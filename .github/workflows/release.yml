@@ -890,7 +890,7 @@ jobs:
           SERVER_PID=$!
 
           echo "Waiting for server to start..."
-          for i in {1..30}; do
+          for i in {1..60}; do
             if curl -s http://localhost:8080/v1/api/healthcheck > /dev/null 2>&1; then
               echo "Server is ready!"
               break
@@ -899,12 +899,12 @@ jobs:
               echo "Server process died"
               exit 1
             fi
-            echo "Waiting... ($i/30)"
+            echo "Waiting... ($i/60)"
             sleep 1
           done
 
           if ! curl -s http://localhost:8080/v1/api/healthcheck > /dev/null 2>&1; then
-            echo "Server failed to start within 30 seconds"
+            echo "Server failed to start within 60 seconds"
             kill $SERVER_PID 2>/dev/null || true
             exit 1
           fi
@@ -935,7 +935,7 @@ jobs:
           if-no-files-found: error
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # SMOKE TESTS - Run after Linux builds complete
+  # SMOKE TESTS - Run against the pre-built Linux x86_64 binary
   # ═══════════════════════════════════════════════════════════════════════════
   smoke_tests:
     name: Smoke Tests (Linux x86_64)
@@ -944,7 +944,6 @@ jobs:
       - build_linux_x86_64
       - build_cli_linux_x86_64
       - read_version
-    # Continue even if tests fail - will be marked as warning
     continue-on-error: true
 
     steps:
@@ -989,123 +988,81 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${{ needs.read_version.outputs.version }}"
-          
-          # Extract all tar.gz archives
           find dist -name "*.tar.gz" -type f -exec tar -xzf {} -C dist/ \;
-          
-          # List extracted files
-          echo "Files in dist/ after extraction:"
-          ls -la dist/
-          
-          # Find and make server executable
           SERVER_BIN=$(find dist -name "kalamdb-server-*-linux-x86_64" -type f ! -name "*.tar.gz" | head -1)
-          if [[ -z "$SERVER_BIN" ]]; then
-            echo "Server binary not found in dist/"
-            exit 1
-          fi
-          chmod +x "$SERVER_BIN"
-          cp "$SERVER_BIN" ./kalamdb-server
-          
-          # Find and make CLI executable  
+          [[ -z "$SERVER_BIN" ]] && { echo "Server binary not found"; exit 1; }
+          chmod +x "$SERVER_BIN" && cp "$SERVER_BIN" ./kalamdb-server
           CLI_BIN=$(find dist -name "kalamcli-*-linux-x86_64" -type f ! -name "*.tar.gz" | head -1)
-          if [[ -z "$CLI_BIN" ]]; then
-            echo "CLI binary not found in dist/"
-            exit 1
-          fi
-          chmod +x "$CLI_BIN"
-          cp "$CLI_BIN" ./kalamcli
-          
-          echo "Server binary: $SERVER_BIN"
-          echo "CLI binary: $CLI_BIN"
+          [[ -z "$CLI_BIN" ]] && { echo "CLI binary not found"; exit 1; }
+          chmod +x "$CLI_BIN" && cp "$CLI_BIN" ./kalamcli
           ls -la ./kalamdb-server ./kalamcli
 
       - name: Create server config
         shell: bash
         run: |
-          # Copy the example config as base
           cp backend/server.example.toml server.toml
-          
-          # Update paths and jwt_secret for smoke tests
           sed -i 's|rocksdb_path = "./data/rocksdb"|rocksdb_path = "./test-data/rocksdb"|g' server.toml
           sed -i 's|default_storage_path = "./data/storage"|default_storage_path = "./test-data/storage"|g' server.toml
           sed -i 's|logs_path = "./logs"|logs_path = "./test-data/logs"|g' server.toml
           sed -i 's|jwt_secret = ".*"|jwt_secret = "smoke-test-secret-key-minimum-32-characters-long-for-ci"|g' server.toml
-          
-          # Increase rate limits for smoke tests
           sed -i 's|max_queries_per_sec = 1000|max_queries_per_sec = 10000|g' server.toml
           sed -i 's|max_messages_per_sec = 500|max_messages_per_sec = 1000|g' server.toml
-          
-          # Verify the config
-          echo "=== server.toml ==="
-          cat server.toml | head -100
 
       - name: Start server
         shell: bash
         run: |
           set -euo pipefail
-          # Create required directories
           mkdir -p test-data/rocksdb test-data/storage test-data/logs
-          
-          # Start server in background
-          ./kalamdb-server &
-          SERVER_PID=$!
-          echo "SERVER_PID=$SERVER_PID" >> "$GITHUB_ENV"
-          
-          # Wait for server to be ready
-          echo "Waiting for server to start..."
-          for i in {1..30}; do
-            if curl -s http://localhost:8080/health > /dev/null 2>&1; then
-              echo "Server is ready!"
-              break
+          ./kalamdb-server > server.log 2>&1 &
+          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
+          for i in {1..60}; do
+            if curl -sf http://localhost:8080/health > /dev/null 2>&1; then
+              echo "✅ Server is ready (${i}s)"
+              exit 0
             fi
-            if ! kill -0 $SERVER_PID 2>/dev/null; then
-              echo "Server process died"
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              echo "❌ Server process died"
+              cat server.log || true
               exit 1
             fi
-            echo "Waiting... ($i/30)"
+            echo "  Waiting... ($i/60)"
             sleep 1
           done
-          
-          # Final check
-          if ! curl -s http://localhost:8080/health > /dev/null 2>&1; then
-            echo "Server failed to start within 30 seconds"
-            exit 1
-          fi
+          echo "❌ Timed out waiting for server"
+          cat server.log || true
+          exit 1
 
       - name: Run smoke tests
         id: smoke_tests
         shell: bash
+        env:
+          KALAMDB_SERVER_URL: "http://localhost:8080"
+          KALAMDB_ROOT_PASSWORD: "kalamdb123"
         run: |
           set -euo pipefail
           cd cli
-          
-          # Run smoke tests and capture result
-          # Using --test-threads=1 for sequential execution
           if cargo test --features e2e-tests --test smoke 2>&1 | tee ../smoke-test-output.txt; then
             echo "smoke_tests_passed=true" >> "$GITHUB_OUTPUT"
             echo "✅ All smoke tests passed!"
           else
             echo "smoke_tests_passed=false" >> "$GITHUB_OUTPUT"
             echo "⚠️ Some smoke tests failed (marked as warning)"
-            # Don't exit with error - continue-on-error handles this
           fi
 
       - name: Stop server
         if: always()
         shell: bash
         run: |
-          if [[ -n "${SERVER_PID:-}" ]]; then
-            kill $SERVER_PID 2>/dev/null || true
-            echo "Server stopped"
-          fi
+          [[ -n "${SERVER_PID:-}" ]] && kill "$SERVER_PID" 2>/dev/null || true
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: smoke-test-results
-          path: smoke-test-output.txt
+          path: |
+            smoke-test-output.txt
+            server.log
           if-no-files-found: ignore
 
       - name: Report test status
@@ -1132,6 +1089,10 @@ jobs:
       - build_windows_x86_64
       - build_macos_arm
       - read_version
+      - smoke_tests
+      - sdk_tests_typescript
+      - sdk_tests_dart
+      - docker
 
     if: ${{ github.event_name == 'push' || github.event.inputs.github_release == 'true' }}
 
@@ -1361,41 +1322,44 @@ jobs:
   # ═══════════════════════════════════════════════════════════════════════════
   # INTEGRATION TESTS - Smoke + TypeScript SDK + Dart SDK against Docker image
   # ═══════════════════════════════════════════════════════════════════════════
-  integration_tests:
-    name: Integration Tests (Docker)
+  # ═══════════════════════════════════════════════════════════════════════════
+  # SDK TESTS - TypeScript and Dart, run in parallel against Linux x86_64 binary
+  # ═══════════════════════════════════════════════════════════════════════════
+  sdk_tests_typescript:
+    name: TypeScript SDK Tests (Linux x86_64)
     runs-on: ubuntu-latest
     needs:
-      - docker
+      - build_linux_x86_64
       - read_version
-    if: ${{ github.event_name == 'push' || github.event.inputs.docker_push == 'true' }}
     continue-on-error: true
-    env:
-      DOCKER_REPO_INPUT: ${{ github.event.inputs.docker_repo }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set Docker repo
-        id: vars
+      - name: Download server binary
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-linux-x86_64
+          path: dist/
+
+      - name: Install system dependencies
         shell: bash
         run: |
-          set -euo pipefail
-          DOCKER_REPO="${DOCKER_REPO_INPUT:-}"
-          if [[ -z "$DOCKER_REPO" ]]; then
-            DOCKER_REPO="jamals86/kalamdb"
-          fi
-          echo "docker_repo=$DOCKER_REPO" >> "$GITHUB_OUTPUT"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang libclang-dev pkg-config libssl-dev
 
-      - name: Setup Rust (for smoke tests)
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          targets: wasm32-unknown-unknown
 
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: integration-tests
+          shared-key: sdk-tests-typescript
           cache-on-failure: true
 
       - name: Setup Node 20
@@ -1403,94 +1367,42 @@ jobs:
         with:
           node-version: 20
 
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-
-      - name: Install system deps
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            clang \
-            libclang-dev \
-            pkg-config \
-            libssl-dev
-
       - name: Install wasm-pack
         shell: bash
         run: |
           set -euo pipefail
           curl -fsSL --retry 5 --retry-delay 2 --retry-connrefused \
             https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
-          wasm-pack --version
 
-      - name: Pull and start KalamDB Docker container
+      - name: Prepare server binary
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${{ needs.read_version.outputs.version }}"
-          DOCKER_REPO="${{ steps.vars.outputs.docker_repo }}"
-          IMAGE="${DOCKER_REPO}:${VERSION}-amd64"
-          JWT_SECRET="sdk-test-secret-key-minimum-32-characters-long"
+          find dist -name "*.tar.gz" -exec tar -xzf {} -C dist/ \;
+          SERVER_BIN=$(find dist -name "kalamdb-server-*-linux-x86_64" ! -name "*.tar.gz" | head -1)
+          [[ -z "$SERVER_BIN" ]] && { echo "Server binary not found"; exit 1; }
+          chmod +x "$SERVER_BIN" && cp "$SERVER_BIN" ./kalamdb-server
 
-          echo "🐳 Pulling image: $IMAGE"
-          docker pull "$IMAGE"
-
-          echo "🚀 Starting container..."
-          docker run -d \
-            --name kalamdb-integration-test \
-            -p 8080:8080 \
-            -e KALAMDB_SERVER_HOST=0.0.0.0 \
-            -e KALAMDB_JWT_SECRET="${JWT_SECRET}" \
-            -e KALAMDB_ROOT_PASSWORD="kalamdb123" \
-            -e KALAMDB_LOG_LEVEL=info \
-            "$IMAGE"
-
-          # Persist for downstream steps
-          echo "KALAMDB_JWT_SECRET=${JWT_SECRET}" >> "$GITHUB_ENV"
-
-          echo "⏳ Waiting for server to be ready..."
+      - name: Start server
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp backend/server.example.toml server.toml
+          sed -i 's|rocksdb_path = "./data/rocksdb"|rocksdb_path = "./test-data/rocksdb"|g' server.toml
+          sed -i 's|default_storage_path = "./data/storage"|default_storage_path = "./test-data/storage"|g' server.toml
+          sed -i 's|logs_path = "./logs"|logs_path = "./test-data/logs"|g' server.toml
+          sed -i 's|jwt_secret = ".*"|jwt_secret = "sdk-test-secret-key-minimum-32-characters-long"|g' server.toml
+          mkdir -p test-data/rocksdb test-data/storage test-data/logs
+          ./kalamdb-server > ts-sdk-server.log 2>&1 &
+          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
           for i in {1..60}; do
-            if curl -sf http://localhost:8080/health > /dev/null 2>&1; then
-              echo "✅ Server is ready (${i}s)"
-              exit 0
-            fi
-            if ! docker inspect kalamdb-integration-test \
-                   --format='{{.State.Running}}' 2>/dev/null | grep -q true; then
-              echo "❌ Container stopped unexpectedly"
-              docker logs kalamdb-integration-test || true
-              exit 1
-            fi
-            echo "  Waiting... ($i/60)"
-            sleep 1
+            curl -sf http://localhost:8080/health > /dev/null 2>&1 && echo "✅ Server ready (${i}s)" && exit 0
+            kill -0 "$SERVER_PID" 2>/dev/null || { echo "❌ Server died"; cat ts-sdk-server.log; exit 1; }
+            echo "  Waiting... ($i/60)"; sleep 1
           done
-
-          echo "❌ Timed out waiting for server"
-          docker logs kalamdb-integration-test || true
-          exit 1
-
-      - name: Run smoke tests
-        id: smoke_tests
-        shell: bash
-        env:
-          KALAMDB_SERVER_URL: "http://localhost:8080"
-          KALAMDB_ROOT_PASSWORD: "kalamdb123"
-        run: |
-          set -euo pipefail
-          cd cli
-          if cargo test --features e2e-tests --test smoke 2>&1 | tee ../smoke-test-output.txt; then
-            echo "smoke_tests_passed=true" >> "$GITHUB_OUTPUT"
-            echo "✅ All smoke tests passed!"
-          else
-            echo "smoke_tests_passed=false" >> "$GITHUB_OUTPUT"
-            echo "⚠️ Some smoke tests failed"
-          fi
+          echo "❌ Timed out"; cat ts-sdk-server.log; exit 1
 
       - name: Run TypeScript SDK tests
-        id: ts_tests
         shell: bash
         working-directory: link/sdks/typescript
         env:
@@ -1502,8 +1414,79 @@ jobs:
           chmod +x ./test.sh
           ./test.sh
 
+      - name: Stop server
+        if: always()
+        shell: bash
+        run: |
+          [[ -n "${SERVER_PID:-}" ]] && kill "$SERVER_PID" 2>/dev/null || true
+
+      - name: Upload server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ts-sdk-server-log
+          path: ts-sdk-server.log
+          if-no-files-found: ignore
+
+  sdk_tests_dart:
+    name: Dart SDK Tests (Linux x86_64)
+    runs-on: ubuntu-latest
+    needs:
+      - build_linux_x86_64
+      - read_version
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download server binary
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-linux-x86_64
+          path: dist/
+
+      - name: Install system dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang libclang-dev pkg-config libssl-dev
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Prepare server binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          find dist -name "*.tar.gz" -exec tar -xzf {} -C dist/ \;
+          SERVER_BIN=$(find dist -name "kalamdb-server-*-linux-x86_64" ! -name "*.tar.gz" | head -1)
+          [[ -z "$SERVER_BIN" ]] && { echo "Server binary not found"; exit 1; }
+          chmod +x "$SERVER_BIN" && cp "$SERVER_BIN" ./kalamdb-server
+
+      - name: Start server
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp backend/server.example.toml server.toml
+          sed -i 's|rocksdb_path = "./data/rocksdb"|rocksdb_path = "./test-data/rocksdb"|g' server.toml
+          sed -i 's|default_storage_path = "./data/storage"|default_storage_path = "./test-data/storage"|g' server.toml
+          sed -i 's|logs_path = "./logs"|logs_path = "./test-data/logs"|g' server.toml
+          sed -i 's|jwt_secret = ".*"|jwt_secret = "sdk-test-secret-key-minimum-32-characters-long"|g' server.toml
+          mkdir -p test-data/rocksdb test-data/storage test-data/logs
+          ./kalamdb-server > dart-sdk-server.log 2>&1 &
+          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
+          for i in {1..60}; do
+            curl -sf http://localhost:8080/health > /dev/null 2>&1 && echo "✅ Server ready (${i}s)" && exit 0
+            kill -0 "$SERVER_PID" 2>/dev/null || { echo "❌ Server died"; cat dart-sdk-server.log; exit 1; }
+            echo "  Waiting... ($i/60)"; sleep 1
+          done
+          echo "❌ Timed out"; cat dart-sdk-server.log; exit 1
+
       - name: Run Dart SDK tests
-        id: dart_tests
         shell: bash
         working-directory: link/sdks/dart
         env:
@@ -1515,33 +1498,19 @@ jobs:
           chmod +x ./test.sh
           ./test.sh
 
-      - name: Stop Docker container
+      - name: Stop server
         if: always()
         shell: bash
         run: |
-          docker logs kalamdb-integration-test 2>/dev/null > docker-server.log || true
-          docker stop kalamdb-integration-test 2>/dev/null || true
-          docker rm kalamdb-integration-test 2>/dev/null || true
+          [[ -n "${SERVER_PID:-}" ]] && kill "$SERVER_PID" 2>/dev/null || true
 
-      - name: Upload test results
+      - name: Upload server log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: integration-test-results
-          path: |
-            smoke-test-output.txt
-            docker-server.log
+          name: dart-sdk-server-log
+          path: dart-sdk-server.log
           if-no-files-found: ignore
-
-      - name: Report test status
-        if: always()
-        shell: bash
-        run: |
-          if [[ "${{ steps.smoke_tests.outputs.smoke_tests_passed }}" == "true" ]]; then
-            echo "::notice::✅ Smoke tests passed"
-          else
-            echo "::warning::⚠️ Some smoke tests failed — check integration-test-results artifact"
-          fi
 
   # ═══════════════════════════════════════════════════════════════════════════
   # NPM PUBLISH - Publish TypeScript SDK to npm registry
@@ -1549,7 +1518,7 @@ jobs:
   publish_npm:
     name: Publish TypeScript SDK to npm
     runs-on: ubuntu-latest
-    needs: [read_version, integration_tests]
+    needs: [read_version, sdk_tests_typescript]
     if: ${{ github.event_name == 'push' || github.event.inputs.npm_publish == 'true' }}
 
     steps:
@@ -1644,7 +1613,7 @@ jobs:
   publish_dart:
     name: Publish Dart SDK to pub.dev
     runs-on: ubuntu-latest
-    needs: [read_version, integration_tests]
+    needs: [read_version, sdk_tests_dart]
     if: ${{ github.event_name == 'push' || github.event.inputs.dart_publish == 'true' }}
 
     steps:
