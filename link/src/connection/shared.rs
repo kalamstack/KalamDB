@@ -642,6 +642,12 @@ async fn connection_task(
                         ws_stream = None;
                         continue;
                     }
+                    // Also send an application-level JSON ping so the server's
+                    // heartbeat checker is satisfied.  The server tracks
+                    // {"type":"ping"} messages, not native WebSocket Ping frames.
+                    if let Ok(json_ping) = serde_json::to_string(&ClientMessage::Ping) {
+                        let _ = ws.send(Message::Text(json_ping.into())).await;
+                    }
                     event_handlers.emit_send("[ping]");
                     if has_pong_timeout {
                         awaiting_pong = true;

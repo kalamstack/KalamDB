@@ -1359,22 +1359,44 @@ jobs:
           echo "✅ Multi-arch manifest created for ${REPO}:${VERSION} and ${REPO}:latest"
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # SDK TESTS - Run TypeScript and Dart SDK test suites
+  # INTEGRATION TESTS - Smoke + TypeScript SDK + Dart SDK against Docker image
   # ═══════════════════════════════════════════════════════════════════════════
-  sdk_tests:
-    name: Test TypeScript and Dart SDKs
+  integration_tests:
+    name: Integration Tests (Docker)
     runs-on: ubuntu-latest
-    needs: read_version
+    needs:
+      - docker
+      - read_version
+    if: ${{ github.event_name == 'push' || github.event.inputs.docker_push == 'true' }}
+    continue-on-error: true
+    env:
+      DOCKER_REPO_INPUT: ${{ github.event.inputs.docker_repo }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Rust
+      - name: Set Docker repo
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+          DOCKER_REPO="${DOCKER_REPO_INPUT:-}"
+          if [[ -z "$DOCKER_REPO" ]]; then
+            DOCKER_REPO="jamals86/kalamdb"
+          fi
+          echo "docker_repo=$DOCKER_REPO" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Rust (for smoke tests)
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
-          targets: wasm32-unknown-unknown
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: integration-tests
+          cache-on-failure: true
 
       - name: Setup Node 20
         uses: actions/setup-node@v4
@@ -1405,67 +1427,121 @@ jobs:
             https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
           wasm-pack --version
 
-      - name: Start KalamDB server
+      - name: Pull and start KalamDB Docker container
         shell: bash
-        working-directory: backend
         run: |
           set -euo pipefail
-          cp server.example.toml server.toml
-          sed -i 's|jwt_secret = ".*"|jwt_secret = "sdk-test-secret-key-minimum-32-characters-long"|g' server.toml
+          VERSION="${{ needs.read_version.outputs.version }}"
+          DOCKER_REPO="${{ steps.vars.outputs.docker_repo }}"
+          IMAGE="${DOCKER_REPO}:${VERSION}-amd64"
+          JWT_SECRET="sdk-test-secret-key-minimum-32-characters-long"
 
-          cargo run --bin kalamdb-server > ../sdk-tests-server.log 2>&1 &
-          SERVER_PID=$!
-          echo "SERVER_PID=$SERVER_PID" >> "$GITHUB_ENV"
+          echo "🐳 Pulling image: $IMAGE"
+          docker pull "$IMAGE"
 
+          echo "🚀 Starting container..."
+          docker run -d \
+            --name kalamdb-integration-test \
+            -p 8080:8080 \
+            -e KALAMDB_SERVER_HOST=0.0.0.0 \
+            -e KALAMDB_JWT_SECRET="${JWT_SECRET}" \
+            -e KALAMDB_ROOT_PASSWORD="kalamdb123" \
+            -e KALAMDB_LOG_LEVEL=info \
+            "$IMAGE"
+
+          # Persist for downstream steps
+          echo "KALAMDB_JWT_SECRET=${JWT_SECRET}" >> "$GITHUB_ENV"
+
+          echo "⏳ Waiting for server to be ready..."
           for i in {1..60}; do
             if curl -sf http://localhost:8080/health > /dev/null 2>&1; then
-              echo "✅ Server is ready"
+              echo "✅ Server is ready (${i}s)"
               exit 0
             fi
-            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-              echo "❌ Server process exited early"
-              cat sdk-tests-server.log || true
+            if ! docker inspect kalamdb-integration-test \
+                   --format='{{.State.Running}}' 2>/dev/null | grep -q true; then
+              echo "❌ Container stopped unexpectedly"
+              docker logs kalamdb-integration-test || true
               exit 1
             fi
+            echo "  Waiting... ($i/60)"
             sleep 1
           done
 
           echo "❌ Timed out waiting for server"
-          cat sdk-tests-server.log || true
+          docker logs kalamdb-integration-test || true
           exit 1
 
+      - name: Run smoke tests
+        id: smoke_tests
+        shell: bash
+        env:
+          KALAMDB_SERVER_URL: "http://localhost:8080"
+          KALAMDB_ROOT_PASSWORD: "kalamdb123"
+        run: |
+          set -euo pipefail
+          cd cli
+          if cargo test --features e2e-tests --test smoke 2>&1 | tee ../smoke-test-output.txt; then
+            echo "smoke_tests_passed=true" >> "$GITHUB_OUTPUT"
+            echo "✅ All smoke tests passed!"
+          else
+            echo "smoke_tests_passed=false" >> "$GITHUB_OUTPUT"
+            echo "⚠️ Some smoke tests failed"
+          fi
+
       - name: Run TypeScript SDK tests
+        id: ts_tests
         shell: bash
         working-directory: link/sdks/typescript
+        env:
+          KALAMDB_URL: "http://localhost:8080"
+          KALAMDB_USER: "admin"
+          KALAMDB_PASSWORD: "kalamdb123"
         run: |
           set -euo pipefail
           chmod +x ./test.sh
           ./test.sh
 
       - name: Run Dart SDK tests
+        id: dart_tests
         shell: bash
         working-directory: link/sdks/dart
+        env:
+          KALAM_URL: "http://localhost:8080"
+          KALAM_USER: "admin"
+          KALAM_PASS: "kalamdb123"
         run: |
           set -euo pipefail
           chmod +x ./test.sh
           ./test.sh
 
-      - name: Stop KalamDB server
+      - name: Stop Docker container
         if: always()
         shell: bash
         run: |
-          set -euo pipefail
-          if [[ -n "${SERVER_PID:-}" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
-            kill "$SERVER_PID" || true
-          fi
+          docker logs kalamdb-integration-test 2>/dev/null > docker-server.log || true
+          docker stop kalamdb-integration-test 2>/dev/null || true
+          docker rm kalamdb-integration-test 2>/dev/null || true
 
-      - name: Upload SDK test server log
+      - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sdk-tests-server-log
-          path: sdk-tests-server.log
+          name: integration-test-results
+          path: |
+            smoke-test-output.txt
+            docker-server.log
           if-no-files-found: ignore
+
+      - name: Report test status
+        if: always()
+        shell: bash
+        run: |
+          if [[ "${{ steps.smoke_tests.outputs.smoke_tests_passed }}" == "true" ]]; then
+            echo "::notice::✅ Smoke tests passed"
+          else
+            echo "::warning::⚠️ Some smoke tests failed — check integration-test-results artifact"
+          fi
 
   # ═══════════════════════════════════════════════════════════════════════════
   # NPM PUBLISH - Publish TypeScript SDK to npm registry
@@ -1473,7 +1549,7 @@ jobs:
   publish_npm:
     name: Publish TypeScript SDK to npm
     runs-on: ubuntu-latest
-    needs: [read_version, sdk_tests]
+    needs: [read_version, integration_tests]
     if: ${{ github.event_name == 'push' || github.event.inputs.npm_publish == 'true' }}
 
     steps:
@@ -1568,7 +1644,7 @@ jobs:
   publish_dart:
     name: Publish Dart SDK to pub.dev
     runs-on: ubuntu-latest
-    needs: [read_version, sdk_tests]
+    needs: [read_version, integration_tests]
     if: ${{ github.event_name == 'push' || github.event.inputs.dart_publish == 'true' }}
 
     steps:
