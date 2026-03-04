@@ -165,3 +165,5 @@ Suggested extra checks:
 5. Cookies carrying auth tokens must be `HttpOnly` and `SameSite=Strict`; `Secure` in production.
 6. WebSocket origins must be validated against config or rejected when strict mode is enabled.
 7. Admin or root password by default should be set or is set to kalamdb123 for testing or writting in tests, and the user should be admin
+
+the folder: link/sdks/dart/lib/src/generated is generated dont modify anything in it, to regenerate this run the link/sdks/dart, build_native_libs.sh file which will regenerate this folder

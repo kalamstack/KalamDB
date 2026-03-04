@@ -57,8 +57,8 @@ describe('DML Helpers', { timeout: 30_000 }, () => {
     const row = await client.queryOne(
       `SELECT title, done FROM ${tbl} WHERE id = 100`,
     );
-    assert.equal(row.title, 'updated title');
-    assert.equal(row.done, true);
+    assert.equal(row.title.asString(), 'updated title');
+    assert.equal(row.done.asBool(), true);
   });
 
   // -----------------------------------------------------------------------

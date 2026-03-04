@@ -47,6 +47,13 @@ export type FieldFlag = WasmFieldFlag;
 export type FieldFlags = FieldFlag[];
 
 /* ================================================================== */
+/*  KalamCellValue & RowData (SDK-level typed cell wrapper)          */
+/* ================================================================== */
+
+export { KalamCellValue, wrapRowMap } from './cell_value.js';
+export type { RowData } from './cell_value.js';
+
+/* ================================================================== */
 /*  Convenience enums (for runtime values, not just types)            */
 /* ================================================================== */
 

@@ -33,6 +33,7 @@
 use crate::errors::CommonError;
 // Chrono no longer needed - DataFusion handles timestamp serialization natively
 use crate::models::rows::Row;
+use crate::models::KalamCellValue;
 use datafusion::arrow::array::*;
 use datafusion::arrow::datatypes::{DataType, Field, SchemaRef, TimeUnit};
 use datafusion::arrow::record_batch::RecordBatch;
@@ -528,59 +529,64 @@ pub fn json_value_to_scalar_strict(v: &JsonValue) -> Result<ScalarValue, String>
     }
 }
 
-/// Convert DataFusion ScalarValue to serde_json::Value
+/// Convert DataFusion ScalarValue to [`KalamCellValue`]
 ///
-/// **SINGLE SOURCE OF TRUTH** for converting ScalarValue to JSON.
-/// All ScalarValue → JSON conversions in the codebase flow through this function.
+/// **SINGLE SOURCE OF TRUTH** for converting ScalarValue to a cell value.
+/// All ScalarValue → cell-value conversions in the codebase flow through
+/// this function.
 ///
 /// Plain JSON values with Int64/UInt64 as strings for precision.
 /// - Example: `"123"` for Int64(123), `"Alice"` for Utf8("Alice")
 /// - Timestamps serialized as raw microsecond values (numbers)
-pub fn scalar_value_to_json(value: &ScalarValue) -> Result<JsonValue, CommonError> {
-    match value {
-        ScalarValue::Null => Ok(JsonValue::Null),
-        ScalarValue::Boolean(Some(b)) => Ok(JsonValue::Bool(*b)),
-        ScalarValue::Boolean(None) => Ok(JsonValue::Null),
-        ScalarValue::Int8(Some(i)) => Ok(JsonValue::Number((*i).into())),
-        ScalarValue::Int8(None) => Ok(JsonValue::Null),
-        ScalarValue::Int16(Some(i)) => Ok(JsonValue::Number((*i).into())),
-        ScalarValue::Int16(None) => Ok(JsonValue::Null),
-        ScalarValue::Int32(Some(i)) => Ok(JsonValue::Number((*i).into())),
-        ScalarValue::Int32(None) => Ok(JsonValue::Null),
+pub fn scalar_value_to_json(value: &ScalarValue) -> Result<KalamCellValue, CommonError> {
+    let json = match value {
+        ScalarValue::Null => JsonValue::Null,
+        ScalarValue::Boolean(Some(b)) => JsonValue::Bool(*b),
+        ScalarValue::Boolean(None) => JsonValue::Null,
+        ScalarValue::Int8(Some(i)) => JsonValue::Number((*i).into()),
+        ScalarValue::Int8(None) => JsonValue::Null,
+        ScalarValue::Int16(Some(i)) => JsonValue::Number((*i).into()),
+        ScalarValue::Int16(None) => JsonValue::Null,
+        ScalarValue::Int32(Some(i)) => JsonValue::Number((*i).into()),
+        ScalarValue::Int32(None) => JsonValue::Null,
         // Int64 always as string for precision (no MAX_SAFE_INTEGER check)
-        ScalarValue::Int64(Some(i)) => Ok(JsonValue::String(i.to_string())),
-        ScalarValue::Int64(None) => Ok(JsonValue::Null),
-        ScalarValue::UInt8(Some(i)) => Ok(JsonValue::Number((*i).into())),
-        ScalarValue::UInt8(None) => Ok(JsonValue::Null),
-        ScalarValue::UInt16(Some(i)) => Ok(JsonValue::Number((*i).into())),
-        ScalarValue::UInt16(None) => Ok(JsonValue::Null),
-        ScalarValue::UInt32(Some(i)) => Ok(JsonValue::Number((*i).into())),
-        ScalarValue::UInt32(None) => Ok(JsonValue::Null),
+        ScalarValue::Int64(Some(i)) => JsonValue::String(i.to_string()),
+        ScalarValue::Int64(None) => JsonValue::Null,
+        ScalarValue::UInt8(Some(i)) => JsonValue::Number((*i).into()),
+        ScalarValue::UInt8(None) => JsonValue::Null,
+        ScalarValue::UInt16(Some(i)) => JsonValue::Number((*i).into()),
+        ScalarValue::UInt16(None) => JsonValue::Null,
+        ScalarValue::UInt32(Some(i)) => JsonValue::Number((*i).into()),
+        ScalarValue::UInt32(None) => JsonValue::Null,
         // UInt64 always as string for precision
-        ScalarValue::UInt64(Some(i)) => Ok(JsonValue::String(i.to_string())),
-        ScalarValue::UInt64(None) => Ok(JsonValue::Null),
-        ScalarValue::Float32(Some(f)) => serde_json::Number::from_f64(*f as f64)
-            .map(JsonValue::Number)
-            .ok_or_else(|| CommonError::invalid_input("Invalid float value")),
-        ScalarValue::Float32(None) => Ok(JsonValue::Null),
-        ScalarValue::Float64(Some(f)) => serde_json::Number::from_f64(*f)
-            .map(JsonValue::Number)
-            .ok_or_else(|| CommonError::invalid_input("Invalid float value")),
-        ScalarValue::Float64(None) => Ok(JsonValue::Null),
-        ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)) => {
-            Ok(JsonValue::String(s.clone()))
+        ScalarValue::UInt64(Some(i)) => JsonValue::String(i.to_string()),
+        ScalarValue::UInt64(None) => JsonValue::Null,
+        ScalarValue::Float32(Some(f)) => {
+            return serde_json::Number::from_f64(*f as f64)
+                .map(|n| KalamCellValue(JsonValue::Number(n)))
+                .ok_or_else(|| CommonError::invalid_input("Invalid float value"));
         },
-        ScalarValue::Utf8(None) | ScalarValue::LargeUtf8(None) => Ok(JsonValue::Null),
-        ScalarValue::Date32(Some(d)) => Ok(JsonValue::Number((*d).into())),
-        ScalarValue::Date32(None) => Ok(JsonValue::Null),
-        ScalarValue::Date64(Some(d)) => Ok(JsonValue::Number((*d).into())),
-        ScalarValue::Date64(None) => Ok(JsonValue::Null),
-        ScalarValue::TimestampMillisecond(Some(ts), _) => Ok(JsonValue::Number((*ts).into())),
-        ScalarValue::TimestampMillisecond(None, _) => Ok(JsonValue::Null),
-        ScalarValue::TimestampMicrosecond(Some(ts), _) => Ok(JsonValue::Number((*ts).into())),
-        ScalarValue::TimestampMicrosecond(None, _) => Ok(JsonValue::Null),
-        ScalarValue::TimestampNanosecond(Some(ts), _) => Ok(JsonValue::Number((*ts).into())),
-        ScalarValue::TimestampNanosecond(None, _) => Ok(JsonValue::Null),
+        ScalarValue::Float32(None) => JsonValue::Null,
+        ScalarValue::Float64(Some(f)) => {
+            return serde_json::Number::from_f64(*f)
+                .map(|n| KalamCellValue(JsonValue::Number(n)))
+                .ok_or_else(|| CommonError::invalid_input("Invalid float value"));
+        },
+        ScalarValue::Float64(None) => JsonValue::Null,
+        ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)) => {
+            JsonValue::String(s.clone())
+        },
+        ScalarValue::Utf8(None) | ScalarValue::LargeUtf8(None) => JsonValue::Null,
+        ScalarValue::Date32(Some(d)) => JsonValue::Number((*d).into()),
+        ScalarValue::Date32(None) => JsonValue::Null,
+        ScalarValue::Date64(Some(d)) => JsonValue::Number((*d).into()),
+        ScalarValue::Date64(None) => JsonValue::Null,
+        ScalarValue::TimestampMillisecond(Some(ts), _) => JsonValue::Number((*ts).into()),
+        ScalarValue::TimestampMillisecond(None, _) => JsonValue::Null,
+        ScalarValue::TimestampMicrosecond(Some(ts), _) => JsonValue::Number((*ts).into()),
+        ScalarValue::TimestampMicrosecond(None, _) => JsonValue::Null,
+        ScalarValue::TimestampNanosecond(Some(ts), _) => JsonValue::Number((*ts).into()),
+        ScalarValue::TimestampNanosecond(None, _) => JsonValue::Null,
         ScalarValue::Decimal128(Some(v), _precision, scale) => {
             // Format decimal with proper scale
             // e.g., 20075 with scale=2 -> "200.75"
@@ -588,46 +594,49 @@ pub fn scalar_value_to_json(value: &ScalarValue) -> Result<JsonValue, CommonErro
             let integer_part = v / divisor;
             let fractional_part = (v % divisor).abs();
             if *scale == 0 {
-                Ok(JsonValue::String(integer_part.to_string()))
+                JsonValue::String(integer_part.to_string())
             } else {
-                Ok(JsonValue::String(format!(
+                JsonValue::String(format!(
                     "{}.{:0>width$}",
                     integer_part,
                     fractional_part,
                     width = *scale as usize
-                )))
+                ))
             }
         },
-        ScalarValue::Decimal128(None, _, _) => Ok(JsonValue::Null),
+        ScalarValue::Decimal128(None, _, _) => JsonValue::Null,
         ScalarValue::FixedSizeBinary(_, Some(bytes)) => {
             // If it looks like a UUID (16 bytes), try to format as UUID string
             if bytes.len() == 16 {
                 if let Ok(uuid) = uuid::Uuid::from_slice(bytes) {
-                    return Ok(JsonValue::String(uuid.to_string()));
+                    return Ok(KalamCellValue(JsonValue::String(uuid.to_string())));
                 }
             }
             // Otherwise, use array of numbers for generic binary
-            Ok(JsonValue::Array(bytes.iter().map(|&b| JsonValue::Number(b.into())).collect()))
+            JsonValue::Array(bytes.iter().map(|&b| JsonValue::Number(b.into())).collect())
         },
-        ScalarValue::FixedSizeBinary(_, None) => Ok(JsonValue::Null),
+        ScalarValue::FixedSizeBinary(_, None) => JsonValue::Null,
         ScalarValue::Binary(Some(bytes)) | ScalarValue::LargeBinary(Some(bytes)) => {
-            Ok(JsonValue::Array(bytes.iter().map(|&b| JsonValue::Number(b.into())).collect()))
+            JsonValue::Array(bytes.iter().map(|&b| JsonValue::Number(b.into())).collect())
         },
-        ScalarValue::Binary(None) | ScalarValue::LargeBinary(None) => Ok(JsonValue::Null),
+        ScalarValue::Binary(None) | ScalarValue::LargeBinary(None) => JsonValue::Null,
         // Time types - output as raw microseconds/nanoseconds value (integer)
-        ScalarValue::Time64Microsecond(Some(t)) => Ok(JsonValue::Number((*t).into())),
-        ScalarValue::Time64Microsecond(None) => Ok(JsonValue::Null),
-        ScalarValue::Time64Nanosecond(Some(t)) => Ok(JsonValue::Number((*t).into())),
-        ScalarValue::Time64Nanosecond(None) => Ok(JsonValue::Null),
-        ScalarValue::Time32Millisecond(Some(t)) => Ok(JsonValue::Number((*t).into())),
-        ScalarValue::Time32Millisecond(None) => Ok(JsonValue::Null),
-        ScalarValue::Time32Second(Some(t)) => Ok(JsonValue::Number((*t).into())),
-        ScalarValue::Time32Second(None) => Ok(JsonValue::Null),
-        _ => Err(CommonError::invalid_input(format!(
-            "Unsupported ScalarValue conversion to JSON: {:?}",
-            value
-        ))),
-    }
+        ScalarValue::Time64Microsecond(Some(t)) => JsonValue::Number((*t).into()),
+        ScalarValue::Time64Microsecond(None) => JsonValue::Null,
+        ScalarValue::Time64Nanosecond(Some(t)) => JsonValue::Number((*t).into()),
+        ScalarValue::Time64Nanosecond(None) => JsonValue::Null,
+        ScalarValue::Time32Millisecond(Some(t)) => JsonValue::Number((*t).into()),
+        ScalarValue::Time32Millisecond(None) => JsonValue::Null,
+        ScalarValue::Time32Second(Some(t)) => JsonValue::Number((*t).into()),
+        ScalarValue::Time32Second(None) => JsonValue::Null,
+        _ => {
+            return Err(CommonError::invalid_input(format!(
+                "Unsupported ScalarValue conversion to JSON: {:?}",
+                value
+            )));
+        },
+    };
+    Ok(KalamCellValue(json))
 }
 
 /// Convert Arrow RecordBatch to JSON rows
@@ -644,7 +653,7 @@ pub fn scalar_value_to_json(value: &ScalarValue) -> Result<JsonValue, CommonErro
 /// ✅ NO direct conversions - all cells go through scalar_value_to_json()
 pub fn record_batch_to_json_rows(
     batch: &RecordBatch,
-) -> Result<Vec<std::collections::HashMap<String, JsonValue>>, CommonError> {
+) -> Result<Vec<std::collections::HashMap<String, KalamCellValue>>, CommonError> {
     let schema = batch.schema();
     let column_names: Vec<String> = schema.fields().iter().map(|f| f.name().clone()).collect();
     let num_rows = batch.num_rows();
@@ -687,7 +696,7 @@ pub fn record_batch_to_json_rows(
 /// ✅ NO direct conversions - all cells go through scalar_value_to_json()
 pub fn record_batch_to_json_arrays(
     batch: &RecordBatch,
-) -> Result<Vec<Vec<JsonValue>>, CommonError> {
+) -> Result<Vec<Vec<KalamCellValue>>, CommonError> {
     let num_rows = batch.num_rows();
     let num_cols = batch.num_columns();
 
@@ -730,7 +739,7 @@ pub fn record_batch_to_json_arrays(
 /// ✅ NO direct conversions - all columns go through scalar_value_to_json()
 pub fn row_to_json_map(
     row: &Row,
-) -> Result<std::collections::HashMap<String, JsonValue>, CommonError> {
+) -> Result<std::collections::HashMap<String, KalamCellValue>, CommonError> {
     let mut json_row = std::collections::HashMap::with_capacity(row.values.len());
 
     for (col_name, scalar_value) in &row.values {
@@ -771,33 +780,33 @@ mod serialization_tests {
         // Int64 should always be serialized as string for precision
         let value = ScalarValue::Int64(Some(123));
         let json = scalar_value_to_json(&value).unwrap();
-        assert_eq!(json, serde_json::json!("123"));
+        assert_eq!(json, serde_json::json!("123").into());
 
         // Even small values should be strings
         let value = ScalarValue::Int64(Some(42));
         let json = scalar_value_to_json(&value).unwrap();
-        assert_eq!(json, serde_json::json!("42"));
+        assert_eq!(json, serde_json::json!("42").into());
     }
 
     #[test]
     fn test_uint64_always_string() {
         let value = ScalarValue::UInt64(Some(123));
         let json = scalar_value_to_json(&value).unwrap();
-        assert_eq!(json, serde_json::json!("123"));
+        assert_eq!(json, serde_json::json!("123").into());
     }
 
     #[test]
     fn test_utf8_plain_string() {
         let value = ScalarValue::Utf8(Some("hello".to_string()));
         let json = scalar_value_to_json(&value).unwrap();
-        assert_eq!(json, serde_json::json!("hello"));
+        assert_eq!(json, serde_json::json!("hello").into());
     }
 
     #[test]
     fn test_boolean_plain_value() {
         let value = ScalarValue::Boolean(Some(true));
         let json = scalar_value_to_json(&value).unwrap();
-        assert_eq!(json, serde_json::json!(true));
+        assert_eq!(json, serde_json::json!(true).into());
     }
 
     #[test]
@@ -805,14 +814,14 @@ mod serialization_tests {
         let value = ScalarValue::TimestampMicrosecond(Some(1765741510326539), None);
         let json = scalar_value_to_json(&value).unwrap();
         // Timestamp should be raw number (microseconds)
-        assert_eq!(json, serde_json::json!(1765741510326539_i64));
+        assert_eq!(json, serde_json::json!(1765741510326539_i64).into());
     }
 
     #[test]
     fn test_null_values() {
         let null = ScalarValue::Null;
         let json = scalar_value_to_json(&null).unwrap();
-        assert_eq!(json, serde_json::json!(null));
+        assert_eq!(json, serde_json::json!(null).into());
     }
 
     #[test]
@@ -820,13 +829,13 @@ mod serialization_tests {
         let value = ScalarValue::Float64(Some(3.25));
         let json = scalar_value_to_json(&value).unwrap();
         // Check it's a number approximately equal to 3.25
-        assert!(json.as_f64().unwrap() > 3.24 && json.as_f64().unwrap() < 3.26);
+        assert!(json.inner().as_f64().unwrap() > 3.24 && json.inner().as_f64().unwrap() < 3.26);
     }
 
     #[test]
     fn test_int32_plain_number() {
         let value = ScalarValue::Int32(Some(42));
         let json = scalar_value_to_json(&value).unwrap();
-        assert_eq!(json, serde_json::json!(42));
+        assert_eq!(json, serde_json::json!(42).into());
     }
 }

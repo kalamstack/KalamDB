@@ -67,6 +67,8 @@ mod smoke_test_user_table_subscription;
 mod smoke_test_subscription_reconnect_resume;
 #[path = "smoke/subscription/smoke_test_shared_table_subscription.rs"]
 mod smoke_test_shared_table_subscription;
+#[path = "smoke/subscription/smoke_test_subscription_delta_updates.rs"]
+mod smoke_test_subscription_delta_updates;
 
 // Topic tests
 #[path = "smoke/topics/smoke_test_topic_consumption.rs"]
@@ -127,6 +129,8 @@ mod smoke_test_dml_watermark_optimization;
 mod smoke_test_dml_wide_columns;
 #[path = "smoke/dml/smoke_test_insert_throughput.rs"]
 mod smoke_test_insert_throughput;
+#[path = "smoke/dml/smoke_test_insert_returning.rs"]
+mod smoke_test_insert_returning;
 
 // Leader-only reads tests (Spec 021)
 #[path = "smoke/leader_only_reads.rs"]

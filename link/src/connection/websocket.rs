@@ -14,7 +14,6 @@ use crate::{
 };
 use futures_util::{SinkExt, StreamExt};
 use reqwest::Url;
-use serde_json::Value;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::io::{Error as IoError, ErrorKind};
@@ -456,32 +455,16 @@ pub(crate) fn parse_message(text: &str) -> Result<Option<ChangeEvent>> {
         } => match change_type {
             ChangeTypeRaw::Insert => ChangeEvent::Insert {
                 subscription_id,
-                rows: rows
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|row| serde_json::to_value(row).unwrap_or(Value::Null))
-                    .collect(),
+                rows: rows.unwrap_or_default(),
             },
             ChangeTypeRaw::Update => ChangeEvent::Update {
                 subscription_id,
-                rows: rows
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|row| serde_json::to_value(row).unwrap_or(Value::Null))
-                    .collect(),
-                old_rows: old_values
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|row| serde_json::to_value(row).unwrap_or(Value::Null))
-                    .collect(),
+                rows: rows.unwrap_or_default(),
+                old_rows: old_values.unwrap_or_default(),
             },
             ChangeTypeRaw::Delete => ChangeEvent::Delete {
                 subscription_id,
-                old_rows: old_values
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|row| serde_json::to_value(row).unwrap_or(Value::Null))
-                    .collect(),
+                old_rows: old_values.unwrap_or_default(),
             },
         },
         ServerMessage::Error {

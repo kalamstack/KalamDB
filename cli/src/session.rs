@@ -2072,7 +2072,7 @@ impl CLISession {
                     }
                 } else {
                     for row in rows {
-                        let row_str = Self::format_json(row);
+                        let row_str = Self::format_row(&row);
                         if self.color {
                             println!(
                                 "\x1b[32m[{}] INSERT\x1b[0m [{}] {}",
@@ -2103,11 +2103,11 @@ impl CLISession {
                     for idx in 0..max_len {
                         let new_str = rows
                             .get(idx)
-                            .map(Self::format_json)
+                            .map(Self::format_row)
                             .unwrap_or_else(|| "<missing>".to_string());
                         let old_str = old_rows
                             .get(idx)
-                            .map(Self::format_json)
+                            .map(Self::format_row)
                             .unwrap_or_else(|| "<missing>".to_string());
                         if self.color {
                             println!(
@@ -2138,7 +2138,7 @@ impl CLISession {
                     }
                 } else {
                     for row in old_rows {
-                        let row_str = Self::format_json(row);
+                        let row_str = Self::format_row(&row);
                         if self.color {
                             println!(
                                 "\x1b[31m[{}] DELETE\x1b[0m [{}] {}",
@@ -2182,6 +2182,7 @@ impl CLISession {
     }
 
     /// Format a JSON value into a compact single-line string
+    #[allow(dead_code)]
     fn format_json(value: &serde_json::Value) -> String {
         match value {
             serde_json::Value::String(s) => format!("\"{}\"", s),
@@ -2190,6 +2191,11 @@ impl CLISession {
             serde_json::Value::Number(n) => n.to_string(),
             _ => serde_json::to_string(value).unwrap_or_else(|_| value.to_string()),
         }
+    }
+
+    /// Format a typed row (RowData) as a compact JSON string for display.
+    fn format_row(row: &kalam_link::RowData) -> String {
+        serde_json::to_string(row).unwrap_or_else(|_| format!("{:?}", row))
     }
 
     /// Fetch cluster information from system.cluster

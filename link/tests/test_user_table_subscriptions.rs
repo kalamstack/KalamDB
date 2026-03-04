@@ -193,7 +193,7 @@ async fn wait_for_subscription_ready(
 }
 
 /// Helper to extract string value from row field (handles {"Utf8": "value"} format)
-fn extract_string_value(value: &serde_json::Value) -> Option<String> {
+fn extract_string_value(value: &kalam_link::KalamCellValue) -> Option<String> {
     // Try direct string access first
     value
         .as_str()
@@ -201,14 +201,14 @@ fn extract_string_value(value: &serde_json::Value) -> Option<String> {
         .or_else(|| value.get("Utf8").and_then(|v| v.as_str()).map(|s| s.to_string()))
 }
 
-fn row_matches_type(row: &serde_json::Value, expected: &str) -> bool {
+fn row_matches_type(row: &std::collections::HashMap<String, kalam_link::KalamCellValue>, expected: &str) -> bool {
     if let Some(type_obj) = row.get("type") {
         if let Some(type_str) = extract_string_value(type_obj) {
             return type_str == expected;
         }
     }
 
-    row.to_string().contains(expected)
+    format!("{:?}", row).contains(expected)
 }
 
 async fn wait_for_insert_with_type(
@@ -454,7 +454,7 @@ async fn test_multiple_filtered_subscriptions() {
                 );
                 println!("✅ FILTERING WORKS: 'thinking' subscription correctly received ONLY 'thinking' type row");
             } else {
-                panic!("Row doesn't have 'type' field. Full row: {}", row);
+                panic!("Row doesn't have 'type' field. Full row: {:?}", row);
             }
         } else {
             panic!("'thinking' subscription received Insert with empty rows!");

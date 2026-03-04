@@ -18,7 +18,7 @@ mod common;
 /// Cluster-specific common utilities
 mod cluster_common {
     use crate::common::*;
-    use kalam_link::{KalamLinkTimeouts, QueryResponse};
+    use kalam_link::{KalamLinkTimeouts, KalamCellValue, QueryResponse};
     use serde_json::Value;
     use std::sync::OnceLock;
     use std::time::Duration;
@@ -520,13 +520,13 @@ mod cluster_common {
         Err(last_err.unwrap_or_else(|| "All cluster nodes failed".to_string()))
     }
 
-    fn normalize_rows(rows: &[Vec<Value>]) -> Vec<String> {
+    fn normalize_rows(rows: &[Vec<KalamCellValue>]) -> Vec<String> {
         let mut normalized: Vec<String> = rows
             .iter()
             .map(|row| {
                 row.iter()
                     .map(|v| {
-                        let extracted = extract_typed_value(v);
+                        let extracted = extract_typed_value(v.inner());
                         match extracted {
                             Value::Null => "NULL".to_string(),
                             Value::String(s) => s,

@@ -47,7 +47,7 @@ use kalamdb_commons::models::{TableId, UserId};
 use kalamdb_commons::schemas::TableType;
 use kalamdb_system::providers::storages::models::StorageType;
 use kalamdb_system::Storage;
-use object_store::{path::Path as ObjectPath, ObjectStore};
+use object_store::{path::Path as ObjectPath, ObjectStore, ObjectStoreExt};
 use parking_lot::RwLock;
 use std::sync::Arc;
 use tracing::Instrument;

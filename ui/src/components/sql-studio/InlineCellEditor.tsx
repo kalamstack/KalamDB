@@ -16,6 +16,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Check, X } from 'lucide-react';
+import { KalamCellValue } from 'kalam-link';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -43,14 +44,16 @@ export function InlineCellEditor({ context, onSave, onCancel }: InlineCellEditor
   // Initialize the edit value when the context changes
   useEffect(() => {
     if (!context) return;
-    if (context.value === null || context.value === undefined) {
+    // Unwrap KalamCellValue to get the raw underlying value
+    const raw = context.value instanceof KalamCellValue ? context.value.toJson() : context.value;
+    if (raw === null || raw === undefined) {
       setEditValue('');
       setIsNull(true);
-    } else if (typeof context.value === 'object') {
-      setEditValue(JSON.stringify(context.value, null, 2));
+    } else if (typeof raw === 'object') {
+      setEditValue(JSON.stringify(raw, null, 2));
       setIsNull(false);
     } else {
-      setEditValue(String(context.value));
+      setEditValue(String(raw));
       setIsNull(false);
     }
     // Focus the input after a tick
@@ -64,8 +67,8 @@ export function InlineCellEditor({ context, onSave, onCancel }: InlineCellEditor
     if (isNull) {
       newValue = null;
     } else {
-      // Try to parse back to the original type
-      const original = context.value;
+      // Try to parse back to the original type (unwrap KalamCellValue if needed)
+      const original = context.value instanceof KalamCellValue ? context.value.toJson() : context.value;
       if (typeof original === 'number') {
         const parsed = Number(editValue);
         newValue = isNaN(parsed) ? editValue : parsed;

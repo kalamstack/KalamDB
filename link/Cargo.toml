@@ -15,7 +15,9 @@ categories = ["database", "web-programming::websocket", "wasm"]
 tokio = { workspace = true, optional = true }
 
 # HTTP client (native only)
-reqwest = { workspace = true, optional = true }
+# Not using workspace = true: drops http2 (saves ~1.7MB h2 crate) and form
+# (unused). Uses rustls with aws-lc-rs crypto for TLS (reqwest 0.13 default).
+reqwest = { version = "0.13.2", default-features = false, features = ["json", "rustls", "multipart", "stream"], optional = true }
 
 # WebSocket (native only)
 tokio-tungstenite = { workspace = true, optional = true }
@@ -33,7 +35,8 @@ http-body-util = { workspace = true }
 base64 = { workspace = true }
 
 # Date/time handling for timestamp formatting
-chrono = { workspace = true }
+# Minimal features: no serde, no iana-time-zone, no oldtime (saves ~0.3MB)
+chrono = { version = "0.4.44", default-features = false, features = ["clock", "std"] }
 
 # Random number generation for WASM
 getrandom = { version = "0.2", optional = true, features = ["js"] }
@@ -87,7 +90,9 @@ web-sys = { workspace = true, features = [
 # WASM builds use wasm-pack which doesn't use default features
 default = ["tokio-runtime"]
 tokio-runtime = ["tokio", "reqwest", "tokio-tungstenite"]
-wasm = ["wasm-bindgen", "wasm-bindgen-futures", "js-sys", "web-sys", "getrandom", "tsify-next", "serde-wasm-bindgen"]
+# Optional HTTP/2 support via reqwest (adds ~1.7MB h2 crate)
+http2 = ["reqwest/http2"]
+wasm = ["wasm-bindgen", "wasm-bindgen-futures", "js-sys", "web-sys", "getrandom", "tsify-next", "serde-wasm-bindgen", "chrono/wasmbind"]
 # End-to-end tests require a running KalamDB server
 e2e-tests = []
 
@@ -131,4 +136,5 @@ tempfile = { workspace = true }
 crate-type = ["cdylib", "rlib"]
 
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = false  # Disable wasm-opt to avoid bulk memory operation issues
+# Enable wasm-opt size optimization (saves ~30-40% WASM size)
+wasm-opt = ["-Oz"]

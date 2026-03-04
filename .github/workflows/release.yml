@@ -49,6 +49,12 @@ on:
         required: false
         default: false
 
+      dart_publish:
+        description: "Publish Dart SDK to pub.dev"
+        type: boolean
+        required: false
+        default: false
+
 permissions:
   contents: write
 
@@ -1353,12 +1359,121 @@ jobs:
           echo "✅ Multi-arch manifest created for ${REPO}:${VERSION} and ${REPO}:latest"
 
   # ═══════════════════════════════════════════════════════════════════════════
+  # SDK TESTS - Run TypeScript and Dart SDK test suites
+  # ═══════════════════════════════════════════════════════════════════════════
+  sdk_tests:
+    name: Test TypeScript and Dart SDKs
+    runs-on: ubuntu-latest
+    needs: read_version
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: wasm32-unknown-unknown
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install system deps
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang \
+            libclang-dev \
+            pkg-config \
+            libssl-dev
+
+      - name: Install wasm-pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 5 --retry-delay 2 --retry-connrefused \
+            https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
+          wasm-pack --version
+
+      - name: Start KalamDB server
+        shell: bash
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          cp server.example.toml server.toml
+          sed -i 's|jwt_secret = ".*"|jwt_secret = "sdk-test-secret-key-minimum-32-characters-long"|g' server.toml
+
+          cargo run --bin kalamdb-server > ../sdk-tests-server.log 2>&1 &
+          SERVER_PID=$!
+          echo "SERVER_PID=$SERVER_PID" >> "$GITHUB_ENV"
+
+          for i in {1..60}; do
+            if curl -sf http://localhost:8080/health > /dev/null 2>&1; then
+              echo "✅ Server is ready"
+              exit 0
+            fi
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              echo "❌ Server process exited early"
+              cat sdk-tests-server.log || true
+              exit 1
+            fi
+            sleep 1
+          done
+
+          echo "❌ Timed out waiting for server"
+          cat sdk-tests-server.log || true
+          exit 1
+
+      - name: Run TypeScript SDK tests
+        shell: bash
+        working-directory: link/sdks/typescript
+        run: |
+          set -euo pipefail
+          chmod +x ./test.sh
+          ./test.sh
+
+      - name: Run Dart SDK tests
+        shell: bash
+        working-directory: link/sdks/dart
+        run: |
+          set -euo pipefail
+          chmod +x ./test.sh
+          ./test.sh
+
+      - name: Stop KalamDB server
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${SERVER_PID:-}" ]] && kill -0 "$SERVER_PID" 2>/dev/null; then
+            kill "$SERVER_PID" || true
+          fi
+
+      - name: Upload SDK test server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-tests-server-log
+          path: sdk-tests-server.log
+          if-no-files-found: ignore
+
+  # ═══════════════════════════════════════════════════════════════════════════
   # NPM PUBLISH - Publish TypeScript SDK to npm registry
   # ═══════════════════════════════════════════════════════════════════════════
   publish_npm:
     name: Publish TypeScript SDK to npm
     runs-on: ubuntu-latest
-    needs: read_version
+    needs: [read_version, sdk_tests]
     if: ${{ github.event_name == 'push' || github.event.inputs.npm_publish == 'true' }}
 
     steps:
@@ -1446,3 +1561,44 @@ jobs:
             npm publish --access public
             echo "✅ Successfully published kalam-link@$VERSION to npm!"
           fi
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # DART PUBLISH - Publish Dart SDK to pub.dev
+  # ═══════════════════════════════════════════════════════════════════════════
+  publish_dart:
+    name: Publish Dart SDK to pub.dev
+    runs-on: ubuntu-latest
+    needs: [read_version, sdk_tests]
+    if: ${{ github.event_name == 'push' || github.event.inputs.dart_publish == 'true' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Configure pub.dev credentials
+        shell: bash
+        env:
+          PUB_DEV_CREDENTIALS_JSON: ${{ secrets.PUB_DEV_CREDENTIALS_JSON }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${PUB_DEV_CREDENTIALS_JSON}" ]]; then
+            echo "❌ Missing required secret: PUB_DEV_CREDENTIALS_JSON"
+            exit 1
+          fi
+
+          mkdir -p "$HOME/.pub-cache"
+          printf '%s' "$PUB_DEV_CREDENTIALS_JSON" > "$HOME/.pub-cache/credentials.json"
+          chmod 600 "$HOME/.pub-cache/credentials.json"
+
+      - name: Publish Dart package
+        shell: bash
+        working-directory: link/sdks/dart
+        run: |
+          set -euo pipefail
+          chmod +x ./publish.sh
+          ./publish.sh

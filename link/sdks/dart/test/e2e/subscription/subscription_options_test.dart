@@ -160,11 +160,11 @@ void main() {
           for (final event in events) {
             switch (event) {
               case InsertEvent(:final rows):
-                if (rows.any((r) => r['id'] == id)) return true;
+                if (rows.any((r) => r['id']?.asInt() == id)) return true;
               case UpdateEvent(:final rows):
-                if (rows.any((r) => r['id'] == id)) return true;
+                if (rows.any((r) => r['id']?.asInt() == id)) return true;
               case InitialDataBatch(:final rows):
-                if (rows.any((r) => r['id'] == id)) return true;
+                if (rows.any((r) => r['id']?.asInt() == id)) return true;
               case AckEvent() || DeleteEvent() || SubscriptionError():
                 break;
             }

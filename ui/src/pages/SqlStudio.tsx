@@ -447,7 +447,8 @@ export default function SqlStudio() {
                 ),
               }));
             } else if (changeType === "update") {
-              // UPDATE: new values in rows, previous values in old_values
+              // UPDATE: delta rows contain only changed columns + PK + _seq.
+              // Changed user columns are the non-system keys (those not starting with '_').
               const updatedRows = normalizeLiveRows(msg.rows ?? []);
               dispatch(appendWorkspaceLiveRows({
                 tabId: tab.id,

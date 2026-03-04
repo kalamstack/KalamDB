@@ -71,6 +71,75 @@ fn apply_projections<'a>(row: &'a Row, projections: &Option<Arc<Vec<String>>>) -
     }
 }
 
+/// Compute the delta between old and new JSON row maps for UPDATE notifications.
+///
+/// Returns `(delta_new, delta_old)` where:
+/// - `delta_new` contains only the changed columns + `_seq` + any user-defined PK
+///   columns (new values).
+/// - `delta_old` contains only the changed columns + `_seq` + PK columns (old values).
+///
+/// `pk_columns` lists the user-defined primary key column name(s) that must always be
+/// included so clients can identify the row. `_seq` is always included automatically.
+/// `_deleted` is **not** included — DELETE events are sent as separate notifications.
+#[inline]
+fn compute_json_update_delta(
+    old_json: &std::collections::HashMap<String, kalamdb_commons::models::KalamCellValue>,
+    new_json: &std::collections::HashMap<String, kalamdb_commons::models::KalamCellValue>,
+    pk_columns: &[String],
+) -> (
+    std::collections::HashMap<String, kalamdb_commons::models::KalamCellValue>,
+    std::collections::HashMap<String, kalamdb_commons::models::KalamCellValue>,
+) {
+    let mut delta_new = std::collections::HashMap::new();
+    let mut delta_old = std::collections::HashMap::new();
+
+    // Always include _seq for row identification
+    let seq_col = SystemColumnNames::SEQ.to_string();
+    if let Some(v) = new_json.get(&seq_col) {
+        delta_new.insert(seq_col.clone(), v.clone());
+    }
+    if let Some(v) = old_json.get(&seq_col) {
+        delta_old.insert(seq_col.clone(), v.clone());
+    }
+
+    // Always include user-defined PK column(s) for row identification
+    for pk_col in pk_columns {
+        if let Some(v) = new_json.get(pk_col) {
+            delta_new.insert(pk_col.clone(), v.clone());
+        }
+        if let Some(v) = old_json.get(pk_col) {
+            delta_old.insert(pk_col.clone(), v.clone());
+        }
+    }
+
+    // Compare all non-system columns; include only those that actually changed
+    for (col_name, new_val) in new_json {
+        // Skip _seq (already handled) and other system columns (_deleted, etc.)
+        if col_name.starts_with('_') {
+            continue;
+        }
+        // Skip PK columns (already handled above)
+        if pk_columns.contains(col_name) {
+            continue;
+        }
+
+        let old_val = old_json.get(col_name);
+        let changed = match old_val {
+            Some(old_v) => old_v != new_val,
+            None => true,
+        };
+
+        if changed {
+            delta_new.insert(col_name.clone(), new_val.clone());
+            if let Some(old_v) = old_val {
+                delta_old.insert(col_name.clone(), old_v.clone());
+            }
+        }
+    }
+
+    (delta_new, delta_old)
+}
+
 /// Service for notifying subscribers of changes
 ///
 /// Uses Arc<ConnectionsManager> directly since ConnectionsManager internally
@@ -385,8 +454,8 @@ impl NotificationService {
         // Send notifications and increment changes
         let mut notification_count = 0usize;
         let filtering_row = &change_notification.row_data;
-        let mut full_row_json: Option<std::collections::HashMap<String, serde_json::Value>> = None;
-        let mut full_old_json: Option<std::collections::HashMap<String, serde_json::Value>> = None;
+        let mut full_row_json: Option<std::collections::HashMap<String, kalamdb_commons::models::KalamCellValue>> = None;
+        let mut full_old_json: Option<std::collections::HashMap<String, kalamdb_commons::models::KalamCellValue>> = None;
         let seq_value = extract_seq(&change_notification);
         for entry in all_handles.iter() {
             let live_id = entry.key();
@@ -495,11 +564,17 @@ impl NotificationService {
             let sub_id = live_id.subscription_id().to_string();
             let notification = match change_notification.change_type {
                 ChangeType::Insert => kalamdb_commons::Notification::insert(sub_id, vec![row_json]),
-                ChangeType::Update => kalamdb_commons::Notification::update(
-                    sub_id,
-                    vec![row_json],
-                    vec![old_json.unwrap_or_else(std::collections::HashMap::new)],
-                ),
+                ChangeType::Update => {
+                    // Compute delta: send only changed columns + PK + _seq
+                    let full_old = old_json.unwrap_or_default();
+                    let (delta_new, delta_old) =
+                        compute_json_update_delta(&full_old, &row_json, &change_notification.pk_columns);
+                    kalamdb_commons::Notification::update(
+                        sub_id,
+                        vec![delta_new],
+                        vec![delta_old],
+                    )
+                },
                 ChangeType::Delete => kalamdb_commons::Notification::delete(sub_id, vec![row_json]),
             };
 
@@ -589,6 +664,7 @@ impl NotificationService {
 
         let seq_value = extract_seq(&change_notification);
         let change_type = change_notification.change_type.clone();
+        let pk_columns = Arc::new(change_notification.pk_columns.clone());
         // Wrap row in Arc for sharing with filter evaluation across chunks
         let filtering_row = Arc::new(change_notification.row_data);
 
@@ -616,6 +692,7 @@ impl NotificationService {
             let ct = change_type.clone();
             let filter_row = Arc::clone(&filtering_row);
             let seq = seq_value;
+            let pk_cols_ref = Arc::clone(&pk_columns);
 
             join_handles.push(tokio::spawn(async move {
                 let mut count = 0usize;
@@ -664,11 +741,17 @@ impl NotificationService {
                         ChangeType::Insert => {
                             kalamdb_commons::Notification::insert(sub_id, vec![subscriber_row_json])
                         },
-                        ChangeType::Update => kalamdb_commons::Notification::update(
-                            sub_id,
-                            vec![subscriber_row_json],
-                            vec![subscriber_old_json.unwrap_or_default()],
-                        ),
+                        ChangeType::Update => {
+                            // Compute delta: send only changed columns + PK + _seq
+                            let full_old = subscriber_old_json.unwrap_or_default();
+                            let (delta_new, delta_old) =
+                                compute_json_update_delta(&full_old, &subscriber_row_json, &pk_cols_ref);
+                            kalamdb_commons::Notification::update(
+                                sub_id,
+                                vec![delta_new],
+                                vec![delta_old],
+                            )
+                        },
                         ChangeType::Delete => {
                             kalamdb_commons::Notification::delete(sub_id, vec![subscriber_row_json])
                         },

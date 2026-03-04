@@ -21,10 +21,11 @@ use crate::{
     error::{KalamLinkError, Result},
     event_handlers::{ConnectionError, DisconnectReason, EventHandlers},
     models::{
-        ChangeEvent, ClientMessage, ConnectionOptions, SubscriptionInfo, SubscriptionOptions,
-        SubscriptionRequest,
+        ChangeEvent, ClientMessage, ConnectionOptions, SubscriptionInfo,
+        SubscriptionOptions, SubscriptionRequest,
     },
     seq_id::SeqId,
+    seq_tracking,
     timeouts::KalamLinkTimeouts,
 };
 use bytes::Bytes;
@@ -406,6 +407,26 @@ async fn route_event(
                 log::warn!("Failed to send NextBatch for {}: {}", sub_id, e);
             }
         }
+    }
+
+    // Track _seq from live change events so reconnects resume correctly.
+    // Without this, only the batch_control seq from the initial load is
+    // remembered — any Insert/Update/Delete events after that would be
+    // replayed on reconnect.
+    match &event {
+        ChangeEvent::Insert { ref rows, .. }
+        | ChangeEvent::Update { ref rows, .. }
+        | ChangeEvent::InitialDataBatch { ref rows, .. } => {
+            if let Some(entry) = subs.get_mut(&sub_id) {
+                seq_tracking::track_rows(&mut entry.last_seq_id, rows);
+            }
+        }
+        ChangeEvent::Delete { ref old_rows, .. } => {
+            if let Some(entry) = subs.get_mut(&sub_id) {
+                seq_tracking::track_rows(&mut entry.last_seq_id, old_rows);
+            }
+        }
+        _ => {}
     }
 
     let matched_key = if subs.contains_key(&sub_id) {

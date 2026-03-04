@@ -94,6 +94,7 @@
 
 use crate::ids::SeqId;
 use crate::models::rows::Row;
+use crate::models::KalamCellValue;
 use crate::models::UserId;
 use crate::schemas::SchemaField;
 
@@ -103,11 +104,10 @@ pub type Row = serde_json::Map<String, serde_json::Value>;
 
 use datafusion::scalar::ScalarValue;
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
 use std::collections::{BTreeMap, HashMap};
 
-/// Type alias for row data in WebSocket messages (column_name -> JSON value)
-pub type RowData = HashMap<String, JsonValue>;
+/// Type alias for row data in WebSocket messages (column_name -> cell value)
+pub type RowData = HashMap<String, KalamCellValue>;
 
 /// Batch size in bytes (8KB) for chunking large initial data payloads
 pub const BATCH_SIZE_BYTES: usize = 8 * 1024;
@@ -403,6 +403,12 @@ pub enum Notification {
     /// Change notification for INSERT/UPDATE/DELETE operations
     ///
     /// Sent only after initial data loading is complete (batch_control.status == Ready).
+    ///
+    /// For UPDATE notifications, `rows` contains **only the changed columns** (delta)
+    /// plus the primary key column(s) and `_seq` for identification.
+    /// To determine which columns changed, inspect the keys in `rows[0]` and filter out
+    /// those starting with `_` (system columns like `_seq`).
+    /// `old_values` contains the previous values of those same changed columns.
     Change {
         /// The subscription ID this notification is for
         subscription_id: String,
@@ -410,11 +416,11 @@ pub enum Notification {
         /// Type of change that occurred
         change_type: ChangeType,
 
-        /// New/current row values (for INSERT and UPDATE)
+        /// For INSERT: full row data. For UPDATE: only changed columns + PK/_seq.
         #[serde(skip_serializing_if = "Option::is_none")]
         rows: Option<Vec<RowData>>,
 
-        /// Previous row values (for UPDATE and DELETE)
+        /// Previous row values (for UPDATE: only changed columns + PK/_seq; for DELETE: full row)
         #[serde(skip_serializing_if = "Option::is_none")]
         old_values: Option<Vec<RowData>>,
     },
@@ -452,8 +458,9 @@ pub struct ChangeNotification {
     pub change_type: ChangeType,
     pub table_id: crate::models::TableId,
     pub row_data: Row,
-    pub old_data: Option<Row>,  // For UPDATE notifications
-    pub row_id: Option<String>, // For DELETE notifications (hard delete)
+    pub old_data: Option<Row>,      // For UPDATE notifications
+    pub row_id: Option<String>,     // For DELETE notifications (hard delete)
+    pub pk_columns: Vec<String>,    // Primary key column name(s) for UPDATE delta
 }
 
 impl ChangeNotification {
@@ -465,17 +472,27 @@ impl ChangeNotification {
             row_data,
             old_data: None,
             row_id: None,
+            pk_columns: vec![],
         }
     }
 
-    /// Create an UPDATE notification with old and new values
-    pub fn update(table_id: crate::models::TableId, old_data: Row, new_data: Row) -> Self {
+    /// Create an UPDATE notification with old and new values.
+    ///
+    /// `pk_columns` lists the primary key column name(s) to always include in the
+    /// delta payload alongside `_seq`, so clients can identify the updated row.
+    pub fn update(
+        table_id: crate::models::TableId,
+        old_data: Row,
+        new_data: Row,
+        pk_columns: Vec<String>,
+    ) -> Self {
         Self {
             change_type: ChangeType::Update,
             table_id,
             row_data: new_data,
             old_data: Some(old_data),
             row_id: None,
+            pk_columns,
         }
     }
 
@@ -487,6 +504,7 @@ impl ChangeNotification {
             row_data,
             old_data: None,
             row_id: None,
+            pk_columns: vec![],
         }
     }
 
@@ -501,6 +519,7 @@ impl ChangeNotification {
             row_data: Row::new(values),
             old_data: None,
             row_id: Some(row_id),
+            pk_columns: vec![],
         }
     }
 }
@@ -633,8 +652,17 @@ impl Notification {
         }
     }
 
-    /// Create an UPDATE change notification
-    pub fn update(subscription_id: String, new_rows: Vec<RowData>, old_rows: Vec<RowData>) -> Self {
+    /// Create an UPDATE change notification with delta (only changed columns).
+    ///
+    /// `new_rows` and `old_rows` contain **only** the columns that changed plus
+    /// the primary key column(s) and `_seq` for identification.
+    /// Clients can derive which columns changed by inspecting the keys in `rows[0]`
+    /// and filtering out those starting with `_` (system columns).
+    pub fn update(
+        subscription_id: String,
+        new_rows: Vec<RowData>,
+        old_rows: Vec<RowData>,
+    ) -> Self {
         Self::Change {
             subscription_id,
             change_type: ChangeType::Update,
@@ -677,15 +705,15 @@ mod tests {
         Row::new(values)
     }
 
-    fn row_to_test_json(row: &Row) -> HashMap<String, JsonValue> {
+    fn row_to_test_json(row: &Row) -> HashMap<String, KalamCellValue> {
         // Simple conversion for tests - convert ScalarValue to JSON
         row.values
             .iter()
             .map(|(k, v)| {
                 let json_val = match v {
-                    ScalarValue::Int64(Some(i)) => JsonValue::String(i.to_string()),
-                    ScalarValue::Utf8(Some(s)) => JsonValue::String(s.clone()),
-                    _ => JsonValue::Null,
+                    ScalarValue::Int64(Some(i)) => KalamCellValue::text(i.to_string()),
+                    ScalarValue::Utf8(Some(s)) => KalamCellValue::text(s.clone()),
+                    _ => KalamCellValue::null(),
                 };
                 (k.clone(), json_val)
             })

@@ -175,7 +175,8 @@ export async function executeQuery(sql: string): Promise<QueryResponse> {
       } else {
         const first = response.results?.[0];
         const resultCount = response.results?.length ?? 0;
-        const rowCount = first?.row_count ?? first?.rows?.length ?? 0;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const rowCount = first?.row_count ?? (first as any)?.named_rows?.length ?? first?.rows?.length ?? 0;
         const columnCount = first?.schema?.length ?? 0;
         console.log(
           "[kalam-client] Query success:",
@@ -215,6 +216,19 @@ function convertRowsToObjects(
 }
 
 /**
+ * Extract named_rows from a query result (new Rust WASM format).
+ * The WASM layer pre-computes named_rows (schema → map) so we don't need
+ * to reconstruct from positional rows + schema.
+ */
+function extractNamedRows(
+  result: unknown
+): Record<string, unknown>[] | undefined {
+  const r = result as Record<string, unknown> | undefined;
+  const named = r?.named_rows;
+  return Array.isArray(named) ? (named as Record<string, unknown>[]) : undefined;
+}
+
+/**
  * Execute SQL and return rows from the first result set
  * Convenience function for hooks that just need rows
  * Converts the new array-based row format to Record objects for backwards compatibility
@@ -233,11 +247,15 @@ export async function executeSql(sql: string): Promise<Record<string, unknown>[]
       return [];
     }
     
-    // Convert array rows to Record objects using schema
-    // The schema contains: { name, data_type, index }
+    // Prefer named_rows: Rust WASM pre-computes the schema→map transformation.
+    const namedRows = extractNamedRows(result);
+    if (namedRows) {
+      return namedRows;
+    }
+
+    // Fallback: positional rows + schema (older server versions)
     const schema = (result as unknown as { schema?: { name: string; data_type: string; index: number }[] }).schema;
     const rows = result.rows as unknown[][] | undefined;
-    
     return convertRowsToObjects(schema, rows);
   } catch (err) {
     console.error('[kalam-client] executeSql failed:', err);

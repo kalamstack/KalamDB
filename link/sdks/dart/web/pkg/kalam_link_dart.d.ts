@@ -37,6 +37,20 @@ export interface SchemaField {
 }
 
 /**
+ * A single cell value in a query result row or subscription notification.
+ *
+ * Thin wrapper around [`serde_json::Value`] with `#[serde(transparent)]`
+ * for zero-cost JSON (de)serialization. Implements [`Deref`] to `JsonValue`
+ * so all existing `serde_json` accessor methods (`.as_str()`, `.is_null()`,
+ * `.as_i64()`, …) continue to work unchanged.
+ *
+ * Use the typed accessor methods (e.g. [`as_big_int`][Self::as_big_int],
+ * [`as_file`][Self::as_file]) to get values in the correct Rust type
+ * matching the column\'s [`KalamDataType`][super::kalam_data_type::KalamDataType].
+ */
+export type KalamCellValue = JsonValue;
+
+/**
  * A single consumed message from a topic.
  *
  * Contains the message payload (decoded from base64), metadata about the
@@ -80,9 +94,10 @@ export interface ConsumeMessage {
      */
     username?: Username;
     /**
-     * Decoded message payload as a JSON object
+     * Decoded message payload as a named-column row (`column → value`).
+     * Mirrors the subscription row shape: `HashMap<String, KalamCellValue>`.
      */
-    value: JsonValue;
+    value: RowData;
 }
 
 /**
@@ -173,6 +188,56 @@ export interface ErrorDetail {
 }
 
 /**
+ * File reference stored as JSON in FILE columns.
+ *
+ * Contains all metadata needed to locate and serve the file.
+ * The server stores this as a JSON string inside FILE-typed columns.
+ *
+ * # JSON example
+ *
+ * ```json
+ * {
+ *   \"id\": \"1234567890123456789\",
+ *   \"sub\": \"f0001\",
+ *   \"name\": \"document.pdf\",
+ *   \"size\": 1048576,
+ *   \"mime\": \"application/pdf\",
+ *   \"sha256\": \"abc123...\
+ * }
+ * ```
+ */
+export interface FileRef {
+    /**
+     * Unique file identifier (Snowflake ID).
+     */
+    id: string;
+    /**
+     * Subfolder name (e.g., `\"f0001\"`, `\"f0002\"`).
+     */
+    sub: string;
+    /**
+     * Original filename (preserved for display/download).
+     */
+    name: string;
+    /**
+     * File size in bytes.
+     */
+    size: number;
+    /**
+     * MIME type (e.g., `\"image/png\"`, `\"application/pdf\"`).
+     */
+    mime: string;
+    /**
+     * SHA-256 hash of file content (hex-encoded).
+     */
+    sha256: string;
+    /**
+     * Optional shard ID for shared tables.
+     */
+    shard?: number;
+}
+
+/**
  * HTTP protocol version to use for connections.
  *
  * HTTP/2 provides benefits like multiplexing multiple requests over a single
@@ -213,25 +278,32 @@ export interface HealthCheckResponse {
 }
 
 /**
- * Individual query result within a SQL response
+ * Individual query result within a SQL response.
  */
 export interface QueryResult {
     /**
-     * Schema describing the columns in the result set
-     * Each field contains: name, data_type (KalamDataType), and index
+     * Schema describing the columns in the result set.
+     * Each field contains: name, data_type (KalamDataType), and index.
      */
     schema?: SchemaField[];
     /**
-     * The result rows as arrays of values (ordered by schema index)
-     * Example: [[\"123\", \"Alice\", 1699000000000000], [\"456\", \"Bob\", 1699000001000000]]
+     * The result rows as arrays of values (ordered by schema index).
+     * Populated by the server; cleared client-side once `named_rows` is built.
      */
-    rows?: JsonValue[][];
+    rows?: KalamCellValue[][];
     /**
-     * Number of rows affected or returned
+     * Rows as maps keyed by column name (column → KalamCellValue).
+     *
+     * Populated client-side by [`populate_named_rows`] from `schema` + `rows`.
+     * When present, SDKs should prefer this over positional `rows`.
+     */
+    named_rows?: RowData[];
+    /**
+     * Number of rows affected or returned.
      */
     row_count: number;
     /**
-     * Optional message for non-query statements
+     * Optional message for non-query statements.
      */
     message?: string;
 }
@@ -391,19 +463,19 @@ export type BatchStatus = "loading" | "loading_batch" | "ready";
  */
 export interface SubscriptionOptions {
     /**
-     * Hint for server-side batch sizing during initial data load
-     * Default: server-configured (typically 1000 rows per batch)
+     * Hint for server-side batch sizing during initial data load.
+     * Default: server-configured (typically 1000 rows per batch).
      */
     batch_size?: number;
     /**
-     * Number of last (newest) rows to fetch for initial data
-     * Default: None (fetch all matching rows)
+     * Number of last (newest) rows to fetch for initial data.
+     * Default: None (fetch all matching rows).
      */
     last_rows?: number;
     /**
-     * Resume subscription from a specific sequence ID
-     * When set, the server will only send changes after this seq_id
-     * Typically set automatically during reconnection to resume from last received event
+     * Resume subscription from a specific sequence ID.
+     * When set, the server will only send changes after this seq_id.
+     * Typically set automatically during reconnection to resume from last received event.
      */
     from_seq_id?: SeqId;
 }
@@ -501,7 +573,7 @@ export interface LoginUserInfo {
 /**
  * WebSocket message types sent from server to client
  */
-export type ServerMessage = { type: "auth_success"; user_id: string; role: string } | { type: "auth_error"; message: string } | { type: "subscription_ack"; subscription_id: string; total_rows: number; batch_control: BatchControl; schema: SchemaField[] } | { type: "initial_data_batch"; subscription_id: string; rows: Map<string, JsonValue>[]; batch_control: BatchControl } | { type: "change"; subscription_id: string; change_type: ChangeTypeRaw; rows?: Map<string, JsonValue>[]; old_values?: Map<string, JsonValue>[] } | { type: "error"; subscription_id: string; code: string; message: string };
+export type ServerMessage = { type: "auth_success"; user_id: string; role: string } | { type: "auth_error"; message: string } | { type: "subscription_ack"; subscription_id: string; total_rows: number; batch_control: BatchControl; schema: SchemaField[] } | { type: "initial_data_batch"; subscription_id: string; rows: Map<string, KalamCellValue>[]; batch_control: BatchControl } | { type: "change"; subscription_id: string; change_type: ChangeTypeRaw; rows?: Map<string, KalamCellValue>[]; old_values?: Map<string, KalamCellValue>[] } | { type: "error"; subscription_id: string; code: string; message: string };
 
 export type FieldFlag = "pk" | "nn" | "uq";
 
@@ -1131,14 +1203,14 @@ export interface InitOutput {
     readonly kalamclient_subscribeWithSql: (a: number, b: number, c: number, d: number, e: number, f: any) => any;
     readonly kalamclient_unsubscribe: (a: number, b: number, c: number) => any;
     readonly kalamclient_withJwt: (a: number, b: number, c: number, d: number) => [number, number, number];
-    readonly wasm_bindgen__closure__destroy__hf286b0385936f085: (a: number, b: number) => void;
-    readonly wasm_bindgen__closure__destroy__h1a47cbf30d85ac9e: (a: number, b: number) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h17cdd96966baca04: (a: number, b: number, c: any) => [number, number];
-    readonly wasm_bindgen__convert__closures_____invoke__h8740b5240cd385d0: (a: number, b: number, c: any, d: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h2873e4b6ce1b5948: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h2873e4b6ce1b5948_2: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h2873e4b6ce1b5948_3: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__he858fb185b316d9a: (a: number, b: number) => void;
+    readonly wasm_bindgen__closure__destroy__h2c6496e14a99c83c: (a: number, b: number) => void;
+    readonly wasm_bindgen__closure__destroy__hc4784aa82de56652: (a: number, b: number) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h6537501fed6ccdff: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen__convert__closures_____invoke__h11188c184bbe4ba9: (a: number, b: number, c: any, d: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h112e717bac3b8530: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h112e717bac3b8530_1: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h112e717bac3b8530_2: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h9ba7c31c46af268d: (a: number, b: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

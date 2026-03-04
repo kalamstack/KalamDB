@@ -198,14 +198,14 @@ await for (final event in stream) {
   switch (event) {
     case AckEvent(:final subscriptionId, :final totalRows):
       print('Subscribed $subscriptionId. Snapshot rows: $totalRows');
-    case InitialDataBatch(:final rowsJson, :final hasMore):
+    case InitialDataBatch(:final hasMore):
       print('Snapshot batch, hasMore=$hasMore');
-    case InsertEvent(:final row):
-      print('New row: $row');
-    case UpdateEvent(:final row, :final oldRow):
-      print('Updated: $oldRow → $row');
-    case DeleteEvent(:final row):
-      print('Deleted: $row');
+    case InsertEvent():
+      print('New row: ${event.typedRow}');
+    case UpdateEvent():
+      print('Updated: ${event.typedOldRow} → ${event.typedRow}');
+    case DeleteEvent():
+      print('Deleted: ${event.typedRow}');
     case SubscriptionError(:final message):
       print('Error: $message');
   }

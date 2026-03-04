@@ -7,7 +7,6 @@
 //! Falls back to DataFusion for:
 //! - INSERT ... SELECT (subquery source)
 //! - ON CONFLICT / ON DUPLICATE KEY
-//! - RETURNING clauses
 //! - Complex expressions in VALUES (functions, casts, subqueries)
 //! - System namespace tables
 //! - Columns with DEFAULT expressions omitted from INSERT column list
@@ -63,9 +62,27 @@ async fn try_fast_insert_from_insert(
     let default_namespace = exec_ctx.default_namespace();
 
     // 2. Quick bail for features we don't optimize
-    if insert.on.is_some() || insert.returning.is_some() || insert.overwrite {
+    if insert.on.is_some() || insert.overwrite {
         return Ok(None);
     }
+
+    // RETURNING clause support: only `RETURNING _seq` or `RETURNING *` is handled
+    let returning_seq = if let Some(ref returning) = insert.returning {
+        if returning.len() == 1 {
+            match &returning[0] {
+                sqlparser::ast::SelectItem::Wildcard(_) => true,
+                sqlparser::ast::SelectItem::UnnamedExpr(expr) => match expr {
+                    Expr::Identifier(ident) => ident.value == "_seq",
+                    _ => return Ok(None), // Complex expression — fall back
+                },
+                _ => return Ok(None),
+            }
+        } else {
+            return Ok(None); // Multiple RETURNING columns — fall back
+        }
+    } else {
+        false
+    };
 
     // 3. Extract table name
     let table_id = match prepared_table_id {
@@ -164,13 +181,39 @@ async fn try_fast_insert_from_insert(
         Err(_) => return Ok(None),
     };
 
-    // 9. Call insert_rows directly via KalamTableProvider, bypassing DataFusion
+    // 9. Call insert directly via KalamTableProvider, bypassing DataFusion
     let user_id = exec_ctx.user_id();
     let row_count = rows.len();
     tracing::debug!(table_id = %table_id, row_count = row_count, "sql.fast_insert");
-    let rows_affected = kalam_provider.insert_rows(user_id, rows).await?;
 
-    Ok(Some(ExecutionResult::Inserted { rows_affected }))
+    if returning_seq {
+        // INSERT ... RETURNING _seq: return the generated sequence IDs as rows
+        let seq_values = kalam_provider.insert_rows_returning(user_id, rows).await?;
+        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
+            arrow::datatypes::Field::new("_seq", arrow::datatypes::DataType::Int64, false),
+        ]));
+        let seq_array: arrow::array::Int64Array = seq_values
+            .iter()
+            .map(|v| match v {
+                ScalarValue::Int64(Some(i)) => Some(*i),
+                _ => None,
+            })
+            .collect();
+        let batch = arrow::array::RecordBatch::try_new(
+            schema.clone(),
+            vec![Arc::new(seq_array)],
+        )
+        .map_err(|e| KalamDbError::InvalidOperation(format!("Failed to create RETURNING batch: {}", e)))?;
+        let row_count = batch.num_rows();
+        Ok(Some(ExecutionResult::Rows {
+            batches: vec![batch],
+            row_count,
+            schema: Some(schema),
+        }))
+    } else {
+        let rows_affected = kalam_provider.insert_rows(user_id, rows).await?;
+        Ok(Some(ExecutionResult::Inserted { rows_affected }))
+    }
 }
 
 /// Extract TableId from INSERT's table reference.

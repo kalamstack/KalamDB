@@ -11,7 +11,7 @@ import 'generated/frb_generated.dart';
 /// KalamDB client for Dart and Flutter.
 ///
 /// Provides query execution, live subscriptions, authentication,
-/// and server health/setup endpoints.
+/// and server health endpoints.
 ///
 /// ```dart
 /// final client = await KalamClient.connect(
@@ -159,7 +159,7 @@ class KalamClient {
       'Auth resolved: ${effectiveAuth.runtimeType}',
     );
 
-    final handle = bridge.dartCreateClient(
+    final handle = await bridge.dartCreateClient(
       baseUrl: url,
       auth: _toBridgeAuth(effectiveAuth),
       timeoutMs: timeout.inMilliseconds,
@@ -214,7 +214,8 @@ class KalamClient {
       if (_isDisposed) return;
       KalamLogger.info(
           'auth', 'Auth credentials refreshed: ${freshAuth.runtimeType}');
-      bridge.dartUpdateAuth(client: _handle, auth: _toBridgeAuth(freshAuth));
+      await bridge.dartUpdateAuth(
+          client: _handle, auth: _toBridgeAuth(freshAuth));
     }();
 
     _refreshAuthInFlight =
@@ -276,7 +277,7 @@ class KalamClient {
   }
 
   // ---------------------------------------------------------------------------
-  // Health / Setup
+  // Health
   // ---------------------------------------------------------------------------
 
   /// Check server health (version, status, etc.).
@@ -287,39 +288,6 @@ class KalamClient {
       version: resp.version,
       apiVersion: resp.apiVersion,
       buildDate: resp.buildDate,
-    );
-  }
-
-  /// Check whether the server requires initial setup.
-  Future<SetupStatusResponse> checkSetupStatus() async {
-    final resp = await bridge.dartCheckSetupStatus(client: _handle);
-    return SetupStatusResponse(
-      needsSetup: resp.needsSetup,
-      message: resp.message,
-    );
-  }
-
-  /// Perform initial server setup (create first admin user).
-  Future<ServerSetupResponse> serverSetup(ServerSetupRequest request) async {
-    final resp = await bridge.dartServerSetup(
-      client: _handle,
-      request: gen.DartServerSetupRequest(
-        username: request.username,
-        password: request.password,
-        rootPassword: request.rootPassword,
-        email: request.email,
-      ),
-    );
-    return ServerSetupResponse(
-      message: resp.message,
-      user: SetupUserInfo(
-        id: resp.user.id,
-        username: resp.user.username,
-        role: resp.user.role,
-        email: resp.user.email,
-        createdAt: resp.user.createdAt,
-        updatedAt: resp.user.updatedAt,
-      ),
     );
   }
 
@@ -356,10 +324,10 @@ class KalamClient {
   /// final stream = client.subscribe('SELECT * FROM messages');
   /// await for (final event in stream) {
   ///   switch (event) {
-  ///     case InsertEvent(:final rowsJson):
-  ///       print('New row: ${rowsJson.first}');
-  ///     case DeleteEvent(:final oldRowsJson):
-  ///       print('Deleted: ${oldRowsJson.first}');
+  ///     case InsertEvent():
+  ///       print('New row: ${event.row}');
+  ///     case DeleteEvent():
+  ///       print('Deleted: ${event.row}');
   ///     case _:
   ///       break;
   ///   }
@@ -569,7 +537,7 @@ class KalamClient {
                           flags: c.flags,
                         ))
                     .toList(),
-                rowsJson: r.rowsJson,
+                namedRowsJson: r.namedRowsJson,
                 rowCount: r.rowCount,
                 message: r.message,
               ))

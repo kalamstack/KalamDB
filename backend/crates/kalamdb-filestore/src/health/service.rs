@@ -8,6 +8,7 @@ use kalamdb_system::providers::storages::models::StorageType;
 use kalamdb_system::Storage;
 use object_store::path::Path as ObjectPath;
 use object_store::ObjectStore;
+use object_store::ObjectStoreExt;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;

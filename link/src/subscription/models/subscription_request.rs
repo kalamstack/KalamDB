@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::subscription_options::SubscriptionOptions;
 
-/// Subscription request details
+/// Subscription request details.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubscriptionRequest {
     /// Unique subscription identifier (client-generated)

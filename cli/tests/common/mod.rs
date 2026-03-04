@@ -3103,7 +3103,7 @@ fn execute_sql_via_client_internal(
                                     .enumerate()
                                     .map(|(i, _col)| {
                                         row.get(i)
-                                            .map(|v| match v {
+                                            .map(|v| match v.inner() {
                                                 serde_json::Value::String(s) => s.clone(),
                                                 serde_json::Value::Null => "NULL".to_string(),
                                                 other => other.to_string(),
@@ -4405,7 +4405,7 @@ pub fn execute_sql_on_node(
                                 .enumerate()
                                 .map(|(i, _col)| {
                                     row.get(i)
-                                        .map(|v| match v {
+                                        .map(|v| match v.inner() {
                                             serde_json::Value::String(s) => s.clone(),
                                             serde_json::Value::Null => "NULL".to_string(),
                                             other => other.to_string(),

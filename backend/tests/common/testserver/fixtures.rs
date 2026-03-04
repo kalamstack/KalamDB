@@ -181,6 +181,7 @@ pub async fn create_messages_table(
                 results: vec![QueryResult {
                     schema: vec![],
                     rows: None,
+                    named_rows: None,
                     row_count: 0,
                     message: Some("Table already existed".to_string()),
                 }],
@@ -301,6 +302,7 @@ pub async fn create_stream_table(
                 results: vec![QueryResult {
                     schema: vec![],
                     rows: None,
+                    named_rows: None,
                     row_count: 0,
                     message: Some("Table already existed".to_string()),
                 }],

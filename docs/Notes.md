@@ -1294,11 +1294,10 @@ pub(crate) fn compose_provider_username(issuer: &str, subject: &str) -> UserName
 
 193) remove checkSetupStatus/serverSetup from the dart and typescript sdk
 
-194) Add an option to not send messages compressed for better debugging while developing, this can be set from the client side client
 
+194) why we need this: compute_update_delta? shouldnt the change query which we run have already the list of columns which was changed there and we can use it directly?
 
-
-
+195) Why we still send in the update change in websocket 2 arrays? shouldnt we make them map<string, string> column -> value only?
 
 
 
@@ -1315,7 +1314,7 @@ Main Epics:
 9) In Progress - Check S3/WebDAV Storages
 10) Move permissions to Shared tables with policies
 11) A new option for STREAM table to only insert the row if the user is online option (delivery_policy = 'online_only'  -- or 'always') also For STREAM tables, to avoid unbounded RAM growth, we can implement a disk-backed buffer (e.g., mmap-backed ring buffer). mmap reduces heap usage, but we still need TTL eviction + max-bytes limits + backpressure to prevent OOM. https://lib.rs/crates/mmap-io, drop policy: drop_oldest
-13) backend/crates/kalamdb-core/src/providers - need to be removed
+13) backend/crates/kalamdb-core/src/providers - need to be removed if they are not needed anymore
 14) Subscription - Send the schema before the initial load starts, so the client can prepare for the incoming data and also we can use it to validate the incoming data as well
 15) When insert support RETURNING id;
 

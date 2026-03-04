@@ -4,6 +4,7 @@ import type {
   ConsumeMessage,
   ConsumeRequest,
   QueryResponse,
+  RowData,
 } from './types.js';
 
 export type AgentLLMRole = 'system' | 'user' | 'assistant';
@@ -63,14 +64,14 @@ export interface AgentContext<TRow extends Record<string, unknown>> {
   readonly systemPrompt: string | undefined;
   readonly llm: AgentLLMContext | null;
   sql: (sql: string, params?: unknown[]) => Promise<QueryResponse>;
-  queryOne: <T extends Record<string, unknown> = Record<string, unknown>>(
+  queryOne: (
     sql: string,
     params?: unknown[],
-  ) => Promise<T | null>;
-  queryAll: <T extends Record<string, unknown> = Record<string, unknown>>(
+  ) => Promise<RowData | null>;
+  queryAll: (
     sql: string,
     params?: unknown[],
-  ) => Promise<T[]>;
+  ) => Promise<RowData[]>;
   ack: () => Promise<void>;
 }
 
@@ -434,14 +435,14 @@ export async function runAgent<TRow extends Record<string, unknown> = Record<str
           systemPrompt: options.systemPrompt,
           llm: createLLMContext(options.llm, options.systemPrompt, runKey, row),
           sql: async (sql: string, params?: unknown[]) => options.client.query(sql, params),
-          queryOne: async <T extends Record<string, unknown> = Record<string, unknown>>(
+          queryOne: async (
             sql: string,
             params?: unknown[],
-          ) => options.client.queryOne<T>(sql, params),
-          queryAll: async <T extends Record<string, unknown> = Record<string, unknown>>(
+          ) => options.client.queryOne(sql, params),
+          queryAll: async (
             sql: string,
             params?: unknown[],
-          ) => options.client.queryAll<T>(sql, params),
+          ) => options.client.queryAll(sql, params),
           ack,
         };
 
@@ -500,14 +501,14 @@ export async function runAgent<TRow extends Record<string, unknown> = Record<str
         systemPrompt: options.systemPrompt,
         llm: createLLMContext(options.llm, options.systemPrompt, runKey, row),
         sql: async (sql: string, params?: unknown[]) => options.client.query(sql, params),
-        queryOne: async <T extends Record<string, unknown> = Record<string, unknown>>(
+        queryOne: async (
           sql: string,
           params?: unknown[],
-        ) => options.client.queryOne<T>(sql, params),
-        queryAll: async <T extends Record<string, unknown> = Record<string, unknown>>(
+        ) => options.client.queryOne(sql, params),
+        queryAll: async (
           sql: string,
           params?: unknown[],
-        ) => options.client.queryAll<T>(sql, params),
+        ) => options.client.queryAll(sql, params),
         ack,
         error: lastError,
       };

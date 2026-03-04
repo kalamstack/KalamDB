@@ -9,6 +9,7 @@ use object_store::aws::AmazonS3Builder;
 use object_store::path::Path as ObjectPath;
 use object_store::prefix::PrefixStore;
 use object_store::ObjectStore;
+use object_store::ObjectStoreExt;
 use serde_json::{json, Value as JsonValue};
 use std::borrow::Cow;
 use std::env;

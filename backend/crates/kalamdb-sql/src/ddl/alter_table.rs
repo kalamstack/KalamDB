@@ -294,6 +294,9 @@ fn value_to_string(value: &Value) -> String {
         Value::Boolean(b) => b.to_string(),
         Value::Null => "NULL".to_string(),
         Value::Placeholder(p) => p.clone(),
+        Value::QuoteDelimitedStringLiteral(s) | Value::NationalQuoteDelimitedStringLiteral(s) => {
+            s.value.clone()
+        },
     }
 }
 

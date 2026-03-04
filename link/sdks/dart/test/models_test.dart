@@ -58,49 +58,47 @@ void main() {
   // QueryResult
   // -----------------------------------------------------------------------
   group('QueryResult', () {
-    test('rows parses JSON arrays', () {
+    test('rows parses named JSON objects into KalamCellValue maps', () {
       final qr = QueryResult(
         columns: [
           const SchemaField(name: 'id', dataType: 'Int', index: 0),
           const SchemaField(name: 'name', dataType: 'Text', index: 1),
         ],
-        rowsJson: [
-          jsonEncode([1, 'Alice']),
-          jsonEncode([2, 'Bob']),
+        namedRowsJson: [
+          jsonEncode({'id': 1, 'name': 'Alice'}),
+          jsonEncode({'id': 2, 'name': 'Bob'}),
         ],
         rowCount: 2,
       );
       expect(qr.rows.length, 2);
-      expect(qr.rows[0], [1, 'Alice']);
-      expect(qr.rows[1], [2, 'Bob']);
-    });
-
-    test('toMaps produces column-keyed maps', () {
-      final qr = QueryResult(
-        columns: [
-          const SchemaField(name: 'id', dataType: 'Int', index: 0),
-          const SchemaField(name: 'name', dataType: 'Text', index: 1),
-        ],
-        rowsJson: [
-          jsonEncode([42, 'Charlie'])
-        ],
-        rowCount: 1,
-      );
-      final maps = qr.toMaps();
-      expect(maps.length, 1);
-      expect(maps[0], {'id': 42, 'name': 'Charlie'});
+      expect(qr.rows[0]['id']?.asInt(), 1);
+      expect(qr.rows[0]['name']?.asString(), 'Alice');
+      expect(qr.rows[1]['id']?.asInt(), 2);
+      expect(qr.rows[1]['name']?.asString(), 'Bob');
     });
 
     test('empty rows', () {
       final qr = QueryResult(
         columns: [],
-        rowsJson: [],
+        namedRowsJson: [],
         rowCount: 0,
         message: 'Table created',
       );
       expect(qr.rows, isEmpty);
-      expect(qr.toMaps(), isEmpty);
       expect(qr.message, 'Table created');
+    });
+
+    test('handles null cell values', () {
+      final qr = QueryResult(
+        columns: [
+          const SchemaField(name: 'val', dataType: 'Text', index: 0),
+        ],
+        namedRowsJson: [
+          jsonEncode({'val': null}),
+        ],
+        rowCount: 1,
+      );
+      expect(qr.rows[0]['val']?.isNull, true);
     });
   });
 
@@ -116,8 +114,8 @@ void main() {
             columns: [
               const SchemaField(name: 'x', dataType: 'Int', index: 0),
             ],
-            rowsJson: [
-              jsonEncode([7])
+            namedRowsJson: [
+              jsonEncode({'x': 7})
             ],
             rowCount: 1,
           ),
@@ -126,12 +124,8 @@ void main() {
       );
       expect(resp.success, isTrue);
       expect(resp.columns.length, 1);
-      expect(resp.rows, [
-        [7]
-      ]);
-      expect(resp.toMaps(), [
-        {'x': 7}
-      ]);
+      expect(resp.rows.length, 1);
+      expect(resp.rows[0]['x']?.asInt(), 7);
       expect(resp.tookMs, closeTo(3.14, 0.001));
     });
 
@@ -139,7 +133,6 @@ void main() {
       const resp = QueryResponse(success: false, results: []);
       expect(resp.rows, isEmpty);
       expect(resp.columns, isEmpty);
-      expect(resp.toMaps(), isEmpty);
     });
   });
 
@@ -213,31 +206,6 @@ void main() {
   });
 
   // -----------------------------------------------------------------------
-  // Setup models
-  // -----------------------------------------------------------------------
-  group('SetupModels', () {
-    test('ServerSetupRequest', () {
-      const req = ServerSetupRequest(
-        username: 'admin',
-        password: 'pass',
-        rootPassword: 'rootpw',
-        email: 'admin@test.com',
-      );
-      expect(req.username, 'admin');
-      expect(req.email, 'admin@test.com');
-    });
-
-    test('SetupStatusResponse', () {
-      const s = SetupStatusResponse(
-        needsSetup: true,
-        message: 'Run setup',
-      );
-      expect(s.needsSetup, isTrue);
-      expect(s.message, contains('setup'));
-    });
-  });
-
-  // -----------------------------------------------------------------------
   // ChangeEvent subclasses
   // -----------------------------------------------------------------------
   group('ChangeEvent', () {
@@ -272,8 +240,8 @@ void main() {
         status: 'ready',
       );
       expect(batch.rows.length, 2);
-      expect(batch.rows[0]['name'], 'Alice');
-      expect(batch.rows[1]['id'], 2);
+      expect(batch.rows[0]['name']?.asString(), 'Alice');
+      expect(batch.rows[1]['id']?.asInt(), 2);
     });
 
     test('InsertEvent row convenience getter', () {
@@ -283,8 +251,33 @@ void main() {
           jsonEncode({'id': 42, 'title': 'Hello'})
         ],
       );
-      expect(insert.row['id'], 42);
-      expect(insert.row['title'], 'Hello');
+      expect(insert.row['id']?.asInt(), 42);
+      expect(insert.row['title']?.asString(), 'Hello');
+    });
+
+    test('InsertEvent row returns KalamCellValue', () {
+      final insert = InsertEvent(
+        subscriptionId: 'sub-3',
+        rowsJson: [
+          jsonEncode({'id': 42, 'title': 'Hello', 'active': true})
+        ],
+      );
+      expect(insert.row['id']?.asInt(), 42);
+      expect(insert.row['title']?.asString(), 'Hello');
+      expect(insert.row['active']?.asBool(), true);
+    });
+
+    test('InsertEvent rows returns all rows typed', () {
+      final insert = InsertEvent(
+        subscriptionId: 'sub-3',
+        rowsJson: [
+          jsonEncode({'id': 1, 'name': 'Alice'}),
+          jsonEncode({'id': 2, 'name': 'Bob'}),
+        ],
+      );
+      expect(insert.rows.length, 2);
+      expect(insert.rows[0]['name']?.asString(), 'Alice');
+      expect(insert.rows[1]['name']?.asString(), 'Bob');
     });
 
     test('UpdateEvent has new and old rows', () {
@@ -297,8 +290,24 @@ void main() {
           jsonEncode({'id': 1, 'name': 'Bob'})
         ],
       );
-      expect(update.row['name'], 'Bob2');
-      expect(update.oldRow?['name'], 'Bob');
+      expect(update.row['name']?.asString(), 'Bob2');
+      expect(update.oldRow?['name']?.asString(), 'Bob');
+    });
+
+    test('UpdateEvent row and oldRow return KalamCellValue', () {
+      final update = UpdateEvent(
+        subscriptionId: 'sub-4',
+        rowsJson: [
+          jsonEncode({'id': 1, 'name': 'Bob2', 'score': 95.5})
+        ],
+        oldRowsJson: [
+          jsonEncode({'id': 1, 'name': 'Bob', 'score': 80.0})
+        ],
+      );
+      expect(update.row['name']?.asString(), 'Bob2');
+      expect(update.row['score']?.asDouble(), 95.5);
+      expect(update.oldRow?['name']?.asString(), 'Bob');
+      expect(update.oldRow?['score']?.asDouble(), 80.0);
     });
 
     test('DeleteEvent exposes deleted row', () {
@@ -308,8 +317,38 @@ void main() {
           jsonEncode({'id': 99})
         ],
       );
-      expect(del.row['id'], 99);
+      expect(del.row['id']?.asInt(), 99);
       expect(del.oldRows.length, 1);
+    });
+
+    test('DeleteEvent row and oldRows return KalamCellValue', () {
+      final del = DeleteEvent(
+        subscriptionId: 'sub-5',
+        oldRowsJson: [
+          jsonEncode({'id': 99, 'name': 'Charlie'})
+        ],
+      );
+      expect(del.row['id']?.asInt(), 99);
+      expect(del.row['name']?.asString(), 'Charlie');
+      expect(del.oldRows.length, 1);
+    });
+
+    test('InitialDataBatch rows returns KalamCellValue maps', () {
+      final batch = InitialDataBatch(
+        subscriptionId: 'sub-7',
+        rowsJson: [
+          jsonEncode({'id': 1, 'name': 'Alice', 'active': true}),
+          jsonEncode({'id': 2, 'name': 'Bob', 'active': false}),
+        ],
+        batchNum: 0,
+        hasMore: false,
+        status: 'ready',
+      );
+      expect(batch.rows.length, 2);
+      expect(batch.rows[0]['name']?.asString(), 'Alice');
+      expect(batch.rows[0]['active']?.asBool(), true);
+      expect(batch.rows[1]['id']?.asInt(), 2);
+      expect(batch.rows[1]['active']?.asBool(), false);
     });
 
     test('SubscriptionError toString', () {
@@ -421,6 +460,141 @@ void main() {
   // -----------------------------------------------------------------------
   // SubscriptionInfo
   // -----------------------------------------------------------------------
+
+  // -----------------------------------------------------------------------
+  // KalamCellValue
+  // -----------------------------------------------------------------------
+  group('KalamCellValue', () {
+    test('from wraps values and isNull works', () {
+      expect(KalamCellValue.from(null).isNull, true);
+      expect(KalamCellValue.from('hello').isNull, false);
+    });
+
+    test('asString returns string for various types', () {
+      expect(KalamCellValue.from('hello').asString(), 'hello');
+      expect(KalamCellValue.from(42).asString(), '42');
+      expect(KalamCellValue.from(true).asString(), 'true');
+      expect(KalamCellValue.from(false).asString(), 'false');
+      expect(KalamCellValue.from(null).asString(), isNull);
+    });
+
+    test('asString handles Utf8 envelope', () {
+      expect(KalamCellValue.from({'Utf8': 'wrapped'}).asString(), 'wrapped');
+      expect(KalamCellValue.from({'String': 'wrapped'}).asString(), 'wrapped');
+    });
+
+    test('asInt returns integer or null', () {
+      expect(KalamCellValue.from(42).asInt(), 42);
+      expect(KalamCellValue.from(3.9).asInt(), 3);
+      expect(KalamCellValue.from('99').asInt(), 99);
+      expect(KalamCellValue.from(true).asInt(), 1);
+      expect(KalamCellValue.from(false).asInt(), 0);
+      expect(KalamCellValue.from('abc').asInt(), isNull);
+      expect(KalamCellValue.from(null).asInt(), isNull);
+    });
+
+    test('asDouble returns double or null', () {
+      expect(KalamCellValue.from(3.14).asDouble(), 3.14);
+      expect(KalamCellValue.from(42).asDouble(), 42.0);
+      expect(KalamCellValue.from('3.14').asDouble(), 3.14);
+      expect(KalamCellValue.from(true).asDouble(), 1.0);
+      expect(KalamCellValue.from('abc').asDouble(), isNull);
+    });
+
+    test('asBool returns boolean or null', () {
+      expect(KalamCellValue.from(true).asBool(), true);
+      expect(KalamCellValue.from(false).asBool(), false);
+      expect(KalamCellValue.from(1).asBool(), true);
+      expect(KalamCellValue.from(0).asBool(), false);
+      expect(KalamCellValue.from('true').asBool(), true);
+      expect(KalamCellValue.from('false').asBool(), false);
+      expect(KalamCellValue.from('1').asBool(), true);
+      expect(KalamCellValue.from('0').asBool(), false);
+      expect(KalamCellValue.from('maybe').asBool(), isNull);
+    });
+
+    test('asDate parses timestamps and ISO strings', () {
+      final d1 = KalamCellValue.from(1704067200000).asDate();
+      expect(d1, isNotNull);
+      expect(d1!.millisecondsSinceEpoch, 1704067200000);
+
+      final d2 = KalamCellValue.from('2024-01-01T00:00:00Z').asDate();
+      expect(d2, isNotNull);
+
+      expect(KalamCellValue.from('not-a-date').asDate(), isNull);
+      expect(KalamCellValue.from(null).asDate(), isNull);
+    });
+
+    test('asObject and asArray', () {
+      expect(KalamCellValue.from({'key': 'val'}).asObject(), {'key': 'val'});
+      expect(KalamCellValue.from([1, 2, 3]).asArray(), [1, 2, 3]);
+      expect(KalamCellValue.from('str').asObject(), isNull);
+      expect(KalamCellValue.from('str').asArray(), isNull);
+    });
+
+    test('toString formats correctly', () {
+      expect(KalamCellValue.from(null).toString(), 'NULL');
+      expect(KalamCellValue.from('hello').toString(), 'hello');
+      expect(KalamCellValue.from(42).toString(), '42');
+    });
+
+    test('equality works', () {
+      expect(KalamCellValue.from(42) == KalamCellValue.from(42), isTrue);
+      expect(KalamCellValue.from('a') == KalamCellValue.from('b'), isFalse);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // QueryResult rows (KalamCellValue maps)
+  // -----------------------------------------------------------------------
+  group('QueryResult rows accessors', () {
+    test('rows wraps cells as KalamCellValue', () {
+      final qr = QueryResult(
+        columns: [
+          const SchemaField(name: 'id', dataType: 'Int', index: 0),
+          const SchemaField(name: 'name', dataType: 'Text', index: 1),
+        ],
+        namedRowsJson: [
+          jsonEncode({'id': 42, 'name': 'Bob'})
+        ],
+        rowCount: 1,
+      );
+      expect(qr.rows.length, 1);
+      expect(qr.rows[0]['id']?.asInt(), 42);
+      expect(qr.rows[0]['name']?.asString(), 'Bob');
+    });
+
+    test('rows handles null cells', () {
+      final qr = QueryResult(
+        columns: [
+          const SchemaField(name: 'val', dataType: 'Text', index: 0),
+        ],
+        namedRowsJson: [
+          jsonEncode({'val': null})
+        ],
+        rowCount: 1,
+      );
+      expect(qr.rows[0]['val']?.isNull, true);
+    });
+
+    test('multiple rows parsed correctly', () {
+      final qr = QueryResult(
+        columns: [
+          const SchemaField(name: 'x', dataType: 'Int', index: 0),
+          const SchemaField(name: 'y', dataType: 'Text', index: 1),
+        ],
+        namedRowsJson: [
+          jsonEncode({'x': 1, 'y': 'a'}),
+          jsonEncode({'x': 2, 'y': 'b'}),
+        ],
+        rowCount: 2,
+      );
+      expect(qr.rows.length, 2);
+      expect(qr.rows[0]['x']?.asInt(), 1);
+      expect(qr.rows[1]['y']?.asString(), 'b');
+    });
+  });
+
   group('SubscriptionInfo', () {
     test('all fields populated', () {
       final info = SubscriptionInfo(

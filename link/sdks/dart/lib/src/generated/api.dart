@@ -23,7 +23,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 ///   gzip-compressed binary frames. Useful during development.
 /// * `keepalive_interval_ms` — optional WebSocket keep-alive ping interval
 ///   in milliseconds (default 10 000). Set to 0 to disable keep-alive pings.
-DartKalamClient dartCreateClient(
+Future<DartKalamClient> dartCreateClient(
         {required String baseUrl,
         required DartAuthProvider auth,
         PlatformInt64? timeoutMs,
@@ -48,7 +48,7 @@ DartKalamClient dartCreateClient(
 /// function to push updated credentials into the Rust client.
 ///
 /// The new credentials take effect on the next `subscribe()` call.
-void dartUpdateAuth(
+Future<void> dartUpdateAuth(
         {required DartKalamClient client, required DartAuthProvider auth}) =>
     RustLib.instance.api.crateApiDartUpdateAuth(client: client, auth: auth);
 
@@ -83,18 +83,6 @@ Future<DartLoginResponse> dartRefreshToken(
 Future<DartHealthCheckResponse> dartHealthCheck(
         {required DartKalamClient client}) =>
     RustLib.instance.api.crateApiDartHealthCheck(client: client);
-
-/// Check whether the server requires initial setup.
-Future<DartSetupStatusResponse> dartCheckSetupStatus(
-        {required DartKalamClient client}) =>
-    RustLib.instance.api.crateApiDartCheckSetupStatus(client: client);
-
-/// Perform initial server setup (create first admin user).
-Future<DartServerSetupResponse> dartServerSetup(
-        {required DartKalamClient client,
-        required DartServerSetupRequest request}) =>
-    RustLib.instance.api
-        .crateApiDartServerSetup(client: client, request: request);
 
 /// Pull the next connection lifecycle event.
 ///

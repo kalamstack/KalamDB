@@ -274,15 +274,16 @@ fn wire__crate__api__dart_connection_events_enabled_impl(
     )
 }
 fn wire__crate__api__dart_create_client_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
     data_len_: i32,
-) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
             debug_name: "dart_create_client",
-            port: None,
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
         },
         move || {
             let message = unsafe {
@@ -302,20 +303,22 @@ fn wire__crate__api__dart_create_client_impl(
             let api_disable_compression = <Option<bool>>::sse_decode(&mut deserializer);
             let api_keepalive_interval_ms = <Option<i64>>::sse_decode(&mut deserializer);
             deserializer.end();
-            transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
-                (move || {
-                    let output_ok = crate::api::dart_create_client(
-                        api_base_url,
-                        api_auth,
-                        api_timeout_ms,
-                        api_max_retries,
-                        api_enable_connection_events,
-                        api_disable_compression,
-                        api_keepalive_interval_ms,
-                    )?;
-                    Ok(output_ok)
-                })(),
-            )
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::dart_create_client(
+                            api_base_url,
+                            api_auth,
+                            api_timeout_ms,
+                            api_max_retries,
+                            api_enable_connection_events,
+                            api_disable_compression,
+                            api_keepalive_interval_ms,
+                        )?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
         },
     )
 }
@@ -1135,15 +1138,16 @@ fn wire__crate__api__dart_subscription_next_impl(
     )
 }
 fn wire__crate__api__dart_update_auth_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
     data_len_: i32,
-) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
             debug_name: "dart_update_auth",
-            port: None,
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
         },
         move || {
             let message = unsafe {
@@ -1160,28 +1164,30 @@ fn wire__crate__api__dart_update_auth_impl(
             >>::sse_decode(&mut deserializer);
             let api_auth = <crate::models::DartAuthProvider>::sse_decode(&mut deserializer);
             deserializer.end();
-            transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
-                (move || {
-                    let mut api_client_guard = None;
-                    let decode_indices_ =
-                        flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
-                            flutter_rust_bridge::for_generated::LockableOrderInfo::new(
-                                &api_client,
-                                0,
-                                true,
-                            ),
-                        ]);
-                    for i in decode_indices_ {
-                        match i {
-                            0 => api_client_guard = Some(api_client.lockable_decode_sync_ref_mut()),
-                            _ => unreachable!(),
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let mut api_client_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                                flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_client,
+                                    0,
+                                    true,
+                                ),
+                            ]);
+                        for i in decode_indices_ {
+                            match i {
+                                0 => api_client_guard = Some(api_client.lockable_decode_sync_ref_mut()),
+                                _ => unreachable!(),
+                            }
                         }
-                    }
-                    let mut api_client_guard = api_client_guard.unwrap();
-                    let output_ok = crate::api::dart_update_auth(&mut *api_client_guard, api_auth)?;
-                    Ok(output_ok)
-                })(),
-            )
+                        let mut api_client_guard = api_client_guard.unwrap();
+                        let output_ok = crate::api::dart_update_auth(&mut *api_client_guard, api_auth)?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
         },
     )
 }
@@ -1515,11 +1521,13 @@ impl SseDecode for crate::models::DartQueryResult {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_columns = <Vec<crate::models::DartSchemaField>>::sse_decode(deserializer);
         let mut var_rowsJson = <Vec<String>>::sse_decode(deserializer);
+        let mut var_namedRowsJson = <Vec<String>>::sse_decode(deserializer);
         let mut var_rowCount = <i64>::sse_decode(deserializer);
         let mut var_message = <Option<String>>::sse_decode(deserializer);
         return crate::models::DartQueryResult {
             columns: var_columns,
             rows_json: var_rowsJson,
+            named_rows_json: var_namedRowsJson,
             row_count: var_rowCount,
             message: var_message,
         };
@@ -1851,6 +1859,7 @@ fn pde_ffi_dispatcher_primary_impl(
         1 => wire__crate__api__dart_cancel_subscription_impl(port, ptr, rust_vec_len, data_len),
         2 => wire__crate__api__dart_check_setup_status_impl(port, ptr, rust_vec_len, data_len),
         3 => wire__crate__api__dart_connect_impl(port, ptr, rust_vec_len, data_len),
+        5 => wire__crate__api__dart_create_client_impl(port, ptr, rust_vec_len, data_len),
         6 => wire__crate__api__dart_disconnect_impl(port, ptr, rust_vec_len, data_len),
         7 => wire__crate__api__dart_execute_query_impl(port, ptr, rust_vec_len, data_len),
         8 => wire__crate__api__dart_health_check_impl(port, ptr, rust_vec_len, data_len),
@@ -1863,6 +1872,7 @@ fn pde_ffi_dispatcher_primary_impl(
         16 => wire__crate__api__dart_subscribe_impl(port, ptr, rust_vec_len, data_len),
         17 => wire__crate__api__dart_subscription_close_impl(port, ptr, rust_vec_len, data_len),
         19 => wire__crate__api__dart_subscription_next_impl(port, ptr, rust_vec_len, data_len),
+        20 => wire__crate__api__dart_update_auth_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -1876,10 +1886,8 @@ fn pde_ffi_dispatcher_sync_impl(
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
         4 => wire__crate__api__dart_connection_events_enabled_impl(ptr, rust_vec_len, data_len),
-        5 => wire__crate__api__dart_create_client_impl(ptr, rust_vec_len, data_len),
         15 => wire__crate__api__dart_signal_dispose_impl(ptr, rust_vec_len, data_len),
         18 => wire__crate__api__dart_subscription_id_impl(ptr, rust_vec_len, data_len),
-        20 => wire__crate__api__dart_update_auth_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -2239,6 +2247,7 @@ impl flutter_rust_bridge::IntoDart for crate::models::DartQueryResult {
         [
             self.columns.into_into_dart().into_dart(),
             self.rows_json.into_into_dart().into_dart(),
+            self.named_rows_json.into_into_dart().into_dart(),
             self.row_count.into_into_dart().into_dart(),
             self.message.into_into_dart().into_dart(),
         ]
@@ -2679,6 +2688,7 @@ impl SseEncode for crate::models::DartQueryResult {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <Vec<crate::models::DartSchemaField>>::sse_encode(self.columns, serializer);
         <Vec<String>>::sse_encode(self.rows_json, serializer);
+        <Vec<String>>::sse_encode(self.named_rows_json, serializer);
         <i64>::sse_encode(self.row_count, serializer);
         <Option<String>>::sse_encode(self.message, serializer);
     }

@@ -3,8 +3,11 @@
  *
  * Provides utilities for:
  * - Query response normalization and column reordering
- * - Parsing query results into typed objects
  * - Schema manipulation
+ *
+ * Row parsing (schema → named maps) is now handled in the Rust WASM layer
+ * via `QueryResult.named_rows`. SDKs read `named_rows` directly and wrap
+ * values in `KalamCellValue` — no `parseRows`/`parseCellRows` needed.
  */
 
 import type { QueryResponse, SchemaField } from '../types.js';
@@ -140,40 +143,6 @@ export function normalizeQueryResponse(
       },
     ],
   };
-}
-
-/* ================================================================== */
-/*  Parse Rows to Objects                                             */
-/* ================================================================== */
-
-/**
- * Parse a QueryResponse into typed row objects.
- *
- * Converts the array-based row format into typed objects using the schema.
- *
- * @param response - Query response from the server
- * @returns Array of typed row objects
- *
- * @example
- * ```typescript
- * interface User { id: string; name: string }
- * const users = parseRows<User>(response);
- * ```
- */
-export function parseRows<T extends Record<string, unknown> = Record<string, unknown>>(
-  response: QueryResponse,
-): T[] {
-  const result = response.results?.[0];
-  if (!result?.rows || !result.schema) return [];
-
-  const schema = result.schema;
-  return result.rows.map(row => {
-    const obj: Record<string, unknown> = {};
-    schema.forEach(field => {
-      obj[field.name] = row[field.index];
-    });
-    return obj as T;
-  });
 }
 
 /* ================================================================== */

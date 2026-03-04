@@ -5,6 +5,7 @@
  * Each component handles formatting, styling, and interaction for its specific type.
  */
 
+import { KalamCellValue } from 'kalam-link';
 import { TimestampDisplay } from './TimestampDisplay';
 import { DateDisplay } from './DateDisplay';
 import { FileDisplay } from './FileDisplay';
@@ -27,8 +28,13 @@ interface CellDisplayProps {
 }
 
 export function CellDisplay({ value, dataType, namespace, tableName }: CellDisplayProps) {
+  // Unwrap KalamCellValue to get the raw underlying JSON value.
+  // This makes CellDisplay work transparently with both legacy raw values
+  // and the new typed KalamCellValue wrappers from rowsToObjects().
+  const rawValue = value instanceof KalamCellValue ? value.toJson() : value;
+
   // Handle null/undefined
-  if (value === null || value === undefined) {
+  if (rawValue === null || rawValue === undefined) {
     return <span className="text-muted-foreground italic">null</span>;
   }
 
@@ -38,22 +44,22 @@ export function CellDisplay({ value, dataType, namespace, tableName }: CellDispl
   // Route to appropriate display component based on dataType
   // Handle Timestamp types (including Arrow types)
   if (normalizedType.startsWith('TIMESTAMP') || normalizedType === 'DATETIME') {
-    return <TimestampDisplay value={value as number | string} dataType={dataType} />;
+    return <TimestampDisplay value={rawValue as number | string} dataType={dataType} />;
   }
   
   // Handle Date types
   if (normalizedType === 'DATE' || normalizedType.startsWith('DATE32') || normalizedType.startsWith('DATE64')) {
-    const dateValue = typeof value === 'number' || typeof value === 'string'
-      ? value
-      : String(value);
+    const dateValue = typeof rawValue === 'number' || typeof rawValue === 'string'
+      ? rawValue
+      : String(rawValue);
     return <DateDisplay value={dateValue} />;
   }
   
   // Handle Boolean
   if (normalizedType === 'BOOLEAN' || normalizedType === 'BOOL') {
-    const boolValue = typeof value === 'boolean'
-      ? value
-      : String(value).toLowerCase() === 'true';
+    const boolValue = typeof rawValue === 'boolean'
+      ? rawValue
+      : String(rawValue).toLowerCase() === 'true';
     return <BooleanDisplay value={boolValue} />;
   }
   
@@ -86,35 +92,35 @@ export function CellDisplay({ value, dataType, namespace, tableName }: CellDispl
     }
     
     const numericValue =
-      typeof value === 'number'
-        ? value
-        : Number(value);
+      typeof rawValue === 'number'
+        ? rawValue
+        : Number(rawValue);
     if (Number.isNaN(numericValue)) {
-      return <TextDisplay value={String(value)} />;
+      return <TextDisplay value={String(rawValue)} />;
     }
     return <NumberDisplay value={numericValue} dataType={displayType} />;
   }
   
   // Handle File type
   if (normalizedType === 'FILE') {
-    return <FileDisplay value={value} namespace={namespace} tableName={tableName} />;
+    return <FileDisplay value={rawValue} namespace={namespace} tableName={tableName} />;
   }
   
   // Handle JSON type
   if (normalizedType === 'JSON') {
-    return <JsonDisplay value={value} />;
+    return <JsonDisplay value={rawValue} />;
   }
   
   // Handle Text types
   if (normalizedType === 'TEXT' || normalizedType === 'STRING' || normalizedType === 'VARCHAR' || 
       normalizedType.startsWith('UTF8') || normalizedType === 'LARGESTRING') {
-    return <TextDisplay value={String(value)} />;
+    return <TextDisplay value={String(rawValue)} />;
   }
   
   // Fallback for unknown types
-  if (typeof value === 'object') {
-    return <JsonDisplay value={value} />;
+  if (typeof rawValue === 'object') {
+    return <JsonDisplay value={rawValue} />;
   }
   
-  return <TextDisplay value={String(value)} />;
+  return <TextDisplay value={String(rawValue)} />;
 }

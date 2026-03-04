@@ -17,7 +17,35 @@ import { useKalamDB } from '@/providers/kalamdb-provider';
 import { KALAMDB_CONFIG } from '@/lib/config';
 import { parseTimestamp } from '@/lib/utils';
 import type { Conversation, Message, TypingIndicator, ConnectionStatus, FileRef, FileAttachment, AiTypingStatus } from '@/types';
-import type { ServerMessage, Unsubscribe, UploadProgress } from 'kalam-link';
+import type { ServerMessage, Unsubscribe, UploadProgress, RowData } from 'kalam-link';
+
+/** Map a `RowData` query row to a `Conversation` using KalamCellValue accessors. */
+function rowToConversation(row: RowData): Conversation {
+  return {
+    id: row['id']?.asString() ?? '',
+    title: row['title']?.asString() ?? '',
+    created_by: row['created_by']?.asString() ?? '',
+    created_at: row['created_at']?.asString() ?? '',
+    updated_at: row['updated_at']?.asString() ?? '',
+  };
+}
+
+/** Map a `RowData` query row to a `Message` using KalamCellValue accessors. */
+function rowToMessage(row: RowData): Message {
+  const fileRaw = row['file_data']?.asObject() ?? (row['file_data']?.asString() ? row['file_data'].asString() : undefined);
+  const file = parseFileRef(fileRaw as string | FileRef | undefined);
+  return {
+    id: row['id']?.asString() ?? '',
+    client_id: row['client_id']?.asString() ?? undefined,
+    conversation_id: row['conversation_id']?.asString() ?? '',
+    sender: row['sender']?.asString() ?? '',
+    role: (row['role']?.asString() ?? 'user') as Message['role'],
+    content: row['content']?.asString() ?? '',
+    status: (row['status']?.asString() ?? 'sent') as Message['status'],
+    created_at: row['created_at']?.asString() ?? '',
+    files: file ? [fileRefToAttachment(file)] : undefined,
+  };
+}
 
 // ============================================================================
 // useConversations - Fetch and live-subscribe to conversations
@@ -109,11 +137,11 @@ export function useConversations() {
 
     const fetchConversationsViaQuery = async () => {
       try {
-        const convs = await client.queryAll<Record<string, unknown>>(
+        const rows = await client.queryAll(
           'SELECT * FROM chat.conversations ORDER BY updated_at DESC'
         );
         if (!cancelled) {
-          setConversations(convs as unknown as Conversation[]);
+          setConversations(rows.map(rowToConversation));
           setLoading(false);
         }
       } catch (err) {
@@ -146,11 +174,11 @@ export function useConversations() {
 
       // The subscription will pick up the new conversation automatically
       // But fetch immediately for optimistic UI
-      const result = await client.queryAll<Record<string, unknown>>(
+      const result = await client.queryAll(
         `SELECT * FROM chat.conversations WHERE title = '${escapedTitle}' ORDER BY created_at DESC LIMIT 1`
       );
       
-      const newConv = (result[0] as unknown as Conversation) || null;
+      const newConv = result.length > 0 ? rowToConversation(result[0]) : null;
       if (newConv) {
         setConversations(prev => {
           // Avoid duplicates (subscription might have already added it)
@@ -194,10 +222,10 @@ export function useConversations() {
   const refetch = useCallback(async () => {
     if (!client) return;
     try {
-      const convs = await client.queryAll<Record<string, unknown>>(
+      const convs = await client.queryAll(
         'SELECT * FROM chat.conversations ORDER BY updated_at DESC'
       );
-      setConversations(convs as unknown as Conversation[]);
+      setConversations(convs.map(rowToConversation));
     } catch (err) {
       console.error('[useConversations] Refetch error:', err);
     }
@@ -330,11 +358,11 @@ export function useMessages(conversationId: string | null) {
 
     const fetchMessagesViaQuery = async () => {
       try {
-        const msgs = await client.queryAll<RawMessageRow>(
+        const msgs = await client.queryAll(
           `SELECT * FROM chat.messages WHERE conversation_id = ${conversationId} ORDER BY created_at ASC`
         );
         if (!cancelled) {
-          setMessages(mergeMessageRows([], msgs));
+          setMessages(mergeMessageRows([], msgs.map(rowToMessage) as RawMessageRow[]));
           setLoading(false);
         }
       } catch (err) {
@@ -454,10 +482,10 @@ export function useMessages(conversationId: string | null) {
   const refetch = useCallback(async () => {
     if (!client || !conversationId) return;
     try {
-      const msgs = await client.queryAll<RawMessageRow>(
+      const msgs = await client.queryAll(
         `SELECT * FROM chat.messages WHERE conversation_id = ${conversationId} ORDER BY created_at ASC`
       );
-      setMessages(mergeMessageRows([], msgs));
+      setMessages(mergeMessageRows([], msgs.map(rowToMessage) as RawMessageRow[]));
     } catch (err) {
       console.error('[useMessages] Refetch error:', err);
     }

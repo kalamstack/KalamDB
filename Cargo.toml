@@ -67,16 +67,20 @@ chrono = { version = "0.4.44", features = ["serde"] }
 rocksdb = { version = "0.24.0", default-features = false, features = ["snappy", "multi-threaded-cf"] }
 
 # Apache Arrow ecosystem
-arrow = { version = "57.2.0", default-features = false, features = ["prettyprint", "json"] }
-arrow-schema = { version = "57.2.0" }
-datafusion = { version = "52.1.0", default-features = false, features = ["sql", "parquet", "recursive_protection"] }
-datafusion-common = { version = "52.1.0" }
-sqlparser = { version = "0.60.0" }
-parquet = { version = "57.2.0", default-features = false, features = ["snap", "zstd", "arrow"] }
+# IMPORTANT: arrow, arrow-schema and parquet MUST match the version used by DataFusion.
+# DataFusion 52.x uses arrow 57.x — using a different major version causes duplicate
+# arrow_array crates in the binary and type-mismatch compilation errors.
+# To upgrade arrow, first upgrade DataFusion to a version that uses the desired arrow version.
+arrow = { version = "57.3.0", default-features = false, features = ["prettyprint", "json"] }
+arrow-schema = { version = "57.3.0" }
+datafusion = { version = "52.2.0", default-features = false, features = ["sql", "parquet", "recursive_protection"] }
+datafusion-common = { version = "52.2.0" }
+sqlparser = { version = "0.61.0" }
+parquet = { version = "57.3.0", default-features = false, features = ["snap", "zstd", "arrow"] }
 
 # Web framework
 actix-web = { version = "4.13.0", features = ["http2"] }
-actix-ws = "0.3.1"
+actix-ws = "0.4.0"
 actix-cors = "0.7"
 actix-rt = "2.10"
 actix-files = "0.6.10"
@@ -126,7 +130,7 @@ prost = "0.14.3"
 prost-types = "0.14.3"
 
 # Additional dependencies
-bcrypt = "0.18.0"
+bcrypt = "0.19.0"
 rand = "0.10.0"
 kalamdb-commons = { path = "backend/crates/kalamdb-commons" }
 kalamdb-views = { path = "backend/crates/kalamdb-views" }
@@ -159,7 +163,7 @@ syn = { version = "2.0.117", features = ["full", "extra-traits"] }
 # Object storage abstraction (S3/GCS/Azure/local)
 # Kept as a workspace dependency so only kalamdb-filestore needs to opt-in.
 # Using 0.12.4 to match DataFusion 51.0.0 dependency
-object_store = { version = "0.12.4", features = ["aws", "gcp", "azure"] }
+object_store = { version = "0.13.1", features = ["aws", "gcp", "azure"] }
 parking_lot = "0.12"
 tokio-util = "0.7.18"
 hex = "0.4"

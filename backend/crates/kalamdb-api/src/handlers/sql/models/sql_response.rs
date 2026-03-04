@@ -3,6 +3,7 @@
 //! This module defines the structure for SQL execution responses from the `/v1/api/sql` endpoint.
 
 use kalamdb_commons::models::datatypes::KalamDataType;
+use kalamdb_commons::models::KalamCellValue;
 use kalamdb_commons::models::Username;
 use kalamdb_commons::schemas::SchemaField;
 use serde::{Deserialize, Serialize};
@@ -210,7 +211,7 @@ pub struct QueryResult {
     /// The result rows as arrays of values (ordered by schema index)
     /// Example: [["123", "Alice", 1699000000000000], ["456", "Bob", 1699000001000000]]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub rows: Option<Vec<Vec<serde_json::Value>>>,
+    pub rows: Option<Vec<Vec<KalamCellValue>>>,
 
     /// Number of rows affected (for INSERT/UPDATE/DELETE) or returned (for SELECT)
     pub row_count: usize,
@@ -280,7 +281,7 @@ impl SqlResponse {
 impl QueryResult {
     /// Create a result for a SELECT query with rows and schema
     pub fn with_rows_and_schema(
-        rows: Vec<Vec<serde_json::Value>>,
+        rows: Vec<Vec<KalamCellValue>>,
         schema: Vec<SchemaField>,
     ) -> Self {
         let row_count = rows.len();
@@ -329,13 +330,13 @@ impl QueryResult {
         // Extract values in schema order
         let row = if let serde_json::Value::Object(map) = subscription_data {
             vec![
-                map.get("status").cloned().unwrap_or(serde_json::Value::Null),
-                map.get("ws_url").cloned().unwrap_or(serde_json::Value::Null),
-                map.get("subscription").cloned().unwrap_or(serde_json::Value::Null),
-                map.get("message").cloned().unwrap_or(serde_json::Value::Null),
+                KalamCellValue::from(map.get("status").cloned().unwrap_or(serde_json::Value::Null)),
+                KalamCellValue::from(map.get("ws_url").cloned().unwrap_or(serde_json::Value::Null)),
+                KalamCellValue::from(map.get("subscription").cloned().unwrap_or(serde_json::Value::Null)),
+                KalamCellValue::from(map.get("message").cloned().unwrap_or(serde_json::Value::Null)),
             ]
         } else {
-            vec![serde_json::Value::Null; 4]
+            vec![KalamCellValue::null(); 4]
         };
 
         Self {
@@ -366,7 +367,7 @@ mod tests {
 
     #[test]
     fn test_success_response_serialization() {
-        let row1 = vec![serde_json::json!("1"), serde_json::json!("Alice")];
+        let row1 = vec![KalamCellValue::text("1"), KalamCellValue::text("Alice")];
 
         let schema = vec![
             SchemaField::new("id", KalamDataType::BigInt, 0),
@@ -418,14 +419,14 @@ mod tests {
     fn test_array_rows_format() {
         let rows = vec![
             vec![
-                serde_json::json!("123"),
-                serde_json::json!("Alice"),
-                serde_json::json!(1699000000000000i64),
+                KalamCellValue::text("123"),
+                KalamCellValue::text("Alice"),
+                KalamCellValue::int(1699000000000000i64),
             ],
             vec![
-                serde_json::json!("456"),
-                serde_json::json!("Bob"),
-                serde_json::json!(1699000001000000i64),
+                KalamCellValue::text("456"),
+                KalamCellValue::text("Bob"),
+                KalamCellValue::int(1699000001000000i64),
             ],
         ];
         let schema = vec![

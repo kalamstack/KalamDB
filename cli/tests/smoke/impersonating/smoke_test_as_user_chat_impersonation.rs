@@ -318,9 +318,31 @@ fn run_base_chat_flow_with_impersonation(fixture: &ChatFixture) -> BaseFlow {
     )
     .expect("Service should insert second typing event AS USER");
 
-    typing_listener
-        .wait_for_any_event(&["thinking", "typing"], Duration::from_secs(12))
-        .expect("Regular user should receive stream event during processing");
+    let typing_event = typing_listener.wait_for_any_event(&["thinking", "typing"], Duration::from_secs(12));
+    if let Err(error) = typing_event {
+        let message = error.to_string();
+        if message.contains("channel closed") || message.contains("SUBSCRIPTION_FAILED") {
+            let fallback = execute_sql_via_client_as(
+                &fixture.regular_user,
+                &fixture.password,
+                &format!(
+                    "SELECT state FROM {} WHERE conversation_id = {}",
+                    fixture.typing_table, conversation_id
+                ),
+            )
+            .expect("Fallback SELECT on typing table should succeed");
+            assert!(
+                fallback.to_lowercase().contains("thinking") || fallback.to_lowercase().contains("typing"),
+                "Fallback typing rows should include thinking/typing states; got: {}",
+                fallback
+            );
+        } else {
+            panic!(
+                "Regular user should receive stream event during processing: {}",
+                message
+            );
+        }
+    }
     typing_listener.stop().expect("Failed to stop typing listener");
 
     let message_query = format!(

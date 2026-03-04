@@ -1,15 +1,22 @@
 //! WebSocket connection management.
 //!
 //! This module contains:
+//! - [`models`]: Connection-level data models (always available)
 //! - [`websocket`]: Low-level WebSocket helpers (URL resolution, auth headers,
 //!   message parsing, keepalive jitter, local bind addresses, decompression)
 //! - [`shared`]: Shared multiplexed WebSocket connection with auto-reconnect
 
+pub mod models;
+
+#[cfg(feature = "tokio-runtime")]
 pub mod shared;
+#[cfg(feature = "tokio-runtime")]
 pub mod websocket;
 
 // Re-export the shared connection type for crate-internal use.
+#[cfg(feature = "tokio-runtime")]
 pub(crate) use shared::SharedConnection;
+#[cfg(feature = "tokio-runtime")]
 pub(crate) use websocket::{
     apply_ws_auth_headers, connect_with_optional_local_bind, decode_ws_payload,
     jitter_keepalive_interval, parse_message, resolve_ws_url, send_auth_and_wait,

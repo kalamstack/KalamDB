@@ -103,24 +103,22 @@ pub mod event_handlers;
 #[path = "models/mod.rs"]
 pub mod models;
 pub mod seq_id;
+pub mod seq_tracking;
 pub mod timeouts;
 pub mod timestamp;
 
 // Credential storage (available in both native and WASM)
 pub mod credentials;
 
-// Native-only modules (use tokio, reqwest, tokio-tungstenite)
-#[cfg(feature = "tokio-runtime")]
+// Always-available modules (contain data models usable in WASM too)
 pub mod auth;
+pub(crate) mod connection;
+pub mod consumer;
+
+// Native-only modules (require tokio, reqwest, tokio-tungstenite)
 #[cfg(feature = "tokio-runtime")]
 pub mod client;
-#[cfg(feature = "tokio-runtime")]
-pub(crate) mod connection;
-#[cfg(feature = "tokio-runtime")]
-pub mod consumer;
-#[cfg(feature = "tokio-runtime")]
 pub mod query;
-#[cfg(feature = "tokio-runtime")]
 pub mod subscription;
 
 // WASM bindings module (T041)
@@ -144,10 +142,11 @@ pub use error::{KalamLinkError, Result};
 pub use event_handlers::{ConnectionError, DisconnectReason, EventHandlers, MessageDirection};
 pub use models::{
     parse_i64, AckResponse, ChangeEvent, ConnectionOptions, ConsumeMessage, ConsumeRequest,
-    ConsumeResponse, ErrorDetail, FieldFlag, FieldFlags, HealthCheckResponse, HttpVersion,
-    KalamDataType, LoginRequest, LoginResponse, LoginUserInfo, QueryRequest, QueryResponse,
-    QueryResult, SchemaField, ServerSetupRequest, ServerSetupResponse, SetupStatusResponse,
-    SetupUserInfo, SubscriptionConfig, SubscriptionInfo, SubscriptionOptions, UploadProgress,
+    ConsumeResponse, ErrorDetail, FieldFlag, FieldFlags, FileRef, HealthCheckResponse, HttpVersion,
+    KalamCellValue, KalamDataType, LoginRequest, LoginResponse, LoginUserInfo, QueryRequest,
+    QueryResponse, QueryResult, RowData, SchemaField, ServerSetupRequest, ServerSetupResponse,
+    SetupStatusResponse, SetupUserInfo, SubscriptionConfig, SubscriptionInfo, SubscriptionOptions,
+    UploadProgress,
 };
 pub use seq_id::SeqId;
 pub use timeouts::{KalamLinkTimeouts, KalamLinkTimeoutsBuilder};

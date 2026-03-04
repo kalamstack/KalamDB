@@ -10,6 +10,7 @@
 
 use async_trait::async_trait;
 use datafusion::datasource::TableProvider;
+use datafusion::scalar::ScalarValue;
 use kalamdb_commons::models::rows::Row;
 use kalamdb_commons::models::UserId;
 
@@ -35,5 +36,18 @@ pub trait KalamTableProvider: TableProvider + Send + Sync {
         Err(KalamDbError::InvalidOperation(
             "INSERT not supported for this table type".into(),
         ))
+    }
+
+    /// Insert rows and return the generated sequence IDs.
+    ///
+    /// Used by INSERT ... RETURNING _seq to return auto-generated row IDs.
+    /// Default implementation calls `insert_rows` and returns an empty vec.
+    async fn insert_rows_returning(
+        &self,
+        user_id: &UserId,
+        rows: Vec<Row>,
+    ) -> Result<Vec<ScalarValue>, KalamDbError> {
+        let _count = self.insert_rows(user_id, rows).await?;
+        Ok(Vec::new())
     }
 }

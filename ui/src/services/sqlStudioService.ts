@@ -1,4 +1,5 @@
 import { executeQuery, executeSql } from "@/lib/kalam-client";
+import { KalamCellValue } from "kalam-link";
 import type { SchemaField } from "kalam-link";
 import type {
   QueryLogEntry,
@@ -13,6 +14,8 @@ const MAX_SQL_STUDIO_RENDER_ROWS = 1000;
 interface RawSqlStatementResult {
   schema?: SchemaField[];
   rows?: unknown[][];
+  /** Pre-computed named rows from Rust WASM (schema → map transformation). */
+  named_rows?: Record<string, unknown>[];
   row_count?: number;
   message?: string;
   as_user?: string;
@@ -71,7 +74,20 @@ export function normalizeSchema(
 function rowsToObjects(
   schema: QueryResultSchemaField[],
   rows: unknown[][] | undefined,
+  namedRows?: Record<string, unknown>[],
 ): Record<string, unknown>[] {
+  // Prefer named_rows: Rust WASM pre-computes the schema→map transformation.
+  if (namedRows && namedRows.length > 0) {
+    return namedRows.slice(0, MAX_SQL_STUDIO_RENDER_ROWS).map((row) => {
+      const item: Record<string, unknown> = {};
+      for (const key of Object.keys(row)) {
+        item[key] = KalamCellValue.from(row[key] ?? null);
+      }
+      return item;
+    });
+  }
+
+  // Fallback: positional rows + schema (older server versions)
   if (!rows || schema.length === 0) {
     return [];
   }
@@ -80,7 +96,7 @@ function rowsToObjects(
   return rowsToRender.map((row) => {
     const item: Record<string, unknown> = {};
     schema.forEach((field) => {
-      item[field.name] = row[field.index] ?? null;
+      item[field.name] = KalamCellValue.from(row[field.index] ?? null);
     });
     return item;
   });
@@ -127,7 +143,11 @@ function buildQueryLogs(statementResults: RawSqlStatementResult[] | undefined): 
 }
 
 function hasTabularPayload(result: RawSqlStatementResult): boolean {
-  return Array.isArray(result.schema) && result.schema.length > 0 && Array.isArray(result.rows);
+  return (
+    Array.isArray(result.schema) &&
+    result.schema.length > 0 &&
+    (Array.isArray(result.named_rows) || Array.isArray(result.rows))
+  );
 }
 
 export async function fetchSqlStudioSchemaTree(): Promise<StudioNamespace[]> {
@@ -244,7 +264,7 @@ export async function executeSqlStudioQuery(sql: string): Promise<QueryResultDat
   const firstResult = statementResults[0];
 
   const schema = normalizeSchema(tabularResult?.schema);
-  const rows = rowsToObjects(schema, tabularResult?.rows);
+  const rows = rowsToObjects(schema, tabularResult?.rows, tabularResult?.named_rows);
   const logs = buildQueryLogs(statementResults);
 
   return {

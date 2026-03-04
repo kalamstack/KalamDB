@@ -1,30 +1,51 @@
 /**
- * FileRef - Type-safe representation of FILE datatype in KalamDB
+ * FileRef — Type-safe representation of the FILE datatype in KalamDB.
  *
- * Mirrors the Rust `FileRef` struct and provides utilities for working with
- * file references stored in FILE columns.
+ * ## Architecture
  *
- * Files are stored in table-specific folders with automatic subfolder rotation.
- * Download URLs can be generated to retrieve files via the KalamDB API.
+ * The canonical `FileRef` lives in Rust (`kalam-link/src/models/file_ref.rs`).
+ * When the WASM bindings are rebuilt, tsify generates a matching `FileRef`
+ * TypeScript interface in `.wasm-out/kalam_link.d.ts`.
+ *
+ * This module provides:
+ *
+ * - **`FileRefData`** — mirrors the Rust struct (once WASM is rebuilt,
+ *   re-export the auto-generated interface from `.wasm-out` instead).
+ * - **`FileRef`** — thin TS class wrapping `FileRefData`, adds convenience
+ *   methods (same logic as Rust `impl FileRef`).
+ * - **`BoundFileRef`** — TS-only: binds server/table context for no-arg URLs.
+ * - **`KalamRow<T>`** — TS-only: generic typed row wrapper with `.file()`.
+ * - **`KalamChange<T>`** — TS-only: generic typed change event wrapper.
+ *
+ * The `FileRef` methods (`downloadUrl`, `isImage`, `formatSize`, etc.) mirror
+ * the Rust impl.  They're kept in TS (not WASM calls) to avoid crossing the
+ * WASM boundary for trivial string operations — each SDK implements them from
+ * the same Rust reference.
+ *
+ * `KalamRow<T>` and `KalamChange<T>` are inherently SDK-level because they
+ * use TypeScript generics (Rust FFI can't express `<T>` row types).
  *
  * @example
  * ```typescript
- * // Parse FileRef from a FILE column
- * const fileRef = FileRef.fromJson(row.avatar);
- *
- * // Get download URL
+ * const fileRef = FileRef.from(row.avatar);
  * const url = fileRef.getDownloadUrl('http://localhost:8080', 'default', 'users');
- *
- * // Fetch and display
- * const img = document.createElement('img');
- * img.src = url;
  * ```
  */
 
+// Import KalamCellValue for unwrapping typed cell values in KalamRow.file()
+// Note: lazy import pattern avoids circular dependency (cell_value.ts → file_ref.ts → cell_value.ts)
+
+import { KalamCellValue, wrapRowMap } from './cell_value.js';
+import type { RowData } from './cell_value.js';
+
 /**
- * File reference stored as JSON in FILE columns.
+ * Data shape for a file reference stored in FILE columns.
  *
- * Contains all metadata needed to locate and serve the file.
+ * **Source of truth**: `kalam-link/src/models/file_ref.rs` → `struct FileRef`.
+ * Once WASM bindings are rebuilt, tsify generates an identical interface in
+ * `.wasm-out/kalam_link.d.ts` which should be re-exported here.
+ *
+ * Each SDK (TypeScript, Dart, etc.) must match this shape exactly.
  */
 export interface FileRefData {
   /** Unique file identifier (Snowflake ID) */
@@ -50,9 +71,11 @@ export interface FileRefData {
 }
 
 /**
- * Type-safe FileRef class for working with FILE datatype in KalamDB.
+ * Type-safe FileRef class for working with FILE columns.
  *
- * Provides methods to parse JSON, generate download URLs, and access file metadata.
+ * Methods mirror the Rust `impl FileRef` in `kalam-link/src/models/file_ref.rs`.
+ * Implemented in TypeScript to avoid per-call WASM boundary overhead for
+ * trivial string operations — each SDK follows the same Rust reference.
  */
 export class FileRef implements FileRefData {
   id: string;
@@ -376,4 +399,262 @@ export function parseFileRefs(values: unknown[]): FileRef[] {
   return values
     .map((v) => FileRef.from(v))
     .filter((ref): ref is FileRef => ref !== null);
+}
+
+/* ================================================================== */
+/*  Context-bound FileRef, Row, and Change wrappers                  */
+/* ================================================================== */
+
+/**
+ * Context needed to generate file URLs without repeating server/table info.
+ */
+export interface FileRefContext {
+  /** KalamDB server base URL (e.g., 'http://localhost:8080') */
+  baseUrl: string;
+  /** Namespace of the table (e.g., 'default') */
+  namespace: string;
+  /** Table name (e.g., 'users') */
+  table: string;
+}
+
+/**
+ * A `FileRef` with its server/table context already bound.
+ *
+ * Returned by `KalamRow.file()` — you never need to pass `baseUrl`,
+ * `namespace`, or `table` again when generating URLs.
+ *
+ * @example
+ * ```typescript
+ * const unsub = await client.subscribeRows<User>('default.users', (change) => {
+ *   change.rows.forEach(row => {
+ *     const avatar = row.file('avatar');
+ *     if (avatar) {
+ *       img.src = avatar.downloadUrl();        // full URL
+ *       console.log(avatar.relativeUrl());     // /api/v1/files/default/users/f0001/12345
+ *       console.log(avatar.name, avatar.formatSize()); // all FileRef attrs still work
+ *     }
+ *   });
+ * });
+ * ```
+ */
+export class BoundFileRef extends FileRef {
+  private readonly _ctx: FileRefContext;
+
+  constructor(data: FileRefData, ctx: FileRefContext) {
+    super(data);
+    this._ctx = ctx;
+  }
+
+  /**
+   * Full download URL — no args needed, context is already bound.
+   *
+   * @example
+   * ```typescript
+   * const url = row.file('avatar')?.downloadUrl();
+   * // → 'http://localhost:8080/api/v1/files/default/users/f0001/12345'
+   * ```
+   */
+  downloadUrl(): string {
+    return this.getDownloadUrl(this._ctx.baseUrl, this._ctx.namespace, this._ctx.table);
+  }
+
+  /**
+   * Relative HTTP path — no args needed.
+   *
+   * Useful when the base URL is already known from your app config (e.g.,
+   * to construct `<img src={row.file('avatar')?.relativeUrl()} />`).
+   *
+   * @example
+   * ```typescript
+   * const path = row.file('avatar')?.relativeUrl();
+   * // → '/api/v1/files/default/users/f0001/12345'
+   * ```
+   */
+  relativeUrl(): string {
+    return `/api/v1/files/${this._ctx.namespace}/${this._ctx.table}/${this.sub}/${this.id}`;
+  }
+}
+
+/**
+ * A row with ergonomic FILE column access (SDK-level generic wrapper).
+ *
+ * This is inherently SDK-specific because `<T>` is a TypeScript generic that
+ * cannot cross the Rust/WASM FFI boundary. Each SDK implements its own thin
+ * wrapper; the heavy lifting (FileRef parsing, URL generation) delegates to
+ * the shared `FileRef` class backed by `kalam-link` Rust.
+ *
+ * - Access raw column values via `.data.columnName`
+ * - Access any FILE column as a `BoundFileRef` via `.file('columnName')`
+ *
+ * @example
+ * ```typescript
+ * const rows = await client.queryRows<User>('SELECT * FROM default.users', 'default.users');
+ * rows.forEach(row => {
+ *   console.log(row.data.name);
+ *   const avatar = row.file('avatar');
+ *   if (avatar) img.src = avatar.downloadUrl();
+ * });
+ * ```
+ */
+export class KalamRow<T extends Record<string, unknown> = Record<string, unknown>> {
+  /** Raw row data — all column values as returned from the server. */
+  readonly data: T;
+  private readonly _ctx: FileRefContext;
+  private _typedData?: RowData;
+
+  constructor(data: T, ctx: FileRefContext) {
+    this.data = data;
+    this._ctx = ctx;
+  }
+
+  /**
+   * Access a column value as a `KalamCellValue` for type-safe extraction.
+   *
+   * Works identically whether the row came from a query or a subscription,
+   * providing the unified `row.cell('colname').asString()` access pattern.
+   *
+   * @param column - Column name (type-checked against row type `T`)
+   *
+   * @example
+   * ```typescript
+   * // Query path:
+   * const rows = await client.queryRows<User>('SELECT * FROM users', 'users');
+   * rows.forEach(row => {
+   *   console.log(row.cell('name').asString());
+   *   console.log(row.cell('age').asInt());
+   * });
+   *
+   * // Subscribe path — same API:
+   * await client.subscribeRows<User>('users', (change) => {
+   *   change.rows.forEach(row => {
+   *     console.log(row.cell('name').asString());
+   *   });
+   * });
+   * ```
+   */
+  cell(column: keyof T): KalamCellValue {
+    return KalamCellValue.from(this.data[column]);
+  }
+
+  /**
+   * All column values wrapped as `KalamCellValue` — cached on first access.
+   *
+   * Returns `RowData` (`Record<string, KalamCellValue>`) so you can use the
+   * familiar `typedData['colname'].asString()` pattern.
+   *
+   * @example
+   * ```typescript
+   * const row = rows[0];
+   * const td = row.typedData;
+   * console.log(td['name'].asString(), td['score'].asFloat());
+   * ```
+   */
+  get typedData(): RowData {
+    if (!this._typedData) {
+      this._typedData = wrapRowMap(this.data as Record<string, unknown>);
+    }
+    return this._typedData!;
+  }
+
+  /**
+   * Parse a FILE column and return a context-bound `BoundFileRef`.
+   *
+   * Returns `null` if the column is missing, null, or not a valid file reference.
+   *
+   * @param column - Column name (type-checked against row type `T`)
+   *
+   * @example
+   * ```typescript
+   * const avatar = row.file('avatar');
+   * if (avatar) {
+   *   img.src = avatar.downloadUrl();
+   *   console.log(avatar.name, avatar.mime, avatar.formatSize());
+   * }
+   * ```
+   */
+  file(column: keyof T): BoundFileRef | null {
+    const value = this.data[column];
+    // Unwrap KalamCellValue instances to get the raw JSON for FileRef parsing
+    const rawValue =
+      value instanceof KalamCellValue ? value.toJson() : value;
+    const ref = FileRef.from(rawValue);
+    if (!ref) return null;
+    return new BoundFileRef(ref.toObject(), this._ctx);
+  }
+}
+
+/**
+ * A live subscription change event with rows wrapped as `KalamRow<T>`.
+ *
+ * SDK-level generic wrapper — maps the raw `ServerMessage` (from the Rust WASM
+ * `kalam-link` crate) into typed rows with `.file()` support.
+ *
+ * The raw `ServerMessage.rows` are `HashMap<String, JsonValue>[]` in Rust,
+ * which arrive as plain JS objects. This wrapper casts them to `T` and wraps
+ * each in a `KalamRow<T>` for file access.
+ *
+ * @example
+ * ```typescript
+ * const unsub = await client.subscribeRows<User>('default.users', (change) => {
+ *   if (change.type === 'insert' || change.type === 'update') {
+ *     change.rows.forEach(row => {
+ *       const avatar = row.file('avatar');
+ *       if (avatar) console.log('Avatar:', avatar.downloadUrl());
+ *     });
+ *   }
+ * });
+ * ```
+ */
+export class KalamChange<T extends Record<string, unknown> = Record<string, unknown>> {
+  /** Change type: `'insert'`, `'update'`, `'delete'`, `'initial_data_batch'`, etc. */
+  readonly type: string;
+
+  /** New/current rows (present on insert, update, initial_data_batch). */
+  readonly rows: KalamRow<T>[];
+
+  /**
+   * Previous row values before the change (present on update and delete).
+   * Empty array for inserts.
+   */
+  readonly oldValues: KalamRow<T>[];
+
+  /** Raw underlying `ServerMessage` from the WASM layer (Rust `kalam-link`). */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  readonly raw: any;
+
+  /**
+   * Construct from a raw `ServerMessage` event and table context.
+   *
+   * Rows come from Rust as `HashMap<String, JsonValue>[]` — plain JS objects.
+   * This constructor casts them to `T` and wraps with `KalamRow` for file access.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  constructor(event: any, ctx: FileRefContext) {
+    this.raw = event;
+    this.type = (event as { type?: string }).type ?? 'unknown';
+    const rowsArr: T[] = Array.isArray(event.rows) ? (event.rows as T[]) : [];
+    const oldArr: T[] = Array.isArray(event.old_values) ? (event.old_values as T[]) : [];
+    this.rows = rowsArr.map(r => new KalamRow<T>(r, ctx));
+    this.oldValues = oldArr.map(r => new KalamRow<T>(r, ctx));
+  }
+}
+
+/**
+ * Wrap an array of raw row objects as `KalamRow<T>` with file access.
+ *
+ * @param rows - Raw row objects (from `queryAll()` or subscribe events)
+ * @param ctx - Server/table context for file URL generation
+ *
+ * @example
+ * ```typescript
+ * const ctx = { baseUrl: 'http://localhost:8080', namespace: 'default', table: 'users' };
+ * const rows = wrapRows<User>(queryResults, ctx);
+ * const avatar = rows[0].file('avatar');
+ * ```
+ */
+export function wrapRows<T extends Record<string, unknown> = Record<string, unknown>>(
+  rows: T[],
+  ctx: FileRefContext,
+): KalamRow<T>[] {
+  return rows.map(r => new KalamRow<T>(r, ctx));
 }

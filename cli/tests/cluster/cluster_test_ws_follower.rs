@@ -201,12 +201,10 @@ fn cluster_test_ws_follower_receives_leader_changes() {
                 Ok(Some(Ok(event))) => match event {
                     ChangeEvent::Insert { rows, .. } => {
                         for row in rows {
-                            if let Some(obj) = row.as_object() {
-                                if let Some(Value::String(val)) = obj.get("value") {
-                                    if val == insert_value {
-                                        received = true;
-                                        break;
-                                    }
+                            if let Some(val) = row.get("value").and_then(|v| v.inner().as_str()) {
+                                if val == insert_value {
+                                    received = true;
+                                    break;
                                 }
                             }
                         }

@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+import { KalamCellValue } from "kalam-link";
 
 interface CodeBlockProps {
   value: unknown;
@@ -14,12 +15,15 @@ interface NormalizedCode {
 }
 
 function normalizeCode(value: unknown, jsonPreferred: boolean): NormalizedCode {
-  if (value === null || value === undefined) {
+  // Unwrap KalamCellValue wrappers before normalizing
+  const raw = value instanceof KalamCellValue ? value.toJson() : value;
+
+  if (raw === null || raw === undefined) {
     return { text: "null", isJson: true };
   }
 
-  if (typeof value === "string") {
-    const trimmed = value.trim();
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
     const maybeJson =
       jsonPreferred ||
       ((trimmed.startsWith("{") && trimmed.endsWith("}")) ||
@@ -27,24 +31,24 @@ function normalizeCode(value: unknown, jsonPreferred: boolean): NormalizedCode {
 
     if (maybeJson) {
       try {
-        const parsed = JSON.parse(value);
+        const parsed = JSON.parse(raw);
         return { text: JSON.stringify(parsed, null, 2), isJson: true };
       } catch {
-        return { text: value, isJson: false };
+        return { text: raw, isJson: false };
       }
     }
-    return { text: value, isJson: false };
+    return { text: raw, isJson: false };
   }
 
-  if (typeof value === "object") {
+  if (typeof raw === "object") {
     try {
-      return { text: JSON.stringify(value, null, 2), isJson: true };
+      return { text: JSON.stringify(raw, null, 2), isJson: true };
     } catch {
-      return { text: String(value), isJson: false };
+      return { text: String(raw), isJson: false };
     }
   }
 
-  return { text: String(value), isJson: false };
+  return { text: String(raw), isJson: false };
 }
 
 function escapeHtml(value: string): string {

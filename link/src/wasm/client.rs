@@ -16,6 +16,7 @@ use crate::models::{
     ClientMessage, ConnectionOptions, QueryRequest, ServerMessage, SubscriptionOptions,
     SubscriptionRequest,
 };
+use crate::seq_tracking;
 use base64::Engine;
 
 use super::auth::WasmAuthProvider;
@@ -733,11 +734,14 @@ impl KalamClient {
                             if let Some(seq_id) = &batch_control.last_seq_id {
                                 let mut subs = subscriptions.borrow_mut();
                                 if let Some(state) = subs.get_mut(subscription_id) {
-                                    state.last_seq_id = Some(*seq_id);
-                                    console_log(&format!(
-                                        "KalamClient: Updated last_seq_id for {} to {}",
-                                        subscription_id, seq_id
-                                    ));
+                                    seq_tracking::advance_seq(&mut state.last_seq_id, *seq_id);
+                                }
+                            }
+                            // Also track _seq from row data
+                            {
+                                let mut subs = subscriptions.borrow_mut();
+                                if let Some(state) = subs.get_mut(subscription_id) {
+                                    seq_tracking::track_rows(&mut state.last_seq_id, &rows);
                                 }
                             }
                             Some(subscription_id.clone())
@@ -746,7 +750,7 @@ impl KalamClient {
                             subscription_id,
                             change_type,
                             rows,
-                            ..
+                            old_values,
                         } => {
                             console_log(&format!(
                                 "KalamClient: Parsed Change - id: {}, type: {:?}, rows: {:?}",
@@ -754,6 +758,18 @@ impl KalamClient {
                                 change_type,
                                 rows.as_ref().map(|r| r.len())
                             ));
+                            // Track _seq from change event rows
+                            {
+                                let mut subs = subscriptions.borrow_mut();
+                                if let Some(state) = subs.get_mut(subscription_id) {
+                                    if let Some(r) = rows.as_ref() {
+                                        seq_tracking::track_rows(&mut state.last_seq_id, r);
+                                    }
+                                    if let Some(old) = old_values.as_ref() {
+                                        seq_tracking::track_rows(&mut state.last_seq_id, old);
+                                    }
+                                }
+                            }
                             Some(subscription_id.clone())
                         },
                         ServerMessage::Error {
@@ -1459,6 +1475,9 @@ impl KalamClient {
                     } else {
                         serde_json::Value::Null
                     };
+                    // Convert plain JSON object into typed RowData (HashMap<String, KalamCellValue>)
+                    let value: crate::models::RowData =
+                        serde_json::from_value(value).unwrap_or_default();
 
                     crate::models::ConsumeMessage {
                         message_id: msg["message_id"]
@@ -1613,9 +1632,23 @@ impl KalamClient {
             return Err(JsValue::from_str(&error_msg));
         }
 
-        // Parse response
+        // Parse response and enrich with named_rows
         let json = JsFuture::from(resp.text()?).await?;
-        Ok(json.as_string().unwrap_or_else(|| "{}".to_string()))
+        let raw = json.as_string().unwrap_or_else(|| "{}".to_string());
+
+        // Deserialize, populate named_rows (schema → map), re-serialize.
+        // This moves the transformation into Rust so every SDK gets it for free.
+        match serde_json::from_str::<crate::query::models::QueryResponse>(&raw) {
+            Ok(mut query_resp) => {
+                for result in &mut query_resp.results {
+                    result.populate_named_rows();
+                }
+                serde_json::to_string(&query_resp)
+                    .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+            }
+            // If deserialization fails, return raw response unchanged
+            Err(_) => Ok(raw),
+        }
     }
 
     /// Set up auto-reconnection handler for the WebSocket

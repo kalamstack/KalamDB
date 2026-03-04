@@ -565,7 +565,7 @@ async fn test_websocket_filtered_subscription() {
                                 .and_then(|v| v.as_str())
                                 .is_some_and(|s| s == "filtered");
 
-                            if direct_match || row.to_string().contains("\"filtered\"") {
+                            if direct_match || serde_json::to_string(&row).unwrap_or_default().contains("\"filtered\"") {
                                 got_filtered = true;
                                 break;
                             }

@@ -264,7 +264,7 @@ void main() {
 
           // Verify row 3 appeared.
           final row3Found = postInserts.any(
-            (e) => e.rows.any((r) => r['id'] == 3),
+            (e) => e.rows.any((r) => r['id']?.asInt() == 3),
           );
           expect(row3Found, isTrue,
               reason: 'row 3 should appear in InsertEvents');
@@ -287,11 +287,11 @@ void main() {
           for (final event in events) {
             switch (event) {
               case InsertEvent(:final rows):
-                if (rows.any((r) => r['id'] == id)) return true;
+                if (rows.any((r) => r['id']?.asInt() == id)) return true;
               case UpdateEvent(:final rows):
-                if (rows.any((r) => r['id'] == id)) return true;
+                if (rows.any((r) => r['id']?.asInt() == id)) return true;
               case InitialDataBatch(:final rows):
-                if (rows.any((r) => r['id'] == id)) return true;
+                if (rows.any((r) => r['id']?.asInt() == id)) return true;
               case AckEvent() || DeleteEvent() || SubscriptionError():
                 break;
             }
@@ -523,11 +523,11 @@ void main() {
           for (final event in events) {
             switch (event) {
               case InsertEvent(:final rows):
-                if (rows.any((r) => r['id'] == id)) return true;
+                if (rows.any((r) => r['id']?.asInt() == id)) return true;
               case UpdateEvent(:final rows):
-                if (rows.any((r) => r['id'] == id)) return true;
+                if (rows.any((r) => r['id']?.asInt() == id)) return true;
               case InitialDataBatch(:final rows):
-                if (rows.any((r) => r['id'] == id)) return true;
+                if (rows.any((r) => r['id']?.asInt() == id)) return true;
               case AckEvent() || DeleteEvent() || SubscriptionError():
                 break;
             }
@@ -689,11 +689,11 @@ void main() {
           for (final event in events) {
             switch (event) {
               case InsertEvent(:final rows):
-                if (rows.any((r) => r['id'] == id)) return true;
+                if (rows.any((r) => r['id']?.asInt() == id)) return true;
               case UpdateEvent(:final rows):
-                if (rows.any((r) => r['id'] == id)) return true;
+                if (rows.any((r) => r['id']?.asInt() == id)) return true;
               case InitialDataBatch(:final rows):
-                if (rows.any((r) => r['id'] == id)) return true;
+                if (rows.any((r) => r['id']?.asInt() == id)) return true;
               case AckEvent() || DeleteEvent() || SubscriptionError():
                 break;
             }

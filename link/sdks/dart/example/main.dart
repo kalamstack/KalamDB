@@ -80,7 +80,7 @@ Future<void> main() async {
   final result = await client.query('SELECT * FROM tasks ORDER BY id');
   if (result.success) {
     print('Columns: ${result.columns.map((c) => c.name).join(', ')}');
-    for (final row in result.toMaps()) {
+    for (final row in result.rows) {
       print('  task ${row['id']}: ${row['title']} (done=${row['done']})');
     }
   } else {

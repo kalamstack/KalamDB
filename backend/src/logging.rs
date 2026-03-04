@@ -94,6 +94,7 @@ fn build_env_filter(
         ("openraft", "error"),
         ("openraft::replication", "off"),
         ("tracing", "warn"),
+        ("tracing_actix_web::middleware", "error"),
         // Reduce verbose Raft logs
         ("kalamdb_core::applier::raft", "warn"),
     ];

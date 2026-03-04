@@ -65,12 +65,12 @@ void main() {
         );
         expect(sel.success, isTrue);
 
-        final rows = sel.toMaps();
+        final rows = sel.rows;
         expect(rows, isNotEmpty);
-        expect(rows.first['id'], 1);
-        expect(rows.first['title'], 'first');
-        expect(rows.first['done'], true);
-        expect(rows.first['score'], 9.5);
+        expect(rows.first['id']?.asInt(), 1);
+        expect(rows.first['title']?.asString(), 'first');
+        expect(rows.first['done']?.asBool(), true);
+        expect(rows.first['score']?.asDouble(), 9.5);
       },
       timeout: const Timeout(Duration(seconds: 30)),
     );
@@ -94,9 +94,9 @@ void main() {
           r' WHERE id = $1',
           params: [2],
         );
-        final rows = sel.toMaps();
-        expect(rows.first['title'], 'parameterised');
-        expect(rows.first['done'], false);
+        final rows = sel.rows;
+        expect(rows.first['title']?.asString(), 'parameterised');
+        expect(rows.first['done']?.asBool(), false);
       },
       timeout: const Timeout(Duration(seconds: 30)),
     );
@@ -114,8 +114,8 @@ void main() {
         final sel = await client.query(
           'SELECT title FROM $tbl WHERE id = 1',
         );
-        final rows = sel.toMaps();
-        expect(rows.first['title'], 'updated');
+        final rows = sel.rows;
+        expect(rows.first['title']?.asString(), 'updated');
       },
       timeout: const Timeout(Duration(seconds: 30)),
     );
@@ -134,7 +134,7 @@ void main() {
         final sel = await client.query(
           'SELECT * FROM $tbl WHERE id = 999',
         );
-        expect(sel.toMaps(), isEmpty);
+        expect(sel.rows, isEmpty);
       },
       timeout: const Timeout(Duration(seconds: 30)),
     );
@@ -173,22 +173,22 @@ void main() {
     // QueryResponse convenience methods
     // ─────────────────────────────────────────────────────────────────
     test(
-      'toMaps returns list of maps',
+      'rows returns list of KalamCellValue maps',
       () async {
         final res = await client.query('SELECT * FROM $tbl ORDER BY id');
-        final maps = res.toMaps();
-        expect(maps, isA<List<Map<String, dynamic>>>());
-        expect(maps.length, greaterThanOrEqualTo(1));
+        final rows = res.rows;
+        expect(rows, isA<List<Map<String, KalamCellValue>>>());
+        expect(rows.length, greaterThanOrEqualTo(1));
       },
       timeout: const Timeout(Duration(seconds: 30)),
     );
 
     test(
-      'rows returns list of lists',
+      'rows returns KalamCellValue entries',
       () async {
         final res = await client.query('SELECT id, title FROM $tbl LIMIT 1');
         final rows = res.rows;
-        expect(rows, isA<List<List<dynamic>>>());
+        expect(rows, isA<List<Map<String, KalamCellValue>>>());
       },
       timeout: const Timeout(Duration(seconds: 30)),
     );
@@ -209,7 +209,7 @@ void main() {
         final sel = await client.query(
           'SELECT id FROM $tbl WHERE id IN (10, 11) ORDER BY id',
         );
-        expect(sel.toMaps().length, greaterThanOrEqualTo(2));
+        expect(sel.rows.length, greaterThanOrEqualTo(2));
       },
       timeout: const Timeout(Duration(seconds: 30)),
     );

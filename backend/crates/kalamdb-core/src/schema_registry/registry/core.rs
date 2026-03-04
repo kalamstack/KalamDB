@@ -21,6 +21,7 @@ use kalamdb_commons::SystemTable;
 use kalamdb_system::{NotificationService, SchemaRegistry as SchemaRegistryTrait};
 // use kalamdb_system::NotificationService as NotificationServiceTrait;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 #[derive(Debug, Default)]
@@ -37,6 +38,10 @@ struct SystemSchemaReconcileStats {
 /// - Memoized Arrow schemas
 /// - DataFusion TableProvider instances
 ///
+/// Maximum number of entries in the version_cache before LRU eviction kicks in.
+/// Each entry contains a CachedTableData with Arrow schema and column metadata.
+const VERSION_CACHE_MAX_ENTRIES: usize = 256;
+
 pub struct SchemaRegistry {
     /// App context for accessing system components (set via set_app_context)
     app_context: OnceLock<Arc<AppContext>>,
@@ -46,6 +51,12 @@ pub struct SchemaRegistry {
 
     /// Cache for specific table versions (for reading old Parquet files)
     version_cache: DashMap<TableVersionId, Arc<CachedTableData>>,
+
+    /// LRU access timestamps for version_cache entries (separate from hot path)
+    version_cache_access: DashMap<TableVersionId, u64>,
+
+    /// Monotonic counter for LRU ordering of version_cache
+    version_cache_counter: AtomicU64,
 
     /// DataFusion base session context for table registration (set once during init)
     base_session_context: OnceLock<Arc<datafusion::prelude::SessionContext>>,
@@ -72,7 +83,9 @@ impl SchemaRegistry {
         Self {
             app_context: OnceLock::new(),
             table_cache: DashMap::with_capacity(initial_capacity),
-            version_cache: DashMap::with_capacity(initial_capacity),
+            version_cache: DashMap::with_capacity(std::cmp::min(VERSION_CACHE_MAX_ENTRIES, 64)),
+            version_cache_access: DashMap::with_capacity(std::cmp::min(VERSION_CACHE_MAX_ENTRIES, 64)),
+            version_cache_counter: AtomicU64::new(0),
             base_session_context: OnceLock::new(),
         }
     }
@@ -702,8 +715,9 @@ impl SchemaRegistry {
             .map(|entry| entry.key().clone())
             .collect();
 
-        for key in keys_to_remove {
-            self.version_cache.remove(&key);
+        for key in &keys_to_remove {
+            self.version_cache.remove(key);
+            self.version_cache_access.remove(key);
         }
 
         let _ = self.deregister_from_datafusion(table_id);
@@ -715,12 +729,57 @@ impl SchemaRegistry {
     ///
     /// Used when reading Parquet files written with older schemas.
     pub fn get_version(&self, version_id: &TableVersionId) -> Option<Arc<CachedTableData>> {
-        self.version_cache.get(version_id).map(|entry| entry.value().clone())
+        let result = self.version_cache.get(version_id).map(|entry| entry.value().clone());
+        if result.is_some() {
+            // Update LRU access time
+            let ts = self.version_cache_counter.fetch_add(1, Ordering::Relaxed);
+            self.version_cache_access.insert(version_id.clone(), ts);
+        }
+        result
     }
 
-    /// Insert a specific version into the cache
+    /// Insert a specific version into the cache, evicting LRU entries if over limit.
     pub fn insert_version(&self, version_id: TableVersionId, data: Arc<CachedTableData>) {
-        self.version_cache.insert(version_id, data);
+        let ts = self.version_cache_counter.fetch_add(1, Ordering::Relaxed);
+        self.version_cache.insert(version_id.clone(), data);
+        self.version_cache_access.insert(version_id, ts);
+
+        // Evict oldest entries if over limit
+        if self.version_cache.len() > VERSION_CACHE_MAX_ENTRIES {
+            self.evict_version_cache_lru();
+        }
+    }
+
+    /// Evict the oldest ~25% of version_cache entries by LRU order.
+    fn evict_version_cache_lru(&self) {
+        let target = VERSION_CACHE_MAX_ENTRIES * 3 / 4; // keep 75%
+        let excess = self.version_cache.len().saturating_sub(target);
+        if excess == 0 {
+            return;
+        }
+
+        // Collect (key, access_ts) pairs
+        let mut entries: Vec<(TableVersionId, u64)> = self
+            .version_cache_access
+            .iter()
+            .map(|e| (e.key().clone(), *e.value()))
+            .collect();
+
+        // Sort ascending by access time (oldest first)
+        entries.sort_by_key(|(_k, ts)| *ts);
+
+        // Evict the oldest `excess` entries
+        let evict_count = std::cmp::min(excess, entries.len());
+        for (key, _) in entries.into_iter().take(evict_count) {
+            self.version_cache.remove(&key);
+            self.version_cache_access.remove(&key);
+        }
+
+        log::debug!(
+            "[SchemaRegistry] Evicted {} version_cache entries, remaining={}",
+            evict_count,
+            self.version_cache.len()
+        );
     }
 
     /// Get cache statistics
@@ -732,6 +791,7 @@ impl SchemaRegistry {
     pub fn clear(&self) {
         self.table_cache.clear();
         self.version_cache.clear();
+        self.version_cache_access.clear();
     }
 
     /// Get number of cached entries (latest versions only)

@@ -385,7 +385,7 @@ pub async fn create_session(
 
         println!();
         println!("No authentication credentials found.");
-        println!("Please enter your credentials to connect:");
+        println!("Please enter your credentials to connect to: {}", server_url);
         println!();
 
         // Prompt for username

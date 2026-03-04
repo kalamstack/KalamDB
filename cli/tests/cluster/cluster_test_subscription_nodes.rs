@@ -238,12 +238,10 @@ fn cluster_test_subscription_leader_to_leader() {
                 Ok(Some(Ok(event))) => {
                     if let ChangeEvent::Insert { rows, .. } = event {
                         for row in rows {
-                            if let Some(obj) = row.as_object() {
-                                if let Some(Value::String(val)) = obj.get("value") {
-                                    if val == insert_value {
-                                        received = true;
-                                        break;
-                                    }
+                            if let Some(val) = row.get("value").and_then(|v| v.inner().as_str()) {
+                                if val == insert_value {
+                                    received = true;
+                                    break;
                                 }
                             }
                         }
@@ -332,12 +330,10 @@ fn cluster_test_subscription_follower_to_leader() {
                 Ok(Some(Ok(event))) => {
                     if let ChangeEvent::Insert { rows, .. } = event {
                         for row in rows {
-                            if let Some(obj) = row.as_object() {
-                                if let Some(Value::String(val)) = obj.get("value") {
-                                    if val == insert_value {
-                                        received = true;
-                                        break;
-                                    }
+                            if let Some(val) = row.get("value").and_then(|v| v.inner().as_str()) {
+                                if val == insert_value {
+                                    received = true;
+                                    break;
                                 }
                             }
                         }
@@ -430,12 +426,10 @@ fn cluster_test_subscription_multi_node_identical() {
             match tokio::time::timeout(wait, subscription.next()).await {
                 Ok(Some(Ok(ChangeEvent::Insert { rows, .. }))) => {
                     for row in rows {
-                        if let Some(obj) = row.as_object() {
-                            if let Some(Value::String(val)) = obj.get("value") {
-                                if val.starts_with(insert_value) {
-                                    local_count += 1;
-                                    received_count.fetch_add(1, Ordering::SeqCst);
-                                }
+                        if let Some(val) = row.get("value").and_then(|v| v.inner().as_str()) {
+                            if val.starts_with(insert_value) {
+                                local_count += 1;
+                                received_count.fetch_add(1, Ordering::SeqCst);
                             }
                         }
                     }

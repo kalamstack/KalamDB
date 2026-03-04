@@ -26,7 +26,7 @@ impl SubscriptionConfig {
         }
     }
 
-    /// Create a configuration without any initial data fetch
+    /// Create a configuration without any initial data fetch.
     pub fn without_initial_data(id: impl Into<String>, sql: impl Into<String>) -> Self {
         Self {
             id: id.into(),

@@ -4,30 +4,30 @@ use datafusion::scalar::ScalarValue;
 use kalamdb_commons::conversions::arrow_json_conversion as commons;
 use kalamdb_commons::errors::CommonError;
 use kalamdb_commons::models::rows::Row;
-use serde_json::Value as JsonValue;
+use kalamdb_commons::models::KalamCellValue;
 use std::collections::HashMap;
 
 fn map_error(err: CommonError) -> KalamDbError {
     KalamDbError::InvalidOperation(err.to_string())
 }
 
-pub fn scalar_value_to_json(value: &ScalarValue) -> Result<JsonValue, KalamDbError> {
+pub fn scalar_value_to_json(value: &ScalarValue) -> Result<KalamCellValue, KalamDbError> {
     commons::scalar_value_to_json(value).map_err(map_error)
 }
 
 pub fn record_batch_to_json_rows(
     batch: &RecordBatch,
-) -> Result<Vec<HashMap<String, JsonValue>>, KalamDbError> {
+) -> Result<Vec<HashMap<String, KalamCellValue>>, KalamDbError> {
     commons::record_batch_to_json_rows(batch).map_err(map_error)
 }
 
 pub fn record_batch_to_json_arrays(
     batch: &RecordBatch,
-) -> Result<Vec<Vec<JsonValue>>, KalamDbError> {
+) -> Result<Vec<Vec<KalamCellValue>>, KalamDbError> {
     commons::record_batch_to_json_arrays(batch).map_err(map_error)
 }
 
-pub fn row_to_json_map(row: &Row) -> Result<HashMap<String, JsonValue>, KalamDbError> {
+pub fn row_to_json_map(row: &Row) -> Result<HashMap<String, KalamCellValue>, KalamDbError> {
     commons::row_to_json_map(row).map_err(map_error)
 }
 

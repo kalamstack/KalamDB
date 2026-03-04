@@ -496,9 +496,11 @@ fn test_query_request_serialization() {
 
 #[test]
 fn test_change_event_helpers() {
+    let mut insert_row = std::collections::HashMap::new();
+    insert_row.insert("id".to_string(), KalamCellValue::int(1));
     let insert = ChangeEvent::Insert {
         subscription_id: "sub-1".to_string(),
-        rows: vec![json!({"id": 1})],
+        rows: vec![insert_row],
     };
     assert_eq!(insert.subscription_id(), Some("sub-1"));
     assert!(!insert.is_error());

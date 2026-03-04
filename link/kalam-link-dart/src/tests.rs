@@ -134,7 +134,8 @@ mod tests {
                 index: 0,
                 flags: None,
             }],
-            rows: Some(vec![vec![serde_json::json!("Alice")]]),
+            rows: Some(vec![vec![kalam_link::KalamCellValue::text("Alice")]]),
+            named_rows: None,
             row_count: 1,
             message: None,
         };
@@ -180,6 +181,7 @@ mod tests {
         let qr = QueryResult {
             schema: vec![],
             rows: None,
+            named_rows: None,
             row_count: 0,
             message: Some("Table created".into()),
         };
@@ -338,7 +340,7 @@ mod tests {
     #[test]
     fn change_event_initial_data_batch_converts() {
         let mut row = std::collections::HashMap::new();
-        row.insert("name".to_string(), serde_json::json!("Alice"));
+        row.insert("name".to_string(), kalam_link::KalamCellValue::text("Alice"));
         let e = ChangeEvent::InitialDataBatch {
             subscription_id: "sub-2".into(),
             rows: vec![row],
@@ -366,9 +368,12 @@ mod tests {
 
     #[test]
     fn change_event_insert_converts() {
+        let mut row = std::collections::HashMap::new();
+        row.insert("id".to_string(), kalam_link::KalamCellValue::int(1));
+        row.insert("name".to_string(), kalam_link::KalamCellValue::text("Bob"));
         let e = ChangeEvent::Insert {
             subscription_id: "sub-3".into(),
-            rows: vec![serde_json::json!({"id": 1, "name": "Bob"})],
+            rows: vec![row],
         };
         let dart: DartChangeEvent = e.into();
         match dart {
@@ -387,10 +392,16 @@ mod tests {
 
     #[test]
     fn change_event_update_converts() {
+        let mut new_row = std::collections::HashMap::new();
+        new_row.insert("id".to_string(), kalam_link::KalamCellValue::int(1));
+        new_row.insert("name".to_string(), kalam_link::KalamCellValue::text("Bob2"));
+        let mut old_row = std::collections::HashMap::new();
+        old_row.insert("id".to_string(), kalam_link::KalamCellValue::int(1));
+        old_row.insert("name".to_string(), kalam_link::KalamCellValue::text("Bob"));
         let e = ChangeEvent::Update {
             subscription_id: "sub-4".into(),
-            rows: vec![serde_json::json!({"id": 1, "name": "Bob2"})],
-            old_rows: vec![serde_json::json!({"id": 1, "name": "Bob"})],
+            rows: vec![new_row],
+            old_rows: vec![old_row],
         };
         let dart: DartChangeEvent = e.into();
         match dart {
@@ -413,9 +424,11 @@ mod tests {
 
     #[test]
     fn change_event_delete_converts() {
+        let mut row = std::collections::HashMap::new();
+        row.insert("id".to_string(), kalam_link::KalamCellValue::int(99));
         let e = ChangeEvent::Delete {
             subscription_id: "sub-5".into(),
-            old_rows: vec![serde_json::json!({"id": 99})],
+            old_rows: vec![row],
         };
         let dart: DartChangeEvent = e.into();
         match dart {

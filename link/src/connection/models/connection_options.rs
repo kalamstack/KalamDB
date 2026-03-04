@@ -169,18 +169,6 @@ impl ConnectionOptions {
     }
 
     /// Set the timestamp format for displaying timestamp columns
-    ///
-    /// Controls how timestamp values (milliseconds since epoch) are formatted
-    /// in query results and subscription updates.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use kalam_link::{ConnectionOptions, TimestampFormat};
-    ///
-    /// let options = ConnectionOptions::new()
-    ///     .with_timestamp_format(TimestampFormat::Iso8601);  // 2024-12-14T15:30:45.123Z
-    /// ```
     pub fn with_timestamp_format(mut self, format: TimestampFormat) -> Self {
         self.timestamp_format = format;
         self
@@ -200,18 +188,12 @@ impl ConnectionOptions {
     }
 
     /// Set local source IP addresses for outbound WebSocket connections.
-    ///
-    /// Each subscription connection will pick one address from this pool and
-    /// bind to `<ip>:0` prior to connect.
     pub fn with_ws_local_bind_addresses(mut self, addresses: Vec<String>) -> Self {
         self.ws_local_bind_addresses = addresses;
         self
     }
 
     /// Disable server-side gzip compression for debugging.
-    ///
-    /// Appends `?compress=false` to the WebSocket URL so the server skips
-    /// compression and sends plain JSON text frames.
     ///
     /// **Do not enable in production.**
     pub fn with_disable_compression(mut self, disable: bool) -> Self {

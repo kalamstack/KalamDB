@@ -185,10 +185,10 @@ void main() {
           );
           expect(select.success, isTrue);
 
-          final rows = select.toMaps();
+          final rows = select.rows;
           expect(rows, isNotEmpty);
-          expect(rows.first['id'], 101);
-          expect(rows.first['title'], 'integration-row');
+          expect(rows.first['id']?.asInt(), 101);
+          expect(rows.first['title']?.asString(), 'integration-row');
         } finally {
           await client.query('DROP TABLE IF EXISTS $fullTable');
           await client.dispose();
@@ -233,7 +233,7 @@ void main() {
 
               if (event case InsertEvent()) {
                 for (final row in event.rows) {
-                  if (row['id'] == 202) {
+                  if (row['id']?.asInt() == 202) {
                     if (!insertEvent.isCompleted) {
                       insertEvent.complete(event);
                     }
@@ -289,8 +289,8 @@ void main() {
             );
           }
 
-          expect(received.row['id'], 202);
-          expect(received.row['title'], 'from-writer');
+          expect(received.row['id']?.asInt(), 202);
+          expect(received.row['title']?.asString(), 'from-writer');
         } finally {
           if (sub != null) {
             await _safeAwait(sub.cancel());

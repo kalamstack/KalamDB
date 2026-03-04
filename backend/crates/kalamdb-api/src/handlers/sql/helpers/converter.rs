@@ -3,6 +3,7 @@
 use arrow::record_batch::RecordBatch;
 use kalamdb_commons::conversions::{read_kalam_data_type_metadata, KALAM_DATA_TYPE_METADATA_KEY};
 use kalamdb_commons::models::datatypes::{FromArrowType, KalamDataType};
+use kalamdb_commons::models::KalamCellValue;
 use kalamdb_commons::models::Role;
 use kalamdb_commons::schemas::SchemaField;
 use kalamdb_core::providers::arrow_json_conversion::record_batch_to_json_arrays;
@@ -89,7 +90,7 @@ pub fn record_batch_to_query_result(
 
 /// Mask a sensitive column with "***" (for array-based rows)
 fn mask_sensitive_column_array(
-    rows: &mut [Vec<serde_json::Value>],
+    rows: &mut [Vec<KalamCellValue>],
     column_indices: &HashMap<String, usize>,
     target_column: &str,
 ) {
@@ -97,7 +98,7 @@ fn mask_sensitive_column_array(
         for row in rows.iter_mut() {
             if let Some(value) = row.get_mut(col_idx) {
                 if !value.is_null() {
-                    *value = serde_json::Value::String("***".to_string());
+                    *value = KalamCellValue::text("***");
                 }
             }
         }

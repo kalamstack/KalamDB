@@ -173,7 +173,7 @@ async fn wait_for_topic_routes(
         if response.status == ResponseStatus::Success {
             if let Some(result) = response.results.first() {
                 if let Some(row) = result.row_as_map(0) {
-                    if let Some(routes_raw) = row.get("routes").and_then(json_string) {
+                    if let Some(routes_raw) = row.get("routes").and_then(|v| json_string(v.inner())) {
                         if let Ok(routes_json) = serde_json::from_str::<Value>(&routes_raw) {
                             let route_count =
                                 routes_json.as_array().map(|routes| routes.len()).unwrap_or(0);

@@ -95,11 +95,11 @@ void main() {
         final sel = await client.query(
           "SELECT name, active, score, count FROM $tbl WHERE name = 'alice'",
         );
-        final row = sel.toMaps().first;
-        expect(row['name'], 'alice');
-        expect(row['active'], true);
-        expect(row['score'], 98.5);
-        expect(row['count'], 42);
+        final row = sel.rows.first;
+        expect(row['name']?.asString(), 'alice');
+        expect(row['active']?.asBool(), true);
+        expect(row['score']?.asDouble(), 98.5);
+        expect(row['count']?.asInt(), 42);
 
         await dropTable(client, tbl);
       },

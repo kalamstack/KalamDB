@@ -4,13 +4,13 @@
 
 use crate::cluster_common::*;
 use crate::common::*;
-use serde_json::Value;
+use kalam_link::KalamCellValue;
 
-fn normalize_rows(rows: &[Vec<Value>]) -> Vec<String> {
+fn normalize_rows(rows: &[Vec<KalamCellValue>]) -> Vec<String> {
     rows.iter()
         .map(|row| {
             row.iter()
-                .map(|value| extract_typed_value(value).to_string())
+                .map(|value| extract_typed_value(value.inner()).to_string())
                 .collect::<Vec<String>>()
                 .join("|")
         })

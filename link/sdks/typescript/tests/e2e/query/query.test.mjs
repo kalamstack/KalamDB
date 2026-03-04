@@ -57,10 +57,10 @@ describe('Query', { timeout: 30_000 }, () => {
     // queryOne transforms raw row arrays into keyed objects
     const row = await client.queryOne(`SELECT * FROM ${tbl} WHERE id = 1`);
     assert.ok(row, 'expected at least one row');
-    assert.equal(row.id, 1);
-    assert.equal(row.title, 'first');
-    assert.equal(row.done, true);
-    assert.equal(row.score, 9.5);
+    assert.equal(row.id.asInt(), 1);
+    assert.equal(row.title.asString(), 'first');
+    assert.equal(row.done.asBool(), true);
+    assert.equal(row.score.asFloat(), 9.5);
   });
 
   // -----------------------------------------------------------------------
@@ -76,8 +76,8 @@ describe('Query', { timeout: 30_000 }, () => {
       `SELECT title, done FROM ${tbl} WHERE id = $1`,
       [2],
     );
-    assert.equal(row.title, 'parameterised');
-    assert.equal(row.done, false);
+    assert.equal(row.title.asString(), 'parameterised');
+    assert.equal(row.done.asBool(), false);
   });
 
   // -----------------------------------------------------------------------
@@ -89,7 +89,7 @@ describe('Query', { timeout: 30_000 }, () => {
     const row = await client.queryOne(
       `SELECT title FROM ${tbl} WHERE id = 1`,
     );
-    assert.equal(row.title, 'updated');
+    assert.equal(row.title.asString(), 'updated');
   });
 
   // -----------------------------------------------------------------------
@@ -133,7 +133,7 @@ describe('Query', { timeout: 30_000 }, () => {
   test('queryOne returns first row or null', async () => {
     const row = await client.queryOne(`SELECT * FROM ${tbl} WHERE id = 1`);
     assert.ok(row);
-    assert.equal(row.id, 1);
+    assert.equal(row.id.asInt(), 1);
 
     const missing = await client.queryOne(
       `SELECT * FROM ${tbl} WHERE id = -1`,

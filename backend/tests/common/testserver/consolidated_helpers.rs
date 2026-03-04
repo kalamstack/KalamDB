@@ -15,7 +15,7 @@
 
 use anyhow::Result;
 use kalam_link::models::{ChangeEvent, QueryResponse, ResponseStatus};
-use kalam_link::SubscriptionManager;
+use kalam_link::{KalamCellValue, SubscriptionManager};
 use kalamdb_commons::Role;
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};
@@ -76,7 +76,7 @@ pub fn get_count(resp: &QueryResponse) -> i64 {
 }
 
 /// Get all rows as HashMaps (wrapper around kalam-link method).
-pub fn get_response_rows(resp: &QueryResponse) -> Vec<HashMap<String, JsonValue>> {
+pub fn get_response_rows(resp: &QueryResponse) -> Vec<HashMap<String, KalamCellValue>> {
     resp.rows_as_maps()
 }
 
@@ -95,7 +95,7 @@ fn extract_i64(v: &JsonValue) -> Option<i64> {
 }
 
 /// Get all rows as vectors of JSON values.
-pub fn get_rows(resp: &QueryResponse) -> Vec<Vec<JsonValue>> {
+pub fn get_rows(resp: &QueryResponse) -> Vec<Vec<KalamCellValue>> {
     resp.rows()
 }
 
@@ -220,7 +220,7 @@ pub async fn ensure_user_exists(
             if resp.status == ResponseStatus::Success {
                 if let Some(rows) = resp.rows_as_maps().first() {
                     if let Some(user_id_val) = rows.get("user_id") {
-                        let user_id_str = match user_id_val {
+                        let user_id_str = match &**user_id_val {
                             JsonValue::String(s) => s.clone(),
                             JsonValue::Object(map) if map.contains_key("Utf8") => {
                                 map.get("Utf8").and_then(|v| v.as_str()).unwrap_or("").to_string()

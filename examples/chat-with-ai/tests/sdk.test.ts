@@ -187,7 +187,8 @@ async function runTests() {
     assert(result.status === 'success', 'Query should succeed');
     assert(Array.isArray(result.results), 'Should have results array');
     
-    // Parse rows like SDK's parseRows/queryAll
+    // Parse rows from raw HTTP response (server returns positional arrays).
+    // The SDK's queryAll() handles this automatically via WASM named_rows.
     if (result.results[0]?.rows && result.results[0]?.schema) {
       const schema = result.results[0].schema;
       const rows = result.results[0].rows;

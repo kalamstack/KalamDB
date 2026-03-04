@@ -28,6 +28,7 @@ import { generateSqlStatements } from "@/components/sql-studio/utils/sqlGenerato
 import { extractTableContext } from "@/components/sql-studio/utils/sqlParser";
 import { useSqlPreview } from "@/components/sql-preview";
 import { CellDisplay } from "@/components/datatype-display";
+import { KalamCellValue } from "kalam-link";
 import { executeSql } from "@/lib/kalam-client";
 import { LIVE_META, LIVE_HIGHLIGHT_DURATION_MS } from "@/features/sql-studio/state/sqlStudioWorkspaceSlice";
 import { cn } from "@/lib/utils";
@@ -67,19 +68,21 @@ const PAGE_SIZE = 50;
 const MAX_RENDERED_ROWS = 1000;
 
 function stringifyCellValue(value: unknown): string {
-  if (value === null || value === undefined) {
+  // Unwrap KalamCellValue wrappers before stringifying
+  const raw = value instanceof KalamCellValue ? value.toJson() : value;
+  if (raw === null || raw === undefined) {
     return "null";
   }
-  if (typeof value === "string") {
-    return value;
+  if (typeof raw === "string") {
+    return raw;
   }
-  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
-    return String(value);
+  if (typeof raw === "number" || typeof raw === "boolean" || typeof raw === "bigint") {
+    return String(raw);
   }
   try {
-    return JSON.stringify(value, null, 2);
+    return JSON.stringify(raw, null, 2);
   } catch {
-    return String(value);
+    return String(raw);
   }
 }
 
@@ -970,12 +973,12 @@ export function StudioResultsGrid({
 
                   {/* Editor textarea or NULL placeholder */}
                   {cellViewer.isNull ? (
-                    <div className="flex min-h-[120px] flex-1 items-center justify-center rounded-md border border-border bg-black font-mono text-sm italic text-muted-foreground">
+                    <div className="flex min-h-[120px] flex-1 items-center justify-center rounded-md border border-border bg-black font-mono text-sm italic text-slate-500">
                       NULL
                     </div>
                   ) : (
                     <textarea
-                      className="min-h-[120px] flex-1 resize-none rounded-md border border-border bg-black p-3 font-mono text-xs leading-5 text-foreground outline-none focus:border-sky-500 focus:ring-1 focus:ring-ring"
+                      className="min-h-[120px] flex-1 resize-none rounded-md border border-border bg-black p-3 font-mono text-xs leading-5 text-slate-200 outline-none focus:border-sky-500 focus:ring-1 focus:ring-ring"
                       value={typeof cellViewer.editedValue === "string" ? cellViewer.editedValue : stringifyCellValue(cellViewer.editedValue)}
                       onChange={(e) => {
                         setCellViewer((prev) => ({ ...prev, editedValue: e.target.value }));

@@ -10,12 +10,6 @@ import {
 
 type AgentRow = Record<string, unknown>;
 
-type BlogRow = {
-  blog_id: string;
-  content: string;
-  summary: string | null;
-};
-
 const MAX_TRACKED_BLOGS = 10_000;
 
 export function normalizeUrlForNode(url: string): string {
@@ -133,17 +127,18 @@ Pick<RunAgentOptions<AgentRow>, 'onRow' | 'onFailed'> {
   ): Promise<void> => {
     console.log(`[wake] run_key=${ctx.runKey} blog_id=${blogId} attempt=${ctx.attempt}/${ctx.maxAttempts}`);
 
-    const row = await ctx.queryOne<BlogRow>(
+    const row = await ctx.queryOne(
       'SELECT blog_id, content, summary FROM blog.blogs WHERE blog_id = $1',
       [blogId],
     );
 
-    if (!row || !row.content) {
+    const content = row?.['content']?.asString();
+    if (!row || !content) {
       console.warn(`[skip] run_key=${ctx.runKey} blog_id=${blogId} reason=missing-row-or-content`);
       return;
     }
 
-    const compactContent = row.content.replace(/\s+/g, ' ').trim();
+    const compactContent = content.replace(/\s+/g, ' ').trim();
     if (!compactContent) {
       console.warn(`[skip] run_key=${ctx.runKey} blog_id=${blogId} reason=empty-content`);
       return;
@@ -163,7 +158,7 @@ Pick<RunAgentOptions<AgentRow>, 'onRow' | 'onFailed'> {
       return;
     }
 
-    const currentSummary = (row.summary ?? '').trim();
+    const currentSummary = (row['summary']?.asString() ?? '').trim();
     if (currentSummary === nextSummary) {
       rememberContentFingerprint(blogId, fingerprint);
       console.log(`[skip] run_key=${ctx.runKey} blog_id=${blogId} reason=unchanged-summary`);

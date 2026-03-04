@@ -684,7 +684,8 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
             }
             if has_live_subs {
                 let old_row = Self::build_notification_row(&latest_row);
-                let notification = ChangeNotification::update(table_id.clone(), old_row, new_row);
+                let pk_col = self.primary_key_field_name().to_string();
+                let notification = ChangeNotification::update(table_id.clone(), old_row, new_row, vec![pk_col]);
                 notification_service.notify_table_change(None, table_id, notification);
             }
         }
@@ -1249,5 +1250,25 @@ impl crate::utils::dml_provider::KalamTableProvider for SharedTableProvider {
         }
         let keys = self.insert_batch(user_id, rows).await?;
         Ok(keys.len())
+    }
+
+    async fn insert_rows_returning(
+        &self,
+        user_id: &UserId,
+        rows: Vec<Row>,
+    ) -> Result<Vec<ScalarValue>, KalamDbError> {
+        if self.core.services.cluster_coordinator.is_cluster_mode().await {
+            let is_leader = self.core.services.cluster_coordinator.is_leader_for_shared().await;
+            if !is_leader {
+                let leader_addr =
+                    self.core.services.cluster_coordinator.leader_addr_for_shared().await;
+                return Err(KalamDbError::NotLeader { leader_addr });
+            }
+        }
+        let keys = self.insert_batch(user_id, rows).await?;
+        Ok(keys
+            .into_iter()
+            .map(|k| ScalarValue::Int64(Some(k.as_i64())))
+            .collect())
     }
 }

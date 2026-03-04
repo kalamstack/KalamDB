@@ -58,11 +58,11 @@ import { fileURLToPath } from 'url';
 import {
   createClient,
   Auth,
-  parseRows,
   type KalamDBClient,
   type ConsumeContext,
   type ConsumerHandle,
   type Username,
+  type QueryResponse,
 } from 'kalam-link';
 import {
   generateConversationTitle,
@@ -96,6 +96,19 @@ interface TopicMessage {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * Extract named row objects from a QueryResponse.
+ *
+ * The WASM kalam-link layer enriches each result set with a `named_rows`
+ * field — an array of `{ column: value }` objects with raw JSON values.
+ * This replaces the old `parseRows()` helper.
+ */
+function rowsFrom(resp: QueryResponse): Record<string, unknown>[] {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const result = (resp as any)?.results?.[0];
+  return (result?.named_rows ?? []) as Record<string, unknown>[];
+}
 
 /**
  * Resolve the absolute path to the kalam-link WASM binary.
@@ -219,7 +232,7 @@ async function fetchConversationHistory(
      LIMIT ${SERVICE_CONFIG.aiContextWindowMessages}`;
 
   const historyResp = await client.executeAsUser(historySql, ownerUser);
-  const historyRows = parseRows<Record<string, unknown>>(historyResp);
+  const historyRows = rowsFrom(historyResp);
 
   return historyRows
     .map((row) => ({
@@ -298,7 +311,7 @@ async function processMessage(
     const convResp = await client.query(
       `SELECT created_by FROM chat.conversations WHERE id = ${data.conversation_id}`
     );
-    const convRows = parseRows<Record<string, unknown>>(convResp);
+    const convRows = rowsFrom(convResp);
     if (convRows.length === 0) {
       console.log(`   ⊘ Conversation ${data.conversation_id} not found`);
       return;

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
 
-use super::username::Username;
+use crate::auth::models::Username;
+use crate::models::RowData;
 
 /// A single consumed message from a topic.
 ///
@@ -43,6 +43,7 @@ pub struct ConsumeMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub username: Option<Username>,
 
-    /// Decoded message payload as a JSON object
-    pub value: JsonValue,
+    /// Decoded message payload as a named-column row (`column → value`).
+    /// Mirrors the subscription row shape: `HashMap<String, KalamCellValue>`.
+    pub value: RowData,
 }

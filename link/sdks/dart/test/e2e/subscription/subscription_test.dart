@@ -102,7 +102,7 @@ void main() {
         final sub = stream.listen((event) {
           if (event case InsertEvent()) {
             for (final row in event.rows) {
-              if (row['id'] == 500) {
+              if (row['id']?.asInt() == 500) {
                 if (!insertEvent.isCompleted) {
                   insertEvent.complete(event);
                 }
@@ -126,8 +126,8 @@ void main() {
             const Duration(seconds: 15),
           );
 
-          expect(received.row['id'], 500);
-          expect(received.row['body'], 'hello from writer');
+          expect(received.row['id']?.asInt(), 500);
+          expect(received.row['body']?.asString(), 'hello from writer');
         } finally {
           await _safeCancel(sub);
           await writer.dispose();

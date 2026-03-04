@@ -2,7 +2,8 @@ use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 
 use super::batch_control::BatchControl;
-use super::schema_field::SchemaField;
+use crate::models::KalamCellValue;
+use crate::models::SchemaField;
 
 /// Change event received via WebSocket subscription.
 #[derive(Debug, Clone)]
@@ -23,8 +24,8 @@ pub enum ChangeEvent {
     InitialDataBatch {
         /// Subscription ID the batch belongs to
         subscription_id: String,
-        /// Rows in this batch
-        rows: Vec<HashMap<String, JsonValue>>,
+        /// Rows in this batch (named columns)
+        rows: Vec<HashMap<String, KalamCellValue>>,
         /// Batch control information
         batch_control: BatchControl,
     },
@@ -33,26 +34,28 @@ pub enum ChangeEvent {
     Insert {
         /// Subscription ID the change belongs to
         subscription_id: String,
-        /// Inserted rows
-        rows: Vec<JsonValue>,
+        /// Inserted rows (named columns)
+        rows: Vec<HashMap<String, KalamCellValue>>,
     },
 
     /// Update notification
     Update {
         /// Subscription ID the change belongs to
         subscription_id: String,
-        /// Updated rows (current values)
-        rows: Vec<JsonValue>,
-        /// Previous row values
-        old_rows: Vec<JsonValue>,
+        /// Updated rows (only changed columns + PK/_seq).
+        /// The changed user columns are exactly the non-system keys in each row:
+        /// `row.keys().filter(|k| !k.starts_with('_'))`
+        rows: Vec<HashMap<String, KalamCellValue>>,
+        /// Previous row values (only changed columns + PK/_seq)
+        old_rows: Vec<HashMap<String, KalamCellValue>>,
     },
 
     /// Delete notification
     Delete {
         /// Subscription ID the change belongs to
         subscription_id: String,
-        /// Deleted rows
-        old_rows: Vec<JsonValue>,
+        /// Deleted rows (named columns)
+        old_rows: Vec<HashMap<String, KalamCellValue>>,
     },
 
     /// Error notification from the server

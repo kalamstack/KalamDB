@@ -17,9 +17,12 @@ use crate::sql::functions::{
 };
 use datafusion::error::Result as DataFusionResult;
 use datafusion::execution::context::{SessionContext, SessionState};
+use datafusion::execution::memory_pool::GreedyMemoryPool;
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::logical_expr::ScalarUDF;
 use datafusion::prelude::SessionConfig;
 use kalamdb_configs::DataFusionSettings;
+use std::sync::Arc;
 
 // KalamSessionState removed (ExecutionContext used at higher layer)
 
@@ -84,7 +87,21 @@ impl DataFusionSessionFactory {
             .with_batch_size(settings.batch_size)
             .with_default_catalog_and_schema("kalam", "default");
 
-        let base_ctx = SessionContext::new_with_config(config);
+        // Enforce memory limit via GreedyMemoryPool so DataFusion
+        // operators (sort, aggregate, join) cannot allocate unbounded memory.
+        // Without this, a single query scanning large Parquet files can spike
+        // process memory by hundreds of MB.
+        let runtime_env = RuntimeEnvBuilder::new()
+            .with_memory_pool(Arc::new(GreedyMemoryPool::new(settings.memory_limit)))
+            .build_arc()
+            .map_err(|e| datafusion::error::DataFusionError::External(Box::new(e)))?;
+
+        log::info!(
+            "DataFusion memory pool enforced: limit={}MB",
+            settings.memory_limit / (1024 * 1024)
+        );
+
+        let base_ctx = SessionContext::new_with_config_rt(config, runtime_env);
 
         // Register custom functions ONCE on the base context
         // The resulting SessionState is then reused via cheap clones.

@@ -375,7 +375,7 @@ async fn test_count_excludes_deleted_rows() {
         })
         .expect(&format!("Missing count column. Available columns: {:?}", rows[0].keys()));
 
-    let count = match count_val {
+    let count = match count_val.inner() {
         serde_json::Value::Number(n) => n.as_i64().unwrap(),
         serde_json::Value::String(s) => s.parse::<i64>().expect("Count string is not a valid i64"),
         _ => panic!("Unexpected count value type: {:?}", count_val),
@@ -420,7 +420,7 @@ async fn test_count_excludes_deleted_rows() {
                 rows[0].keys()
             ));
 
-        let current = match count_val {
+        let current = match count_val.inner() {
             serde_json::Value::Number(n) => n.as_i64().unwrap(),
             serde_json::Value::String(s) => {
                 s.parse::<i64>().expect("Count string after delete is not a valid i64")

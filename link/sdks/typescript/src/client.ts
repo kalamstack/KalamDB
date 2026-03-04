@@ -44,7 +44,19 @@ import type {
   ConsumeResponse,
 } from '../.wasm-out/kalam_link.js';
 
-import { parseRows } from './helpers/query_helpers.js';
+import { KalamCellValue, wrapRowMap } from './cell_value.js';
+import type { RowData } from './cell_value.js';
+
+import {
+  FileRefContext,
+  KalamChange,
+  KalamRow,
+  wrapRows,
+} from './file_ref.js';
+
+// Re-export so consumers of client.ts don't need a separate file_ref import.
+export { KalamChange, KalamRow, wrapRows };
+export type { FileRefContext };
 
 type NodeWindowShim = {
   location?: {
@@ -762,36 +774,195 @@ export class KalamDBClient {
   }
 
   /**
-   * Query and return the first row, or `null`.
+   * Extract `named_rows` from a query response and wrap each cell as `KalamCellValue`.
+   *
+   * The Rust WASM layer pre-computes `named_rows` (schema → map) so SDKs
+   * don't need to perform the transformation themselves.
+   * @internal
+   */
+  private static namedRows(response: QueryResponse): RowData[] {
+    const result = response.results?.[0];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const raw = (result as any)?.named_rows as Record<string, unknown>[] | undefined;
+    if (!raw || !Array.isArray(raw)) return [];
+    return raw.map(row => wrapRowMap(row));
+  }
+
+  /**
+   * Query and return the first row as a `RowData`, or `null`.
+   *
+   * Every cell value is wrapped as a `KalamCellValue` with type-safe
+   * accessors (`.asString()`, `.asInt()`, `.asFile()`, etc.).
    *
    * @example
    * ```typescript
-   * const user = await client.queryOne<User>('SELECT * FROM users WHERE id = $1', [42]);
+   * const row = await client.queryOne('SELECT * FROM users WHERE id = $1', [42]);
+   * if (row) {
+   *   console.log(row['name'].asString(), row['email'].asString());
+   * }
    * ```
    */
-  async queryOne<T extends Record<string, unknown> = Record<string, unknown>>(
+  async queryOne(
     sql: string,
     params?: unknown[],
-  ): Promise<T | null> {
+  ): Promise<RowData | null> {
     const response = await this.query(sql, params);
-    const rows = parseRows<T>(response);
+    const rows = KalamDBClient.namedRows(response);
     return rows[0] ?? null;
   }
 
   /**
-   * Query and return all rows.
+   * Query and return all rows as `RowData[]`.
+   *
+   * Every cell value is wrapped as a `KalamCellValue` with type-safe
+   * accessors (`.asString()`, `.asInt()`, `.asFile()`, etc.).
    *
    * @example
    * ```typescript
-   * const msgs = await client.queryAll<Message>('SELECT * FROM chat.messages');
+   * const rows = await client.queryAll('SELECT * FROM users');
+   * for (const row of rows) {
+   *   console.log(row['name'].asString());
+   *   console.log(row['age'].asInt());
+   *   const url = row['avatar'].asFileUrl('http://localhost:8080', 'default', 'users');
+   * }
    * ```
    */
-  async queryAll<T extends Record<string, unknown> = Record<string, unknown>>(
+  async queryAll(
     sql: string,
     params?: unknown[],
-  ): Promise<T[]> {
+  ): Promise<RowData[]> {
     const response = await this.query(sql, params);
-    return parseRows<T>(response);
+    return KalamDBClient.namedRows(response);
+  }
+
+  /**
+   * Parse a "namespace.table" or "table" string into a `FileRefContext`.
+   * Unqualified names fall back to the "default" namespace.
+   * @internal
+   */
+  private tableContext(qualifiedName: string): FileRefContext {
+    const dot = qualifiedName.indexOf('.');
+    if (dot !== -1) {
+      return {
+        baseUrl: this.url,
+        namespace: qualifiedName.slice(0, dot),
+        table: qualifiedName.slice(dot + 1),
+      };
+    }
+    return { baseUrl: this.url, namespace: 'default', table: qualifiedName };
+  }
+
+  /**
+   * Wrap a single raw row object as a `KalamRow<T>` with FILE column access.
+   *
+   * Supply the table as a `"namespace.table"` string (or plain `"table"` for the
+   * `"default"` namespace). The resulting row's `.file(column)` returns a
+   * `BoundFileRef` whose `downloadUrl()` / `relativeUrl()` need no extra args.
+   *
+   * @param row       - Raw row object (e.g., result of `queryOne`)
+   * @param tableName - Qualified table name, e.g. `"default.users"` or `"users"`
+   *
+   * @example
+   * ```typescript
+   * const raw = await client.queryOne<User>('SELECT * FROM default.users WHERE id = $1', [42]);
+   * if (raw) {
+   *   const row = client.wrapRow<User>(raw, 'default.users');
+   *   const avatar = row.file('avatar');
+   *   if (avatar) console.log(avatar.downloadUrl());
+   * }
+   * ```
+   */
+  wrapRow<T extends Record<string, unknown> = Record<string, unknown>>(
+    row: T,
+    tableName: string,
+  ): KalamRow<T> {
+    return new KalamRow<T>(row, this.tableContext(tableName));
+  }
+
+  /**
+   * Execute a SQL query and return rows wrapped as `KalamRow<T>`.
+   *
+   * Each row exposes `.data` for raw column values and `.file(column)` for
+   * FILE columns — returning a `BoundFileRef` with no-arg `downloadUrl()`.
+   *
+   * @param sql       - SQL query string
+   * @param tableName - Qualified table name for file URL context, e.g. `"default.users"`
+   * @param params    - Optional query parameters
+   *
+   * @example
+   * ```typescript
+   * interface User { id: string; name: string; avatar: string }
+   *
+   * const rows = await client.queryRows<User>(
+   *   'SELECT * FROM default.users WHERE active = true',
+   *   'default.users',
+   * );
+   *
+   * rows.forEach(row => {
+   *   console.log(row.data.name);
+   *   const avatar = row.file('avatar');
+   *   if (avatar) {
+   *     img.src = avatar.downloadUrl();
+   *     console.log(avatar.isImage(), avatar.formatSize());
+   *   }
+   * });
+   * ```
+   */
+  async queryRows<T extends Record<string, unknown> = Record<string, unknown>>(
+    sql: string,
+    tableName: string,
+    params?: unknown[],
+  ): Promise<KalamRow<T>[]> {
+    const ctx = this.tableContext(tableName);
+    const response = await this.query(sql, params);
+    const rows = KalamDBClient.namedRows(response) as unknown as T[];
+    return wrapRows<T>(rows, ctx);
+  }
+
+  /**
+   * Subscribe to a table and receive change events with rows pre-wrapped as `KalamRow<T>`.
+   *
+   * The callback receives a `KalamChange<T>` where both `rows` (new values) and
+   * `oldValues` (pre-change values for updates/deletes) are `KalamRow<T>` instances.
+   * Call `.file(column)` on any row to get a `BoundFileRef` with no-arg URL methods.
+   *
+   * @param tableName - Qualified table name, e.g. `"default.users"` or `"users"`.
+   *                    Used both as the subscription target and as the file URL context.
+   * @param callback  - Invoked for every change event
+   * @param options   - Optional subscription options (batch_size, resume, etc.)
+   * @returns An unsubscribe function
+   *
+   * @example
+   * ```typescript
+   * interface User { id: string; name: string; avatar: string }
+   *
+   * const unsub = await client.subscribeRows<User>('default.users', (change) => {
+   *   if (change.type === 'insert' || change.type === 'update') {
+   *     change.rows.forEach(row => {
+   *       console.log('User:', row.data.name);
+   *       const avatar = row.file('avatar');
+   *       if (avatar) {
+   *         img.src = avatar.downloadUrl();           // full URL
+   *         console.log(avatar.relativeUrl());         // /api/v1/files/default/users/…
+   *         console.log(avatar.name, avatar.formatSize(), avatar.isImage());
+   *       }
+   *     });
+   *   }
+   * });
+   *
+   * // Unsubscribe when done
+   * await unsub();
+   * ```
+   */
+  async subscribeRows<T extends Record<string, unknown> = Record<string, unknown>>(
+    tableName: string,
+    callback: (change: KalamChange<T>) => void,
+    options?: SubscriptionOptions,
+  ): Promise<Unsubscribe> {
+    const ctx = this.tableContext(tableName);
+    return this.subscribe(tableName, (event) => {
+      callback(new KalamChange<T>(event, ctx));
+    }, options);
   }
 
   /* ---------------------------------------------------------------- */
@@ -1177,7 +1348,7 @@ export class KalamDBClient {
     if (typeof runtime.WebSocket === 'undefined') {
       try {
         const wsModuleName = 'ws';
-        const wsModule = (await import(wsModuleName)) as {
+        const wsModule = (await import(/* @vite-ignore */ wsModuleName)) as {
           WebSocket?: typeof WebSocket;
           default?: typeof WebSocket;
         };

@@ -5,7 +5,7 @@
 use kalamdb_commons::{
     conversions::arrow_json_conversion::row_to_json_map,
     errors::{CommonError, Result},
-    models::{rows::Row, PayloadMode, TableId},
+    models::{rows::Row, KalamCellValue, PayloadMode, TableId},
 };
 use kalamdb_system::providers::topics::TopicRoute;
 
@@ -78,7 +78,7 @@ impl PreparedRow {
             hasher.finish()
         };
         // Pre-insert _table and serialize for Full/Diff payloads.
-        json_map.insert("_table".to_string(), serde_json::Value::String(table_id.to_string()));
+        json_map.insert("_table".to_string(), KalamCellValue::text(table_id.to_string()));
         let full_payload = serde_json::to_vec(&json_map)
             .map_err(|e| CommonError::Internal(format!("Failed to serialize row: {}", e)))?;
         Ok(Self {
@@ -213,7 +213,7 @@ fn extract_full_row_with_metadata(row: &Row, table_id: &TableId) -> Result<Vec<u
         .map_err(|e| CommonError::Internal(format!("Failed to convert row to JSON: {}", e)))?;
 
     // Inject source table metadata (uses system column convention with underscore prefix)
-    json_map.insert("_table".to_string(), serde_json::Value::String(table_id.to_string()));
+    json_map.insert("_table".to_string(), KalamCellValue::text(table_id.to_string()));
 
     serde_json::to_vec(&json_map)
         .map_err(|e| CommonError::Internal(format!("Failed to serialize row: {}", e)))

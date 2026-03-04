@@ -50,9 +50,11 @@ export type {
 // Types & enums
 export {
   ChangeType,
+  KalamCellValue,
   LogLevel,
   MessageType,
   Username,
+  wrapRowMap,
 } from './types.js';
 
 export type {
@@ -88,6 +90,7 @@ export type {
   QueryResponse,
   QueryResult,
   ResponseStatus,
+  RowData,
   SchemaField,
   SeqId,
   ServerMessage,
@@ -130,19 +133,23 @@ export { createClient, KalamDBClient } from './client.js';
 // Query helpers
 export {
   normalizeQueryResponse,
-  parseRows,
   sortColumns,
   SYSTEM_TABLES_ORDER,
 } from './helpers/query_helpers.js';
 
 // FileRef helpers
 export {
+  BoundFileRef,
   FileRef,
+  KalamChange,
+  KalamRow,
   parseFileRef,
   parseFileRefs,
+  wrapRows,
 } from './file_ref.js';
 
 export type {
+  FileRefContext,
   FileRefData,
 } from './file_ref.js';
 

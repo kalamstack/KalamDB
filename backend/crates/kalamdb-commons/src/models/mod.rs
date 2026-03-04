@@ -32,6 +32,9 @@ pub mod datatypes; // Unified data type system (KalamDataType)
 pub mod ids; // Type-safe identifier wrappers
 pub mod schemas; // Table and column schema definitions
 
+// Cell value wrapper
+mod kalam_cell_value;
+
 // Standalone type modules (not IDs, not system tables)
 mod auth_type;
 mod connection;
@@ -49,6 +52,7 @@ pub mod rows;
 // Re-export all types from submodules for convenience
 pub use auth_type::AuthType;
 pub use ids::*;
+pub use kalam_cell_value::KalamCellValue;
 pub use oauth_provider::OAuthProvider;
 pub use payload_mode::PayloadMode;
 pub use read_context::ReadContext;

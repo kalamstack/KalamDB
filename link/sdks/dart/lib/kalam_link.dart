@@ -27,6 +27,8 @@
 library;
 
 export 'src/auth.dart';
+export 'src/cell_value.dart';
+export 'src/file_ref.dart';
 export 'src/kalam_client.dart';
 export 'src/logger.dart';
 export 'src/models.dart';

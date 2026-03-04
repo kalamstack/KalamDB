@@ -13,7 +13,6 @@ use kalam_link::{
     ChangeEvent, ConnectionOptions, EventHandlers, KalamLinkClient, KalamLinkTimeouts,
     SubscriptionConfig,
 };
-use serde_json::Value;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -406,11 +405,11 @@ async fn test_three_subscriptions_resume_without_old_rows() {
         match event {
             ChangeEvent::Insert { rows, .. } | ChangeEvent::Update { rows, .. } => rows
                 .iter()
-                .filter_map(Value::as_object)
-                .any(|r| r.get("id").and_then(Value::as_str) == Some(target)),
+                
+                .any(|r| r.get("id").and_then(|v| v.as_str()) == Some(target)),
             ChangeEvent::InitialDataBatch { rows, .. } => rows
                 .iter()
-                .any(|r| r.get("id").and_then(Value::as_str) == Some(target)),
+                .any(|r| r.get("id").and_then(|v| v.as_str()) == Some(target)),
             _ => false,
         }
     };
@@ -548,15 +547,15 @@ async fn test_three_subscriptions_resume_without_old_rows() {
     let collect_ids = |event: &ChangeEvent, out: &mut Vec<String>| {
         match event {
             ChangeEvent::Insert { rows, .. } | ChangeEvent::Update { rows, .. } => {
-                for row in rows.iter().filter_map(Value::as_object) {
-                    if let Some(id) = row.get("id").and_then(Value::as_str) {
+                for row in rows.iter() {
+                    if let Some(id) = row.get("id").and_then(|v| v.as_str()) {
                         out.push(id.to_string());
                     }
                 }
             },
             ChangeEvent::InitialDataBatch { rows, .. } => {
                 for row in rows {
-                    if let Some(id) = row.get("id").and_then(Value::as_str) {
+                    if let Some(id) = row.get("id").and_then(|v| v.as_str()) {
                         out.push(id.to_string());
                     }
                 }
@@ -648,11 +647,11 @@ async fn test_three_subscriptions_repeated_reconnect_cycles() {
         match event {
             ChangeEvent::Insert { rows, .. } | ChangeEvent::Update { rows, .. } => rows
                 .iter()
-                .filter_map(Value::as_object)
-                .any(|r| r.get("id").and_then(Value::as_str) == Some(target)),
+                
+                .any(|r| r.get("id").and_then(|v| v.as_str()) == Some(target)),
             ChangeEvent::InitialDataBatch { rows, .. } => rows
                 .iter()
-                .any(|r| r.get("id").and_then(Value::as_str) == Some(target)),
+                .any(|r| r.get("id").and_then(|v| v.as_str()) == Some(target)),
             _ => false,
         }
     };
@@ -660,15 +659,15 @@ async fn test_three_subscriptions_repeated_reconnect_cycles() {
     let collect_ids = |event: &ChangeEvent, out: &mut Vec<String>| {
         match event {
             ChangeEvent::Insert { rows, .. } | ChangeEvent::Update { rows, .. } => {
-                for row in rows.iter().filter_map(Value::as_object) {
-                    if let Some(id) = row.get("id").and_then(Value::as_str) {
+                for row in rows.iter() {
+                    if let Some(id) = row.get("id").and_then(|v| v.as_str()) {
                         out.push(id.to_string());
                     }
                 }
             },
             ChangeEvent::InitialDataBatch { rows, .. } => {
                 for row in rows {
-                    if let Some(id) = row.get("id").and_then(Value::as_str) {
+                    if let Some(id) = row.get("id").and_then(|v| v.as_str()) {
                         out.push(id.to_string());
                     }
                 }

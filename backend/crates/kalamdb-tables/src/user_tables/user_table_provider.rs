@@ -838,7 +838,8 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
             }
             if has_live_subs {
                 let old_row = Self::build_notification_row(&latest_row);
-                let notification = ChangeNotification::update(table_id.clone(), old_row, new_row);
+                let pk_col = self.primary_key_field_name().to_string();
+                let notification = ChangeNotification::update(table_id.clone(), old_row, new_row, vec![pk_col]);
                 notification_service.notify_table_change(
                     Some(user_id.clone()),
                     table_id,
@@ -1429,5 +1430,17 @@ impl crate::utils::dml_provider::KalamTableProvider for UserTableProvider {
     async fn insert_rows(&self, user_id: &UserId, rows: Vec<Row>) -> Result<usize, KalamDbError> {
         let keys = self.insert_batch(user_id, rows).await?;
         Ok(keys.len())
+    }
+
+    async fn insert_rows_returning(
+        &self,
+        user_id: &UserId,
+        rows: Vec<Row>,
+    ) -> Result<Vec<ScalarValue>, KalamDbError> {
+        let keys = self.insert_batch(user_id, rows).await?;
+        Ok(keys
+            .into_iter()
+            .map(|k| ScalarValue::Int64(Some(k.seq.as_i64())))
+            .collect())
     }
 }

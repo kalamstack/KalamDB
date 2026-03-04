@@ -141,15 +141,12 @@ function mergeLiveRowsIntoResult(
       }
     } else if (changeType === "update") {
       if (existingIdx !== undefined) {
-        // Compute which columns actually changed
+        // Derive changed user columns from the incoming delta row keys
+        // (the server sends only changed columns + PK + _seq in delta rows)
         const prev = rows[existingIdx];
-        const changedCols: string[] = [];
-        for (const col of Object.keys(incoming)) {
-          if (col.startsWith("_live_")) continue;
-          if (String(prev[col] ?? "") !== String(incoming[col] ?? "")) {
-            changedCols.push(col);
-          }
-        }
+        const changedCols: string[] = Object.keys(incoming).filter(
+          (k) => !k.startsWith("_"),
+        );
         rows[existingIdx] = {
           ...prev,
           ...incoming,

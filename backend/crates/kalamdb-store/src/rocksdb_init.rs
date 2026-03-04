@@ -56,7 +56,11 @@ impl RocksDbInit {
         let cache = Cache::new_lru_cache(self.settings.block_cache_size);
         let block_opts = create_block_options_with_cache(&cache);
         db_opts.set_block_based_table_factory(&block_opts);
-        db_opts.optimize_for_point_lookup(block_cache_size_mb(self.settings.block_cache_size));
+        // NOTE: We intentionally do NOT call optimize_for_point_lookup() at the DB level.
+        // That function switches memtables to a hash-based representation with 2-4x higher
+        // fixed memory overhead per column family and internally creates a second block cache.
+        // The bloom filters and block cache are already configured via set_block_based_table_factory()
+        // which provides the read-path optimizations without the memory penalty.
 
         // Determine existing CFs (or default if DB missing)
         let mut existing = match DB::list_cf(&db_opts, path) {
@@ -138,10 +142,6 @@ impl RocksDbInit {
 
     /// Close database handle (drop Arc)
     pub fn close(_db: Arc<DB>) {}
-}
-
-fn block_cache_size_mb(bytes: usize) -> u64 {
-    std::cmp::max(1, (bytes / (1024 * 1024)) as u64)
 }
 
 fn apply_cf_settings(cf_opts: &mut Options, settings: &RocksDbSettings) {

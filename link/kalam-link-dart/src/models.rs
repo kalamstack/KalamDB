@@ -120,12 +120,23 @@ pub struct DartQueryResult {
     /// Each row is a JSON-encoded string (array of values).
     /// Dart side parses this into typed values.
     pub rows_json: Vec<String>,
+    /// Each row as a JSON-encoded object (`{"col": value, ...}`).
+    /// Pre-computed from `schema` + `rows` so the Dart SDK doesn't need to
+    /// perform the schema → map transformation itself.
+    pub named_rows_json: Vec<String>,
     pub row_count: i64,
     pub message: Option<String>,
 }
 
 impl From<QueryResult> for DartQueryResult {
     fn from(r: QueryResult) -> Self {
+        // Build named_rows: schema + rows → Vec<HashMap<String, KalamCellValue>>
+        let named_rows = r.rows_as_maps();
+        let named_rows_json = named_rows
+            .iter()
+            .map(|row| serde_json::to_string(row).unwrap_or_default())
+            .collect();
+
         let rows_json = r
             .rows
             .unwrap_or_default()
@@ -135,6 +146,7 @@ impl From<QueryResult> for DartQueryResult {
         Self {
             columns: r.schema.into_iter().map(DartSchemaField::from).collect(),
             rows_json,
+            named_rows_json,
             row_count: r.row_count as i64,
             message: r.message,
         }
@@ -359,6 +371,8 @@ pub enum DartChangeEvent {
     /// One or more rows were updated.
     Update {
         subscription_id: String,
+        /// Delta rows — only changed columns + PK + `_seq`.
+        /// Changed user columns are the non-system keys: filter by `!key.starts_with('_')`.
         rows_json: Vec<String>,
         old_rows_json: Vec<String>,
     },
@@ -383,10 +397,9 @@ fn batch_status_str(bs: &BatchStatus) -> String {
     }
 }
 
-fn json_vec(values: Vec<serde_json::Value>) -> Vec<String> {
-    values
-        .into_iter()
-        .map(|v| serde_json::to_string(&v).unwrap_or_default())
+fn json_vec(rows: Vec<std::collections::HashMap<String, kalam_link::KalamCellValue>>) -> Vec<String> {
+    rows.into_iter()
+        .map(|row| serde_json::to_string(&row).unwrap_or_default())
         .collect()
 }
 

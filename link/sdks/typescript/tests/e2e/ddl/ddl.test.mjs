@@ -84,10 +84,10 @@ describe('DDL', { timeout: 30_000 }, () => {
     const row = await client.queryOne(
       `SELECT name, active, score, count FROM ${tbl} WHERE name = 'alice'`,
     );
-    assert.equal(row.name, 'alice');
-    assert.equal(row.active, true);
-    assert.equal(row.score, 98.5);
-    assert.equal(row.count, 42);
+    assert.equal(row.name.asString(), 'alice');
+    assert.equal(row.active.asBool(), true);
+    assert.equal(row.score.asFloat(), 98.5);
+    assert.equal(row.count.asInt(), 42);
 
     await dropTable(client, tbl);
   });

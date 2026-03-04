@@ -975,11 +975,17 @@ impl KalamLinkClientBuilder {
                 log::debug!("[CLIENT] Using HTTP/1.1 only");
                 client_builder.http1_only()
             },
+            #[cfg(feature = "http2")]
             HttpVersion::Http2 => {
                 log::debug!("[CLIENT] Using HTTP/2 with prior knowledge");
                 // http2_prior_knowledge() assumes the server speaks HTTP/2
                 // Use this for known HTTP/2 servers for best performance
                 client_builder.http2_prior_knowledge()
+            },
+            #[cfg(not(feature = "http2"))]
+            HttpVersion::Http2 => {
+                log::warn!("[CLIENT] HTTP/2 requested but 'http2' feature is not enabled; falling back to HTTP/1.1");
+                client_builder.http1_only()
             },
             HttpVersion::Auto => {
                 log::debug!("[CLIENT] Using automatic HTTP version negotiation");

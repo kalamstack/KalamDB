@@ -10,6 +10,7 @@
 //! - Keep all query helpers in this single file
 
 use kalam_link::models::{QueryResponse, ResponseStatus};
+use kalam_link::KalamCellValue;
 use serde_json::Value as JsonValue;
 
 /// Get a count value from a COUNT(*) query response safely.
@@ -31,7 +32,7 @@ pub fn get_count_value(response: &QueryResponse, default: i64) -> i64 {
             row.get("count")
                 .or_else(|| row.get("COUNT(*)"))
                 .or_else(|| row.get("total"))
-                .and_then(|v| match v {
+                .and_then(|v| match v.inner() {
                     JsonValue::Number(n) => n.as_i64(),
                     JsonValue::String(s) => s.parse::<i64>().ok(),
                     _ => None,
@@ -96,8 +97,8 @@ pub fn assert_row_count(response: &QueryResponse, expected: usize, context: &str
 pub fn get_value_or_default(
     response: &QueryResponse,
     column_name: &str,
-    default: JsonValue,
-) -> JsonValue {
+    default: KalamCellValue,
+) -> KalamCellValue {
     response.get_value(column_name).unwrap_or(default)
 }
 

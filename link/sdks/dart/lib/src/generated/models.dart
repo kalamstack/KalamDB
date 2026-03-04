@@ -328,12 +328,17 @@ class DartQueryResult {
   /// Each row is a JSON-encoded string (array of values).
   /// Dart side parses this into typed values.
   final List<String> rowsJson;
+
+  /// Each row as a JSON-encoded object (`{"col": value, ...}`).
+  /// Pre-computed from `schema` + `rows` on the Rust side.
+  final List<String> namedRowsJson;
   final PlatformInt64 rowCount;
   final String? message;
 
   const DartQueryResult({
     required this.columns,
     required this.rowsJson,
+    required this.namedRowsJson,
     required this.rowCount,
     this.message,
   });
@@ -342,6 +347,7 @@ class DartQueryResult {
   int get hashCode =>
       columns.hashCode ^
       rowsJson.hashCode ^
+      namedRowsJson.hashCode ^
       rowCount.hashCode ^
       message.hashCode;
 
@@ -352,6 +358,7 @@ class DartQueryResult {
           runtimeType == other.runtimeType &&
           columns == other.columns &&
           rowsJson == other.rowsJson &&
+          namedRowsJson == other.namedRowsJson &&
           rowCount == other.rowCount &&
           message == other.message;
 }
@@ -385,118 +392,6 @@ class DartSchemaField {
           dataType == other.dataType &&
           index == other.index &&
           flags == other.flags;
-}
-
-class DartServerSetupRequest {
-  final String username;
-  final String password;
-  final String rootPassword;
-  final String? email;
-
-  const DartServerSetupRequest({
-    required this.username,
-    required this.password,
-    required this.rootPassword,
-    this.email,
-  });
-
-  @override
-  int get hashCode =>
-      username.hashCode ^
-      password.hashCode ^
-      rootPassword.hashCode ^
-      email.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is DartServerSetupRequest &&
-          runtimeType == other.runtimeType &&
-          username == other.username &&
-          password == other.password &&
-          rootPassword == other.rootPassword &&
-          email == other.email;
-}
-
-class DartServerSetupResponse {
-  final String message;
-  final DartSetupUserInfo user;
-
-  const DartServerSetupResponse({
-    required this.message,
-    required this.user,
-  });
-
-  @override
-  int get hashCode => message.hashCode ^ user.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is DartServerSetupResponse &&
-          runtimeType == other.runtimeType &&
-          message == other.message &&
-          user == other.user;
-}
-
-class DartSetupStatusResponse {
-  final bool needsSetup;
-  final String message;
-
-  const DartSetupStatusResponse({
-    required this.needsSetup,
-    required this.message,
-  });
-
-  @override
-  int get hashCode => needsSetup.hashCode ^ message.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is DartSetupStatusResponse &&
-          runtimeType == other.runtimeType &&
-          needsSetup == other.needsSetup &&
-          message == other.message;
-}
-
-class DartSetupUserInfo {
-  final String id;
-  final String username;
-  final String role;
-  final String? email;
-  final String createdAt;
-  final String updatedAt;
-
-  const DartSetupUserInfo({
-    required this.id,
-    required this.username,
-    required this.role,
-    this.email,
-    required this.createdAt,
-    required this.updatedAt,
-  });
-
-  @override
-  int get hashCode =>
-      id.hashCode ^
-      username.hashCode ^
-      role.hashCode ^
-      email.hashCode ^
-      createdAt.hashCode ^
-      updatedAt.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is DartSetupUserInfo &&
-          runtimeType == other.runtimeType &&
-          id == other.id &&
-          username == other.username &&
-          role == other.role &&
-          email == other.email &&
-          createdAt == other.createdAt &&
-          updatedAt == other.updatedAt;
 }
 
 /// Subscription configuration.

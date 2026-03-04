@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:kalam_link/src/cell_value.dart';
+
 /// Column metadata from a query result.
 class SchemaField {
   final String name;
@@ -32,8 +34,9 @@ class QueryResult {
   /// Column definitions.
   final List<SchemaField> columns;
 
-  /// Raw JSON-encoded rows. Use [rows] or [toMaps] for parsed access.
-  final List<String> _rowsJson;
+  /// Named-row JSON objects computed by the Rust kalam-link layer.
+  /// Each element is a JSON object string like `{"col":"value", ...}`.
+  final List<String> _namedRowsJson;
 
   /// Number of rows affected or returned.
   final int rowCount;
@@ -43,26 +46,31 @@ class QueryResult {
 
   QueryResult({
     required this.columns,
-    required List<String> rowsJson,
+    required List<String> namedRowsJson,
     required this.rowCount,
     this.message,
-  }) : _rowsJson = rowsJson;
+  }) : _namedRowsJson = namedRowsJson;
 
-  /// Parsed rows — each row is a `List<dynamic>` of column values.
-  late final List<List<dynamic>> rows = _rowsJson
-      .map((json) => jsonDecode(json) as List<dynamic>)
-      .toList(growable: false);
-
-  /// Rows as maps keyed by column name.
-  List<Map<String, dynamic>> toMaps() {
-    return rows.map((row) {
-      final map = <String, dynamic>{};
-      for (var i = 0; i < columns.length && i < row.length; i++) {
-        map[columns[i].name] = row[i];
-      }
-      return map;
-    }).toList(growable: false);
-  }
+  /// Rows as maps keyed by column name, with values wrapped as [KalamCellValue].
+  ///
+  /// This is the primary row access method. Each cell value is a
+  /// [KalamCellValue] with type-safe accessors like `.asString()`,
+  /// `.asInt()`, `.asFile()`, etc.
+  ///
+  /// ```dart
+  /// final rows = result.rows;
+  /// for (final row in rows) {
+  ///   final name = row['name']?.asString();
+  ///   final url  = row['avatar']?.asFileUrl(
+  ///     'http://localhost:18080', 'default', 'users',
+  ///   );
+  /// }
+  /// ```
+  late final List<Map<String, KalamCellValue>> rows =
+      _namedRowsJson.map((json) {
+    final map = Map<String, dynamic>.from(jsonDecode(json) as Map);
+    return map.map((k, v) => MapEntry(k, KalamCellValue.from(v)));
+  }).toList(growable: false);
 }
 
 /// Response from a query execution.
@@ -87,16 +95,12 @@ class QueryResponse {
   });
 
   /// Convenience: rows from the first result set, or empty.
-  List<List<dynamic>> get rows =>
+  List<Map<String, KalamCellValue>> get rows =>
       results.isNotEmpty ? results.first.rows : const [];
 
   /// Convenience: column metadata from the first result set, or empty.
   List<SchemaField> get columns =>
       results.isNotEmpty ? results.first.columns : const [];
-
-  /// Convenience: first result set as maps, or empty.
-  List<Map<String, dynamic>> toMaps() =>
-      results.isNotEmpty ? results.first.toMaps() : const [];
 }
 
 /// Error details from the server.
@@ -164,56 +168,6 @@ class LoginUserInfo {
     required this.createdAt,
     required this.updatedAt,
   });
-}
-
-/// Server setup request.
-class ServerSetupRequest {
-  final String username;
-  final String password;
-  final String rootPassword;
-  final String? email;
-
-  const ServerSetupRequest({
-    required this.username,
-    required this.password,
-    required this.rootPassword,
-    this.email,
-  });
-}
-
-/// Server setup response.
-class ServerSetupResponse {
-  final String message;
-  final SetupUserInfo user;
-
-  const ServerSetupResponse({required this.message, required this.user});
-}
-
-/// User info from server setup.
-class SetupUserInfo {
-  final String id;
-  final String username;
-  final String role;
-  final String? email;
-  final String createdAt;
-  final String updatedAt;
-
-  const SetupUserInfo({
-    required this.id,
-    required this.username,
-    required this.role,
-    this.email,
-    required this.createdAt,
-    required this.updatedAt,
-  });
-}
-
-/// Setup status response.
-class SetupStatusResponse {
-  final bool needsSetup;
-  final String message;
-
-  const SetupStatusResponse({required this.needsSetup, required this.message});
 }
 
 // ---------------------------------------------------------------------------
@@ -322,6 +276,28 @@ class ConnectionHandlers {
 // Subscription / Change events
 // ---------------------------------------------------------------------------
 
+/// Parse raw JSON row strings into named maps.
+///
+/// Shared by all [ChangeEvent] subclasses that carry row data, avoiding
+/// duplicated parsing logic across [InitialDataBatch], [InsertEvent],
+/// [UpdateEvent], and [DeleteEvent].
+List<Map<String, dynamic>> _parseRowJsonList(List<String> rowsJson) {
+  return rowsJson
+      .map((json) => Map<String, dynamic>.from(jsonDecode(json) as Map))
+      .toList(growable: false);
+}
+
+/// Wrap parsed row maps with [KalamCellValue] for type-safe cell access.
+///
+/// Shared conversion used by the `rows` / `row` getters on
+/// [ChangeEvent] subclasses.
+List<Map<String, KalamCellValue>> _wrapRowMaps(
+    List<Map<String, dynamic>> rows) {
+  return rows
+      .map((row) => row.map((k, v) => MapEntry(k, KalamCellValue.from(v))))
+      .toList(growable: false);
+}
+
 /// A change event from a live subscription.
 sealed class ChangeEvent {
   const ChangeEvent._();
@@ -365,10 +341,18 @@ final class InitialDataBatch extends ChangeEvent {
   })  : _rowsJson = rowsJson,
         super._();
 
-  /// Parsed rows as maps.
-  late final List<Map<String, dynamic>> rows = _rowsJson
-      .map((json) => Map<String, dynamic>.from(jsonDecode(json) as Map))
-      .toList(growable: false);
+  /// Rows with every cell wrapped as [KalamCellValue] for type-safe access.
+  ///
+  /// Use the same `row['colname']?.asString()` pattern as [QueryResult.toTypedMaps].
+  ///
+  /// ```dart
+  /// for (final row in batch.rows) {
+  ///   print(row['name']?.asString());
+  ///   print(row['score']?.asInt());
+  /// }
+  /// ```
+  late final List<Map<String, KalamCellValue>> rows =
+      _wrapRowMaps(_parseRowJsonList(_rowsJson));
 }
 
 /// One or more rows were inserted.
@@ -382,12 +366,12 @@ final class InsertEvent extends ChangeEvent {
   })  : _rowsJson = rowsJson,
         super._();
 
-  late final List<Map<String, dynamic>> rows = _rowsJson
-      .map((json) => Map<String, dynamic>.from(jsonDecode(json) as Map))
-      .toList(growable: false);
+  /// Rows with every cell wrapped as [KalamCellValue] for type-safe access.
+  late final List<Map<String, KalamCellValue>> rows =
+      _wrapRowMaps(_parseRowJsonList(_rowsJson));
 
-  /// Convenience: first inserted row (most common case).
-  Map<String, dynamic> get row => rows.first;
+  /// Convenience: first inserted row with typed cell values.
+  Map<String, KalamCellValue> get row => rows.first;
 }
 
 /// One or more rows were updated.
@@ -404,16 +388,20 @@ final class UpdateEvent extends ChangeEvent {
         _oldRowsJson = oldRowsJson,
         super._();
 
-  late final List<Map<String, dynamic>> rows = _rowsJson
-      .map((json) => Map<String, dynamic>.from(jsonDecode(json) as Map))
-      .toList(growable: false);
+  /// Rows with every cell wrapped as [KalamCellValue] for type-safe access.
+  late final List<Map<String, KalamCellValue>> rows =
+      _wrapRowMaps(_parseRowJsonList(_rowsJson));
 
-  late final List<Map<String, dynamic>> oldRows = _oldRowsJson
-      .map((json) => Map<String, dynamic>.from(jsonDecode(json) as Map))
-      .toList(growable: false);
+  /// Previous row values with typed cell values.
+  late final List<Map<String, KalamCellValue>> oldRows =
+      _wrapRowMaps(_parseRowJsonList(_oldRowsJson));
 
-  Map<String, dynamic> get row => rows.first;
-  Map<String, dynamic>? get oldRow => oldRows.isNotEmpty ? oldRows.first : null;
+  /// Convenience: first updated row with typed cell values.
+  Map<String, KalamCellValue> get row => rows.first;
+
+  /// Convenience: first old row with typed cell values, or `null`.
+  Map<String, KalamCellValue>? get oldRow =>
+      oldRows.isNotEmpty ? oldRows.first : null;
 }
 
 /// One or more rows were deleted.
@@ -427,11 +415,12 @@ final class DeleteEvent extends ChangeEvent {
   })  : _oldRowsJson = oldRowsJson,
         super._();
 
-  late final List<Map<String, dynamic>> oldRows = _oldRowsJson
-      .map((json) => Map<String, dynamic>.from(jsonDecode(json) as Map))
-      .toList(growable: false);
+  /// Deleted rows with typed cell values.
+  late final List<Map<String, KalamCellValue>> oldRows =
+      _wrapRowMaps(_parseRowJsonList(_oldRowsJson));
 
-  Map<String, dynamic> get row => oldRows.first;
+  /// Convenience: first deleted row with typed cell values.
+  Map<String, KalamCellValue> get row => oldRows.first;
 }
 
 /// Server-side error on this subscription.

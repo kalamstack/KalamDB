@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 
-use super::batch_control::BatchControl;
-use super::change_type_raw::ChangeTypeRaw;
-use super::schema_field::SchemaField;
+use crate::models::KalamCellValue;
+use crate::models::SchemaField;
+use crate::subscription::models::BatchControl;
+use crate::subscription::models::ChangeTypeRaw;
 
 /// WebSocket message types sent from server to client
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,7 +43,7 @@ pub enum ServerMessage {
         /// The subscription ID this data is for
         subscription_id: String,
         /// The rows in this batch
-        rows: Vec<HashMap<String, JsonValue>>,
+        rows: Vec<HashMap<String, KalamCellValue>>,
         /// Batch control information
         batch_control: BatchControl,
     },
@@ -56,13 +56,13 @@ pub enum ServerMessage {
         /// Type of change: "insert", "update", or "delete"
         change_type: ChangeTypeRaw,
 
-        /// New/current row values (for INSERT and UPDATE)
+        /// For INSERT: full row data. For UPDATE: only changed columns + PK/_seq.
         #[serde(skip_serializing_if = "Option::is_none")]
-        rows: Option<Vec<HashMap<String, JsonValue>>>,
+        rows: Option<Vec<HashMap<String, KalamCellValue>>>,
 
-        /// Previous row values (for UPDATE and DELETE)
+        /// Previous row values (for UPDATE: only changed columns + PK/_seq; for DELETE: full row)
         #[serde(skip_serializing_if = "Option::is_none")]
-        old_values: Option<Vec<HashMap<String, JsonValue>>>,
+        old_values: Option<Vec<HashMap<String, KalamCellValue>>>,
     },
 
     /// Error notification

@@ -69,7 +69,11 @@ pub struct DartKalamClient {
 ///   gzip-compressed binary frames. Useful during development.
 /// * `keepalive_interval_ms` — optional WebSocket keep-alive ping interval
 ///   in milliseconds (default 10 000). Set to 0 to disable keep-alive pings.
-#[frb(sync)]
+///
+/// **Note:** This function intentionally omits `#[frb(sync)]` so that FRB
+/// dispatches it to a worker thread via `executeNormal`. The client
+/// builder may perform TLS initialisation, certificate loading, or other
+/// CPU-bound work that would otherwise freeze the Flutter UI thread.
 pub fn dart_create_client(
     base_url: String,
     auth: DartAuthProvider,
@@ -156,7 +160,9 @@ fn create_client_inner(
 /// function to push updated credentials into the Rust client.
 ///
 /// The new credentials take effect on the next `subscribe()` call.
-#[frb(sync)]
+///
+/// **Note:** `#[frb(sync)]` is intentionally removed so the lock acquisition
+/// runs on a worker thread instead of the Flutter UI thread.
 pub fn dart_update_auth(
     client: &mut DartKalamClient,
     auth: DartAuthProvider,
