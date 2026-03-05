@@ -383,6 +383,11 @@ class KalamClient {
           if (event == null || closed) break;
           controller.add(_fromBridgeChangeEvent(event));
         }
+      } catch (error, stackTrace) {
+        if (!closed && !_isDisposed) {
+          KalamLogger.error('subscription', 'Subscription error: $error');
+          controller.addError(error, stackTrace);
+        }
       } finally {
         activeSubId = null;
         if (sub != null) {
