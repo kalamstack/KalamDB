@@ -16,11 +16,17 @@ bool get _integrationEnabled {
 }
 
 String _requireEnv(String key, {required String defaultValue}) {
-  final value = Platform.environment[key];
-  if (value == null || value.trim().isEmpty) {
-    return defaultValue;
+  return _requireEnvAny([key], defaultValue: defaultValue);
+}
+
+String _requireEnvAny(List<String> keys, {required String defaultValue}) {
+  for (final key in keys) {
+    final value = Platform.environment[key];
+    if (value != null && value.trim().isNotEmpty) {
+      return value;
+    }
   }
-  return value;
+  return defaultValue;
 }
 
 String _uniqueTableName(String prefix) {
@@ -34,10 +40,12 @@ Future<KalamClient> _connectJwtClient() async {
   _sdkInitialized ??= KalamClient.init();
   await _sdkInitialized;
 
-  final serverUrl =
-      _requireEnv('KALAM_URL', defaultValue: 'http://localhost:8080');
-  final adminUser = _requireEnv('KALAM_USER', defaultValue: 'admin');
-  final adminPass = _requireEnv('KALAM_PASS', defaultValue: 'kalamdb123');
+  final serverUrl = _requireEnvAny(['KALAMDB_URL', 'KALAM_URL'],
+      defaultValue: 'http://localhost:8080');
+  final adminUser =
+      _requireEnvAny(['KALAMDB_USER', 'KALAM_USER'], defaultValue: 'admin');
+  final adminPass = _requireEnvAny(['KALAMDB_PASSWORD', 'KALAM_PASS'],
+      defaultValue: 'kalamdb123');
 
   final anonClient = await KalamClient.connect(
     url: serverUrl,

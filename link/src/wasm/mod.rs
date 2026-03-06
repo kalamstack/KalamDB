@@ -21,4 +21,7 @@ extern "C" {
 pub(crate) fn console_log(message: &str) {
     #[cfg(target_arch = "wasm32")]
     log(message);
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = message;
 }

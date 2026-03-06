@@ -37,6 +37,12 @@ export interface NoAuthCredentials {
  */
 export type AuthCredentials = BasicAuthCredentials | JwtAuthCredentials | NoAuthCredentials;
 
+type BufferCtor = {
+  from(input: string, encoding?: string): {
+    toString(encoding: string): string;
+  };
+};
+
 /**
  * Type guard to check if credentials are Basic Auth
  */
@@ -69,12 +75,17 @@ export function isAuthenticated(auth: AuthCredentials): auth is BasicAuthCredent
  * Base64 encode a string (works in both Node.js and browser)
  */
 function base64Encode(str: string): string {
-  if (typeof btoa === 'function') {
+  const runtime = globalThis as typeof globalThis & {
+    btoa?: (input: string) => string;
+    Buffer?: BufferCtor;
+  };
+
+  if (typeof runtime.btoa === 'function') {
     // Browser environment
-    return btoa(str);
-  } else if (typeof Buffer !== 'undefined') {
+    return runtime.btoa(str);
+  } else if (runtime.Buffer) {
     // Node.js environment
-    return Buffer.from(str).toString('base64');
+    return runtime.Buffer.from(str, 'utf8').toString('base64');
   }
   throw new Error('No base64 encoding available');
 }

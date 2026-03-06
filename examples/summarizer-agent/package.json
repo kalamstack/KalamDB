@@ -3,18 +3,13 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Minimal topic consumer that summarizes blog posts with kalam-link",
+  "description": "Small worker-only example using runAgent to enrich rows through a topic route",
   "scripts": {
-    "ensure-sdk": "bash scripts/ensure-sdk.sh",
-    "precheck": "npm run ensure-sdk",
-    "prestart": "npm run ensure-sdk",
     "start": "tsx src/agent.ts",
-    "check": "tsc --noEmit",
-    "test": "node --test tests/*.test.mjs",
+    "test": "node --import tsx --test tests/*.test.ts",
     "setup": "bash ./setup.sh"
   },
   "dependencies": {
-    "@langchain/google-genai": "^0.2.12",
     "dotenv": "^17.3.1",
     "kalam-link": "file:../../link/sdks/typescript"
   },

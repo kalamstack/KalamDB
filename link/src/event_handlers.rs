@@ -271,6 +271,7 @@ impl EventHandlers {
     // Internal dispatch helpers
     // ---------------------------------------------------------------
 
+    #[cfg(feature = "tokio-runtime")]
     /// Dispatch the on_connect event.
     pub(crate) fn emit_connect(&self) {
         if let Some(cb) = &self.on_connect {
@@ -278,6 +279,7 @@ impl EventHandlers {
         }
     }
 
+    #[cfg(feature = "tokio-runtime")]
     /// Dispatch the on_disconnect event.
     pub(crate) fn emit_disconnect(&self, reason: DisconnectReason) {
         if let Some(cb) = &self.on_disconnect {
@@ -285,6 +287,7 @@ impl EventHandlers {
         }
     }
 
+    #[cfg(feature = "tokio-runtime")]
     /// Dispatch the on_error event.
     pub(crate) fn emit_error(&self, error: ConnectionError) {
         if let Some(cb) = &self.on_error {
@@ -292,6 +295,7 @@ impl EventHandlers {
         }
     }
 
+    #[cfg(feature = "tokio-runtime")]
     /// Dispatch the on_receive event.
     pub(crate) fn emit_receive(&self, raw: &str) {
         if let Some(cb) = &self.on_receive {
@@ -299,6 +303,7 @@ impl EventHandlers {
         }
     }
 
+    #[cfg(feature = "tokio-runtime")]
     /// Dispatch the on_send event.
     pub(crate) fn emit_send(&self, raw: &str) {
         if let Some(cb) = &self.on_send {

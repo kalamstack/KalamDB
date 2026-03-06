@@ -169,13 +169,6 @@ KALAMDB_PASSWORD=$ROOT_PASSWORD
 # Agent settings
 KALAMDB_TOPIC=blog.summarizer
 KALAMDB_GROUP=blog-summarizer-agent
-KALAMDB_SYSTEM_PROMPT=Write one concise sentence summarizing the blog content.
-
-# Gemini API (required for AI summaries)
-# Set one key value below before running npm run start
-GEMINI_API_KEY=
-# GOOGLE_GENERATIVE_AI_API_KEY=
-GEMINI_MODEL=gemini-2.5-flash
 EOF
 
   log_success "Wrote $(basename "$ENV_FILE")"

@@ -7,9 +7,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # ── Configuration ──────────────────────────────────────────────────────
-export KALAM_URL="${KALAM_URL:-http://localhost:8080}"
-export KALAM_USER="${KALAM_USER:-admin}"
-export KALAM_PASS="${KALAM_PASS:-kalamdb123}"
+export KALAMDB_URL="${KALAMDB_URL:-${KALAM_URL:-http://localhost:8080}}"
+export KALAMDB_USER="${KALAMDB_USER:-${KALAM_USER:-admin}}"
+export KALAMDB_PASSWORD="${KALAMDB_PASSWORD:-${KALAM_PASS:-kalamdb123}}"
+export KALAM_URL="${KALAM_URL:-$KALAMDB_URL}"
+export KALAM_USER="${KALAM_USER:-$KALAMDB_USER}"
+export KALAM_PASS="${KALAM_PASS:-$KALAMDB_PASSWORD}"
 
 # ── Dependencies ──────────────────────────────────────────────────────
 echo "📦 Ensuring dependencies are installed..."
@@ -34,8 +37,8 @@ flutter test test/models_test.dart
 
 # ── E2E tests (require running KalamDB server) ──────────────────────
 echo ""
-echo "🔗 Checking server at $KALAM_URL ..."
-if curl -sf "$KALAM_URL/health" > /dev/null 2>&1; then
+echo "🔗 Checking server at $KALAMDB_URL ..."
+if curl -sf "$KALAMDB_URL/health" > /dev/null 2>&1; then
   echo "✅ Server is reachable"
   echo ""
   echo "🧪 Running e2e tests..."
@@ -50,7 +53,7 @@ if curl -sf "$KALAM_URL/health" > /dev/null 2>&1; then
   echo ""
   echo "✅ All Dart SDK tests passed!"
 else
-  echo "⚠️  Server not reachable at $KALAM_URL — skipping e2e tests."
+  echo "⚠️  Server not reachable at $KALAMDB_URL — skipping e2e tests."
   echo "   Start the server: cd backend && cargo run"
   echo "   Then re-run: ./test.sh"
   exit 1

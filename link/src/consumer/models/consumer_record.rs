@@ -16,6 +16,7 @@ pub struct ConsumerRecord {
     pub payload: Vec<u8>,
 }
 
+#[cfg(feature = "tokio-runtime")]
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct ConsumerRecordWire {
     pub topic_id: String,
@@ -35,6 +36,7 @@ pub(crate) struct ConsumerRecordWire {
     pub payload: Vec<u8>,
 }
 
+#[cfg(feature = "tokio-runtime")]
 impl ConsumerRecordWire {
     pub fn into_record(self, topic_name: String) -> ConsumerRecord {
         ConsumerRecord {
@@ -52,6 +54,7 @@ impl ConsumerRecordWire {
     }
 }
 
+#[cfg(feature = "tokio-runtime")]
 mod base64_bytes {
     use base64::engine::general_purpose::STANDARD;
     use base64::Engine;

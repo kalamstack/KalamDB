@@ -4,18 +4,6 @@ use std::hash::{Hash, Hasher};
 use wasm_bindgen::prelude::*;
 use web_sys::Request;
 
-/// Convert an `http(s)://` base URL to its `ws(s)://` WebSocket equivalent.
-///
-/// Appends `/v1/ws` to the converted URL. Performs basic validation to reject
-/// URLs that already use `ws://` or `wss://`.
-///
-/// When `disable_compression` is `true`, `?compress=false` is appended so the
-/// server sends plain-text frames instead of gzip-compressed binary frames.
-/// This is useful during development and debugging.
-pub(crate) fn ws_url_from_http(base_url: &str) -> Result<String, JsValue> {
-    ws_url_from_http_opts(base_url, false)
-}
-
 pub(crate) fn ws_url_from_http_opts(
     base_url: &str,
     disable_compression: bool,

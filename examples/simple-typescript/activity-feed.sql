@@ -1,0 +1,10 @@
+CREATE NAMESPACE IF NOT EXISTS demo;
+
+CREATE USER TABLE IF NOT EXISTS demo.activity_feed (
+    id BIGINT PRIMARY KEY DEFAULT SNOWFLAKE_ID(),
+    service TEXT NOT NULL,
+    level TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    message TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);

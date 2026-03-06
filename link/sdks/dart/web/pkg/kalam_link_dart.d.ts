@@ -1178,6 +1178,13 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
+    readonly __wbg_wasmtimestampformatter_free: (a: number, b: number) => void;
+    readonly parseIso8601: (a: number, b: number) => [number, number, number];
+    readonly timestampNow: () => number;
+    readonly wasmtimestampformatter_format: (a: number, b: number, c: number) => [number, number];
+    readonly wasmtimestampformatter_formatRelative: (a: number, b: number) => [number, number];
+    readonly wasmtimestampformatter_new: () => number;
+    readonly wasmtimestampformatter_withFormat: (a: number, b: number) => [number, number, number];
     readonly __wbg_kalamclient_free: (a: number, b: number) => void;
     readonly kalamclient_ack: (a: number, b: number, c: number, d: number, e: number, f: number, g: bigint) => any;
     readonly kalamclient_anonymous: (a: number, b: number) => [number, number, number];
@@ -1215,21 +1222,14 @@ export interface InitOutput {
     readonly kalamclient_subscribeWithSql: (a: number, b: number, c: number, d: number, e: number, f: any) => any;
     readonly kalamclient_unsubscribe: (a: number, b: number, c: number) => any;
     readonly kalamclient_withJwt: (a: number, b: number, c: number, d: number) => [number, number, number];
-    readonly __wbg_wasmtimestampformatter_free: (a: number, b: number) => void;
-    readonly parseIso8601: (a: number, b: number) => [number, number, number];
-    readonly timestampNow: () => number;
-    readonly wasmtimestampformatter_format: (a: number, b: number, c: number) => [number, number];
-    readonly wasmtimestampformatter_formatRelative: (a: number, b: number) => [number, number];
-    readonly wasmtimestampformatter_new: () => number;
-    readonly wasmtimestampformatter_withFormat: (a: number, b: number) => [number, number, number];
-    readonly wasm_bindgen__closure__destroy__h2e71e468c9717f03: (a: number, b: number) => void;
+    readonly wasm_bindgen__closure__destroy__h13e3942f6fe4f415: (a: number, b: number) => void;
     readonly wasm_bindgen__closure__destroy__hc4784aa82de56652: (a: number, b: number) => void;
     readonly wasm_bindgen__convert__closures_____invoke__h6537501fed6ccdff: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen__convert__closures_____invoke__h11188c184bbe4ba9: (a: number, b: number, c: any, d: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h7b0911d7f5b0bb2d: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h7b0911d7f5b0bb2d_1: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h7b0911d7f5b0bb2d_2: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h96917d2f4337dacb: (a: number, b: number) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h32394fb56f4cf4d4: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h32394fb56f4cf4d4_1: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h32394fb56f4cf4d4_2: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h4f807de8301e48dd: (a: number, b: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

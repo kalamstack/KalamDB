@@ -6,8 +6,17 @@ use kalamdb_commons::models::datatypes::KalamDataType;
 use kalamdb_commons::models::KalamCellValue;
 use kalamdb_commons::models::Username;
 use kalamdb_commons::schemas::SchemaField;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use std::fmt;
+
+/// Custom serializer to limit took field to 3 decimal places
+fn serialize_took<S>(took: &f64, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let rounded = (took * 1000.0).round() / 1000.0;
+    serializer.serialize_f64(rounded)
+}
 
 /// Error code enum for type-safe error handling
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -190,7 +199,8 @@ pub struct SqlResponse {
     /// Array of result sets, one per executed statement
     pub results: Vec<QueryResult>,
 
-    /// Total execution time in milliseconds (with fractional precision)
+    /// Total execution time in milliseconds (with fractional precision, limited to 3 decimal places)
+    #[serde(serialize_with = "serialize_took")]
     pub took: f64,
 
     /// Error details if status is "error", otherwise null

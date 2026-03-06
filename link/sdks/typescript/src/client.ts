@@ -59,6 +59,14 @@ import {
 export { KalamChange, KalamRow, wrapRows };
 export type { FileRefContext };
 
+type DynamicImport = (specifier: string) => Promise<Record<string, unknown>>;
+
+type NodeProcessShim = {
+  versions?: {
+    node?: string;
+  };
+};
+
 type NodeWindowShim = {
   location?: {
     protocol: string;
@@ -68,6 +76,26 @@ type NodeWindowShim = {
   };
   fetch?: typeof fetch;
 };
+
+type NodeFsPromisesShim = {
+  readFile(path: string): Promise<BufferSource>;
+};
+
+type NodeUrlShim = {
+  fileURLToPath(url: URL): string;
+};
+
+const dynamicImport = new Function(
+  'specifier',
+  'return import(specifier)',
+) as DynamicImport;
+
+function getNodeProcess(): NodeProcessShim | undefined {
+  const runtime = globalThis as typeof globalThis & {
+    process?: NodeProcessShim;
+  };
+  return runtime.process;
+}
 
 /* ================================================================== */
 /*  KalamDBClient                                                     */
@@ -1387,7 +1415,7 @@ export class KalamDBClient {
   }
 
   private async ensureNodeRuntimeCompat(): Promise<void> {
-    const isNodeRuntime = typeof process !== 'undefined' && Boolean(process.versions?.node);
+    const isNodeRuntime = Boolean(getNodeProcess()?.versions?.node);
     if (!isNodeRuntime) {
       return;
     }
@@ -1400,7 +1428,7 @@ export class KalamDBClient {
     if (typeof runtime.WebSocket === 'undefined') {
       try {
         const wsModuleName = 'ws';
-        const wsModule = (await import(/* @vite-ignore */ wsModuleName)) as {
+        const wsModule = (await dynamicImport(wsModuleName)) as {
           WebSocket?: typeof WebSocket;
           default?: typeof WebSocket;
         };
@@ -1423,8 +1451,8 @@ export class KalamDBClient {
     if (!this.wasmUrl) {
       try {
         const [{ readFile }, { fileURLToPath }] = await Promise.all([
-          import('node:fs/promises'),
-          import('node:url'),
+          dynamicImport('node:fs/promises') as Promise<NodeFsPromisesShim>,
+          dynamicImport('node:url') as Promise<NodeUrlShim>,
         ]);
         const wasmFileUrl = new URL('../wasm/kalam_link_bg.wasm', import.meta.url);
         this.wasmUrl = await readFile(fileURLToPath(wasmFileUrl));

@@ -1,85 +1,235 @@
-/**
- * App Component
- * Feature: 006-docker-wasm-examples
- * 
- * Main application component composing all features
- */
+import { useEffect, useMemo, useState } from 'react';
+import {
+  Auth,
+  MessageType,
+  createClient,
+  type RowData,
+} from 'kalam-link';
+import './styles.css';
 
-import { useTodos } from './hooks/useTodos';
-import { ConnectionStatus } from './components/ConnectionStatus';
-import { AddTodoForm } from './components/AddTodoForm';
-import { TodoList } from './components/TodoList';
-import './styles/App.css';
+type ActivityItem = {
+  id: string;
+  service: string;
+  level: string;
+  actor: string;
+  message: string;
+  createdAt: string;
+};
+
+const FEED_SQL = [
+  'SELECT id, service, level, actor, message, created_at',
+  'FROM demo.activity_feed',
+  'ORDER BY created_at DESC',
+  'LIMIT 12',
+].join(' ');
+
+const client = createClient({
+  url: import.meta.env.VITE_KALAMDB_URL ?? 'http://127.0.0.1:8080',
+  authProvider: async () => Auth.basic(
+    import.meta.env.VITE_KALAMDB_USERNAME ?? 'demo-user',
+    import.meta.env.VITE_KALAMDB_PASSWORD ?? 'demo123',
+  ),
+});
+
+function readText(row: RowData, key: string): string {
+  return row[key]?.asString() ?? '';
+}
+
+function toActivity(row: RowData): ActivityItem {
+  return {
+    id: readText(row, 'id'),
+    service: readText(row, 'service'),
+    level: readText(row, 'level'),
+    actor: readText(row, 'actor'),
+    message: readText(row, 'message'),
+    createdAt: readText(row, 'created_at'),
+  };
+}
 
 export function App() {
-  const {
-    todos,
-    connectionStatus,
-    addTodo,
-    deleteTodo,
-    toggleTodo,
-    isLoading,
-    error
-  } = useTodos();
+  const [items, setItems] = useState<ActivityItem[]>([]);
+  const [status, setStatus] = useState<'loading' | 'live' | 'error'>('loading');
+  const [error, setError] = useState<string | null>(null);
+  const [service, setService] = useState('api');
+  const [level, setLevel] = useState('ok');
+  const [actor, setActor] = useState('console');
+  const [message, setMessage] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  const isDisabled = connectionStatus !== 'connected';
+  const summary = useMemo(() => {
+    const critical = items.filter((item) => item.level === 'critical').length;
+    const warnings = items.filter((item) => item.level === 'warn').length;
+    const services = new Set(items.map((item) => item.service)).size;
+    return { critical, warnings, services };
+  }, [items]);
+
+  useEffect(() => {
+    let active = true;
+    let unsubscribe: (() => Promise<void>) | undefined;
+
+    const refresh = async (): Promise<void> => {
+      const rows = await client.queryAll(FEED_SQL);
+      if (!active) {
+        return;
+      }
+      setItems(rows.map(toActivity));
+    };
+
+    const start = async (): Promise<void> => {
+      try {
+        await refresh();
+        unsubscribe = await client.subscribeWithSql(
+          FEED_SQL,
+          async (event) => {
+            if (event.type === MessageType.SubscriptionAck) {
+              setStatus('live');
+              return;
+            }
+            if (event.type === MessageType.Error) {
+              setStatus('error');
+              setError('Subscription dropped. Check the KalamDB server logs.');
+              return;
+            }
+            await refresh();
+          },
+          { last_rows: 12 },
+        );
+        if (active) {
+          setStatus('live');
+        }
+      } catch (caughtError) {
+        if (!active) {
+          return;
+        }
+        setStatus('error');
+        setError(caughtError instanceof Error ? caughtError.message : String(caughtError));
+      }
+    };
+
+    void start();
+
+    return () => {
+      active = false;
+      void unsubscribe?.();
+      void client.disconnect();
+    };
+  }, []);
+
+  const submitEvent = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault();
+    const trimmed = message.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      await client.query(
+        'INSERT INTO demo.activity_feed (service, level, actor, message) VALUES ($1, $2, $3, $4)',
+        [service, level, actor, trimmed],
+      );
+      setMessage('');
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : String(caughtError));
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
-    <div className="app">
-      <header className="app-header">
-        <div className="header-content">
-          <h1 className="app-title">
-            <span className="title-icon">✓</span>
-            KalamDB TODO
-          </h1>
-          <ConnectionStatus status={connectionStatus} />
+    <main className="shell">
+      <section className="hero">
+        <div>
+          <p className="eyebrow">Browser SDK example</p>
+          <h1>Realtime Ops Feed</h1>
+          <p className="lede">
+            One query to load the feed. One subscription to keep every tab current.
+            No custom transport layer in between.
+          </p>
         </div>
-        <p className="app-subtitle">
-          Real-time TODO app powered by KalamDB WASM client
-        </p>
-      </header>
+        <div className={`status status-${status}`} data-testid="connection-status">
+          <span className="status-dot" />
+          {status === 'live' ? 'Live' : status === 'loading' ? 'Connecting' : 'Needs attention'}
+        </div>
+      </section>
 
-      <main className="app-main">
-        {error && (
-          <div className="error-banner">
-            <strong>Error:</strong> {error}
-            <p className="error-help">
-              Make sure KalamDB server is running and .env is configured correctly.
-            </p>
-          </div>
-        )}
+      <section className="summary-grid">
+        <article>
+          <span>Tracked rows</span>
+          <strong>{items.length}</strong>
+        </article>
+        <article>
+          <span>Critical</span>
+          <strong>{summary.critical}</strong>
+        </article>
+        <article>
+          <span>Warnings</span>
+          <strong>{summary.warnings}</strong>
+        </article>
+        <article>
+          <span>Services</span>
+          <strong>{summary.services}</strong>
+        </article>
+      </section>
 
-        {isLoading && (
-          <div className="loading-state">
-            <div className="spinner"></div>
-            <p>Loading TODOs...</p>
-          </div>
-        )}
-
-        {!isLoading && !error && (
-          <>
-            <AddTodoForm 
-              onAdd={addTodo} 
-              disabled={isDisabled}
+      <section className="panel composer-panel">
+        <div className="panel-head">
+          <h2>Insert an event</h2>
+          <p>Submit once and watch every open tab update.</p>
+        </div>
+        <form className="composer" onSubmit={submitEvent}>
+          <label>
+            Service
+            <input value={service} onChange={(event) => setService(event.target.value)} />
+          </label>
+          <label>
+            Level
+            <select value={level} onChange={(event) => setLevel(event.target.value)}>
+              <option value="ok">ok</option>
+              <option value="warn">warn</option>
+              <option value="critical">critical</option>
+            </select>
+          </label>
+          <label>
+            Actor
+            <input value={actor} onChange={(event) => setActor(event.target.value)} />
+          </label>
+          <label className="message-field">
+            Message
+            <textarea
+              value={message}
+              onChange={(event) => setMessage(event.target.value)}
+              placeholder="Describe the thing worth broadcasting to every open dashboard"
             />
-            
-            <TodoList
-              todos={todos}
-              onDelete={deleteTodo}
-              onToggle={toggleTodo}
-              disabled={isDisabled}
-            />
-          </>
-        )}
-      </main>
+          </label>
+          <button type="submit" disabled={submitting || status === 'error'}>
+            {submitting ? 'Sending…' : 'Broadcast event'}
+          </button>
+        </form>
+        {error ? <p className="error-text">{error}</p> : null}
+      </section>
 
-      <footer className="app-footer">
-        <p>
-          Built with <a href="https://github.com/yourusername/KalamDB" target="_blank" rel="noopener noreferrer">KalamDB</a>
-          {' '} • {' '}
-          <span className="todo-count">{todos.length} total TODO{todos.length !== 1 ? 's' : ''}</span>
-        </p>
-      </footer>
-    </div>
+      <section className="panel">
+        <div className="panel-head">
+          <h2>Live feed</h2>
+          <p>The UI refreshes from the same SQL query after every subscription event.</p>
+        </div>
+        <div className="feed" data-testid="feed-list">
+          {items.map((item) => (
+            <article className="feed-row" data-testid="feed-row" key={item.id}>
+              <header>
+                <span className={`pill pill-${item.level}`}>{item.level}</span>
+                <strong>{item.service}</strong>
+                <span>{item.actor}</span>
+              </header>
+              <p>{item.message}</p>
+              <small>{item.createdAt}</small>
+            </article>
+          ))}
+        </div>
+      </section>
+    </main>
   );
 }

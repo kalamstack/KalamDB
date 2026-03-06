@@ -1,263 +1,55 @@
-# KalamDB TODO Example - TypeScript/React
+# Realtime Ops Feed
 
-A real-time TODO application demonstrating KalamDB's WASM client with React, featuring:
+Smallest useful browser example for the TypeScript SDK.
 
-- ✅ **Real-time sync** across multiple browser tabs via WebSocket
-- ✅ **Offline-first** with localStorage caching for instant load
-- ✅ **Professional UI** with modern design and smooth animations
-- ✅ **Type-safe** TypeScript throughout
-- ✅ **Connection resilience** with automatic reconnection and sync
-- ✅ **< 500 LOC** - simple enough to understand, powerful enough to be useful
+This app shows three KalamDB strengths with very little code:
 
-## Features
+- SQL reads with `queryAll()`
+- live updates with `subscribeWithSql()`
+- browser auth using `Auth.basic()` via the SDK's built-in JWT exchange
 
-### Real-Time Synchronization
-- Changes propagate instantly to all connected tabs
-- Subscribe from last known ID to catch missed updates
-- Automatic reconnection with sync resume
+Instead of a CRUD todo app, this example renders a live operations feed. Open it in two tabs, add an event in one tab, and the second tab updates immediately.
 
-### Offline-First Architecture
-- TODOs load instantly from localStorage cache
-- Full functionality in read-only mode when disconnected
-- Background sync when connection is restored
+## Why this example exists
 
-### Professional UI/UX
-- Clean, modern interface with dark mode support
-- Smooth animations and transitions
-- Accessible design with keyboard navigation
-- Responsive layout for mobile and desktop
-- Visual connection status indicator
+It stays intentionally small so the SDK usage is obvious:
 
-## Prerequisites
+- one React component
+- no client wrapper layer
+- no custom hook hierarchy
+- one browser test that verifies the real cross-tab flow
 
-- **KalamDB server** running (see [main README](../../README.md))
-- **Node.js 18+** and npm
-- **API key** from KalamDB (see setup instructions below)
+## Quick start
 
-## Quick Start
+1. Make sure KalamDB is running on `http://127.0.0.1:8080`.
+2. Run `npm install`.
+3. Run `npm run setup`.
+4. Run `npm run dev`.
+5. Open `http://127.0.0.1:5173`.
 
-### 1. Setup Database
+The setup script creates:
 
-```bash
-# Make sure KalamDB server is running
-cargo run --bin kalamdb-server
+- namespace `demo`
+- user table `demo.activity_feed`
+- local example user `demo-user` / `demo123`
+- `.env.local` with browser credentials for local development
 
-# In another terminal, create TODO table
-./setup.sh
-```
+## Test it
 
-The setup script will:
-- ✅ Check KalamDB server connectivity
-- ✅ Create the `todos` table if it doesn't exist
-- ✅ Verify setup was successful
+Run `npm test`.
 
-### 2. Get API Key
+The Playwright test:
 
-**For Local Development/Testing:**
+- boots the example
+- opens two pages
+- submits a new event
+- verifies both tabs render the same live row
 
-The KalamDB server automatically creates a system user with a test API key on startup when configured in `backend/config.toml`:
+## Files worth reading
 
-```toml
-[server]
-test_api_key = "test-api-key-12345"
-```
-
-This test API key is **only for development** and should never be used in production.
-
-**For Production:**
-
-Create a dedicated user with the CLI:
-
-```bash
-# Using kalam CLI
-kalam user create --name "demo-user" --role "user"
-
-# Output will show your API key:
-# API Key: 550e8400-e29b-41d4-a716-446655440000
-# ⚠️  Save this securely!
-```
-
-### 3. Configure Environment
-
-```bash
-# Copy example env file
-cp .env.example .env
-
-# Edit .env and add your API key
-# VITE_KALAMDB_URL=ws://localhost:8080
-# VITE_KALAMDB_API_KEY=your-api-key-here
-```
-
-### 4. Install Dependencies
-
-```bash
-npm install
-```
-
-**Note**: This example uses the KalamDB TypeScript SDK from `link/sdks/typescript/` as a local dependency. The SDK is automatically linked during `npm install` via the `file:` protocol in package.json:
-
-```json
-{
-  "dependencies": {
-    "kalam-link": "file:../../link/sdks/typescript"
-  }
-}
-```
-
-**Important - Vite Configuration**: Since the SDK is located outside the project directory, Vite's `fs.allow` option must be configured to allow serving files from parent directories:
-
-```typescript
-// vite.config.ts
-export default defineConfig({
-  server: {
-    fs: {
-      allow: ['..', '../..']  // Allow access to KalamDB repository root
-    }
-  }
-})
-```
-
-This allows Vite to serve the WASM module (`kalam_link_bg.wasm`) from the SDK directory.
-
-### 5. Run Development Server
-
-```bash
-npm run dev
-```
-
-The app will be available at **http://localhost:5173**
-
-## Project Structure
-
-```
-examples/simple-typescript/
-├── src/
-│   ├── types/
-│   │   └── todo.ts              # TypeScript type definitions
-│   ├── services/
-│   │   ├── kalamClient.ts       # WASM client wrapper (mock for dev)
-│   │   └── localStorage.ts      # Cache management
-│   ├── hooks/
-│   │   └── useTodos.ts          # React hook for TODO state
-│   ├── components/
-│   │   ├── ConnectionStatus.tsx # WebSocket status indicator
-│   │   ├── AddTodoForm.tsx      # Add TODO form
-│   │   ├── TodoList.tsx         # TODO list container
-│   │   └── TodoItem.tsx         # Individual TODO item
-│   ├── styles/
-│   │   └── App.css              # Professional styling
-│   ├── App.tsx                  # Main app component
-│   └── main.tsx                 # React entry point
-├── setup.sh                     # Database setup script
-├── todo-app.sql                 # SQL schema
-├── package.json                 # Dependencies
-├── tsconfig.json                # TypeScript config
-├── vite.config.ts               # Vite config
-└── README.md                    # This file
-```
-
-## How It Works
-
-### Data Flow
-
-```
-┌──────────────┐
-│  localStorage│ ◄────┐
-└───────┬──────┘      │
-        │ Load cache  │ Save cache
-        ▼             │
-┌──────────────┐      │
-│  React State │ ─────┘
-└───────┬──────┘
-        │ User actions (add/delete/toggle)
-        ▼
-┌──────────────┐
-│ WASM Client  │ ◄──── WebSocket events (insert/update/delete)
-└───────┬──────┘
-        │ HTTP (write) / WebSocket (subscribe)
-        ▼
-┌──────────────┐
-│ KalamDB      │
-│ Server       │
-└──────────────┘
-```
-
-### Initial Load Sequence
-
-1. **Instant render**: Load TODOs from localStorage cache
-2. **Connect**: Establish WebSocket connection with API key
-3. **Subscribe**: Subscribe to `todos` table from last sync ID
-4. **Sync**: Receive any missed events since last connection
-5. **Update**: Merge new events with cached state
-6. **Persist**: Save updated state to localStorage
-
-### Real-Time Sync
-
-- All write operations (INSERT, UPDATE, DELETE) go through HTTP `/sql` endpoint
-- Server broadcasts changes to all subscribers via WebSocket
-- Each tab receives events and updates both UI and localStorage
-- Last sync ID is tracked to resume subscriptions after disconnect
-
-### Error Handling
-
-- **No connection**: Display error banner with helpful message
-- **Disconnected**: Show warning, disable writes, enable read-only mode
-- **Write failure**: Show error message, don't update UI
-- **localStorage full**: Clear old cache and retry
-
-## API Reference
-
-### useTodos Hook
-
-```typescript
-const {
-  todos,              // Todo[] - Current TODO list
-  connectionStatus,   // ConnectionStatus - 'connected' | 'connecting' | 'disconnected' | 'error'
-  addTodo,            // (title: string) => Promise<void>
-  deleteTodo,         // (id: number) => Promise<void>
-  toggleTodo,         // (id: number) => Promise<void>
-  isLoading,          // boolean - Initial load state
-  error               // string | null - Error message
-} = useTodos();
-```
-
-### KalamDB Client Interface
-
-The example uses the official KalamDB TypeScript SDK (`kalam-link`) which provides a type-safe WASM client. The client is wrapped in `src/services/kalamdb.ts` with TODO-specific helpers:
-
-```typescript
-import { createClient, Auth } from 'kalam-link';
-
-const client = createClient({
-  url: 'http://localhost:8080',
-  auth: Auth.jwt('your-jwt-token')
-});
-
-await client.connect();
-
-// Example wrapper adds convenience methods:
-class KalamDBClient {
-  async insertTodo(todo: CreateTodoInput): Promise<Todo>;
-  async deleteTodo(id: number): Promise<void>;
-  async query<T>(sql: string): Promise<T[]>; // Auto-parses JSON
-  async subscribe(table: string, fromId: number, callback: SubscriptionCallback): Promise<void>;
-}
-```
-
-**SDK Location**: `link/sdks/typescript/` (linked as local dependency)  
-**SDK Documentation**: See `link/sdks/typescript/README.md` for full API reference
-
-## Testing
-
-### Manual Testing Checklist
-
-- [ ] **Add TODO**: Type title, click Add, verify appears in list
-- [ ] **Delete TODO**: Click delete (✕), confirm, verify removed
-- [ ] **Toggle completion**: Check/uncheck checkbox, verify strikethrough
-- [ ] **Multi-tab sync**: Open 2 tabs, add TODO in one, verify appears in other
-- [ ] **localStorage persistence**: Close tab, reopen, verify TODOs still there
-- [ ] **Disconnect**: Stop server, verify "Disconnected" badge, add button disabled
-- [ ] **Reconnect**: Restart server, verify "Connected" badge, functionality restored
+- `src/App.tsx`: complete example logic
+- `activity-feed.sql`: schema used by the app
+- `tests/realtime.spec.ts`: end-to-end verification
 - [ ] **Offline sync**: Disconnect, add TODO elsewhere, reconnect, verify sync
 
 ### Automated Tests
