@@ -62,6 +62,7 @@ class _MockRustLibApi extends MockRustLibApi {
     bool? enableConnectionEvents,
     bool? disableCompression,
     PlatformInt64? keepaliveIntervalMs,
+    bool? wsLazyConnect,
   }) async {
     createClientCalls++;
     // Simulate work that now happens OFF the main thread (via executeNormal).

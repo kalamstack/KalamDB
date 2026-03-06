@@ -42,11 +42,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   DartKalamClient
-      dco_decode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerDartKalamClient(
-          dynamic raw);
-
-  @protected
-  DartKalamClient
       dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerDartKalamClient(
           dynamic raw);
 
@@ -92,6 +87,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   DartErrorDetail dco_decode_box_autoadd_dart_error_detail(dynamic raw);
+
+  @protected
+  DartServerSetupRequest dco_decode_box_autoadd_dart_server_setup_request(
+      dynamic raw);
 
   @protected
   DartSubscriptionConfig dco_decode_box_autoadd_dart_subscription_config(
@@ -141,6 +140,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   DartSchemaField dco_decode_dart_schema_field(dynamic raw);
+
+  @protected
+  DartServerSetupRequest dco_decode_dart_server_setup_request(dynamic raw);
+
+  @protected
+  DartServerSetupResponse dco_decode_dart_server_setup_response(dynamic raw);
+
+  @protected
+  DartSetupStatusResponse dco_decode_dart_setup_status_response(dynamic raw);
+
+  @protected
+  DartSetupUserInfo dco_decode_dart_setup_user_info(dynamic raw);
 
   @protected
   DartSubscriptionConfig dco_decode_dart_subscription_config(dynamic raw);
@@ -226,11 +237,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   DartKalamClient
-      sse_decode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerDartKalamClient(
-          SseDeserializer deserializer);
-
-  @protected
-  DartKalamClient
       sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerDartKalamClient(
           SseDeserializer deserializer);
 
@@ -280,6 +286,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   DartErrorDetail sse_decode_box_autoadd_dart_error_detail(
+      SseDeserializer deserializer);
+
+  @protected
+  DartServerSetupRequest sse_decode_box_autoadd_dart_server_setup_request(
       SseDeserializer deserializer);
 
   @protected
@@ -337,6 +347,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   DartSchemaField sse_decode_dart_schema_field(SseDeserializer deserializer);
+
+  @protected
+  DartServerSetupRequest sse_decode_dart_server_setup_request(
+      SseDeserializer deserializer);
+
+  @protected
+  DartServerSetupResponse sse_decode_dart_server_setup_response(
+      SseDeserializer deserializer);
+
+  @protected
+  DartSetupStatusResponse sse_decode_dart_setup_status_response(
+      SseDeserializer deserializer);
+
+  @protected
+  DartSetupUserInfo sse_decode_dart_setup_user_info(
+      SseDeserializer deserializer);
 
   @protected
   DartSubscriptionConfig sse_decode_dart_subscription_config(
@@ -429,11 +455,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void
-      sse_encode_Auto_RefMut_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerDartKalamClient(
-          DartKalamClient self, SseSerializer serializer);
-
-  @protected
-  void
       sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerDartKalamClient(
           DartKalamClient self, SseSerializer serializer);
 
@@ -484,6 +505,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_dart_error_detail(
       DartErrorDetail self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_dart_server_setup_request(
+      DartServerSetupRequest self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_dart_subscription_config(
@@ -546,6 +571,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_dart_schema_field(
       DartSchemaField self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_dart_server_setup_request(
+      DartServerSetupRequest self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_dart_server_setup_response(
+      DartServerSetupResponse self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_dart_setup_status_response(
+      DartSetupStatusResponse self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_dart_setup_user_info(
+      DartSetupUserInfo self, SseSerializer serializer);
 
   @protected
   void sse_encode_dart_subscription_config(

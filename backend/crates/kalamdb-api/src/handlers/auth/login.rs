@@ -9,6 +9,7 @@ use kalamdb_auth::{
     authenticate, create_and_sign_token, create_auth_cookie, extract_client_ip_secure, AuthRequest,
     CookieConfig, UserRepository,
 };
+use kalamdb_commons::Role;
 use kalamdb_configs::AuthSettings;
 use std::sync::Arc;
 
@@ -18,8 +19,9 @@ use crate::limiter::RateLimiter;
 
 /// POST /v1/api/auth/login
 ///
-/// Authenticates a user and returns an HttpOnly cookie with JWT token.
-/// Only allows dba and system roles to access the admin UI.
+/// Authenticates a user and returns JWT tokens for API usage.
+/// The response also includes `admin_ui_access` so browser clients can
+/// distinguish normal API tokens from accounts allowed to enter the Admin UI.
 pub async fn login_handler(
     req: HttpRequest,
     user_repo: web::Data<Arc<dyn UserRepository>>,
@@ -60,6 +62,8 @@ pub async fn login_handler(
                 .json(AuthErrorResponse::new("internal_error", "Authentication failed"));
         },
     };
+
+    let admin_ui_access = matches!(user.role, Role::Dba | Role::System);
 
     // Generate JWT access token
     let (token, _claims) = match create_and_sign_token(
@@ -126,6 +130,7 @@ pub async fn login_handler(
             created_at,
             updated_at,
         },
+        admin_ui_access,
         expires_at: expires_at.to_rfc3339(),
         access_token: token,
         refresh_token,

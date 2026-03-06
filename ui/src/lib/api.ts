@@ -168,6 +168,7 @@ export interface UserInfo {
 
 export interface LoginResponse {
   user: UserInfo;
+  admin_ui_access: boolean;
   expires_at: string;
   access_token: string;
   refresh_token: string;

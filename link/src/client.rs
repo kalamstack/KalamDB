@@ -210,10 +210,23 @@ impl KalamLinkClient {
     ///
     /// Uses the shared connection when available, otherwise falls back to a
     /// per-subscription WebSocket.
+    ///
+    /// When [`ConnectionOptions::ws_lazy_connect`] is `true` (the default)
+    /// and no shared connection exists yet, `connect()` is called
+    /// automatically before subscribing.
     pub async fn subscribe_with_config(
         &self,
         config: SubscriptionConfig,
     ) -> Result<SubscriptionManager> {
+        // ── Auto-connect: establish the shared connection on first subscribe
+        if self.connection_options.ws_lazy_connect {
+            let conn_guard = self.connection.lock().await;
+            if conn_guard.is_none() {
+                drop(conn_guard); // release lock before connect()
+                self.connect().await?;
+            }
+        }
+
         // ── Shared connection path ───────────────────────────────────────
         {
             let conn_guard = self.connection.lock().await;
@@ -385,6 +398,24 @@ impl KalamLinkClient {
         self.resolved_auth = resolved.clone();
         // Update the shared source so the background connection task picks up
         // fresh credentials on its next reconnect cycle.
+        *self.shared_resolved_auth.write().unwrap() = resolved;
+    }
+
+    /// Update the shared authentication source without requiring `&mut self`.
+    ///
+    /// This updates only `shared_resolved_auth` (the `Arc<RwLock<>>` used by
+    /// the background shared connection for subscribe/connect/reconnect).
+    /// It does NOT update the non-thread-safe `auth` / `resolved_auth` fields,
+    /// which is fine because:
+    /// - HTTP queries use a cloned `AuthProvider` in `QueryExecutor` (fixed at
+    ///   build time).
+    /// - Subscribe/connect paths read exclusively from `shared_resolved_auth`.
+    ///
+    /// Use this from FFI callers (e.g. Dart) where `&mut self` would require
+    /// an exclusive write lock on the opaque handle — which deadlocks when the
+    /// connection event pump holds a long-lived read lock.
+    pub fn update_shared_auth(&self, auth: AuthProvider) {
+        let resolved = ResolvedAuth::Static(auth);
         *self.shared_resolved_auth.write().unwrap() = resolved;
     }
 
@@ -1049,5 +1080,30 @@ mod tests {
     fn test_builder_missing_url() {
         let result = KalamLinkClient::builder().build();
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_builder_with_ws_lazy_connect() {
+        let client = KalamLinkClient::builder()
+            .base_url("http://localhost:3000")
+            .jwt_token("test_token")
+            .connection_options(
+                ConnectionOptions::new().with_ws_lazy_connect(true),
+            )
+            .build()
+            .expect("build should succeed");
+
+        assert!(client.connection_options.ws_lazy_connect);
+    }
+
+    #[test]
+    fn test_builder_default_ws_lazy_connect_is_true() {
+        let client = KalamLinkClient::builder()
+            .base_url("http://localhost:3000")
+            .jwt_token("test_token")
+            .build()
+            .expect("build should succeed");
+
+        assert!(client.connection_options.ws_lazy_connect);
     }
 }

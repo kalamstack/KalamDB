@@ -1551,31 +1551,7 @@ jobs:
           shared-key: npm-publish
           cache-on-failure: true
 
-      - name: Build TypeScript SDK
-        shell: bash
-        working-directory: link/sdks/typescript
-        run: |
-          set -euo pipefail
-          echo "📦 Installing npm dependencies..."
-          npm ci || npm install
-          
-          echo "🔨 Building SDK..."
-          npm run build
-          
-          echo "✅ SDK build complete"
-          ls -la dist/
-
-      - name: Update package version
-        shell: bash
-        working-directory: link/sdks/typescript
-        run: |
-          set -euo pipefail
-          VERSION="${{ needs.read_version.outputs.version }}"
-          echo "📝 Updating package.json version to $VERSION"
-          npm version "$VERSION" --no-git-tag-version --allow-same-version
-          cat package.json | grep version
-
-      - name: Publish to npm
+      - name: Publish TypeScript SDK to npm
         shell: bash
         working-directory: link/sdks/typescript
         env:
@@ -1583,32 +1559,12 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ needs.read_version.outputs.version }}"
-          FORCE_PUBLISH="${{ github.event.inputs.force_npm_publish }}"
-          
-          echo "🚀 Publishing kalam-link@$VERSION to npm..."
-          
-          # Check if this version already exists
-          if npm view "kalam-link@$VERSION" version 2>/dev/null; then
-            if [[ "$FORCE_PUBLISH" == "true" ]]; then
-              echo "⚠️  Version $VERSION exists. Force publish enabled - attempting to unpublish..."
-              if npm unpublish "kalam-link@$VERSION" --force 2>/dev/null; then
-                echo "✅ Successfully unpublished kalam-link@$VERSION"
-                npm publish --access public
-                echo "✅ Successfully republished kalam-link@$VERSION to npm!"
-              else
-                echo "❌ Failed to unpublish (version may be >72 hours old)"
-                echo "💡 Tip: npm doesn't allow unpublishing after 72 hours."
-                echo "    Use a different version number (e.g., ${VERSION}.1, ${VERSION}.2)"
-                exit 1
-              fi
-            else
-              echo "⚠️  Version $VERSION already exists on npm, skipping publish"
-              echo "💡 To force republish, enable 'force_npm_publish' workflow input"
-            fi
-          else
-            npm publish --access public
-            echo "✅ Successfully published kalam-link@$VERSION to npm!"
+          FORCE_FLAG=""
+          if [[ "${{ github.event.inputs.force_npm_publish }}" == "true" ]]; then
+            FORCE_FLAG="--force"
           fi
+          chmod +x ./publish.sh
+          ./publish.sh --version "$VERSION" $FORCE_FLAG
 
   # ═══════════════════════════════════════════════════════════════════════════
   # DART PUBLISH - Publish Dart SDK to pub.dev

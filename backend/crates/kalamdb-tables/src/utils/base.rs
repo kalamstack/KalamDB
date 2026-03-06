@@ -1410,10 +1410,10 @@ where
 /// * `limit` - Optional limit
 /// * `table_type` - Type of table (User, Shared, Stream)
 pub fn warn_if_unfiltered_scan(
-    table_id: &TableId,
-    filter: Option<&Expr>,
-    limit: Option<usize>,
-    table_type: TableType,
+    _table_id: &TableId,
+    _filter: Option<&Expr>,
+    _limit: Option<usize>,
+    _table_type: TableType,
 ) {
     // if filter.is_none() && limit.is_none() {
     //     log::warn!(

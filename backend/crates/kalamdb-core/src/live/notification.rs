@@ -74,8 +74,10 @@ fn apply_projections<'a>(row: &'a Row, projections: &Option<Arc<Vec<String>>>) -
 /// Compute the delta between old and new JSON row maps for UPDATE notifications.
 ///
 /// Returns `(delta_new, delta_old)` where:
-/// - `delta_new` contains only the changed columns + `_seq` + any user-defined PK
-///   columns (new values).
+/// - `delta_new` contains all non-null columns from the new row + `_seq` + any
+///   user-defined PK columns. This means subscribers always receive every non-null
+///   value in the updated row, not just the columns that changed — useful when the
+///   table is used as a change trigger rather than a diff source.
 /// - `delta_old` contains only the changed columns + `_seq` + PK columns (old values).
 ///
 /// `pk_columns` lists the user-defined primary key column name(s) that must always be
@@ -112,7 +114,8 @@ fn compute_json_update_delta(
         }
     }
 
-    // Compare all non-system columns; include only those that actually changed
+    // Include all non-null, non-system columns in delta_new (full snapshot for
+    // subscribers). delta_old still only tracks columns that actually changed.
     for (col_name, new_val) in new_json {
         // Skip _seq (already handled) and other system columns (_deleted, etc.)
         if col_name.starts_with('_') {
@@ -123,14 +126,18 @@ fn compute_json_update_delta(
             continue;
         }
 
+        // Always include non-null columns in the new delta
+        if !new_val.is_null() {
+            delta_new.insert(col_name.clone(), new_val.clone());
+        }
+
+        // Only include in old delta if the value actually changed
         let old_val = old_json.get(col_name);
         let changed = match old_val {
             Some(old_v) => old_v != new_val,
             None => true,
         };
-
         if changed {
-            delta_new.insert(col_name.clone(), new_val.clone());
             if let Some(old_v) = old_val {
                 delta_old.insert(col_name.clone(), old_v.clone());
             }

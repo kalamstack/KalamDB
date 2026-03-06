@@ -404,11 +404,13 @@ pub enum Notification {
     ///
     /// Sent only after initial data loading is complete (batch_control.status == Ready).
     ///
-    /// For UPDATE notifications, `rows` contains **only the changed columns** (delta)
-    /// plus the primary key column(s) and `_seq` for identification.
-    /// To determine which columns changed, inspect the keys in `rows[0]` and filter out
-    /// those starting with `_` (system columns like `_seq`).
-    /// `old_values` contains the previous values of those same changed columns.
+    /// For UPDATE notifications, `rows` contains **all non-null columns** from the
+    /// updated row plus the primary key column(s) and `_seq` for identification.
+    /// This means subscribers always receive a full snapshot of non-null values,
+    /// not just the columns that changed — useful when the table is used as a
+    /// change trigger.
+    /// `old_values` contains the previous values of only the **changed** columns
+    /// plus PK and `_seq`.
     Change {
         /// The subscription ID this notification is for
         subscription_id: String,
@@ -416,7 +418,7 @@ pub enum Notification {
         /// Type of change that occurred
         change_type: ChangeType,
 
-        /// For INSERT: full row data. For UPDATE: only changed columns + PK/_seq.
+        /// For INSERT: full row data. For UPDATE: all non-null columns + PK/_seq.
         #[serde(skip_serializing_if = "Option::is_none")]
         rows: Option<Vec<RowData>>,
 

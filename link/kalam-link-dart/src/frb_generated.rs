@@ -302,6 +302,7 @@ fn wire__crate__api__dart_create_client_impl(
             let api_enable_connection_events = <Option<bool>>::sse_decode(&mut deserializer);
             let api_disable_compression = <Option<bool>>::sse_decode(&mut deserializer);
             let api_keepalive_interval_ms = <Option<i64>>::sse_decode(&mut deserializer);
+            let api_ws_lazy_connect = <Option<bool>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -314,6 +315,7 @@ fn wire__crate__api__dart_create_client_impl(
                             api_enable_connection_events,
                             api_disable_compression,
                             api_keepalive_interval_ms,
+                            api_ws_lazy_connect,
                         )?;
                         Ok(output_ok)
                     })(),
@@ -1169,21 +1171,21 @@ fn wire__crate__api__dart_update_auth_impl(
                     (move || {
                         let mut api_client_guard = None;
                         let decode_indices_ =
-                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
-                                flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
                                     &api_client,
                                     0,
-                                    true,
-                                ),
-                            ]);
+                                    false,
+                                )],
+                            );
                         for i in decode_indices_ {
                             match i {
-                                0 => api_client_guard = Some(api_client.lockable_decode_sync_ref_mut()),
+                                0 => api_client_guard = Some(api_client.lockable_decode_sync_ref()),
                                 _ => unreachable!(),
                             }
                         }
-                        let mut api_client_guard = api_client_guard.unwrap();
-                        let output_ok = crate::api::dart_update_auth(&mut *api_client_guard, api_auth)?;
+                        let api_client_guard = api_client_guard.unwrap();
+                        let output_ok = crate::api::dart_update_auth(&*api_client_guard, api_auth)?;
                         Ok(output_ok)
                     })(),
                 )

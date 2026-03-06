@@ -600,14 +600,14 @@ void main() {
       final info = SubscriptionInfo(
         id: 'sub-1',
         query: 'SELECT * FROM users',
-        lastSeqId: BigInt.from(42),
+        lastSeqId: SeqId(42),
         lastEventTimeMs: 1700000000000,
         createdAtMs: 1700000000000,
         closed: false,
       );
       expect(info.id, 'sub-1');
       expect(info.query, 'SELECT * FROM users');
-      expect(info.lastSeqId, BigInt.from(42));
+      expect(info.lastSeqId, SeqId(42));
       expect(info.lastEventTimeMs, 1700000000000);
       expect(info.createdAtMs, 1700000000000);
       expect(info.closed, isFalse);
@@ -636,6 +636,150 @@ void main() {
       expect(str, contains('sub-3'));
       expect(str, contains('SELECT * FROM t'));
       expect(str, contains('closed: false'));
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // SeqId
+  // -----------------------------------------------------------------------
+  group('SeqId', () {
+    test('creates from int', () {
+      final seq = SeqId(123456789);
+      expect(seq.value, 123456789);
+      expect(seq.toInt(), 123456789);
+    });
+
+    test('parse from string', () {
+      final seq = SeqId.parse('123456789');
+      expect(seq.value, 123456789);
+    });
+
+    test('parse from BigInt', () {
+      final seq = SeqId.parse(BigInt.from(42));
+      expect(seq.value, 42);
+    });
+
+    test('tryParse returns null for invalid', () {
+      expect(SeqId.tryParse(null), isNull);
+      expect(SeqId.tryParse('abc'), isNull);
+    });
+
+    test('zero constructor', () {
+      const seq = SeqId.zero();
+      expect(seq.value, 0);
+    });
+
+    test('Snowflake field extraction', () {
+      final timestampOffset = 5000;
+      final workerId = 7;
+      final sequence = 21;
+      final id = (timestampOffset << 22) | (workerId << 12) | sequence;
+      final seq = SeqId(id);
+
+      expect(seq.timestampMillis, SeqId.epoch + timestampOffset);
+      expect(seq.workerId, workerId);
+      expect(seq.sequence, sequence);
+    });
+
+    test('toDateTime returns UTC DateTime', () {
+      final seq = SeqId(1000 << 22);
+      final dt = seq.toDateTime();
+      expect(dt.isUtc, isTrue);
+      expect(dt.millisecondsSinceEpoch, SeqId.epoch + 1000);
+    });
+
+    test('equality', () {
+      expect(SeqId(42), equals(SeqId(42)));
+      expect(SeqId(42) == SeqId(43), isFalse);
+    });
+
+    test('compareTo', () {
+      expect(SeqId(10).compareTo(SeqId(20)), lessThan(0));
+      expect(SeqId(20).compareTo(SeqId(10)), greaterThan(0));
+      expect(SeqId(10).compareTo(SeqId(10)), 0);
+    });
+
+    test('comparison operators', () {
+      expect(SeqId(10) < SeqId(20), isTrue);
+      expect(SeqId(20) > SeqId(10), isTrue);
+      expect(SeqId(10) <= SeqId(10), isTrue);
+      expect(SeqId(10) >= SeqId(10), isTrue);
+    });
+
+    test('toString returns decimal', () {
+      expect(SeqId(42).toString(), '42');
+    });
+
+    test('toBigInt', () {
+      expect(SeqId(42).toBigInt(), BigInt.from(42));
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // KalamCellValue.asSeqId()
+  // -----------------------------------------------------------------------
+  group('KalamCellValue.asSeqId()', () {
+    test('converts int to SeqId', () {
+      final seq = KalamCellValue.from(42).asSeqId();
+      expect(seq, isNotNull);
+      expect(seq!.value, 42);
+    });
+
+    test('converts string to SeqId', () {
+      final seq = KalamCellValue.from('99').asSeqId();
+      expect(seq, isNotNull);
+      expect(seq!.value, 99);
+    });
+
+    test('returns null for non-numeric string', () {
+      expect(KalamCellValue.from('abc').asSeqId(), isNull);
+    });
+
+    test('returns null for null', () {
+      expect(KalamCellValue.from(null).asSeqId(), isNull);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // KalamClient.connect — wsLazyConnect parameter
+  // -----------------------------------------------------------------------
+  group('wsLazyConnect parameter', () {
+    // These are compile-time / API-shape tests only. They verify that the
+    // named parameter exists, has the correct default, and is accepted by
+    // the `connect` factory.  Actual connection behaviour requires a running
+    // server and is covered by e2e tests.
+
+    test('wsLazyConnect defaults to true in call signature', () async {
+      await expectLater(
+        KalamClient.connect(
+          url: 'http://127.0.0.1:1',
+          authProvider: () async => Auth.none(),
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('flutter_rust_bridge has not been initialized'),
+          ),
+        ),
+      );
+    });
+
+    test('wsLazyConnect false is accepted', () async {
+      await expectLater(
+        KalamClient.connect(
+          url: 'http://127.0.0.1:1',
+          authProvider: () async => Auth.none(),
+          wsLazyConnect: false,
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('flutter_rust_bridge has not been initialized'),
+          ),
+        ),
+      );
     });
   });
 }

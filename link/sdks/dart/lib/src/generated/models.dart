@@ -63,6 +63,9 @@ sealed class DartChangeEvent with _$DartChangeEvent {
   /// One or more rows were updated.
   const factory DartChangeEvent.update({
     required String subscriptionId,
+
+    /// Delta rows — only changed columns + PK + `_seq`.
+    /// Changed user columns are the non-system keys: filter by `!key.starts_with('_')`.
     required List<String> rowsJson,
     required List<String> oldRowsJson,
   }) = DartChangeEvent_Update;
@@ -330,7 +333,8 @@ class DartQueryResult {
   final List<String> rowsJson;
 
   /// Each row as a JSON-encoded object (`{"col": value, ...}`).
-  /// Pre-computed from `schema` + `rows` on the Rust side.
+  /// Pre-computed from `schema` + `rows` so the Dart SDK doesn't need to
+  /// perform the schema → map transformation itself.
   final List<String> namedRowsJson;
   final PlatformInt64 rowCount;
   final String? message;
@@ -392,6 +396,118 @@ class DartSchemaField {
           dataType == other.dataType &&
           index == other.index &&
           flags == other.flags;
+}
+
+class DartServerSetupRequest {
+  final String username;
+  final String password;
+  final String rootPassword;
+  final String? email;
+
+  const DartServerSetupRequest({
+    required this.username,
+    required this.password,
+    required this.rootPassword,
+    this.email,
+  });
+
+  @override
+  int get hashCode =>
+      username.hashCode ^
+      password.hashCode ^
+      rootPassword.hashCode ^
+      email.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DartServerSetupRequest &&
+          runtimeType == other.runtimeType &&
+          username == other.username &&
+          password == other.password &&
+          rootPassword == other.rootPassword &&
+          email == other.email;
+}
+
+class DartServerSetupResponse {
+  final String message;
+  final DartSetupUserInfo user;
+
+  const DartServerSetupResponse({
+    required this.message,
+    required this.user,
+  });
+
+  @override
+  int get hashCode => message.hashCode ^ user.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DartServerSetupResponse &&
+          runtimeType == other.runtimeType &&
+          message == other.message &&
+          user == other.user;
+}
+
+class DartSetupStatusResponse {
+  final bool needsSetup;
+  final String message;
+
+  const DartSetupStatusResponse({
+    required this.needsSetup,
+    required this.message,
+  });
+
+  @override
+  int get hashCode => needsSetup.hashCode ^ message.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DartSetupStatusResponse &&
+          runtimeType == other.runtimeType &&
+          needsSetup == other.needsSetup &&
+          message == other.message;
+}
+
+class DartSetupUserInfo {
+  final String id;
+  final String username;
+  final String role;
+  final String? email;
+  final String createdAt;
+  final String updatedAt;
+
+  const DartSetupUserInfo({
+    required this.id,
+    required this.username,
+    required this.role,
+    this.email,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      username.hashCode ^
+      role.hashCode ^
+      email.hashCode ^
+      createdAt.hashCode ^
+      updatedAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DartSetupUserInfo &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          username == other.username &&
+          role == other.role &&
+          email == other.email &&
+          createdAt == other.createdAt &&
+          updatedAt == other.updatedAt;
 }
 
 /// Subscription configuration.

@@ -69,9 +69,7 @@ use super::validation::{
 /// client.setAutoReconnect(true);
 /// client.setReconnectDelay(1000, 30000);
 ///
-/// await client.connect();
-///
-/// // Subscribe with options
+/// // WebSocket connects automatically on first subscribe (wsLazyConnect=true by default)
 /// const subId = await client.subscribeWithSql(
 ///   "SELECT * FROM chat.messages",
 ///   JSON.stringify({
@@ -407,6 +405,28 @@ impl KalamClient {
     #[wasm_bindgen(js_name = setDisableCompression)]
     pub fn set_disable_compression(&self, disable: bool) {
         self.connection_options.borrow_mut().disable_compression = disable;
+    }
+
+    /// Control lazy WebSocket connections.
+    ///
+    /// When `true` (the default), the WebSocket connection is deferred until
+    /// the first `subscribe()` / `subscribeWithSql()` call. The SDK manages
+    /// the connection lifecycle automatically.
+    ///
+    /// When `false`, the caller should call `connect()` before subscribing.
+    ///
+    /// Default: `true`.
+    ///
+    /// # Example (JavaScript)
+    /// ```js
+    /// // Eager connection (override the default lazy behaviour)
+    /// client.setWsLazyConnect(false);
+    /// await client.connect();
+    /// const subId = await client.subscribeWithSql('SELECT * FROM messages', null, cb);
+    /// ```
+    #[wasm_bindgen(js_name = setWsLazyConnect)]
+    pub fn set_ws_lazy_connect(&self, lazy: bool) {
+        self.connection_options.borrow_mut().ws_lazy_connect = lazy;
     }
 
     ///

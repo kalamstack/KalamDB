@@ -40,7 +40,7 @@ void main() {
         // Connect with a short keepalive interval (2s) so pings fire quickly.
         final client = await KalamClient.connect(
           url: serverUrl,
-          auth: Auth.jwt(login.accessToken),
+          authProvider: () async => Auth.jwt(login.accessToken),
           keepaliveInterval: const Duration(seconds: 2),
           connectionHandlers: ConnectionHandlers(
             onSend: (msg) => sendEvents.add(msg),
@@ -100,7 +100,7 @@ void main() {
 
         final client = await KalamClient.connect(
           url: serverUrl,
-          auth: Auth.jwt(login.accessToken),
+          authProvider: () async => Auth.jwt(login.accessToken),
           keepaliveInterval: const Duration(seconds: 2),
           connectionHandlers: ConnectionHandlers(
             onSend: (msg) {
@@ -188,7 +188,7 @@ void main() {
 
         final client = await KalamClient.connect(
           url: serverUrl,
-          auth: Auth.jwt(login.accessToken),
+          authProvider: () async => Auth.jwt(login.accessToken),
           keepaliveInterval: const Duration(seconds: 2),
           connectionHandlers: ConnectionHandlers(
             onConnect: () => connectCount[0]++,
@@ -240,7 +240,7 @@ void main() {
 
         final client = await KalamClient.connect(
           url: serverUrl,
-          auth: Auth.jwt(login.accessToken),
+          authProvider: () async => Auth.jwt(login.accessToken),
           keepaliveInterval: const Duration(seconds: 2),
           connectionHandlers: ConnectionHandlers(
             onSend: (msg) {
@@ -328,7 +328,7 @@ void main() {
 
         final client = await KalamClient.connect(
           url: serverUrl,
-          auth: Auth.jwt(login.accessToken),
+          authProvider: () async => Auth.jwt(login.accessToken),
           keepaliveInterval: Duration.zero,
           connectionHandlers: ConnectionHandlers(
             onSend: (msg) => sendEvents.add(msg),

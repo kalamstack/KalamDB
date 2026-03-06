@@ -9,7 +9,7 @@ cd "$SCRIPT_DIR"
 
 # Clean previous build
 echo "🧹 Cleaning previous build..."
-rm -rf dist .wasm-out
+rm -rf dist wasm
 
 # Install dependencies if needed
 if [ ! -d "node_modules" ]; then
@@ -20,11 +20,11 @@ fi
 # Navigate to link crate root (parent of sdks/)
 cd "$SCRIPT_DIR/../.."
 
-# Build WASM using wasm-pack (output to .wasm-out to avoid overwriting package.json)
+# Build WASM using wasm-pack (output to wasm/)
 echo "📦 Compiling Rust to WASM..."
 wasm-pack build \
   --target web \
-  --out-dir sdks/typescript/.wasm-out \
+  --out-dir sdks/typescript/wasm \
   --features wasm \
   --no-default-features
 
@@ -35,14 +35,13 @@ cd "$SCRIPT_DIR"
 echo "🔧 Compiling TypeScript..."
 npx tsc
 
-# Copy WASM files to dist/wasm for published output and dist/.wasm-out for in-package imports
+# Copy WASM files to dist/wasm for published output
 echo "📁 Copying WASM files to dist..."
-mkdir -p dist/wasm dist/.wasm-out
-for f in .wasm-out/*; do
+mkdir -p dist/wasm
+for f in wasm/*; do
     filename=$(basename "$f")
     if [[ "$filename" != "package.json" && "$filename" != ".gitignore" ]]; then
         cp "$f" dist/wasm/
-        cp "$f" dist/.wasm-out/
     fi
 done
 
@@ -55,6 +54,5 @@ echo "  - src/index.d.ts (TypeScript types)"
 echo "  - wasm/kalam_link.js (WASM bindings)"
 echo "  - wasm/kalam_link.d.ts (WASM TypeScript definitions)"
 echo "  - wasm/kalam_link_bg.wasm (WebAssembly module)"
-echo "  - .wasm-out/ (internal WASM files for imports)"
 echo ""
 echo "To publish: npm publish"

@@ -96,7 +96,7 @@ async function runTests() {
     console.log('    Creating client...');
     client = createClient({
       url: KALAMDB_URL,
-      auth: Auth.basic(USERNAME, PASSWORD),
+      authProvider: async () => Auth.basic(USERNAME, PASSWORD),
       wasmUrl: wasmBytes, // Pass buffer directly (Node.js doesn't support file:// in fetch)
     });
 

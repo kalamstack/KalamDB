@@ -13,9 +13,7 @@ use kalamdb_commons::websocket::WsAuthCredentials;
 use kalamdb_commons::WebSocketMessage;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::live::{ConnectionsManager, SharedConnectionState};
-use kalamdb_core::sql::executor::helpers::audit;
 use log::debug;
-use log::error;
 use std::sync::Arc;
 
 use super::{send_auth_error, send_json};
@@ -35,7 +33,7 @@ pub async fn handle_authenticate(
     credentials: WsAuthCredentials,
     session: &mut Session,
     registry: &Arc<ConnectionsManager>,
-    app_context: &Arc<AppContext>,
+    _app_context: &Arc<AppContext>,
     rate_limiter: &Arc<RateLimiter>,
     user_repo: &Arc<dyn UserRepository>,
 ) -> Result<(), String> {
@@ -61,7 +59,6 @@ pub async fn handle_authenticate(
         auth_request,
         session,
         registry,
-        app_context,
         user_repo,
     )
     .await
@@ -74,7 +71,6 @@ async fn authenticate_with_request(
     auth_request: AuthRequest,
     session: &mut Session,
     registry: &Arc<ConnectionsManager>,
-    app_context: &Arc<AppContext>,
     user_repo: &Arc<dyn UserRepository>,
 ) -> Result<(), String> {
     let connection_id = connection_state.read().connection_id().clone();
@@ -98,12 +94,12 @@ async fn authenticate_with_request(
             //     "LOGIN_WS"
             // };
             // let entry = audit::log_auth_event(&result.user.user_id, event_type, true, None);
-            // if let Err(e) = audit::persist_audit_entry(app_context, &entry).await {
-            //     error!("Failed to persist audit log: {}", e);
+            // if let Err(_e) = audit::persist_audit_entry(app_context, &entry).await {
+            //     error!("Failed to persist audit log: {}", _e);
             // }
             result.user
         },
-        Err(e) => {
+        Err(_e) => {
             // Log failed authentication
             // let entry = audit::log_auth_event_with_username(
             //     &username_for_log,

@@ -43,6 +43,7 @@
  */
 
 import { FileRef } from './file_ref.js';
+import { SeqId } from './seq_id.js';
 import type { JsonValue } from './types.js';
 
 /* ================================================================== */
@@ -196,6 +197,32 @@ export class KalamCellValue {
       if (typeof this.#raw === 'string') return BigInt(this.#raw.trim());
     } catch {
       // non-integer string
+    }
+    return null;
+  }
+
+  /**
+   * Return the value as a `SeqId`, or `null` for SQL NULL / non-numeric.
+   *
+   * Use this for `_seq` columns or any Snowflake-based sequence ID.
+   *
+   * @example
+   * ```typescript
+   * const seq = row._seq.asSeqId();
+   * if (seq) {
+   *   console.log(seq.timestampMillis()); // when the row was written
+   *   console.log(seq.workerId());        // which worker generated it
+   * }
+   * ```
+   */
+  asSeqId(): SeqId | null {
+    if (this.isNull()) return null;
+    try {
+      if (typeof this.#raw === 'number') return SeqId.from(this.#raw);
+      if (typeof this.#raw === 'bigint') return SeqId.from(this.#raw);
+      if (typeof this.#raw === 'string') return SeqId.from(this.#raw.trim());
+    } catch {
+      // not parseable as SeqId
     }
     return null;
   }

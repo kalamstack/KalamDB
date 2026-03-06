@@ -69,6 +69,10 @@ pub struct DartKalamClient {
 ///   gzip-compressed binary frames. Useful during development.
 /// * `keepalive_interval_ms` — optional WebSocket keep-alive ping interval
 ///   in milliseconds (default 10 000). Set to 0 to disable keep-alive pings.
+/// * `ws_lazy_connect` — controls when the WebSocket connection is established.
+///   When `true` (the default), the connection is deferred until the first
+///   `subscribe()` call. When `false`, the connection is established eagerly.
+///   Authentication uses the same provider configured for HTTP queries.
 ///
 /// **Note:** This function intentionally omits `#[frb(sync)]` so that FRB
 /// dispatches it to a worker thread via `executeNormal`. The client
@@ -82,6 +86,7 @@ pub fn dart_create_client(
     enable_connection_events: Option<bool>,
     disable_compression: Option<bool>,
     keepalive_interval_ms: Option<i64>,
+    ws_lazy_connect: Option<bool>,
 ) -> anyhow::Result<DartKalamClient> {
     create_client_inner(
         base_url,
@@ -91,6 +96,7 @@ pub fn dart_create_client(
         enable_connection_events,
         disable_compression,
         keepalive_interval_ms,
+        ws_lazy_connect,
     )
 }
 
@@ -107,6 +113,7 @@ fn create_client_inner(
     enable_connection_events: Option<bool>,
     disable_compression: Option<bool>,
     keepalive_interval_ms: Option<i64>,
+    ws_lazy_connect: Option<bool>,
 ) -> anyhow::Result<DartKalamClient> {
     let event_queue: Arc<std::sync::Mutex<VecDeque<DartConnectionEvent>>> =
         Arc::new(std::sync::Mutex::new(VecDeque::new()));
@@ -123,11 +130,21 @@ fn create_client_inner(
     if let Some(r) = max_retries {
         builder = builder.max_retries(r as u32);
     }
-    if disable_compression.unwrap_or(false) {
-        builder = builder.connection_options(
-            kalam_link::ConnectionOptions::default().with_disable_compression(true),
-        );
+
+    // Build connection options from the individual flags.
+    {
+        let mut conn_opts = kalam_link::ConnectionOptions::default();
+        if disable_compression.unwrap_or(false) {
+            conn_opts.disable_compression = true;
+        }
+        // ws_lazy_connect defaults to true in ConnectionOptions::default().
+        // Only override when the caller explicitly passes false.
+        if let Some(lazy) = ws_lazy_connect {
+            conn_opts.ws_lazy_connect = lazy;
+        }
+        builder = builder.connection_options(conn_opts);
     }
+
     if let Some(ms) = keepalive_interval_ms {
         let mut timeouts = kalam_link::KalamLinkTimeouts::default();
         timeouts.keepalive_interval = std::time::Duration::from_millis(ms as u64);
@@ -161,15 +178,19 @@ fn create_client_inner(
 ///
 /// The new credentials take effect on the next `subscribe()` call.
 ///
+/// Uses `&self` (read lock) instead of `&mut self` (write lock) to avoid
+/// deadlocking with [`dart_next_connection_event`], which holds a long-lived
+/// read lock on the `RustAutoOpaque<DartKalamClient>` while awaiting events.
+///
 /// **Note:** `#[frb(sync)]` is intentionally removed so the lock acquisition
 /// runs on a worker thread instead of the Flutter UI thread.
 pub fn dart_update_auth(
-    client: &mut DartKalamClient,
+    client: &DartKalamClient,
     auth: DartAuthProvider,
 ) -> anyhow::Result<()> {
     client
         .inner
-        .set_auth(auth.into_native());
+        .update_shared_auth(auth.into_native());
     Ok(())
 }
 

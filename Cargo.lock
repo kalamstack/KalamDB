@@ -3529,7 +3529,7 @@ dependencies = [
 
 [[package]]
 name = "kalam-cli"
-version = "0.4.0-alpha3"
+version = "0.4.0-alpha4"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -3570,7 +3570,7 @@ dependencies = [
 
 [[package]]
 name = "kalam-link"
-version = "0.4.0-alpha3"
+version = "0.4.0-alpha4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3602,7 +3602,7 @@ dependencies = [
 
 [[package]]
 name = "kalam-link-dart"
-version = "0.4.0-alpha3"
+version = "0.4.0-alpha4"
 dependencies = [
  "anyhow",
  "flutter_rust_bridge",
@@ -3614,7 +3614,7 @@ dependencies = [
 
 [[package]]
 name = "kalamdb-api"
-version = "0.4.0-alpha3"
+version = "0.4.0-alpha4"
 dependencies = [
  "actix-files",
  "actix-multipart",
@@ -3659,7 +3659,7 @@ dependencies = [
 
 [[package]]
 name = "kalamdb-auth"
-version = "0.4.0-alpha3"
+version = "0.4.0-alpha4"
 dependencies = [
  "actix-web",
  "anyhow",
@@ -3691,7 +3691,7 @@ dependencies = [
 
 [[package]]
 name = "kalamdb-commons"
-version = "0.4.0-alpha3"
+version = "0.4.0-alpha4"
 dependencies = [
  "anyhow",
  "arrow",
@@ -3721,7 +3721,7 @@ dependencies = [
 
 [[package]]
 name = "kalamdb-configs"
-version = "0.4.0-alpha3"
+version = "0.4.0-alpha4"
 dependencies = [
  "anyhow",
  "num_cpus",
@@ -3732,7 +3732,7 @@ dependencies = [
 
 [[package]]
 name = "kalamdb-core"
-version = "0.4.0-alpha3"
+version = "0.4.0-alpha4"
 dependencies = [
  "anyhow",
  "arrow",
@@ -3781,7 +3781,7 @@ dependencies = [
 
 [[package]]
 name = "kalamdb-filestore"
-version = "0.4.0-alpha3"
+version = "0.4.0-alpha4"
 dependencies = [
  "anyhow",
  "arrow",
@@ -3816,7 +3816,7 @@ dependencies = [
 
 [[package]]
 name = "kalamdb-macros"
-version = "0.4.0-alpha3"
+version = "0.4.0-alpha4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3825,7 +3825,7 @@ dependencies = [
 
 [[package]]
 name = "kalamdb-observability"
-version = "0.4.0-alpha3"
+version = "0.4.0-alpha4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3841,7 +3841,7 @@ dependencies = [
 
 [[package]]
 name = "kalamdb-oidc"
-version = "0.4.0-alpha3"
+version = "0.4.0-alpha4"
 dependencies = [
  "base64",
  "chrono",
@@ -3857,7 +3857,7 @@ dependencies = [
 
 [[package]]
 name = "kalamdb-publisher"
-version = "0.4.0-alpha3"
+version = "0.4.0-alpha4"
 dependencies = [
  "chrono",
  "dashmap 6.1.0",
@@ -3875,7 +3875,7 @@ dependencies = [
 
 [[package]]
 name = "kalamdb-raft"
-version = "0.4.0-alpha3"
+version = "0.4.0-alpha4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3905,7 +3905,7 @@ dependencies = [
 
 [[package]]
 name = "kalamdb-server"
-version = "0.4.0-alpha3"
+version = "0.4.0-alpha4"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -3962,7 +3962,7 @@ dependencies = [
 
 [[package]]
 name = "kalamdb-session"
-version = "0.4.0-alpha3"
+version = "0.4.0-alpha4"
 dependencies = [
  "arrow",
  "arrow-schema",
@@ -3978,7 +3978,7 @@ dependencies = [
 
 [[package]]
 name = "kalamdb-sharding"
-version = "0.4.0-alpha3"
+version = "0.4.0-alpha4"
 dependencies = [
  "kalamdb-commons",
  "kalamdb-configs",
@@ -3987,7 +3987,7 @@ dependencies = [
 
 [[package]]
 name = "kalamdb-sql"
-version = "0.4.0-alpha3"
+version = "0.4.0-alpha4"
 dependencies = [
  "anyhow",
  "arrow",
@@ -4010,7 +4010,7 @@ dependencies = [
 
 [[package]]
 name = "kalamdb-store"
-version = "0.4.0-alpha3"
+version = "0.4.0-alpha4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4033,7 +4033,7 @@ dependencies = [
 
 [[package]]
 name = "kalamdb-streams"
-version = "0.4.0-alpha3"
+version = "0.4.0-alpha4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4048,7 +4048,7 @@ dependencies = [
 
 [[package]]
 name = "kalamdb-system"
-version = "0.4.0-alpha3"
+version = "0.4.0-alpha4"
 dependencies = [
  "anyhow",
  "arrow",
@@ -4077,7 +4077,7 @@ dependencies = [
 
 [[package]]
 name = "kalamdb-tables"
-version = "0.4.0-alpha3"
+version = "0.4.0-alpha4"
 dependencies = [
  "anyhow",
  "arrow",
@@ -4109,7 +4109,7 @@ dependencies = [
 
 [[package]]
 name = "kalamdb-views"
-version = "0.4.0-alpha3"
+version = "0.4.0-alpha4"
 dependencies = [
  "arrow",
  "async-trait",

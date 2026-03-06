@@ -1200,8 +1200,6 @@ and then make sure we have a test for it as well
 
 137) when i run: SELECT * FROM chat.uploads limit 5 i always get a different order of rows if no order by is specified will use the key ordering instead to have consistent results, then add test cases to check this with queriying number of times
 
-138) Override the information_schema.columns to also return the KalamDatatype and schema version and other kalamdb specific things at the end, also the select * from information_schema.tables to add to it another column with tabletype
-
 139) For the cli if we click enter dont open the history menu again only execute enter
 
 140) Make sure we have default namespace whenever we setup the system, and make sure its used by default unless the user changed it using user namespace for that session
@@ -1299,6 +1297,11 @@ pub(crate) fn compose_provider_username(issuer: &str, subject: &str) -> UserName
 
 195) Why we still send in the update change in websocket 2 arrays? shouldnt we make them map<string, string> column -> value only?
 
+196) change the sdks to return instead of RowData and is a hashmap in it, to return a RowData: seqid/deleted/columns: HashMap<string, string> this way we can make sure that the sdks read them separatly instead of from the hashmap and map them then to an internal object
+
+197) Make sure we have this option in kalamclient which we specify that the websocket connection is lazy loaded which means only whenever we first subscribe it will connect
+
+
 
 
 Main Epics:
@@ -1315,8 +1318,8 @@ Main Epics:
 10) Move permissions to Shared tables with policies
 11) A new option for STREAM table to only insert the row if the user is online option (delivery_policy = 'online_only'  -- or 'always') also For STREAM tables, to avoid unbounded RAM growth, we can implement a disk-backed buffer (e.g., mmap-backed ring buffer). mmap reduces heap usage, but we still need TTL eviction + max-bytes limits + backpressure to prevent OOM. https://lib.rs/crates/mmap-io, drop policy: drop_oldest
 13) backend/crates/kalamdb-core/src/providers - need to be removed if they are not needed anymore
-14) Subscription - Send the schema before the initial load starts, so the client can prepare for the incoming data and also we can use it to validate the incoming data as well
-15) When insert support RETURNING id;
+14) Done - Subscription - Send the schema before the initial load starts, so the client can prepare for the incoming data and also we can use it to validate the incoming data as well
+15) Done - When insert support RETURNING id;
 
 
 

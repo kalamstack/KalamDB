@@ -23,6 +23,15 @@ import {
 } from '../helpers.mjs';
 import { createClient, Auth } from '../../../dist/src/index.js';
 
+async function reconnectViaSubscription(client, tableName) {
+  const events = [];
+  const unsub = await client.subscribe(tableName, (event) => {
+    events.push(event);
+  });
+  await sleep(1500);
+  return { unsub, events };
+}
+
 describe('Reconnect & Resume', { timeout: 120_000 }, () => {
   let client;
   const ns = uniqueName('ts_recon');
@@ -48,16 +57,17 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
   // -----------------------------------------------------------------------
   // 1. connect / disconnect toggles isConnected
   // -----------------------------------------------------------------------
-  test('connect then disconnect then reconnect toggles isConnected', async () => {
+  test('disconnect then subscribe reconnects automatically', async () => {
     const c = await connectJwtClient();
-    assert.equal(c.isConnected(), true, 'should be connected after connect');
+    assert.equal(c.isConnected(), true, 'should be connected after initialize');
 
     await c.disconnect();
     assert.equal(c.isConnected(), false, 'should be disconnected after disconnect');
 
-    await c.connect();
-    assert.equal(c.isConnected(), true, 'should be reconnected after reconnect');
+    const { unsub } = await reconnectViaSubscription(c, tbl);
+    assert.equal(c.isConnected(), true, 'should reconnect on first subscribe after disconnect');
 
+    await unsub();
     await c.disconnect();
   });
 
@@ -69,12 +79,13 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
 
     const c = createClient({
       url: SERVER_URL,
-      auth: Auth.basic(ADMIN_USER, ADMIN_PASS),
+      authProvider: async () => Auth.basic(ADMIN_USER, ADMIN_PASS),
+      wsLazyConnect: false,
       onConnect: () => events.push('connect'),
       onDisconnect: (reason) => events.push(`disconnect:${reason?.message || 'manual'}`),
     });
 
-    await c.connect();
+    await c.initialize();
     await sleep(500);
 
     // Should have fired onConnect.
@@ -92,9 +103,9 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
       `expected 'disconnect' in events: ${JSON.stringify(events)}`,
     );
 
-    // Reconnect — should fire onConnect again.
+    // Reconnect on next subscribe — should fire onConnect again.
     const countBefore = events.filter((e) => e === 'connect').length;
-    await c.connect();
+    const { unsub } = await reconnectViaSubscription(c, tbl);
     await sleep(500);
 
     const countAfter = events.filter((e) => e === 'connect').length;
@@ -103,6 +114,7 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
       `expected onConnect to fire again after reconnect, events: ${JSON.stringify(events)}`,
     );
 
+    await unsub();
     await c.disconnect();
   });
 
@@ -114,11 +126,12 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
 
     const c = createClient({
       url: SERVER_URL,
-      auth: Auth.basic(ADMIN_USER, ADMIN_PASS),
+      authProvider: async () => Auth.basic(ADMIN_USER, ADMIN_PASS),
+      wsLazyConnect: false,
       onError: (err) => errors.push(err),
     });
 
-    await c.connect();
+    await c.initialize();
     // The handler is wired; we just verify it doesn't break anything.
     assert.ok(c.isConnected());
     await c.disconnect();
@@ -179,15 +192,12 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
       `INSERT INTO ${tbl} (id, payload) VALUES (2, 'during disconnect')`,
     );
 
-    // --- Reconnect ---
-    await client.connect();
-    assert.equal(client.isConnected(), true, 'should be reconnected');
-
-    // Re-subscribe since subscriptions may have been cleared on disconnect.
+    // Re-subscribe after disconnect; this should reconnect automatically.
     const postReconnectEvents = [];
     const unsub2 = await client.subscribe(tbl, (event) => {
       postReconnectEvents.push(event);
     });
+    assert.equal(client.isConnected(), true, 'should reconnect on subscribe');
 
     // Wait for subscription ack on the new subscription.
     await sleep(2000);
@@ -247,9 +257,7 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
     await client.disconnect();
     await sleep(500);
 
-    // Reconnect and re-subscribe.
-    await client.connect();
-
+    // Re-subscribe after disconnect; subscriptions should reconnect automatically.
     const postEvents1 = [];
     const postEvents2 = [];
 
@@ -370,9 +378,6 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
     await writer.query(`INSERT INTO ${tblB} (id, payload) VALUES (${gapRows.b}, 'gap-b')`);
     await writer.query(`INSERT INTO ${tblC} (id, payload) VALUES (${gapRows.c}, 'gap-c')`);
 
-    await client.connect();
-    assert.equal(client.isConnected(), true, 'client should reconnect');
-
     const postEventsA = [];
     const postEventsB = [];
     const postEventsC = [];
@@ -389,6 +394,7 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
       `SELECT id, payload FROM ${tblC} WHERE id >= ${gapRows.c}`,
       (ev) => postEventsC.push(ev),
     );
+    assert.equal(client.isConnected(), true, 'client should reconnect on subscribeWithSql');
 
     await waitFor(() =>
       postEventsA.some((e) => e.type === 'subscription_ack')
@@ -499,9 +505,6 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
       await writer.query(`INSERT INTO ${tblB} (id, payload) VALUES (${gap.b}, 'chaos-gap-b-${cycle}')`);
       await writer.query(`INSERT INTO ${tblC} (id, payload) VALUES (${gap.c}, 'chaos-gap-c-${cycle}')`);
 
-      await client.connect();
-      assert.equal(client.isConnected(), true, `cycle ${cycle}: expected reconnected`);
-
       const eventsA = [];
       const eventsB = [];
       const eventsC = [];
@@ -518,6 +521,7 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
         `SELECT id, payload FROM ${tblC} WHERE id >= ${gap.c}`,
         (e) => eventsC.push(e),
       );
+      assert.equal(client.isConnected(), true, `cycle ${cycle}: expected reconnected on subscribe`);
 
       await waitFor(() =>
         eventsA.some((e) => e.type === 'subscription_ack')
@@ -556,7 +560,7 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
   // -----------------------------------------------------------------------
   // 9. Queries still work after reconnect
   // -----------------------------------------------------------------------
-  test('queries work correctly after reconnect cycle', async () => {
+  test('queries work correctly after WebSocket disconnect cycle', async () => {
     const c = await connectJwtClient();
 
     // Query before disconnect.
@@ -564,9 +568,8 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
     assert.ok(res1.results?.length > 0, 'query before disconnect');
 
     await c.disconnect();
-    await c.connect();
 
-    // Query after reconnect.
+    // Query after disconnect still works because queries use HTTP.
     const res2 = await c.query('SELECT 2 AS n');
     assert.ok(res2.results?.length > 0, 'query after reconnect');
 

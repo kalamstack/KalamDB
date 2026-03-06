@@ -25,7 +25,7 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash';
 
 const client = createClient({
   url: KALAMDB_URL,
-  auth: Auth.basic(KALAMDB_USERNAME, KALAMDB_PASSWORD),
+  authProvider: async () => Auth.basic(KALAMDB_USERNAME, KALAMDB_PASSWORD),
 });
 
 async function main(): Promise<void> {

@@ -76,7 +76,7 @@ function inspectAckResponse(resp: AckResponse): void {
 async function testConsumerAutoAck() {
   const client = createClient({
     url: 'http://localhost:8080',
-    auth: Auth.basic('admin', 'kalamdb123'),
+    authProvider: async () => Auth.basic('admin', 'kalamdb123'),
   });
 
   // Auto-ack consumer: messages are acknowledged automatically after handler
@@ -103,7 +103,7 @@ async function testConsumerAutoAck() {
 async function testConsumerManualAck() {
   const client = createClient({
     url: 'http://localhost:8080',
-    auth: Auth.basic('admin', 'kalamdb123'),
+    authProvider: async () => Auth.basic('admin', 'kalamdb123'),
   });
 
   // Manual-ack consumer: user must call ctx.ack() to acknowledge
@@ -132,7 +132,7 @@ async function testConsumerManualAck() {
 async function testConsumeBatch() {
   const client = createClient({
     url: 'http://localhost:8080',
-    auth: Auth.basic('admin', 'kalamdb123'),
+    authProvider: async () => Auth.basic('admin', 'kalamdb123'),
   });
 
   // One-shot batch consume (no loop)
@@ -169,7 +169,7 @@ async function testConsumeBatch() {
 async function testConsumerStop() {
   const client = createClient({
     url: 'http://localhost:8080',
-    auth: Auth.basic('admin', 'kalamdb123'),
+    authProvider: async () => Auth.basic('admin', 'kalamdb123'),
   });
 
   const handle = client.consumer({
@@ -196,7 +196,7 @@ async function testConsumerStop() {
 async function testConsumerHandlerTypeSafety() {
   const client = createClient({
     url: 'http://localhost:8080',
-    auth: Auth.basic('admin', 'kalamdb123'),
+    authProvider: async () => Auth.basic('admin', 'kalamdb123'),
   });
 
   // Demonstrate typed handler with specific business logic

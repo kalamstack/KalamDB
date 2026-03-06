@@ -121,19 +121,19 @@ export function buildAuthHeader(auth: AuthCredentials): string | undefined {
  * // Basic Auth
  * const client = createClient({
  *   url: 'http://localhost:8080',
- *   auth: Auth.basic('admin', 'admin')
+ *   authProvider: async () => Auth.basic('admin', 'admin')
  * });
  * 
  * // JWT Token
  * const jwtClient = createClient({
  *   url: 'http://localhost:8080',
- *   auth: Auth.jwt('eyJhbGciOiJIUzI1NiIs...')
+ *   authProvider: async () => Auth.jwt('eyJhbGciOiJIUzI1NiIs...')
  * });
  * 
  * // Anonymous (no auth)
  * const anonClient = createClient({
  *   url: 'http://localhost:8080',
- *   auth: Auth.none()
+ *   authProvider: async () => Auth.none()
  * });
  * ```
  */
@@ -175,9 +175,9 @@ export const Auth = {
  * Called before each (re-)connection attempt to obtain fresh credentials.
  * This is the recommended approach for refresh-token flows.
  *
- * The returned `AuthCredentials` should be `{ type: 'jwt', token: '...' }` or
- * `{ type: 'none' }`.  Returning `{ type: 'basic' }` will cause `connect()` to
- * throw because Basic Auth cannot be used directly for WebSocket authentication.
+ * The returned `AuthCredentials` can be any auth type. Returning
+ * `{ type: 'basic' }` is supported — the SDK will automatically exchange
+ * the credentials for a JWT before establishing the WebSocket connection.
  *
  * @example
  * ```typescript

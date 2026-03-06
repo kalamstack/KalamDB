@@ -16,7 +16,7 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type JsonValue = any;
 
-import type { FieldFlag as WasmFieldFlag } from '../.wasm-out/kalam_link.js';
+import type { FieldFlag as WasmFieldFlag } from '../wasm/kalam_link.js';
 
 export type {
   AckResponse,
@@ -36,12 +36,14 @@ export type {
   QueryResult,
   ResponseStatus,
   SchemaField,
-  SeqId,
   ServerMessage,
   SubscriptionOptions,
   TimestampFormat,
   UploadProgress,
-} from '../.wasm-out/kalam_link.js';
+} from '../wasm/kalam_link.js';
+
+// SeqId: SDK-level typed wrapper (replaces WASM's plain `number` alias)
+export { SeqId } from './seq_id.js';
 
 export type FieldFlag = WasmFieldFlag;
 export type FieldFlags = FieldFlag[];
@@ -124,7 +126,7 @@ export type LogListener = (entry: LogEntry) => void;
 /**
  * Subscription callback function type
  */
-export type SubscriptionCallback = (event: import('../.wasm-out/kalam_link.js').ServerMessage) => void;
+export type SubscriptionCallback = (event: import('../wasm/kalam_link.js').ServerMessage) => void;
 
 /**
  * Typed subscription callback for convenience.
@@ -141,7 +143,7 @@ export type SubscriptionCallback = (event: import('../.wasm-out/kalam_link.js').
  * ```
  */
 export type TypedSubscriptionCallback<T extends Record<string, unknown>> = (
-  event: import('../.wasm-out/kalam_link.js').ServerMessage & { rows?: T[]; old_values?: T[] },
+  event: import('../wasm/kalam_link.js').ServerMessage & { rows?: T[]; old_values?: T[] },
 ) => void;
 
 /**
@@ -221,7 +223,7 @@ export interface SubscriptionInfo {
   /** Timestamp when subscription was created */
   createdAt: Date;
   /** Last received sequence ID (for resume on reconnect), if any */
-  lastSeqId?: string;
+  lastSeqId?: import('./seq_id.js').SeqId;
   /** Whether this subscription has been closed */
   closed: boolean;
 }
@@ -255,7 +257,7 @@ export interface ConsumeContext {
   /** Username of the user who produced this message/event */
   readonly username: Username | undefined;
   /** The consumed message with decoded payload */
-  readonly message: import('../.wasm-out/kalam_link.js').ConsumeMessage;
+  readonly message: import('../wasm/kalam_link.js').ConsumeMessage;
   /** Acknowledge the current message (manual ack mode) */
   ack: () => Promise<void>;
 }
@@ -318,7 +320,7 @@ export interface ConsumerHandle {
  * ```typescript
  * const client = createClient({
  *   url: 'http://localhost:8080',
- *   auth: Auth.basic('admin', 'admin')
+ *   authProvider: async () => Auth.basic('admin', 'admin'),
  * });
  * ```
  */
@@ -326,45 +328,34 @@ export interface ClientOptions {
   /** Server URL (e.g., 'http://localhost:8080') */
   url: string;
   /**
-   * Static authentication credentials.
+   * Authentication provider callback.
    *
-   * @deprecated Use `authProvider` instead. Static credentials cannot
-   * refresh automatically — tokens will expire mid-session without
-   * reconnect support.  `authProvider` is invoked before every
-   * (re-)connection and handles refresh transparently.
+   * Called before each (re-)connection to obtain credentials — supports
+   * JWT, basic, and anonymous auth. Ideal for refresh-token flows where
+   * the callback is responsible for refreshing expired tokens.
    *
-   * ```typescript
-   * // Before (deprecated)
-   * createClient({ url, auth: Auth.jwt(token) });
-   *
-   * // After
-   * createClient({ url, authProvider: async () => Auth.jwt(await getToken()) });
-   * ```
-   *
-   * Ignored when `authProvider` is set.  At least one of `auth` or
-   * `authProvider` must be provided.
-   */
-  auth?: import('./auth.js').AuthCredentials;
-  /**
-   * Async authentication provider callback.
-   *
-   * When set, this is called before each (re-)connection to obtain fresh
-   * credentials — ideal for refresh-token flows.  Takes precedence over the
-   * static `auth` option.
+   * Return `Auth.jwt(token)` for JWT-based auth, `Auth.basic(user, pass)`
+   * for username/password (the SDK automatically exchanges these for a JWT
+   * before opening the WebSocket), or `Auth.none()` for anonymous access.
    *
    * @example
    * ```typescript
    * import { Auth, type AuthProvider } from 'kalam-link';
    *
+   * // JWT with auto-refresh
    * const authProvider: AuthProvider = async () => {
    *   const token = await myApp.getOrRefreshJwt();
    *   return Auth.jwt(token);
    * };
    *
+   * // Basic credentials (SDK handles JWT exchange internally)
+   * const authProvider: AuthProvider = async () =>
+   *   Auth.basic('admin', 'secret');
+   *
    * const client = createClient({ url: '...', authProvider });
    * ```
    */
-  authProvider?: import('./auth.js').AuthProvider;
+  authProvider: import('./auth.js').AuthProvider;
   /**
    * Maximum attempts used when resolving `authProvider` credentials on
    * transient failures (timeouts/network hiccups).
@@ -402,13 +393,23 @@ export interface ClientOptions {
    */
   wasmUrl?: string | BufferSource;
   /**
-   * Automatically connect (and login if using Basic auth) the first time
-   * a WebSocket operation is needed (subscribe, subscribeWithSql).
+   * Control when the WebSocket connection is established.
    *
-   * Defaults to `true`. Set to `false` if you want to control the
-   * connection lifecycle manually via `connect()` / `disconnect()`.
+   * When `true` (the default), the WebSocket connection is deferred until
+   * the first `subscribe()` or `subscribeWithSql()` call. This avoids
+   * unnecessary connections when the client is only used for HTTP queries.
+   *
+   * When `false`, the WebSocket connection is established eagerly during
+   * initialization (before any subscribe call). Use this when you want the
+   * connection ready immediately.
+   *
+   * Authentication uses the `authProvider` configured on the client.
+   * There is no need to call `connect()` manually — the SDK manages
+   * the connection lifecycle automatically.
+   *
+   * Defaults to `true`.
    */
-  autoConnect?: boolean;
+  wsLazyConnect?: boolean;
 
   /**
    * Interval in milliseconds at which the client sends an application-level
@@ -429,7 +430,7 @@ export interface ClientOptions {
    * ```typescript
    * const client = createClient({
    *   url: 'http://localhost:8080',
-   *   auth: Auth.basic('admin', 'secret'),
+ *   authProvider: async () => Auth.basic('admin', 'secret'),
    *   onConnect: () => console.log('Connected!'),
    * });
    * ```
@@ -443,7 +444,7 @@ export interface ClientOptions {
    * ```typescript
    * const client = createClient({
    *   url: 'http://localhost:8080',
-   *   auth: Auth.basic('admin', 'secret'),
+ *   authProvider: async () => Auth.basic('admin', 'secret'),
    *   onDisconnect: (reason) => console.log('Disconnected:', reason.message),
    * });
    * ```
@@ -457,7 +458,7 @@ export interface ClientOptions {
    * ```typescript
    * const client = createClient({
    *   url: 'http://localhost:8080',
-   *   auth: Auth.basic('admin', 'secret'),
+ *   authProvider: async () => Auth.basic('admin', 'secret'),
    *   onError: (err) => console.error('Error:', err.message, 'recoverable:', err.recoverable),
    * });
    * ```
@@ -472,7 +473,7 @@ export interface ClientOptions {
    * ```typescript
    * const client = createClient({
    *   url: 'http://localhost:8080',
-   *   auth: Auth.basic('admin', 'secret'),
+ *   authProvider: async () => Auth.basic('admin', 'secret'),
    *   onReceive: (msg) => console.log('[RECV]', msg),
    * });
    * ```
@@ -487,7 +488,7 @@ export interface ClientOptions {
    * ```typescript
    * const client = createClient({
    *   url: 'http://localhost:8080',
-   *   auth: Auth.basic('admin', 'secret'),
+ *   authProvider: async () => Auth.basic('admin', 'secret'),
    *   onSend: (msg) => console.log('[SEND]', msg),
    * });
    * ```

@@ -279,9 +279,10 @@ window.connectClient = async function() {
     
     // Step 2: Create client with JWT token
     log('🔧 Initializing WASM client...', 'info');
+    const capturedToken = currentToken;
     client = new KalamDBClient({
       url: config.url,
-      auth: Auth.jwt(currentToken),
+      authProvider: async () => Auth.jwt(capturedToken),
     });
     await client.initialize();
     

@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:kalam_link/src/cell_value.dart';
+import 'package:kalam_link/src/seq_id.dart';
 
 /// Column metadata from a query result.
 class SchemaField {
@@ -454,7 +455,7 @@ class SubscriptionInfo {
   final String query;
 
   /// Last received sequence ID (for resume on reconnect), if any.
-  final BigInt? lastSeqId;
+  final SeqId? lastSeqId;
 
   /// Timestamp (millis since epoch) of the last received event.
   final int? lastEventTimeMs;

@@ -108,7 +108,7 @@ void main() {
         final events = <ChangeEvent>[];
         final stream = client.subscribe(
           'SELECT * FROM $tbl',
-          fromSeqId: BigInt.zero, // start from beginning
+          fromSeqId: SeqId.zero(), // start from beginning
         );
         final sub = stream.listen(events.add);
 
@@ -134,7 +134,7 @@ void main() {
           'SELECT * FROM $tbl',
           batchSize: 10,
           lastRows: 5,
-          fromSeqId: BigInt.zero,
+          fromSeqId: SeqId.zero(),
           subscriptionId: 'custom-all-opts',
         );
         final sub = stream.listen(events.add);
@@ -214,7 +214,7 @@ void main() {
 
           await waitFor(() => hasRowId(firstEvents, preId));
 
-          BigInt? checkpoint;
+          SeqId? checkpoint;
           final started = DateTime.now();
           while (checkpoint == null) {
             final subs = await client.getSubscriptions();
@@ -225,8 +225,10 @@ void main() {
               }
             }
             if (checkpoint != null) break;
-            if (DateTime.now().difference(started) > const Duration(seconds: 20)) {
-              throw TimeoutException('Timed out waiting for subscription checkpoint');
+            if (DateTime.now().difference(started) >
+                const Duration(seconds: 20)) {
+              throw TimeoutException(
+                  'Timed out waiting for subscription checkpoint');
             }
             await sleep(const Duration(milliseconds: 200));
           }
@@ -252,7 +254,8 @@ void main() {
             "INSERT INTO $tbl (id, value) VALUES ($postId, 'post-resub')",
           );
 
-          await waitFor(() => hasRowId(secondEvents, gapId) && hasRowId(secondEvents, postId));
+          await waitFor(() =>
+              hasRowId(secondEvents, gapId) && hasRowId(secondEvents, postId));
 
           expect(hasRowId(secondEvents, preId), isFalse,
               reason: 'row written before checkpoint must not replay');
@@ -338,7 +341,8 @@ void main() {
         final subsDuring = await client.getSubscriptions();
         final activeDuring = subsDuring.where((s) => s.id == subId);
         expect(activeDuring, isNotEmpty,
-            reason: 'should include active subscription before cancel ($subId)');
+            reason:
+                'should include active subscription before cancel ($subId)');
 
         await _safeCancel(sub);
 
@@ -348,7 +352,8 @@ void main() {
             final current = await client.getSubscriptions();
             final stillActive = current.where((s) => s.id == subId);
             if (stillActive.isEmpty) return;
-            if (DateTime.now().difference(started) > const Duration(seconds: 10)) {
+            if (DateTime.now().difference(started) >
+                const Duration(seconds: 10)) {
               break;
             }
             await sleep(const Duration(milliseconds: 200));

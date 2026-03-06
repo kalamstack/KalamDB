@@ -22,7 +22,7 @@ describe('Auth', { timeout: 30_000 }, () => {
   test('login with basic auth returns tokens and user info', async () => {
     const client = createClient({
       url: SERVER_URL,
-      auth: Auth.basic(ADMIN_USER, ADMIN_PASS),
+      authProvider: async () => Auth.basic(ADMIN_USER, ADMIN_PASS),
     });
     const resp = await client.login();
 
@@ -41,7 +41,7 @@ describe('Auth', { timeout: 30_000 }, () => {
   test('refreshToken returns a valid access token', async () => {
     const client = createClient({
       url: SERVER_URL,
-      auth: Auth.basic(ADMIN_USER, ADMIN_PASS),
+      authProvider: async () => Auth.basic(ADMIN_USER, ADMIN_PASS),
     });
     const login = await client.login();
     const refreshed = await client.refreshToken(login.refresh_token);
@@ -61,7 +61,7 @@ describe('Auth', { timeout: 30_000 }, () => {
     // First, get a token
     const bootstrap = createClient({
       url: SERVER_URL,
-      auth: Auth.basic(ADMIN_USER, ADMIN_PASS),
+      authProvider: async () => Auth.basic(ADMIN_USER, ADMIN_PASS),
     });
     const login = await bootstrap.login();
     await bootstrap.disconnect();
@@ -69,7 +69,7 @@ describe('Auth', { timeout: 30_000 }, () => {
     // Now connect with JWT
     const jwtClient = createClient({
       url: SERVER_URL,
-      auth: Auth.jwt(login.access_token),
+      authProvider: async () => Auth.jwt(login.access_token),
     });
     const resp = await jwtClient.query('SELECT 1 AS val');
     assert.ok(resp.results?.length > 0);
@@ -85,20 +85,21 @@ describe('Auth', { timeout: 30_000 }, () => {
     // Get a JWT first via basic auth
     const bootstrap = createClient({
       url: SERVER_URL,
-      auth: Auth.basic(ADMIN_USER, ADMIN_PASS),
+      authProvider: async () => Auth.basic(ADMIN_USER, ADMIN_PASS),
     });
     const login = await bootstrap.login();
     await bootstrap.disconnect();
 
     const client = createClient({
       url: SERVER_URL,
+      wsLazyConnect: false,
       authProvider: async () => {
         providerCallCount++;
         return Auth.jwt(login.access_token);
       },
     });
 
-    await client.connect();
+    await client.initialize();
     assert.ok(providerCallCount >= 1, 'authProvider should have been called at least once');
     assert.ok(client.isConnected(), 'client should be connected via authProvider');
     await client.disconnect();
@@ -110,7 +111,7 @@ describe('Auth', { timeout: 30_000 }, () => {
   test('Auth.none client can be created (anonymous mode)', async () => {
     const client = createClient({
       url: SERVER_URL,
-      auth: Auth.none(),
+      authProvider: async () => Auth.none(),
     });
     assert.equal(client.getAuthType(), 'none');
     // Anonymous queries may be rejected by server policy but client creation succeeds
@@ -122,7 +123,7 @@ describe('Auth', { timeout: 30_000 }, () => {
   test('wrong password rejects login', async () => {
     const client = createClient({
       url: SERVER_URL,
-      auth: Auth.basic(ADMIN_USER, 'wrong-password-xyz'),
+      authProvider: async () => Auth.basic(ADMIN_USER, 'wrong-password-xyz'),
     });
     await assert.rejects(
       () => client.login(),
@@ -134,10 +135,10 @@ describe('Auth', { timeout: 30_000 }, () => {
   // Validation
   // -----------------------------------------------------------------------
   test('constructor requires url', () => {
-    assert.throws(() => createClient({ url: '', auth: Auth.none() }));
+    assert.throws(() => createClient({ url: '', authProvider: async () => Auth.none() }));
   });
 
-  test('constructor requires auth or authProvider', () => {
+  test('constructor requires authProvider', () => {
     assert.throws(() => createClient({ url: SERVER_URL }));
   });
 });

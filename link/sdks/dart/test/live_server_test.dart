@@ -48,7 +48,7 @@ Future<KalamClient> _connectJwtClient() async {
     final login = await anonClient.login(adminUser, adminPass);
     return KalamClient.connect(
       url: serverUrl,
-      auth: Auth.jwt(login.accessToken),
+      authProvider: () async => Auth.jwt(login.accessToken),
       timeout: const Duration(seconds: 10),
       maxRetries: 2,
     );

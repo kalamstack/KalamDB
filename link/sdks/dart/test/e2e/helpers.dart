@@ -58,8 +58,10 @@ Future<void> ensureSdkReady() async {
 Future<KalamClient> connectJwtClient() async {
   await ensureSdkReady();
 
+  // First, log in anonymously to obtain a JWT.
   final anonClient = await KalamClient.connect(
     url: serverUrl,
+    authProvider: () async => Auth.none(),
     timeout: const Duration(seconds: 10),
   );
 
@@ -67,7 +69,7 @@ Future<KalamClient> connectJwtClient() async {
     final login = await anonClient.login(adminUser, adminPass);
     return KalamClient.connect(
       url: serverUrl,
-      auth: Auth.jwt(login.accessToken),
+      authProvider: () async => Auth.jwt(login.accessToken),
       timeout: const Duration(seconds: 10),
       maxRetries: 2,
     );
@@ -89,7 +91,7 @@ Future<KalamClient> connectWithAuthProvider() async {
         // Bootstrap: basic-auth login to get a JWT.
         final bootstrap = await KalamClient.connect(
           url: serverUrl,
-          auth: Auth.basic(adminUser, adminPass),
+          authProvider: () async => Auth.basic(adminUser, adminPass),
           timeout: const Duration(seconds: 10),
         );
         try {

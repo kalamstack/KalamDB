@@ -1,9 +1,10 @@
 // Smoke Test: Delta updates for subscription UPDATE notifications
 //
-// Covers: When a subscription receives an UPDATE change event, only the changed
-// columns (plus system columns _seq, _deleted) should be included in the
-// notification — not all columns. The `changed_columns` field lists which
-// user-defined columns were modified.
+// Covers: When a subscription receives an UPDATE change event, the notification
+// includes all non-null columns (plus _seq and PK) — not just the columns that
+// changed. The `old_values` field only contains columns that actually changed.
+// This "full snapshot" approach lets subscribers use tables as change triggers
+// without needing to re-query for unchanged values.
 //
 // This verifies the end-to-end delta update pipeline:
 //   Backend (notification.rs compute_json_update_delta) → WebSocket → kalam-link SDK
@@ -75,7 +76,7 @@ fn smoke_subscription_update_sends_delta_only() {
         }
     }
 
-    // 4) UPDATE only the 'name' column — email and age should NOT be in the delta
+    // 4) UPDATE only the 'name' column — all non-null cols should appear in the update
     let upd = format!("UPDATE {} SET name = 'Bob' WHERE name = 'Alice'", full);
     execute_sql_as_root_via_client(&upd).expect("update should succeed");
 
@@ -112,11 +113,11 @@ fn smoke_subscription_update_sends_delta_only() {
         update_joined
     );
 
-    // 5b) Verify only the changed column is listed
-    //     (email and age should NOT appear in changed_columns)
+    // 5b) Non-null unchanged columns should also appear in the update rows
+    //     (email and age are non-null, so they should be included in the snapshot)
     assert!(
-        !update_joined.contains("email") && !update_joined.contains("age"),
-        "Single-column UPDATE delta should not include unchanged fields 'email' or 'age'; got: {}",
+        update_joined.contains("alice@test.com") || update_joined.contains("email"),
+        "UPDATE should include non-null unchanged column 'email' in the snapshot; got: {}",
         update_joined
     );
 

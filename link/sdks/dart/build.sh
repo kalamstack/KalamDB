@@ -82,6 +82,12 @@ if [ -f "$BRIDGE_DIR/flutter_rust_bridge.yaml" ]; then
   fi
 fi
 
+echo "🦀 Building host native library for Dart VM / Flutter desktop..."
+(
+  cd "$BRIDGE_DIR"
+  CARGO_TARGET_DIR="$BRIDGE_DIR/target" cargo build --release
+)
+
 echo "🔍 Running static analysis..."
 flutter analyze
 

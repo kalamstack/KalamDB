@@ -151,8 +151,10 @@ struct ChatFixture {
     messages_table: String,
     typing_table: String,
     regular_user: String,
+    regular_user_id: String,
     service_user: String,
     other_user: String,
+    other_user_id: String,
     password: String,
 }
 
@@ -173,39 +175,54 @@ impl ChatFixture {
             "DROP TABLE IF EXISTS {}",
             self.conversations_table
         ));
-        let _ =
-            execute_sql_as_root_via_client(&format!("DROP NAMESPACE IF EXISTS {}", self.namespace));
-    }
-}
-
-fn create_user_with_retry(username: &str, password: &str, role: &str) {
-    let sql = format!("CREATE USER {} WITH PASSWORD '{}' ROLE '{}'", username, password, role);
-    let mut last_error = None;
-    for attempt in 0..3 {
-        match execute_sql_as_root_via_client(&sql) {
-            Ok(_) => return,
-            Err(err) => {
-                let msg = err.to_string();
-                if msg.contains("Already exists") {
-                    let alter_sql = format!("ALTER USER {} SET PASSWORD '{}'", username, password);
-                    let _ = execute_sql_as_root_via_client(&alter_sql);
-                    return;
-                }
-                if msg.contains("Serialization error") || msg.contains("UnexpectedEnd") {
-                    last_error = Some(msg);
-                    thread::sleep(Duration::from_millis(200 * (attempt + 1) as u64));
-                    continue;
-                }
-                panic!("Failed to create user {}: {}", username, msg);
-            },
+            let _ =
+                execute_sql_as_root_via_client(&format!("DROP NAMESPACE IF EXISTS {}", self.namespace));
         }
     }
-    panic!(
-        "Failed to create user {} after retries: {}",
-        username,
-        last_error.unwrap_or_else(|| "unknown error".to_string())
-    );
-}
+
+    fn create_user_with_retry(username: &str, password: &str, role: &str) {
+        let sql = format!("CREATE USER {} WITH PASSWORD '{}' ROLE '{}'", username, password, role);
+        let mut last_error = None;
+        for attempt in 0..3 {
+            match execute_sql_as_root_via_client(&sql) {
+                Ok(_) => return,
+                Err(err) => {
+                    let msg = err.to_string();
+                    if msg.contains("Already exists") {
+                        let alter_sql = format!("ALTER USER {} SET PASSWORD '{}'", username, password);
+                        let _ = execute_sql_as_root_via_client(&alter_sql);
+                        return;
+                    }
+                    if msg.contains("Serialization error") || msg.contains("UnexpectedEnd") {
+                        last_error = Some(msg);
+                        thread::sleep(Duration::from_millis(200 * (attempt + 1) as u64));
+                        continue;
+                    }
+                    panic!("Failed to create user {}: {}", username, msg);
+                },
+            }
+        }
+        panic!(
+            "Failed to create user {} after retries: {}",
+            username,
+            last_error.unwrap_or_else(|| "unknown error".to_string())
+        );
+    }
+
+    fn get_user_id_for_username(username: &str) -> Option<String> {
+        let query = format!("SELECT user_id FROM system.users WHERE username = '{}'", username);
+        let result = execute_sql_as_root_via_client_json(&query).ok()?;
+
+        let json: serde_json::Value = serde_json::from_str(&result).ok()?;
+        let rows = get_rows_as_hashmaps(&json)?;
+
+        if let Some(row) = rows.first() {
+            let user_id_value = row.get("user_id").map(extract_typed_value)?;
+            return user_id_value.as_str().map(|value| value.to_string());
+        }
+
+        None
+    }
 
 fn setup_chat_fixture(suffix: &str) -> ChatFixture {
     let namespace = generate_unique_namespace(&format!("smoke_imp_chat_{}", suffix));
@@ -243,14 +260,21 @@ fn setup_chat_fixture(suffix: &str) -> ChatFixture {
     create_user_with_retry(&service_user, &password, "service");
     create_user_with_retry(&other_user, &password, "user");
 
+    let regular_user_id =
+        get_user_id_for_username(&regular_user).expect("Failed to get regular user_id");
+    let other_user_id =
+        get_user_id_for_username(&other_user).expect("Failed to get other user_id");
+
     ChatFixture {
         namespace,
         conversations_table,
         messages_table,
         typing_table,
         regular_user,
+        regular_user_id,
         service_user,
         other_user,
+        other_user_id,
         password,
     }
 }
@@ -366,7 +390,7 @@ fn run_base_chat_flow_with_impersonation(fixture: &ChatFixture) -> BaseFlow {
         &fixture.password,
         &format!(
             "EXECUTE AS USER '{}' (INSERT INTO {} (id, conversation_id, sender, role, content, status) VALUES ({}, {}, 'AI Assistant', 'assistant', '{}', 'sent'))",
-            fixture.regular_user,
+            fixture.regular_user_id,
             fixture.messages_table,
             assistant_message_id,
             conversation_id,
@@ -464,7 +488,7 @@ fn smoke_as_user_chat_insert_and_select_flow() {
         &fixture.password,
         &format!(
             "EXECUTE AS USER '{}' (SELECT role, content FROM {} WHERE conversation_id = {} ORDER BY id)",
-            fixture.regular_user,
+            fixture.regular_user_id,
             fixture.messages_table, flow.conversation_id
         ),
     )
@@ -498,7 +522,7 @@ fn smoke_as_user_chat_select_scope_for_different_user() {
         &fixture.password,
         &format!(
             "EXECUTE AS USER '{}' (SELECT role, content FROM {} WHERE conversation_id = {} ORDER BY id)",
-            fixture.other_user,
+            fixture.other_user_id,
             fixture.messages_table, flow.conversation_id
         ),
     )
@@ -552,7 +576,7 @@ fn smoke_as_user_chat_update_flow() {
         &fixture.password,
         &format!(
             "EXECUTE AS USER '{}' (UPDATE {} SET content = 'Service response updated', status = 'delivered' WHERE id = {})",
-            fixture.regular_user,
+            fixture.regular_user_id,
             fixture.messages_table, flow.assistant_message_id
         ),
     )
@@ -587,7 +611,7 @@ fn smoke_as_user_chat_update_flow() {
         &fixture.password,
         &format!(
             "EXECUTE AS USER '{}' (SELECT content, status FROM {} WHERE id = {})",
-            fixture.regular_user, fixture.messages_table, flow.assistant_message_id
+            fixture.regular_user_id, fixture.messages_table, flow.assistant_message_id
         ),
     )
     .expect("Service SELECT AS USER should see updated message");
@@ -618,7 +642,7 @@ fn smoke_as_user_chat_delete_flow() {
         &fixture.password,
         &format!(
             "EXECUTE AS USER '{}' (DELETE FROM {} WHERE id = {})",
-            fixture.regular_user, fixture.messages_table, flow.assistant_message_id
+            fixture.regular_user_id, fixture.messages_table, flow.assistant_message_id
         ),
     )
     .expect("Service DELETE AS USER should succeed");
@@ -644,7 +668,7 @@ fn smoke_as_user_chat_delete_flow() {
         &fixture.password,
         &format!(
             "EXECUTE AS USER '{}' (SELECT role, content FROM {} WHERE conversation_id = {} ORDER BY id)",
-            fixture.regular_user,
+            fixture.regular_user_id,
             fixture.messages_table, flow.conversation_id
         ),
     )

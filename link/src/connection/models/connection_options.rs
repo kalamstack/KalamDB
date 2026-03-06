@@ -93,6 +93,21 @@ pub struct ConnectionOptions {
     /// for large payloads.  Default: `false`.
     #[serde(default)]
     pub disable_compression: bool,
+
+    /// Defer the WebSocket connection until the first subscription is created.
+    ///
+    /// When `true` (the default), calling `connect()` is not required — the
+    /// client will automatically open the shared WebSocket connection the
+    /// first time `subscribe()` (or `subscribe_with_config()`) is called.
+    /// The same `AuthProvider` used for HTTP queries is reused for the
+    /// WebSocket handshake.
+    ///
+    /// When `false`, the caller is expected to establish the WebSocket
+    /// connection explicitly by calling `connect()` before subscribing.
+    ///
+    /// Default: `true`.
+    #[serde(default = "default_ws_lazy_connect")]
+    pub ws_lazy_connect: bool,
 }
 
 fn default_auto_reconnect() -> bool {
@@ -111,6 +126,10 @@ fn default_ping_interval_ms() -> u64 {
     30000
 }
 
+fn default_ws_lazy_connect() -> bool {
+    true
+}
+
 impl Default for ConnectionOptions {
     fn default() -> Self {
         Self {
@@ -123,6 +142,7 @@ impl Default for ConnectionOptions {
             ping_interval_ms: 30000,
             ws_local_bind_addresses: Vec::new(),
             disable_compression: false,
+            ws_lazy_connect: true,
         }
     }
 }
@@ -199,5 +219,52 @@ impl ConnectionOptions {
     pub fn with_disable_compression(mut self, disable: bool) -> Self {
         self.disable_compression = disable;
         self
+    }
+
+    /// Control lazy WebSocket connections.
+    ///
+    /// When `true` (the default), the shared WebSocket connection is
+    /// deferred until the first `subscribe()` call, removing the need to
+    /// call `connect()` explicitly.  Authentication uses the same provider
+    /// configured for HTTP queries.
+    ///
+    /// Set to `false` to require an explicit `connect()` call before
+    /// subscribing.
+    pub fn with_ws_lazy_connect(mut self, lazy: bool) -> Self {
+        self.ws_lazy_connect = lazy;
+        self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_ws_lazy_connect_is_true() {
+        let opts = ConnectionOptions::default();
+        assert!(opts.ws_lazy_connect);
+    }
+
+    #[test]
+    fn with_ws_lazy_connect_sets_field() {
+        let opts = ConnectionOptions::default().with_ws_lazy_connect(true);
+        assert!(opts.ws_lazy_connect);
+    }
+
+    #[test]
+    fn serde_roundtrip_ws_lazy_connect() {
+        let opts = ConnectionOptions::default().with_ws_lazy_connect(true);
+        let json = serde_json::to_string(&opts).unwrap();
+        let deserialized: ConnectionOptions = serde_json::from_str(&json).unwrap();
+        assert!(deserialized.ws_lazy_connect);
+    }
+
+    #[test]
+    fn serde_missing_ws_lazy_connect_defaults_true() {
+        // Simulates receiving JSON from an older client that doesn't send this field
+        let json = r#"{"auto_reconnect": true}"#;
+        let deserialized: ConnectionOptions = serde_json::from_str(json).unwrap();
+        assert!(deserialized.ws_lazy_connect);
     }
 }

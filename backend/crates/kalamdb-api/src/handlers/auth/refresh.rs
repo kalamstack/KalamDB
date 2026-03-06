@@ -4,7 +4,9 @@
 
 use actix_web::{web, HttpRequest, HttpResponse};
 use chrono::{Duration, Utc};
-use kalamdb_auth::providers::jwt_auth::{create_and_sign_refresh_token, validate_jwt_token};
+use kalamdb_auth::providers::jwt_auth::{
+    create_and_sign_refresh_token, validate_jwt_token, TokenType,
+};
 use kalamdb_auth::{
     create_and_sign_token, create_auth_cookie, extract_client_ip_secure, CookieConfig,
     UserRepository,
@@ -41,14 +43,19 @@ pub async fn refresh_handler(
         Err(err) => return map_auth_error_to_response(err),
     };
 
-    // Validate existing token directly (accepts both access and refresh tokens).
-    // Unlike authenticate_bearer (which rejects refresh tokens for API auth),
-    // the refresh endpoint must accept refresh tokens to issue new token pairs.
+    // Validate existing token directly, then require a real refresh token.
     let jwt_config = kalamdb_auth::providers::jwt_config::get_jwt_config();
     let claims = match validate_jwt_token(&token, &jwt_config.secret, &jwt_config.trusted_issuers) {
         Ok(c) => c,
         Err(err) => return map_auth_error_to_response(err),
     };
+
+    if !matches!(claims.token_type, Some(TokenType::Refresh)) {
+        return HttpResponse::Unauthorized().json(AuthErrorResponse::new(
+            "unauthorized",
+            "Refresh endpoint requires a refresh token",
+        ));
+    }
 
     let username_claim = match claims.username {
         Some(ref u) => u.clone(),
@@ -132,6 +139,7 @@ pub async fn refresh_handler(
 
     let expires_at = Utc::now() + Duration::hours(config.jwt_expiry_hours);
     let refresh_expires_at = Utc::now() + Duration::hours(refresh_expiry_hours);
+    let admin_ui_access = matches!(user.role, kalamdb_commons::Role::Dba | kalamdb_commons::Role::System);
 
     // Convert timestamps properly
     let created_at = chrono::DateTime::from_timestamp_millis(user.created_at)
@@ -150,9 +158,43 @@ pub async fn refresh_handler(
             created_at,
             updated_at,
         },
+        admin_ui_access,
         expires_at: expires_at.to_rfc3339(),
         access_token: new_token,
         refresh_token: new_refresh_token,
         refresh_expires_at: refresh_expires_at.to_rfc3339(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kalamdb_auth::providers::jwt_auth::JwtClaims;
+
+    #[test]
+    fn refresh_endpoint_only_accepts_refresh_token_type() {
+        let now = chrono::Utc::now().timestamp() as usize;
+        let refresh_claims = JwtClaims {
+            sub: "u_1".to_string(),
+            iss: "kalamdb".to_string(),
+            exp: now + 3600,
+            iat: now,
+            username: None,
+            email: None,
+            role: None,
+            token_type: Some(TokenType::Refresh),
+        };
+        let access_claims = JwtClaims {
+            token_type: Some(TokenType::Access),
+            ..refresh_claims.clone()
+        };
+        let legacy_claims = JwtClaims {
+            token_type: None,
+            ..refresh_claims.clone()
+        };
+
+        assert!(matches!(refresh_claims.token_type, Some(TokenType::Refresh)));
+        assert!(!matches!(access_claims.token_type, Some(TokenType::Refresh)));
+        assert!(!matches!(legacy_claims.token_type, Some(TokenType::Refresh)));
+    }
 }

@@ -52,7 +52,7 @@ void main() {
         // Connect with compression disabled.
         final client = await KalamClient.connect(
           url: serverUrl,
-          auth: Auth.jwt(login.accessToken),
+          authProvider: () async => Auth.jwt(login.accessToken),
           disableCompression: true,
           timeout: const Duration(seconds: 10),
         );

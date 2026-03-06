@@ -17,7 +17,7 @@
 /// // Then in your widget/provider:
 /// final client = await KalamClient.connect(
 ///   url: 'https://db.example.com',
-///   auth: Auth.basic('alice', 'secret123'),
+///   authProvider: () async => Auth.basic('alice', 'secret123'),
 /// );
 /// ```
 ///
@@ -32,3 +32,4 @@ export 'src/file_ref.dart';
 export 'src/kalam_client.dart';
 export 'src/logger.dart';
 export 'src/models.dart';
+export 'src/seq_id.dart';

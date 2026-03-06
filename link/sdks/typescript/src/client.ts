@@ -6,7 +6,7 @@
  * fetch() + FormData for better browser compatibility.
  */
 
-import init, { KalamClient as WasmClient } from '../.wasm-out/kalam_link.js';
+import init, { KalamClient as WasmClient } from '../wasm/kalam_link.js';
 
 import type { AuthCredentials, AuthProvider } from './auth.js';
 import { buildAuthHeader } from './auth.js';
@@ -36,13 +36,14 @@ import type {
 } from './types.js';
 
 import { LogLevel } from './types.js';
+import { SeqId } from './seq_id.js';
 
 import type {
   AckResponse,
   ConsumeMessage,
   ConsumeRequest,
   ConsumeResponse,
-} from '../.wasm-out/kalam_link.js';
+} from '../wasm/kalam_link.js';
 
 import { KalamCellValue, wrapRowMap } from './cell_value.js';
 import type { RowData } from './cell_value.js';
@@ -89,10 +90,8 @@ type NodeWindowShim = {
  *
  * const client = createClient({
  *   url: 'http://localhost:8080',
- *   auth: Auth.basic('alice', 'password123'),
+ *   authProvider: async () => Auth.basic('alice', 'password123'),
  * });
- *
- * await client.connect();
  *
  * const users = await client.query('SELECT * FROM users WHERE active = true');
  * console.log(users.results[0].rows);
@@ -110,14 +109,15 @@ export class KalamDBClient {
   private initialized = false;
   private connecting: Promise<void> | null = null;
   private url: string;
-  private auth: AuthCredentials;
-  private _authProvider?: AuthProvider;
+  /** Current auth state — updated by initialize() and mutated by login()/refreshToken(). */
+  private auth: AuthCredentials = { type: 'none' };
+  private _authProvider: AuthProvider;
   private authProviderMaxAttempts: number;
   private authProviderInitialBackoffMs: number;
   private authProviderMaxBackoffMs: number;
   private disableCompression: boolean;
   private wasmUrl?: string | BufferSource;
-  private autoConnect: boolean;
+  private wsLazyConnect: boolean;
   private pingIntervalMs: number;
 
   /** Current minimum log level. */
@@ -138,8 +138,8 @@ export class KalamDBClient {
   /**
    * Create a new KalamDB client
    *
-   * @param options - Client options with URL and auth credentials
-   * @throws Error if url or auth is missing
+   * @param options - Client options with URL and authProvider
+   * @throws Error if url or authProvider is missing
    *
    * @example
    * ```typescript
@@ -147,25 +147,24 @@ export class KalamDBClient {
    *
    * const client = new KalamDBClient({
    *   url: 'http://localhost:8080',
-   *   auth: Auth.basic('admin', 'secret'),
+   *   authProvider: async () => Auth.basic('admin', 'secret'),
    * });
    * ```
    */
   constructor(options: ClientOptions) {
     if (!options.url) throw new Error('KalamDBClient: url is required');
-    if (!options.auth && !options.authProvider) {
-      throw new Error('KalamDBClient: either auth or authProvider is required');
+    if (!options.authProvider) {
+      throw new Error('KalamDBClient: authProvider is required');
     }
 
     this.url = options.url;
-    this.auth = options.auth ?? { type: 'none' };
     this._authProvider = options.authProvider;
     this.authProviderMaxAttempts = options.authProviderMaxAttempts ?? 3;
     this.authProviderInitialBackoffMs = options.authProviderInitialBackoffMs ?? 250;
     this.authProviderMaxBackoffMs = options.authProviderMaxBackoffMs ?? 2000;
     this.disableCompression = options.disableCompression ?? false;
     this.wasmUrl = options.wasmUrl;
-    this.autoConnect = options.autoConnect ?? true;
+    this.wsLazyConnect = options.wsLazyConnect ?? true;
     this.pingIntervalMs = options.pingIntervalMs ?? 30_000;
     this._logLevel = options.logLevel ?? LogLevel.Warn;
     this._logListener = options.logListener;
@@ -250,7 +249,7 @@ export class KalamDBClient {
 
   /**
    * Initialize WASM module and create client instance.
-   * Called automatically by `connect()` if not already done.
+   * Called automatically before the first operation that requires it.
    */
   async initialize(): Promise<void> {
     if (this.initialized) return;
@@ -268,13 +267,23 @@ export class KalamDBClient {
         await init();
       }
 
-      switch (this.auth.type) {
+      // Resolve initial credentials from the authProvider.
+      this.log(LogLevel.Debug, 'init', 'Resolving initial credentials from authProvider...');
+      const initialCreds = await resolveAuthProviderWithRetry(this._authProvider, {
+        maxAttempts: this.authProviderMaxAttempts,
+        initialBackoffMs: this.authProviderInitialBackoffMs,
+        maxBackoffMs: this.authProviderMaxBackoffMs,
+      });
+      this.auth = initialCreds;
+      this.log(LogLevel.Debug, 'init', `Initial credentials resolved: type=${initialCreds.type}`);
+
+      switch (initialCreds.type) {
         case 'basic':
-          this.wasmClient = new WasmClient(this.url, this.auth.username, this.auth.password);
+          this.wasmClient = new WasmClient(this.url, initialCreds.username, initialCreds.password);
           this.log(LogLevel.Debug, 'init', 'Created WASM client with basic auth');
           break;
         case 'jwt':
-          this.wasmClient = WasmClient.withJwt(this.url, this.auth.token);
+          this.wasmClient = WasmClient.withJwt(this.url, initialCreds.token);
           this.log(LogLevel.Debug, 'init', 'Created WASM client with JWT auth');
           break;
         case 'none':
@@ -283,41 +292,67 @@ export class KalamDBClient {
           break;
       }
 
-      // Wire authProvider if configured — takes precedence over static auth
-      if (this._authProvider) {
-        this.log(LogLevel.Debug, 'init', 'Wiring async auth provider');
-        const provider = this._authProvider;
-        const logFn = this.log.bind(this);
-        this.wasmClient.setAuthProvider(async () => {
-          logFn(LogLevel.Debug, 'auth', 'Auth provider invoked for credentials...');
-          const creds = await resolveAuthProviderWithRetry(provider, {
-            maxAttempts: this.authProviderMaxAttempts,
-            initialBackoffMs: this.authProviderInitialBackoffMs,
-            maxBackoffMs: this.authProviderMaxBackoffMs,
-          });
-          logFn(LogLevel.Debug, 'auth', `Auth provider resolved: type=${creds.type}`);
-          if (creds.type === 'jwt') {
-            return { jwt: { token: creds.token } };
-          }
-          if (creds.type === 'none') {
-            return null;
-          }
-          throw new Error(
-            'authProvider must return Auth.jwt(...) or Auth.none(); basic credentials are not valid for WebSocket auth',
-          );
+      // Wire authProvider for WebSocket (re-)connections.
+      this.log(LogLevel.Debug, 'init', 'Wiring async auth provider');
+      const provider = this._authProvider;
+      const baseUrl = this.url;
+      const logFn = this.log.bind(this);
+      const updateAuth = (auth: AuthCredentials) => { this.auth = auth; };
+      this.wasmClient.setAuthProvider(async () => {
+        logFn(LogLevel.Debug, 'auth', 'Auth provider invoked for credentials...');
+        const creds = await resolveAuthProviderWithRetry(provider, {
+          maxAttempts: this.authProviderMaxAttempts,
+          initialBackoffMs: this.authProviderInitialBackoffMs,
+          maxBackoffMs: this.authProviderMaxBackoffMs,
         });
-      }
+        logFn(LogLevel.Debug, 'auth', `Auth provider resolved: type=${creds.type}`);
+        if (creds.type === 'jwt') {
+          return { jwt: { token: creds.token } };
+        }
+        if (creds.type === 'none') {
+          return null;
+        }
+        if (creds.type === 'basic') {
+          // Basic auth: use a direct fetch to avoid re-entering the WASM object
+          // (calling wasmClient.login() from inside a WASM callback would cause
+          // a Rust "recursive use of an object" panic).
+          logFn(LogLevel.Debug, 'auth', 'Auth provider returned basic — performing direct HTTP login for JWT...');
+          const resp = await fetch(`${baseUrl}/v1/api/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: creds.username, password: creds.password }),
+          });
+          if (!resp.ok) {
+            const body = await resp.text().catch(() => '');
+            throw new Error(body || `Login failed: HTTP ${resp.status}`);
+          }
+          const loginResp = (await resp.json()) as LoginResponse;
+          updateAuth({ type: 'jwt', token: loginResp.access_token });
+          logFn(LogLevel.Debug, 'auth', 'Login successful via authProvider bridge (direct fetch)');
+          return { jwt: { token: loginResp.access_token } };
+        }
+        throw new Error('authProvider returned an unknown credential type');
+      });
 
       // Wire disable compression option
       if (this.disableCompression) {
         this.wasmClient.setDisableCompression(true);
       }
 
+      // Forward ws_lazy_connect to WASM for cross-layer consistency.
+      this.wasmClient.setWsLazyConnect(this.wsLazyConnect);
+
       this.initialized = true;
       this.log(LogLevel.Info, 'init', 'WASM initialization complete');
 
       // Wire connection lifecycle event handlers to the WASM client
       this.applyEventHandlers();
+
+      // Eager connect: when wsLazyConnect is false, connect immediately.
+      if (!this.wsLazyConnect) {
+        this.log(LogLevel.Debug, 'init', 'wsLazyConnect=false — connecting eagerly...');
+        await this.connectInternal();
+      }
     } catch (error) {
       this.log(LogLevel.Error, 'init', `WASM initialization failed: ${error}`);
       throw new Error(`Failed to initialize WASM client: ${error}`);
@@ -326,16 +361,20 @@ export class KalamDBClient {
 
   /**
    * Connect to KalamDB server via WebSocket.
-   * Also initialises WASM if not already done.
+   *
+   * This is managed internally — you do not need to call it.
+   * When `wsLazyConnect` is `true` (default), the SDK connects
+   * automatically on the first `subscribe()` / `subscribeWithSql()` call.
+   * When `wsLazyConnect` is `false`, the SDK connects during
+   * `initialize()`.
    *
    * When using Basic auth, `login()` is called automatically to exchange
    * credentials for a JWT before opening the WebSocket.
    *
-   * This is called lazily by `subscribe()` / `subscribeWithSql()` unless
-   * `autoConnect` was set to `false`.
+   * @internal
    */
-  async connect(): Promise<void> {
-    // Deduplicate concurrent connect() calls — only one handshake at a time.
+  private async connectInternal(): Promise<void> {
+    // Deduplicate concurrent connectInternal() calls — only one handshake at a time.
     if (this.connecting) return this.connecting;
 
     this.connecting = (async () => {
@@ -345,8 +384,7 @@ export class KalamDBClient {
         if (!this.wasmClient) throw new Error('WASM client not initialized');
 
         // Auto-login: exchange Basic credentials for JWT before WebSocket connect.
-        // Skipped when an authProvider is set (it handles credentials itself).
-        if (this.auth.type === 'basic' && !this._authProvider) {
+        if (this.auth.type === 'basic') {
           this.log(LogLevel.Debug, 'auth', 'Auto-login: exchanging basic creds for JWT...');
           await this.login();
           this.log(LogLevel.Debug, 'auth', 'Auto-login successful');
@@ -366,6 +404,18 @@ export class KalamDBClient {
     })();
 
     return this.connecting;
+  }
+
+  /**
+   * Ensure the WebSocket connection is established.
+   *
+   * Safe to call multiple times — deduplicates concurrent connect attempts.
+   * @internal
+   */
+  private async ensureConnected(): Promise<void> {
+    if (!this.isConnected()) {
+      await this.connectInternal();
+    }
   }
 
   /** Disconnect and clean up all subscriptions */
@@ -389,7 +439,6 @@ export class KalamDBClient {
    * ```typescript
    * async function demo() {
    *   await using client = createClient({ url, auth });
-   *   await client.connect();
    *   // ... use client ...
    * } // client.disconnect() called automatically here
    * ```
@@ -548,9 +597,15 @@ export class KalamDBClient {
   }
 
   /** Last received sequence ID for a subscription */
-  getLastSeqId(subscriptionId: string): string | undefined {
+  getLastSeqId(subscriptionId: string): import('./seq_id.js').SeqId | undefined {
     this.requireInit();
-    return this.wasmClient!.getLastSeqId(subscriptionId) ?? undefined;
+    const raw = this.wasmClient!.getLastSeqId(subscriptionId);
+    if (raw === null || raw === undefined) return undefined;
+    try {
+      return SeqId.from(raw);
+    } catch {
+      return undefined;
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -973,18 +1028,16 @@ export class KalamDBClient {
    * Login with Basic Auth credentials and switch to JWT.
    *
    * Uses WASM binding to POST to `/v1/api/auth/login`, obtain a JWT token,
-   * and automatically update the client to use JWT auth. Must be called
-   * before `connect()` for WebSocket subscriptions.
+   * and automatically update the client to use JWT auth. Should be called
+   * before subscribing to WebSocket queries.
    *
    * @returns The full LoginResponse (access_token, refresh_token, user info, etc.)
    */
   async login(): Promise<LoginResponse> {
-    if (this.auth.type !== 'basic') {
-      throw new Error('login() requires Basic auth credentials. Use Auth.basic(username, password)');
-    }
-
-    this.log(LogLevel.Debug, 'auth', 'Logging in with basic credentials...');
     await this.initialize();
+    if (this.auth.type !== 'basic') {
+      throw new Error('login() requires Basic auth credentials. Use authProvider returning Auth.basic(username, password)');
+    }
     if (!this.wasmClient) throw new Error('WASM client not initialized');
 
     // WASM client's login() returns the full LoginResponse as a JsValue
@@ -1063,12 +1116,7 @@ export class KalamDBClient {
     options?: SubscriptionOptions,
   ): Promise<Unsubscribe> {
     this.log(LogLevel.Debug, 'subscription', `Subscribing to: ${sql.substring(0, 120)}`);
-    if (this.autoConnect && !this.isConnected()) {
-      this.log(LogLevel.Debug, 'subscription', 'Auto-connecting before subscribe...');
-      await this.connect();
-    } else {
-      await this.initialize();
-    }
+    await this.ensureConnected();
     if (!this.wasmClient) throw new Error('WASM client not initialized');
 
     const logFn = this.log.bind(this);
@@ -1128,8 +1176,12 @@ export class KalamDBClient {
         const wasmMap = new Map(wasmSubs.map((s) => [s.id, s]));
         for (const [id, info] of this.subscriptions) {
           const ws = wasmMap.get(id);
-          if (ws) {
-            info.lastSeqId = ws.lastSeqId;
+          if (ws && ws.lastSeqId) {
+            try {
+              info.lastSeqId = SeqId.from(ws.lastSeqId);
+            } catch {
+              // best-effort parse
+            }
           }
         }
       } catch {
@@ -1324,7 +1376,7 @@ export class KalamDBClient {
 
   private requireInit(): void {
     if (!this.wasmClient) {
-      throw new Error('WASM client not initialized. Call connect() first.');
+      throw new Error('WASM client not initialized. Call initialize() first.');
     }
   }
 
@@ -1374,11 +1426,11 @@ export class KalamDBClient {
           import('node:fs/promises'),
           import('node:url'),
         ]);
-        const wasmFileUrl = new URL('../.wasm-out/kalam_link_bg.wasm', import.meta.url);
+        const wasmFileUrl = new URL('../wasm/kalam_link_bg.wasm', import.meta.url);
         this.wasmUrl = await readFile(fileURLToPath(wasmFileUrl));
       } catch (error) {
         throw new Error(
-          `Node.js runtime could not load bundled WASM file. Build the SDK and ensure dist/.wasm-out/kalam_link_bg.wasm exists. Cause: ${error}`,
+          `Node.js runtime could not load bundled WASM file. Build the SDK and ensure dist/wasm/kalam_link_bg.wasm exists. Cause: ${error}`,
         );
       }
     }
@@ -1416,7 +1468,7 @@ export class KalamDBClient {
  *
  * const client = createClient({
  *   url: 'http://localhost:8080',
- *   auth: Auth.basic('admin', 'admin'),
+ *   authProvider: async () => Auth.basic('admin', 'admin'),
  * });
  * ```
  */

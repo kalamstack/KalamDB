@@ -97,7 +97,7 @@ void main() {
 
         final c = await KalamClient.connect(
           url: serverUrl,
-          auth: Auth.jwt(login.accessToken),
+          authProvider: () async => Auth.jwt(login.accessToken),
           connectionHandlers: ConnectionHandlers(
             onConnect: () => events.add('connect'),
             onDisconnect: (_) => events.add('disconnect'),
@@ -142,7 +142,7 @@ void main() {
 
         final bootstrap = await KalamClient.connect(
           url: serverUrl,
-          timeout: const Duration(seconds: 10),
+          timeout: const Duration(seconds: 10)
         );
         LoginResponse login;
         try {
@@ -153,7 +153,7 @@ void main() {
 
         final c = await KalamClient.connect(
           url: serverUrl,
-          auth: Auth.jwt(login.accessToken),
+          authProvider: () async => Auth.jwt(login.accessToken),
           connectionHandlers: ConnectionHandlers(
             onError: (_) {},
           ),
@@ -339,7 +339,7 @@ void main() {
           await waitFor(() => eventsBefore.whereType<AckEvent>().isNotEmpty);
           await waitFor(() => hasRowId(eventsBefore, preId));
 
-          BigInt? checkpoint;
+          SeqId? checkpoint;
           final started = DateTime.now();
           while (checkpoint == null) {
             final subs = await client.getSubscriptions();
@@ -350,8 +350,10 @@ void main() {
               }
             }
             if (checkpoint != null) break;
-            if (DateTime.now().difference(started) > const Duration(seconds: 20)) {
-              throw TimeoutException('Timed out waiting for reconnect checkpoint');
+            if (DateTime.now().difference(started) >
+                const Duration(seconds: 20)) {
+              throw TimeoutException(
+                  'Timed out waiting for reconnect checkpoint');
             }
             await sleep(const Duration(milliseconds: 200));
           }
@@ -383,12 +385,15 @@ void main() {
             "INSERT INTO $tbl (id, payload) VALUES ($postId, 'post-reconnect')",
           );
 
-          await waitFor(() => hasRowId(eventsAfter, gapId) && hasRowId(eventsAfter, postId));
+          await waitFor(() =>
+              hasRowId(eventsAfter, gapId) && hasRowId(eventsAfter, postId));
 
           expect(hasRowId(eventsAfter, preId), isFalse,
-              reason: 'pre-checkpoint row must not replay after reconnect resume');
+              reason:
+                  'pre-checkpoint row must not replay after reconnect resume');
           expect(hasRowId(eventsAfter, gapId), isTrue,
-              reason: 'row written during disconnect must be resumed from checkpoint');
+              reason:
+                  'row written during disconnect must be resumed from checkpoint');
           expect(hasRowId(eventsAfter, postId), isTrue,
               reason: 'row written after reconnect must be received live');
         } finally {

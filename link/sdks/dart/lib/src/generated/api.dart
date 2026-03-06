@@ -23,6 +23,15 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 ///   gzip-compressed binary frames. Useful during development.
 /// * `keepalive_interval_ms` — optional WebSocket keep-alive ping interval
 ///   in milliseconds (default 10 000). Set to 0 to disable keep-alive pings.
+/// * `ws_lazy_connect` — controls when the WebSocket connection is established.
+///   When `true` (the default), the connection is deferred until the first
+///   `subscribe()` call. When `false`, the connection is established eagerly.
+///   Authentication uses the same provider configured for HTTP queries.
+///
+/// **Note:** This function intentionally omits `#[frb(sync)]` so that FRB
+/// dispatches it to a worker thread via `executeNormal`. The client
+/// builder may perform TLS initialisation, certificate loading, or other
+/// CPU-bound work that would otherwise freeze the Flutter UI thread.
 Future<DartKalamClient> dartCreateClient(
         {required String baseUrl,
         required DartAuthProvider auth,
@@ -30,7 +39,8 @@ Future<DartKalamClient> dartCreateClient(
         int? maxRetries,
         bool? enableConnectionEvents,
         bool? disableCompression,
-        PlatformInt64? keepaliveIntervalMs}) =>
+        PlatformInt64? keepaliveIntervalMs,
+        bool? wsLazyConnect}) =>
     RustLib.instance.api.crateApiDartCreateClient(
         baseUrl: baseUrl,
         auth: auth,
@@ -38,7 +48,8 @@ Future<DartKalamClient> dartCreateClient(
         maxRetries: maxRetries,
         enableConnectionEvents: enableConnectionEvents,
         disableCompression: disableCompression,
-        keepaliveIntervalMs: keepaliveIntervalMs);
+        keepaliveIntervalMs: keepaliveIntervalMs,
+        wsLazyConnect: wsLazyConnect);
 
 /// Update the authentication credentials on a live client.
 ///
@@ -48,6 +59,13 @@ Future<DartKalamClient> dartCreateClient(
 /// function to push updated credentials into the Rust client.
 ///
 /// The new credentials take effect on the next `subscribe()` call.
+///
+/// Uses `&self` (read lock) instead of `&mut self` (write lock) to avoid
+/// deadlocking with [`dart_next_connection_event`], which holds a long-lived
+/// read lock on the `RustAutoOpaque<DartKalamClient>` while awaiting events.
+///
+/// **Note:** `#[frb(sync)]` is intentionally removed so the lock acquisition
+/// runs on a worker thread instead of the Flutter UI thread.
 Future<void> dartUpdateAuth(
         {required DartKalamClient client, required DartAuthProvider auth}) =>
     RustLib.instance.api.crateApiDartUpdateAuth(client: client, auth: auth);
@@ -83,6 +101,18 @@ Future<DartLoginResponse> dartRefreshToken(
 Future<DartHealthCheckResponse> dartHealthCheck(
         {required DartKalamClient client}) =>
     RustLib.instance.api.crateApiDartHealthCheck(client: client);
+
+/// Check whether the server requires initial setup.
+Future<DartSetupStatusResponse> dartCheckSetupStatus(
+        {required DartKalamClient client}) =>
+    RustLib.instance.api.crateApiDartCheckSetupStatus(client: client);
+
+/// Perform initial server setup (create first admin user).
+Future<DartServerSetupResponse> dartServerSetup(
+        {required DartKalamClient client,
+        required DartServerSetupRequest request}) =>
+    RustLib.instance.api
+        .crateApiDartServerSetup(client: client, request: request);
 
 /// Pull the next connection lifecycle event.
 ///

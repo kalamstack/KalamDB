@@ -6,7 +6,7 @@ use kalamdb_commons::models::TableId;
 use kalamdb_commons::schemas::TableType;
 use kalamdb_commons::TableAccess;
 use kalamdb_core::app_context::AppContext;
-use kalamdb_session::{can_access_shared_table, can_impersonate_user, AuthSession};
+use kalamdb_session::{can_access_shared_table, can_impersonate_role, AuthSession};
 use kalamdb_system::FileRef;
 use std::sync::Arc;
 
@@ -46,12 +46,38 @@ pub async fn download_file(
 
     // Check impersonation permissions
     if let Some(ref requested_user_id) = query.user_id {
-        if requested_user_id != session.user_id() && !can_impersonate_user(session.role()) {
-            return HttpResponse::Forbidden().json(SqlResponse::error(
-                ErrorCode::PermissionDenied,
-                "User impersonation requires Service, Dba, or System role",
-                0.0,
-            ));
+        if requested_user_id != session.user_id() {
+            let users_provider = app_context.system_tables().users();
+            let target_user = match users_provider.get_user_by_id(requested_user_id) {
+                Ok(Some(user)) if user.deleted_at.is_none() => user,
+                Ok(_) => {
+                    return HttpResponse::NotFound().json(SqlResponse::error(
+                        ErrorCode::InvalidInput,
+                        "Requested user was not found",
+                        0.0,
+                    ));
+                },
+                Err(e) => {
+                    log::warn!(
+                        "Failed to resolve impersonation target for file download: user_id={}, error={}",
+                        requested_user_id,
+                        e
+                    );
+                    return HttpResponse::InternalServerError().json(SqlResponse::error(
+                        ErrorCode::InternalError,
+                        "Failed to validate impersonation target",
+                        0.0,
+                    ));
+                },
+            };
+
+            if !can_impersonate_role(session.role(), target_user.role) {
+                return HttpResponse::Forbidden().json(SqlResponse::error(
+                    ErrorCode::PermissionDenied,
+                    "Impersonation target is not allowed for the current role",
+                    0.0,
+                ));
+            }
         }
     }
 
@@ -145,4 +171,21 @@ pub async fn download_file(
 
 fn guess_content_type(file_id: &str) -> String {
     mime_guess::from_path(file_id).first_or_octet_stream().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kalamdb_commons::Role;
+
+    #[test]
+    fn download_impersonation_respects_target_role_matrix() {
+        assert!(can_impersonate_role(Role::System, Role::System));
+        assert!(can_impersonate_role(Role::Dba, Role::Service));
+        assert!(can_impersonate_role(Role::Service, Role::User));
+
+        assert!(!can_impersonate_role(Role::Dba, Role::System));
+        assert!(!can_impersonate_role(Role::Service, Role::Dba));
+        assert!(!can_impersonate_role(Role::User, Role::User));
+    }
 }

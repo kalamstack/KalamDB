@@ -16,6 +16,6 @@
     "allowSyntheticDefaultImports": true,
     "baseUrl": "."
   },
-  "include": ["src/**/*", ".wasm-out/**/*"],
+  "include": ["src/**/*", "wasm/**/*"],
   "exclude": ["node_modules", "dist", "tests"]
 }

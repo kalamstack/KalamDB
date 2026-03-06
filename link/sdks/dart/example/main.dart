@@ -55,7 +55,7 @@ Future<void> main() async {
   // -------------------------------------------------------------------------
   final client = await KalamClient.connect(
     url: serverUrl,
-    auth: Auth.jwt(login.accessToken),
+    authProvider: () async => Auth.jwt(login.accessToken),
     timeout: const Duration(seconds: 10),
   );
 

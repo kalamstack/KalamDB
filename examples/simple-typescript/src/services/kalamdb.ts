@@ -187,11 +187,11 @@ export async function createKalamClient(config: KalamClientConfig): Promise<Kala
   // Interpret apiKey as a JWT token for the SDK (Auth.jwt)
   const sdkClient = createClient({
     url: config.url,
-    auth: Auth.jwt(config.apiKey)
+    authProvider: async () => Auth.jwt(config.apiKey)
   });
 
   // Connect to server
-  await sdkClient.connect();
+  //await sdkClient.connect();
 
   // Wrap in enhanced client
   return new KalamDBClient(sdkClient);

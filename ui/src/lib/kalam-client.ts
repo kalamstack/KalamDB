@@ -90,7 +90,7 @@ export async function initializeClient(jwtToken: string): Promise<KalamDBClient>
 
     const nextClient = new KalamDBClient({
       url: getBackendUrl(),
-      auth: Auth.jwt(jwtToken),
+      authProvider: async () => Auth.jwt(jwtToken),
     });
 
     console.log('[kalam-client] Initializing WASM...');
@@ -312,7 +312,7 @@ export async function connectWebSocket(): Promise<void> {
     await initializeClient(currentToken);
   }
   
-  await client!.connect();
+  //await client!.connect();
 }
 
 /**
@@ -381,11 +381,11 @@ export async function subscribe(
     await initializeClient(currentToken);
   }
   
-  // Ensure WebSocket is connected
-  if (!client!.isConnected()) {
-    console.log('[kalam-client] Connecting WebSocket for subscription...');
-    await client!.connect();
-  }
+  // // Ensure WebSocket is connected
+  // if (!client!.isConnected()) {
+  //   console.log('[kalam-client] Connecting WebSocket for subscription...');
+  //   await client!.connect();
+  // }
   
   // Parse OPTIONS from SQL if present (CLI-style syntax)
   const { sql: cleanSql, options: parsedOptions } = parseOptionsFromSql(tableOrQuery);

@@ -7,11 +7,8 @@
  *
  * const client = createClient({
  *   url: 'http://localhost:8080',
- *   auth: Auth.basic('admin', 'admin'),
+ *   authProvider: async () => Auth.basic('admin', 'admin'),
  * });
- *
- * await client.login();
- * await client.connect();
  *
  * const unsub = await client.subscribe('messages', (event) => {
  *   console.log('Change:', event);
@@ -53,6 +50,7 @@ export {
   KalamCellValue,
   LogLevel,
   MessageType,
+  SeqId,
   Username,
   wrapRowMap,
 } from './types.js';
@@ -92,7 +90,6 @@ export type {
   ResponseStatus,
   RowData,
   SchemaField,
-  SeqId,
   ServerMessage,
   SubscriptionCallback,
   SubscriptionInfo,
@@ -154,7 +151,7 @@ export type {
 } from './file_ref.js';
 
 // WASM bindings (re-exported so advanced users can access low-level API)
-export type { KalamClient as WasmKalamClient } from '../.wasm-out/kalam_link.js';
+export type { KalamClient as WasmKalamClient } from '../wasm/kalam_link.js';
 
 // Default export
 export { KalamDBClient as default } from './client.js';

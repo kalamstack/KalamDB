@@ -620,9 +620,7 @@ export type FieldFlag = "pk" | "nn" | "uq";
  * client.setAutoReconnect(true);
  * client.setReconnectDelay(1000, 30000);
  *
- * await client.connect();
- *
- * // Subscribe with options
+ * // WebSocket connects automatically on first subscribe (wsLazyConnect=true by default)
  * const subId = await client.subscribeWithSql(
  *   "SELECT * FROM chat.messages",
  *   JSON.stringify({
@@ -1012,6 +1010,26 @@ export class KalamClient {
      */
     setReconnectDelay(initial_delay_ms: bigint, max_delay_ms: bigint): void;
     /**
+     * Control lazy WebSocket connections.
+     *
+     * When `true` (the default), the WebSocket connection is deferred until
+     * the first `subscribe()` / `subscribeWithSql()` call. The SDK manages
+     * the connection lifecycle automatically.
+     *
+     * When `false`, the caller should call `connect()` before subscribing.
+     *
+     * Default: `true`.
+     *
+     * # Example (JavaScript)
+     * ```js
+     * // Eager connection (override the default lazy behaviour)
+     * client.setWsLazyConnect(false);
+     * await client.connect();
+     * const subId = await client.subscribeWithSql('SELECT * FROM messages', null, cb);
+     * ```
+     */
+    setWsLazyConnect(lazy: boolean): void;
+    /**
      * Subscribe to table changes (T051, T063I-T063J)
      *
      * # Arguments
@@ -1160,13 +1178,6 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
-    readonly __wbg_wasmtimestampformatter_free: (a: number, b: number) => void;
-    readonly parseIso8601: (a: number, b: number) => [number, number, number];
-    readonly timestampNow: () => number;
-    readonly wasmtimestampformatter_format: (a: number, b: number, c: number) => [number, number];
-    readonly wasmtimestampformatter_formatRelative: (a: number, b: number) => [number, number];
-    readonly wasmtimestampformatter_new: () => number;
-    readonly wasmtimestampformatter_withFormat: (a: number, b: number) => [number, number, number];
     readonly __wbg_kalamclient_free: (a: number, b: number) => void;
     readonly kalamclient_ack: (a: number, b: number, c: number, d: number, e: number, f: number, g: bigint) => any;
     readonly kalamclient_anonymous: (a: number, b: number) => [number, number, number];
@@ -1199,18 +1210,26 @@ export interface InitOutput {
     readonly kalamclient_setMaxReconnectAttempts: (a: number, b: number) => void;
     readonly kalamclient_setPingInterval: (a: number, b: number) => void;
     readonly kalamclient_setReconnectDelay: (a: number, b: bigint, c: bigint) => void;
+    readonly kalamclient_setWsLazyConnect: (a: number, b: number) => void;
     readonly kalamclient_subscribe: (a: number, b: number, c: number, d: any) => any;
     readonly kalamclient_subscribeWithSql: (a: number, b: number, c: number, d: number, e: number, f: any) => any;
     readonly kalamclient_unsubscribe: (a: number, b: number, c: number) => any;
     readonly kalamclient_withJwt: (a: number, b: number, c: number, d: number) => [number, number, number];
-    readonly wasm_bindgen__closure__destroy__h2c6496e14a99c83c: (a: number, b: number) => void;
+    readonly __wbg_wasmtimestampformatter_free: (a: number, b: number) => void;
+    readonly parseIso8601: (a: number, b: number) => [number, number, number];
+    readonly timestampNow: () => number;
+    readonly wasmtimestampformatter_format: (a: number, b: number, c: number) => [number, number];
+    readonly wasmtimestampformatter_formatRelative: (a: number, b: number) => [number, number];
+    readonly wasmtimestampformatter_new: () => number;
+    readonly wasmtimestampformatter_withFormat: (a: number, b: number) => [number, number, number];
+    readonly wasm_bindgen__closure__destroy__h2e71e468c9717f03: (a: number, b: number) => void;
     readonly wasm_bindgen__closure__destroy__hc4784aa82de56652: (a: number, b: number) => void;
     readonly wasm_bindgen__convert__closures_____invoke__h6537501fed6ccdff: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen__convert__closures_____invoke__h11188c184bbe4ba9: (a: number, b: number, c: any, d: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h112e717bac3b8530: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h112e717bac3b8530_1: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h112e717bac3b8530_2: (a: number, b: number, c: any) => void;
-    readonly wasm_bindgen__convert__closures_____invoke__h9ba7c31c46af268d: (a: number, b: number) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h7b0911d7f5b0bb2d: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h7b0911d7f5b0bb2d_1: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h7b0911d7f5b0bb2d_2: (a: number, b: number, c: any) => void;
+    readonly wasm_bindgen__convert__closures_____invoke__h96917d2f4337dacb: (a: number, b: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;

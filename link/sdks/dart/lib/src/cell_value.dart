@@ -1,4 +1,5 @@
 import 'package:kalam_link/src/file_ref.dart';
+import 'package:kalam_link/src/seq_id.dart';
 
 /// Type-safe wrapper for a single cell value in a KalamDB query result row.
 ///
@@ -205,6 +206,23 @@ class KalamCellValue {
     if (_raw is List) return _raw;
     return null;
   }
+
+  // ------------------------------------------------------------------ //
+  //  SeqId support                                                      //
+  // ------------------------------------------------------------------ //
+
+  /// Return the value as a [SeqId], or `null` for SQL NULL / non-numeric.
+  ///
+  /// Use this for `_seq` columns or any Snowflake-based sequence ID.
+  ///
+  /// ```dart
+  /// final seq = row['_seq']?.asSeqId();
+  /// if (seq != null) {
+  ///   print(seq.timestampMillis);  // when the row was written
+  ///   print(seq.workerId);         // which worker generated it
+  /// }
+  /// ```
+  SeqId? asSeqId() => SeqId.tryParse(_raw);
 
   // ------------------------------------------------------------------ //
   //  FILE column support                                                //

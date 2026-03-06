@@ -90,7 +90,7 @@ void main() {
         // Now connect with JWT only.
         final jwtClient = await KalamClient.connect(
           url: serverUrl,
-          auth: Auth.jwt(login.accessToken),
+          authProvider: () async => Auth.jwt(login.accessToken),
           timeout: const Duration(seconds: 10),
         );
         try {

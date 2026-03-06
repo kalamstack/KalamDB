@@ -1095,7 +1095,13 @@ class DartChangeEvent_Update extends DartChangeEvent {
 
   @override
   final String subscriptionId;
+
+  /// Delta rows — only changed columns + PK + `_seq`.
+  /// Changed user columns are the non-system keys: filter by `!key.starts_with('_')`.
   final List<String> _rowsJson;
+
+  /// Delta rows — only changed columns + PK + `_seq`.
+  /// Changed user columns are the non-system keys: filter by `!key.starts_with('_')`.
   List<String> get rowsJson {
     if (_rowsJson is EqualUnmodifiableListView) return _rowsJson;
     // ignore: implicit_dynamic_type

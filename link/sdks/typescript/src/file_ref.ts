@@ -5,12 +5,12 @@
  *
  * The canonical `FileRef` lives in Rust (`kalam-link/src/models/file_ref.rs`).
  * When the WASM bindings are rebuilt, tsify generates a matching `FileRef`
- * TypeScript interface in `.wasm-out/kalam_link.d.ts`.
+ * TypeScript interface in `wasm/kalam_link.d.ts`.
  *
  * This module provides:
  *
  * - **`FileRefData`** — mirrors the Rust struct (once WASM is rebuilt,
- *   re-export the auto-generated interface from `.wasm-out` instead).
+ *   re-export the auto-generated interface from `wasm/` instead).
  * - **`FileRef`** — thin TS class wrapping `FileRefData`, adds convenience
  *   methods (same logic as Rust `impl FileRef`).
  * - **`BoundFileRef`** — TS-only: binds server/table context for no-arg URLs.
@@ -43,7 +43,7 @@ import type { RowData } from './cell_value.js';
  *
  * **Source of truth**: `kalam-link/src/models/file_ref.rs` → `struct FileRef`.
  * Once WASM bindings are rebuilt, tsify generates an identical interface in
- * `.wasm-out/kalam_link.d.ts` which should be re-exported here.
+ * `wasm/kalam_link.d.ts` which should be re-exported here.
  *
  * Each SDK (TypeScript, Dart, etc.) must match this shape exactly.
  */

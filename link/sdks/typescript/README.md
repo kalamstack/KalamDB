@@ -221,10 +221,10 @@ console.log(refreshed.access_token);
 
 ## Client Lifecycle
 
-By default (`autoConnect: true`) the client is fully lazy:
+By default (`wsLazyConnect: true`) the client is fully lazy:
 
-- `query()` boots WASM and runs an HTTP POST — no WebSocket needed.
-- `subscribe()` / `subscribeWithSql()` boot WASM, call `login()` automatically if you're using Basic auth, and open the WebSocket — all on the first call.
+- `query()` boots WASM, automatically exchanges Basic auth for JWT when needed, and runs the HTTP request.
+- `subscribe()` / `subscribeWithSql()` boot WASM, ensure auth is ready, and open the WebSocket automatically on first use.
 
 ### Manual WASM initialization
 
@@ -240,19 +240,19 @@ const client = createClient({
 await client.initialize(); // load WASM explicitly
 ```
 
-### Manual connect / full lifecycle control
+### Eager WebSocket connection
 
-Set `autoConnect: false` for complete control over connection timing:
+Set `wsLazyConnect: false` to establish the shared WebSocket immediately:
 
 ```ts
 const client = createClient({
   url: 'http://localhost:8080',
   auth: Auth.basic('admin', 'pass'),
-  autoConnect: false,
+  wsLazyConnect: false,
 });
 
-await client.login();    // exchange Basic creds for JWT
-await client.connect();  // open WebSocket explicitly
+// The SDK now opens the WebSocket during initialize()/construction flow
+// and manages auth + connection lifecycle internally.
 console.log(client.isConnected());
 
 client.setAutoReconnect(true);

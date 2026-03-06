@@ -1,5 +1,5 @@
 /**
- * Client lifecycle e2e tests — connect, disconnect, reconnect, disableCompression.
+ * Client lifecycle e2e tests — initialize, disconnect, callbacks, disableCompression.
  *
  * Run: node --test tests/e2e/lifecycle/lifecycle.test.mjs
  */
@@ -19,7 +19,7 @@ describe('Client Lifecycle', { timeout: 30_000 }, () => {
   // -----------------------------------------------------------------------
   // Connect / disconnect
   // -----------------------------------------------------------------------
-  test('connect then disconnect toggles isConnected', async () => {
+  test('eager initialize then disconnect toggles isConnected', async () => {
     const client = await connectJwtClient();
     assert.equal(client.isConnected(), true);
 
@@ -50,11 +50,12 @@ describe('Client Lifecycle', { timeout: 30_000 }, () => {
   test('disableCompression: true still connects and queries', async () => {
     const client = createClient({
       url: SERVER_URL,
-      auth: Auth.basic(ADMIN_USER, ADMIN_PASS),
+      authProvider: async () => Auth.basic(ADMIN_USER, ADMIN_PASS),
       disableCompression: true,
+      wsLazyConnect: false,
     });
 
-    await client.connect();
+    await client.initialize();
     assert.ok(client.isConnected());
 
     const resp = await client.query("SELECT 'no-compress' AS val");
@@ -64,21 +65,22 @@ describe('Client Lifecycle', { timeout: 30_000 }, () => {
   });
 
   // -----------------------------------------------------------------------
-  // autoConnect
+  // wsLazyConnect
   // -----------------------------------------------------------------------
-  test('autoConnect: false does not connect until explicit connect()', async () => {
+  test('wsLazyConnect: true keeps query-only usage disconnected', async () => {
     const client = createClient({
       url: SERVER_URL,
-      auth: Auth.basic(ADMIN_USER, ADMIN_PASS),
-      autoConnect: false,
+      authProvider: async () => Auth.basic(ADMIN_USER, ADMIN_PASS),
+      wsLazyConnect: true,
     });
 
-    // Not connected yet — isConnected should be false
+    // Not connected yet.
     assert.equal(client.isConnected(), false);
 
-    // Query forces init (auto-jwt-login via ensureJwtForBasicAuth)
+    // Query uses HTTP only and should not force a WebSocket connection.
     const resp = await client.query('SELECT 1 AS n');
     assert.ok(resp.results?.length > 0);
+    assert.equal(client.isConnected(), false);
 
     await client.disconnect();
   });
@@ -91,13 +93,14 @@ describe('Client Lifecycle', { timeout: 30_000 }, () => {
 
     const client = createClient({
       url: SERVER_URL,
-      auth: Auth.basic(ADMIN_USER, ADMIN_PASS),
+      authProvider: async () => Auth.basic(ADMIN_USER, ADMIN_PASS),
+      wsLazyConnect: false,
       onConnect: () => {
         connectFired = true;
       },
     });
 
-    await client.connect();
+    await client.initialize();
     await sleep(500);
 
     assert.ok(connectFired, 'onConnect should fire');
@@ -107,14 +110,15 @@ describe('Client Lifecycle', { timeout: 30_000 }, () => {
   // -----------------------------------------------------------------------
   // Multiple connect calls are idempotent
   // -----------------------------------------------------------------------
-  test('calling connect() twice is safe', async () => {
+  test('calling initialize() twice is safe', async () => {
     const client = createClient({
       url: SERVER_URL,
-      auth: Auth.basic(ADMIN_USER, ADMIN_PASS),
+      authProvider: async () => Auth.basic(ADMIN_USER, ADMIN_PASS),
+      wsLazyConnect: false,
     });
 
-    await client.connect();
-    await client.connect(); // should not throw
+    await client.initialize();
+    await client.initialize(); // should not throw
     assert.ok(client.isConnected());
 
     await client.disconnect();

@@ -1,6 +1,6 @@
 # Build outputs
 dist/
-.wasm-out/
+wasm/
 src/wasm/
 
 # Dependencies
@@ -22,4 +22,4 @@ snippets/
 
 # OS
 .DS_Store
-Thumbs.db
+Thumbs.db.env

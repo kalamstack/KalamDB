@@ -28,25 +28,39 @@ import {
 // Test: Constructor with Auth.basic
 const client1 = new KalamDBClient({
   url: 'http://localhost:8080',
-  auth: Auth.basic('user', 'pass'),
+  authProvider: async () => Auth.basic('user', 'pass'),
 });
 
 // Test: Constructor with Auth.jwt
 const client2 = new KalamDBClient({
   url: 'http://localhost:8080',
-  auth: Auth.jwt('eyJhbGci...'),
+  authProvider: async () => Auth.jwt('eyJhbGci...'),
 });
 
 // Test: Constructor with Auth.none
 const client3 = new KalamDBClient({
   url: 'http://localhost:8080',
-  auth: Auth.none(),
+  authProvider: async () => Auth.none(),
 });
 
 // Test: Factory function
 const client4 = createClient({
   url: 'http://localhost:8080',
-  auth: Auth.basic('admin', 'admin'),
+  authProvider: async () => Auth.basic('admin', 'admin'),
+});
+
+// Test: Factory function with wsLazyConnect
+const client5 = createClient({
+  url: 'http://localhost:8080',
+  authProvider: async () => Auth.basic('admin', 'admin'),
+  wsLazyConnect: true,
+});
+
+// Test: wsLazyConnect defaults to true — connection is managed internally
+const client6 = createClient({
+  url: 'http://localhost:8080',
+  authProvider: async () => Auth.basic('admin', 'admin'),
+  wsLazyConnect: false,
 });
 
 // Test: getAuthType
@@ -56,11 +70,10 @@ const authType: 'basic' | 'jwt' | 'none' = client1.getAuthType();
 async function testMethods() {
   const client = createClient({
     url: 'http://localhost:8080',
-    auth: Auth.basic('user', 'pass'),
+    authProvider: async () => Auth.basic('user', 'pass'),
   });
 
   // Connection methods
-  const connectResult: void = await client.connect();
   const disconnectResult: void = await client.disconnect();
   const isConnected: boolean = client.isConnected();
 

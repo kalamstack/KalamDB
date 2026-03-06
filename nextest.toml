@@ -3,17 +3,17 @@
 # Serializing kalam-cli tests avoids timeouts, flaky websocket sessions, and shared state races.
 retries = 3
 # Limit test execution to prevent too many concurrent tests hitting the shared server
-test-threads = 8
+test-threads = 15
 
 [[profile.default.overrides]]
 filter = 'package(kalam-cli)'
 # Force complete serialization by marking all tests as needing the single shared resource
-threads-required = 8
+threads-required = 15
 retries = 3
 
 [[profile.default.overrides]]
 filter = 'package(kalam-link)'
-threads-required = 8
+threads-required = 15
 retries = 3
 
 [[profile.default.overrides]]

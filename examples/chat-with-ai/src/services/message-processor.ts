@@ -459,7 +459,7 @@ async function main(): Promise<void> {
   // ── Create kalam-link client (WASM-based) ─────────────────────────────
   const client = createClient({
     url: KALAMDB_URL,
-    auth: Auth.basic(SERVICE_USERNAME, SERVICE_PASSWORD),
+    authProvider: async () => Auth.basic(SERVICE_USERNAME, SERVICE_PASSWORD),
     wasmUrl: wasmBytes,  // Pass buffer so WASM init skips fetch()
   });
 

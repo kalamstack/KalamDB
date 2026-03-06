@@ -22,32 +22,36 @@ export function uniqueName(prefix) {
 }
 
 /**
- * Create a client that logs in with basic auth, obtains a JWT, then
- * returns a JWT-authenticated KalamDBClient.
+ * Create a client with eager WebSocket connection enabled.
+ *
+ * Uses basic credentials via authProvider; the SDK exchanges them for JWT
+ * automatically before the WebSocket handshake.
  */
 export async function connectJwtClient() {
   const client = createClient({
     url: SERVER_URL,
-    auth: Auth.basic(ADMIN_USER, ADMIN_PASS),
+    authProvider: async () => Auth.basic(ADMIN_USER, ADMIN_PASS),
+    wsLazyConnect: false,
   });
-  await client.connect();
+  await client.initialize();
   return client;
 }
 
 /**
- * Create a client with authProvider (recommended API).
+ * Create a client with authProvider using a cached JWT obtained via login.
  */
 export async function connectWithAuthProvider() {
   let cachedToken = null;
 
   const client = createClient({
     url: SERVER_URL,
+    wsLazyConnect: false,
     authProvider: async () => {
       if (!cachedToken) {
-        // Bootstrap: do a basic-auth login to get a JWT
+        // Bootstrap: use basic auth to log in and obtain a JWT.
         const bootstrapClient = createClient({
           url: SERVER_URL,
-          auth: Auth.basic(ADMIN_USER, ADMIN_PASS),
+          authProvider: async () => Auth.basic(ADMIN_USER, ADMIN_PASS),
         });
         const loginResp = await bootstrapClient.login();
         cachedToken = loginResp.access_token;
@@ -56,7 +60,7 @@ export async function connectWithAuthProvider() {
       return Auth.jwt(cachedToken);
     },
   });
-  await client.connect();
+  await client.initialize();
   return client;
 }
 

@@ -1285,7 +1285,7 @@ impl TableProvider for UserTableProvider {
         check_user_table_access(state, self.core.table_id()).map_err(DataFusionError::from)?;
 
         // Extract user context including read_context for leader check
-        let (user_id, _role, read_context) = extract_full_user_context(state).map_err(|e| {
+        let (_user_id, _role, read_context) = extract_full_user_context(state).map_err(|e| {
             DataFusionError::Execution(format!("Failed to extract user context: {}", e))
         })?;
 

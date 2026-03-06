@@ -4,9 +4,13 @@ import 'dart:convert';
 import 'auth.dart';
 import 'logger.dart';
 import 'models.dart';
+import 'seq_id.dart';
 import 'generated/api.dart' as bridge;
 import 'generated/models.dart' as gen;
 import 'generated/frb_generated.dart';
+
+/// Default [AuthProvider] used when no auth is specified — returns [NoAuth].
+Future<Auth> _noAuth() async => const NoAuth();
 
 /// KalamDB client for Dart and Flutter.
 ///
@@ -16,7 +20,7 @@ import 'generated/frb_generated.dart';
 /// ```dart
 /// final client = await KalamClient.connect(
 ///   url: 'https://db.example.com',
-///   auth: Auth.basic('alice', 'secret123'),
+///   authProvider: () async => Auth.basic('alice', 'secret123'),
 /// );
 ///
 /// final result = await client.query('SELECT * FROM users LIMIT 10');
@@ -25,19 +29,19 @@ import 'generated/frb_generated.dart';
 /// await client.dispose();
 /// ```
 class KalamClient {
-  static final BigInt _minI64 = BigInt.parse('-9223372036854775808');
-  static final BigInt _maxI64 = BigInt.parse('9223372036854775807');
-
   final bridge.DartKalamClient _handle;
   final ConnectionHandlers? _connectionHandlers;
-  final AuthProvider? _authProvider;
+  final AuthProvider _authProvider;
+  Auth _auth;
   var _isDisposed = false;
   Future<void>? _connectionEventPump;
   Future<void>? _refreshAuthInFlight;
+  Future<void>? _basicAuthExchangeInFlight;
 
   KalamClient._(this._handle, this._connectionHandlers,
-      {AuthProvider? authProvider})
-      : _authProvider = authProvider;
+      {required Auth initialAuth, required AuthProvider authProvider})
+      : _authProvider = authProvider,
+        _auth = initialAuth;
 
   /// Initialize the Rust runtime. Call once at app startup before any
   /// [KalamClient.connect] calls.
@@ -55,23 +59,6 @@ class KalamClient {
   /// }
   /// ```
   static Future<void> init() => RustLib.init();
-
-  static int _toI64(BigInt value, {required String fieldName}) {
-    if (value < _minI64 || value > _maxI64) {
-      throw ArgumentError.value(
-        value,
-        fieldName,
-        'must fit signed 64-bit range',
-      );
-    }
-    return value.toInt();
-  }
-
-  static BigInt _toBigInt(Object value) {
-    if (value is BigInt) return value;
-    if (value is int) return BigInt.from(value);
-    return BigInt.parse(value.toString());
-  }
 
   /// Connect to a KalamDB server.
   ///
@@ -95,16 +82,23 @@ class KalamClient {
   /// ```
   ///
   /// * [url] — server URL, e.g. `"https://db.example.com"`.
-  /// * [auth] — **Deprecated.** Use [authProvider] instead. Static credentials
-  ///   cannot refresh automatically — tokens expire mid-session without
-  ///   transparent reconnect support.  Defaults to [Auth.none].
-  ///   Ignored when [authProvider] is set.
-  /// * [authProvider] — async callback invoked to obtain fresh credentials
-  ///   before each connection attempt. Use this for refresh-token flows.
-  ///   Takes precedence over [auth].
+  /// * [authProvider] — async callback invoked to obtain credentials before
+  ///   each connection attempt. Return [Auth.jwt] for JWT-based auth,
+  ///   [Auth.basic] for username/password (the SDK automatically exchanges
+  ///   these for a JWT before the WebSocket connection), or [Auth.none] for
+  ///   anonymous access. Ideal for refresh-token flows.
   /// * [disableCompression] — set to `true` to disable gzip compression for
   ///   WebSocket messages (useful during development for easier inspection).
   ///   Defaults to `false`.
+  /// * [wsLazyConnect] — controls when the WebSocket connection is
+  ///   established.  When `true` (the default), the connection is deferred
+  ///   until the first `subscribe()` call, avoiding unnecessary connections
+  ///   when the client is only used for HTTP queries.  When `false`, the
+  ///   connection is established eagerly during `connect()`.  The SDK
+  ///   manages the connection lifecycle automatically — there is no need
+  ///   to call a separate `connect()` method. When static [Auth.basic]
+  ///   credentials are used, the SDK also exchanges them for a JWT
+  ///   automatically before the first query or WebSocket connection.
   /// * [timeout] — HTTP request timeout. Defaults to 30 seconds.
   /// * [maxRetries] — retry count for idempotent (SELECT) queries. Defaults to 3.
   /// * [keepaliveInterval] — WebSocket keep-alive ping interval.
@@ -121,9 +115,9 @@ class KalamClient {
   /// * [authProviderMaxBackoff] — maximum retry backoff.
   static Future<KalamClient> connect({
     required String url,
-    Auth auth = const NoAuth(),
-    AuthProvider? authProvider,
+    AuthProvider authProvider = _noAuth,
     bool disableCompression = false,
+    bool wsLazyConnect = true,
     Duration timeout = const Duration(seconds: 30),
     int maxRetries = 3,
     ConnectionHandlers? connectionHandlers,
@@ -144,15 +138,13 @@ class KalamClient {
 
     KalamLogger.info('client', 'Connecting to $url');
 
-    // Resolve initial auth from provider if set.
-    final effectiveAuth = authProvider != null
-        ? await resolveAuthWithRetry(
-            authProvider,
-            maxAttempts: authProviderMaxAttempts,
-            initialBackoff: authProviderInitialBackoff,
-            maxBackoff: authProviderMaxBackoff,
-          )
-        : auth;
+    // Resolve initial auth from the provider.
+    final effectiveAuth = await resolveAuthWithRetry(
+      authProvider,
+      maxAttempts: authProviderMaxAttempts,
+      initialBackoff: authProviderInitialBackoff,
+      maxBackoff: authProviderMaxBackoff,
+    );
 
     KalamLogger.debug(
       'client',
@@ -167,17 +159,32 @@ class KalamClient {
       enableConnectionEvents: connectionHandlers?.hasAny ?? false,
       disableCompression: disableCompression,
       keepaliveIntervalMs: keepaliveInterval?.inMilliseconds,
+      wsLazyConnect: wsLazyConnect,
     );
-    final client =
-        KalamClient._(handle, connectionHandlers, authProvider: authProvider);
+    final client = KalamClient._(      handle,
+      connectionHandlers,
+      initialAuth: effectiveAuth,
+      authProvider: authProvider,
+    );
     client._startConnectionEventPumpIfNeeded();
 
-    // Establish a shared WebSocket connection so all subscriptions are
-    // multiplexed over a single connection.  The Rust SharedConnection
-    // handles auto-reconnection and re-subscription internally.
-    KalamLogger.debug('client', 'Calling Rust dartConnect...');
-    await bridge.dartConnect(client: client._handle);
-    KalamLogger.info('client', 'Connected to $url successfully');
+    // When ws_lazy_connect is enabled (default), defer the WebSocket
+    // connection until the first subscribe() call.  The Rust client's
+    // subscribe_with_config will call connect() automatically.
+    if (!wsLazyConnect) {
+      // Establish a shared WebSocket connection so all subscriptions are
+      // multiplexed over a single connection.  The Rust SharedConnection
+      // handles auto-reconnection and re-subscription internally.
+      await client._ensureJwtForBasicAuth();
+      KalamLogger.debug('client', 'Calling Rust dartConnect...');
+      await bridge.dartConnect(client: client._handle);
+      KalamLogger.info('client', 'Connected to $url successfully');
+    } else {
+      KalamLogger.info(
+        'client',
+        'wsLazyConnect enabled — WebSocket will connect on first subscribe',
+      );
+    }
 
     return client;
   }
@@ -196,8 +203,7 @@ class KalamClient {
     Duration initialBackoff = const Duration(milliseconds: 250),
     Duration maxBackoff = const Duration(seconds: 2),
   }) async {
-    final provider = _authProvider;
-    if (provider == null || _isDisposed) return;
+    if (_isDisposed) return;
 
     if (_refreshAuthInFlight != null) {
       return _refreshAuthInFlight;
@@ -206,7 +212,7 @@ class KalamClient {
     final refreshTask = () async {
       KalamLogger.debug('auth', 'Refreshing auth credentials...');
       final freshAuth = await resolveAuthWithRetry(
-        provider,
+        _authProvider,
         maxAttempts: maxAttempts,
         initialBackoff: initialBackoff,
         maxBackoff: maxBackoff,
@@ -214,8 +220,13 @@ class KalamClient {
       if (_isDisposed) return;
       KalamLogger.info(
           'auth', 'Auth credentials refreshed: ${freshAuth.runtimeType}');
-      await bridge.dartUpdateAuth(
-          client: _handle, auth: _toBridgeAuth(freshAuth));
+      _auth = freshAuth;
+      if (freshAuth is BasicAuth) {
+        // Exchange basic credentials for JWT.
+        await login(freshAuth.username, freshAuth.password);
+      } else {
+        await bridge.dartUpdateAuth(client: _handle, auth: _toBridgeAuth(freshAuth));
+      }
     }();
 
     _refreshAuthInFlight =
@@ -240,6 +251,7 @@ class KalamClient {
     List<dynamic>? params,
     String? namespace,
   }) async {
+    await _ensureJwtForBasicAuth();
     final paramsJson = params != null ? jsonEncode(params) : null;
     final resp = await bridge.dartExecuteQuery(
       client: _handle,
@@ -254,17 +266,25 @@ class KalamClient {
   // Authentication
   // ---------------------------------------------------------------------------
 
-  /// Log in with username and password.
+  /// Optional helper to log in with username and password.
   ///
-  /// Returns tokens and user info. Use the access token with [Auth.jwt]
-  /// for subsequent authenticated requests.
+  /// Most apps do not need to call this manually — when the client was
+  /// created with static [Auth.basic] credentials, the SDK automatically
+  /// performs this exchange before the first query or WebSocket connection.
+  ///
+  /// Returns tokens and user info. The client's in-memory auth state is
+  /// updated to [Auth.jwt] automatically.
   Future<LoginResponse> login(String username, String password) async {
     final resp = await bridge.dartLogin(
       client: _handle,
       username: username,
       password: password,
     );
-    return _fromBridgeLoginResponse(resp);
+    final loginResponse = _fromBridgeLoginResponse(resp);
+    final jwt = Auth.jwt(loginResponse.accessToken);
+    _auth = jwt;
+    await bridge.dartUpdateAuth(client: _handle, auth: _toBridgeAuth(jwt));
+    return loginResponse;
   }
 
   /// Refresh an expiring access token.
@@ -273,7 +293,11 @@ class KalamClient {
       client: _handle,
       refreshToken: refreshToken,
     );
-    return _fromBridgeLoginResponse(resp);
+    final loginResponse = _fromBridgeLoginResponse(resp);
+    final jwt = Auth.jwt(loginResponse.accessToken);
+    _auth = jwt;
+    await bridge.dartUpdateAuth(client: _handle, auth: _toBridgeAuth(jwt));
+    return loginResponse;
   }
 
   // ---------------------------------------------------------------------------
@@ -337,7 +361,7 @@ class KalamClient {
     String sql, {
     int? batchSize,
     int? lastRows,
-    BigInt? fromSeqId,
+    SeqId? fromSeqId,
     String? subscriptionId,
   }) {
     late StreamController<ChangeEvent> controller;
@@ -357,6 +381,7 @@ class KalamClient {
       try {
         // Refresh auth before each connect when a provider is configured.
         await refreshAuth();
+        await _ensureJwtForBasicAuth();
 
         sub = await bridge.dartSubscribe(
           client: _handle,
@@ -370,9 +395,7 @@ class KalamClient {
                   batchSize: batchSize,
                   lastRows: lastRows,
                   id: subscriptionId,
-                  fromSeqId: fromSeqId == null
-                      ? null
-                      : _toI64(fromSeqId, fieldName: 'fromSeqId'),
+                  fromSeqId: fromSeqId?.toInt(),
                 )
               : null,
         );
@@ -382,6 +405,11 @@ class KalamClient {
           final event = await bridge.dartSubscriptionNext(subscription: sub);
           if (event == null || closed) break;
           controller.add(_fromBridgeChangeEvent(event));
+        }
+      } catch (error, stackTrace) {
+        if (!closed && !_isDisposed) {
+          KalamLogger.error('subscription', 'Subscription error: $error');
+          controller.addError(error, stackTrace);
         }
       } finally {
         activeSubId = null;
@@ -473,7 +501,7 @@ class KalamClient {
               id: info.id,
               query: info.query,
               lastSeqId:
-                  info.lastSeqId == null ? null : _toBigInt(info.lastSeqId!),
+                  info.lastSeqId == null ? null : SeqId.parse(info.lastSeqId!),
               lastEventTimeMs: info.lastEventTimeMs,
               createdAtMs: info.createdAtMs,
               closed: info.closed,
@@ -703,6 +731,31 @@ class KalamClient {
       '504',
     ];
     return transientMarkers.any(message.contains);
+  }
+
+  Future<void> _ensureJwtForBasicAuth() async {
+    if (_isDisposed) return;
+
+    final auth = _auth;
+    if (auth is! BasicAuth) return;
+
+    if (_basicAuthExchangeInFlight != null) {
+      return _basicAuthExchangeInFlight;
+    }
+
+    KalamLogger.debug(
+      'auth',
+      'Auto-login: exchanging basic credentials for JWT...',
+    );
+
+    final exchangeTask = () async {
+      await login(auth.username, auth.password);
+      KalamLogger.info('auth', 'Auto-login successful, switched to JWT auth');
+    }();
+
+    _basicAuthExchangeInFlight =
+        exchangeTask.whenComplete(() => _basicAuthExchangeInFlight = null);
+    return _basicAuthExchangeInFlight;
   }
 
   void _startConnectionEventPumpIfNeeded() {

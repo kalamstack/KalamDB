@@ -15,6 +15,13 @@ export KALAM_PASS="${KALAM_PASS:-kalamdb123}"
 echo "📦 Ensuring dependencies are installed..."
 flutter pub get
 
+BRIDGE_DIR="$SCRIPT_DIR/../../kalam-link-dart"
+echo "🦀 Building host native library used by flutter test..."
+(
+  cd "$BRIDGE_DIR"
+  CARGO_TARGET_DIR="$BRIDGE_DIR/target" cargo build --release
+)
+
 # ── Static analysis ──────────────────────────────────────────────────
 echo ""
 echo "🧭 Running analyzer checks..."
