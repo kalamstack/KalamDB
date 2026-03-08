@@ -72,7 +72,6 @@ const threadSql = `
   SELECT id, role, content, created_at
   FROM chat.messages
   WHERE thread_id = 'thread_42'
-  ORDER BY created_at ASC
 `;
 
 await client.query(`
