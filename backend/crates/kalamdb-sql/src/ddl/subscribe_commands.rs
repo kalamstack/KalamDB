@@ -52,6 +52,7 @@
 //! ```
 
 use super::DdlResult;
+use crate::parser::query_parser::QueryParser;
 use crate::parser::utils::parse_sql_statements;
 use kalamdb_commons::websocket::SubscriptionOptions;
 use kalamdb_commons::{NamespaceId, TableName};
@@ -144,6 +145,9 @@ impl SubscribeStatement {
         let Statement::Query(query) = statement else {
             return Err("SUBSCRIBE TO must parse as SELECT query".to_string());
         };
+
+        QueryParser::analyze_subscription_query_ast(&query)
+            .map_err(|e| format!("Invalid subscription query: {}", e))?;
 
         // Extract table name from FROM clause
         let SetExpr::Select(select_box) = *query.body else {
@@ -652,5 +656,30 @@ mod tests {
         .unwrap();
         assert_eq!(stmt.options.last_rows, Some(10));
         assert_eq!(stmt.options.batch_size, Some(20));
+    }
+
+    #[test]
+    fn test_parse_subscribe_rejects_order_by() {
+        let result =
+            SubscribeStatement::parse("SUBSCRIBE TO SELECT id FROM app.messages ORDER BY id");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("ORDER BY"));
+    }
+
+    #[test]
+    fn test_parse_subscribe_rejects_group_by() {
+        let result =
+            SubscribeStatement::parse("SUBSCRIBE TO SELECT user_id FROM app.messages GROUP BY user_id");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("GROUP BY"));
+    }
+
+    #[test]
+    fn test_parse_subscribe_rejects_system_projection() {
+        let result = SubscribeStatement::parse("SUBSCRIBE TO SELECT _seq FROM app.messages");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("_seq"));
+        assert!(err.contains("_deleted"));
     }
 }

@@ -11,9 +11,9 @@ use serde_json::Value;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-// Use 100 parallel queries - this tests real concurrency now that we use the client directly
-// Keep this reasonable to avoid overwhelming the server with connection limits
-const PARALLEL_QUERIES: usize = 100;
+// Keep enough parallelism to exercise concurrent reads without poisoning later smoke
+// tests on externally managed servers that enforce stricter request/IP guards.
+const PARALLEL_QUERIES: usize = 32;
 const ROW_TARGET: usize = 500;
 const INSERT_CHUNK_SIZE: usize = 1000;
 const MAX_QUERY_DURATION: Duration = Duration::from_secs(60);

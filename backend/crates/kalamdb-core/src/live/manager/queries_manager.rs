@@ -208,9 +208,10 @@ impl LiveQueryManager {
             (user_id, user_role)
         };
 
+        let parsed_query = QueryParser::analyze_subscription_query(&request.sql)?;
+
         // Parse table name from SQL
-        // TODO: Parse tableid/where/projection all at once using sqlparser instead of writing ad-hoc parsers
-        let raw_table = QueryParser::extract_table_name(&request.sql)?;
+        let raw_table = parsed_query.table_name.clone();
         let (namespace, table) = raw_table.split_once('.').ok_or_else(|| {
             KalamDbError::InvalidSql("Query must use namespace.table format".to_string())
         })?;
@@ -249,14 +250,9 @@ impl LiveQueryManager {
             .unwrap_or(kalamdb_commons::websocket::MAX_ROWS_PER_BATCH);
 
         // Parse filter expression from WHERE clause (if present)
-        let filter_expr: Option<Expr> = QueryParser::extract_where_clause(&request.sql)
-            // Handle parsing errors by logging and ignoring (or propagating if critical)
-            .map_err(|e| {
-                log::warn!("Failed to extract WHERE clause: {}", e);
-                e
-            })
-            .ok()
-            .flatten()
+        let where_clause = parsed_query.where_clause.clone();
+        let filter_expr: Option<Expr> = where_clause
+            .clone()
             .map(|where_clause| {
                 // Resolve placeholders like CURRENT_USER() before parsing
                 let resolved =
@@ -272,8 +268,7 @@ impl LiveQueryManager {
             .flatten();
 
         // Extract column projections from SELECT clause (None = SELECT *, all columns)
-        let projections = QueryParser::extract_projections(&request.sql)
-            .map_err(|e| KalamDbError::InvalidSql(format!("Failed to parse projections: {}", e)))?;
+        let projections = parsed_query.projections.clone();
 
         // if let Some(ref cols) = projections {
         //     log::info!("Subscription projections: {:?}", cols);
@@ -294,9 +289,6 @@ impl LiveQueryManager {
 
         // Fetch initial data if requested
         let initial_data = if let Some(mut fetch_options) = initial_data_options {
-            // Extract WHERE clause from SQL for initial data fetch
-            let where_clause = QueryParser::extract_where_clause(&request.sql)?;
-
             // Compute snapshot boundary (MAX(_seq)) before initial load
             let snapshot_seq = self
                 .initial_data_fetcher

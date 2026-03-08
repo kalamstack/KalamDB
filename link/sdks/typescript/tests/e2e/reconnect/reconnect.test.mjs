@@ -23,12 +23,65 @@ import {
 } from '../helpers.mjs';
 import { createClient, Auth } from '../../../dist/src/index.js';
 
+async function waitFor(predicate, timeoutMs = 10_000, intervalMs = 100) {
+  const start = Date.now();
+  while (!predicate()) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error('Timed out waiting for condition');
+    }
+    await sleep(intervalMs);
+  }
+}
+
+function unwrapCell(value) {
+  if (value && typeof value.asInt === 'function') {
+    return value.asInt();
+  }
+  if (value && typeof value.asString === 'function') {
+    return value.asString();
+  }
+  return value;
+}
+
+function extractRows(events) {
+  const rows = [];
+  for (const event of events) {
+    if ((event.type === 'change' || event.type === 'initial_data_batch') && Array.isArray(event.rows)) {
+      rows.push(...event.rows);
+    }
+  }
+  return rows;
+}
+
+function extractChangeRows(events) {
+  return events.flatMap((event) => (
+    event.type === 'change' && Array.isArray(event.rows) ? event.rows : []
+  ));
+}
+
+function hasRowId(events, expectedId) {
+  return extractRows(events).some((row) => unwrapCell(row.id) === expectedId);
+}
+
+async function shutdownClient(client) {
+  if (!client) {
+    return;
+  }
+
+  if (typeof client.shutdown === 'function') {
+    await client.shutdown();
+    return;
+  }
+
+  await client.disconnect();
+}
+
 async function reconnectViaSubscription(client, tableName) {
   const events = [];
   const unsub = await client.subscribe(tableName, (event) => {
     events.push(event);
   });
-  await sleep(1500);
+  await waitFor(() => events.some((event) => event.type === 'subscription_ack'));
   return { unsub, events };
 }
 
@@ -51,7 +104,7 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
   after(async () => {
     try { await client.unsubscribeAll(); } catch (_) {}
     await dropTable(client, tbl);
-    await client.disconnect();
+    await shutdownClient(client);
   });
 
   // -----------------------------------------------------------------------
@@ -68,7 +121,7 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
     assert.equal(c.isConnected(), true, 'should reconnect on first subscribe after disconnect');
 
     await unsub();
-    await c.disconnect();
+    await shutdownClient(c);
   });
 
   // -----------------------------------------------------------------------
@@ -86,7 +139,7 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
     });
 
     await c.initialize();
-    await sleep(500);
+    await waitFor(() => events.some((e) => e === 'connect'));
 
     // Should have fired onConnect.
     assert.ok(
@@ -96,7 +149,7 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
 
     // Disconnect — should fire onDisconnect.
     await c.disconnect();
-    await sleep(500);
+    await waitFor(() => events.some((e) => e.startsWith('disconnect')));
 
     assert.ok(
       events.some((e) => e.startsWith('disconnect')),
@@ -106,7 +159,7 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
     // Reconnect on next subscribe — should fire onConnect again.
     const countBefore = events.filter((e) => e === 'connect').length;
     const { unsub } = await reconnectViaSubscription(c, tbl);
-    await sleep(500);
+    await waitFor(() => events.filter((e) => e === 'connect').length > countBefore);
 
     const countAfter = events.filter((e) => e === 'connect').length;
     assert.ok(
@@ -115,7 +168,7 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
     );
 
     await unsub();
-    await c.disconnect();
+    await shutdownClient(c);
   });
 
   // -----------------------------------------------------------------------
@@ -134,7 +187,7 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
     await c.initialize();
     // The handler is wired; we just verify it doesn't break anything.
     assert.ok(c.isConnected());
-    await c.disconnect();
+    await shutdownClient(c);
   });
 
   // -----------------------------------------------------------------------
@@ -150,7 +203,7 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
     assert.equal(c.getReconnectAttempts(), 0);
     assert.equal(c.isReconnecting(), false);
 
-    await c.disconnect();
+    await shutdownClient(c);
   });
 
   // -----------------------------------------------------------------------
@@ -164,10 +217,7 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
       events.push(event);
     });
 
-    // Wait for subscription ack.
-    await sleep(2000);
-    const ack = events.find((e) => e.type === 'subscription_ack');
-    assert.ok(ack, 'should receive subscription_ack');
+    await waitFor(() => events.some((e) => e.type === 'subscription_ack'));
 
     // Insert a row BEFORE disconnect.
     const writer = await connectJwtClient();
@@ -175,8 +225,7 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
       `INSERT INTO ${tbl} (id, payload) VALUES (1, 'before disconnect')`,
     );
 
-    // Wait for the change event.
-    await sleep(3000);
+    await waitFor(() => hasRowId(events, 1));
     const priorChanges = events.filter((e) => e.type === 'change');
     assert.ok(
       priorChanges.length >= 1,
@@ -199,18 +248,14 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
     });
     assert.equal(client.isConnected(), true, 'should reconnect on subscribe');
 
-    // Wait for subscription ack on the new subscription.
-    await sleep(2000);
-    const ack2 = postReconnectEvents.find((e) => e.type === 'subscription_ack');
-    assert.ok(ack2, 'should receive subscription_ack after reconnect');
+    await waitFor(() => postReconnectEvents.some((e) => e.type === 'subscription_ack'));
 
     // Insert a row AFTER reconnect.
     await writer.query(
       `INSERT INTO ${tbl} (id, payload) VALUES (3, 'after reconnect')`,
     );
 
-    // Wait for the change event.
-    await sleep(3000);
+    await waitFor(() => hasRowId(postReconnectEvents, 3));
     const postChanges = postReconnectEvents.filter((e) => e.type === 'change');
     assert.ok(
       postChanges.length >= 1,
@@ -219,13 +264,13 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
 
     // Verify row 3 is in the change events.
     const row3Change = postChanges.find((c) =>
-      c.rows?.some((r) => r.id === 3),
+      c.rows?.some((r) => unwrapCell(r.id) === 3),
     );
     assert.ok(row3Change, 'row 3 should appear in change events after reconnect');
 
     await unsub2();
     await unsub();
-    await writer.disconnect();
+    await shutdownClient(writer);
   });
 
   // -----------------------------------------------------------------------
@@ -247,7 +292,10 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
     const unsub1 = await client.subscribe(tbl, (ev) => events1.push(ev));
     const unsub2 = await client.subscribe(tbl2, (ev) => events2.push(ev));
 
-    await sleep(2000);
+    await waitFor(() =>
+      events1.some((e) => e.type === 'subscription_ack')
+      && events2.some((e) => e.type === 'subscription_ack'),
+    );
 
     // Verify both subscriptions ack'd.
     assert.ok(events1.find((e) => e.type === 'subscription_ack'), 'sub1 ack');
@@ -264,7 +312,10 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
     const unsub3 = await client.subscribe(tbl, (ev) => postEvents1.push(ev));
     const unsub4 = await client.subscribe(tbl2, (ev) => postEvents2.push(ev));
 
-    await sleep(2000);
+    await waitFor(() =>
+      postEvents1.some((e) => e.type === 'subscription_ack')
+      && postEvents2.some((e) => e.type === 'subscription_ack'),
+    );
 
     // Insert into both tables.
     const writer = await connectJwtClient();
@@ -275,9 +326,8 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
       `INSERT INTO ${tbl2} (id, label) VALUES (10, 'multi-recon-2')`,
     );
 
-    await sleep(3000);
-
     // Both should have received change events.
+    await waitFor(() => hasRowId(postEvents1, 10) && hasRowId(postEvents2, 10));
     const changes1 = postEvents1.filter((e) => e.type === 'change');
     const changes2 = postEvents2.filter((e) => e.type === 'change');
     assert.ok(changes1.length >= 1, 'table 1 should receive changes after reconnect');
@@ -288,7 +338,7 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
     await unsub2();
     await unsub1();
     await dropTable(client, tbl2);
-    await writer.disconnect();
+    await shutdownClient(writer);
   });
 
   // -----------------------------------------------------------------------
@@ -307,33 +357,6 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
     const preRows = { a: 1001, b: 2001, c: 3001 };
     const gapRows = { a: 1002, b: 2002, c: 3002 };
     const postRows = { a: 1003, b: 2003, c: 3003 };
-
-    const waitFor = async (predicate, timeoutMs = 15000, intervalMs = 200) => {
-      const start = Date.now();
-      while (!predicate()) {
-        if (Date.now() - start > timeoutMs) {
-          throw new Error('Timed out waiting for condition');
-        }
-        await sleep(intervalMs);
-      }
-    };
-
-    const extractRows = (events) => {
-      const rows = [];
-      for (const ev of events) {
-        if (ev.type === 'change' && Array.isArray(ev.rows)) rows.push(...ev.rows);
-        if (ev.type === 'initial_data_batch' && Array.isArray(ev.rows)) rows.push(...ev.rows);
-      }
-      return rows;
-    };
-
-    const extractChangeRows = (events) => {
-      const rows = [];
-      for (const ev of events) {
-        if (ev.type === 'change' && Array.isArray(ev.rows)) rows.push(...ev.rows);
-      }
-      return rows;
-    };
 
     const preEventsA = [];
     const preEventsB = [];
@@ -366,9 +389,9 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
     await writer.query(`INSERT INTO ${tblC} (id, payload) VALUES (${preRows.c}, 'pre-c')`);
 
     await waitFor(() =>
-      extractChangeRows(preEventsA).some((r) => r.id === preRows.a)
-      && extractChangeRows(preEventsB).some((r) => r.id === preRows.b)
-      && extractChangeRows(preEventsC).some((r) => r.id === preRows.c),
+      extractChangeRows(preEventsA).some((r) => unwrapCell(r.id) === preRows.a)
+      && extractChangeRows(preEventsB).some((r) => unwrapCell(r.id) === preRows.b)
+      && extractChangeRows(preEventsC).some((r) => unwrapCell(r.id) === preRows.c),
     );
 
     await client.disconnect();
@@ -407,18 +430,18 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
     await writer.query(`INSERT INTO ${tblC} (id, payload) VALUES (${postRows.c}, 'post-c')`);
 
     await waitFor(() =>
-      extractRows(postEventsA).some((r) => r.id === gapRows.a)
-      && extractRows(postEventsA).some((r) => r.id === postRows.a)
-      && extractRows(postEventsB).some((r) => r.id === gapRows.b)
-      && extractRows(postEventsB).some((r) => r.id === postRows.b)
-      && extractRows(postEventsC).some((r) => r.id === gapRows.c)
-      && extractRows(postEventsC).some((r) => r.id === postRows.c),
-      20000,
+      extractRows(postEventsA).some((r) => unwrapCell(r.id) === gapRows.a)
+      && extractRows(postEventsA).some((r) => unwrapCell(r.id) === postRows.a)
+      && extractRows(postEventsB).some((r) => unwrapCell(r.id) === gapRows.b)
+      && extractRows(postEventsB).some((r) => unwrapCell(r.id) === postRows.b)
+      && extractRows(postEventsC).some((r) => unwrapCell(r.id) === gapRows.c)
+      && extractRows(postEventsC).some((r) => unwrapCell(r.id) === postRows.c),
+      10_000,
     );
 
-    assert.ok(!extractRows(postEventsA).some((r) => r.id === preRows.a), 'A should not replay pre row');
-    assert.ok(!extractRows(postEventsB).some((r) => r.id === preRows.b), 'B should not replay pre row');
-    assert.ok(!extractRows(postEventsC).some((r) => r.id === preRows.c), 'C should not replay pre row');
+    assert.ok(!extractRows(postEventsA).some((r) => unwrapCell(r.id) === preRows.a), 'A should not replay pre row');
+    assert.ok(!extractRows(postEventsB).some((r) => unwrapCell(r.id) === preRows.b), 'B should not replay pre row');
+    assert.ok(!extractRows(postEventsC).some((r) => unwrapCell(r.id) === preRows.c), 'C should not replay pre row');
 
     await unsubC2();
     await unsubB2();
@@ -430,7 +453,7 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
     await dropTable(client, tblC);
     await dropTable(client, tblB);
     await dropTable(client, tblA);
-    await writer.disconnect();
+    await shutdownClient(writer);
   });
 
   test('chaos: repeated reconnect cycles with 3 subscriptions stay consistent', async () => {
@@ -445,26 +468,6 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
 
     const writer = await connectJwtClient();
     const pre = { a: 11001, b: 12001, c: 13001 };
-
-    const waitFor = async (predicate, timeoutMs = 20000, intervalMs = 200) => {
-      const started = Date.now();
-      while (!predicate()) {
-        if (Date.now() - started > timeoutMs) {
-          throw new Error('Timed out waiting for condition');
-        }
-        await sleep(intervalMs);
-      }
-    };
-
-    const extractRows = (events) => {
-      const rows = [];
-      for (const ev of events) {
-        if ((ev.type === 'change' || ev.type === 'initial_data_batch') && Array.isArray(ev.rows)) {
-          rows.push(...ev.rows);
-        }
-      }
-      return rows;
-    };
 
     const preAEvents = [];
     const preBEvents = [];
@@ -485,9 +488,9 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
     await writer.query(`INSERT INTO ${tblC} (id, payload) VALUES (${pre.c}, 'chaos-pre-c')`);
 
     await waitFor(() =>
-      extractRows(preAEvents).some((r) => r.id === pre.a)
-      && extractRows(preBEvents).some((r) => r.id === pre.b)
-      && extractRows(preCEvents).some((r) => r.id === pre.c),
+      extractRows(preAEvents).some((r) => unwrapCell(r.id) === pre.a)
+      && extractRows(preBEvents).some((r) => unwrapCell(r.id) === pre.b)
+      && extractRows(preCEvents).some((r) => unwrapCell(r.id) === pre.c),
     );
 
     await preUnsubC();
@@ -534,17 +537,17 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
       await writer.query(`INSERT INTO ${tblC} (id, payload) VALUES (${post.c}, 'chaos-post-c-${cycle}')`);
 
       await waitFor(() =>
-        extractRows(eventsA).some((r) => r.id === gap.a)
-        && extractRows(eventsA).some((r) => r.id === post.a)
-        && extractRows(eventsB).some((r) => r.id === gap.b)
-        && extractRows(eventsB).some((r) => r.id === post.b)
-        && extractRows(eventsC).some((r) => r.id === gap.c)
-        && extractRows(eventsC).some((r) => r.id === post.c),
+          extractRows(eventsA).some((r) => unwrapCell(r.id) === gap.a)
+          && extractRows(eventsA).some((r) => unwrapCell(r.id) === post.a)
+          && extractRows(eventsB).some((r) => unwrapCell(r.id) === gap.b)
+          && extractRows(eventsB).some((r) => unwrapCell(r.id) === post.b)
+          && extractRows(eventsC).some((r) => unwrapCell(r.id) === gap.c)
+          && extractRows(eventsC).some((r) => unwrapCell(r.id) === post.c),
       );
 
-      assert.ok(!extractRows(eventsA).some((r) => r.id === pre.a), `cycle ${cycle}: A replayed pre row`);
-      assert.ok(!extractRows(eventsB).some((r) => r.id === pre.b), `cycle ${cycle}: B replayed pre row`);
-      assert.ok(!extractRows(eventsC).some((r) => r.id === pre.c), `cycle ${cycle}: C replayed pre row`);
+        assert.ok(!extractRows(eventsA).some((r) => unwrapCell(r.id) === pre.a), `cycle ${cycle}: A replayed pre row`);
+        assert.ok(!extractRows(eventsB).some((r) => unwrapCell(r.id) === pre.b), `cycle ${cycle}: B replayed pre row`);
+        assert.ok(!extractRows(eventsC).some((r) => unwrapCell(r.id) === pre.c), `cycle ${cycle}: C replayed pre row`);
 
       await unsubC();
       await unsubB();
@@ -554,7 +557,7 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
     await dropTable(client, tblC);
     await dropTable(client, tblB);
     await dropTable(client, tblA);
-    await writer.disconnect();
+    await shutdownClient(writer);
   });
 
   // -----------------------------------------------------------------------
@@ -573,6 +576,6 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
     const res2 = await c.query('SELECT 2 AS n');
     assert.ok(res2.results?.length > 0, 'query after reconnect');
 
-    await c.disconnect();
+    await shutdownClient(c);
   });
 });

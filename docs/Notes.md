@@ -1301,6 +1301,7 @@ pub(crate) fn compose_provider_username(issuer: &str, subject: &str) -> UserName
 
 197) Make sure we have this option in kalamclient which we specify that the websocket connection is lazy loaded which means only whenever we first subscribe it will connect
 
+198) when subscribing if the query has an orderby or group by then return an error its not supported only a select and where is supported, also the _seq and _deleted cant be included in the subscription at all
 
 
 

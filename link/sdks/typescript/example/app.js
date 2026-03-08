@@ -508,7 +508,7 @@ window.testSubscribe = async function() {
     // Use subscribeWithSql for filtered query with options
     // Returns an unsubscribe function (Firebase/Supabase style)
     unsubscribeTodos = await client.subscribeWithSql(
-      'SELECT * FROM test_browser.todos ORDER BY created_at DESC',
+      'SELECT * FROM test_browser.todos',
       (data) => {
         logJson('← [TODOS] WebSocket message', data, 'success');
         updateSubscriptionBar();
@@ -641,7 +641,7 @@ window.testCreateAndSubscribeTodos = async function() {
     // Subscribe with SQL query and options
     log('→ SUBSCRIBE test_browser.todos (with batch_size: 100)', 'info');
     unsubscribeTodos = await client.subscribeWithSql(
-      'SELECT * FROM test_browser.todos ORDER BY created_at DESC',
+      'SELECT * FROM test_browser.todos',
       (data) => {
         logJson('← [TODOS] WebSocket message', data, 'success');
         updateSubscriptionBar();
@@ -700,7 +700,7 @@ window.testCreateAndSubscribeEvents = async function() {
     // Subscribe to stream with SQL query and options
     log('→ SUBSCRIBE test_browser.events (with batch_size: 25)', 'info');
     unsubscribeEvents = await client.subscribeWithSql(
-      'SELECT * FROM test_browser.events ORDER BY timestamp DESC',
+      'SELECT * FROM test_browser.events',
       (data) => {
         logJson('← [EVENTS] WebSocket message', data, 'success');
         updateSubscriptionBar();

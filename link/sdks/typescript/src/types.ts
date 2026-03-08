@@ -174,10 +174,6 @@ export interface LiveRowsOptions<T> {
    */
   getKey?: (row: T) => string | null | undefined;
   /**
-   * Maximum number of rows to keep in memory.
-   */
-  limit?: number;
-  /**
    * Subscription-level options passed through to the server.
    */
   subscriptionOptions?: import('../wasm/kalam_link.js').SubscriptionOptions;

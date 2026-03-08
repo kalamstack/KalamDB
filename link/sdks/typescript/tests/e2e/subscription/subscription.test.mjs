@@ -38,6 +38,19 @@ function insertedIds(events) {
   return ids;
 }
 
+async function shutdownClient(client) {
+  if (!client) {
+    return;
+  }
+
+  if (typeof client.shutdown === 'function') {
+    await client.shutdown();
+    return;
+  }
+
+  await client.disconnect();
+}
+
 describe('Subscription', { timeout: 150_000 }, () => {
   let client;
   const ns = uniqueName('ts_sub');
@@ -57,7 +70,7 @@ describe('Subscription', { timeout: 150_000 }, () => {
   after(async () => {
     await client.unsubscribeAll();
     await dropTable(client, tbl);
-    await client.disconnect();
+    await shutdownClient(client);
   });
 
   // -----------------------------------------------------------------------
@@ -125,7 +138,7 @@ describe('Subscription', { timeout: 150_000 }, () => {
     );
 
     await unsub();
-    await writer.disconnect();
+    await shutdownClient(writer);
   });
 
   // -----------------------------------------------------------------------
@@ -151,7 +164,7 @@ describe('Subscription', { timeout: 150_000 }, () => {
     assert.ok(ack, 'should get ack for sql subscription');
 
     await unsub();
-    await writer.disconnect();
+    await shutdownClient(writer);
   });
 
   // -----------------------------------------------------------------------
@@ -232,8 +245,8 @@ describe('Subscription', { timeout: 150_000 }, () => {
       for (const unsub of unsubs.reverse()) {
         await unsub();
       }
-      await Promise.all(writerClients.map((writer) => writer.disconnect()));
-      await Promise.all(subscriberClients.map((subscriber) => subscriber.disconnect()));
+      await Promise.all(writerClients.map((writer) => shutdownClient(writer)));
+      await Promise.all(subscriberClients.map((subscriber) => shutdownClient(subscriber)));
     }
   });
 
@@ -282,7 +295,7 @@ describe('Subscription', { timeout: 150_000 }, () => {
       for (const unsub of unsubs.reverse()) {
         await unsub();
       }
-      await writer.disconnect();
+      await shutdownClient(writer);
     }
   });
 });

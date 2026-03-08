@@ -173,6 +173,11 @@ describe('KalamCellValue.asDate()', () => {
     const d = KalamCellValue.from('1704067200000').asDate();
     assert.ok(d instanceof Date);
   });
+  it('normalizes microsecond timestamp strings', () => {
+    const d = KalamCellValue.from('1772964000000000').asDate();
+    assert.ok(d instanceof Date);
+    assert.equal(d.toISOString(), '2026-03-08T10:00:00.000Z');
+  });
   it('returns null for bad date', () => {
     assert.equal(KalamCellValue.from('not-a-date').asDate(), null);
   });

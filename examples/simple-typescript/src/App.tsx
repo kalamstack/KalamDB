@@ -69,7 +69,7 @@ export function App() {
 
     const start = async (): Promise<void> => {
       try {
-        unsubscribe = await client.liveQueryRowsWithSql(
+        unsubscribe = await client.live(
           FEED_SQL,
           (rows) => {
             if (!active) {
@@ -80,7 +80,6 @@ export function App() {
             setStatus('live');
           },
           {
-            limit: 12,
             subscriptionOptions: { last_rows: 12 },
             onError: (event) => {
               if (!active) {

@@ -80,7 +80,7 @@ await client.query(`
   VALUES ('thread_42', 'user', 'hello from frontend');
 `);
 
-const unsubscribe = await client.liveQueryRowsWithSql(
+const unsubscribe = await client.live(
   threadSql,
   (rows) => {
     // If `chat.messages` is a USER table, each signed-in user only sees
@@ -88,7 +88,6 @@ const unsubscribe = await client.liveQueryRowsWithSql(
     console.log('live rows', rows);
   },
   {
-    limit: 20,
     subscriptionOptions: { last_rows: 20 },
   },
 );

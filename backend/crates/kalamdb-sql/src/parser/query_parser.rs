@@ -4,8 +4,10 @@
 //! and ensure proper handling of edge cases.
 
 use crate::parser::utils::parse_sql_statements;
+use kalamdb_commons::constants::SystemColumnNames;
 use sqlparser::ast::{
-    Expr, Query, Select, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins,
+    Expr, GroupByExpr, Query, Select, SelectItem, SetExpr, Statement, TableFactor,
+    TableWithJoins,
 };
 use sqlparser::dialect::GenericDialect;
 
@@ -32,7 +34,48 @@ impl std::error::Error for QueryParseError {}
 /// Utilities for parsing SQL queries for live subscriptions
 pub struct QueryParser;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubscriptionQueryAnalysis {
+    pub table_name: String,
+    pub where_clause: Option<String>,
+    pub projections: Option<Vec<String>>,
+}
+
 impl QueryParser {
+    /// Parse and validate a subscription query once, returning the extracted parts.
+    pub fn analyze_subscription_query(
+        query: &str,
+    ) -> Result<SubscriptionQueryAnalysis, QueryParseError> {
+        let dialect = GenericDialect {};
+        let statements = parse_sql_statements(query, &dialect)
+            .map_err(|e| QueryParseError::ParseError(format!("Failed to parse SQL: {}", e)))?;
+
+        if statements.is_empty() {
+            return Err(QueryParseError::InvalidSql("Empty SQL statement".to_string()));
+        }
+
+        if statements.len() != 1 {
+            return Err(QueryParseError::InvalidSql(
+                "Subscription query must contain exactly one SELECT statement".to_string(),
+            ));
+        }
+
+        match &statements[0] {
+            Statement::Query(query) => Self::analyze_subscription_query_ast(query),
+            _ => Err(QueryParseError::InvalidSql(
+                "Only SELECT queries are supported for subscriptions".to_string(),
+            )),
+        }
+    }
+
+    /// Validate that a subscription query uses only supported clauses.
+    ///
+    /// Supported shape:
+    /// `SELECT <columns>|* FROM namespace.table [WHERE ...]`
+    pub fn validate_subscription_query(query: &str) -> Result<(), QueryParseError> {
+        Self::analyze_subscription_query(query).map(|_| ())
+    }
+
     /// Extract table name from SQL query using sqlparser-rs
     ///
     /// This uses proper SQL parsing to safely extract the table name,
@@ -45,21 +88,7 @@ impl QueryParser {
     /// Uses sqlparser-rs instead of string manipulation to prevent
     /// SQL injection attacks in live query subscriptions.
     pub fn extract_table_name(query: &str) -> Result<String, QueryParseError> {
-        let dialect = GenericDialect {};
-        let statements = parse_sql_statements(query, &dialect)
-            .map_err(|e| QueryParseError::ParseError(format!("Failed to parse SQL: {}", e)))?;
-
-        if statements.is_empty() {
-            return Err(QueryParseError::InvalidSql("Empty SQL statement".to_string()));
-        }
-
-        let statement = &statements[0];
-        match statement {
-            Statement::Query(query) => Self::extract_table_from_query(query),
-            _ => Err(QueryParseError::InvalidSql(
-                "Only SELECT queries are supported for subscriptions".to_string(),
-            )),
-        }
+        Self::analyze_subscription_query(query).map(|analysis| analysis.table_name)
     }
 
     /// Extract table name from a parsed Query AST
@@ -112,19 +141,7 @@ impl QueryParser {
     /// Returns the WHERE clause as a string for filter matching.
     /// Uses sqlparser-rs to safely parse and extract the clause.
     pub fn extract_where_clause(query: &str) -> Result<Option<String>, QueryParseError> {
-        let dialect = GenericDialect {};
-        let statements = parse_sql_statements(query, &dialect)
-            .map_err(|e| QueryParseError::ParseError(format!("Failed to parse SQL: {}", e)))?;
-
-        if statements.is_empty() {
-            return Err(QueryParseError::InvalidSql("Empty SQL statement".to_string()));
-        }
-
-        let statement = &statements[0];
-        match statement {
-            Statement::Query(query) => Self::extract_where_from_query(query),
-            _ => Err(QueryParseError::InvalidSql("Only SELECT queries are supported".to_string())),
-        }
+        Self::analyze_subscription_query(query).map(|analysis| analysis.where_clause)
     }
 
     /// Extract WHERE clause from a parsed Query AST
@@ -142,19 +159,7 @@ impl QueryParser {
     /// Returns a list of column names requested in the SELECT clause.
     /// Returns None for SELECT * queries.
     pub fn extract_projections(query: &str) -> Result<Option<Vec<String>>, QueryParseError> {
-        let dialect = GenericDialect {};
-        let statements = parse_sql_statements(query, &dialect)
-            .map_err(|e| QueryParseError::ParseError(format!("Failed to parse SQL: {}", e)))?;
-
-        if statements.is_empty() {
-            return Err(QueryParseError::InvalidSql("Empty SQL statement".to_string()));
-        }
-
-        let statement = &statements[0];
-        match statement {
-            Statement::Query(query) => Self::extract_projections_from_query(query),
-            _ => Err(QueryParseError::InvalidSql("Only SELECT queries are supported".to_string())),
-        }
+        Self::analyze_subscription_query(query).map(|analysis| analysis.projections)
     }
 
     /// Resolve placeholders like CURRENT_USER() in WHERE clause
@@ -262,6 +267,139 @@ impl QueryParser {
             }
         }
     }
+
+    pub(crate) fn analyze_subscription_query_ast(
+        query: &Query,
+    ) -> Result<SubscriptionQueryAnalysis, QueryParseError> {
+        Self::validate_subscription_query_ast(query)?;
+
+        Ok(SubscriptionQueryAnalysis {
+            table_name: Self::extract_table_from_query(query)?,
+            where_clause: Self::extract_where_from_query(query)?,
+            projections: Self::extract_projections_from_query(query)?,
+        })
+    }
+
+    fn validate_subscription_query_ast(query: &Query) -> Result<(), QueryParseError> {
+        if query.with.is_some() {
+            return Err(QueryParseError::InvalidSql(
+                "Subscription query does not support WITH clauses. Only SELECT ... FROM ... [WHERE ...] is supported.".to_string(),
+            ));
+        }
+
+        if query.order_by.is_some() {
+            return Err(QueryParseError::InvalidSql(
+                "Subscription query does not support ORDER BY. Only SELECT ... FROM ... [WHERE ...] is supported.".to_string(),
+            ));
+        }
+
+        if query.limit_clause.is_some()
+            || query.fetch.is_some()
+            || !query.locks.is_empty()
+            || query.for_clause.is_some()
+            || query.settings.is_some()
+            || query.format_clause.is_some()
+            || !query.pipe_operators.is_empty()
+        {
+            return Err(QueryParseError::InvalidSql(
+                "Subscription query supports only SELECT ... FROM ... [WHERE ...].".to_string(),
+            ));
+        }
+
+        match query.body.as_ref() {
+            SetExpr::Select(select) => Self::validate_subscription_select(select),
+            _ => Err(QueryParseError::InvalidSql(
+                "Subscription query supports only simple SELECT statements.".to_string(),
+            )),
+        }
+    }
+
+    fn validate_subscription_select(select: &Select) -> Result<(), QueryParseError> {
+        if select.distinct.is_some()
+            || select.select_modifiers.is_some()
+            || select.top.is_some()
+            || select.exclude.is_some()
+            || select.into.is_some()
+            || !select.lateral_views.is_empty()
+            || select.prewhere.is_some()
+            || !select.connect_by.is_empty()
+            || !select.cluster_by.is_empty()
+            || !select.distribute_by.is_empty()
+            || !select.sort_by.is_empty()
+            || select.having.is_some()
+            || !select.named_window.is_empty()
+            || select.qualify.is_some()
+            || select.value_table_mode.is_some()
+        {
+            return Err(QueryParseError::InvalidSql(
+                "Subscription query supports only SELECT ... FROM ... [WHERE ...].".to_string(),
+            ));
+        }
+
+        if Self::has_group_by(&select.group_by) {
+            return Err(QueryParseError::InvalidSql(
+                "Subscription query does not support GROUP BY. Only SELECT ... FROM ... [WHERE ...] is supported.".to_string(),
+            ));
+        }
+
+        if select.from.len() != 1 {
+            return Err(QueryParseError::InvalidSql(
+                "Subscription query requires exactly one table in the FROM clause.".to_string(),
+            ));
+        }
+
+        let table_with_joins = &select.from[0];
+        if !table_with_joins.joins.is_empty() {
+            return Err(QueryParseError::InvalidSql(
+                "Subscription query does not support JOIN clauses. Only SELECT ... FROM ... [WHERE ...] is supported.".to_string(),
+            ));
+        }
+
+        match &table_with_joins.relation {
+            TableFactor::Table { .. } => {},
+            _ => {
+                return Err(QueryParseError::InvalidSql(
+                    "Subscription query requires a direct table reference in FROM.".to_string(),
+                ));
+            },
+        }
+
+        Self::validate_subscription_projection_items(&select.projection)
+    }
+
+    fn validate_subscription_projection_items(
+        projection: &[SelectItem],
+    ) -> Result<(), QueryParseError> {
+        for item in projection {
+            let column_name = match item {
+                SelectItem::Wildcard(_) | SelectItem::QualifiedWildcard(..) => continue,
+                SelectItem::UnnamedExpr(expr) => Some(Self::expr_to_column_name(expr)),
+                SelectItem::ExprWithAlias { expr, .. } => Some(Self::expr_to_column_name(expr)),
+            };
+
+            if let Some(column_name) = column_name {
+                let base_name = column_name.rsplit('.').next().unwrap_or(&column_name);
+                if base_name.eq_ignore_ascii_case(SystemColumnNames::SEQ)
+                    || base_name.eq_ignore_ascii_case(SystemColumnNames::DELETED)
+                {
+                    return Err(QueryParseError::InvalidSql(format!(
+                        "Subscription query cannot project system columns '{}' or '{}'.",
+                        SystemColumnNames::SEQ,
+                        SystemColumnNames::DELETED
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn has_group_by(group_by: &GroupByExpr) -> bool {
+        match group_by {
+            GroupByExpr::All(_) => true,
+            GroupByExpr::Expressions(expressions, _) => !expressions.is_empty(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -299,5 +437,63 @@ mod tests {
         assert!(result.is_some());
         let cols = result.unwrap();
         assert_eq!(cols, vec!["id", "name", "email"]);
+    }
+
+    #[test]
+    fn test_validate_subscription_query_accepts_select_where() {
+        QueryParser::validate_subscription_query(
+            "SELECT id, name FROM chat.messages WHERE conversation_id = 1",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_validate_subscription_query_rejects_order_by() {
+        let err = QueryParser::validate_subscription_query(
+            "SELECT id FROM chat.messages WHERE conversation_id = 1 ORDER BY id",
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("ORDER BY"));
+    }
+
+    #[test]
+    fn test_validate_subscription_query_rejects_group_by() {
+        let err = QueryParser::validate_subscription_query(
+            "SELECT user_id FROM chat.messages GROUP BY user_id",
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("GROUP BY"));
+    }
+
+    #[test]
+    fn test_validate_subscription_query_rejects_seq_projection() {
+        let err = QueryParser::validate_subscription_query("SELECT _seq FROM chat.messages")
+            .unwrap_err();
+
+        assert!(err.to_string().contains(SystemColumnNames::SEQ));
+    }
+
+    #[test]
+    fn test_validate_subscription_query_rejects_deleted_projection() {
+        let err = QueryParser::validate_subscription_query(
+            "SELECT chat.messages._deleted FROM chat.messages",
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains(SystemColumnNames::DELETED));
+    }
+
+    #[test]
+    fn test_analyze_subscription_query_extracts_all_parts() {
+        let analysis = QueryParser::analyze_subscription_query(
+            "SELECT id, name FROM chat.messages WHERE conversation_id = 1",
+        )
+        .unwrap();
+
+        assert_eq!(analysis.table_name, "chat.messages");
+        assert_eq!(analysis.where_clause, Some("conversation_id = 1".to_string()));
+        assert_eq!(analysis.projections, Some(vec!["id".to_string(), "name".to_string()]));
     }
 }

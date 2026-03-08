@@ -2183,7 +2183,15 @@ fn install_auto_reconnect_listener(
     on_error_cb: Rc<RefCell<Option<js_sys::Function>>>,
     on_receive_cb: Rc<RefCell<Option<js_sys::Function>>>,
 ) {
+    let source_ws = ws.clone();
     let onclose_reconnect = Closure::wrap(Box::new(move |_e: CloseEvent| {
+        let is_active_socket = ws_ref.borrow().as_ref().is_some_and(|current_ws| {
+            js_sys::Object::is(current_ws.as_ref(), source_ws.as_ref())
+        });
+        if !is_active_socket {
+            return;
+        }
+
         let opts = connection_options.borrow();
         if !opts.auto_reconnect || *is_reconnecting.borrow() {
             return;
@@ -2229,6 +2237,17 @@ fn install_auto_reconnect_listener(
         let auth_provider_rc = auth_provider_cb.clone();
 
         let reconnect_fn = Closure::wrap(Box::new(move || {
+            {
+                let opts = connection_options_clone.borrow();
+                if !opts.auto_reconnect {
+                    return;
+                }
+            }
+
+            if ws_ref_clone.borrow().is_some() {
+                return;
+            }
+
             *is_reconnecting_clone.borrow_mut() = true;
             *reconnect_attempts_clone.borrow_mut() += 1;
 

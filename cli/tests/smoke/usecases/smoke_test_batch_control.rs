@@ -595,8 +595,8 @@ fn smoke_batch_control_data_ordering() {
         execute_sql_as_root_via_client(&insert_sql).expect("insert should succeed");
     }
 
-    // Subscribe with small batch size
-    let query = format!("SELECT * FROM {} ORDER BY id", full);
+    // Subscribe with small batch size using the supported live query shape.
+    let query = format!("SELECT * FROM {}", full);
     let options = SubscriptionOptions::default().with_batch_size(5);
     let mut listener =
         start_subscription_with_config(&query, Some(options)).expect("subscription should start");

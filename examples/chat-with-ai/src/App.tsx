@@ -157,7 +157,7 @@ export function App() {
 
     const start = async (): Promise<void> => {
       try {
-        const messagesUnsubscribe = await client.liveQueryRowsWithSql(
+        const messagesUnsubscribe = await client.live(
           CHAT_SQL,
           (nextMessages) => {
             if (active) {
@@ -166,7 +166,6 @@ export function App() {
           },
           {
             mapRow: toMessage,
-            limit: MAX_CHAT_MESSAGES,
             subscriptionOptions: { last_rows: MAX_CHAT_MESSAGES },
             onError: (event) => {
               if (!active) {
@@ -179,7 +178,7 @@ export function App() {
         );
         unsubscribers.push(messagesUnsubscribe);
 
-        const eventsUnsubscribe = await client.liveQueryRowsWithSql(
+        const eventsUnsubscribe = await client.live(
           EVENTS_SQL,
           (nextEvents) => {
             if (active) {
@@ -188,7 +187,6 @@ export function App() {
           },
           {
             mapRow: toAgentEvent,
-            limit: MAX_AGENT_EVENTS,
             subscriptionOptions: { last_rows: MAX_AGENT_EVENTS },
             onError: (event) => {
               if (!active) {

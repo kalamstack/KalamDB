@@ -116,7 +116,7 @@ function createReadmeAgentClient(messages) {
   return { client, state };
 }
 
-test('README liveQueryRowsWithSql resume example passes options and exposes typed checkpoints', async () => {
+test('README live resume example passes options and exposes typed checkpoints', async () => {
   const client = createClient({
     url: 'http://127.0.0.1:8080',
     authProvider: async () => Auth.none(),
@@ -129,13 +129,12 @@ test('README liveQueryRowsWithSql resume example passes options and exposes type
   const inboxSql = `
   SELECT id, room, role, body, created_at
   FROM support.inbox
-  ORDER BY created_at DESC
 `;
   const renderedSnapshots = [];
   const checkpoints = [];
   const startFrom = SeqId.from('42');
 
-  const stop = await client.liveQueryRowsWithSql(
+  const stop = await client.live(
     inboxSql,
     (rows) => {
       renderedSnapshots.push(rows.map((row) => ({
@@ -148,7 +147,6 @@ test('README liveQueryRowsWithSql resume example passes options and exposes type
       checkpoints.push(active?.lastSeqId?.toString());
     },
     {
-      limit: 200,
       subscriptionOptions: {
         last_rows: 200,
         from_seq_id: startFrom.toJSON(),
@@ -157,7 +155,6 @@ test('README liveQueryRowsWithSql resume example passes options and exposes type
   );
 
   assert.deepEqual(JSON.parse(fakeWasmClient.lastLiveQueryOptionsJson), {
-    limit: 200,
     subscription_options: {
       last_rows: 200,
       from_seq_id: 42,

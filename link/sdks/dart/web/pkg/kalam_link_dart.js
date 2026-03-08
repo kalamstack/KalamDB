@@ -1107,6 +1107,10 @@ function __wbg_get_imports() {
             const ret = Number.isSafeInteger(arg0);
             return ret;
         },
+        __wbg_is_a166b9958c2438ad: function(arg0, arg1) {
+            const ret = Object.is(arg0, arg1);
+            return ret;
+        },
         __wbg_length_ea16607d7b61445b: function(arg0) {
             const ret = arg0.length;
             return ret;
@@ -1323,7 +1327,7 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_cast_0000000000000005: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { dtor_idx: 227, function: Function { arguments: [Externref], shim_idx: 228, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { dtor_idx: 238, function: Function { arguments: [Externref], shim_idx: 239, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm.wasm_bindgen__closure__destroy__hc4784aa82de56652, wasm_bindgen__convert__closures_____invoke__h6537501fed6ccdff);
             return ret;
         },

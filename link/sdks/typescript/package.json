@@ -38,7 +38,7 @@
     "build:ts": "tsc",
     "build:copy-wasm": "node -e \"const fs=require('fs');const p=require('path');fs.mkdirSync('dist/wasm',{recursive:true});fs.readdirSync('wasm').filter(f=>!f.includes('package.json')&&!f.includes('.gitignore')).forEach(f=>fs.copyFileSync(p.join('wasm',f),p.join('dist/wasm',f)))\"",
     "build": "npm run clean && npm run build:wasm && npm run build:fix-types && npm run build:ts && npm run build:copy-wasm",
-    "test": "npm run build:ts && NO_SERVER=true node --test tests/basic.test.mjs tests/normalize.test.mjs tests/auth-provider-retry.test.mjs tests/agent-runtime.test.mjs tests/cell-value.test.mjs tests/single-socket-subscriptions.test.mjs tests/readme-examples.test.mjs",
+    "test": "npm run build:ts && NO_SERVER=true node --test tests/basic.test.mjs tests/normalize.test.mjs tests/auth-provider-retry.test.mjs tests/agent-runtime.test.mjs tests/cell-value.test.mjs tests/single-socket-subscriptions.test.mjs tests/readme-examples.test.mjs tests/sdk-runtime-coverage.test.mjs",
     "test:agent-runtime": "npm run build:ts && node --test tests/agent-runtime.test.mjs",
     "prepublishOnly": "npm run build"
   },

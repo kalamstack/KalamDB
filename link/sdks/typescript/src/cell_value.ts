@@ -271,13 +271,22 @@ export class KalamCellValue {
   asDate(): Date | null {
     if (this.isNull()) return null;
     if (typeof this.#raw === 'number') {
-      const d = new Date(this.#raw);
+      let epochMillis = this.#raw;
+      // Some KalamDB timestamp paths return microseconds or nanoseconds.
+      // Normalize oversized epoch values back to JavaScript milliseconds.
+      while (Math.abs(epochMillis) >= 1e15) {
+        epochMillis /= 1000;
+      }
+      const d = new Date(epochMillis);
       return isNaN(d.getTime()) ? null : d;
     }
     if (typeof this.#raw === 'string') {
       // Try numeric timestamp first
-      const n = Number(this.#raw);
+      let n = Number(this.#raw);
       if (Number.isFinite(n)) {
+        while (Math.abs(n) >= 1e15) {
+          n /= 1000;
+        }
         const d = new Date(n);
         return isNaN(d.getTime()) ? null : d;
       }

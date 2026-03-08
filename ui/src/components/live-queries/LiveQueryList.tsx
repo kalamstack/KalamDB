@@ -88,7 +88,7 @@ export function LiveQueryList() {
           },
           {
             mapRow: toLiveQuery,
-            limit: appliedFilters.limit ?? 1000,
+            // limit: appliedFilters.limit ?? 1000,
             subscriptionOptions: { last_rows: appliedFilters.limit ?? 1000 },
             onError: (event) => {
               if (!active) {

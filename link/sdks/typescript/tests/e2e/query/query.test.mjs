@@ -27,7 +27,9 @@ describe('Query', { timeout: 30_000 }, () => {
         id INT PRIMARY KEY,
         title TEXT NOT NULL,
         done BOOLEAN,
-        score DOUBLE
+        score DOUBLE,
+        big_count BIGINT,
+        created_at TIMESTAMP
       )`,
     );
   });
@@ -50,7 +52,7 @@ describe('Query', { timeout: 30_000 }, () => {
   // -----------------------------------------------------------------------
   test('INSERT then SELECT returns inserted row', async () => {
     const ins = await client.query(
-      `INSERT INTO ${tbl} (id, title, done, score) VALUES (1, 'first', true, 9.5)`,
+      `INSERT INTO ${tbl} (id, title, done, score, big_count, created_at) VALUES (1, 'first', true, 9.5, 900719925474099, '2026-03-08T10:00:00Z')`,
     );
     assert.ok(ins, 'insert should return response');
 
@@ -61,6 +63,8 @@ describe('Query', { timeout: 30_000 }, () => {
     assert.equal(row.title.asString(), 'first');
     assert.equal(row.done.asBool(), true);
     assert.equal(row.score.asFloat(), 9.5);
+    assert.equal(row.big_count.asBigInt(), 900719925474099n);
+    assert.equal(row.created_at.asDate().toISOString(), '2026-03-08T10:00:00.000Z');
   });
 
   // -----------------------------------------------------------------------
@@ -68,16 +72,18 @@ describe('Query', { timeout: 30_000 }, () => {
   // -----------------------------------------------------------------------
   test('parameterised INSERT + SELECT with $1 $2 $3', async () => {
     await client.query(
-      `INSERT INTO ${tbl} (id, title, done, score) VALUES ($1, $2, $3, $4)`,
-      [2, 'parameterised', false, 3.14],
+      `INSERT INTO ${tbl} (id, title, done, score, big_count, created_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+      [2, 'parameterised', false, 3.14, '42', '2026-03-08T11:15:00Z'],
     );
 
     const row = await client.queryOne(
-      `SELECT title, done FROM ${tbl} WHERE id = $1`,
+      `SELECT title, done, big_count, created_at FROM ${tbl} WHERE id = $1`,
       [2],
     );
     assert.equal(row.title.asString(), 'parameterised');
     assert.equal(row.done.asBool(), false);
+    assert.equal(row.big_count.asBigInt(), 42n);
+    assert.equal(row.created_at.asDate().toISOString(), '2026-03-08T11:15:00.000Z');
   });
 
   // -----------------------------------------------------------------------

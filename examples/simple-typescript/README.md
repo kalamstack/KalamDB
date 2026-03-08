@@ -5,7 +5,7 @@ Smallest useful browser example for the TypeScript SDK.
 This app shows three KalamDB strengths with very little code:
 
 - SQL reads with `queryAll()`
-- live updates with `liveQueryRowsWithSql()`
+- live updates with `live()`
 - browser auth using `Auth.basic()` via the SDK's built-in JWT exchange
 
 Instead of a CRUD todo app, this example renders a live operations feed. Open it in two tabs, add an event in one tab, and the second tab updates immediately.

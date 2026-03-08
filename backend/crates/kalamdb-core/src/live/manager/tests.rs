@@ -376,6 +376,50 @@ async fn test_extract_table_name() {
 }
 
 #[tokio::test]
+async fn test_register_subscription_rejects_order_by() {
+    let (registry, manager, _test_db) = create_test_manager().await;
+    let user_id = UserId::new("user1".to_string());
+    let connection_id = ConnectionId::new("conn1".to_string());
+
+    let connection_state = register_and_auth_connection(&registry, connection_id, user_id);
+    let subscription = create_test_subscription_request(
+        "q1".to_string(),
+        "SELECT * FROM user1.messages WHERE id > 0 ORDER BY id".to_string(),
+        None,
+    );
+
+    let err = manager
+        .register_subscription_with_initial_data(&connection_state, &subscription, None)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, crate::error::KalamDbError::InvalidSql(_)));
+    assert!(err.to_string().contains("ORDER BY"));
+}
+
+#[tokio::test]
+async fn test_register_subscription_rejects_system_projection() {
+    let (registry, manager, _test_db) = create_test_manager().await;
+    let user_id = UserId::new("user1".to_string());
+    let connection_id = ConnectionId::new("conn1".to_string());
+
+    let connection_state = register_and_auth_connection(&registry, connection_id, user_id);
+    let subscription = create_test_subscription_request(
+        "q1".to_string(),
+        "SELECT _seq FROM user1.messages".to_string(),
+        None,
+    );
+
+    let err = manager
+        .register_subscription_with_initial_data(&connection_state, &subscription, None)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, crate::error::KalamDbError::InvalidSql(_)));
+    assert!(err.to_string().contains("_seq"));
+}
+
+#[tokio::test]
 #[ignore] // Requires Raft leader for live query persistence
 async fn test_get_subscriptions_for_table() {
     let (registry, manager, _test_db) = create_test_manager().await;

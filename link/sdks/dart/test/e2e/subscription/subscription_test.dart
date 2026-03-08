@@ -282,7 +282,7 @@ void main() {
             (DateTime.now().millisecondsSinceEpoch % 1000000) * 100 + 700;
         final snapshots = <List<Map<String, KalamCellValue>>>[];
         final stream = client.liveQueryRowsWithSql<Map<String, KalamCellValue>>(
-          'SELECT id, body FROM $tbl WHERE id = $rowId ORDER BY id ASC',
+          'SELECT id, body FROM $tbl WHERE id = $rowId',
           limit: 2,
         );
         final sub = stream.listen(snapshots.add);

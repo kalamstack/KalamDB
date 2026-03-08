@@ -455,8 +455,8 @@ export async function subscribeRows<T = RowData>(
                      trimmed.startsWith('select\t');
 
   if (isSqlQuery) {
-    console.log('[kalam-client] Detected SQL query, using liveQueryRowsWithSql');
-    return client!.liveQueryRowsWithSql(cleanSql, callback, options);
+    console.log('[kalam-client] Detected SQL query, using live');
+    return client!.live(cleanSql, callback, options);
   }
 
   console.log('[kalam-client] Detected table name, using liveTableRows');

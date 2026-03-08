@@ -95,13 +95,13 @@ impl StreamEvictionScheduler {
         }
 
         if stream_tables_found > 0 {
-            log::debug!(
+            log::trace!(
                 "Stream eviction check: found {} stream tables, created {} new eviction jobs",
                 stream_tables_found,
                 jobs_created
             );
         } else {
-            log::debug!("Stream eviction check: no stream tables with TTL found");
+            log::trace!("Stream eviction check: no stream tables with TTL found");
         }
 
         Ok(())

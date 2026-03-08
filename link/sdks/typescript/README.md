@@ -4,14 +4,14 @@ Official TypeScript / JavaScript SDK for [KalamDB](https://kalamdb.org) — SQL,
 
 > Status: **Alpha** — the API surface is still evolving.
 
-KalamDB is built for apps where every user or tenant owns a private data space. The same SQL can run for every signed-in customer, while USER tables ensure each query only touches that caller's data. On the frontend, the default realtime API is now `liveQueryRowsWithSql()`: you get the current materialized row set, not a stream of low-level diff frames that your UI has to reconcile.
+KalamDB is built for apps where every user or tenant owns a private data space. The same SQL can run for every signed-in customer, while USER tables ensure each query only touches that caller's data. On the frontend, the default realtime API is now `live()`: you get the current materialized row set, not a stream of low-level diff frames that your UI has to reconcile.
 
 → **[kalamdb.org](https://kalamdb.org)** · [Docs](https://kalamdb.org/docs/sdk/typescript) · [GitHub](https://github.com/jamals86/KalamDB)
 
 `kalam-link` provides:
 
 - SQL execution over HTTP
-- materialized live query rows over WebSocket with `liveQueryRowsWithSql()` and `liveTableRows()`
+- materialized live query rows over WebSocket with `live()` and `liveTableRows()`
 - low-level realtime events with `subscribe()` / `subscribeWithSql()` when you need raw frames
 - per-user and per-tenant isolation with USER tables
 - topic consumer APIs (`consumer`, `consumeBatch`, `ack`) for background workers
@@ -28,11 +28,11 @@ Runtime targets:
 npm i kalam-link
 ```
 
-## Why `liveQueryRowsWithSql()` First
+## Why `live()` First
 
 Most UIs do not want `subscription_ack`, `initial_data_batch`, `change`, and `error` frames. They want the latest rows.
 
-`liveQueryRowsWithSql()` gives you exactly that:
+`live()` gives you exactly that:
 
 - the current row set already reconciled for insert, update, and delete
 - one callback shape for initial load and future changes
@@ -78,10 +78,9 @@ function renderInbox(rows) {
 const inboxSql = `
   SELECT id, room, role, body, created_at
   FROM support.inbox
-  ORDER BY created_at DESC
 `;
 
-const stop = await client.liveQueryRowsWithSql(
+const stop = await client.live(
   inboxSql,
   (rows) => {
     // `support.inbox` is a USER table.
@@ -90,8 +89,6 @@ const stop = await client.liveQueryRowsWithSql(
     renderInbox(rows);
   },
   {
-    // Keep the newest 200 materialized rows in memory.
-    limit: 200,
     subscriptionOptions: { last_rows: 200 },
     onError: (event) => {
       console.error(event.code, event.message);
@@ -128,7 +125,6 @@ function renderInbox(rows) {
 const inboxSql = `
   SELECT id, room, role, body, created_at
   FROM support.inbox
-  ORDER BY created_at DESC
 `;
 
 // Start from a specific known sequence ID.
@@ -136,7 +132,7 @@ const inboxSql = `
 const startFrom = SeqId.from('42');
 let latestCheckpoint;
 
-const stop = await client.liveQueryRowsWithSql(
+const stop = await client.live(
   inboxSql,
   (rows) => {
     renderInbox(rows);
@@ -149,7 +145,6 @@ const stop = await client.liveQueryRowsWithSql(
     }
   },
   {
-    limit: 200,
     subscriptionOptions: {
       last_rows: 200,
       ...(startFrom ? { from_seq_id: startFrom.toJSON() } : {}),
@@ -184,7 +179,7 @@ If you need raw subscription frames, `subscribeWithSql()` still exists.
 import { ChangeType, MessageType } from 'kalam-link';
 
 const stop = await client.subscribeWithSql(
-  'SELECT * FROM support.inbox ORDER BY created_at DESC',
+  'SELECT * FROM support.inbox',
   (event) => {
     // Use this path when you need raw subscription protocol events.
     if (event.type !== MessageType.Change) {
@@ -199,7 +194,7 @@ const stop = await client.subscribeWithSql(
 );
 ```
 
-Use this API for protocol tooling, debugging, or custom reconciliation. For app UI state, prefer `liveQueryRowsWithSql()`.
+Use this API for protocol tooling, debugging, or custom reconciliation. For app UI state, prefer `live()`.
 
 ## Topics and Workers
 
@@ -316,7 +311,7 @@ The SDK handles:
 
 The npm README examples are backed by SDK tests:
 
-- `tests/readme-examples.test.mjs` covers `liveQueryRowsWithSql()`, resume-from-`SeqId`, `executeAsUser()`, `queryWithFiles()`, and the README `runAgent()` pattern.
+- `tests/readme-examples.test.mjs` covers `live()`, resume-from-`SeqId`, `executeAsUser()`, `queryWithFiles()`, and the README `runAgent()` pattern.
 - `tests/single-socket-subscriptions.test.mjs` covers shared-socket subscriptions and materialized live rows.
 - `tests/agent-runtime.test.mjs` covers retries, failure sinks, `runConsumer()`, and LangChain adapter behavior.
 
@@ -324,7 +319,7 @@ The npm README examples are backed by SDK tests:
 
 - `query()`, `queryOne()`, `queryAll()`, `queryRows()` for SQL reads
 - `insert()`, `update()`, `delete()` for convenience DML
-- `liveQueryRowsWithSql()` and `liveTableRows()` for materialized realtime rows
+- `live()` and `liveTableRows()` for materialized realtime rows
 - `subscribe()` and `subscribeWithSql()` for low-level subscription frames
 - `getSubscriptions()` for active subscriptions and typed `lastSeqId` checkpoints
 - `consumer()`, `consumeBatch()`, and `ack()` for topic processing

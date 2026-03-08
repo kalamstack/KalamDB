@@ -533,7 +533,8 @@ export class KalamRow<T extends Record<string, unknown> = Record<string, unknown
    * ```
    */
   cell(column: keyof T): KalamCellValue {
-    return KalamCellValue.from(this.data[column]);
+    const value = this.data[column];
+    return value instanceof KalamCellValue ? value : KalamCellValue.from(value);
   }
 
   /**
@@ -551,7 +552,12 @@ export class KalamRow<T extends Record<string, unknown> = Record<string, unknown
    */
   get typedData(): RowData {
     if (!this._typedData) {
-      this._typedData = wrapRowMap(this.data as Record<string, unknown>);
+      const raw = this.data as Record<string, unknown>;
+      const entries = Object.entries(raw);
+      const alreadyWrapped = entries.every(([, value]) => value instanceof KalamCellValue);
+      this._typedData = alreadyWrapped
+        ? raw as unknown as RowData
+        : wrapRowMap(raw);
     }
     return this._typedData!;
   }

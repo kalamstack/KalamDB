@@ -143,7 +143,7 @@ test('subscribeWithSql normalizes websocket rows into RowData cells', async () =
   await unsubscribe();
 });
 
-test('liveQueryRowsWithSql delegates materialized rows to the Rust/WASM layer', async () => {
+test('live delegates materialized rows to the Rust/WASM layer', async () => {
   const client = createClient({
     url: 'http://127.0.0.1:8080',
     authProvider: async () => ({ type: 'none' }),
@@ -154,16 +154,13 @@ test('liveQueryRowsWithSql delegates materialized rows to the Rust/WASM layer', 
   client.wasmClient = fakeWasmClient;
 
   const snapshots = [];
-  const unsubscribe = await client.liveQueryRowsWithSql(
-    'SELECT * FROM chat_demo.messages ORDER BY id ASC',
+  const unsubscribe = await client.live(
+    'SELECT * FROM chat_demo.messages',
     (rows) => {
       snapshots.push(rows.map((row) => ({
         id: row.id.asString(),
         content: row.content.asString(),
       })));
-    },
-    {
-      limit: 2,
     },
   );
 
