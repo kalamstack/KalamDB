@@ -47,7 +47,7 @@ fn test_seq_id_tracking_for_resume() {
     };
 
     assert!(reconnect_options.has_resume_seq_id());
-    assert_eq!(reconnect_options.from_seq_id, Some(SeqId::from(2000i64)));
+    assert_eq!(reconnect_options.from, Some(SeqId::from(2000i64)));
 }
 
 /// Test multiple subscription tracking (like in the WASM client)
@@ -90,9 +90,9 @@ fn test_multiple_subscriptions_seq_id_tracking() {
             let reconnect_opts = state.options.clone().with_from_seq_id(seq_id);
 
             if id == "sub-1" {
-                assert_eq!(reconnect_opts.from_seq_id, Some(SeqId::from(5000i64)));
+                assert_eq!(reconnect_opts.from, Some(SeqId::from(5000i64)));
             } else if id == "sub-2" {
-                assert_eq!(reconnect_opts.from_seq_id, Some(SeqId::from(3000i64)));
+                assert_eq!(reconnect_opts.from, Some(SeqId::from(3000i64)));
             }
         }
     }
@@ -199,7 +199,7 @@ fn test_full_reconnection_workflow() {
             };
 
             assert!(reconnect_sub_opts.has_resume_seq_id());
-            assert_eq!(reconnect_sub_opts.from_seq_id, Some(SeqId::from(12345i64)));
+            assert_eq!(reconnect_sub_opts.from, Some(SeqId::from(12345i64)));
         }
 
         // Verify delay calculation

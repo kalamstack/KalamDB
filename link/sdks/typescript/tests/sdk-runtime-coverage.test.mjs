@@ -6,6 +6,7 @@ import {
   SeqId,
   createClient,
 } from '../dist/src/index.js';
+import { KalamClient as WasmKalamClient } from '../dist/wasm/kalam_link.js';
 
 function createRuntimeCoverageWasmClient() {
   let connected = false;
@@ -256,12 +257,12 @@ test('liveTableRows delegates to live using SELECT * sugar', async () => {
   const unsub = await client.liveTableRows('demo.tasks', (rows) => {
     snapshots.push(rows.map((row) => row.id.asInt()));
   }, {
-    subscriptionOptions: { last_rows: 5, from_seq_id: SeqId.from('10').toJSON() },
+    subscriptionOptions: { last_rows: 5, from: SeqId.from('10') },
   });
 
   assert.equal(fakeWasmClient.liveSubscribeCalls[0].sql, 'SELECT * FROM demo.tasks');
   assert.deepEqual(JSON.parse(fakeWasmClient.liveSubscribeCalls[0].optionsJson), {
-    subscription_options: { last_rows: 5, from_seq_id: 10 },
+    subscription_options: { last_rows: 5, from: 10 },
   });
 
   fakeWasmClient.emitLiveRows('live-1', [{ id: 1 }, { id: 2 }], 12);
@@ -271,6 +272,8 @@ test('liveTableRows delegates to live using SELECT * sugar', async () => {
 });
 
 test('login refresh and reconnect helpers delegate to wasm client', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWithJwt = WasmKalamClient.withJwt;
   const client = createClient({
     url: 'http://127.0.0.1:8080',
     authProvider: async () => Auth.basic('alice', 'secret'),
@@ -280,24 +283,43 @@ test('login refresh and reconnect helpers delegate to wasm client', async () => 
   client.wasmClient = fakeWasmClient;
   client.auth = Auth.basic('alice', 'secret');
 
-  const login = await client.login();
-  assert.equal(login.access_token, 'jwt-123');
-  assert.equal(client.getAuthType(), 'jwt');
+  globalThis.fetch = async () => ({
+    ok: true,
+    async json() {
+      return {
+        access_token: 'jwt-123',
+        refresh_token: 'refresh-123',
+        token_type: 'Bearer',
+        expires_in: 3600,
+        user: { username: 'alice', role: 'user' },
+      };
+    },
+  });
+  WasmKalamClient.withJwt = () => fakeWasmClient;
 
-  const refreshed = await client.refreshToken('refresh-123');
-  assert.equal(refreshed.access_token, 'jwt-for-refresh-123');
+  try {
+    const login = await client.login();
+    assert.equal(login.access_token, 'jwt-123');
+    assert.equal(client.getAuthType(), 'jwt');
 
-  client.setAutoReconnect(true);
-  client.setReconnectDelay(100, 2000);
-  client.setMaxReconnectAttempts(5);
-  fakeWasmClient.setReconnectAttempts(2);
+    const refreshed = await client.refreshToken('refresh-123');
+    assert.equal(refreshed.access_token, 'jwt-for-refresh-123');
 
-  assert.equal(fakeWasmClient.reconnectConfig.autoReconnect, true);
-  assert.equal(fakeWasmClient.reconnectConfig.initialDelayMs, 100n);
-  assert.equal(fakeWasmClient.reconnectConfig.maxDelayMs, 2000n);
-  assert.equal(fakeWasmClient.reconnectConfig.maxReconnectAttempts, 5);
-  assert.equal(client.getReconnectAttempts(), 2);
-  assert.equal(client.isReconnecting(), true);
+    client.setAutoReconnect(true);
+    client.setReconnectDelay(100, 2000);
+    client.setMaxReconnectAttempts(5);
+    fakeWasmClient.setReconnectAttempts(2);
+
+    assert.equal(fakeWasmClient.reconnectConfig.autoReconnect, true);
+    assert.equal(fakeWasmClient.reconnectConfig.initialDelayMs, 100n);
+    assert.equal(fakeWasmClient.reconnectConfig.maxDelayMs, 2000n);
+    assert.equal(fakeWasmClient.reconnectConfig.maxReconnectAttempts, 5);
+    assert.equal(client.getReconnectAttempts(), 2);
+    assert.equal(client.isReconnecting(), true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    WasmKalamClient.withJwt = originalWithJwt;
+  }
 });
 
 test('consumer one-shot batch and ack preserve all consume options', async () => {

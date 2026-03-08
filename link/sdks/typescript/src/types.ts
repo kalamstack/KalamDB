@@ -17,6 +17,7 @@
 export type JsonValue = any;
 
 import type { FieldFlag as WasmFieldFlag } from '../wasm/kalam_link.js';
+import type { SeqId as TypedSeqId } from './seq_id.js';
 
 export type {
   AckResponse,
@@ -37,7 +38,6 @@ export type {
   ResponseStatus,
   SchemaField,
   ServerMessage,
-  SubscriptionOptions,
   TimestampFormat,
   UploadProgress,
 } from '../wasm/kalam_link.js';
@@ -47,6 +47,21 @@ export { SeqId } from './seq_id.js';
 
 export type FieldFlag = WasmFieldFlag;
 export type FieldFlags = FieldFlag[];
+
+/**
+ * Type-safe subscription options exposed by the SDK.
+ *
+ * The SDK accepts a real `SeqId` for resume checkpoints and normalizes it to
+ * the wire format expected by the underlying transport.
+ */
+export interface SubscriptionOptions {
+  /** Hint for server-side batch sizing during initial data load. */
+  batch_size?: number;
+  /** Number of newest rows to fetch for the initial snapshot. */
+  last_rows?: number;
+  /** Resume from a specific sequence ID. */
+  from?: TypedSeqId | number | string;
+}
 
 /* ================================================================== */
 /*  KalamCellValue & RowData (SDK-level typed cell wrapper)          */
@@ -176,7 +191,7 @@ export interface LiveRowsOptions<T> {
   /**
    * Subscription-level options passed through to the server.
    */
-  subscriptionOptions?: import('../wasm/kalam_link.js').SubscriptionOptions;
+  subscriptionOptions?: SubscriptionOptions;
   /**
    * Optional error callback for post-start subscription failures.
    */

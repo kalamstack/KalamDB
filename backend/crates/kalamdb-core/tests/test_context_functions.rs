@@ -348,6 +348,55 @@ async fn test_all_three_functions_together() {
 }
 
 #[tokio::test]
+async fn test_sql_standard_context_function_aliases() {
+    let username = UserName::new("admin");
+    let user_id = UserId::new("u_admin");
+    let role = Role::Dba;
+
+    let auth_session = AuthSession::with_username_and_auth_details(
+        user_id,
+        username,
+        role,
+        kalamdb_commons::models::ConnectionInfo::new(None),
+        kalamdb_session::AuthMethod::Bearer,
+    );
+
+    let exec_ctx = ExecutionContext::from_session(auth_session, create_test_session());
+    let session = exec_ctx.create_session_with_user();
+
+    let result = session
+        .sql(
+            "SELECT CURRENT_USER() AS username, CURRENT_USER_ID() AS user_id, CURRENT_ROLE() AS role",
+        )
+        .await;
+    assert!(result.is_ok(), "Query failed: {:?}", result.err());
+
+    let batches = result.unwrap().collect().await.unwrap();
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0].num_rows(), 1);
+
+    let username_col = batches[0]
+        .column(0)
+        .as_any()
+        .downcast_ref::<datafusion::arrow::array::StringArray>()
+        .unwrap();
+    let user_id_col = batches[0]
+        .column(1)
+        .as_any()
+        .downcast_ref::<datafusion::arrow::array::StringArray>()
+        .unwrap();
+    let role_col = batches[0]
+        .column(2)
+        .as_any()
+        .downcast_ref::<datafusion::arrow::array::StringArray>()
+        .unwrap();
+
+    assert_eq!(username_col.value(0), "admin");
+    assert_eq!(user_id_col.value(0), "u_admin");
+    assert_eq!(role_col.value(0), "dba");
+}
+
+#[tokio::test]
 async fn test_functions_in_where_clause() {
     let username = UserName::new("admin");
     let user_id = UserId::new("u_admin");

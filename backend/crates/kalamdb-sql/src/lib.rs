@@ -62,7 +62,9 @@ pub use ddl::{
 pub use ddl_parent::DdlAst;
 pub use parser::SqlParser;
 pub use parser::{
-    extract_dml_table_id, extract_dml_table_id_from_statement, parse_single_statement,
+    extract_dml_table_id, extract_dml_table_id_from_statement,
+    normalize_context_keyword_calls_for_sqlparser, parse_single_statement,
+    rewrite_context_functions_for_datafusion,
 };
 pub use query_cache::{QueryCache, QueryCacheKey, QueryCacheTtlConfig};
 pub use validation::{

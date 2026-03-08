@@ -489,11 +489,11 @@ async fn resubscribe_all(
     for (id, entry) in subs.iter() {
         let mut options = entry.options.clone();
         if let Some(seq_id) = entry.last_seq_id {
-            options.from_seq_id = Some(seq_id);
+            options.from = Some(seq_id);
         }
 
         log::info!(
-            "[kalam-link] Re-subscribing '{}' with from_seq_id={:?}",
+            "[kalam-link] Re-subscribing '{}' with from={:?}",
             id,
             entry.last_seq_id.map(|s| s.to_string())
         );

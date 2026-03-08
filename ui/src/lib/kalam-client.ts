@@ -12,6 +12,7 @@
 import {
   KalamDBClient,
   Auth,
+  type KalamCellValue,
   type LiveRowsOptions,
   type QueryResponse,
   type RowData,
@@ -23,6 +24,13 @@ import {
 let client: KalamDBClient | null = null;
 let currentToken: string | null = null;
 let isInitialized = false;
+const isDebugLoggingEnabled = import.meta.env.DEV;
+
+function debugLog(...args: unknown[]): void {
+  if (isDebugLoggingEnabled) {
+    console.log(...args);
+  }
+}
 
 /**
  * Query queue to prevent concurrent WASM calls which cause "recursive borrow" errors.
@@ -80,14 +88,14 @@ function getBackendUrl(): string {
 export async function initializeClient(jwtToken: string): Promise<KalamDBClient> {
   return queueLifecycle(async () => {
     if (jwtToken === currentToken && client && isInitialized) {
-      console.log('[kalam-client] Returning existing initialized client');
+      debugLog('[kalam-client] Returning existing initialized client');
       return client;
     }
 
-    console.log('[kalam-client] initializeClient called');
+    debugLog('[kalam-client] initializeClient called');
 
     if (client && jwtToken !== currentToken) {
-      console.log('[kalam-client] Token changed, disconnecting old client');
+      debugLog('[kalam-client] Token changed, disconnecting old client');
       try {
         await client.disconnect();
       } catch {
@@ -102,13 +110,13 @@ export async function initializeClient(jwtToken: string): Promise<KalamDBClient>
       authProvider: async () => Auth.jwt(jwtToken),
     });
 
-    console.log('[kalam-client] Initializing WASM...');
+    debugLog('[kalam-client] Initializing WASM...');
     await nextClient.initialize();
 
     client = nextClient;
     currentToken = jwtToken;
     isInitialized = true;
-    console.log('[kalam-client] WASM initialized successfully');
+    debugLog('[kalam-client] WASM initialized successfully');
     return nextClient;
   });
 }
@@ -125,7 +133,7 @@ export function getClient(): KalamDBClient | null {
  * Creates and initializes the client immediately
  */
 export async function setClientToken(token: string): Promise<void> {
-  console.log('[kalam-client] setClientToken called');
+  debugLog('[kalam-client] setClientToken called');
   await initializeClient(token);
 }
 
@@ -134,7 +142,7 @@ export async function setClientToken(token: string): Promise<void> {
  */
 export async function clearClient(): Promise<void> {
   await queueLifecycle(async () => {
-    console.log('[kalam-client] clearClient called');
+    debugLog('[kalam-client] clearClient called');
     const existingClient = client;
     client = null;
     currentToken = null;
@@ -169,11 +177,11 @@ export async function executeQuery(sql: string): Promise<QueryResponse> {
   }
   
   if (!client || !isInitialized) {
-    console.log('[kalam-client] Client not initialized, initializing now...');
+    debugLog('[kalam-client] Client not initialized, initializing now...');
     await initializeClient(currentToken);
   }
   
-  console.log("[kalam-client] Executing query via SDK:", sql.substring(0, 120) + (sql.length > 120 ? "..." : ""));
+  debugLog("[kalam-client] Executing query via SDK:", sql.substring(0, 120) + (sql.length > 120 ? "..." : ""));
   
   // Queue the query to prevent concurrent WASM access
   return queueQuery(async () => {
@@ -187,7 +195,7 @@ export async function executeQuery(sql: string): Promise<QueryResponse> {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const rowCount = first?.row_count ?? (first as any)?.named_rows?.length ?? first?.rows?.length ?? 0;
         const columnCount = first?.schema?.length ?? 0;
-        console.log(
+        debugLog(
           "[kalam-client] Query success:",
           `${resultCount} result set(s), ${rowCount} row(s), ${columnCount} column(s), took ${response.took ?? 0}ms`,
         );
@@ -202,39 +210,16 @@ export async function executeQuery(sql: string): Promise<QueryResponse> {
   });
 }
 
-/**
- * Convert array-based rows to Record objects using schema
- * New API format: { schema: [{name, data_type, index}], rows: [[val1, val2], ...] }
- * Old/convenience format: [{col1: val1, col2: val2}, ...]
- */
-function convertRowsToObjects(
-  schema: { name: string; data_type: string; index: number }[] | undefined,
-  rows: unknown[][] | undefined
-): Record<string, unknown>[] {
-  if (!rows || !schema || schema.length === 0) {
-    return [];
-  }
-  
+function unwrapRowData(rows: RowData[]): Record<string, unknown>[] {
   return rows.map((row) => {
-    const obj: Record<string, unknown> = {};
-    schema.forEach((field) => {
-      obj[field.name] = row[field.index] ?? null;
-    });
-    return obj;
-  });
-}
+    const record: Record<string, unknown> = {};
 
-/**
- * Extract named_rows from a query result (new Rust WASM format).
- * The WASM layer pre-computes named_rows (schema → map) so we don't need
- * to reconstruct from positional rows + schema.
- */
-function extractNamedRows(
-  result: unknown
-): Record<string, unknown>[] | undefined {
-  const r = result as Record<string, unknown> | undefined;
-  const named = r?.named_rows;
-  return Array.isArray(named) ? (named as Record<string, unknown>[]) : undefined;
+    for (const [key, value] of Object.entries(row)) {
+      record[key] = (value as KalamCellValue).toJson();
+    }
+
+    return record;
+  });
 }
 
 /**
@@ -244,28 +229,20 @@ function extractNamedRows(
  */
 export async function executeSql(sql: string): Promise<Record<string, unknown>[]> {
   try {
-    const response = await executeQuery(sql);
-    
-    if (response.status === 'error' && response.error) {
-      console.error('[kalam-client] SQL execution error:', response.error);
-      throw new Error(response.error.message);
-    }
-    
-    const result = response.results?.[0];
-    if (!result) {
-      return [];
-    }
-    
-    // Prefer named_rows: Rust WASM pre-computes the schema→map transformation.
-    const namedRows = extractNamedRows(result);
-    if (namedRows) {
-      return namedRows;
+    if (!currentToken) {
+      throw new Error('Not authenticated. Please log in first.');
     }
 
-    // Fallback: positional rows + schema (older server versions)
-    const schema = (result as unknown as { schema?: { name: string; data_type: string; index: number }[] }).schema;
-    const rows = result.rows as unknown[][] | undefined;
-    return convertRowsToObjects(schema, rows);
+    if (!client || !isInitialized) {
+      await initializeClient(currentToken);
+    }
+
+    const rows = await queueQuery(() => client!.queryAll(sql));
+    if (!rows.length) {
+      return [];
+    }
+
+    return unwrapRowData(rows);
   } catch (err) {
     console.error('[kalam-client] executeSql failed:', err);
     throw err;
@@ -356,13 +333,13 @@ function parseOptionsFromSql(sql: string): { sql: string; options: SubscriptionO
           options.last_rows = parseInt(value, 10);
         } else if (keyLower === 'batch_size') {
           options.batch_size = parseInt(value, 10);
-        } else if (keyLower === 'from_seq_id') {
-          options.from_seq_id = parseInt(value, 10);
+        } else if (keyLower === 'from') {
+          options.from = parseInt(value, 10);
         }
       }
     }
     
-    console.log('[kalam-client] Parsed OPTIONS from SQL:', options);
+    debugLog('[kalam-client] Parsed OPTIONS from SQL:', options);
   }
   
   return { sql: cleanSql, options };
@@ -401,12 +378,12 @@ export async function subscribe(
   
   // Merge options: parsed from SQL > passed options > defaults
   const subscribeOptions: SubscriptionOptions = {
-    last_rows: parsedOptions.last_rows ?? options?.last_rows ?? 100,
-    batch_size: parsedOptions.batch_size ?? options?.batch_size ?? 1000,
-    from_seq_id: parsedOptions.from_seq_id ?? options?.from_seq_id,
+    last_rows: parsedOptions.last_rows ?? options?.last_rows,
+    batch_size: parsedOptions.batch_size ?? options?.batch_size,
+    from: parsedOptions.from ?? options?.from,
   };
   
-  console.log('[kalam-client] Subscribing to:', cleanSql, 'with options:', subscribeOptions);
+  debugLog('[kalam-client] Subscribing to:', cleanSql, 'with options:', subscribeOptions);
   
   // Detect if input is a SQL query or just a table name
   const trimmed = cleanSql.trim().toLowerCase();
@@ -417,15 +394,15 @@ export async function subscribe(
   let unsubscribe: Unsubscribe;
   if (isSqlQuery) {
     // Full SQL query - use subscribeWithSql
-    console.log('[kalam-client] Detected SQL query, using subscribeWithSql');
+    debugLog('[kalam-client] Detected SQL query, using subscribeWithSql');
     unsubscribe = await client!.subscribeWithSql(cleanSql, callback, subscribeOptions);
   } else {
     // Just a table name - use subscribe (which wraps in SELECT * FROM)
-    console.log('[kalam-client] Detected table name, using subscribe');
+    debugLog('[kalam-client] Detected table name, using subscribe');
     unsubscribe = await client!.subscribe(cleanSql, callback, subscribeOptions);
   }
   
-  console.log('[kalam-client] Subscription registered successfully');
+  debugLog('[kalam-client] Subscription registered successfully');
   
   return unsubscribe;
 }
@@ -455,11 +432,11 @@ export async function subscribeRows<T = RowData>(
                      trimmed.startsWith('select\t');
 
   if (isSqlQuery) {
-    console.log('[kalam-client] Detected SQL query, using live');
+    debugLog('[kalam-client] Detected SQL query, using live');
     return client!.live(cleanSql, callback, options);
   }
 
-  console.log('[kalam-client] Detected table name, using liveTableRows');
+  debugLog('[kalam-client] Detected table name, using liveTableRows');
   return client!.liveTableRows(cleanSql, callback, options);
 }
 

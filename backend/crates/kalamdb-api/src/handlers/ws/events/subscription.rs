@@ -63,10 +63,10 @@ pub async fn handle_subscribe(
     let batch_size = subscription.options.batch_size.unwrap_or(MAX_ROWS_PER_BATCH);
 
     // Create initial data options respecting all three options:
-    // - from_seq_id: Resume from a specific sequence ID
+    // - from: Resume from a specific sequence ID
     // - last_rows: Fetch the last N rows
     // - batch_size: Hint for server-side batch sizing
-    let initial_opts = if let Some(from_seq) = subscription.options.from_seq_id {
+    let initial_opts = if let Some(from_seq) = subscription.options.from {
         // Resume from specific sequence ID - use since_seq for filtering
         InitialDataOptions::batch(Some(from_seq), None, batch_size)
     } else if let Some(n) = subscription.options.last_rows {

@@ -75,6 +75,10 @@ type LiveRowsWasmEvent = {
   message?: string;
 };
 
+type LegacySubscriptionOptions = SubscriptionOptions & {
+  from_seq_id?: SeqId | number | string;
+};
+
 type DynamicImport = (specifier: string) => Promise<Record<string, unknown>>;
 
 type NodeProcessShim = {
@@ -121,6 +125,31 @@ function wrapSubscriptionRows(rows: unknown): RowData[] | undefined {
   }
 
   return rows.map((row) => wrapRowMap((row ?? {}) as Record<string, unknown>));
+}
+
+function normalizeSubscriptionOptions(
+  options?: LegacySubscriptionOptions,
+): { batch_size?: number; last_rows?: number; from?: number } | undefined {
+  if (!options) {
+    return undefined;
+  }
+
+  const from = options.from ?? options.from_seq_id;
+  const normalized: { batch_size?: number; last_rows?: number; from?: number } = {};
+
+  if (options.batch_size !== undefined) {
+    normalized.batch_size = options.batch_size;
+  }
+
+  if (options.last_rows !== undefined) {
+    normalized.last_rows = options.last_rows;
+  }
+
+  if (from !== undefined) {
+    normalized.from = from instanceof SeqId ? from.toJSON() : SeqId.from(from).toJSON();
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
 function normalizeSubscriptionEvent(event: ServerMessage): NormalizedSubscriptionEvent {
@@ -1267,10 +1296,10 @@ export class KalamDBClient {
       }
     };
 
-    const optionsJson = options ? JSON.stringify(options) : undefined;
+    const optionsJson = JSON.stringify(normalizeSubscriptionOptions(options));
     const subscriptionId = await this.wasmClient.subscribeWithSql(
       sql,
-      optionsJson,
+      optionsJson === undefined ? undefined : optionsJson,
       wrappedCallback as unknown as Function,
     );
     this.log(LogLevel.Info, 'subscription', `Subscribed: id=${subscriptionId}`);
@@ -1346,7 +1375,7 @@ export class KalamDBClient {
     };
 
     const optionsJson = JSON.stringify({
-      subscription_options: options.subscriptionOptions,
+      subscription_options: normalizeSubscriptionOptions(options.subscriptionOptions),
     });
     const subscriptionId = await wasmClient.liveQueryRowsWithSql(
       sql,

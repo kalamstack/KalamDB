@@ -333,7 +333,7 @@ class KalamClient {
   /// Options:
   /// - [batchSize] — hint for server-side batch sizing during initial load.
   /// - [lastRows] — number of newest rows to fetch for initial data.
-  /// - [fromSeqId] — resume from a specific sequence ID (only changes
+  /// - [from] — resume from a specific sequence ID (only changes
   ///   after this seq_id are sent). Typically used after reconnection.
   /// - [subscriptionId] — custom subscription ID (auto-generated if omitted).
   ///
@@ -364,7 +364,7 @@ class KalamClient {
     String sql, {
     int? batchSize,
     int? lastRows,
-    SeqId? fromSeqId,
+    SeqId? from,
     String? subscriptionId,
   }) {
     late StreamController<ChangeEvent> controller;
@@ -392,13 +392,13 @@ class KalamClient {
           config: (batchSize != null ||
                   lastRows != null ||
                   subscriptionId != null ||
-                  fromSeqId != null)
+                  from != null)
               ? gen.DartSubscriptionConfig(
                   sql: sql,
                   batchSize: batchSize,
                   lastRows: lastRows,
                   id: subscriptionId,
-                  fromSeqId: fromSeqId?.toInt(),
+                  from: from?.toInt(),
                 )
               : null,
         );
@@ -495,7 +495,7 @@ class KalamClient {
     String sql, {
     int? batchSize,
     int? lastRows,
-    SeqId? fromSeqId,
+    SeqId? from,
     String? subscriptionId,
     int? limit,
     T Function(Map<String, KalamCellValue> row)? mapRow,
@@ -529,13 +529,13 @@ class KalamClient {
           config: (batchSize != null ||
                   lastRows != null ||
                   subscriptionId != null ||
-                  fromSeqId != null)
+                  from != null)
               ? gen.DartSubscriptionConfig(
                   sql: sql,
                   batchSize: batchSize,
                   lastRows: lastRows,
                   id: subscriptionId,
-                  fromSeqId: fromSeqId?.toInt(),
+                  from: from?.toInt(),
                 )
               : null,
           liveConfig: gen.DartLiveRowsConfig(limit: limit),
@@ -638,7 +638,7 @@ class KalamClient {
     String tableName, {
     int? batchSize,
     int? lastRows,
-    SeqId? fromSeqId,
+    SeqId? from,
     String? subscriptionId,
     int? limit,
     T Function(Map<String, KalamCellValue> row)? mapRow,
@@ -647,7 +647,7 @@ class KalamClient {
       'SELECT * FROM $tableName',
       batchSize: batchSize,
       lastRows: lastRows,
-      fromSeqId: fromSeqId,
+      from: from,
       subscriptionId: subscriptionId,
       limit: limit,
       mapRow: mapRow,

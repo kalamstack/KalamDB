@@ -1,3 +1,4 @@
+import { KalamCellValue, type SchemaField } from "kalam-link";
 import { executeQuery, getCurrentToken } from "./kalam-client";
 
 // HTTP API client for auth/setup endpoints.
@@ -106,18 +107,12 @@ export interface SqlRequest {
   namespace?: string;
 }
 
-// Schema field describing a column in the result set
-export interface SchemaField {
-  name: string;
-  data_type: string;
-  index: number;
-  flags?: string[];
-}
+export type SqlRow = KalamCellValue[];
 
 // Query result alias for hooks
 export interface QueryResult {
   schema: SchemaField[];
-  rows: unknown[][];
+  rows: SqlRow[];
   row_count: number;
   truncated: boolean;
   execution_time_ms: number;
@@ -126,11 +121,19 @@ export interface QueryResult {
 
 export interface SqlResponse {
   schema: SchemaField[];
-  rows: unknown[][];
+  rows: SqlRow[];
   row_count: number;
   truncated: boolean;
   execution_time_ms: number;
   as_user?: string;
+}
+
+function wrapSqlRows(rows: unknown[][] | undefined): SqlRow[] {
+  if (!rows || rows.length === 0) {
+    return [];
+  }
+
+  return rows.map((row) => row.map((value) => KalamCellValue.from(value)));
 }
 
 export async function executeSql(sql: string, namespace?: string): Promise<SqlResponse> {
@@ -143,7 +146,7 @@ export async function executeSql(sql: string, namespace?: string): Promise<SqlRe
 
   return {
     schema: (result?.schema ?? []) as SchemaField[],
-    rows: (result?.rows ?? []) as unknown[][],
+    rows: wrapSqlRows(result?.rows as unknown[][] | undefined),
     row_count: result?.row_count ?? 0,
     truncated: false,
     execution_time_ms: response.took ?? 0,

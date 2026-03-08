@@ -146,7 +146,11 @@ impl SqlExecutor {
         // custom DDL (CREATE NAMESPACE, CREATE USER, SHOW TABLES, etc.).
         // When it fails we fall through with None — the classifier and
         // executor handle these statements via their own tokeniser.
-        let parsed_statement = kalamdb_sql::parse_single_statement(sql).ok().flatten();
+        let sqlparser_compatible_sql =
+            kalamdb_sql::normalize_context_keyword_calls_for_sqlparser(sql);
+        let parsed_statement = kalamdb_sql::parse_single_statement(&sqlparser_compatible_sql)
+            .ok()
+            .flatten();
         let table_id = parsed_statement.as_ref().and_then(|stmt| {
             kalamdb_sql::extract_dml_table_id_from_statement(
                 stmt,
@@ -300,6 +304,8 @@ impl SqlExecutor {
         exec_ctx: &ExecutionContext,
         dml_kind: DmlKind,
     ) -> Result<ExecutionResult, KalamDbError> {
+        let execution_sql = kalamdb_sql::rewrite_context_functions_for_datafusion(sql);
+        let execution_sql = execution_sql.as_str();
         let parsed_statement = metadata.parsed_statement.as_ref();
         self.block_system_namespace_dml(metadata.table_id.as_ref(), dml_kind)?;
 
@@ -340,7 +346,7 @@ impl SqlExecutor {
         let df = if params.is_empty() {
             let session = exec_ctx.create_session_with_user();
             let plan_start = std::time::Instant::now();
-            match session.sql(sql).await {
+            match session.sql(execution_sql).await {
                 Ok(df) => {
                     tracing::debug!(plan_ms = %plan_start.elapsed().as_micros() as f64 / 1000.0, "sql.dml_plan");
                     df
@@ -357,7 +363,7 @@ impl SqlExecutor {
                         }
                         let retry_session = exec_ctx.create_session_with_user();
                         retry_session
-                            .sql(sql)
+                            .sql(execution_sql)
                             .await
                             .map_err(|e2| self.log_sql_error(sql, exec_ctx, e2))?
                     } else {
@@ -366,8 +372,11 @@ impl SqlExecutor {
                 },
             }
         } else {
-            let cache_key =
-                PlanCacheKey::new(exec_ctx.default_namespace().clone(), exec_ctx.user_role(), sql);
+            let cache_key = PlanCacheKey::new(
+                exec_ctx.default_namespace().clone(),
+                exec_ctx.user_role(),
+                execution_sql,
+            );
             let session = exec_ctx.create_session_with_user();
 
             if let Some(template_plan) = self.plan_cache.get(&cache_key) {
@@ -381,7 +390,7 @@ impl SqlExecutor {
                             e
                         );
 
-                        match session.sql(sql).await {
+                        match session.sql(execution_sql).await {
                             Ok(planned_df) => {
                                 let template_plan = planned_df.logical_plan().clone();
                                 self.plan_cache.insert(cache_key.clone(), template_plan.clone());
@@ -404,7 +413,7 @@ impl SqlExecutor {
                                     }
                                     let retry_session = exec_ctx.create_session_with_user();
                                     let retry_df = retry_session
-                                        .sql(sql)
+                                        .sql(execution_sql)
                                         .await
                                         .map_err(|e2| self.log_sql_error(sql, exec_ctx, e2))?;
                                     let template_plan = retry_df.logical_plan().clone();
@@ -424,7 +433,7 @@ impl SqlExecutor {
                     },
                 }
             } else {
-                match session.sql(sql).await {
+                match session.sql(execution_sql).await {
                     Ok(planned_df) => {
                         let template_plan = planned_df.logical_plan().clone();
                         self.plan_cache.insert(cache_key.clone(), template_plan.clone());
@@ -446,7 +455,7 @@ impl SqlExecutor {
                             }
                             let retry_session = exec_ctx.create_session_with_user();
                             let retry_df = retry_session
-                                .sql(sql)
+                                .sql(execution_sql)
                                 .await
                                 .map_err(|e2| self.log_sql_error(sql, exec_ctx, e2))?;
 
@@ -497,6 +506,8 @@ impl SqlExecutor {
         params: Vec<ScalarValue>,
         exec_ctx: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
+        let execution_sql = kalamdb_sql::rewrite_context_functions_for_datafusion(sql);
+        let execution_sql = execution_sql.as_str();
         use crate::sql::executor::default_ordering::apply_default_order_by;
         use crate::sql::executor::parameter_binding::{
             replace_placeholders_in_plan, validate_params,
@@ -511,8 +522,11 @@ impl SqlExecutor {
 
         // Try cached template plan first (works for both plain and parameterized SQL).
         // Key excludes user_id because LogicalPlan is user-agnostic - filtering happens at scan time.
-        let cache_key =
-            PlanCacheKey::new(exec_ctx.default_namespace().clone(), exec_ctx.user_role(), sql);
+        let cache_key = PlanCacheKey::new(
+            exec_ctx.default_namespace().clone(),
+            exec_ctx.user_role(),
+            execution_sql,
+        );
 
         let df = if let Some(template_plan) = self.plan_cache.get(&cache_key) {
             let executable_plan = if params.is_empty() {
@@ -525,7 +539,7 @@ impl SqlExecutor {
                 Ok(df) => df,
                 Err(e) => {
                     log::warn!("Failed to execute cached plan, reparsing SQL: {}", e);
-                    let planned_df = match session.sql(sql).await {
+                    let planned_df = match session.sql(execution_sql).await {
                         Ok(df) => df,
                         Err(e) => {
                             if Self::is_table_not_found_error(&e) {
@@ -543,7 +557,7 @@ impl SqlExecutor {
                                     );
                                 }
                                 let retry_session = exec_ctx.create_session_with_user();
-                                match retry_session.sql(sql).await {
+                                match retry_session.sql(execution_sql).await {
                                     Ok(df) => df,
                                     Err(e2) => {
                                         return Err(self.log_sql_error(sql, exec_ctx, e2));
@@ -584,7 +598,7 @@ impl SqlExecutor {
                 },
             }
         } else {
-            let planned_df = match session.sql(sql).await {
+            let planned_df = match session.sql(execution_sql).await {
                 Ok(df) => df,
                 Err(e) => {
                     if Self::is_table_not_found_error(&e) {
@@ -602,7 +616,7 @@ impl SqlExecutor {
                             );
                         }
                         let retry_session = exec_ctx.create_session_with_user();
-                        match retry_session.sql(sql).await {
+                        match retry_session.sql(execution_sql).await {
                             Ok(df) => df,
                             Err(e2) => {
                                 return Err(self.log_sql_error(sql, exec_ctx, e2));
@@ -694,11 +708,13 @@ impl SqlExecutor {
         sql: &str,
         exec_ctx: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
+        let execution_sql = kalamdb_sql::rewrite_context_functions_for_datafusion(sql);
+        let execution_sql = execution_sql.as_str();
         // Create per-request SessionContext with user_id injected
         let session = exec_ctx.create_session_with_user();
 
         // Execute the command directly via DataFusion
-        let df = match session.sql(sql).await {
+        let df = match session.sql(execution_sql).await {
             Ok(df) => df,
             Err(e) => {
                 log::error!(

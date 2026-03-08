@@ -141,9 +141,7 @@ void main() {
         await ensureSdkReady();
 
         final bootstrap = await KalamClient.connect(
-          url: serverUrl,
-          timeout: const Duration(seconds: 10)
-        );
+            url: serverUrl, timeout: const Duration(seconds: 10));
         LoginResponse login;
         try {
           login = await bootstrap.login(adminUser, adminPass);
@@ -374,7 +372,7 @@ void main() {
           final eventsAfter = <ChangeEvent>[];
           final streamAfter = client.subscribe(
             'SELECT id, payload FROM $tbl WHERE id >= $preId',
-            fromSeqId: checkpoint,
+            from: checkpoint,
             lastRows: 0,
           );
           sub2 = streamAfter.listen(eventsAfter.add);

@@ -555,14 +555,14 @@ class DartSubscriptionConfig {
 
   /// Resume from a specific sequence ID.
   /// When set, the server only sends changes after this seq_id.
-  final PlatformInt64? fromSeqId;
+  final PlatformInt64? from;
 
   const DartSubscriptionConfig({
     required this.sql,
     this.id,
     this.batchSize,
     this.lastRows,
-    this.fromSeqId,
+    this.from,
   });
 
   @override
@@ -571,7 +571,7 @@ class DartSubscriptionConfig {
       id.hashCode ^
       batchSize.hashCode ^
       lastRows.hashCode ^
-      fromSeqId.hashCode;
+      from.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -582,7 +582,7 @@ class DartSubscriptionConfig {
           id == other.id &&
           batchSize == other.batchSize &&
           lastRows == other.lastRows &&
-          fromSeqId == other.fromSeqId;
+          from == other.from;
 }
 
 /// Read-only snapshot of an active subscription's metadata.

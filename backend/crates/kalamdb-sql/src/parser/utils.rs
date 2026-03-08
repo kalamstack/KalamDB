@@ -4,6 +4,8 @@
 //! custom parsers (CREATE STORAGE, STORAGE FLUSH, KILL JOB, etc.).
 
 use kalamdb_commons::TableId;
+use once_cell::sync::Lazy;
+use regex::Regex;
 use sqlparser::ast::{ObjectNamePart, Statement, TableFactor, TableObject};
 use sqlparser::dialect::Dialect;
 use sqlparser::dialect::GenericDialect;
@@ -12,9 +14,38 @@ use sqlparser::tokenizer::{Span, Token};
 
 const DEFAULT_SQL_RECURSION_LIMIT: usize = 512;
 
+static CURRENT_USER_CALL_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)\bCURRENT_USER\s*\(\s*\)").expect("valid regex"));
+static CURRENT_ROLE_CALL_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)\bCURRENT_ROLE\s*\(\s*\)").expect("valid regex"));
+static CURRENT_USER_ID_CALL_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)\bCURRENT_USER_ID\s*\(\s*\)").expect("valid regex"));
+
 /// Default sqlparser options used across KalamDB
 pub fn parser_options() -> ParserOptions {
     ParserOptions::new().with_trailing_commas(true)
+}
+
+/// Normalize SQL-standard context keyword calls for `sqlparser-rs`.
+///
+/// `sqlparser-rs` treats `CURRENT_USER` and `CURRENT_ROLE` as reserved keywords,
+/// not regular zero-argument function calls. Queries like `SELECT CURRENT_USER()`
+/// therefore fail parsing unless the empty parentheses are stripped first.
+pub fn normalize_context_keyword_calls_for_sqlparser(sql: &str) -> String {
+    let sql = CURRENT_USER_CALL_RE.replace_all(sql, "CURRENT_USER");
+    CURRENT_ROLE_CALL_RE.replace_all(&sql, "CURRENT_ROLE").into_owned()
+}
+
+/// Rewrite public context function spellings to KalamDB's internal DataFusion UDFs.
+///
+/// These aliases let user-facing SQL use `CURRENT_USER()`, `CURRENT_USER_ID()`, and
+/// `CURRENT_ROLE()` while execution resolves to the registered `KDB_*` functions.
+pub fn rewrite_context_functions_for_datafusion(sql: &str) -> String {
+    let sql = CURRENT_USER_ID_CALL_RE.replace_all(sql, "KDB_CURRENT_USER_ID()");
+    let sql = CURRENT_USER_CALL_RE.replace_all(&sql, "KDB_CURRENT_USER()");
+    CURRENT_ROLE_CALL_RE
+        .replace_all(&sql, "KDB_CURRENT_ROLE()")
+        .into_owned()
 }
 
 /// Parse SQL into statements using KalamDB defaults (options + recursion limit)
@@ -22,10 +53,11 @@ pub fn parse_sql_statements(
     sql: &str,
     dialect: &dyn Dialect,
 ) -> Result<Vec<Statement>, ParserError> {
+    let sql = normalize_context_keyword_calls_for_sqlparser(sql);
     Parser::new(dialect)
         .with_options(parser_options())
         .with_recursion_limit(DEFAULT_SQL_RECURSION_LIMIT)
-        .try_with_sql(sql)?
+        .try_with_sql(&sql)?
         .parse_statements()
 }
 
@@ -442,5 +474,24 @@ mod tests {
         let delete = extract_dml_table_id("DELETE FROM chat.messages WHERE id = 1", "default")
             .expect("delete table id");
         assert_eq!(delete.full_name(), "chat.messages");
+    }
+
+    #[test]
+    fn test_normalize_context_keyword_calls_for_sqlparser() {
+        let normalized = normalize_context_keyword_calls_for_sqlparser(
+            "SELECT CURRENT_USER(), CURRENT_ROLE()",
+        );
+        assert_eq!(normalized, "SELECT CURRENT_USER, CURRENT_ROLE");
+    }
+
+    #[test]
+    fn test_rewrite_context_functions_for_datafusion() {
+        let rewritten = rewrite_context_functions_for_datafusion(
+            "SELECT CURRENT_USER(), CURRENT_USER_ID(), CURRENT_ROLE()",
+        );
+        assert_eq!(
+            rewritten,
+            "SELECT KDB_CURRENT_USER(), KDB_CURRENT_USER_ID(), KDB_CURRENT_ROLE()"
+        );
     }
 }

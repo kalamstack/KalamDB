@@ -15,7 +15,7 @@ fn test_subscription_options_defaults() {
 
     assert!(opts.batch_size.is_none(), "batch_size should default to None");
     assert!(opts.last_rows.is_none(), "last_rows should default to None");
-    assert!(opts.from_seq_id.is_none(), "from_seq_id should default to None");
+    assert!(opts.from.is_none(), "from should default to None");
 }
 
 /// Test the builder pattern for SubscriptionOptions
@@ -30,7 +30,7 @@ fn test_subscription_options_builder() {
 
     assert_eq!(opts.batch_size, Some(100));
     assert_eq!(opts.last_rows, Some(50));
-    assert_eq!(opts.from_seq_id, Some(seq_id));
+    assert_eq!(opts.from, Some(seq_id));
 }
 
 /// Test setting only batch_size
@@ -40,7 +40,7 @@ fn test_subscription_options_batch_size_only() {
 
     assert_eq!(opts.batch_size, Some(500));
     assert!(opts.last_rows.is_none());
-    assert!(opts.from_seq_id.is_none());
+    assert!(opts.from.is_none());
 }
 
 /// Test setting only last_rows
@@ -50,7 +50,7 @@ fn test_subscription_options_last_rows_only() {
 
     assert!(opts.batch_size.is_none());
     assert_eq!(opts.last_rows, Some(25));
-    assert!(opts.from_seq_id.is_none());
+    assert!(opts.from.is_none());
 }
 
 /// Test setting only from_seq_id (for resume after reconnection)
@@ -62,7 +62,7 @@ fn test_subscription_options_from_seq_id_only() {
 
     assert!(opts.batch_size.is_none());
     assert!(opts.last_rows.is_none());
-    assert_eq!(opts.from_seq_id, Some(seq_id));
+    assert_eq!(opts.from, Some(seq_id));
 }
 
 /// Test the has_resume_seq_id helper method
@@ -85,9 +85,9 @@ fn test_subscription_options_json_serialization_sparse() {
     // Should contain batch_size
     assert!(json.contains("\"batch_size\":200"), "JSON should contain batch_size");
 
-    // Should NOT contain last_rows or from_seq_id (they're None)
+    // Should NOT contain last_rows or from (they're None)
     assert!(!json.contains("last_rows"), "JSON should not contain last_rows");
-    assert!(!json.contains("from_seq_id"), "JSON should not contain from_seq_id");
+    assert!(!json.contains("\"from\""), "JSON should not contain from");
 }
 
 /// Test that JSON serialization includes from_seq_id when set
@@ -100,7 +100,7 @@ fn test_subscription_options_json_with_seq_id() {
     let json = serde_json::to_string(&opts).expect("serialization failed");
 
     assert!(json.contains("batch_size"), "JSON should contain batch_size");
-    assert!(json.contains("from_seq_id"), "JSON should contain from_seq_id");
+    assert!(json.contains("\"from\""), "JSON should contain from");
 }
 
 /// Test JSON deserialization with all fields
@@ -112,7 +112,7 @@ fn test_subscription_options_json_deserialization_full() {
 
     assert_eq!(opts.batch_size, Some(100));
     assert_eq!(opts.last_rows, Some(50));
-    assert_eq!(opts.from_seq_id, Some(SeqId::from(12345i64)));
+    assert_eq!(opts.from, Some(SeqId::from(12345i64)));
 }
 
 /// Test JSON deserialization with minimal fields
@@ -124,7 +124,7 @@ fn test_subscription_options_json_deserialization_empty() {
 
     assert!(opts.batch_size.is_none());
     assert!(opts.last_rows.is_none());
-    assert!(opts.from_seq_id.is_none());
+    assert!(opts.from.is_none());
 }
 
 /// Test reconnection workflow: initial subscription -> receive data -> reconnect with seq_id
@@ -150,7 +150,7 @@ fn test_subscription_options_reconnection_workflow() {
         reconnect_opts.has_resume_seq_id(),
         "Reconnect subscription should have resume seq_id"
     );
-    assert_eq!(reconnect_opts.from_seq_id, Some(last_received_seq));
+    assert_eq!(reconnect_opts.from, Some(last_received_seq));
     assert_eq!(reconnect_opts.batch_size, Some(100), "Should preserve batch_size from original");
 }
 
@@ -176,7 +176,7 @@ fn test_subscription_options_typical_use_case() {
 
     assert_eq!(opts.batch_size, Some(50));
     assert_eq!(opts.last_rows, Some(100));
-    assert!(opts.from_seq_id.is_none(), "New subscription should not have from_seq_id");
+    assert!(opts.from.is_none(), "New subscription should not have from");
 }
 
 /// Test SeqId comparison for resume scenarios

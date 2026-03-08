@@ -101,13 +101,7 @@ export function SqlPreviewDialog({ open, options, onClose }: SqlPreviewDialogPro
 
   // Sync SQL when options change
   useEffect(() => {
-    console.log('[SqlPreviewDialog] Options changed:', {
-      hasOptions: !!options,
-      sqlLength: options?.sql?.length || 0,
-      sqlPreview: options?.sql?.substring(0, 100),
-    });
     if (options?.sql) {
-      console.log('[SqlPreviewDialog] Setting SQL:', options.sql);
       setSql(options.sql);
       setStatus('idle');
       setStatusMessage('');
@@ -116,7 +110,6 @@ export function SqlPreviewDialog({ open, options, onClose }: SqlPreviewDialogPro
       setIsReadOnly(options.editable === false);
       // Also update the editor directly if it's already mounted
       if (editorRef.current) {
-        console.log('[SqlPreviewDialog] Updating editor value directly');
         editorRef.current.setValue(options.sql);
       }
     }
@@ -126,10 +119,8 @@ export function SqlPreviewDialog({ open, options, onClose }: SqlPreviewDialogPro
   useEffect(() => {
     if (open && sql) {
       const timer = setTimeout(() => {
-        console.log('[SqlPreviewDialog] Dialog opened, force updating editor');
         // Force update the editor if it's mounted
         if (editorRef.current && sql) {
-          console.log('[SqlPreviewDialog] Force setting editor value after open');
           editorRef.current.setValue(sql);
         }
       }, 100);
@@ -169,7 +160,6 @@ export function SqlPreviewDialog({ open, options, onClose }: SqlPreviewDialogPro
 
   /** Execute the SQL statements one-by-one and update audit log. */
   const handleCommit = useCallback(async () => {
-    console.log('[SqlPreviewDialog] Commit clicked, sql:', sql);
     if (!options?.onExecute || !sql.trim()) {
       console.warn('[SqlPreviewDialog] Cannot commit - no onExecute or empty SQL');
       return;
@@ -298,9 +288,6 @@ export function SqlPreviewDialog({ open, options, onClose }: SqlPreviewDialogPro
     .filter((line) => line.trim().length > 0 && !line.trim().startsWith('--'))
     .length;
 
-  // Log whenever the component re-renders
-  console.log('[SqlPreviewDialog] Rendering, open:', open, 'sql length:', sql.length);
-
   return (
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) handleCancel(); }}>
       <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden">
@@ -361,7 +348,6 @@ export function SqlPreviewDialog({ open, options, onClose }: SqlPreviewDialogPro
                   if (!isReadOnly) setSql(value ?? '');
                 }}
                 onMount={(editor) => {
-                  console.log('[SqlPreviewDialog] Monaco editor mounted, setting value:', sql.substring(0, 100));
                   editorRef.current = editor;
                   if (sql) {
                     editor.setValue(sql);

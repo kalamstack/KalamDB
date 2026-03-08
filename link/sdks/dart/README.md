@@ -359,7 +359,7 @@ class SyncService {
 
     final client = await _getClient();
     _messagesSubscription ??= client
-        .subscribe('SELECT * FROM messages', fromSeqId: lastSeenSeqId)
+        .subscribe('SELECT * FROM messages', from: lastSeenSeqId)
         .listen(
           _handleEvent,
           onError: (e, st) => print('subscription error: $e'),

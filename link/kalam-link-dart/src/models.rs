@@ -535,7 +535,7 @@ pub struct DartSubscriptionConfig {
     pub last_rows: Option<i32>,
     /// Resume from a specific sequence ID.
     /// When set, the server only sends changes after this seq_id.
-    pub from_seq_id: Option<i64>,
+    pub from: Option<i64>,
 }
 
 impl DartSubscriptionConfig {
@@ -546,7 +546,7 @@ impl DartSubscriptionConfig {
             options: Some(kalam_link::SubscriptionOptions {
                 batch_size: self.batch_size.map(|v| v as usize),
                 last_rows: self.last_rows.map(|v| v as u32),
-                from_seq_id: self.from_seq_id.map(kalam_link::SeqId::new),
+                from: self.from.map(kalam_link::SeqId::new),
             }),
             ws_url: None,
         }

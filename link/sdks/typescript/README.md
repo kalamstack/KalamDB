@@ -108,7 +108,7 @@ await client.disconnect();
 
 ## Resume From a Specific `SeqId`
 
-When you want offline resume or a durable checkpoint, persist the last `SeqId` you applied and feed it back into `subscriptionOptions.from_seq_id`.
+When you want offline resume or a durable checkpoint, persist the last `SeqId` you applied and feed it back into `subscriptionOptions.from`.
 
 ```ts
 import { Auth, SeqId, createClient } from 'kalam-link';
@@ -147,7 +147,7 @@ const stop = await client.live(
   {
     subscriptionOptions: {
       last_rows: 200,
-      ...(startFrom ? { from_seq_id: startFrom.toJSON() } : {}),
+      ...(startFrom ? { from: startFrom } : {}),
     },
   },
 );

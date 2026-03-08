@@ -20,6 +20,7 @@ import type {
 import {
   loadSqlStudioWorkspaceState,
   saveSqlStudioWorkspaceState,
+  type SqlStudioWorkspaceState,
 } from "@/components/sql-studio-v2/workspaceState";
 import {
   executeSqlStudioQuery,
@@ -81,6 +82,7 @@ import {
 } from "@/features/sql-studio/utils/workspaceHelpers";
 import { ExplorerTableContextMenu } from "@/features/sql-studio/components/ExplorerTableContextMenu";
 
+const WORKSPACE_PERSIST_DEBOUNCE_MS = 250;
 
 function normalizeLiveRows(rows: unknown[]): Record<string, unknown>[] {
   return rows.map((row) => {
@@ -684,7 +686,7 @@ export default function SqlStudio() {
 
     const persistedActiveTabId = tabs.find((tab) => tab.id === activeTabId)?.id ?? tabs[0].id;
 
-    saveSqlStudioWorkspaceState({
+    const nextState: SqlStudioWorkspaceState = {
       version: 1,
       tabs: tabs.map(toPersistedTab),
       savedQueries: savedQueries.map((item) => ({
@@ -707,7 +709,13 @@ export default function SqlStudio() {
         expandedTables,
         filter: schemaFilter,
       },
-    });
+    };
+
+    const timeoutId = window.setTimeout(() => {
+      saveSqlStudioWorkspaceState(nextState);
+    }, WORKSPACE_PERSIST_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timeoutId);
   }, [
     tabs,
     activeTabId,

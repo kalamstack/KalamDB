@@ -203,10 +203,10 @@ pub(crate) async fn resubscribe_all(
             state.last_seq_id.map(|s| s.to_string())
         ));
 
-        // Create options with from_seq_id if we have a last seq_id
+        // Create options with from if we have a last seq_id
         let mut options = state.options.clone();
         if let Some(seq_id) = state.last_seq_id {
-            options.from_seq_id = Some(seq_id);
+            options.from = Some(seq_id);
         }
 
         let subscribe_msg = ClientMessage::Subscribe {

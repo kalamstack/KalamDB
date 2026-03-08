@@ -13,7 +13,7 @@ fn test_subscription_with_from_seq_id() {
     let seq = SeqId::from(12345i64);
     let opts = SubscriptionOptions::new().with_from_seq_id(seq);
 
-    assert_eq!(opts.from_seq_id, Some(SeqId::from(12345i64)));
+    assert_eq!(opts.from, Some(SeqId::from(12345i64)));
     assert!(opts.has_resume_seq_id());
 }
 
@@ -22,7 +22,7 @@ fn test_subscription_with_from_seq_id() {
 fn test_from_seq_id_initially_none() {
     let opts = SubscriptionOptions::new();
 
-    assert!(opts.from_seq_id.is_none());
+    assert!(opts.from.is_none());
     assert!(!opts.has_resume_seq_id());
 }
 
@@ -32,16 +32,16 @@ fn test_update_from_seq_id() {
     // Initial subscription with batch_size
     let opts = SubscriptionOptions::new().with_batch_size(50).with_last_rows(10);
 
-    assert!(opts.from_seq_id.is_none());
+    assert!(opts.from.is_none());
 
     // After receiving events, create updated options for reconnect
     let reconnect_opts = opts.clone().with_from_seq_id(SeqId::from(5000i64));
 
     // Original unchanged
-    assert!(opts.from_seq_id.is_none());
+    assert!(opts.from.is_none());
 
     // New options have from_seq_id
-    assert_eq!(reconnect_opts.from_seq_id, Some(SeqId::from(5000i64)));
+    assert_eq!(reconnect_opts.from, Some(SeqId::from(5000i64)));
     // Other fields preserved
     assert_eq!(reconnect_opts.batch_size, Some(50));
     assert_eq!(reconnect_opts.last_rows, Some(10));
@@ -67,7 +67,7 @@ fn test_seq_id_value_extraction() {
     let opts = SubscriptionOptions::new().with_from_seq_id(seq);
 
     // Verify we can get the value back
-    if let Some(resume_seq) = opts.from_seq_id {
+    if let Some(resume_seq) = opts.from {
         let raw_value: i64 = resume_seq.into();
         assert_eq!(raw_value, 999999i64);
     } else {
@@ -83,7 +83,7 @@ fn test_seq_id_zero() {
 
     // Zero is a valid seq_id (means resume from the very beginning)
     assert!(opts.has_resume_seq_id());
-    assert_eq!(opts.from_seq_id, Some(SeqId::from(0i64)));
+    assert_eq!(opts.from, Some(SeqId::from(0i64)));
 }
 
 /// Test edge case: large seq_id values
@@ -94,7 +94,7 @@ fn test_large_seq_id() {
 
     assert!(opts.has_resume_seq_id());
 
-    if let Some(seq) = opts.from_seq_id {
+    if let Some(seq) = opts.from {
         let raw: i64 = seq.into();
         assert_eq!(raw, i64::MAX);
     }
@@ -109,7 +109,7 @@ fn test_negative_seq_id() {
 
     assert!(opts.has_resume_seq_id());
 
-    if let Some(seq) = opts.from_seq_id {
+    if let Some(seq) = opts.from {
         let raw: i64 = seq.into();
         assert_eq!(raw, -1i64);
     }
@@ -127,7 +127,7 @@ fn test_clone_preserves_from_seq_id() {
 
     assert_eq!(cloned.batch_size, Some(100));
     assert_eq!(cloned.last_rows, Some(50));
-    assert_eq!(cloned.from_seq_id, Some(SeqId::from(42i64)));
+    assert_eq!(cloned.from, Some(SeqId::from(42i64)));
 }
 
 /// Test resumption scenario: simulating receiving multiple batches
@@ -155,7 +155,7 @@ fn test_batch_resumption_scenario() {
     }
 
     assert!(opts.has_resume_seq_id());
-    assert_eq!(opts.from_seq_id, Some(SeqId::from(299i64)));
+    assert_eq!(opts.from, Some(SeqId::from(299i64)));
 
     // Server should send events starting from seq > 299
 }
@@ -183,7 +183,7 @@ fn test_from_seq_id_with_other_options() {
     // All options should be set
     assert_eq!(opts.batch_size, Some(200));
     assert_eq!(opts.last_rows, Some(10));
-    assert_eq!(opts.from_seq_id, Some(SeqId::from(500i64)));
+    assert_eq!(opts.from, Some(SeqId::from(500i64)));
 
     // Should be resuming
     assert!(opts.has_resume_seq_id());

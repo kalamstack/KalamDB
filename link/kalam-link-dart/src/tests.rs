@@ -490,12 +490,12 @@ mod tests {
             id: None,
             batch_size: None,
             last_rows: None,
-            from_seq_id: None,
+            from: None,
         };
         let native = cfg.into_native();
         assert_eq!(native.sql, "SELECT * FROM t");
         assert!(native.id.starts_with("dart-sub-"));
-        assert!(native.options.as_ref().unwrap().from_seq_id.is_none());
+        assert!(native.options.as_ref().unwrap().from.is_none());
     }
 
     #[test]
@@ -505,7 +505,7 @@ mod tests {
             id: Some("my-sub-1".into()),
             batch_size: Some(500),
             last_rows: Some(10),
-            from_seq_id: Some(42),
+            from: Some(42),
         };
         let native = cfg.into_native();
         assert_eq!(native.id, "my-sub-1");
@@ -513,24 +513,24 @@ mod tests {
         let opts = native.options.unwrap();
         assert_eq!(opts.batch_size.unwrap(), 500);
         assert_eq!(opts.last_rows.unwrap(), 10);
-        assert_eq!(opts.from_seq_id.unwrap().as_i64(), 42);
+        assert_eq!(opts.from.unwrap().as_i64(), 42);
     }
 
     #[test]
-    fn subscription_config_with_from_seq_id_only() {
+    fn subscription_config_with_from_only() {
         let cfg = DartSubscriptionConfig {
             sql: "SELECT * FROM events".into(),
             id: None,
             batch_size: None,
             last_rows: None,
-            from_seq_id: Some(12345),
+            from: Some(12345),
         };
         let native = cfg.into_native();
         assert_eq!(native.sql, "SELECT * FROM events");
         let opts = native.options.unwrap();
         assert!(opts.batch_size.is_none());
         assert!(opts.last_rows.is_none());
-        assert_eq!(opts.from_seq_id.unwrap().as_i64(), 12345);
+        assert_eq!(opts.from.unwrap().as_i64(), 12345);
     }
 
     // -----------------------------------------------------------------------

@@ -9,6 +9,7 @@ import {
   KalamDBClient,
   MessageType,
   ChangeType,
+  SeqId,
   createClient,
   type BatchStatus,
   type QueryResponse,
@@ -97,7 +98,11 @@ async function testMethods() {
   });
 
   // Subscription with options
-  const opts: SubscriptionOptions = { batch_size: 50, last_rows: 100 };
+  const opts: SubscriptionOptions = {
+    batch_size: 50,
+    last_rows: 100,
+    from: SeqId.from('42'),
+  };
   const unsub2 = await client.subscribeWithSql(
     'SELECT * FROM chat.messages',
     (event) => {},

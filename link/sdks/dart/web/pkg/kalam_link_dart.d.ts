@@ -441,7 +441,7 @@ export type BatchStatus = "loading" | "loading_batch" | "ready";
  *
  * These options control individual subscription behavior including:
  * - Initial data loading (batch_size, last_rows)
- * - Data resumption after reconnection (from_seq_id)
+ * - Data resumption after reconnection (from)
  *
  * Aligned with backend\'s SubscriptionOptions in kalamdb-commons/websocket.rs.
  *
@@ -458,7 +458,7 @@ export type BatchStatus = "loading" | "loading_batch" | "ready";
  * // Resume from a specific sequence ID after reconnection
  * let some_seq_id = SeqId::new(123);
  * let options = SubscriptionOptions::default()
- *     .with_from_seq_id(some_seq_id);
+ *     .with_from(some_seq_id);
  * ```
  */
 export interface SubscriptionOptions {
@@ -477,7 +477,7 @@ export interface SubscriptionOptions {
      * When set, the server will only send changes after this seq_id.
      * Typically set automatically during reconnection to resume from last received event.
      */
-    from_seq_id?: SeqId;
+    from?: SeqId;
 }
 
 /**
@@ -1057,7 +1057,7 @@ export class KalamClient {
      *   - `batch_size`: Number of rows per batch (default: server-configured)
      *   - `auto_reconnect`: Override client auto-reconnect for this subscription (default: true)
      *   - `include_old_values`: Include old values in UPDATE/DELETE events (default: false)
-     *   - `resume_from_seq_id`: Resume from a specific sequence ID (internal use)
+     *   - `from`: Resume from a specific sequence ID (internal use)
      * * `callback` - JavaScript function to call when changes occur
      *
      * # Returns
@@ -1068,7 +1068,7 @@ export class KalamClient {
      * // Subscribe with options
      * const subId = await client.subscribeWithSql(
      *   "SELECT * FROM chat.messages WHERE conversation_id = 1",
-     *   JSON.stringify({ batch_size: 50, include_old_values: true }),
+     *   JSON.stringify({ batch_size: 50, from: 42 }),
      *   (event) => console.log('Change:', event)
      * );
      * ```

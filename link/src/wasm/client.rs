@@ -1614,7 +1614,7 @@ impl KalamClient {
     ///   - `batch_size`: Number of rows per batch (default: server-configured)
     ///   - `auto_reconnect`: Override client auto-reconnect for this subscription (default: true)
     ///   - `include_old_values`: Include old values in UPDATE/DELETE events (default: false)
-    ///   - `resume_from_seq_id`: Resume from a specific sequence ID (internal use)
+    ///   - `from`: Resume from a specific sequence ID (internal use)
     /// * `callback` - JavaScript function to call when changes occur
     ///
     /// # Returns
@@ -1625,7 +1625,7 @@ impl KalamClient {
     /// // Subscribe with options
     /// const subId = await client.subscribeWithSql(
     ///   "SELECT * FROM chat.messages WHERE conversation_id = 1",
-    ///   JSON.stringify({ batch_size: 50, include_old_values: true }),
+    ///   JSON.stringify({ batch_size: 50, from: 42 }),
     ///   (event) => console.log('Change:', event)
     /// );
     /// ```

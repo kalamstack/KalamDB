@@ -1,6 +1,6 @@
 /// Subscription options & getSubscriptions e2e tests.
 ///
-/// Verifies that all subscription options (batchSize, lastRows, fromSeqId)
+/// Verifies that all subscription options (batchSize, lastRows, from)
 /// are properly forwarded to the server, and that getSubscriptions() returns
 /// accurate metadata.
 library;
@@ -100,23 +100,22 @@ void main() {
     );
 
     // ─────────────────────────────────────────────────────────────────
-    // subscribe with fromSeqId
+    // subscribe with from
     // ─────────────────────────────────────────────────────────────────
     test(
-      'subscribe with fromSeqId receives ack',
+      'subscribe with from receives ack',
       () async {
         final events = <ChangeEvent>[];
         final stream = client.subscribe(
           'SELECT * FROM $tbl',
-          fromSeqId: SeqId.zero(), // start from beginning
+          from: SeqId.zero(), // start from beginning
         );
         final sub = stream.listen(events.add);
 
         await sleep(const Duration(seconds: 3));
 
         final ack = events.whereType<AckEvent>();
-        expect(ack, isNotEmpty,
-            reason: 'should receive AckEvent with fromSeqId=0');
+        expect(ack, isNotEmpty, reason: 'should receive AckEvent with from=0');
 
         await _safeCancel(sub);
       },
@@ -134,7 +133,7 @@ void main() {
           'SELECT * FROM $tbl',
           batchSize: 10,
           lastRows: 5,
-          fromSeqId: SeqId.zero(),
+          from: SeqId.zero(),
           subscriptionId: 'custom-all-opts',
         );
         final sub = stream.listen(events.add);
@@ -150,11 +149,11 @@ void main() {
     );
 
     // ─────────────────────────────────────────────────────────────────
-    // fromSeqId with specific checkpoint: no replay before checkpoint,
+    // from with specific checkpoint: no replay before checkpoint,
     // includes rows created after checkpoint
     // ─────────────────────────────────────────────────────────────────
     test(
-      'fromSeqId resumes from specific checkpoint without replaying older rows',
+      'from resumes from specific checkpoint without replaying older rows',
       () async {
         bool hasRowId(List<ChangeEvent> events, int id) {
           for (final event in events) {
@@ -243,7 +242,7 @@ void main() {
           final secondEvents = <ChangeEvent>[];
           final secondStream = client.subscribe(
             'SELECT id, value FROM $tbl WHERE id >= $preId',
-            fromSeqId: checkpoint,
+            from: checkpoint,
             lastRows: 0,
           );
           sub2 = secondStream.listen(secondEvents.add);

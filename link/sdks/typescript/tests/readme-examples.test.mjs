@@ -21,6 +21,11 @@ function createReadmeWasmClient() {
     queryWithParamsCalls: [],
     setAuthProvider() {},
     setWsLazyConnect() {},
+    setAutoReconnect() {},
+    setReconnectDelay() {},
+    setMaxReconnectAttempts() {},
+    getReconnectAttempts() { return 0; },
+    isReconnecting() { return false; },
     onConnect() {},
     onDisconnect() {},
     onError() {},
@@ -149,7 +154,7 @@ test('README live resume example passes options and exposes typed checkpoints', 
     {
       subscriptionOptions: {
         last_rows: 200,
-        from_seq_id: startFrom.toJSON(),
+        from: startFrom,
       },
     },
   );
@@ -157,7 +162,7 @@ test('README live resume example passes options and exposes typed checkpoints', 
   assert.deepEqual(JSON.parse(fakeWasmClient.lastLiveQueryOptionsJson), {
     subscription_options: {
       last_rows: 200,
-      from_seq_id: 42,
+      from: 42,
     },
   });
 

@@ -10,7 +10,7 @@
 //! **Supported Options**:
 //! - `last_rows=N` - Number of recent rows to fetch initially (default: fetch all)
 //! - `batch_size=N` - Hint for server-side batch sizing during initial data load
-//! - `from_seq_id=N` - Resume subscription from a specific sequence ID
+//! - `from=N` - Resume subscription from a specific sequence ID
 //!
 //! **Examples**:
 //! ```sql
@@ -27,7 +27,7 @@
 //! SUBSCRIBE TO app.messages OPTIONS (last_rows=100, batch_size=50);
 //!
 //! -- Resume from specific sequence ID
-//! SUBSCRIBE TO app.messages OPTIONS (from_seq_id=12345);
+//! SUBSCRIBE TO app.messages OPTIONS (from=12345);
 //!
 //! -- Shared table subscription
 //! SUBSCRIBE TO shared.announcements WHERE priority > 5;
@@ -70,7 +70,7 @@ pub struct SubscribeStatement {
     pub namespace: NamespaceId,
     /// Table name (e.g., "messages") - extracted from query
     pub table_name: TableName,
-    /// Optional subscription options (e.g., last_rows=10, batch_size=100, from_seq_id=123)
+    /// Optional subscription options (e.g., last_rows=10, batch_size=100, from=123)
     pub options: SubscriptionOptions,
 }
 
@@ -310,7 +310,7 @@ impl SubscribeStatement {
 /// Supported options:
 /// - `last_rows=N` - Number of recent rows to fetch initially
 /// - `batch_size=N` - Hint for server-side batch sizing during initial data load
-/// - `from_seq_id=N` - Resume subscription from a specific sequence ID
+/// - `from=N` - Resume subscription from a specific sequence ID
 ///
 /// Unknown options are rejected with an error to catch typos early.
 fn parse_subscribe_options(options_str: &str) -> DdlResult<SubscriptionOptions> {
@@ -329,7 +329,7 @@ fn parse_subscribe_options(options_str: &str) -> DdlResult<SubscriptionOptions> 
     // Parse key=value pairs
     let mut batch_size = None;
     let mut last_rows = None;
-    let mut from_seq_id = None;
+    let mut from = None;
 
     for part in inner.split(',') {
         let part = part.trim();
@@ -355,14 +355,14 @@ fn parse_subscribe_options(options_str: &str) -> DdlResult<SubscriptionOptions> 
                             .map_err(|_| format!("Invalid batch_size value: {}", value))?,
                     );
                 },
-                "from_seq_id" => {
+                "from" | "from_seq_id" => {
                     let seq_val = value
                         .parse::<i64>()
-                        .map_err(|_| format!("Invalid from_seq_id value: {}", value))?;
-                    from_seq_id = Some(SeqId::new(seq_val));
+                        .map_err(|_| format!("Invalid from value: {}", value))?;
+                    from = Some(SeqId::new(seq_val));
                 },
                 _ => {
-                    return Err(format!("Unknown subscription option: '{}'. Valid options are: last_rows, batch_size, from_seq_id", key));
+                    return Err(format!("Unknown subscription option: '{}'. Valid options are: last_rows, batch_size, from", key));
                 },
             }
         } else {
@@ -373,7 +373,7 @@ fn parse_subscribe_options(options_str: &str) -> DdlResult<SubscriptionOptions> 
     Ok(SubscriptionOptions {
         batch_size,
         last_rows,
-        from_seq_id,
+        from,
     })
 }
 
@@ -552,7 +552,7 @@ mod tests {
     }
 
     // ========================================================================
-    // Tests for new subscription options: batch_size, from_seq_id
+    // Tests for new subscription options: batch_size, from
     // ========================================================================
 
     #[test]
@@ -564,21 +564,30 @@ mod tests {
         assert_eq!(stmt.select_query, "SELECT * FROM app.messages");
         assert_eq!(stmt.options.batch_size, Some(500));
         assert!(stmt.options.last_rows.is_none());
-        assert!(stmt.options.from_seq_id.is_none());
+        assert!(stmt.options.from.is_none());
     }
 
     #[test]
-    fn test_parse_subscribe_with_from_seq_id() {
+    fn test_parse_subscribe_with_from() {
+        use kalamdb_commons::ids::SeqId;
+
+        let stmt = SubscribeStatement::parse("SUBSCRIBE TO app.messages OPTIONS (from=12345)")
+            .unwrap();
+        assert_eq!(stmt.namespace, NamespaceId::from("app"));
+        assert_eq!(stmt.table_name, TableName::from("messages"));
+        assert_eq!(stmt.options.from, Some(SeqId::new(12345)));
+        assert!(stmt.options.batch_size.is_none());
+        assert!(stmt.options.last_rows.is_none());
+    }
+
+    #[test]
+    fn test_parse_subscribe_with_from_seq_id_alias() {
         use kalamdb_commons::ids::SeqId;
 
         let stmt =
             SubscribeStatement::parse("SUBSCRIBE TO app.messages OPTIONS (from_seq_id=12345)")
                 .unwrap();
-        assert_eq!(stmt.namespace, NamespaceId::from("app"));
-        assert_eq!(stmt.table_name, TableName::from("messages"));
-        assert_eq!(stmt.options.from_seq_id, Some(SeqId::new(12345)));
-        assert!(stmt.options.batch_size.is_none());
-        assert!(stmt.options.last_rows.is_none());
+        assert_eq!(stmt.options.from, Some(SeqId::new(12345)));
     }
 
     #[test]
@@ -586,14 +595,14 @@ mod tests {
         use kalamdb_commons::ids::SeqId;
 
         let stmt = SubscribeStatement::parse(
-            "SUBSCRIBE TO app.messages OPTIONS (last_rows=100, batch_size=50, from_seq_id=999)",
+            "SUBSCRIBE TO app.messages OPTIONS (last_rows=100, batch_size=50, from=999)",
         )
         .unwrap();
         assert_eq!(stmt.namespace, NamespaceId::from("app"));
         assert_eq!(stmt.table_name, TableName::from("messages"));
         assert_eq!(stmt.options.last_rows, Some(100));
         assert_eq!(stmt.options.batch_size, Some(50));
-        assert_eq!(stmt.options.from_seq_id, Some(SeqId::new(999)));
+        assert_eq!(stmt.options.from, Some(SeqId::new(999)));
     }
 
     #[test]
@@ -618,12 +627,10 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_subscribe_invalid_from_seq_id() {
-        let result = SubscribeStatement::parse(
-            "SUBSCRIBE TO app.messages OPTIONS (from_seq_id=not_a_number)",
-        );
+    fn test_parse_subscribe_invalid_from() {
+        let result = SubscribeStatement::parse("SUBSCRIBE TO app.messages OPTIONS (from=not_a_number)");
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Invalid from_seq_id value"));
+        assert!(result.unwrap_err().contains("Invalid from value"));
     }
 
     #[test]
@@ -638,13 +645,13 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_subscribe_negative_from_seq_id() {
+    fn test_parse_subscribe_negative_from() {
         use kalamdb_commons::ids::SeqId;
 
         // Negative seq_id should be valid (might be used for special cases)
-        let stmt = SubscribeStatement::parse("SUBSCRIBE TO app.messages OPTIONS (from_seq_id=-1)")
+        let stmt = SubscribeStatement::parse("SUBSCRIBE TO app.messages OPTIONS (from=-1)")
             .unwrap();
-        assert_eq!(stmt.options.from_seq_id, Some(SeqId::new(-1)));
+        assert_eq!(stmt.options.from, Some(SeqId::new(-1)));
     }
 
     #[test]

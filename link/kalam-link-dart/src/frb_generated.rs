@@ -1920,13 +1920,13 @@ impl SseDecode for crate::models::DartSubscriptionConfig {
         let mut var_id = <Option<String>>::sse_decode(deserializer);
         let mut var_batchSize = <Option<i32>>::sse_decode(deserializer);
         let mut var_lastRows = <Option<i32>>::sse_decode(deserializer);
-        let mut var_fromSeqId = <Option<i64>>::sse_decode(deserializer);
+        let mut var_from = <Option<i64>>::sse_decode(deserializer);
         return crate::models::DartSubscriptionConfig {
             sql: var_sql,
             id: var_id,
             batch_size: var_batchSize,
             last_rows: var_lastRows,
-            from_seq_id: var_fromSeqId,
+            from: var_from,
         };
     }
 }
@@ -2795,7 +2795,7 @@ impl flutter_rust_bridge::IntoDart for crate::models::DartSubscriptionConfig {
             self.id.into_into_dart().into_dart(),
             self.batch_size.into_into_dart().into_dart(),
             self.last_rows.into_into_dart().into_dart(),
-            self.from_seq_id.into_into_dart().into_dart(),
+            self.from.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -3219,7 +3219,7 @@ impl SseEncode for crate::models::DartSubscriptionConfig {
         <Option<String>>::sse_encode(self.id, serializer);
         <Option<i32>>::sse_encode(self.batch_size, serializer);
         <Option<i32>>::sse_encode(self.last_rows, serializer);
-        <Option<i64>>::sse_encode(self.from_seq_id, serializer);
+        <Option<i64>>::sse_encode(self.from, serializer);
     }
 }
 

@@ -31,7 +31,7 @@ fn create_test_subscription_request(
         options: SubscriptionOptions {
             batch_size: None,
             last_rows,
-            from_seq_id: None,
+            from: None,
         },
     }
 }

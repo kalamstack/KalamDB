@@ -1407,7 +1407,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       id: dco_decode_opt_String(arr[1]),
       batchSize: dco_decode_opt_box_autoadd_i_32(arr[2]),
       lastRows: dco_decode_opt_box_autoadd_i_32(arr[3]),
-      fromSeqId: dco_decode_opt_box_autoadd_i_64(arr[4]),
+      from: dco_decode_opt_box_autoadd_i_64(arr[4]),
     );
   }
 
@@ -2100,13 +2100,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_id = sse_decode_opt_String(deserializer);
     var var_batchSize = sse_decode_opt_box_autoadd_i_32(deserializer);
     var var_lastRows = sse_decode_opt_box_autoadd_i_32(deserializer);
-    var var_fromSeqId = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_from = sse_decode_opt_box_autoadd_i_64(deserializer);
     return DartSubscriptionConfig(
         sql: var_sql,
         id: var_id,
         batchSize: var_batchSize,
         lastRows: var_lastRows,
-        fromSeqId: var_fromSeqId);
+        from: var_from);
   }
 
   @protected
@@ -2829,7 +2829,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.id, serializer);
     sse_encode_opt_box_autoadd_i_32(self.batchSize, serializer);
     sse_encode_opt_box_autoadd_i_32(self.lastRows, serializer);
-    sse_encode_opt_box_autoadd_i_64(self.fromSeqId, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.from, serializer);
   }
 
   @protected

@@ -112,7 +112,7 @@ fn test_subscription_options_default() {
 
     assert!(opts.batch_size.is_none(), "batch_size should default to None");
     assert!(opts.last_rows.is_none(), "last_rows should default to None");
-    assert!(opts.from_seq_id.is_none(), "from_seq_id should default to None");
+    assert!(opts.from.is_none(), "from should default to None");
 }
 
 #[test]
@@ -122,7 +122,7 @@ fn test_subscription_options_new() {
     // new() should be equivalent to default()
     assert!(opts.batch_size.is_none());
     assert!(opts.last_rows.is_none());
-    assert!(opts.from_seq_id.is_none());
+    assert!(opts.from.is_none());
 }
 
 #[test]
@@ -131,12 +131,12 @@ fn test_subscription_options_builder_pattern() {
     let opts = SubscriptionOptions::new()
         .with_batch_size(100)
         .with_last_rows(50)
-        .with_from_seq_id(seq_id);
+        .with_from(seq_id);
 
     assert_eq!(opts.batch_size, Some(100));
     assert_eq!(opts.last_rows, Some(50));
-    assert!(opts.from_seq_id.is_some());
-    assert_eq!(opts.from_seq_id.unwrap(), seq_id);
+    assert!(opts.from.is_some());
+    assert_eq!(opts.from.unwrap(), seq_id);
 }
 
 #[test]
@@ -145,7 +145,7 @@ fn test_subscription_options_with_batch_size_only() {
 
     assert_eq!(opts.batch_size, Some(500));
     assert!(opts.last_rows.is_none());
-    assert!(opts.from_seq_id.is_none());
+    assert!(opts.from.is_none());
 }
 
 #[test]
@@ -154,17 +154,17 @@ fn test_subscription_options_with_last_rows_only() {
 
     assert!(opts.batch_size.is_none());
     assert_eq!(opts.last_rows, Some(25));
-    assert!(opts.from_seq_id.is_none());
+    assert!(opts.from.is_none());
 }
 
 #[test]
-fn test_subscription_options_with_from_seq_id_only() {
+fn test_subscription_options_with_from_only() {
     let seq_id = SeqId::from(99999i64);
-    let opts = SubscriptionOptions::new().with_from_seq_id(seq_id);
+    let opts = SubscriptionOptions::new().with_from(seq_id);
 
     assert!(opts.batch_size.is_none());
     assert!(opts.last_rows.is_none());
-    assert_eq!(opts.from_seq_id, Some(seq_id));
+    assert_eq!(opts.from, Some(seq_id));
 }
 
 #[test]
@@ -172,7 +172,7 @@ fn test_subscription_options_has_resume_seq_id() {
     let opts_without = SubscriptionOptions::new();
     assert!(!opts_without.has_resume_seq_id());
 
-    let opts_with = SubscriptionOptions::new().with_from_seq_id(SeqId::from(123i64));
+    let opts_with = SubscriptionOptions::new().with_from(SeqId::from(123i64));
     assert!(opts_with.has_resume_seq_id());
 }
 
@@ -185,19 +185,18 @@ fn test_subscription_options_serialization() {
     // Verify JSON structure
     assert!(json.contains("\"batch_size\":200"));
     assert!(json.contains("\"last_rows\":100"));
-    // from_seq_id should be skipped when None
-    assert!(!json.contains("from_seq_id"));
+    assert!(!json.contains("\"from\":"));
 }
 
 #[test]
 fn test_subscription_options_serialization_with_seq_id() {
     let seq_id = SeqId::from(42i64);
-    let opts = SubscriptionOptions::new().with_batch_size(50).with_from_seq_id(seq_id);
+    let opts = SubscriptionOptions::new().with_batch_size(50).with_from(seq_id);
 
     let json = serde_json::to_string(&opts).unwrap();
 
     assert!(json.contains("\"batch_size\":50"));
-    assert!(json.contains("from_seq_id"));
+    assert!(json.contains("\"from\":42"));
 }
 
 #[test]
@@ -207,7 +206,15 @@ fn test_subscription_options_deserialization() {
 
     assert_eq!(opts.batch_size, Some(100));
     assert_eq!(opts.last_rows, Some(50));
-    assert!(opts.from_seq_id.is_none());
+    assert!(opts.from.is_none());
+}
+
+#[test]
+fn test_subscription_options_deserialization_alias() {
+    let json = r#"{"from_seq_id": 75}"#;
+    let opts: SubscriptionOptions = serde_json::from_str(json).unwrap();
+
+    assert_eq!(opts.from, Some(SeqId::from(75i64)));
 }
 
 #[test]
@@ -217,7 +224,7 @@ fn test_subscription_options_deserialization_empty() {
 
     assert!(opts.batch_size.is_none());
     assert!(opts.last_rows.is_none());
-    assert!(opts.from_seq_id.is_none());
+    assert!(opts.from.is_none());
 }
 
 // ==================== Options Separation Tests ====================
@@ -234,7 +241,7 @@ fn test_connection_and_subscription_options_are_independent() {
     let conn_json = serde_json::to_string(&conn_opts).unwrap();
     assert!(!conn_json.contains("batch_size"));
     assert!(!conn_json.contains("last_rows"));
-    assert!(!conn_json.contains("from_seq_id"));
+    assert!(!conn_json.contains("\"from\":"));
 
     // Subscription options should NOT have connection fields
     let sub_json = serde_json::to_string(&sub_opts).unwrap();
@@ -315,13 +322,13 @@ fn test_client_message_subscribe_with_resume() {
         subscription: SubscriptionRequest {
             id: "resume-sub".to_string(),
             sql: "SELECT * FROM events".to_string(),
-            options: SubscriptionOptions::new().with_from_seq_id(seq_id),
+            options: SubscriptionOptions::new().with_from(seq_id),
         },
     };
 
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains("\"type\":\"subscribe\""));
-    assert!(json.contains("from_seq_id"));
+    assert!(json.contains("\"from\":12345"));
 }
 
 // ==================== BatchControl Tests ====================
@@ -445,10 +452,10 @@ fn test_subscription_options_for_reconnection() {
     // 3. On reconnect, we create new options with the resume seq_id
     let reconnect_opts = SubscriptionOptions::new()
         .with_batch_size(initial_opts.batch_size.unwrap_or(100))
-        .with_from_seq_id(last_received_seq);
+        .with_from(last_received_seq);
 
     assert!(reconnect_opts.has_resume_seq_id());
-    assert_eq!(reconnect_opts.from_seq_id, Some(last_received_seq));
+    assert_eq!(reconnect_opts.from, Some(last_received_seq));
     assert_eq!(reconnect_opts.batch_size, Some(100));
 }
 

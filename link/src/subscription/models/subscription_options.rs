@@ -6,7 +6,7 @@ use crate::seq_id::SeqId;
 ///
 /// These options control individual subscription behavior including:
 /// - Initial data loading (batch_size, last_rows)
-/// - Data resumption after reconnection (from_seq_id)
+/// - Data resumption after reconnection (from)
 ///
 /// Aligned with backend's SubscriptionOptions in kalamdb-commons/websocket.rs.
 ///
@@ -23,7 +23,7 @@ use crate::seq_id::SeqId;
 /// // Resume from a specific sequence ID after reconnection
 /// let some_seq_id = SeqId::new(123);
 /// let options = SubscriptionOptions::default()
-///     .with_from_seq_id(some_seq_id);
+///     .with_from(some_seq_id);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify_next::Tsify))]
@@ -42,8 +42,8 @@ pub struct SubscriptionOptions {
     /// Resume subscription from a specific sequence ID.
     /// When set, the server will only send changes after this seq_id.
     /// Typically set automatically during reconnection to resume from last received event.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub from_seq_id: Option<SeqId>,
+    #[serde(skip_serializing_if = "Option::is_none", alias = "from_seq_id")]
+    pub from: Option<SeqId>,
 }
 
 impl SubscriptionOptions {
@@ -66,13 +66,19 @@ impl SubscriptionOptions {
 
     /// Resume from a specific sequence ID.
     /// Used during reconnection to continue from where we left off.
-    pub fn with_from_seq_id(mut self, seq_id: SeqId) -> Self {
-        self.from_seq_id = Some(seq_id);
+    pub fn with_from(mut self, seq_id: SeqId) -> Self {
+        self.from = Some(seq_id);
         self
+    }
+
+    /// Resume from a specific sequence ID.
+    /// Deprecated alias retained for backward compatibility.
+    pub fn with_from_seq_id(self, seq_id: SeqId) -> Self {
+        self.with_from(seq_id)
     }
 
     /// Check if this has a resume seq_id set.
     pub fn has_resume_seq_id(&self) -> bool {
-        self.from_seq_id.is_some()
+        self.from.is_some()
     }
 }
