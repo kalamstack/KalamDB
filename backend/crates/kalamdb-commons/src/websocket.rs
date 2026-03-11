@@ -97,6 +97,7 @@ use crate::models::rows::Row;
 use crate::models::KalamCellValue;
 use crate::models::UserId;
 use crate::schemas::SchemaField;
+pub use crate::websocket_auth::WsAuthCredentials;
 
 // Simple Row type for WASM (JSON only)
 #[cfg(feature = "wasm")]
@@ -173,38 +174,6 @@ pub enum WebSocketMessage {
     /// Only sent when batch_control.status == Ready.
     #[serde(untagged)]
     Notification(Notification),
-}
-
-/// Authentication credentials for WebSocket connection
-///
-/// This enum is the **client-facing** authentication model for WebSocket connections.
-/// It maps 1:1 with `AuthRequest` variants in `kalamdb-auth` via the `From` impl.
-///
-/// # Supported Methods
-///
-/// - `Jwt` - JWT token (Bearer) authentication
-///
-/// # JSON Wire Format
-///
-/// ```json
-/// // JWT Auth  
-/// {"type": "authenticate", "method": "jwt", "token": "eyJhbGciOiJIUzI1NiIs..."}
-/// ```
-///
-/// # Adding a New Authentication Method
-///
-/// 1. Add variant here with appropriate fields
-/// 2. Add corresponding variant to `AuthRequest` in `kalamdb-auth/unified.rs`
-/// 3. Update `From<WsAuthCredentials> for AuthRequest` impl
-/// 4. Update client SDKs (TypeScript `Auth` class, WASM `WasmAuthProvider`)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "method", rename_all = "snake_case")]
-pub enum WsAuthCredentials {
-    /// JWT token authentication
-    Jwt { token: String },
-    // Future auth methods can be added here:
-    // ApiKey { key: String },
-    // OAuth { provider: String, token: String },
 }
 
 /// Client-to-server request messages

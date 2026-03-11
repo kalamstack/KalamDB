@@ -18,6 +18,7 @@ use crate::shared_tables::{SharedTableIndexedStore, SharedTablePkIndex, SharedTa
 use crate::utils::base::{self, BaseTableProvider, TableProviderCore};
 use crate::utils::row_utils::extract_full_user_context;
 use async_trait::async_trait;
+use datafusion::arrow::array::{Array, Float32Array};
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::catalog::Session;
@@ -30,12 +31,17 @@ use datafusion::scalar::ScalarValue;
 use kalamdb_commons::constants::SystemColumnNames;
 use kalamdb_commons::conversions::arrow_json_conversion::coerce_rows;
 use kalamdb_commons::ids::SharedTableRowId;
+use kalamdb_commons::models::datatypes::KalamDataType;
 use kalamdb_commons::models::rows::Row;
 use kalamdb_commons::models::UserId;
 use kalamdb_commons::websocket::ChangeNotification;
 use kalamdb_commons::NotLeaderError;
 use kalamdb_session::{check_shared_table_access, check_shared_table_write_access};
 use kalamdb_store::EntityStore;
+use kalamdb_system::VectorMetric;
+use kalamdb_vector::{
+    new_indexed_shared_vector_hot_store, SharedVectorHotOpId, VectorHotOp, VectorHotOpType,
+};
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -60,6 +66,9 @@ pub struct SharedTableProvider {
 
     /// PK index for efficient lookups
     pk_index: SharedTablePkIndex,
+
+    /// Embedding columns tracked by vector hot staging: (column_name, dimensions).
+    vector_columns: Vec<(String, u32)>,
 }
 
 impl SharedTableProvider {
@@ -70,11 +79,23 @@ impl SharedTableProvider {
     /// * `store` - SharedTableIndexedStore for this table
     pub fn new(core: Arc<TableProviderCore>, store: Arc<SharedTableIndexedStore>) -> Self {
         let pk_index = SharedTablePkIndex::new(core.table_id(), core.primary_key_field_name());
+        let vector_columns = core
+            .table_def()
+            .columns
+            .iter()
+            .filter_map(|column| match &column.data_type {
+                KalamDataType::Embedding(dim) if *dim > 0 => {
+                    Some((column.column_name.clone(), *dim as u32))
+                },
+                _ => None,
+            })
+            .collect();
 
         Self {
             core,
             store,
             pk_index,
+            vector_columns,
         }
     }
 
@@ -107,6 +128,127 @@ impl SharedTableProvider {
     /// Access the underlying indexed store (used by flush jobs)
     pub fn store(&self) -> Arc<SharedTableIndexedStore> {
         Arc::clone(&self.store)
+    }
+
+    fn extract_embedding_vector(value: &ScalarValue, expected_dimensions: u32) -> Option<Vec<f32>> {
+        let parse_inner = |array: &dyn Array| -> Option<Vec<f32>> {
+            let float_array = array.as_any().downcast_ref::<Float32Array>()?;
+            if float_array.len() != expected_dimensions as usize {
+                return None;
+            }
+            Some(
+                (0..float_array.len())
+                    .map(|idx| {
+                        if float_array.is_null(idx) {
+                            0.0
+                        } else {
+                            float_array.value(idx)
+                        }
+                    })
+                    .collect(),
+            )
+        };
+
+        match value {
+            ScalarValue::FixedSizeList(list) => {
+                if list.is_empty() || list.is_null(0) {
+                    return None;
+                }
+                parse_inner(list.value(0).as_ref())
+            },
+            ScalarValue::List(list) => {
+                if list.is_empty() || list.is_null(0) {
+                    return None;
+                }
+                parse_inner(list.value(0).as_ref())
+            },
+            ScalarValue::LargeList(list) => {
+                if list.is_empty() || list.is_null(0) {
+                    return None;
+                }
+                parse_inner(list.value(0).as_ref())
+            },
+            ScalarValue::Utf8(Some(json)) | ScalarValue::LargeUtf8(Some(json)) => {
+                let parsed = serde_json::from_str::<Vec<f32>>(json).ok()?;
+                if parsed.len() != expected_dimensions as usize {
+                    return None;
+                }
+                Some(parsed)
+            },
+            _ => None,
+        }
+    }
+
+    fn stage_vector_upsert(&self, seq: SharedTableRowId, row: &Row) -> Result<(), KalamDbError> {
+        if self.vector_columns.is_empty() {
+            return Ok(());
+        }
+
+        let pk =
+            crate::utils::unified_dml::extract_user_pk_value(row, self.primary_key_field_name())?;
+        let backend = self.store.backend().clone();
+
+        for (column_name, dimensions) in &self.vector_columns {
+            let Some(value) = row.get(column_name.as_str()) else {
+                continue;
+            };
+            let Some(vector) = Self::extract_embedding_vector(value, *dimensions) else {
+                continue;
+            };
+
+            let store = new_indexed_shared_vector_hot_store(
+                backend.clone(),
+                self.core.table_id(),
+                column_name,
+            );
+            let key = SharedVectorHotOpId::new(seq, pk.clone());
+            let op = VectorHotOp::new(
+                self.core.table_id().clone(),
+                column_name.clone(),
+                pk.clone(),
+                VectorHotOpType::Upsert,
+                Some(vector),
+                None,
+                *dimensions,
+                VectorMetric::Cosine,
+            );
+            store.insert(&key, &op).map_err(|e| {
+                KalamDbError::InvalidOperation(format!("Failed to stage vector upsert op: {}", e))
+            })?;
+        }
+
+        Ok(())
+    }
+
+    fn stage_vector_delete(&self, seq: SharedTableRowId, pk: &str) -> Result<(), KalamDbError> {
+        if self.vector_columns.is_empty() {
+            return Ok(());
+        }
+
+        let backend = self.store.backend().clone();
+        for (column_name, dimensions) in &self.vector_columns {
+            let store = new_indexed_shared_vector_hot_store(
+                backend.clone(),
+                self.core.table_id(),
+                column_name,
+            );
+            let key = SharedVectorHotOpId::new(seq, pk.to_string());
+            let op = VectorHotOp::new(
+                self.core.table_id().clone(),
+                column_name.clone(),
+                pk.to_string(),
+                VectorHotOpType::Delete,
+                None,
+                None,
+                *dimensions,
+                VectorMetric::Cosine,
+            );
+            store.insert(&key, &op).map_err(|e| {
+                KalamDbError::InvalidOperation(format!("Failed to stage vector delete op: {}", e))
+            })?;
+        }
+
+        Ok(())
     }
 
     /// Scan Parquet files from cold storage for shared table
@@ -297,6 +439,25 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
         })?;
 
         log::debug!("Inserted shared table row with _seq {}", seq_id);
+
+        if let Err(e) = self.stage_vector_upsert(seq_id, &entity.fields) {
+            log::warn!(
+                "Failed to stage vector upsert for table={}, seq={}: {}",
+                self.core.table_id(),
+                seq_id.as_i64(),
+                e
+            );
+        }
+
+        // Mark manifest as having pending writes (hot data needs to be flushed)
+        let manifest_service = self.core.services.manifest_service.clone();
+        if let Err(e) = manifest_service.mark_pending_write(self.core.table_id(), None) {
+            log::warn!(
+                "Failed to mark manifest as pending_write for {}: {}",
+                self.core.table_id(),
+                e
+            );
+        }
 
         // Fire topic/CDC notification (INSERT) - no user_id for shared tables
         let notification_service = self.core.services.notification_service.clone();
@@ -495,6 +656,17 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
             ))
         })?;
 
+        for (row_key, entity) in &entries {
+            if let Err(e) = self.stage_vector_upsert(*row_key, &entity.fields) {
+                log::warn!(
+                    "Failed to stage vector upsert for table={}, seq={}: {}",
+                    self.core.table_id(),
+                    row_key.as_i64(),
+                    e
+                );
+            }
+        }
+
         // Mark manifest as having pending writes (hot data needs to be flushed)
         let manifest_service = self.core.services.manifest_service.clone();
         if let Err(e) = manifest_service.mark_pending_write(self.core.table_id(), None) {
@@ -654,6 +826,15 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
             KalamDbError::InvalidOperation(format!("Failed to update shared table row: {}", e))
         })?;
 
+        if let Err(e) = self.stage_vector_upsert(seq_id, &entity.fields) {
+            log::warn!(
+                "Failed to stage vector upsert for table={}, seq={}: {}",
+                self.core.table_id(),
+                seq_id.as_i64(),
+                e
+            );
+        }
+
         // Mark manifest as having pending writes (hot data needs to be flushed)
         let manifest_service = self.core.services.manifest_service.clone();
         if let Err(e) = manifest_service.mark_pending_write(self.core.table_id(), None) {
@@ -790,6 +971,16 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
         self.store.insert(&row_key, &entity).map_err(|e| {
             KalamDbError::InvalidOperation(format!("Failed to delete shared table row: {}", e))
         })?;
+
+        if let Err(e) = self.stage_vector_delete(seq_id, pk_value) {
+            log::warn!(
+                "Failed to stage vector delete for table={}, seq={}, pk={}: {}",
+                self.core.table_id(),
+                seq_id.as_i64(),
+                pk_value,
+                e
+            );
+        }
 
         // Mark manifest as having pending writes (hot data needs to be flushed)
         let manifest_service = self.core.services.manifest_service.clone();

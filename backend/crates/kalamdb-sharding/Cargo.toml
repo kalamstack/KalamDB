@@ -12,7 +12,7 @@ categories = ["database"]
 
 [dependencies]
 # Internal crates
-kalamdb-commons = { path = "../kalamdb-commons" }
+kalamdb-commons = { path = "../kalamdb-commons", default-features = false, features = ["serde"] }
 kalamdb-configs = { path = "../kalamdb-configs" }
 
 # Serialization

@@ -18,6 +18,7 @@ use crate::user_tables::{UserTableIndexedStore, UserTablePkIndex, UserTableRow};
 use crate::utils::base::{self, BaseTableProvider, TableProviderCore};
 use crate::utils::row_utils::{extract_full_user_context, extract_user_context};
 use async_trait::async_trait;
+use datafusion::arrow::array::{Array, Float32Array};
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::catalog::Session;
@@ -30,11 +31,16 @@ use datafusion::scalar::ScalarValue;
 use kalamdb_commons::constants::SystemColumnNames;
 use kalamdb_commons::conversions::arrow_json_conversion::coerce_rows;
 use kalamdb_commons::ids::{SeqId, UserTableRowId};
+use kalamdb_commons::models::datatypes::KalamDataType;
 use kalamdb_commons::models::UserId;
 use kalamdb_commons::NotLeaderError;
 use kalamdb_commons::StorageKey;
 use kalamdb_session::{can_read_all_users, check_user_table_access, check_user_table_write_access};
 use kalamdb_store::EntityStore;
+use kalamdb_system::VectorMetric;
+use kalamdb_vector::{
+    new_indexed_user_vector_hot_store, UserVectorHotOpId, VectorHotOp, VectorHotOpType,
+};
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -61,6 +67,9 @@ pub struct UserTableProvider {
 
     /// PK index for efficient lookups
     pk_index: UserTablePkIndex,
+
+    /// Embedding columns tracked by vector hot staging: (column_name, dimensions).
+    vector_columns: Vec<(String, u32)>,
 }
 
 impl UserTableProvider {
@@ -71,6 +80,17 @@ impl UserTableProvider {
     /// * `store` - IndexedEntityStore with PK index for this table
     pub fn new(core: Arc<TableProviderCore>, store: Arc<UserTableIndexedStore>) -> Self {
         let pk_index = UserTablePkIndex::new(core.table_id(), core.primary_key_field_name());
+        let vector_columns = core
+            .table_def()
+            .columns
+            .iter()
+            .filter_map(|column| match &column.data_type {
+                KalamDataType::Embedding(dim) if *dim > 0 => {
+                    Some((column.column_name.clone(), *dim as u32))
+                },
+                _ => None,
+            })
+            .collect();
 
         if log::log_enabled!(log::Level::Debug) {
             let field_names: Vec<_> = core.schema().fields().iter().map(|f| f.name()).collect();
@@ -85,6 +105,7 @@ impl UserTableProvider {
             core,
             store,
             pk_index,
+            vector_columns,
         }
     }
 
@@ -116,6 +137,137 @@ impl UserTableProvider {
     /// Access the underlying indexed store (used by flush jobs)
     pub fn store(&self) -> Arc<UserTableIndexedStore> {
         Arc::clone(&self.store)
+    }
+
+    fn extract_embedding_vector(value: &ScalarValue, expected_dimensions: u32) -> Option<Vec<f32>> {
+        let parse_inner = |array: &dyn Array| -> Option<Vec<f32>> {
+            let float_array = array.as_any().downcast_ref::<Float32Array>()?;
+            if float_array.len() != expected_dimensions as usize {
+                return None;
+            }
+            Some(
+                (0..float_array.len())
+                    .map(|idx| {
+                        if float_array.is_null(idx) {
+                            0.0
+                        } else {
+                            float_array.value(idx)
+                        }
+                    })
+                    .collect(),
+            )
+        };
+
+        match value {
+            ScalarValue::FixedSizeList(list) => {
+                if list.is_empty() || list.is_null(0) {
+                    return None;
+                }
+                parse_inner(list.value(0).as_ref())
+            },
+            ScalarValue::List(list) => {
+                if list.is_empty() || list.is_null(0) {
+                    return None;
+                }
+                parse_inner(list.value(0).as_ref())
+            },
+            ScalarValue::LargeList(list) => {
+                if list.is_empty() || list.is_null(0) {
+                    return None;
+                }
+                parse_inner(list.value(0).as_ref())
+            },
+            ScalarValue::Utf8(Some(json)) | ScalarValue::LargeUtf8(Some(json)) => {
+                let parsed = serde_json::from_str::<Vec<f32>>(json).ok()?;
+                if parsed.len() != expected_dimensions as usize {
+                    return None;
+                }
+                Some(parsed)
+            },
+            _ => None,
+        }
+    }
+
+    fn stage_vector_upsert(
+        &self,
+        user_id: &UserId,
+        seq: SeqId,
+        row: &Row,
+    ) -> Result<(), KalamDbError> {
+        if self.vector_columns.is_empty() {
+            return Ok(());
+        }
+
+        let pk =
+            crate::utils::unified_dml::extract_user_pk_value(row, self.primary_key_field_name())?;
+        let backend = self.store.backend().clone();
+
+        for (column_name, dimensions) in &self.vector_columns {
+            let Some(value) = row.get(column_name.as_str()) else {
+                continue;
+            };
+            let Some(vector) = Self::extract_embedding_vector(value, *dimensions) else {
+                continue;
+            };
+
+            let store = new_indexed_user_vector_hot_store(
+                backend.clone(),
+                self.core.table_id(),
+                column_name,
+            );
+            let key = UserVectorHotOpId::new(user_id.clone(), seq, pk.clone());
+            let op = VectorHotOp::new(
+                self.core.table_id().clone(),
+                column_name.clone(),
+                pk.clone(),
+                VectorHotOpType::Upsert,
+                Some(vector),
+                None,
+                *dimensions,
+                VectorMetric::Cosine,
+            );
+            store.insert(&key, &op).map_err(|e| {
+                KalamDbError::InvalidOperation(format!("Failed to stage vector upsert op: {}", e))
+            })?;
+        }
+
+        Ok(())
+    }
+
+    fn stage_vector_delete(
+        &self,
+        user_id: &UserId,
+        seq: SeqId,
+        pk: &str,
+    ) -> Result<(), KalamDbError> {
+        if self.vector_columns.is_empty() {
+            return Ok(());
+        }
+
+        let backend = self.store.backend().clone();
+        for (column_name, dimensions) in &self.vector_columns {
+            let store = new_indexed_user_vector_hot_store(
+                backend.clone(),
+                self.core.table_id(),
+                column_name,
+            );
+            let key = UserVectorHotOpId::new(user_id.clone(), seq, pk.to_string());
+            let op = VectorHotOp::new(
+                self.core.table_id().clone(),
+                column_name.clone(),
+                pk.to_string(),
+                VectorHotOpType::Delete,
+                None,
+                None,
+                *dimensions,
+                VectorMetric::Cosine,
+            );
+            store.insert(&key, &op).map_err(|e| {
+                KalamDbError::InvalidOperation(format!("Failed to stage vector delete op: {}", e))
+            })?;
+        }
+
+        Ok(())
     }
 
     /// Build a complete Row from UserTableRow including system columns (_seq, _deleted)
@@ -438,6 +590,26 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
 
         log::debug!("Inserted user table row for user {} with _seq {}", user_id.as_str(), seq_id);
 
+        if let Err(e) = self.stage_vector_upsert(user_id, seq_id, &entity.fields) {
+            log::warn!(
+                "Failed to stage vector upsert for table={}, user={}, seq={}: {}",
+                self.core.table_id(),
+                user_id.as_str(),
+                seq_id.as_i64(),
+                e
+            );
+        }
+
+        // Mark manifest as having pending writes (hot data needs to be flushed)
+        let manifest_service = self.core.services.manifest_service.clone();
+        if let Err(e) = manifest_service.mark_pending_write(self.core.table_id(), Some(user_id)) {
+            log::warn!(
+                "Failed to mark manifest as pending_write for {}: {}",
+                self.core.table_id(),
+                e
+            );
+        }
+
         // Fire live query + topic notification (INSERT)
         let notification_service = self.core.services.notification_service.clone();
         let table_id = self.core.table_id().clone();
@@ -620,6 +792,18 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
                     e
                 ))
             })?;
+        }
+
+        for (row_key, entity) in &entries {
+            if let Err(e) = self.stage_vector_upsert(user_id, row_key.seq, &entity.fields) {
+                log::warn!(
+                    "Failed to stage vector upsert for table={}, user={}, seq={}: {}",
+                    self.core.table_id(),
+                    user_id.as_str(),
+                    row_key.seq.as_i64(),
+                    e
+                );
+            }
         }
 
         // Mark manifest as having pending writes (hot data needs to be flushed)
@@ -808,6 +992,16 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
             KalamDbError::InvalidOperation(format!("Failed to update user table row: {}", e))
         })?;
 
+        if let Err(e) = self.stage_vector_upsert(user_id, seq_id, &entity.fields) {
+            log::warn!(
+                "Failed to stage vector upsert for table={}, user={}, seq={}: {}",
+                self.core.table_id(),
+                user_id.as_str(),
+                seq_id.as_i64(),
+                e
+            );
+        }
+
         // Mark manifest as having pending writes (hot data needs to be flushed)
         let manifest_service = self.core.services.manifest_service.clone();
         if let Err(e) = manifest_service.mark_pending_write(self.core.table_id(), Some(user_id)) {
@@ -948,6 +1142,17 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         self.store.insert(&row_key, &entity).map_err(|e| {
             KalamDbError::InvalidOperation(format!("Failed to delete user table row: {}", e))
         })?;
+
+        if let Err(e) = self.stage_vector_delete(user_id, seq_id, pk_value) {
+            log::warn!(
+                "Failed to stage vector delete for table={}, user={}, seq={}, pk={}: {}",
+                self.core.table_id(),
+                user_id.as_str(),
+                seq_id.as_i64(),
+                pk_value,
+                e
+            );
+        }
 
         // Mark manifest as having pending writes (hot data needs to be flushed)
         let manifest_service = self.core.services.manifest_service.clone();

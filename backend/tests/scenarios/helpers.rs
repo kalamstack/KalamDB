@@ -9,8 +9,7 @@
 
 use anyhow::Result;
 use kalam_link::models::{ChangeEvent, ResponseStatus};
-use kalam_link::SubscriptionManager;
-use serde_json::Value as JsonValue;
+use kalam_link::{KalamCellValue, SubscriptionManager};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use tokio::time::{sleep, timeout, Instant};
@@ -74,7 +73,7 @@ pub async fn assert_user_isolation(
     let get_user_ids = |resp: &kalam_link::models::QueryResponse| -> HashSet<String> {
         resp.rows_as_maps()
             .iter()
-            .filter_map(|row: &HashMap<String, JsonValue>| {
+            .filter_map(|row| {
                 row.get("user_id")
                     .or_else(|| row.get("_user_id"))
                     .and_then(|v| v.as_str().map(|s| s.to_string()))
@@ -108,7 +107,7 @@ pub async fn wait_for_inserts(
     subscription: &mut SubscriptionManager,
     expected_count: usize,
     timeout_duration: Duration,
-) -> Result<Vec<serde_json::Value>> {
+) -> Result<Vec<HashMap<String, KalamCellValue>>> {
     let deadline = Instant::now() + timeout_duration;
     let mut all_rows = Vec::new();
 
@@ -144,7 +143,7 @@ pub async fn wait_for_updates(
     subscription: &mut SubscriptionManager,
     expected_count: usize,
     timeout_duration: Duration,
-) -> Result<Vec<serde_json::Value>> {
+) -> Result<Vec<HashMap<String, KalamCellValue>>> {
     let deadline = Instant::now() + timeout_duration;
     let mut all_rows = Vec::new();
 
@@ -176,7 +175,7 @@ pub async fn wait_for_deletes(
     subscription: &mut SubscriptionManager,
     expected_count: usize,
     timeout_duration: Duration,
-) -> Result<Vec<serde_json::Value>> {
+) -> Result<Vec<HashMap<String, KalamCellValue>>> {
     let deadline = Instant::now() + timeout_duration;
     let mut all_rows = Vec::new();
 

@@ -1,48 +1,14 @@
-/**
- * CellContextMenu - Right-click context menu for data table cells.
- *
- * Shows options to:
- *   - Edit cell value (opens inline edit)
- *   - Delete the entire row (marks for deletion)
- *   - Undo edit / Undo delete for already-changed rows
- *   - View / Copy cell value (existing behavior preserved)
- *
- * This component renders as a positioned overlay triggered by onContextMenu.
- * It should be rendered once in the parent and controlled via state.
- *
- * Usage:
- *   <CellContextMenu
- *     context={cellContextMenuState}
- *     onEdit={(rowIndex, columnName, currentValue) => { ... }}
- *     onDelete={(rowIndex) => { ... }}
- *     onUndoEdit={(rowIndex) => { ... }}
- *     onUndoDelete={(rowIndex) => { ... }}
- *     onCopyValue={(value) => { ... }}
- *     onViewData={(value) => { ... }}
- *     onClose={() => setCellContextMenuState(null)}
- *   />
- */
-
-import { useEffect, useRef } from 'react';
-import { Pencil, Trash2, Undo2, Eye, Copy } from 'lucide-react';
+import { useEffect, useRef } from "react";
+import { Copy, Eye, Pencil, Trash2, Undo2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-
 export interface CellContextMenuState {
-  /** Screen X position for the menu. */
   x: number;
-  /** Screen Y position for the menu. */
   y: number;
-  /** Row index in the data array. */
   rowIndex: number;
-  /** Column id / name. */
   columnName: string;
-  /** Current cell value. */
   value: unknown;
-  /** Current change status of this row. */
-  rowStatus: 'deleted' | 'edited' | null;
-  /** Whether this specific cell has been edited. */
+  rowStatus: "deleted" | "edited" | null;
   cellEdited: boolean;
 }
 
@@ -57,8 +23,6 @@ interface CellContextMenuProps {
   onClose: () => void;
 }
 
-// ─── Component ───────────────────────────────────────────────────────────────
-
 export function CellContextMenu({
   context,
   onEdit,
@@ -71,60 +35,54 @@ export function CellContextMenu({
 }: CellContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Close on Escape key
   useEffect(() => {
     if (!context) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
     };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, [context, onClose]);
 
-  // Adjust menu position to stay within viewport
   useEffect(() => {
     if (!context || !menuRef.current) return;
     const rect = menuRef.current.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
 
-    if (rect.right > vw) {
+    if (rect.right > viewportWidth) {
       menuRef.current.style.left = `${context.x - rect.width}px`;
     }
-    if (rect.bottom > vh) {
+    if (rect.bottom > viewportHeight) {
       menuRef.current.style.top = `${context.y - rect.height}px`;
     }
   }, [context]);
 
   if (!context) return null;
 
-  const isDeleted = context.rowStatus === 'deleted';
-  const isEdited = context.rowStatus === 'edited';
+  const isDeleted = context.rowStatus === "deleted";
+  const isEdited = context.rowStatus === "edited";
   const hasViewableData =
     context.value !== null &&
-    (typeof context.value === 'object' ||
-      (typeof context.value === 'string' && context.value.length > 40));
+    (typeof context.value === "object" ||
+      (typeof context.value === "string" && context.value.length > 40));
   const itemClassName =
-    "relative flex w-full cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-left outline-none transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50";
+    "relative flex w-full cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50";
 
   return (
     <>
-      {/* Backdrop */}
       <div className="fixed inset-0 z-40" onClick={onClose} />
 
-      {/* Menu */}
       <div
         ref={menuRef}
         className="fixed z-50 min-w-[11rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground opacity-100 shadow-md antialiased backdrop-blur-none"
         style={{ left: context.x, top: context.y }}
       >
-        {/* ── Header showing column name ─────────────────────────── */}
         <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
           {context.columnName} · Row {context.rowIndex + 1}
         </div>
         <div className="-mx-1 my-1 h-px bg-muted" />
 
-        {/* ── Edit cell ──────────────────────────────────────────── */}
         {!isDeleted && (
           <button
             className={itemClassName}
@@ -138,7 +96,6 @@ export function CellContextMenu({
           </button>
         )}
 
-        {/* ── Delete row ─────────────────────────────────────────── */}
         {!isDeleted && (
           <button
             className={cn(itemClassName, "text-destructive hover:bg-destructive/10 hover:text-destructive")}
@@ -152,7 +109,6 @@ export function CellContextMenu({
           </button>
         )}
 
-        {/* ── Undo delete ────────────────────────────────────────── */}
         {isDeleted && (
           <button
             className={itemClassName}
@@ -166,7 +122,6 @@ export function CellContextMenu({
           </button>
         )}
 
-        {/* ── Undo cell edits ────────────────────────────────────── */}
         {isEdited && !isDeleted && (
           <button
             className={itemClassName}
@@ -182,7 +137,6 @@ export function CellContextMenu({
 
         <div className="-mx-1 my-1 h-px bg-muted" />
 
-        {/* ── View data (for large/complex values) ───────────────── */}
         <button
           className={itemClassName}
           disabled={!hasViewableData}
@@ -198,7 +152,6 @@ export function CellContextMenu({
           View Data
         </button>
 
-        {/* ── Copy value ─────────────────────────────────────────── */}
         <button
           className={itemClassName}
           onClick={() => {

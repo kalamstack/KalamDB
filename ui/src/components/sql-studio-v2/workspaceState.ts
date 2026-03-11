@@ -2,6 +2,12 @@ export const SQL_STUDIO_WORKSPACE_STORAGE_KEY = "kalamdb-sql-studio-v2-workspace
 
 type PanelLayout = [number, number];
 
+interface PersistedSubscriptionOptions {
+  batch_size?: number;
+  last_rows?: number;
+  from?: number | string;
+}
+
 export interface SqlStudioPersistedQueryTab {
   id: string;
   name: string;
@@ -13,6 +19,7 @@ export interface SqlStudioPersistedQueryTab {
     resultView: "results" | "log";
     lastSavedAt: string | null;
     savedQueryId: string | null;
+    subscriptionOptions?: PersistedSubscriptionOptions;
   };
 }
 
@@ -22,10 +29,12 @@ export interface SqlStudioPersistedSavedQuery {
   sql: string;
   lastSavedAt: string;
   isLive: boolean;
+  subscriptionOptions?: PersistedSubscriptionOptions;
 }
 
 export interface SqlStudioExplorerTreeState {
   favoritesExpanded: boolean;
+  namespaceSectionExpanded: boolean;
   expandedNamespaces: Record<string, boolean>;
   expandedTables: Record<string, boolean>;
   filter: string;
@@ -64,6 +73,24 @@ function sanitizePanelLayout(value: unknown, fallback: PanelLayout): PanelLayout
   }
 
   return [left, right];
+}
+
+function normalizeSubscriptionOptions(value: unknown): PersistedSubscriptionOptions | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const result: PersistedSubscriptionOptions = {};
+  if (typeof record.batch_size === "number" && Number.isFinite(record.batch_size)) {
+    result.batch_size = record.batch_size;
+  }
+  if (typeof record.last_rows === "number" && Number.isFinite(record.last_rows)) {
+    result.last_rows = record.last_rows;
+  }
+  if (typeof record.from === "number" || typeof record.from === "string") {
+    result.from = record.from;
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 function sanitizeRecord(value: unknown): Record<string, boolean> {
@@ -109,6 +136,7 @@ function normalizeTabs(
     const savedQueryId = typeof record.settings?.savedQueryId === "string"
       ? record.settings.savedQueryId
       : null;
+    const subscriptionOptions = normalizeSubscriptionOptions(record.settings?.subscriptionOptions);
 
     if (!id || !name) {
       return;
@@ -125,6 +153,7 @@ function normalizeTabs(
         resultView,
         lastSavedAt,
         savedQueryId,
+        subscriptionOptions,
       },
     });
   });
@@ -138,7 +167,7 @@ function normalizeSavedQueries(value: unknown): SqlStudioPersistedSavedQuery[] {
   }
 
   return value
-    .map((item) => {
+    .map((item): SqlStudioPersistedSavedQuery | null => {
       if (!item || typeof item !== "object") {
         return null;
       }
@@ -148,6 +177,7 @@ function normalizeSavedQueries(value: unknown): SqlStudioPersistedSavedQuery[] {
       const sql = typeof record.sql === "string" ? record.sql : "";
       const lastSavedAt = typeof record.lastSavedAt === "string" ? record.lastSavedAt : "";
       const isLive = Boolean(record.isLive);
+      const subscriptionOptions = normalizeSubscriptionOptions(record.subscriptionOptions);
       if (!id || !title || !lastSavedAt) {
         return null;
       }
@@ -158,7 +188,8 @@ function normalizeSavedQueries(value: unknown): SqlStudioPersistedSavedQuery[] {
         sql,
         lastSavedAt,
         isLive,
-      } satisfies SqlStudioPersistedSavedQuery;
+        subscriptionOptions,
+      };
     })
     .filter((item): item is SqlStudioPersistedSavedQuery => item !== null);
 }
@@ -177,6 +208,7 @@ export function loadSqlStudioWorkspaceState(
       sizes: DEFAULT_WORKSPACE_SIZES,
       explorerTree: {
         favoritesExpanded: true,
+        namespaceSectionExpanded: true,
         expandedNamespaces: {},
         expandedTables: {},
         filter: "",
@@ -211,6 +243,7 @@ export function loadSqlStudioWorkspaceState(
       },
       explorerTree: {
         favoritesExpanded: parsed.explorerTree?.favoritesExpanded !== false,
+        namespaceSectionExpanded: parsed.explorerTree?.namespaceSectionExpanded !== false,
         expandedNamespaces: sanitizeRecord(parsed.explorerTree?.expandedNamespaces),
         expandedTables: sanitizeRecord(parsed.explorerTree?.expandedTables),
         filter: typeof parsed.explorerTree?.filter === "string" ? parsed.explorerTree.filter : "",
@@ -227,6 +260,7 @@ export function loadSqlStudioWorkspaceState(
       sizes: DEFAULT_WORKSPACE_SIZES,
       explorerTree: {
         favoritesExpanded: true,
+        namespaceSectionExpanded: true,
         expandedNamespaces: {},
         expandedTables: {},
         filter: "",

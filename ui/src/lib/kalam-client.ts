@@ -12,8 +12,11 @@
 import {
   KalamDBClient,
   Auth,
+  LogLevel,
   type KalamCellValue,
   type LiveRowsOptions,
+  type LogEntry,
+  type LogListener,
   type QueryResponse,
   type RowData,
   type ServerMessage,
@@ -446,6 +449,22 @@ export async function subscribeRows<T = RowData>(
 export function getSubscriptionCount(): number {
   return client?.getSubscriptionCount() ?? 0;
 }
+
+/**
+ * Set a log listener on the SDK client to capture internal SDK logs.
+ * Pass undefined to remove the listener.
+ */
+export function setClientLogListener(listener: LogListener | undefined): void {
+  if (client) {
+    client.setLogListener(listener);
+  }
+}
+
+/**
+ * Get the SDK LogLevel enum for external use.
+ */
+export { LogLevel };
+export type { LogEntry, LogListener };
 
 // Re-export types for convenience
 export type { LiveRowsOptions, QueryResponse, RowData, ServerMessage, SubscriptionOptions, Unsubscribe };

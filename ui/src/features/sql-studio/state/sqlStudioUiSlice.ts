@@ -4,6 +4,7 @@ import type { SqlStudioPanelLayout } from "@/components/sql-studio-v2/types";
 interface SqlStudioUiState {
   schemaFilter: string;
   favoritesExpanded: boolean;
+  namespaceSectionExpanded: boolean;
   expandedNamespaces: Record<string, boolean>;
   expandedTables: Record<string, boolean>;
   selectedTableKey: string | null;
@@ -15,6 +16,7 @@ interface SqlStudioUiState {
 const initialState: SqlStudioUiState = {
   schemaFilter: "",
   favoritesExpanded: true,
+  namespaceSectionExpanded: true,
   expandedNamespaces: {},
   expandedTables: {},
   selectedTableKey: null,
@@ -34,6 +36,9 @@ const sqlStudioUiSlice = createSlice({
       }
       if (typeof payload.favoritesExpanded === "boolean") {
         state.favoritesExpanded = payload.favoritesExpanded;
+      }
+      if (typeof payload.namespaceSectionExpanded === "boolean") {
+        state.namespaceSectionExpanded = payload.namespaceSectionExpanded;
       }
       if (payload.expandedNamespaces) {
         state.expandedNamespaces = payload.expandedNamespaces;
@@ -59,6 +64,9 @@ const sqlStudioUiSlice = createSlice({
     },
     toggleFavoritesExpanded(state) {
       state.favoritesExpanded = !state.favoritesExpanded;
+    },
+    toggleNamespaceSectionExpanded(state) {
+      state.namespaceSectionExpanded = !state.namespaceSectionExpanded;
     },
     toggleNamespaceExpanded(state, action: PayloadAction<string>) {
       const namespaceName = action.payload;
@@ -99,6 +107,7 @@ export const {
   hydrateSqlStudioUi,
   setSchemaFilter,
   toggleFavoritesExpanded,
+  toggleNamespaceSectionExpanded,
   toggleNamespaceExpanded,
   setNamespaceExpanded,
   toggleTableExpanded,

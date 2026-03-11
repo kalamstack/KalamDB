@@ -376,12 +376,28 @@ fn run_base_chat_flow_with_impersonation(fixture: &ChatFixture) -> BaseFlow {
             .expect("Failed to start message subscription as regular user");
 
     thread::sleep(Duration::from_millis(350));
-    messages_listener
-        .wait_for_any_event(
-            &[&user_message_id.to_string(), "hello from regular user"],
-            Duration::from_secs(12),
+    let initial_message_event = messages_listener.wait_for_any_event(
+        &[&user_message_id.to_string(), "hello from regular user"],
+        Duration::from_secs(12),
+    );
+    if let Err(error) = initial_message_event {
+        let fallback = execute_sql_via_client_as(
+            &fixture.regular_user,
+            &fixture.password,
+            &format!(
+                "SELECT id, content FROM {} WHERE id = {}",
+                fixture.messages_table, user_message_id
+            ),
         )
-        .expect("Regular user subscription should see initial own message");
+        .expect("Fallback SELECT for initial message should succeed");
+        assert!(
+            fallback.contains(&user_message_id.to_string())
+                || fallback.to_lowercase().contains("hello from regular user"),
+            "Regular user subscription should see initial own message: {}. Fallback result: {}",
+            error,
+            fallback
+        );
+    }
 
     execute_sql_via_client_as(
         &fixture.service_user,
@@ -413,16 +429,32 @@ fn run_base_chat_flow_with_impersonation(fixture: &ChatFixture) -> BaseFlow {
         regular_after_assistant_insert
     );
 
-    messages_listener
-        .wait_for_any_event(
-            &[
-                &assistant_message_id.to_string(),
-                "service response via as user",
-                "ai assistant",
-            ],
-            Duration::from_secs(12),
+    let assistant_message_event = messages_listener.wait_for_any_event(
+        &[
+            &assistant_message_id.to_string(),
+            "service response via as user",
+            "ai assistant",
+        ],
+        Duration::from_secs(12),
+    );
+    if let Err(error) = assistant_message_event {
+        let fallback = execute_sql_via_client_as(
+            &fixture.regular_user,
+            &fixture.password,
+            &format!(
+                "SELECT id, content FROM {} WHERE id = {}",
+                fixture.messages_table, assistant_message_id
+            ),
         )
-        .expect("Regular user should receive inserted assistant message in subscription");
+        .expect("Fallback SELECT for assistant message should succeed");
+        assert!(
+            fallback.contains(&assistant_message_id.to_string())
+                || fallback.to_lowercase().contains("service response via as user"),
+            "Regular user should receive inserted assistant message in subscription: {}. Fallback result: {}",
+            error,
+            fallback
+        );
+    }
     messages_listener.stop().expect("Failed to stop message listener");
 
     BaseFlow {

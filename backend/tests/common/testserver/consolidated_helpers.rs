@@ -17,7 +17,6 @@ use anyhow::Result;
 use kalam_link::models::{ChangeEvent, QueryResponse, ResponseStatus};
 use kalam_link::{KalamCellValue, SubscriptionManager};
 use kalamdb_commons::Role;
-use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -80,17 +79,13 @@ pub fn get_response_rows(resp: &QueryResponse) -> Vec<HashMap<String, KalamCellV
     resp.rows_as_maps()
 }
 
-/// Extract i64 from JSON value, handling both Number and String types.
-pub fn json_to_i64(v: &JsonValue) -> Option<i64> {
-    match v {
-        JsonValue::Number(n) => n.as_i64(),
-        JsonValue::String(s) => s.parse::<i64>().ok(),
-        _ => None,
-    }
+/// Extract i64 from cell value, handling both Number and String types.
+pub fn json_to_i64(v: &KalamCellValue) -> Option<i64> {
+    v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok()))
 }
 
 /// Extract i64 from JSON value (alternative name for compatibility).
-fn extract_i64(v: &JsonValue) -> Option<i64> {
+fn extract_i64(v: &KalamCellValue) -> Option<i64> {
     json_to_i64(v)
 }
 
@@ -105,7 +100,7 @@ pub fn get_column_index(resp: &QueryResponse, column_name: &str) -> Option<usize
 }
 
 /// Extract a string column value from a row.
-pub fn get_string_value(row: &[JsonValue], idx: usize) -> Option<String> {
+pub fn get_string_value(row: &[KalamCellValue], idx: usize) -> Option<String> {
     row.get(idx).and_then(|v| {
         v.as_str()
             .map(|s| s.to_string())
@@ -114,8 +109,8 @@ pub fn get_string_value(row: &[JsonValue], idx: usize) -> Option<String> {
 }
 
 /// Extract an i64 column value from a row.
-pub fn get_i64_value(row: &[JsonValue], idx: usize) -> Option<i64> {
-    row.get(idx).and_then(|v| v.as_i64())
+pub fn get_i64_value(row: &[KalamCellValue], idx: usize) -> Option<i64> {
+    row.get(idx).and_then(json_to_i64)
 }
 
 // =============================================================================
@@ -220,13 +215,16 @@ pub async fn ensure_user_exists(
             if resp.status == ResponseStatus::Success {
                 if let Some(rows) = resp.rows_as_maps().first() {
                     if let Some(user_id_val) = rows.get("user_id") {
-                        let user_id_str = match &**user_id_val {
-                            JsonValue::String(s) => s.clone(),
-                            JsonValue::Object(map) if map.contains_key("Utf8") => {
-                                map.get("Utf8").and_then(|v| v.as_str()).unwrap_or("").to_string()
-                            },
-                            _ => user_id_val.as_str().unwrap_or("").to_string(),
-                        };
+                        let user_id_str = user_id_val
+                            .as_str()
+                            .map(ToString::to_string)
+                            .or_else(|| {
+                                user_id_val
+                                    .get("Utf8")
+                                    .and_then(|v| v.as_str())
+                                    .map(ToString::to_string)
+                            })
+                            .unwrap_or_default();
 
                         if !user_id_str.is_empty() {
                             server.cache_user_id(username, &user_id_str);

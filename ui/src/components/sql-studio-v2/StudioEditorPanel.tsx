@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Editor, { type Monaco } from "@monaco-editor/react";
 import type { IDisposable, Position, editor, languages } from "monaco-editor";
-import { MoreHorizontal, PenLine, Play, Save, Square } from "lucide-react";
+import { MoreHorizontal, PenLine, Play, Save, Settings2, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { StudioNamespace } from "@/components/sql-studio-v2/types";
+import type { LiveSubscriptionOptions, StudioNamespace } from "@/components/sql-studio-v2/types";
 
 interface StudioEditorPanelProps {
   schema: StudioNamespace[];
@@ -20,9 +21,11 @@ interface StudioEditorPanelProps {
   liveStatus: "idle" | "connecting" | "connected" | "error";
   sql: string;
   isRunning: boolean;
+  subscriptionOptions?: LiveSubscriptionOptions;
   onSqlChange: (value: string) => void;
   onRun: () => void;
   onToggleLive: (checked: boolean) => void;
+  onSubscriptionOptionsChange: (options: LiveSubscriptionOptions | undefined) => void;
   onRename: (title: string) => void;
   onSave: () => void;
   onSaveCopy: () => void;
@@ -37,9 +40,11 @@ export function StudioEditorPanel({
   liveStatus,
   sql,
   isRunning,
+  subscriptionOptions,
   onSqlChange,
   onRun,
   onToggleLive,
+  onSubscriptionOptionsChange,
   onRename,
   onSave,
   onSaveCopy,
@@ -47,6 +52,7 @@ export function StudioEditorPanel({
 }: StudioEditorPanelProps) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(tabTitle);
+  const [showSubscriptionOptions, setShowSubscriptionOptions] = useState(false);
   const completionProviderRef = useRef<IDisposable | null>(null);
   const completionDataRef = useRef<{
     namespaces: string[];
@@ -297,6 +303,17 @@ export function StudioEditorPanel({
                 disabled={liveStatus === "connecting"}
               />
               <span className="text-xs text-muted-foreground">Live query</span>
+              {isLive && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowSubscriptionOptions((prev) => !prev)}
+                  title="Subscription options"
+                >
+                  <Settings2 className="h-3.5 w-3.5" />
+                </Button>
+              )}
             </div>
             <span className="text-xs text-muted-foreground">{lastSavedLabel}</span>
           </div>
@@ -346,6 +363,81 @@ export function StudioEditorPanel({
           </DropdownMenu>
         </div>
       </div>
+
+      {isLive && showSubscriptionOptions && (
+        <div className="flex items-center gap-4 border-b border-border bg-muted/30 px-4 py-2">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Options</span>
+          <div className="flex items-center gap-1.5">
+            <label className="text-xs text-muted-foreground" htmlFor="opt-last-rows">last_rows</label>
+            <Input
+              id="opt-last-rows"
+              type="number"
+              min={0}
+              placeholder="–"
+              value={subscriptionOptions?.last_rows ?? ""}
+              onChange={(e) => {
+                const val = e.target.value ? parseInt(e.target.value, 10) : undefined;
+                onSubscriptionOptionsChange({
+                  ...subscriptionOptions,
+                  last_rows: Number.isFinite(val) ? val : undefined,
+                });
+              }}
+              className="h-7 w-20 border-border bg-background text-xs"
+            />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <label className="text-xs text-muted-foreground" htmlFor="opt-batch-size">batch_size</label>
+            <Input
+              id="opt-batch-size"
+              type="number"
+              min={0}
+              placeholder="–"
+              value={subscriptionOptions?.batch_size ?? ""}
+              onChange={(e) => {
+                const val = e.target.value ? parseInt(e.target.value, 10) : undefined;
+                onSubscriptionOptionsChange({
+                  ...subscriptionOptions,
+                  batch_size: Number.isFinite(val) ? val : undefined,
+                });
+              }}
+              className="h-7 w-20 border-border bg-background text-xs"
+            />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <label className="text-xs text-muted-foreground" htmlFor="opt-from">from</label>
+            <Input
+              id="opt-from"
+              type="text"
+              placeholder="–"
+              value={subscriptionOptions?.from ?? ""}
+              onChange={(e) => {
+                const raw = e.target.value.trim();
+                let val: number | string | undefined;
+                if (!raw) {
+                  val = undefined;
+                } else if (/^\d+$/.test(raw)) {
+                  val = parseInt(raw, 10);
+                } else {
+                  val = raw;
+                }
+                onSubscriptionOptionsChange({
+                  ...subscriptionOptions,
+                  from: val,
+                });
+              }}
+              className="h-7 w-28 border-border bg-background text-xs"
+            />
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => onSubscriptionOptionsChange(undefined)}
+          >
+            Clear
+          </Button>
+        </div>
+      )}
 
       <div className="flex-1 overflow-hidden">
         <Editor

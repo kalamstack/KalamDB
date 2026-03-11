@@ -213,6 +213,10 @@ pub fn coerce_scalar_to_field(value: ScalarValue, field: &Field) -> Result<Scala
         });
     }
 
+    if let Some(embedding) = coerce_embedding_scalar(value.clone(), field)? {
+        return Ok(embedding);
+    }
+
     value.cast_to(field.data_type()).map_err(|e| {
         format!(
             "Unable to cast value {:?} to {:?} for column '{}': {}",
@@ -222,6 +226,79 @@ pub fn coerce_scalar_to_field(value: ScalarValue, field: &Field) -> Result<Scala
             e
         )
     })
+}
+
+fn coerce_embedding_scalar(
+    value: ScalarValue,
+    field: &Field,
+) -> Result<Option<ScalarValue>, String> {
+    let DataType::FixedSizeList(child, len) = field.data_type() else {
+        return Ok(None);
+    };
+
+    if !matches!(child.data_type(), DataType::Float32) {
+        return Ok(None);
+    }
+
+    let raw = match value {
+        ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)) => s,
+        _ => return Ok(None),
+    };
+
+    let normalized = raw.trim();
+    let normalized = normalized
+        .strip_prefix('\'')
+        .and_then(|s| s.strip_suffix('\''))
+        .unwrap_or(normalized);
+
+    let parsed = match serde_json::from_str::<Vec<f32>>(normalized) {
+        Ok(v) => v,
+        Err(json_err) => parse_debug_embedding_repr(normalized).ok_or_else(|| {
+            format!(
+                "Invalid embedding JSON for column '{}': {}",
+                field.name(),
+                json_err
+            )
+        })?,
+    };
+
+    if parsed.len() != (*len as usize) {
+        return Err(format!(
+            "Embedding dimension mismatch for column '{}': expected {}, got {}",
+            field.name(),
+            len,
+            parsed.len()
+        ));
+    }
+
+    let values = Float32Array::from(parsed);
+    let list = FixedSizeListArray::new(child.clone(), *len, Arc::new(values), None);
+
+    Ok(Some(ScalarValue::FixedSizeList(Arc::new(list))))
+}
+
+fn parse_debug_embedding_repr(raw: &str) -> Option<Vec<f32>> {
+    let mut values = Vec::new();
+    for line in raw.lines() {
+        let token = line.trim().trim_end_matches(',');
+        if token.is_empty()
+            || token.starts_with('[')
+            || token.starts_with(']')
+            || token.contains("Array")
+            || token.contains('<')
+            || token.contains('>')
+        {
+            continue;
+        }
+        if let Ok(parsed) = token.parse::<f32>() {
+            values.push(parsed);
+        }
+    }
+    if values.is_empty() {
+        None
+    } else {
+        Some(values)
+    }
 }
 
 fn coerce_uuid_scalar(value: ScalarValue, field: &Field) -> Result<Option<ScalarValue>, String> {

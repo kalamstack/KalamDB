@@ -46,7 +46,7 @@
     "ws": "^8.18.3"
   },
   "devDependencies": {
-    "@types/node": "^25.3.3",
+    "@types/node": "^25.3.5",
     "typescript": "^5.3.0"
   },
   "keywords": [

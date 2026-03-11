@@ -25,9 +25,9 @@ pub enum AuthRequest {
 }
 
 #[cfg(feature = "websocket")]
-impl From<kalamdb_commons::websocket::WsAuthCredentials> for AuthRequest {
-    fn from(creds: kalamdb_commons::websocket::WsAuthCredentials) -> Self {
-        use kalamdb_commons::websocket::WsAuthCredentials;
+impl From<kalamdb_commons::websocket_auth::WsAuthCredentials> for AuthRequest {
+    fn from(creds: kalamdb_commons::websocket_auth::WsAuthCredentials) -> Self {
+        use kalamdb_commons::websocket_auth::WsAuthCredentials;
         match creds {
             WsAuthCredentials::Jwt { token } => AuthRequest::Jwt { token },
         }

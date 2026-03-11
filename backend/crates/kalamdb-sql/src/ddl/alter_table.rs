@@ -13,6 +13,7 @@ use crate::parser::utils::parse_sql_statements;
 use crate::compatibility::map_sql_type_to_kalam;
 use kalamdb_commons::models::datatypes::KalamDataType;
 use kalamdb_commons::models::{NamespaceId, TableAccess, TableName};
+use kalamdb_system::VectorMetric;
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use sqlparser::ast::{
@@ -46,6 +47,13 @@ pub enum ColumnOperation {
     },
     /// Set access level (SHARED tables only)
     SetAccessLevel { access_level: TableAccess },
+    /// Create or enable a vector index for an embedding column.
+    CreateVectorIndex {
+        column_name: String,
+        metric: VectorMetric,
+    },
+    /// Disable a vector index for an embedding column.
+    DropVectorIndex { column_name: String },
 }
 
 static LEGACY_ALTER_PREFIX_RE: Lazy<Regex> =
@@ -53,6 +61,18 @@ static LEGACY_ALTER_PREFIX_RE: Lazy<Regex> =
 
 static SET_ACCESS_LEVEL_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)SET\s+ACCESS\s+LEVEL\s+(PUBLIC|PRIVATE|RESTRICTED)").unwrap());
+static ALTER_CREATE_VECTOR_INDEX_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?i)^\s*ALTER\s+(?:USER\s+|SHARED\s+|STREAM\s+)?TABLE\s+([a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*)?)\s+CREATE\s+(?:VECTOR\s+)?INDEX\s+([a-zA-Z_][\w]*)\s*(?:USING\s+(COSINE|L2|DOT))?\s*;?\s*$",
+    )
+    .unwrap()
+});
+static ALTER_DROP_VECTOR_INDEX_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?i)^\s*ALTER\s+(?:USER\s+|SHARED\s+|STREAM\s+)?TABLE\s+([a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*)?)\s+DROP\s+(?:VECTOR\s+)?INDEX\s+([a-zA-Z_][\w]*)\s*;?\s*$",
+    )
+    .unwrap()
+});
 
 /// ALTER TABLE statement
 #[derive(Debug, Clone, PartialEq)]
@@ -70,6 +90,10 @@ pub struct AlterTableStatement {
 impl AlterTableStatement {
     /// Parse an ALTER TABLE statement from SQL (sqlparser-backed)
     pub fn parse(sql: &str, current_namespace: &NamespaceId) -> DdlResult<Self> {
+        if let Some(stmt) = parse_vector_index_operation(sql, current_namespace)? {
+            return Ok(stmt);
+        }
+
         let normalized_sql = normalize_alter_sql(sql);
         let dialect = GenericDialect {};
         let mut statements =
@@ -99,6 +123,77 @@ impl AlterTableStatement {
             namespace_id,
             operation,
         })
+    }
+}
+
+fn parse_vector_index_operation(
+    sql: &str,
+    current_namespace: &NamespaceId,
+) -> DdlResult<Option<AlterTableStatement>> {
+    if let Some(caps) = ALTER_CREATE_VECTOR_INDEX_RE.captures(sql) {
+        let table_ref = caps
+            .get(1)
+            .map(|m| m.as_str())
+            .ok_or_else(|| "Missing table reference in CREATE INDEX".to_string())?;
+        let column_name = caps
+            .get(2)
+            .map(|m| m.as_str().to_string())
+            .ok_or_else(|| "Missing column name in CREATE INDEX".to_string())?;
+        let metric = caps
+            .get(3)
+            .map(|m| m.as_str().to_uppercase())
+            .map(|m| match m.as_str() {
+                "COSINE" => Ok(VectorMetric::Cosine),
+                "L2" => Ok(VectorMetric::L2),
+                "DOT" => Ok(VectorMetric::Dot),
+                _ => Err(format!("Unsupported vector index metric '{}'", m)),
+            })
+            .transpose()?
+            .unwrap_or(VectorMetric::Cosine);
+        let (namespace_id, table_name) =
+            resolve_table_reference_from_str(table_ref, current_namespace)?;
+        return Ok(Some(AlterTableStatement {
+            table_name,
+            namespace_id,
+            operation: ColumnOperation::CreateVectorIndex {
+                column_name,
+                metric,
+            },
+        }));
+    }
+
+    if let Some(caps) = ALTER_DROP_VECTOR_INDEX_RE.captures(sql) {
+        let table_ref = caps
+            .get(1)
+            .map(|m| m.as_str())
+            .ok_or_else(|| "Missing table reference in DROP INDEX".to_string())?;
+        let column_name = caps
+            .get(2)
+            .map(|m| m.as_str().to_string())
+            .ok_or_else(|| "Missing column name in DROP INDEX".to_string())?;
+        let (namespace_id, table_name) =
+            resolve_table_reference_from_str(table_ref, current_namespace)?;
+        return Ok(Some(AlterTableStatement {
+            table_name,
+            namespace_id,
+            operation: ColumnOperation::DropVectorIndex { column_name },
+        }));
+    }
+
+    Ok(None)
+}
+
+fn resolve_table_reference_from_str(
+    table_ref: &str,
+    current_namespace: &NamespaceId,
+) -> DdlResult<(NamespaceId, TableName)> {
+    if let Some((namespace, table)) = table_ref.split_once('.') {
+        if namespace.is_empty() || table.is_empty() {
+            return Err("Invalid table reference. Use 'table' or 'namespace.table'".to_string());
+        }
+        Ok((NamespaceId::from(namespace), TableName::from(table)))
+    } else {
+        Ok((current_namespace.clone(), TableName::from(table_ref)))
     }
 }
 
@@ -566,5 +661,66 @@ mod tests {
         let result =
             AlterTableStatement::parse("ALTER TABLE test SET LEVEL public", &test_namespace());
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_create_vector_index_default_metric() {
+        let stmt = AlterTableStatement::parse(
+            "ALTER TABLE docs CREATE INDEX embedding",
+            &test_namespace(),
+        )
+        .unwrap();
+
+        match stmt.operation {
+            ColumnOperation::CreateVectorIndex {
+                column_name,
+                metric,
+            } => {
+                assert_eq!(column_name, "embedding");
+                assert_eq!(metric, VectorMetric::Cosine);
+            },
+            _ => panic!("Expected CreateVectorIndex operation"),
+        }
+    }
+
+    #[test]
+    fn test_parse_create_vector_index_with_metric_and_namespace() {
+        let stmt = AlterTableStatement::parse(
+            "ALTER TABLE app.docs CREATE VECTOR INDEX emb USING L2",
+            &test_namespace(),
+        )
+        .unwrap();
+        assert_eq!(stmt.namespace_id, NamespaceId::new("app"));
+        assert_eq!(stmt.table_name, TableName::new("docs"));
+        match stmt.operation {
+            ColumnOperation::CreateVectorIndex {
+                column_name,
+                metric,
+            } => {
+                assert_eq!(column_name, "emb");
+                assert_eq!(metric, VectorMetric::L2);
+            },
+            _ => panic!("Expected CreateVectorIndex operation"),
+        }
+    }
+
+    #[test]
+    fn test_parse_add_vector_index_rejected() {
+        let result =
+            AlterTableStatement::parse("ALTER TABLE docs ADD INDEX embedding", &test_namespace());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_drop_vector_index() {
+        let stmt =
+            AlterTableStatement::parse("ALTER TABLE docs DROP INDEX embedding", &test_namespace())
+                .unwrap();
+        match stmt.operation {
+            ColumnOperation::DropVectorIndex { column_name } => {
+                assert_eq!(column_name, "embedding");
+            },
+            _ => panic!("Expected DropVectorIndex operation"),
+        }
     }
 }

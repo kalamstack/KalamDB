@@ -57,6 +57,11 @@ pub use error::{Result, TableError};
 // Re-export table stores
 pub use kalamdb_commons::models::StreamTableRow;
 pub use kalamdb_commons::models::UserTableRow;
+pub use kalamdb_vector::{
+    new_indexed_shared_vector_hot_store, new_indexed_user_vector_hot_store,
+    normalize_vector_column_name, SharedVectorHotOpId, SharedVectorHotStore, UserVectorHotOpId,
+    UserVectorHotStore, VectorHotOp, VectorHotOpType,
+};
 pub use shared_tables::pk_index::{create_shared_table_pk_index, SharedTablePkIndex};
 pub use shared_tables::shared_table_store::{
     new_indexed_shared_table_store, new_shared_table_store, SharedTableIndexedStore,

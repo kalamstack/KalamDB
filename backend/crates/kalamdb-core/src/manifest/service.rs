@@ -7,17 +7,17 @@
 //!
 //! Key type: (TableId, Option<UserId>) for type-safe cache access.
 
-use crate::schema_registry::SchemaRegistry;
 use kalamdb_commons::ids::SeqId;
 use kalamdb_commons::{ManifestId, TableId, UserId};
 use kalamdb_configs::ManifestCacheSettings;
 use kalamdb_filestore::StorageRegistry;
 use kalamdb_store::{StorageBackend, StorageError};
 use kalamdb_system::providers::ManifestTableProvider;
-use kalamdb_system::ManifestService as ManifestServiceTrait;
+use kalamdb_system::{ManifestService as ManifestServiceTrait, SchemaRegistry as SchemaRegistryTrait};
 use kalamdb_system::{
     FileSubfolderState, Manifest, ManifestCacheEntry, SegmentMetadata, SyncState,
 };
+use kalamdb_tables::TableError;
 use log::{debug, info, warn};
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -40,7 +40,7 @@ pub struct ManifestService {
     /// Optional registries for path/object store resolution.
     ///
     /// In production these are injected via `new_with_registries()`
-    schema_registry: Option<Arc<SchemaRegistry>>,
+    schema_registry: Option<Arc<dyn SchemaRegistryTrait<Error = TableError>>>,
     storage_registry: Option<Arc<StorageRegistry>>,
 }
 
@@ -60,7 +60,7 @@ impl ManifestService {
         backend: Arc<dyn StorageBackend>,
         _base_path: String,
         config: ManifestCacheSettings,
-        schema_registry: Arc<SchemaRegistry>,
+        schema_registry: Arc<dyn SchemaRegistryTrait<Error = TableError>>,
         storage_registry: Arc<StorageRegistry>,
     ) -> Self {
         let provider = Arc::new(ManifestTableProvider::new(backend));
@@ -71,7 +71,10 @@ impl ManifestService {
     }
 
     /// Set SchemaRegistry (break circular dependency)
-    pub fn set_schema_registry(&mut self, registry: Arc<SchemaRegistry>) {
+    pub fn set_schema_registry(
+        &mut self,
+        registry: Arc<dyn SchemaRegistryTrait<Error = TableError>>,
+    ) {
         self.schema_registry = Some(registry);
     }
 
@@ -81,7 +84,7 @@ impl ManifestService {
     }
 
     // Internal helper to get registries (panics if not set in production flows)
-    fn get_schema_registry(&self) -> &Arc<SchemaRegistry> {
+    fn get_schema_registry(&self) -> &Arc<dyn SchemaRegistryTrait<Error = TableError>> {
         self.schema_registry
             .as_ref()
             .expect("SchemaRegistry not initialized in ManifestService")
@@ -514,6 +517,38 @@ impl ManifestService {
         Ok(manifest)
     }
 
+    /// Update manifest in cache using a caller-provided mutator.
+    ///
+    /// This is used for metadata updates that are not segment appends
+    /// (for example vector index watermark/snapshot pointers).
+    pub fn update_manifest_with<F>(
+        &self,
+        table_id: &TableId,
+        user_id: Option<&UserId>,
+        mutator: F,
+    ) -> Result<Manifest, StorageError>
+    where
+        F: FnOnce(&mut Manifest),
+    {
+        let mut manifest = self.ensure_manifest_initialized(table_id, user_id)?;
+        mutator(&mut manifest);
+        self.upsert_cache_entry(table_id, user_id, &manifest, None, SyncState::PendingWrite)?;
+        Ok(manifest)
+    }
+
+    /// Persist a manifest to cold storage and mark cache state as in-sync.
+    pub fn persist_manifest(
+        &self,
+        table_id: &TableId,
+        user_id: Option<&UserId>,
+        manifest: &Manifest,
+    ) -> Result<(), StorageError> {
+        self.upsert_cache_entry(table_id, user_id, manifest, None, SyncState::PendingWrite)?;
+        self.flush_manifest(table_id, user_id)?;
+        self.update_after_flush(table_id, user_id, manifest, None)?;
+        Ok(())
+    }
+
     /// Flush manifest: Write to Cold Store (storage via StorageCached).
     pub fn flush_manifest(
         &self,
@@ -524,13 +559,19 @@ impl ManifestService {
             let schema_registry = self.get_schema_registry();
             let storage_registry = self.get_storage_registry();
 
-            let cached = schema_registry
-                .get(table_id)
+            let table = schema_registry
+                .get_table_if_exists(table_id)
+                .map_err(|e| StorageError::Other(e.to_string()))?
                 .ok_or_else(|| StorageError::Other(format!("Table not found: {}", table_id)))?;
-
-            let storage_cached = cached
-                .storage_cached(storage_registry)
+            let storage_id = schema_registry
+                .get_storage_id(table_id)
                 .map_err(|e| StorageError::Other(e.to_string()))?;
+            let storage_cached = storage_registry
+                .get_cached(&storage_id)
+                .map_err(|e| StorageError::Other(e.to_string()))?
+                .ok_or_else(|| {
+                    StorageError::Other(format!("Storage '{}' not found in registry", storage_id))
+                })?;
 
             // Serialize to Value for write_manifest_sync
             let json_value = serde_json::to_value(&entry.manifest).map_err(|e| {
@@ -538,7 +579,7 @@ impl ManifestService {
             })?;
 
             storage_cached
-                .write_manifest_sync(cached.table.table_type, table_id, user_id, &json_value)
+                .write_manifest_sync(table.table_type, table_id, user_id, &json_value)
                 .map_err(|e| StorageError::IoError(e.to_string()))?;
 
             debug!("Flushed manifest for {} (ver: {})", table_id, entry.manifest.version);
@@ -557,16 +598,22 @@ impl ManifestService {
         let schema_registry = self.get_schema_registry();
         let storage_registry = self.get_storage_registry();
 
-        let cached = schema_registry
-            .get(table_id)
+        let table = schema_registry
+            .get_table_if_exists(table_id)
+            .map_err(|e| StorageError::Other(e.to_string()))?
             .ok_or_else(|| StorageError::Other(format!("Table not found: {}", table_id)))?;
-
-        let storage_cached = cached
-            .storage_cached(storage_registry)
+        let storage_id = schema_registry
+            .get_storage_id(table_id)
             .map_err(|e| StorageError::Other(e.to_string()))?;
+        let storage_cached = storage_registry
+            .get_cached(&storage_id)
+            .map_err(|e| StorageError::Other(e.to_string()))?
+            .ok_or_else(|| {
+                StorageError::Other(format!("Storage '{}' not found in registry", storage_id))
+            })?;
 
         let manifest_value = storage_cached
-            .read_manifest_sync(cached.table.table_type, table_id, user_id)
+            .read_manifest_sync(table.table_type, table_id, user_id)
             .map_err(|e| StorageError::IoError(e.to_string()))?
             .ok_or_else(|| StorageError::Other("Manifest not found".to_string()))?;
 
@@ -584,19 +631,25 @@ impl ManifestService {
         let schema_registry = self.get_schema_registry();
         let storage_registry = self.get_storage_registry();
 
-        let cached = schema_registry
-            .get(table_id)
+        let table = schema_registry
+            .get_table_if_exists(table_id)
+            .map_err(|e| StorageError::Other(e.to_string()))?
             .ok_or_else(|| StorageError::Other(format!("Table not found: {}", table_id)))?;
-
-        let storage_cached = cached
-            .storage_cached(storage_registry)
+        let storage_id = schema_registry
+            .get_storage_id(table_id)
             .map_err(|e| StorageError::Other(e.to_string()))?;
+        let storage_cached = storage_registry
+            .get_cached(&storage_id)
+            .map_err(|e| StorageError::Other(e.to_string()))?
+            .ok_or_else(|| {
+                StorageError::Other(format!("Storage '{}' not found in registry", storage_id))
+            })?;
 
         let mut manifest = Manifest::new(table_id.clone(), user_id.cloned());
 
         // List all parquet files using the optimized method
         let mut batch_files = storage_cached
-            .list_parquet_files_sync(cached.table.table_type, table_id, user_id)
+            .list_parquet_files_sync(table.table_type, table_id, user_id)
             .map_err(|e| StorageError::IoError(e.to_string()))?;
 
         // Filter only batch files (exclude compaction temp files etc)
@@ -610,7 +663,7 @@ impl ManifestService {
 
             // Get file size via head operation
             let file_info = storage_cached
-                .head_sync(cached.table.table_type, table_id, user_id, file_name)
+                .head_sync(table.table_type, table_id, user_id, file_name)
                 .map_err(|e| StorageError::IoError(e.to_string()))?;
 
             let size_bytes = file_info.size as u64;
@@ -636,7 +689,7 @@ impl ManifestService {
         })?;
 
         storage_cached
-            .write_manifest_sync(cached.table.table_type, table_id, user_id, &json_value)
+            .write_manifest_sync(table.table_type, table_id, user_id, &json_value)
             .map_err(|e| StorageError::IoError(e.to_string()))?;
 
         Ok(manifest)
@@ -657,16 +710,22 @@ impl ManifestService {
         let schema_registry = self.get_schema_registry();
         let storage_registry = self.get_storage_registry();
 
-        let cached = schema_registry
-            .get(table_id)
+        let table = schema_registry
+            .get_table_if_exists(table_id)
+            .map_err(|e| StorageError::Other(e.to_string()))?
             .ok_or_else(|| StorageError::Other(format!("Table not found: {}", table_id)))?;
-
-        let storage_cached = cached
-            .storage_cached(storage_registry)
+        let storage_id = schema_registry
+            .get_storage_id(table_id)
             .map_err(|e| StorageError::Other(e.to_string()))?;
+        let storage_cached = storage_registry
+            .get_cached(&storage_id)
+            .map_err(|e| StorageError::Other(e.to_string()))?
+            .ok_or_else(|| {
+                StorageError::Other(format!("Storage '{}' not found in registry", storage_id))
+            })?;
 
         let manifest_path_result =
-            storage_cached.get_manifest_path(cached.table.table_type, table_id, user_id);
+            storage_cached.get_manifest_path(table.table_type, table_id, user_id);
 
         Ok(manifest_path_result.full_path)
     }

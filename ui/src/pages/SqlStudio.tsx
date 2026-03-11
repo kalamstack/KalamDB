@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { useAuth } from "@/lib/auth";
-import { subscribe, type Unsubscribe } from "@/lib/kalam-client";
+import { subscribe, setClientLogListener, type Unsubscribe } from "@/lib/kalam-client";
 import type { ServerMessage, ChangeTypeRaw, SchemaField } from "kalam-link";
 import type {
   QueryRunSummary,
@@ -51,6 +51,7 @@ import {
   setTableExpanded,
   setVerticalLayout,
   toggleFavoritesExpanded,
+  toggleNamespaceSectionExpanded,
   toggleNamespaceExpanded,
   toggleTableExpanded,
 } from "@/features/sql-studio/state/sqlStudioUiSlice";
@@ -60,6 +61,7 @@ import {
   selectFavoritesExpanded,
   selectHorizontalLayout,
   selectIsInspectorCollapsed,
+  selectNamespaceSectionExpanded,
   selectSchemaFilter,
   selectSelectedTableKey,
   selectVerticalLayout,
@@ -112,6 +114,7 @@ export default function SqlStudio() {
   const { data: schema = [] } = useGetSqlStudioSchemaTreeQuery();
   const schemaFilter = useAppSelector(selectSchemaFilter);
   const favoritesExpanded = useAppSelector(selectFavoritesExpanded);
+  const namespaceSectionExpanded = useAppSelector(selectNamespaceSectionExpanded);
   const expandedNamespaces = useAppSelector(selectExpandedNamespaces);
   const expandedTables = useAppSelector(selectExpandedTables);
   const selectedTableKey = useAppSelector(selectSelectedTableKey);
@@ -160,6 +163,7 @@ export default function SqlStudio() {
       resultView: tab.settings.resultView,
       lastSavedAt: tab.settings.lastSavedAt,
       savedQueryId: tab.settings.savedQueryId,
+      subscriptionOptions: tab.settings.subscriptionOptions,
     }));
     const workspaceSavedQueries = initialWorkspace.savedQueries.map((item) => ({
       id: item.id,
@@ -167,6 +171,7 @@ export default function SqlStudio() {
       sql: item.sql,
       lastSavedAt: item.lastSavedAt,
       isLive: item.isLive,
+      subscriptionOptions: item.subscriptionOptions,
     }));
 
     dispatch(hydrateSqlStudioWorkspace({
@@ -178,6 +183,7 @@ export default function SqlStudio() {
     dispatch(hydrateSqlStudioUi({
       schemaFilter: initialWorkspace.explorerTree.filter,
       favoritesExpanded: initialWorkspace.explorerTree.favoritesExpanded,
+      namespaceSectionExpanded: initialWorkspace.explorerTree.namespaceSectionExpanded,
       expandedNamespaces: initialWorkspace.explorerTree.expandedNamespaces,
       expandedTables: initialWorkspace.explorerTree.expandedTables,
       selectedTableKey: initialWorkspace.selectedTableKey,
@@ -351,6 +357,8 @@ export default function SqlStudio() {
       unsubscribe();
       delete liveUnsubscribeRef.current[tabId];
     }
+    // Clear the SDK log listener when stopping
+    setClientLogListener(undefined);
     updateTab(tabId, { liveStatus: "idle" });
   }, [updateTab]);
 
@@ -370,10 +378,25 @@ export default function SqlStudio() {
         logs: [createLogEntry("Starting live subscription.", "info", user?.username, {
           event: "live_start",
           sql: tab.sql,
+          options: tab.subscriptionOptions,
         })],
       },
     }));
     updateTab(tab.id, { liveStatus: "connecting", isLive: true });
+
+    // Set up SDK log listener to capture all WS-level logs for this subscription
+    setClientLogListener((entry) => {
+      dispatch(appendWorkspaceResultLog({
+        tabId: tab.id,
+        entry: createLogEntry(
+          `[SDK ${entry.tag}] ${entry.message}`,
+          entry.level >= 4 ? "error" : "info",
+          user?.username,
+          entry,
+        ),
+      }));
+    });
+
     try {
       const unsubscribe = await subscribe(tab.sql, (msg: ServerMessage) => {
         switch (msg.type) {
@@ -387,10 +410,23 @@ export default function SqlStudio() {
             return;
           }
 
-          case "auth_success":
-          case "auth_error":
-            // Auth messages are handled by the SDK internally
+          case "auth_success": {
+            dispatch(appendWorkspaceResultLog({
+              tabId: tab.id,
+              entry: createLogEntry("Authentication successful.", "info", user?.username, msg),
+            }));
             return;
+          }
+
+          case "auth_error": {
+            dispatch(appendWorkspaceResultLog({
+              tabId: tab.id,
+              entry: createLogEntry(`Authentication failed: ${(msg as Record<string, unknown>).message ?? "unknown error"}`, "error", user?.username, msg),
+              statusOverride: "error",
+            }));
+            updateTab(tab.id, { liveStatus: "error" });
+            return;
+          }
 
           case "subscription_ack": {
             if (msg.schema.length > 0) {
@@ -489,10 +525,19 @@ export default function SqlStudio() {
           }
 
           default:
-            // Unknown message type — ignore
+            // Unknown message type — log it for tracing
+            dispatch(appendWorkspaceResultLog({
+              tabId: tab.id,
+              entry: createLogEntry(
+                `Received message: ${(msg as { type: string }).type}`,
+                "info",
+                user?.username,
+                msg,
+              ),
+            }));
             break;
         }
-      });
+      }, tab.subscriptionOptions);
 
       liveUnsubscribeRef.current[tab.id] = unsubscribe;
     } catch (error) {
@@ -544,7 +589,7 @@ export default function SqlStudio() {
       if (existing) {
         return previous.map((item) =>
           item.id === saveId
-            ? { ...item, title: saveTitle, sql: tab.sql, isLive: tab.isLive, lastSavedAt: nowIso }
+            ? { ...item, title: saveTitle, sql: tab.sql, isLive: tab.isLive, lastSavedAt: nowIso, subscriptionOptions: tab.subscriptionOptions }
             : item,
         );
       }
@@ -555,6 +600,7 @@ export default function SqlStudio() {
           sql: tab.sql,
           isLive: tab.isLive,
           lastSavedAt: nowIso,
+          subscriptionOptions: tab.subscriptionOptions,
         },
         ...previous,
       ];
@@ -645,6 +691,7 @@ export default function SqlStudio() {
       resultView: "results",
       lastSavedAt: savedQuery.lastSavedAt,
       savedQueryId: savedQuery.id,
+      subscriptionOptions: savedQuery.subscriptionOptions,
     };
     dispatch(addWorkspaceTab(tab));
     dispatch(setWorkspaceActiveTabId(tab.id));
@@ -676,6 +723,7 @@ export default function SqlStudio() {
     return () => {
       Object.values(liveUnsubscribeRef.current).forEach((unsubscribe) => unsubscribe());
       liveUnsubscribeRef.current = {};
+      setClientLogListener(undefined);
     };
   }, []);
 
@@ -695,6 +743,7 @@ export default function SqlStudio() {
         sql: item.sql,
         lastSavedAt: item.lastSavedAt,
         isLive: item.isLive,
+        subscriptionOptions: item.subscriptionOptions,
       })),
       activeTabId: persistedActiveTabId,
       selectedTableKey,
@@ -705,6 +754,7 @@ export default function SqlStudio() {
       },
       explorerTree: {
         favoritesExpanded,
+        namespaceSectionExpanded,
         expandedNamespaces,
         expandedTables,
         filter: schemaFilter,
@@ -724,6 +774,7 @@ export default function SqlStudio() {
     horizontalLayout,
     verticalLayout,
     favoritesExpanded,
+    namespaceSectionExpanded,
     savedQueries,
     expandedNamespaces,
     expandedTables,
@@ -762,11 +813,13 @@ export default function SqlStudio() {
               filter={schemaFilter}
               savedQueries={savedQueries}
               favoritesExpanded={favoritesExpanded}
+              namespaceSectionExpanded={namespaceSectionExpanded}
               expandedNamespaces={expandedNamespaces}
               expandedTables={expandedTables}
               selectedTableKey={selectedTableKey}
               onFilterChange={(value) => dispatch(setSchemaFilter(value))}
               onToggleFavorites={() => dispatch(toggleFavoritesExpanded())}
+              onToggleNamespaceSection={() => dispatch(toggleNamespaceSectionExpanded())}
               onToggleNamespace={(namespaceName) => dispatch(toggleNamespaceExpanded(namespaceName))}
               onToggleTable={(tableKey) => dispatch(toggleTableExpanded(tableKey))}
               onOpenSavedQuery={openSavedQuery}
@@ -831,6 +884,7 @@ export default function SqlStudio() {
                     liveStatus={activeTab.liveStatus}
                     sql={activeTab.sql}
                     isRunning={isRunning}
+                    subscriptionOptions={activeTab.subscriptionOptions}
                     onSqlChange={(value) => updateActiveTab({ sql: value, isDirty: true })}
                     onRun={runActiveQuery}
                     onToggleLive={(checked) => {
@@ -839,6 +893,7 @@ export default function SqlStudio() {
                         stopLiveQuery(activeTab.id);
                       }
                     }}
+                    onSubscriptionOptionsChange={(options) => updateActiveTab({ subscriptionOptions: options, isDirty: true })}
                     onRename={renameActiveTab}
                     onSave={() => saveTab(activeTab.id, false)}
                     onSaveCopy={() => saveTab(activeTab.id, true)}

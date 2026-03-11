@@ -11,6 +11,7 @@ members = [
     "backend/crates/kalamdb-system",
     "backend/crates/kalamdb-tables",
     "backend/crates/kalamdb-observability",
+    "backend/crates/kalamdb-vector",
     "backend/crates/kalamdb-core",
     "backend/crates/kalamdb-publisher",
     "backend/crates/kalamdb-sql",
@@ -73,7 +74,7 @@ rocksdb = { version = "0.24.0", default-features = false, features = ["snappy", 
 # To upgrade arrow, first upgrade DataFusion to a version that uses the desired arrow version.
 arrow = { version = "57.3.0", default-features = false, features = ["prettyprint", "json"] }
 arrow-schema = { version = "57.3.0" }
-datafusion = { version = "52.2.0", default-features = false, features = ["sql", "parquet", "recursive_protection"] }
+datafusion = { version = "52.2.0", default-features = false, features = ["sql", "parquet", "recursive_protection", "nested_expressions"] }
 datafusion-common = { version = "52.2.0" }
 sqlparser = { version = "0.61.0" }
 parquet = { version = "57.3.0", default-features = false, features = ["snap", "zstd", "arrow"] }
@@ -164,6 +165,10 @@ syn = { version = "2.0.117", features = ["full", "extra-traits"] }
 # Kept as a workspace dependency so only kalamdb-filestore needs to opt-in.
 # Using 0.12.4 to match DataFusion 51.0.0 dependency
 object_store = { version = "0.13.1", features = ["aws", "gcp", "azure"] }
+ 
+# Vector ANN engines
+usearch = "2.24.0"
+
 parking_lot = "0.12"
 tokio-util = "0.7.18"
 hex = "0.4"
@@ -227,3 +232,13 @@ incremental = true   # incremental builds
 lto = "off"          # no link-time optimization
 codegen-units = 256  # maximum parallelism for codegen
 split-debuginfo = "unpacked"  # faster on macOS
+
+[profile.dev.build-override]
+opt-level = 0
+debug = 0
+codegen-units = 256
+
+[profile.test.build-override]
+opt-level = 0
+debug = 0
+codegen-units = 256

@@ -47,6 +47,7 @@ pub mod providers;
 pub mod schema_registry;
 pub mod slow_query_logger;
 pub mod sql;
+pub mod vector;
 pub mod views;
 
 // Re-export commonly used items

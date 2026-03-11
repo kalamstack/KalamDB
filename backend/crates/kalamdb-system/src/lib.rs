@@ -79,7 +79,7 @@ pub use providers::audit_logs::models::AuditLogEntry;
 pub use providers::job_nodes::models::JobNode;
 pub use providers::manifest::models::{
     ColumnStats, FileRef, FileSubfolderState, Manifest, ManifestCacheEntry, SegmentMetadata,
-    SegmentStatus, SyncState,
+    SegmentStatus, SyncState, VectorEngine, VectorIndexMetadata, VectorIndexState, VectorMetric,
 };
 pub use providers::namespaces::models::Namespace;
 pub use providers::storages::models::{Storage, StorageType};

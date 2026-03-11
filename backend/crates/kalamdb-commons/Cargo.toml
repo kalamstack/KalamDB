@@ -43,18 +43,31 @@ tracing = { workspace = true }
 serde = [
 	"dep:serde",
 	"dep:serde_json",
-	"dep:arrow",
-	"dep:arrow-schema",
+	]
+serialization = [
+	"serde",
 	"dep:flatbuffers",
 	"dep:flexbuffers",
+	]
+arrow = [
+	"serde",
+	"dep:arrow",
+	"dep:arrow-schema",
+	]
+websocket-auth = ["serde"]
+# Full feature set including Arrow/DataFusion-backed utilities (for server use)
+full = [
+	"serde",
+	"serialization",
+	"arrow",
 	"dep:chrono",
 	"dep:openraft",
 	"dep:uuid",
 	"dep:nanoid",
 	"dep:log",
+ 	"websocket-auth",
+	"dep:datafusion",
 ]
-# Full feature set including datafusion (for server use)
-full = ["serde", "dep:datafusion"]
 # WASM-compatible subset (no datafusion but has serialization)
 wasm = ["serde"]
 default = ["full"]

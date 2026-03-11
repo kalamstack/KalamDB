@@ -257,7 +257,7 @@ mod tests {
     #[cfg(feature = "websocket")]
     #[test]
     fn test_from_ws_auth_credentials_jwt() {
-        use kalamdb_commons::websocket::WsAuthCredentials;
+        use kalamdb_commons::websocket_auth::WsAuthCredentials;
 
         let ws_creds = WsAuthCredentials::Jwt {
             token: "my.jwt.token".to_string(),

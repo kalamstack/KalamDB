@@ -8,7 +8,7 @@ use crate::error_extensions::KalamDbResultExt;
 use crate::jobs::executors::{
     BackupExecutor, CleanupExecutor, CompactExecutor, FlushExecutor, JobCleanupExecutor,
     JobRegistry, RestoreExecutor, RetentionExecutor, StreamEvictionExecutor, TopicCleanupExecutor,
-    TopicRetentionExecutor, UserCleanupExecutor, UserExportExecutor,
+    TopicRetentionExecutor, UserCleanupExecutor, UserExportExecutor, VectorIndexExecutor,
 };
 use crate::live::notification::NotificationService;
 use crate::live::ConnectionsManager;
@@ -17,6 +17,7 @@ use crate::live_query::LiveQueryManager;
 use crate::schema_registry::SchemaRegistry;
 use crate::sql::datafusion_session::DataFusionSessionFactory;
 use crate::sql::executor::SqlExecutor;
+use crate::sql::table_functions::{CoreVectorSearchRuntime, VectorSearchTableFunction};
 use crate::views::system_schema_provider::SystemSchemaProvider;
 use async_trait::async_trait;
 use datafusion::catalog::SchemaProvider;
@@ -35,6 +36,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::metrics::runtime::collect_runtime_metrics;
+use crate::schema_registry::TablesSchemaRegistryAdapter;
 
 // Use RwLock instead of OnceLock to allow resetting in tests
 // The RwLock is wrapped in a OnceLock for lazy initialization
@@ -306,6 +308,7 @@ impl AppContext {
             job_registry.register(Arc::new(TopicRetentionExecutor::new()));
             job_registry.register(Arc::new(TopicCleanupExecutor::new()));
             job_registry.register(Arc::new(UserExportExecutor::new()));
+            job_registry.register(Arc::new(VectorIndexExecutor::new()));
 
             // Create unified job manager (Phase 9, T154)
             let jobs_provider = system_tables.jobs();
@@ -346,7 +349,9 @@ impl AppContext {
                 system_tables.manifest(),
                 config.manifest_cache.clone(),
             );
-            manifest_service_obj.set_schema_registry(schema_registry.clone());
+            manifest_service_obj.set_schema_registry(Arc::new(TablesSchemaRegistryAdapter::new(
+                schema_registry.clone(),
+            )));
             manifest_service_obj.set_storage_registry(storage_registry.clone());
             let manifest_service = Arc::new(manifest_service_obj);
 
@@ -432,6 +437,15 @@ impl AppContext {
                 sql_executor: OnceCell::new(),
                 server_start_time: Instant::now(),
             });
+
+            // Register vector_search with AppContext-backed runtime.
+            // This overrides the bootstrap placeholder and allows scope-aware lookup.
+            app_ctx.base_session_context.register_udtf(
+                "vector_search",
+                Arc::new(VectorSearchTableFunction::new(Arc::new(CoreVectorSearchRuntime::new(
+                    Arc::downgrade(&app_ctx),
+                )))),
+            );
 
             // Set AppContext in SchemaRegistry to break circular dependency
             schema_registry.set_app_context(app_ctx.clone());
@@ -697,7 +711,7 @@ impl AppContext {
             storage_backend.clone(),
             "./data/storage".to_string(),
             config.manifest_cache.clone(),
-            schema_registry.clone(),
+            Arc::new(TablesSchemaRegistryAdapter::new(schema_registry.clone())),
             storage_registry.clone(),
         ));
 
@@ -751,6 +765,14 @@ impl AppContext {
             sql_executor: OnceCell::new(),
             server_start_time: Instant::now(),
         });
+
+        // Register vector_search with AppContext-backed runtime for tests.
+        app_ctx.base_session_context.register_udtf(
+            "vector_search",
+            Arc::new(VectorSearchTableFunction::new(Arc::new(CoreVectorSearchRuntime::new(
+                Arc::downgrade(&app_ctx),
+            )))),
+        );
 
         // Topic publishing is now synchronous in table providers — no need to wire
         // into notification service.

@@ -15,6 +15,6 @@ serde_json = { workspace = true }
 log = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
-kalamdb-commons = { path = "../kalamdb-commons" }
+kalamdb-commons = { path = "../kalamdb-commons", default-features = false, features = ["serde"] }
 base64 = { workspace = true }
 chrono = { workspace = true }

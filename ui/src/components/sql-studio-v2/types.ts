@@ -1,3 +1,9 @@
+export interface LiveSubscriptionOptions {
+  batch_size?: number;
+  last_rows?: number;
+  from?: number | string;
+}
+
 export interface StudioColumn {
   name: string;
   dataType: string;
@@ -30,6 +36,7 @@ export interface QueryTab {
   resultView: SqlStudioResultView;
   lastSavedAt: string | null;
   savedQueryId: string | null;
+  subscriptionOptions?: LiveSubscriptionOptions;
 }
 
 export type SqlStudioResultView = "results" | "log";
@@ -40,6 +47,7 @@ export interface SavedQuery {
   sql: string;
   lastSavedAt: string;
   isLive: boolean;
+  subscriptionOptions?: LiveSubscriptionOptions;
 }
 
 export interface QueryRunSummary {

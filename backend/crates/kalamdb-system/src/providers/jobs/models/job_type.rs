@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum JobType {
     Flush,
+    VectorIndex,
     Compact,
     Cleanup,
     JobCleanup,
@@ -27,6 +28,7 @@ impl JobType {
     pub fn as_str(&self) -> &'static str {
         match self {
             JobType::Flush => "flush",
+            JobType::VectorIndex => "vector_index",
             JobType::Compact => "compact",
             JobType::Cleanup => "cleanup",
             JobType::JobCleanup => "job_cleanup",
@@ -47,6 +49,7 @@ impl JobType {
     ///
     /// Prefix mapping:
     /// - FL: Flush
+    /// - VI: VectorIndex
     /// - CO: Compact
     /// - CL: Cleanup
     /// - BK: Backup
@@ -59,6 +62,7 @@ impl JobType {
     pub fn short_prefix(&self) -> &'static str {
         match self {
             JobType::Flush => "FL",
+            JobType::VectorIndex => "VI",
             JobType::Compact => "CO",
             JobType::Cleanup => "CL",
             JobType::JobCleanup => "JC",
@@ -78,6 +82,7 @@ impl JobType {
     pub fn from_str_opt(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "flush" => Some(JobType::Flush),
+            "vector_index" => Some(JobType::VectorIndex),
             "compact" => Some(JobType::Compact),
             "cleanup" => Some(JobType::Cleanup),
             "job_cleanup" => Some(JobType::JobCleanup),
@@ -108,6 +113,7 @@ impl JobType {
         matches!(
             self,
             JobType::Flush |        // Parquet upload + manifest update
+            JobType::VectorIndex |  // Vector snapshot persistence to cold storage
             JobType::Cleanup |      // Delete external Parquet + metadata
             JobType::Backup |       // External storage upload
             JobType::Restore |      // External storage download
@@ -169,6 +175,7 @@ impl From<&str> for JobType {
     fn from(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "flush" => JobType::Flush,
+            "vector_index" => JobType::VectorIndex,
             "compact" => JobType::Compact,
             "cleanup" => JobType::Cleanup,
             "job_cleanup" => JobType::JobCleanup,

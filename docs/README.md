@@ -35,6 +35,7 @@ System architecture and design decisions.
 - **[decisions/](architecture/decisions/)** – Architecture Decision Records (ADRs)
 - **[manifest.md](architecture/manifest.md)** – Manifest file format
 - **[conversion-architecture.md](architecture/conversion-architecture.md)** – Data type conversion
+- **[vector-search-architecture.md](architecture/vector-search-architecture.md)** – Vector index hot staging, cold snapshots, and query path
 
 ### [development/](development/)
 Contributor guides for building and developing KalamDB.

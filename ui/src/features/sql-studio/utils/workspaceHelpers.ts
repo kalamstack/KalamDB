@@ -52,6 +52,7 @@ export function createQueryTab(index: number): QueryTab {
     resultView: "results",
     lastSavedAt: null,
     savedQueryId: null,
+    subscriptionOptions: undefined,
   };
 }
 
@@ -67,6 +68,7 @@ export function toPersistedTab(tab: QueryTab): SqlStudioPersistedQueryTab {
       resultView: tab.resultView,
       lastSavedAt: tab.lastSavedAt,
       savedQueryId: tab.savedQueryId,
+      subscriptionOptions: tab.subscriptionOptions,
     },
   };
 }

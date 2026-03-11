@@ -30,7 +30,8 @@ pub mod live_queries {
 pub mod manifest {
     pub use crate::providers::manifest::models::{
         ColumnStats, FileRef, FileSubfolderState, Manifest, ManifestCacheEntry, SegmentMetadata,
-        SegmentStatus, SyncState,
+        SegmentStatus, SyncState, VectorEngine, VectorIndexMetadata, VectorIndexState,
+        VectorMetric,
     };
 }
 

@@ -3,6 +3,7 @@ import type { RootState } from "@/store";
 export const selectSqlStudioUi = (state: RootState) => state.sqlStudioUi;
 export const selectSchemaFilter = (state: RootState) => state.sqlStudioUi.schemaFilter;
 export const selectFavoritesExpanded = (state: RootState) => state.sqlStudioUi.favoritesExpanded;
+export const selectNamespaceSectionExpanded = (state: RootState) => state.sqlStudioUi.namespaceSectionExpanded;
 export const selectExpandedNamespaces = (state: RootState) => state.sqlStudioUi.expandedNamespaces;
 export const selectExpandedTables = (state: RootState) => state.sqlStudioUi.expandedTables;
 export const selectSelectedTableKey = (state: RootState) => state.sqlStudioUi.selectedTableKey;

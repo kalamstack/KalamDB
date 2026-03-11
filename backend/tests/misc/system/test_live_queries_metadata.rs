@@ -1,7 +1,7 @@
 use super::test_support::{consolidated_helpers, TestServer};
+use kalam_link::models::ResponseStatus;
 use kalamdb_api::handlers::ws::events::cleanup::cleanup_connection;
 use kalamdb_api::limiter::RateLimiter;
-use kalam_link::models::ResponseStatus;
 use kalamdb_commons::models::{ConnectionId, ConnectionInfo, Role, UserId};
 use kalamdb_commons::websocket::{SubscriptionOptions, SubscriptionRequest};
 use std::sync::Arc;
@@ -177,15 +177,28 @@ async fn test_cleanup_connection_removes_live_queries_and_registry_state() {
 
     let sql = "SELECT * FROM system.live_queries WHERE subscription_id = 'sub_cleanup_test'";
     let response_before = server.execute_sql(sql).await;
-    assert_eq!(response_before.status, ResponseStatus::Success, "SQL failed: {:?}", response_before.error);
+    assert_eq!(
+        response_before.status,
+        ResponseStatus::Success,
+        "SQL failed: {:?}",
+        response_before.error
+    );
     assert_eq!(response_before.results[0].rows.as_ref().unwrap().len(), 1);
 
     cleanup_connection(&connection_state, &registry, &rate_limiter, &manager).await;
 
-    assert!(registry.get_connection(&conn_id).is_none(), "connection registry entry should be removed");
+    assert!(
+        registry.get_connection(&conn_id).is_none(),
+        "connection registry entry should be removed"
+    );
 
     let response_after = server.execute_sql(sql).await;
-    assert_eq!(response_after.status, ResponseStatus::Success, "SQL failed: {:?}", response_after.error);
+    assert_eq!(
+        response_after.status,
+        ResponseStatus::Success,
+        "SQL failed: {:?}",
+        response_after.error
+    );
     assert_eq!(
         response_after.results[0].rows.as_ref().unwrap().len(),
         0,

@@ -25,3 +25,4 @@ mod scenario_10_multi_tenant;
 mod scenario_11_multi_storage;
 mod scenario_12_performance;
 mod scenario_13_soak_test;
+mod scenario_14_vector_rag;

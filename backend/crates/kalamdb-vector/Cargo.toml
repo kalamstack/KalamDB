@@ -1,0 +1,41 @@
+[package]
+name = "kalamdb-vector"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Vector search and indexing primitives for KalamDB"
+
+[dependencies]
+# Internal crates
+kalamdb-commons = { path = "../kalamdb-commons", features = ["full"] }
+kalamdb-filestore = { path = "../kalamdb-filestore" }
+kalamdb-store = { path = "../kalamdb-store" }
+kalamdb-system = { path = "../kalamdb-system" }
+kalamdb-session = { path = "../kalamdb-session" }
+
+# Apache Arrow/DataFusion
+datafusion = { workspace = true }
+arrow = { workspace = true }
+
+# Async
+async-trait = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+bytes = { workspace = true }
+
+# Time
+chrono = { workspace = true }
+dashmap = { workspace = true }
+once_cell = { workspace = true }
+
+# ANN engines
+usearch = { workspace = true }
+
+[lib]
+name = "kalamdb_vector"
+path = "src/lib.rs"

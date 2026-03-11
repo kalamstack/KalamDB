@@ -57,33 +57,37 @@ pub fn split_statements(sql: &str) -> Result<Vec<String>, BatchParseError> {
         if in_line_comment {
             if ch == '\n' {
                 in_line_comment = false;
+                if !current.ends_with(char::is_whitespace) {
+                    current.push('\n');
+                }
             }
-            current.push(ch);
             continue;
         }
 
         if in_block_comment {
             if ch == '*' && chars.peek() == Some(&'/') {
-                current.push(ch);
-                current.push(chars.next().unwrap());
+                if !current.ends_with(char::is_whitespace) {
+                    current.push(' ');
+                }
+                chars.next();
                 in_block_comment = false;
                 continue;
             }
-            current.push(ch);
+            if ch == '\n' && !current.ends_with(char::is_whitespace) {
+                current.push('\n');
+            }
             continue;
         }
 
         if !in_single_quote && !in_double_quote && !in_backtick {
             if ch == '-' && chars.peek() == Some(&'-') {
-                current.push(ch);
-                current.push(chars.next().unwrap());
+                chars.next();
                 in_line_comment = true;
                 continue;
             }
 
             if ch == '/' && chars.peek() == Some(&'*') {
-                current.push(ch);
-                current.push(chars.next().unwrap());
+                chars.next();
                 in_block_comment = true;
                 continue;
             }
@@ -171,6 +175,30 @@ mod tests {
         let sql = "SELECT 1; -- second statement;\nSELECT 2; /* comment; */ SELECT 3;";
         let statements = split_statements(sql).unwrap();
         assert_eq!(statements.len(), 3);
+        assert_eq!(statements[0], "SELECT 1");
+        assert_eq!(statements[1], "SELECT 2");
+        assert_eq!(statements[2], "SELECT 3");
+    }
+
+    #[test]
+    fn strips_commented_lines_and_keeps_executable_statement() {
+        let sql = "-- create namespace rag;\nselect * from system.schemas;\n-- test\n-- dfdvd\n";
+        let statements = split_statements(sql).unwrap();
+        assert_eq!(statements, vec!["select * from system.schemas"]);
+    }
+
+    #[test]
+    fn returns_empty_for_comment_only_input() {
+        let sql = "-- first\n/* second */\n-- third";
+        let statements = split_statements(sql).unwrap();
+        assert!(statements.is_empty());
+    }
+
+    #[test]
+    fn preserves_comment_markers_inside_strings() {
+        let sql = "SELECT '-- keep', '/* keep */';";
+        let statements = split_statements(sql).unwrap();
+        assert_eq!(statements, vec!["SELECT '-- keep', '/* keep */'"]);
     }
 
     #[test]

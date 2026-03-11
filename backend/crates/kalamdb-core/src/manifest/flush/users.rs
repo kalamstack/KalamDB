@@ -9,6 +9,7 @@ use crate::error::KalamDbError;
 use crate::error_extensions::KalamDbResultExt;
 use crate::manifest::{FlushManifestHelper, ManifestService};
 use crate::schema_registry::SchemaRegistry;
+use crate::vector::flush_user_scope_vectors;
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
 use kalamdb_commons::constants::SystemColumnNames;
@@ -205,6 +206,15 @@ impl UserTableFlushJob {
             size_bytes,
             indexed_columns,
             schema_version,
+        )?;
+
+        // Flush vector hot-staging artifacts for embedding columns in this user scope.
+        flush_user_scope_vectors(
+            &self.app_context,
+            &self.table_id,
+            &user_id_typed,
+            &self.schema,
+            &storage_cached,
         )?;
 
         log::debug!(

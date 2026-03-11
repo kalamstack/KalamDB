@@ -12,9 +12,10 @@
 //! - `batch_size`: Arrow batch size for record processing (default: 8192)
 
 use crate::sql::functions::{
-    CurrentRoleFunction, CurrentUserFunction, CurrentUserIdFunction, SnowflakeIdFunction,
-    UlidFunction, UuidV7Function,
+    CosineDistanceFunction, CurrentRoleFunction, CurrentUserFunction, CurrentUserIdFunction,
+    SnowflakeIdFunction, UlidFunction, UuidV7Function,
 };
+use crate::sql::table_functions::VectorSearchTableFunction;
 use datafusion::error::Result as DataFusionResult;
 use datafusion::execution::context::{SessionContext, SessionState};
 use datafusion::execution::memory_pool::GreedyMemoryPool;
@@ -160,6 +161,12 @@ impl DataFusionSessionFactory {
 
         // Register CURRENT_ROLE() function (will be overridden with actual role in ExecutionContext)
         ctx.register_udf(ScalarUDF::from(CurrentRoleFunction::new()));
+
+        // Register COSINE_DISTANCE(vector, query_vector) for ORDER BY similarity search syntax.
+        ctx.register_udf(ScalarUDF::from(CosineDistanceFunction::new()));
+
+        // Register vector search table function (TABLE(vector_search(...))).
+        ctx.register_udtf("vector_search", Arc::new(VectorSearchTableFunction::unavailable()));
     }
 
     /// Register all existing namespaces as DataFusion schemas

@@ -22,10 +22,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useTableChanges } from "@/hooks/useTableChanges";
-import { CellContextMenu, type CellContextMenuState } from "@/components/sql-studio/CellContextMenu";
-import { InlineCellEditor, type InlineEditContext } from "@/components/sql-studio/InlineCellEditor";
-import { generateSqlStatements } from "@/components/sql-studio/utils/sqlGenerator";
-import { extractTableContext } from "@/components/sql-studio/utils/sqlParser";
+import { CellContextMenu, type CellContextMenuState } from "./CellContextMenu";
+import { InlineCellEditor, type InlineEditContext } from "./InlineCellEditor";
+import { generateSqlStatements } from "./utils/sqlGenerator";
+import { extractTableContext } from "./utils/sqlParser";
 import { useSqlPreview } from "@/components/sql-preview";
 import { CellDisplay } from "@/components/datatype-display";
 import { KalamCellValue } from "kalam-link";

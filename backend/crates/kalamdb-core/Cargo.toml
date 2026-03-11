@@ -24,6 +24,7 @@ kalamdb-system = { path = "../kalamdb-system" }
 kalamdb-tables = { path = "../kalamdb-tables" }
 kalamdb-publisher = { path = "../kalamdb-publisher" }
 kalamdb-views = { path = "../kalamdb-views" }
+kalamdb-vector = { path = "../kalamdb-vector" }
 
 # Apache Arrow ecosystem
 arrow = { workspace = true }
@@ -86,8 +87,6 @@ parquet = { workspace = true }
 
 # Byte buffers
 bytes = { workspace = true }
-
-
 
 [dev-dependencies]
 # Testing utilities

@@ -19,6 +19,7 @@ kalamdb-system = { path = "../kalamdb-system" }
 kalamdb-streams = { path = "../kalamdb-streams" }
 kalamdb-sharding = { path = "../kalamdb-sharding" }
 kalamdb-session = { path = "../kalamdb-session" }
+kalamdb-vector = { path = "../kalamdb-vector" }
 
 # Apache Arrow ecosystem
 arrow = { workspace = true }

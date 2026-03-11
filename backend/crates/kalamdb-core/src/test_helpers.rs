@@ -3,7 +3,7 @@
 use crate::app_context::AppContext;
 use crate::jobs::executors::{
     BackupExecutor, CleanupExecutor, CompactExecutor, FlushExecutor, JobRegistry, RestoreExecutor,
-    RetentionExecutor, StreamEvictionExecutor, UserCleanupExecutor,
+    RetentionExecutor, StreamEvictionExecutor, UserCleanupExecutor, VectorIndexExecutor,
 };
 use datafusion::prelude::SessionContext;
 use kalamdb_commons::models::{NamespaceId, NodeId, StorageId};
@@ -203,6 +203,7 @@ pub fn create_test_job_registry() -> JobRegistry {
     registry.register(Arc::new(CompactExecutor::new()));
     registry.register(Arc::new(BackupExecutor::new()));
     registry.register(Arc::new(RestoreExecutor::new()));
+    registry.register(Arc::new(VectorIndexExecutor::new()));
 
     registry
 }

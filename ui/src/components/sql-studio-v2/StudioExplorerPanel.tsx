@@ -29,11 +29,13 @@ interface StudioExplorerPanelProps {
   filter: string;
   savedQueries: SavedQuery[];
   favoritesExpanded: boolean;
+  namespaceSectionExpanded: boolean;
   expandedNamespaces: Record<string, boolean>;
   expandedTables: Record<string, boolean>;
   selectedTableKey: string | null;
   onFilterChange: (value: string) => void;
   onToggleFavorites: () => void;
+  onToggleNamespaceSection: () => void;
   onToggleNamespace: (namespaceName: string) => void;
   onToggleTable: (tableKey: string) => void;
   onOpenSavedQuery: (queryId: string) => void;
@@ -79,11 +81,13 @@ const StudioExplorerPanelComponent = ({
   filter,
   savedQueries,
   favoritesExpanded,
+  namespaceSectionExpanded,
   expandedNamespaces,
   expandedTables,
   selectedTableKey,
   onFilterChange,
   onToggleFavorites,
+  onToggleNamespaceSection,
   onToggleNamespace,
   onToggleTable,
   onOpenSavedQuery,
@@ -182,6 +186,20 @@ const StudioExplorerPanelComponent = ({
               )}
             </div>
 
+            <div>
+              <button
+                type="button"
+                onClick={onToggleNamespaceSection}
+                className="mb-1 flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground hover:bg-accent"
+              >
+                {namespaceSectionExpanded ? (
+                  <ChevronDown className="h-3 w-3" />
+                ) : (
+                  <ChevronRight className="h-3 w-3" />
+                )}
+                Namespaces
+              </button>
+              {namespaceSectionExpanded && (
             <div className="space-y-0.5">
               {filteredSchema.map((namespace) => {
                 const namespaceOpen = expandedNamespaces[namespace.name] ?? false;
@@ -284,6 +302,8 @@ const StudioExplorerPanelComponent = ({
                   </div>
                 );
               })}
+            </div>
+              )}
             </div>
           </div>
         </ScrollArea>

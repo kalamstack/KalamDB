@@ -10,7 +10,7 @@ repository.workspace = true
 [features]
 default = ["websocket"]
 # Enable WebSocket authentication support (From<WsAuthCredentials> impl)
-websocket = []
+websocket = ["kalamdb-commons/websocket-auth"]
 
 [dependencies]
 # Password hashing
@@ -29,7 +29,7 @@ actix-web = { workspace = true }
 cookie = { workspace = true }
 
 # Internal dependencies
-kalamdb-commons = { path = "../kalamdb-commons" }
+kalamdb-commons = { path = "../kalamdb-commons", default-features = false, features = ["serde"] }
 kalamdb-configs = { path = "../kalamdb-configs" }
 kalamdb-oidc = { path = "../kalamdb-oidc" }
 kalamdb-session = { path = "../kalamdb-session" }

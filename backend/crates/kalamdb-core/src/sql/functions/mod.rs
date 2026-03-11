@@ -20,6 +20,7 @@ pub mod uuid_v7;
 pub use current_role::CurrentRoleFunction;
 pub use current_user::CurrentUserFunction;
 pub use current_user_id::CurrentUserIdFunction;
+pub use kalamdb_vector::CosineDistanceFunction;
 pub use snowflake_id::SnowflakeIdFunction;
 pub use ulid::UlidFunction;
 pub use uuid_v7::UuidV7Function;

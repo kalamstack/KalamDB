@@ -419,6 +419,100 @@ impl SegmentMetadata {
     }
 }
 
+/// Similarity metric used by vector indexes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorMetric {
+    #[default]
+    Cosine,
+    L2,
+    Dot,
+}
+
+/// Vector index engine used for a column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorEngine {
+    #[default]
+    USearch,
+}
+
+/// Manifest-tracked state of a vector index column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VectorIndexState {
+    #[default]
+    Active,
+    Syncing,
+    Error,
+}
+
+/// Vector index metadata embedded in manifest.json per indexed column.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VectorIndexMetadata {
+    /// Column name this metadata belongs to.
+    pub column_name: String,
+    /// Whether indexing is enabled for this column.
+    pub enabled: bool,
+    /// Similarity metric used for ANN search.
+    pub metric: VectorMetric,
+    /// Index engine implementation.
+    pub engine: VectorEngine,
+    /// Embedding dimensions for this column.
+    pub dimensions: u32,
+    /// Relative snapshot path under table storage root.
+    pub snapshot_path: Option<String>,
+    /// Monotonic snapshot version.
+    pub snapshot_version: u64,
+    /// Last staged sequence applied into snapshot.
+    pub last_applied_seq: SeqId,
+    /// Last update timestamp.
+    pub updated_at: i64,
+    /// Current index sync state.
+    #[serde(default)]
+    pub state: VectorIndexState,
+}
+
+impl VectorIndexMetadata {
+    pub fn new(
+        column_name: impl Into<String>,
+        dimensions: u32,
+        metric: VectorMetric,
+        engine: VectorEngine,
+    ) -> Self {
+        Self {
+            column_name: column_name.into(),
+            enabled: true,
+            metric,
+            engine,
+            dimensions,
+            snapshot_path: None,
+            snapshot_version: 0,
+            last_applied_seq: SeqId::from(0i64),
+            updated_at: chrono::Utc::now().timestamp_millis(),
+            state: VectorIndexState::Active,
+        }
+    }
+
+    pub fn mark_syncing(&mut self) {
+        self.state = VectorIndexState::Syncing;
+        self.updated_at = chrono::Utc::now().timestamp_millis();
+    }
+
+    pub fn mark_error(&mut self) {
+        self.state = VectorIndexState::Error;
+        self.updated_at = chrono::Utc::now().timestamp_millis();
+    }
+
+    pub fn record_snapshot(&mut self, snapshot_path: String, last_applied_seq: SeqId) {
+        self.snapshot_version = self.snapshot_version.saturating_add(1);
+        self.snapshot_path = Some(snapshot_path);
+        self.last_applied_seq = last_applied_seq;
+        self.state = VectorIndexState::Active;
+        self.updated_at = chrono::Utc::now().timestamp_millis();
+    }
+}
+
 /// Manifest file tracking segments for a table.
 ///
 /// The manifest is the source of truth for data location (Hot vs Cold).
@@ -450,6 +544,13 @@ pub struct Manifest {
     /// Only present if the table has FILE columns.
     /// Tracks current subfolder and file count for rotation.
     pub files: Option<FileSubfolderState>,
+
+    /// Vector index metadata keyed by column name.
+    /// This is embedded in manifest.json so index artifacts can be managed with
+    /// the same atomic flush lifecycle used for segment metadata.
+    #[serde(default)]
+    //TODO: Dont include in json if empty
+    pub vector_indexes: HashMap<String, VectorIndexMetadata>,
 }
 
 impl Manifest {
@@ -464,6 +565,7 @@ impl Manifest {
             segments: Vec::new(),
             last_sequence_number: 0,
             files: None,
+            vector_indexes: HashMap::new(),
         }
     }
 
@@ -479,6 +581,7 @@ impl Manifest {
             segments: Vec::new(),
             last_sequence_number: 0,
             files: Some(FileSubfolderState::new()),
+            vector_indexes: HashMap::new(),
         }
     }
 
@@ -538,6 +641,45 @@ impl Manifest {
             self.updated_at = chrono::Utc::now().timestamp_millis();
             // Version bump? Maybe not for just seq update if it happens often in memory
         }
+    }
+
+    /// Ensure vector metadata exists for a column and return mutable access to it.
+    pub fn ensure_vector_index(
+        &mut self,
+        column_name: &str,
+        dimensions: u32,
+        metric: VectorMetric,
+        engine: VectorEngine,
+    ) -> &mut VectorIndexMetadata {
+        let entry = self
+            .vector_indexes
+            .entry(column_name.to_string())
+            .or_insert_with(|| VectorIndexMetadata::new(column_name, dimensions, metric, engine));
+
+        entry.dimensions = dimensions;
+        entry.metric = metric;
+        entry.engine = engine;
+        entry.enabled = true;
+        entry.updated_at = chrono::Utc::now().timestamp_millis();
+        self.updated_at = entry.updated_at;
+        self.version += 1;
+        entry
+    }
+
+    /// Update vector snapshot pointer and watermark for a column.
+    pub fn record_vector_snapshot(
+        &mut self,
+        column_name: &str,
+        dimensions: u32,
+        metric: VectorMetric,
+        engine: VectorEngine,
+        snapshot_path: String,
+        last_applied_seq: SeqId,
+    ) {
+        let entry = self.ensure_vector_index(column_name, dimensions, metric, engine);
+        entry.record_snapshot(snapshot_path, last_applied_seq);
+        self.updated_at = entry.updated_at;
+        self.version += 1;
     }
 }
 
@@ -993,5 +1135,44 @@ mod tests {
     fn test_segment_status_default() {
         // Test that default status is Committed for backward compatibility
         assert_eq!(SegmentStatus::default(), SegmentStatus::Committed);
+    }
+
+    #[test]
+    fn test_manifest_vector_index_roundtrip() {
+        let table_id = TableId::new(NamespaceId::new("vec_ns"), TableName::new("emb"));
+        let mut manifest = Manifest::new(table_id, Some(UserId::new("u1")));
+
+        manifest.record_vector_snapshot(
+            "embedding",
+            384,
+            VectorMetric::Cosine,
+            VectorEngine::USearch,
+            "vec-embedding-snapshot-1.vix".to_string(),
+            SeqId::from(42i64),
+        );
+
+        let json = serde_json::to_string(&manifest).unwrap();
+        let decoded: Manifest = serde_json::from_str(&json).unwrap();
+
+        let meta = decoded.vector_indexes.get("embedding").expect("vector metadata exists");
+        assert_eq!(meta.dimensions, 384);
+        assert_eq!(meta.metric, VectorMetric::Cosine);
+        assert_eq!(meta.engine, VectorEngine::USearch);
+        assert_eq!(meta.last_applied_seq, SeqId::from(42i64));
+        assert_eq!(meta.snapshot_version, 1);
+        assert_eq!(meta.snapshot_path.as_deref(), Some("vec-embedding-snapshot-1.vix"));
+    }
+
+    #[test]
+    fn test_manifest_vector_index_backward_compat_default() {
+        let table_id = TableId::new(NamespaceId::new("ns1"), TableName::new("t1"));
+        let manifest = Manifest::new(table_id, None);
+        let mut raw = serde_json::to_value(&manifest).unwrap();
+        if let Some(obj) = raw.as_object_mut() {
+            obj.remove("vector_indexes");
+        }
+
+        let decoded: Manifest = serde_json::from_value(raw).unwrap();
+        assert!(decoded.vector_indexes.is_empty());
     }
 }

@@ -32,6 +32,7 @@ impl TypedStatementHandler<FlushTableStatement> for FlushTableHandler {
     ) -> Result<ExecutionResult, KalamDbError> {
         // Validate table exists via SchemaRegistry and fetch definition for table_type
         let registry = self.app_context.schema_registry();
+        let manifest_service = self.app_context.manifest_service();
         let table_id = TableId::new(statement.namespace.clone(), statement.table_name.clone());
         let table_def = registry.get_table_if_exists(&table_id)?.ok_or_else(|| {
             KalamDbError::NotFound(format!(
@@ -47,6 +48,20 @@ impl TypedStatementHandler<FlushTableStatement> for FlushTableHandler {
             ));
         }
 
+        let pending_manifests = manifest_service
+            .get_pending_for_table(&table_id)
+            .map_err(|e| KalamDbError::Other(format!("Pending manifest scan failed: {}", e)))?;
+
+        if pending_manifests.is_empty() {
+            return Ok(ExecutionResult::Success {
+                message: format!(
+                    "Storage flush skipped: no pending writes for table '{}.{}'",
+                    statement.namespace.as_str(),
+                    statement.table_name.as_str()
+                ),
+            });
+        }
+
         // Create FlushParams with typed parameters
         let params = FlushParams {
             table_id: table_id.clone(),
@@ -58,9 +73,22 @@ impl TypedStatementHandler<FlushTableStatement> for FlushTableHandler {
         let job_manager = self.app_context.job_manager();
         let idempotency_key =
             format!("flush-{}-{}", statement.namespace.as_str(), statement.table_name.as_str());
-        let job_id: JobId = job_manager
+        let job_id: JobId = match job_manager
             .create_job_typed(JobType::Flush, params, Some(idempotency_key), None)
-            .await?;
+            .await
+        {
+            Ok(job_id) => job_id,
+            Err(KalamDbError::IdempotentConflict(_)) => {
+                return Ok(ExecutionResult::Success {
+                    message: format!(
+                        "Storage flush skipped: a flush is already queued or running for table '{}.{}'",
+                        statement.namespace.as_str(),
+                        statement.table_name.as_str()
+                    ),
+                });
+            },
+            Err(err) => return Err(err),
+        };
 
         Ok(ExecutionResult::Success {
             message: format!(

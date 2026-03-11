@@ -208,6 +208,7 @@ impl LeaderFailoverHandler {
         match job.job_type {
             // Safe to re-run (idempotent operations)
             JobType::Flush
+            | JobType::VectorIndex
             | JobType::Cleanup
             | JobType::Retention
             | JobType::Compact

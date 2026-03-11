@@ -21,8 +21,6 @@ use super::helpers::*;
 use futures_util::StreamExt;
 use kalam_link::models::ResponseStatus;
 use kalamdb_commons::Role;
-use serde_json::Value as JsonValue;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -235,7 +233,7 @@ async fn test_scenario_03_shopping_cart_parallel() -> anyhow::Result<()> {
     let u0_items: Vec<i64> = resp
         .rows_as_maps()
         .iter()
-        .filter_map(|r: &HashMap<String, JsonValue>| r.get("id").and_then(json_to_i64))
+        .filter_map(|r| r.get("id").and_then(json_to_i64))
         .collect();
 
     let resp = u1_client
@@ -244,7 +242,7 @@ async fn test_scenario_03_shopping_cart_parallel() -> anyhow::Result<()> {
     let u1_items: Vec<i64> = resp
         .rows_as_maps()
         .iter()
-        .filter_map(|r: &HashMap<String, JsonValue>| r.get("id").and_then(json_to_i64))
+        .filter_map(|r| r.get("id").and_then(json_to_i64))
         .collect();
 
     // Check no overlap
