@@ -33,3 +33,7 @@ ENV LLVM_CONFIG_PATH=/usr/bin/llvm-config-16
 ENV CLANG_PATH=/usr/bin/clang-16
 ENV LIBCLANG_STATIC=0
 
+# Provide a no-op sccache wrapper so the repo-level Cargo config works in CI cross images.
+RUN printf '#!/bin/sh\nexec "$@"\n' > /usr/local/bin/sccache && \
+    chmod +x /usr/local/bin/sccache
+

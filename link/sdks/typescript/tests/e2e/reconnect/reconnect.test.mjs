@@ -63,6 +63,19 @@ function hasRowId(events, expectedId) {
   return extractRows(events).some((row) => unwrapCell(row.id) === expectedId);
 }
 
+function assertRowsStrictlyAfter(events, from, context) {
+  for (const row of extractRows(events)) {
+    const seq = row._seq?.asSeqId?.();
+    if (!seq) {
+      continue;
+    }
+    assert.ok(
+      seq.compareTo(from) > 0,
+      `${context}: received stale row with _seq=${seq.toString()} at/before from=${from.toString()}`,
+    );
+  }
+}
+
 async function shutdownClient(client) {
   if (!client) {
     return;
@@ -339,6 +352,79 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
     await unsub1();
     await dropTable(client, tbl2);
     await shutdownClient(writer);
+  });
+
+  test('subscribeWithSql from resumes with only seqs greater than checkpoint', async () => {
+    const tblFrom = `${ns}.from_seq_boundary`;
+    const sql = `SELECT id, payload FROM ${tblFrom} WHERE id >= 41001`;
+
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS ${tblFrom} (
+        id INT PRIMARY KEY,
+        payload TEXT
+      )`,
+    );
+
+    const writer = await connectJwtClient();
+    const baselineA = 41001;
+    const baselineB = 41002;
+    const fresh = 41003;
+
+    try {
+      await writer.query(
+        `INSERT INTO ${tblFrom} (id, payload) VALUES (${baselineA}, 'baseline-a')`,
+      );
+      await writer.query(
+        `INSERT INTO ${tblFrom} (id, payload) VALUES (${baselineB}, 'baseline-b')`,
+      );
+
+      const baselineEvents = [];
+      const stopBaseline = await client.subscribeWithSql(
+        sql,
+        (event) => baselineEvents.push(event),
+        { last_rows: 2 },
+      );
+
+      await waitFor(() => hasRowId(baselineEvents, baselineA) && hasRowId(baselineEvents, baselineB));
+      await waitFor(() => {
+        const sub = client.getSubscriptions().find((entry) => entry.tableName === sql);
+        return !!sub?.lastSeqId;
+      });
+
+      const checkpoint = client.getSubscriptions().find((entry) => entry.tableName === sql)?.lastSeqId;
+      assert.ok(checkpoint, 'baseline subscription should expose lastSeqId checkpoint');
+
+      await stopBaseline();
+
+      await writer.query(
+        `INSERT INTO ${tblFrom} (id, payload) VALUES (${fresh}, 'fresh-after-checkpoint')`,
+      );
+
+      const resumedEvents = [];
+      const stopResumed = await client.subscribeWithSql(
+        sql,
+        (event) => resumedEvents.push(event),
+        { from: checkpoint, last_rows: 0 },
+      );
+
+      try {
+        await waitFor(() => resumedEvents.some((event) => event.type === 'subscription_ack'));
+        await waitFor(() => hasRowId(resumedEvents, fresh));
+        await waitFor(() => {
+          const sub = client.getSubscriptions().find((entry) => entry.tableName === sql);
+          return !!sub?.lastSeqId && sub.lastSeqId.compareTo(checkpoint) > 0;
+        });
+
+        assertRowsStrictlyAfter(resumedEvents, checkpoint, 'subscribeWithSql(from)');
+        assert.ok(!hasRowId(resumedEvents, baselineA), 'should not replay baseline row A');
+        assert.ok(!hasRowId(resumedEvents, baselineB), 'should not replay baseline row B');
+      } finally {
+        await stopResumed();
+      }
+    } finally {
+      await dropTable(client, tblFrom);
+      await shutdownClient(writer);
+    }
   });
 
   // -----------------------------------------------------------------------

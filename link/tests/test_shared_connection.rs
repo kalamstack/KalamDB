@@ -11,24 +11,130 @@
 use kalam_link::auth::AuthProvider;
 use kalam_link::{
     ChangeEvent, ConnectionOptions, EventHandlers, KalamLinkClient, KalamLinkTimeouts,
-    LiveRowsConfig, LiveRowsEvent,
-    SubscriptionConfig,
+    LiveRowsConfig, LiveRowsEvent, SubscriptionConfig, SubscriptionOptions, SeqId,
+    KalamCellValue,
 };
-use std::sync::atomic::{AtomicU32, Ordering};
+use kalam_link::seq_tracking::{extract_max_seq, row_seq};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::io::copy_bidirectional;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Mutex as TokioMutex;
+use tokio::task::JoinHandle;
 use tokio::time::{sleep, timeout};
 
 mod common;
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(15);
 
+struct TcpDisconnectProxy {
+    base_url: String,
+    paused: Arc<AtomicBool>,
+    active_connections: Arc<TokioMutex<HashMap<u64, JoinHandle<()>>>>,
+    accept_task: JoinHandle<()>,
+}
+
+impl TcpDisconnectProxy {
+    async fn start(target_base_url: &str) -> Self {
+        let target_addr = extract_host_port(target_base_url);
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("proxy should bind to an ephemeral port");
+        let bind_addr = listener.local_addr().expect("proxy should have a local addr");
+        let paused = Arc::new(AtomicBool::new(false));
+        let active_connections = Arc::new(TokioMutex::new(HashMap::new()));
+        let next_id = Arc::new(AtomicU64::new(1));
+
+        let paused_clone = paused.clone();
+        let active_clone = active_connections.clone();
+        let next_id_clone = next_id.clone();
+        let accept_task = tokio::spawn(async move {
+            while let Ok((mut inbound, _peer)) = listener.accept().await {
+                if paused_clone.load(Ordering::SeqCst) {
+                    drop(inbound);
+                    continue;
+                }
+
+                let id = next_id_clone.fetch_add(1, Ordering::SeqCst);
+                let target_addr = target_addr.clone();
+                let active_for_task = active_clone.clone();
+                let task = tokio::spawn(async move {
+                    if let Ok(mut outbound) = TcpStream::connect(&target_addr).await {
+                        let _ = copy_bidirectional(&mut inbound, &mut outbound).await;
+                    }
+                    active_for_task.lock().await.remove(&id);
+                });
+
+                active_clone.lock().await.insert(id, task);
+            }
+        });
+
+        Self {
+            base_url: format!("http://{}", bind_addr),
+            paused,
+            active_connections,
+            accept_task,
+        }
+    }
+
+    fn pause(&self) {
+        self.paused.store(true, Ordering::SeqCst);
+    }
+
+    fn resume(&self) {
+        self.paused.store(false, Ordering::SeqCst);
+    }
+
+    async fn drop_active_connections(&self) {
+        let mut active = self.active_connections.lock().await;
+        for (_id, task) in active.drain() {
+            task.abort();
+        }
+    }
+
+    async fn wait_for_active_connections(&self, min_count: usize, timeout_dur: Duration) -> bool {
+        let start = std::time::Instant::now();
+        loop {
+            if self.active_connections.lock().await.len() >= min_count {
+                return true;
+            }
+            if start.elapsed() >= timeout_dur {
+                return false;
+            }
+            sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    async fn shutdown(self) {
+        self.accept_task.abort();
+        self.drop_active_connections().await;
+    }
+}
+
+fn extract_host_port(base_url: &str) -> String {
+    base_url
+        .trim_start_matches("http://")
+        .trim_start_matches("https://")
+        .split('/')
+        .next()
+        .unwrap_or("127.0.0.1:8080")
+        .to_string()
+}
+
 /// Create a test client authenticated with root credentials.
 fn create_test_client() -> Result<KalamLinkClient, kalam_link::KalamLinkError> {
+    create_test_client_for_base_url(common::server_url())
+}
+
+fn create_test_client_for_base_url(
+    base_url: &str,
+) -> Result<KalamLinkClient, kalam_link::KalamLinkError> {
     let token = common::root_access_token_blocking()
         .map_err(|e| kalam_link::KalamLinkError::InternalError(e.to_string()))?;
     KalamLinkClient::builder()
-        .base_url(common::server_url())
+        .base_url(base_url)
         .timeout(Duration::from_secs(30))
         .auth(AuthProvider::jwt_token(token))
         .timeouts(KalamLinkTimeouts::default())
@@ -37,6 +143,12 @@ fn create_test_client() -> Result<KalamLinkClient, kalam_link::KalamLinkError> {
 }
 
 fn create_test_client_with_events(
+) -> Result<(KalamLinkClient, Arc<AtomicU32>, Arc<AtomicU32>), kalam_link::KalamLinkError> {
+    create_test_client_with_events_for_base_url(common::server_url())
+}
+
+fn create_test_client_with_events_for_base_url(
+    base_url: &str,
 ) -> Result<(KalamLinkClient, Arc<AtomicU32>, Arc<AtomicU32>), kalam_link::KalamLinkError> {
     let token = common::root_access_token_blocking()
         .map_err(|e| kalam_link::KalamLinkError::InternalError(e.to_string()))?;
@@ -47,7 +159,7 @@ fn create_test_client_with_events(
     let dc = disconnect_count.clone();
 
     let client = KalamLinkClient::builder()
-        .base_url(common::server_url())
+        .base_url(base_url)
         .timeout(Duration::from_secs(30))
         .auth(AuthProvider::jwt_token(token))
         .event_handlers(
@@ -75,6 +187,95 @@ async fn ensure_table(client: &KalamLinkClient, table: &str) {
             None,
         )
         .await;
+}
+
+async fn query_max_seq(client: &KalamLinkClient, table: &str) -> SeqId {
+    let result = client
+        .execute_query(
+            &format!("SELECT MAX(_seq) AS max_seq FROM {}", table),
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("max seq query should succeed");
+
+    let max_seq = result
+        .get_i64("max_seq")
+        .unwrap_or_else(|| panic!("max seq query should return a value for {}", table));
+
+    SeqId::from_i64(max_seq)
+}
+
+fn change_event_rows(event: &ChangeEvent) -> Option<&[HashMap<String, KalamCellValue>]> {
+    match event {
+        ChangeEvent::Insert { rows, .. }
+        | ChangeEvent::Update { rows, .. }
+        | ChangeEvent::InitialDataBatch { rows, .. } => Some(rows.as_slice()),
+        _ => None,
+    }
+}
+
+fn row_id(row: &HashMap<String, KalamCellValue>) -> Option<&str> {
+    row.get("id").and_then(|value| value.as_str())
+}
+
+fn event_last_seq(event: &ChangeEvent) -> Option<SeqId> {
+    match event {
+        ChangeEvent::Ack { batch_control, .. }
+        | ChangeEvent::InitialDataBatch { batch_control, .. } => batch_control.last_seq_id,
+        ChangeEvent::Insert { rows, .. } | ChangeEvent::Update { rows, .. } => {
+            extract_max_seq(rows)
+        },
+        ChangeEvent::Delete { old_rows, .. } => extract_max_seq(old_rows),
+        _ => None,
+    }
+}
+
+fn assert_event_rows_strictly_after(event: &ChangeEvent, from: SeqId, context: &str) {
+    let Some(rows) = change_event_rows(event) else {
+        return;
+    };
+
+    for row in rows {
+        if let Some(seq) = row_seq(row) {
+            assert!(
+                seq > from,
+                "{}: received stale row with _seq={} at/before from={}; id={:?}; row={:?}",
+                context,
+                seq,
+                from,
+                row_id(row),
+                row
+            );
+        }
+    }
+}
+
+fn collect_ids_and_track_seq(
+    event: &ChangeEvent,
+    ids: &mut Vec<String>,
+    max_seq: &mut Option<SeqId>,
+    strict_from: Option<SeqId>,
+    context: &str,
+) {
+    if let Some(from) = strict_from {
+        assert_event_rows_strictly_after(event, from, context);
+    }
+
+    if let Some(seq) = event_last_seq(event) {
+        *max_seq = Some(max_seq.map_or(seq, |prev| prev.max(seq)));
+    }
+
+    let Some(rows) = change_event_rows(event) else {
+        return;
+    };
+
+    for row in rows {
+        if let Some(id) = row_id(row) {
+            ids.push(id.to_string());
+        }
+    }
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -382,6 +583,197 @@ async fn test_subscription_drop_unsubscribes() {
     client.disconnect().await;
 }
 
+/// Simulate a real network/socket drop by routing the client through a local
+/// TCP proxy, force-closing the active socket, then allowing the shared
+/// connection to auto-reconnect and resume the same subscription.
+#[tokio::test]
+async fn test_shared_connection_auto_reconnects_after_socket_drop_and_resumes() {
+    let writer = match create_test_client() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Skipping test (writer client unavailable): {}", e);
+            return;
+        },
+    };
+
+    let proxy = TcpDisconnectProxy::start(common::server_url()).await;
+    let (client, connect_count, disconnect_count) =
+        match create_test_client_with_events_for_base_url(&proxy.base_url) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Skipping test (proxy client unavailable): {}", e);
+                proxy.shutdown().await;
+                return;
+            },
+        };
+
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let table = format!("default.socket_drop_resume_{}", suffix);
+
+    ensure_table(&writer, &table).await;
+
+    client.connect().await.expect("connect should succeed through proxy");
+
+    let mut sub = client
+        .subscribe_with_config(SubscriptionConfig::new(
+            format!("socket-drop-sub-{}", suffix),
+            format!("SELECT id, value FROM {}", table),
+        ))
+        .await
+        .expect("subscribe should succeed through proxy");
+
+    let _ = timeout(TEST_TIMEOUT, sub.next()).await;
+    assert!(
+        proxy.wait_for_active_connections(1, TEST_TIMEOUT).await,
+        "proxy should observe the shared websocket connection"
+    );
+
+    let pre_id = "71001";
+    let gap_id = "71002";
+    let live_id = "71003";
+
+    writer
+        .execute_query(
+            &format!("INSERT INTO {} (id, value) VALUES ('{}', 'before-drop')", table, pre_id),
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("insert before drop");
+
+    let mut pre_seen = Vec::<String>::new();
+    let mut observed_seq = None;
+    for _ in 0..12 {
+        if pre_seen.iter().any(|id| id == pre_id) {
+            break;
+        }
+
+        match timeout(Duration::from_millis(1200), sub.next()).await {
+            Ok(Some(Ok(ev))) => {
+                collect_ids_and_track_seq(
+                    &ev,
+                    &mut pre_seen,
+                    &mut observed_seq,
+                    None,
+                    "socket drop pre",
+                );
+            },
+            Ok(Some(Err(e))) => panic!("subscription error before socket drop: {}", e),
+            Ok(None) => panic!("subscription ended unexpectedly before socket drop"),
+            Err(_) => {},
+        }
+    }
+
+    assert!(pre_seen.iter().any(|id| id == pre_id), "pre row should be observed before drop");
+    let resume_from = query_max_seq(&writer, &table).await;
+    let subs = client.subscriptions().await;
+    let tracked_seq = subs
+        .iter()
+        .find(|entry| entry.query == format!("SELECT id, value FROM {}", table))
+        .and_then(|entry| entry.last_seq_id);
+    assert_eq!(
+        tracked_seq,
+        Some(resume_from),
+        "shared subscription should track last_seq_id before the socket drop"
+    );
+
+    let disconnects_before = disconnect_count.load(Ordering::SeqCst);
+    proxy.pause();
+    proxy.drop_active_connections().await;
+
+    for _ in 0..40 {
+        if disconnect_count.load(Ordering::SeqCst) > disconnects_before {
+            break;
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    assert!(
+        disconnect_count.load(Ordering::SeqCst) > disconnects_before,
+        "forced socket close should trigger an on_disconnect event"
+    );
+
+    writer
+        .execute_query(
+            &format!("INSERT INTO {} (id, value) VALUES ('{}', 'while-disconnected')", table, gap_id),
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("insert while disconnected");
+
+    sleep(Duration::from_millis(300)).await;
+    proxy.resume();
+
+    for _ in 0..60 {
+        if connect_count.load(Ordering::SeqCst) >= 2 && client.is_connected().await {
+            break;
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    assert!(client.is_connected().await, "client should auto reconnect after socket drop");
+    assert!(
+        connect_count.load(Ordering::SeqCst) >= 2,
+        "shared connection should emit a second on_connect after reconnect"
+    );
+
+    writer
+        .execute_query(
+            &format!("INSERT INTO {} (id, value) VALUES ('{}', 'after-reconnect')", table, live_id),
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("insert after reconnect");
+
+    let mut resumed_ids = Vec::<String>::new();
+    let mut resumed_seq = Some(resume_from);
+    for _ in 0..20 {
+        if resumed_ids.iter().any(|id| id == gap_id) && resumed_ids.iter().any(|id| id == live_id) {
+            break;
+        }
+
+        match timeout(Duration::from_millis(1200), sub.next()).await {
+            Ok(Some(Ok(ev))) => {
+                collect_ids_and_track_seq(
+                    &ev,
+                    &mut resumed_ids,
+                    &mut resumed_seq,
+                    Some(resume_from),
+                    "socket drop resumed",
+                );
+            },
+            Ok(Some(Err(e))) => panic!("subscription error after reconnect: {}", e),
+            Ok(None) => panic!("subscription ended unexpectedly after reconnect"),
+            Err(_) => {},
+        }
+    }
+
+    assert!(
+        resumed_ids.iter().any(|id| id == gap_id),
+        "subscription should resume and receive the row written during the disconnect"
+    );
+    assert!(
+        resumed_ids.iter().any(|id| id == live_id),
+        "subscription should continue receiving live rows after reconnect"
+    );
+    assert!(
+        !resumed_ids.iter().any(|id| id == pre_id),
+        "subscription must not replay rows observed before the socket drop"
+    );
+
+    sub.close().await.ok();
+    client.disconnect().await;
+    proxy.shutdown().await;
+}
+
 /// Without connect(), subscribe() should still work (legacy per-subscription path).
 #[tokio::test]
 async fn test_subscribe_without_connect_legacy() {
@@ -499,21 +891,15 @@ async fn test_three_subscriptions_resume_without_old_rows() {
         .await
         .expect("insert pre C");
 
-    let has_id = |event: &ChangeEvent, target: &str| -> bool {
-        match event {
-            ChangeEvent::Insert { rows, .. } | ChangeEvent::Update { rows, .. } => {
-                rows.iter().any(|r| r.get("id").and_then(|v| v.as_str()) == Some(target))
-            },
-            ChangeEvent::InitialDataBatch { rows, .. } => {
-                rows.iter().any(|r| r.get("id").and_then(|v| v.as_str()) == Some(target))
-            },
-            _ => false,
-        }
-    };
-
     let mut got_pre_a = false;
     let mut got_pre_b = false;
     let mut got_pre_c = false;
+    let mut baseline_ids_a = Vec::<String>::new();
+    let mut baseline_ids_b = Vec::<String>::new();
+    let mut baseline_ids_c = Vec::<String>::new();
+    let mut max_seq_a = None;
+    let mut max_seq_b = None;
+    let mut max_seq_c = None;
 
     for _ in 0..14 {
         if got_pre_a && got_pre_b && got_pre_c {
@@ -522,7 +908,14 @@ async fn test_three_subscriptions_resume_without_old_rows() {
 
         if !got_pre_a {
             if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(900), sub_a.next()).await {
-                if has_id(&ev, pre_a) {
+                collect_ids_and_track_seq(
+                    &ev,
+                    &mut baseline_ids_a,
+                    &mut max_seq_a,
+                    None,
+                    "resume3 baseline A",
+                );
+                if baseline_ids_a.iter().any(|id| id == pre_a) {
                     got_pre_a = true;
                 }
             }
@@ -530,7 +923,14 @@ async fn test_three_subscriptions_resume_without_old_rows() {
 
         if !got_pre_b {
             if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(900), sub_b.next()).await {
-                if has_id(&ev, pre_b) {
+                collect_ids_and_track_seq(
+                    &ev,
+                    &mut baseline_ids_b,
+                    &mut max_seq_b,
+                    None,
+                    "resume3 baseline B",
+                );
+                if baseline_ids_b.iter().any(|id| id == pre_b) {
                     got_pre_b = true;
                 }
             }
@@ -538,7 +938,14 @@ async fn test_three_subscriptions_resume_without_old_rows() {
 
         if !got_pre_c {
             if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(900), sub_c.next()).await {
-                if has_id(&ev, pre_c) {
+                collect_ids_and_track_seq(
+                    &ev,
+                    &mut baseline_ids_c,
+                    &mut max_seq_c,
+                    None,
+                    "resume3 baseline C",
+                );
+                if baseline_ids_c.iter().any(|id| id == pre_c) {
                     got_pre_c = true;
                 }
             }
@@ -548,6 +955,9 @@ async fn test_three_subscriptions_resume_without_old_rows() {
     assert!(got_pre_a, "pre A row should be received");
     assert!(got_pre_b, "pre B row should be received");
     assert!(got_pre_c, "pre C row should be received");
+    let from_a = query_max_seq(&writer, table_a).await;
+    let from_b = query_max_seq(&writer, table_b).await;
+    let from_c = query_max_seq(&writer, table_c).await;
 
     sub_a.close().await.ok();
     sub_b.close().await.ok();
@@ -587,49 +997,40 @@ async fn test_three_subscriptions_resume_without_old_rows() {
 
     client.connect().await.expect("reconnect should succeed");
 
+    let mut config_a = SubscriptionConfig::new(
+        "resume3-post-a",
+        format!("SELECT id, value FROM {}", table_a),
+    );
+    config_a.options = Some(SubscriptionOptions::new().with_from(from_a));
     let mut sub_a2 = client
-        .subscribe_with_config(SubscriptionConfig::new(
-            "resume3-post-a",
-            format!("SELECT id, value FROM {} WHERE id >= '{}'", table_a, gap_a),
-        ))
+        .subscribe_with_config(config_a)
         .await
         .expect("subscribe A post");
+    let mut config_b = SubscriptionConfig::new(
+        "resume3-post-b",
+        format!("SELECT id, value FROM {}", table_b),
+    );
+    config_b.options = Some(SubscriptionOptions::new().with_from(from_b));
     let mut sub_b2 = client
-        .subscribe_with_config(SubscriptionConfig::new(
-            "resume3-post-b",
-            format!("SELECT id, value FROM {} WHERE id >= '{}'", table_b, gap_b),
-        ))
+        .subscribe_with_config(config_b)
         .await
         .expect("subscribe B post");
+    let mut config_c = SubscriptionConfig::new(
+        "resume3-post-c",
+        format!("SELECT id, value FROM {}", table_c),
+    );
+    config_c.options = Some(SubscriptionOptions::new().with_from(from_c));
     let mut sub_c2 = client
-        .subscribe_with_config(SubscriptionConfig::new(
-            "resume3-post-c",
-            format!("SELECT id, value FROM {} WHERE id >= '{}'", table_c, gap_c),
-        ))
+        .subscribe_with_config(config_c)
         .await
         .expect("subscribe C post");
 
     let mut seen_a = Vec::<String>::new();
     let mut seen_b = Vec::<String>::new();
     let mut seen_c = Vec::<String>::new();
-
-    let collect_ids = |event: &ChangeEvent, out: &mut Vec<String>| match event {
-        ChangeEvent::Insert { rows, .. } | ChangeEvent::Update { rows, .. } => {
-            for row in rows.iter() {
-                if let Some(id) = row.get("id").and_then(|v| v.as_str()) {
-                    out.push(id.to_string());
-                }
-            }
-        },
-        ChangeEvent::InitialDataBatch { rows, .. } => {
-            for row in rows {
-                if let Some(id) = row.get("id").and_then(|v| v.as_str()) {
-                    out.push(id.to_string());
-                }
-            }
-        },
-        _ => {},
-    };
+    let mut resumed_max_seq_a = Some(from_a);
+    let mut resumed_max_seq_b = Some(from_b);
+    let mut resumed_max_seq_c = Some(from_c);
 
     for _ in 0..12 {
         if seen_a.iter().any(|id| id == gap_a)
@@ -640,13 +1041,31 @@ async fn test_three_subscriptions_resume_without_old_rows() {
         }
 
         if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(1200), sub_a2.next()).await {
-            collect_ids(&ev, &mut seen_a);
+            collect_ids_and_track_seq(
+                &ev,
+                &mut seen_a,
+                &mut resumed_max_seq_a,
+                Some(from_a),
+                "resume3 resumed A",
+            );
         }
         if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(1200), sub_b2.next()).await {
-            collect_ids(&ev, &mut seen_b);
+            collect_ids_and_track_seq(
+                &ev,
+                &mut seen_b,
+                &mut resumed_max_seq_b,
+                Some(from_b),
+                "resume3 resumed B",
+            );
         }
         if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(1200), sub_c2.next()).await {
-            collect_ids(&ev, &mut seen_c);
+            collect_ids_and_track_seq(
+                &ev,
+                &mut seen_c,
+                &mut resumed_max_seq_c,
+                Some(from_c),
+                "resume3 resumed C",
+            );
         }
     }
 
@@ -662,6 +1081,121 @@ async fn test_three_subscriptions_resume_without_old_rows() {
     sub_b2.close().await.ok();
     sub_c2.close().await.ok();
     client.disconnect().await;
+}
+
+#[tokio::test]
+async fn test_fresh_subscribe_with_from_fails_on_any_stale_seq_row() {
+    let observer = match create_test_client() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Skipping test (observer client unavailable): {}", e);
+            return;
+        },
+    };
+
+    let writer = match create_test_client() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Skipping test (writer client unavailable): {}", e);
+            return;
+        },
+    };
+
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let table = format!("default.resume_from_fresh_{}", suffix);
+
+    ensure_table(&observer, &table).await;
+
+    let baseline_a = "51001";
+    let baseline_b = "51002";
+    let fresh_id = "51003";
+
+    writer
+        .execute_query(
+            &format!("INSERT INTO {} (id, value) VALUES ('{}', 'baseline-a')", table, baseline_a),
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("insert baseline A");
+    writer
+        .execute_query(
+            &format!("INSERT INTO {} (id, value) VALUES ('{}', 'baseline-b')", table, baseline_b),
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("insert baseline B");
+
+    let max_seq = query_max_seq(&observer, &table).await;
+
+    let resumed = create_test_client().expect("create resumed client");
+    resumed.connect().await.expect("resumed connect");
+
+    let mut config = SubscriptionConfig::new(
+        "resume-from-fresh",
+        format!("SELECT id, value FROM {}", table),
+    );
+    config.options = Some(SubscriptionOptions::new().with_from(max_seq));
+
+    let mut resumed_sub = resumed
+        .subscribe_with_config(config)
+        .await
+        .expect("subscribe with from");
+
+    writer
+        .execute_query(
+            &format!("INSERT INTO {} (id, value) VALUES ('{}', 'fresh')", table, fresh_id),
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("insert fresh row");
+
+    let mut replayed_ids = Vec::<String>::new();
+    let mut saw_fresh = false;
+    let mut resumed_max_seq = Some(max_seq);
+
+    for _ in 0..14 {
+        match timeout(Duration::from_millis(1200), resumed_sub.next()).await {
+            Ok(Some(Ok(ev))) => {
+                collect_ids_and_track_seq(
+                    &ev,
+                    &mut replayed_ids,
+                    &mut resumed_max_seq,
+                    Some(max_seq),
+                    "fresh subscribe(from)",
+                );
+                if replayed_ids.iter().any(|id| id == fresh_id) {
+                    saw_fresh = true;
+                }
+                replayed_ids.retain(|id| id != fresh_id);
+
+                if saw_fresh {
+                    break;
+                }
+            },
+            Ok(Some(Err(e))) => panic!("resumed subscription error: {}", e),
+            Ok(None) => panic!("resumed subscription ended unexpectedly"),
+            Err(_) => {},
+        }
+    }
+
+    assert!(saw_fresh, "fresh row should arrive after subscribe(from)");
+    assert!(
+        !replayed_ids.iter().any(|id| id == baseline_a || id == baseline_b),
+        "baseline rows should not be replayed after subscribe(from); saw {:?}",
+        replayed_ids
+    );
+
+    resumed_sub.close().await.ok();
+    resumed.disconnect().await;
 }
 
 /// Real-world chaos scenario: repeated disconnect/reconnect cycles with three
@@ -703,36 +1237,6 @@ async fn test_three_subscriptions_repeated_reconnect_cycles() {
     let pre_a = "41001";
     let pre_b = "42001";
     let pre_c = "43001";
-
-    let has_id = |event: &ChangeEvent, target: &str| -> bool {
-        match event {
-            ChangeEvent::Insert { rows, .. } | ChangeEvent::Update { rows, .. } => {
-                rows.iter().any(|r| r.get("id").and_then(|v| v.as_str()) == Some(target))
-            },
-            ChangeEvent::InitialDataBatch { rows, .. } => {
-                rows.iter().any(|r| r.get("id").and_then(|v| v.as_str()) == Some(target))
-            },
-            _ => false,
-        }
-    };
-
-    let collect_ids = |event: &ChangeEvent, out: &mut Vec<String>| match event {
-        ChangeEvent::Insert { rows, .. } | ChangeEvent::Update { rows, .. } => {
-            for row in rows.iter() {
-                if let Some(id) = row.get("id").and_then(|v| v.as_str()) {
-                    out.push(id.to_string());
-                }
-            }
-        },
-        ChangeEvent::InitialDataBatch { rows, .. } => {
-            for row in rows {
-                if let Some(id) = row.get("id").and_then(|v| v.as_str()) {
-                    out.push(id.to_string());
-                }
-            }
-        },
-        _ => {},
-    };
 
     let mut pre_sub_a = client
         .subscribe_with_config(SubscriptionConfig::new(
@@ -791,6 +1295,12 @@ async fn test_three_subscriptions_repeated_reconnect_cycles() {
     let mut got_pre_a = false;
     let mut got_pre_b = false;
     let mut got_pre_c = false;
+    let mut pre_ids_a = Vec::<String>::new();
+    let mut pre_ids_b = Vec::<String>::new();
+    let mut pre_ids_c = Vec::<String>::new();
+    let mut last_seq_a = None;
+    let mut last_seq_b = None;
+    let mut last_seq_c = None;
     for _ in 0..14 {
         if got_pre_a && got_pre_b && got_pre_c {
             break;
@@ -798,17 +1308,20 @@ async fn test_three_subscriptions_repeated_reconnect_cycles() {
 
         if !got_pre_a {
             if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(900), pre_sub_a.next()).await {
-                got_pre_a = has_id(&ev, pre_a);
+                collect_ids_and_track_seq(&ev, &mut pre_ids_a, &mut last_seq_a, None, "chaos pre A");
+                got_pre_a = pre_ids_a.iter().any(|id| id == pre_a);
             }
         }
         if !got_pre_b {
             if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(900), pre_sub_b.next()).await {
-                got_pre_b = has_id(&ev, pre_b);
+                collect_ids_and_track_seq(&ev, &mut pre_ids_b, &mut last_seq_b, None, "chaos pre B");
+                got_pre_b = pre_ids_b.iter().any(|id| id == pre_b);
             }
         }
         if !got_pre_c {
             if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(900), pre_sub_c.next()).await {
-                got_pre_c = has_id(&ev, pre_c);
+                collect_ids_and_track_seq(&ev, &mut pre_ids_c, &mut last_seq_c, None, "chaos pre C");
+                got_pre_c = pre_ids_c.iter().any(|id| id == pre_c);
             }
         }
     }
@@ -816,6 +1329,9 @@ async fn test_three_subscriptions_repeated_reconnect_cycles() {
     assert!(got_pre_a, "pre A row should be received");
     assert!(got_pre_b, "pre B row should be received");
     assert!(got_pre_c, "pre C row should be received");
+    let mut last_seq_a = query_max_seq(&writer, &table_a).await;
+    let mut last_seq_b = query_max_seq(&writer, &table_b).await;
+    let mut last_seq_c = query_max_seq(&writer, &table_c).await;
 
     pre_sub_a.close().await.ok();
     pre_sub_b.close().await.ok();
@@ -825,6 +1341,9 @@ async fn test_three_subscriptions_repeated_reconnect_cycles() {
         let gap_a = format!("{}", 41000 + (cycle * 10) + 2);
         let gap_b = format!("{}", 42000 + (cycle * 10) + 2);
         let gap_c = format!("{}", 43000 + (cycle * 10) + 2);
+        let live_a = format!("{}", 41000 + (cycle * 10) + 3);
+        let live_b = format!("{}", 42000 + (cycle * 10) + 3);
+        let live_c = format!("{}", 43000 + (cycle * 10) + 3);
         client.disconnect().await;
         sleep(Duration::from_millis(150)).await;
         assert!(!client.is_connected().await, "cycle {} should disconnect", cycle);
@@ -868,58 +1387,132 @@ async fn test_three_subscriptions_repeated_reconnect_cycles() {
 
         client.connect().await.expect("reconnect should succeed");
 
+        let mut config_a = SubscriptionConfig::new(
+            format!("resume3-chaos-a-{}", cycle),
+            format!("SELECT id, value FROM {}", table_a),
+        );
+        config_a.options = Some(SubscriptionOptions::new().with_from(last_seq_a));
         let mut sub_a = client
-            .subscribe_with_config(SubscriptionConfig::new(
-                format!("resume3-chaos-a-{}", cycle),
-                format!("SELECT id, value FROM {} WHERE id >= '{}'", table_a, gap_a),
-            ))
+            .subscribe_with_config(config_a)
             .await
             .expect("subscribe cycle A");
+        let mut config_b = SubscriptionConfig::new(
+            format!("resume3-chaos-b-{}", cycle),
+            format!("SELECT id, value FROM {}", table_b),
+        );
+        config_b.options = Some(SubscriptionOptions::new().with_from(last_seq_b));
         let mut sub_b = client
-            .subscribe_with_config(SubscriptionConfig::new(
-                format!("resume3-chaos-b-{}", cycle),
-                format!("SELECT id, value FROM {} WHERE id >= '{}'", table_b, gap_b),
-            ))
+            .subscribe_with_config(config_b)
             .await
             .expect("subscribe cycle B");
+        let mut config_c = SubscriptionConfig::new(
+            format!("resume3-chaos-c-{}", cycle),
+            format!("SELECT id, value FROM {}", table_c),
+        );
+        config_c.options = Some(SubscriptionOptions::new().with_from(last_seq_c));
         let mut sub_c = client
-            .subscribe_with_config(SubscriptionConfig::new(
-                format!("resume3-chaos-c-{}", cycle),
-                format!("SELECT id, value FROM {} WHERE id >= '{}'", table_c, gap_c),
-            ))
+            .subscribe_with_config(config_c)
             .await
             .expect("subscribe cycle C");
+
+        writer
+            .execute_query(
+                &format!(
+                    "INSERT INTO {} (id, value) VALUES ('{}', 'chaos-live-a-{}')",
+                    table_a, live_a, cycle
+                ),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("insert live A");
+        writer
+            .execute_query(
+                &format!(
+                    "INSERT INTO {} (id, value) VALUES ('{}', 'chaos-live-b-{}')",
+                    table_b, live_b, cycle
+                ),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("insert live B");
+        writer
+            .execute_query(
+                &format!(
+                    "INSERT INTO {} (id, value) VALUES ('{}', 'chaos-live-c-{}')",
+                    table_c, live_c, cycle
+                ),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("insert live C");
 
         let mut seen_a = Vec::<String>::new();
         let mut seen_b = Vec::<String>::new();
         let mut seen_c = Vec::<String>::new();
+        let mut cycle_max_seq_a = Some(last_seq_a);
+        let mut cycle_max_seq_b = Some(last_seq_b);
+        let mut cycle_max_seq_c = Some(last_seq_c);
 
         for _ in 0..14 {
             if seen_a.iter().any(|id| id == &gap_a)
+                && seen_a.iter().any(|id| id == &live_a)
                 && seen_b.iter().any(|id| id == &gap_b)
+                && seen_b.iter().any(|id| id == &live_b)
                 && seen_c.iter().any(|id| id == &gap_c)
+                && seen_c.iter().any(|id| id == &live_c)
             {
                 break;
             }
 
             if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(1200), sub_a.next()).await {
-                collect_ids(&ev, &mut seen_a);
+                collect_ids_and_track_seq(
+                    &ev,
+                    &mut seen_a,
+                    &mut cycle_max_seq_a,
+                    Some(last_seq_a),
+                    &format!("chaos cycle {} A", cycle),
+                );
             }
             if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(1200), sub_b.next()).await {
-                collect_ids(&ev, &mut seen_b);
+                collect_ids_and_track_seq(
+                    &ev,
+                    &mut seen_b,
+                    &mut cycle_max_seq_b,
+                    Some(last_seq_b),
+                    &format!("chaos cycle {} B", cycle),
+                );
             }
             if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(1200), sub_c.next()).await {
-                collect_ids(&ev, &mut seen_c);
+                collect_ids_and_track_seq(
+                    &ev,
+                    &mut seen_c,
+                    &mut cycle_max_seq_c,
+                    Some(last_seq_c),
+                    &format!("chaos cycle {} C", cycle),
+                );
             }
         }
 
         assert!(seen_a.iter().any(|id| id == &gap_a), "cycle {} A should receive gap row", cycle);
+        assert!(seen_a.iter().any(|id| id == &live_a), "cycle {} A should receive live row", cycle);
         assert!(seen_b.iter().any(|id| id == &gap_b), "cycle {} B should receive gap row", cycle);
+        assert!(seen_b.iter().any(|id| id == &live_b), "cycle {} B should receive live row", cycle);
         assert!(seen_c.iter().any(|id| id == &gap_c), "cycle {} C should receive gap row", cycle);
+        assert!(seen_c.iter().any(|id| id == &live_c), "cycle {} C should receive live row", cycle);
 
         assert!(!seen_a.iter().any(|id| id == pre_a), "cycle {} A replayed pre row", cycle);
         assert!(!seen_b.iter().any(|id| id == pre_b), "cycle {} B replayed pre row", cycle);
         assert!(!seen_c.iter().any(|id| id == pre_c), "cycle {} C replayed pre row", cycle);
+
+        last_seq_a = query_max_seq(&writer, &table_a).await;
+        last_seq_b = query_max_seq(&writer, &table_b).await;
+        last_seq_c = query_max_seq(&writer, &table_c).await;
 
         sub_a.close().await.ok();
         sub_b.close().await.ok();
@@ -927,6 +1520,230 @@ async fn test_three_subscriptions_repeated_reconnect_cycles() {
     }
 
     client.disconnect().await;
+}
+
+#[tokio::test]
+async fn test_multiple_subscriptions_with_distinct_from_values_fail_fast_on_stale_rows() {
+    let observer = match create_test_client() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Skipping test (observer client unavailable): {}", e);
+            return;
+        },
+    };
+
+    let writer = match create_test_client() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Skipping test (writer client unavailable): {}", e);
+            return;
+        },
+    };
+
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let table_a = format!("default.resume_multi_from_a_{}", suffix);
+    let table_b = format!("default.resume_multi_from_b_{}", suffix);
+    let table_c = format!("default.resume_multi_from_c_{}", suffix);
+
+    ensure_table(&observer, &table_a).await;
+    ensure_table(&observer, &table_b).await;
+    ensure_table(&observer, &table_c).await;
+
+    observer.connect().await.expect("observer connect");
+
+    let baseline_a = "61001";
+    let baseline_b = "62001";
+    let baseline_c = "63001";
+    let fresh_a = "61002";
+    let fresh_b = "62002";
+    let fresh_c = "63002";
+
+    for (table, id, value) in [
+        (&table_a, baseline_a, "baseline-a"),
+        (&table_b, baseline_b, "baseline-b"),
+        (&table_c, baseline_c, "baseline-c"),
+    ] {
+        writer
+            .execute_query(
+                &format!("INSERT INTO {} (id, value) VALUES ('{}', '{}')", table, id, value),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("insert baseline row");
+    }
+
+    let mut baseline_sub_a = observer
+        .subscribe_with_config(SubscriptionConfig::new(
+            "multi-from-baseline-a",
+            format!("SELECT id, value FROM {}", table_a),
+        ))
+        .await
+        .expect("subscribe baseline A");
+    let mut baseline_sub_b = observer
+        .subscribe_with_config(SubscriptionConfig::new(
+            "multi-from-baseline-b",
+            format!("SELECT id, value FROM {}", table_b),
+        ))
+        .await
+        .expect("subscribe baseline B");
+    let mut baseline_sub_c = observer
+        .subscribe_with_config(SubscriptionConfig::new(
+            "multi-from-baseline-c",
+            format!("SELECT id, value FROM {}", table_c),
+        ))
+        .await
+        .expect("subscribe baseline C");
+
+    let mut ids_a = Vec::<String>::new();
+    let mut ids_b = Vec::<String>::new();
+    let mut ids_c = Vec::<String>::new();
+    let mut from_a = None;
+    let mut from_b = None;
+    let mut from_c = None;
+
+    for _ in 0..12 {
+        if ids_a.iter().any(|id| id == baseline_a)
+            && ids_b.iter().any(|id| id == baseline_b)
+            && ids_c.iter().any(|id| id == baseline_c)
+        {
+            break;
+        }
+
+        if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(1200), baseline_sub_a.next()).await {
+            collect_ids_and_track_seq(&ev, &mut ids_a, &mut from_a, None, "multi baseline A");
+        }
+        if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(1200), baseline_sub_b.next()).await {
+            collect_ids_and_track_seq(&ev, &mut ids_b, &mut from_b, None, "multi baseline B");
+        }
+        if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(1200), baseline_sub_c.next()).await {
+            collect_ids_and_track_seq(&ev, &mut ids_c, &mut from_c, None, "multi baseline C");
+        }
+    }
+
+    assert!(ids_a.iter().any(|id| id == baseline_a));
+    assert!(ids_b.iter().any(|id| id == baseline_b));
+    assert!(ids_c.iter().any(|id| id == baseline_c));
+    let from_a = from_a.expect("baseline A max seq should be captured");
+    let from_b = from_b.expect("baseline B max seq should be captured");
+    let from_c = from_c.expect("baseline C max seq should be captured");
+
+    baseline_sub_a.close().await.ok();
+    baseline_sub_b.close().await.ok();
+    baseline_sub_c.close().await.ok();
+    observer.disconnect().await;
+    sleep(Duration::from_millis(150)).await;
+
+    for (table, id, value) in [
+        (&table_a, fresh_a, "fresh-a"),
+        (&table_b, fresh_b, "fresh-b"),
+        (&table_c, fresh_c, "fresh-c"),
+    ] {
+        writer
+            .execute_query(
+                &format!("INSERT INTO {} (id, value) VALUES ('{}', '{}')", table, id, value),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("insert fresh row");
+    }
+
+    let resumed = create_test_client().expect("create resumed client");
+    resumed.connect().await.expect("resumed connect");
+
+    let mut config_a = SubscriptionConfig::new(
+        "multi-from-resumed-a",
+        format!("SELECT id, value FROM {}", table_a),
+    );
+    config_a.options = Some(SubscriptionOptions::new().with_from(from_a));
+    let mut config_b = SubscriptionConfig::new(
+        "multi-from-resumed-b",
+        format!("SELECT id, value FROM {}", table_b),
+    );
+    config_b.options = Some(SubscriptionOptions::new().with_from(from_b));
+    let mut config_c = SubscriptionConfig::new(
+        "multi-from-resumed-c",
+        format!("SELECT id, value FROM {}", table_c),
+    );
+    config_c.options = Some(SubscriptionOptions::new().with_from(from_c));
+
+    let mut resumed_a = resumed
+        .subscribe_with_config(config_a)
+        .await
+        .expect("subscribe resumed A");
+    let mut resumed_b = resumed
+        .subscribe_with_config(config_b)
+        .await
+        .expect("subscribe resumed B");
+    let mut resumed_c = resumed
+        .subscribe_with_config(config_c)
+        .await
+        .expect("subscribe resumed C");
+
+    let mut resumed_ids_a = Vec::<String>::new();
+    let mut resumed_ids_b = Vec::<String>::new();
+    let mut resumed_ids_c = Vec::<String>::new();
+    let mut resumed_seq_a = Some(from_a);
+    let mut resumed_seq_b = Some(from_b);
+    let mut resumed_seq_c = Some(from_c);
+
+    for _ in 0..14 {
+        if resumed_ids_a.iter().any(|id| id == fresh_a)
+            && resumed_ids_b.iter().any(|id| id == fresh_b)
+            && resumed_ids_c.iter().any(|id| id == fresh_c)
+        {
+            break;
+        }
+
+        if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(1200), resumed_a.next()).await {
+            collect_ids_and_track_seq(
+                &ev,
+                &mut resumed_ids_a,
+                &mut resumed_seq_a,
+                Some(from_a),
+                "multi resumed A",
+            );
+        }
+        if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(1200), resumed_b.next()).await {
+            collect_ids_and_track_seq(
+                &ev,
+                &mut resumed_ids_b,
+                &mut resumed_seq_b,
+                Some(from_b),
+                "multi resumed B",
+            );
+        }
+        if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(1200), resumed_c.next()).await {
+            collect_ids_and_track_seq(
+                &ev,
+                &mut resumed_ids_c,
+                &mut resumed_seq_c,
+                Some(from_c),
+                "multi resumed C",
+            );
+        }
+    }
+
+    assert!(resumed_ids_a.iter().any(|id| id == fresh_a), "A should receive fresh row");
+    assert!(resumed_ids_b.iter().any(|id| id == fresh_b), "B should receive fresh row");
+    assert!(resumed_ids_c.iter().any(|id| id == fresh_c), "C should receive fresh row");
+    assert!(
+        !resumed_ids_a.iter().any(|id| id == baseline_a)
+            && !resumed_ids_b.iter().any(|id| id == baseline_b)
+            && !resumed_ids_c.iter().any(|id| id == baseline_c),
+        "baseline rows must not replay after subscribe(from)"
+    );
+
+    resumed_a.close().await.ok();
+    resumed_b.close().await.ok();
+    resumed_c.close().await.ok();
+    resumed.disconnect().await;
 }
 
 // ── Tests for client.subscriptions() and unsubscribe verification ────────
@@ -1090,13 +1907,484 @@ async fn test_subscription_handle_has_id_and_close() {
     sub.close().await.expect("close should succeed");
     assert!(sub.is_closed(), "subscription should be closed after close()");
 
-    // Verify it's removed from client subscriptions
+    // Verify it's removed from active subscriptions (may appear as closed
+    // in seq_id_cache).
     sleep(Duration::from_millis(300)).await;
     let subs = client.subscriptions().await;
     assert!(
-        !subs.iter().any(|s| s.id == sub_id),
-        "closed subscription should not appear in client.subscriptions()"
+        !subs.iter().any(|s| s.id == sub_id && !s.closed),
+        "closed subscription should not appear as active in client.subscriptions()"
     );
 
+    client.disconnect().await;
+}
+
+/// After closing a subscription and re-subscribing with the same ID, the
+/// new subscription should resume from the last received seq_id (not from
+/// the beginning). This tests the `seq_id_cache` mechanism that preserves
+/// `last_seq_id` across close/resubscribe cycles.
+#[tokio::test]
+async fn test_close_resubscribe_resumes_from_last_seq_id() {
+    let client = match create_test_client() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Skipping test (server not available): {}", e);
+            return;
+        },
+    };
+
+    let writer = match create_test_client() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Skipping test (writer client unavailable): {}", e);
+            return;
+        },
+    };
+
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let table = format!("default.resume_close_resub_{}", suffix);
+    ensure_table(&client, &table).await;
+
+    // Insert baseline row before subscribing.
+    writer
+        .execute_query(
+            &format!("INSERT INTO {} (id, value) VALUES ('pre-1', 'baseline')", table),
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("insert baseline row");
+
+    // ── First subscription: observe baseline + one live insert ──────────
+    client.connect().await.expect("connect");
+
+    let sub_id = "resume-close-test";
+    let config = SubscriptionConfig::new(sub_id, format!("SELECT id, value FROM {}", table));
+    let mut sub = client
+        .subscribe_with_config(config)
+        .await
+        .expect("first subscribe");
+
+    // Drain until we see the baseline row in initial data.
+    let mut first_ids = Vec::<String>::new();
+    let mut first_max_seq: Option<SeqId> = None;
+    for _ in 0..6 {
+        match timeout(Duration::from_millis(2000), sub.next()).await {
+            Ok(Some(Ok(ev))) => {
+                collect_ids_and_track_seq(&ev, &mut first_ids, &mut first_max_seq, None, "close-resub first");
+                if first_ids.iter().any(|id| id == "pre-1") {
+                    break;
+                }
+            },
+            _ => {},
+        }
+    }
+    assert!(first_ids.iter().any(|id| id == "pre-1"), "should observe baseline row");
+    assert!(first_max_seq.is_some(), "should have received a seq_id");
+
+    // Insert a second row while subscribed.
+    writer
+        .execute_query(
+            &format!("INSERT INTO {} (id, value) VALUES ('live-1', 'during-first')", table),
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("insert live row");
+
+    // Drain until we see the live insert.
+    for _ in 0..8 {
+        match timeout(Duration::from_millis(2000), sub.next()).await {
+            Ok(Some(Ok(ev))) => {
+                collect_ids_and_track_seq(&ev, &mut first_ids, &mut first_max_seq, None, "close-resub live");
+                if first_ids.iter().any(|id| id == "live-1") {
+                    break;
+                }
+            },
+            _ => {},
+        }
+    }
+    assert!(first_ids.iter().any(|id| id == "live-1"), "should observe live-1");
+    let latest_seq = first_max_seq.unwrap();
+
+    // ── Close first subscription ────────────────────────────────────────
+    sub.close().await.expect("close first sub");
+    sleep(Duration::from_millis(200)).await;
+
+    // The closed subscription's last_seq_id should be available via the
+    // seq_id_cache (shown in subscriptions() as a closed entry).
+    let subs_snapshot = client.subscriptions().await;
+    let cached = subs_snapshot.iter().find(|s| s.id == sub_id);
+    assert!(
+        cached.is_some(),
+        "seq_id_cache should still expose the closed subscription's seq_id"
+    );
+    assert!(
+        cached.unwrap().last_seq_id.is_some(),
+        "cached last_seq_id should be set"
+    );
+    assert!(cached.unwrap().closed, "entry should be marked as closed");
+
+    // Insert a row while disconnected from the subscription.
+    writer
+        .execute_query(
+            &format!("INSERT INTO {} (id, value) VALUES ('gap-1', 'between-subs')", table),
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("insert gap row");
+
+    // ── Re-subscribe with the same ID (no explicit `from`) ──────────────
+    // The shared connection should inherit the last_seq_id from the cache
+    // and resume from there, NOT from the beginning.
+    let config2 = SubscriptionConfig::new(sub_id, format!("SELECT id, value FROM {}", table));
+    let mut sub2 = client
+        .subscribe_with_config(config2)
+        .await
+        .expect("second subscribe");
+
+    let mut second_ids = Vec::<String>::new();
+    let mut second_max_seq: Option<SeqId> = Some(latest_seq);
+
+    for _ in 0..12 {
+        match timeout(Duration::from_millis(2000), sub2.next()).await {
+            Ok(Some(Ok(ev))) => {
+                collect_ids_and_track_seq(
+                    &ev,
+                    &mut second_ids,
+                    &mut second_max_seq,
+                    Some(latest_seq),
+                    "close-resub second",
+                );
+                if second_ids.iter().any(|id| id == "gap-1") {
+                    break;
+                }
+            },
+            Ok(Some(Err(e))) => panic!("second sub error: {}", e),
+            Ok(None) => panic!("second sub ended unexpectedly"),
+            Err(_) => {},
+        }
+    }
+
+    // The gap row should be received (it was inserted after the last_seq_id
+    // from the first subscription).
+    assert!(
+        second_ids.iter().any(|id| id == "gap-1"),
+        "gap row should be received on re-subscribe"
+    );
+
+    // Baseline and first live row should NOT be replayed.
+    assert!(
+        !second_ids.iter().any(|id| id == "pre-1"),
+        "baseline row should NOT be replayed on re-subscribe; saw {:?}",
+        second_ids
+    );
+    assert!(
+        !second_ids.iter().any(|id| id == "live-1"),
+        "live-1 should NOT be replayed on re-subscribe; saw {:?}",
+        second_ids
+    );
+
+    sub2.close().await.ok();
+    client.disconnect().await;
+}
+
+/// Verifies the seq_id_cache also works when the original subscription was
+/// opened with an explicit `from` value. On re-subscribe, the new
+/// subscription should use `max(original_from, cached_last_seq_id)`.
+#[tokio::test]
+async fn test_close_resubscribe_with_explicit_from_uses_max() {
+    let client = match create_test_client() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Skipping test (server not available): {}", e);
+            return;
+        },
+    };
+
+    let writer = match create_test_client() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Skipping test (writer client unavailable): {}", e);
+            return;
+        },
+    };
+
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let table = format!("default.resume_from_max_{}", suffix);
+    ensure_table(&client, &table).await;
+
+    // Insert two baseline rows.
+    writer
+        .execute_query(
+            &format!("INSERT INTO {} (id, value) VALUES ('base-a', 'a')", table),
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("insert base-a");
+    writer
+        .execute_query(
+            &format!("INSERT INTO {} (id, value) VALUES ('base-b', 'b')", table),
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("insert base-b");
+
+    let from_seq = query_max_seq(&writer, &table).await;
+
+    // Insert another row AFTER the from_seq checkpoint.
+    writer
+        .execute_query(
+            &format!("INSERT INTO {} (id, value) VALUES ('after-from', 'c')", table),
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("insert after-from");
+
+    // ── First subscription with explicit from ───────────────────────────
+    client.connect().await.expect("connect");
+
+    let sub_id = "resume-from-max-test";
+    let mut config = SubscriptionConfig::new(sub_id, format!("SELECT id, value FROM {}", table));
+    config.options = Some(SubscriptionOptions::new().with_from(from_seq));
+
+    let mut sub = client
+        .subscribe_with_config(config)
+        .await
+        .expect("first subscribe with from");
+
+    let mut first_ids = Vec::<String>::new();
+    let mut first_max_seq: Option<SeqId> = Some(from_seq);
+
+    for _ in 0..10 {
+        match timeout(Duration::from_millis(2000), sub.next()).await {
+            Ok(Some(Ok(ev))) => {
+                collect_ids_and_track_seq(
+                    &ev,
+                    &mut first_ids,
+                    &mut first_max_seq,
+                    Some(from_seq),
+                    "from-max first",
+                );
+                if first_ids.iter().any(|id| id == "after-from") {
+                    break;
+                }
+            },
+            _ => {},
+        }
+    }
+
+    assert!(
+        first_ids.iter().any(|id| id == "after-from"),
+        "should observe after-from row"
+    );
+    assert!(
+        !first_ids.iter().any(|id| id == "base-a" || id == "base-b"),
+        "baseline rows should not appear with from filter"
+    );
+
+    let cached_seq = first_max_seq.unwrap();
+    assert!(cached_seq > from_seq, "cached_seq should be > from_seq");
+
+    // ── Close and re-subscribe WITHOUT explicit from ────────────────────
+    sub.close().await.expect("close");
+    sleep(Duration::from_millis(200)).await;
+
+    // Insert a gap row.
+    writer
+        .execute_query(
+            &format!("INSERT INTO {} (id, value) VALUES ('gap-x', 'gap')", table),
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("insert gap-x");
+
+    // Re-subscribe with same ID but no explicit from — should resume from
+    // cached_seq (the higher value), not from_seq (the original explicit).
+    let config2 = SubscriptionConfig::new(sub_id, format!("SELECT id, value FROM {}", table));
+    let mut sub2 = client
+        .subscribe_with_config(config2)
+        .await
+        .expect("second subscribe (no from)");
+
+    let mut second_ids = Vec::<String>::new();
+    let mut second_max_seq: Option<SeqId> = Some(cached_seq);
+
+    for _ in 0..10 {
+        match timeout(Duration::from_millis(2000), sub2.next()).await {
+            Ok(Some(Ok(ev))) => {
+                collect_ids_and_track_seq(
+                    &ev,
+                    &mut second_ids,
+                    &mut second_max_seq,
+                    Some(cached_seq),
+                    "from-max second",
+                );
+                if second_ids.iter().any(|id| id == "gap-x") {
+                    break;
+                }
+            },
+            _ => {},
+        }
+    }
+
+    assert!(
+        second_ids.iter().any(|id| id == "gap-x"),
+        "gap row should be received"
+    );
+    assert!(
+        !second_ids.iter().any(|id| id == "after-from"),
+        "after-from should NOT be replayed (was seen in first subscription)"
+    );
+    assert!(
+        !second_ids.iter().any(|id| id == "base-a" || id == "base-b"),
+        "baseline rows should NOT appear"
+    );
+
+    sub2.close().await.ok();
+    client.disconnect().await;
+}
+
+/// Verify that disconnect() + connect() + re-subscribe with explicit from
+/// resumes correctly.
+#[tokio::test]
+async fn test_disconnect_reconnect_resubscribe_resumes_seq_id() {
+    let client = match create_test_client() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Skipping test (server not available): {}", e);
+            return;
+        },
+    };
+
+    let writer = match create_test_client() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Skipping test (writer client unavailable): {}", e);
+            return;
+        },
+    };
+
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let table = format!("default.disc_reconn_resub_{}", suffix);
+    ensure_table(&client, &table).await;
+
+    // Insert baseline row.
+    writer
+        .execute_query(
+            &format!("INSERT INTO {} (id, value) VALUES ('row-1', 'first')", table),
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("insert row-1");
+
+    client.connect().await.expect("connect");
+
+    let sub_id = "disc-reconn-test";
+    let config = SubscriptionConfig::new(sub_id, format!("SELECT id, value FROM {}", table));
+    let mut sub = client
+        .subscribe_with_config(config)
+        .await
+        .expect("first subscribe");
+
+    let mut seen_ids = Vec::<String>::new();
+    let mut max_seq: Option<SeqId> = None;
+
+    for _ in 0..8 {
+        match timeout(Duration::from_millis(2000), sub.next()).await {
+            Ok(Some(Ok(ev))) => {
+                collect_ids_and_track_seq(&ev, &mut seen_ids, &mut max_seq, None, "disc-reconn first");
+                if seen_ids.iter().any(|id| id == "row-1") {
+                    break;
+                }
+            },
+            _ => {},
+        }
+    }
+    assert!(seen_ids.iter().any(|id| id == "row-1"), "should see row-1");
+    let last_seq = max_seq.unwrap();
+
+    // Close subscription and disconnect (simulates what happens when a
+    // Flutter app detects disconnect and tears down).
+    sub.close().await.expect("close sub");
+    client.disconnect().await;
+    sleep(Duration::from_millis(300)).await;
+
+    // Insert rows while disconnected.
+    writer
+        .execute_query(
+            &format!("INSERT INTO {} (id, value) VALUES ('row-2', 'while-away')", table),
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("insert row-2");
+
+    // Reconnect and re-subscribe with the same ID + explicit from.
+    client.connect().await.expect("reconnect");
+
+    let mut config2 = SubscriptionConfig::new(sub_id, format!("SELECT id, value FROM {}", table));
+    config2.options = Some(SubscriptionOptions::new().with_from(last_seq));
+
+    let mut sub2 = client
+        .subscribe_with_config(config2)
+        .await
+        .expect("re-subscribe with from");
+
+    let mut second_ids = Vec::<String>::new();
+    let mut second_max_seq: Option<SeqId> = Some(last_seq);
+
+    for _ in 0..10 {
+        match timeout(Duration::from_millis(2000), sub2.next()).await {
+            Ok(Some(Ok(ev))) => {
+                collect_ids_and_track_seq(
+                    &ev,
+                    &mut second_ids,
+                    &mut second_max_seq,
+                    Some(last_seq),
+                    "disc-reconn second",
+                );
+                if second_ids.iter().any(|id| id == "row-2") {
+                    break;
+                }
+            },
+            _ => {},
+        }
+    }
+
+    assert!(
+        second_ids.iter().any(|id| id == "row-2"),
+        "gap row should be received after reconnect"
+    );
+    assert!(
+        !second_ids.iter().any(|id| id == "row-1"),
+        "old row should NOT be replayed"
+    );
+
+    sub2.close().await.ok();
     client.disconnect().await;
 }

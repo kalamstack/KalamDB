@@ -16,6 +16,13 @@ use crate::seq_id::SeqId;
 /// Name of the system sequence column in every subscription row.
 pub const SEQ_COLUMN: &str = "_seq";
 
+/// Extract a row-level `_seq` value, if present and parseable.
+pub fn row_seq(row: &HashMap<String, KalamCellValue>) -> Option<SeqId> {
+    row.get(SEQ_COLUMN)
+        .and_then(KalamCellValue::as_big_int)
+        .map(SeqId::from_i64)
+}
+
 /// Extract the maximum `_seq` value from a slice of named-column rows.
 ///
 /// Returns `None` when no row contains a parseable `_seq` value.
@@ -29,13 +36,24 @@ pub const SEQ_COLUMN: &str = "_seq";
 pub fn extract_max_seq(rows: &[HashMap<String, KalamCellValue>]) -> Option<SeqId> {
     let mut max: Option<i64> = None;
     for row in rows {
-        if let Some(cell) = row.get(SEQ_COLUMN) {
-            if let Some(seq) = cell.as_big_int() {
-                max = Some(max.map_or(seq, |prev| prev.max(seq)));
-            }
+        if let Some(seq) = row_seq(row).map(|value| value.as_i64()) {
+            max = Some(max.map_or(seq, |prev| prev.max(seq)));
         }
     }
     max.map(SeqId::from_i64)
+}
+
+/// Remove rows whose `_seq` is less than or equal to `after`.
+///
+/// Rows without a parseable `_seq` are retained because the client cannot
+/// prove they are stale.
+pub fn retain_rows_after(
+    rows: &mut Vec<HashMap<String, KalamCellValue>>,
+    after: SeqId,
+) -> usize {
+    let original_len = rows.len();
+    rows.retain(|row| row_seq(row).map_or(true, |seq| seq > after));
+    original_len.saturating_sub(rows.len())
 }
 
 /// Update `current` to `candidate` if `candidate` is strictly greater
@@ -105,6 +123,39 @@ mod tests {
         let mut row = HashMap::new();
         row.insert("id".to_string(), KalamCellValue::text("abc"));
         assert_eq!(extract_max_seq(&[row]), None);
+    }
+
+    #[test]
+    fn row_seq_reads_text_and_numeric_values() {
+        let mut text_row = HashMap::new();
+        text_row.insert(SEQ_COLUMN.to_string(), KalamCellValue::text("55"));
+        assert_eq!(row_seq(&text_row), Some(SeqId::from_i64(55)));
+
+        let mut int_row = HashMap::new();
+        int_row.insert(SEQ_COLUMN.to_string(), KalamCellValue::int(77));
+        assert_eq!(row_seq(&int_row), Some(SeqId::from_i64(77)));
+    }
+
+    #[test]
+    fn retain_rows_after_filters_stale_rows() {
+        let mut rows = vec![row_with_seq(10), row_with_seq(20), row_with_seq(30)];
+
+        let removed = retain_rows_after(&mut rows, SeqId::from_i64(20));
+
+        assert_eq!(removed, 2);
+        assert_eq!(extract_max_seq(&rows), Some(SeqId::from_i64(30)));
+    }
+
+    #[test]
+    fn retain_rows_after_keeps_rows_without_seq() {
+        let mut row = HashMap::new();
+        row.insert("id".to_string(), KalamCellValue::text("abc"));
+        let mut rows = vec![row];
+
+        let removed = retain_rows_after(&mut rows, SeqId::from_i64(20));
+
+        assert_eq!(removed, 0);
+        assert_eq!(rows.len(), 1);
     }
 
     #[test]

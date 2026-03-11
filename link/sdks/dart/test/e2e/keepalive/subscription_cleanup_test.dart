@@ -16,6 +16,20 @@ import 'package:kalam_link/kalam_link.dart';
 
 import '../helpers.dart';
 
+Future<void> _waitForCondition(
+  bool Function() predicate, {
+  Duration timeout = const Duration(seconds: 20),
+  Duration interval = const Duration(milliseconds: 200),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (!predicate()) {
+    if (DateTime.now().isAfter(deadline)) {
+      throw TimeoutException('Timed out waiting for condition');
+    }
+    await sleep(interval);
+  }
+}
+
 void main() {
   group('Subscription Cleanup', skip: skipIfNoIntegration, () {
     // ─────────────────────────────────────────────────────────────────
@@ -47,8 +61,7 @@ void main() {
             );
             final sub = stream.listen(events.add);
 
-            // Wait for ACK.
-            await sleep(const Duration(seconds: 2));
+            await _waitForCondition(() => events.whereType<AckEvent>().isNotEmpty);
             expect(events.whereType<AckEvent>(), isNotEmpty,
                 reason: 'Iteration $i: should receive AckEvent');
 
@@ -69,7 +82,7 @@ void main() {
           );
           final sub = stream.listen(events.add);
 
-          await sleep(const Duration(seconds: 2));
+          await _waitForCondition(() => events.whereType<AckEvent>().isNotEmpty);
           expect(events.whereType<AckEvent>(), isNotEmpty,
               reason:
                   'Final subscribe should succeed (not SUBSCRIPTION_LIMIT_EXCEEDED)');

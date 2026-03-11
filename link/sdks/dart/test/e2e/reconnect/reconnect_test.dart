@@ -54,7 +54,25 @@ void main() {
     test(
       'connect then disconnect then reconnect toggles isConnected',
       () async {
-        final c = await connectJwtClient();
+        await ensureSdkReady();
+
+        final bootstrap = await KalamClient.connect(
+          url: serverUrl,
+          timeout: const Duration(seconds: 10),
+        );
+        LoginResponse login;
+        try {
+          login = await bootstrap.login(adminUser, adminPass);
+        } finally {
+          await bootstrap.dispose();
+        }
+
+        final c = await KalamClient.connect(
+          url: serverUrl,
+          authProvider: () async => Auth.jwt(login.accessToken),
+          wsLazyConnect: false,
+          timeout: const Duration(seconds: 10),
+        );
         try {
           expect(await c.isConnected, isTrue,
               reason: 'should be connected after connect');
@@ -98,6 +116,7 @@ void main() {
         final c = await KalamClient.connect(
           url: serverUrl,
           authProvider: () async => Auth.jwt(login.accessToken),
+          wsLazyConnect: false,
           connectionHandlers: ConnectionHandlers(
             onConnect: () => events.add('connect'),
             onDisconnect: (_) => events.add('disconnect'),
@@ -152,6 +171,7 @@ void main() {
         final c = await KalamClient.connect(
           url: serverUrl,
           authProvider: () async => Auth.jwt(login.accessToken),
+          wsLazyConnect: false,
           connectionHandlers: ConnectionHandlers(
             onError: (_) {},
           ),

@@ -210,7 +210,7 @@ void main() {
         );
         final sub = stream.listen(events.add);
 
-        await sleep(const Duration(seconds: 3));
+        await _waitForCondition(() => events.whereType<AckEvent>().isNotEmpty);
 
         final ack = events.whereType<AckEvent>();
         expect(ack, isNotEmpty);

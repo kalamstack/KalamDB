@@ -274,6 +274,160 @@ void main() {
       },
       timeout: const Timeout(Duration(seconds: 120)),
     );
+
+    test(
+      'from resumes with only seqs strictly greater than checkpoint',
+      () async {
+        bool hasRowId(List<ChangeEvent> events, int id) {
+          for (final event in events) {
+            switch (event) {
+              case InsertEvent(:final rows):
+                if (rows.any((r) => r['id']?.asInt() == id)) return true;
+              case UpdateEvent(:final rows):
+                if (rows.any((r) => r['id']?.asInt() == id)) return true;
+              case InitialDataBatch(:final rows):
+                if (rows.any((r) => r['id']?.asInt() == id)) return true;
+              case AckEvent() || DeleteEvent() || SubscriptionError():
+                break;
+            }
+          }
+          return false;
+        }
+
+        Future<void> waitFor(
+          bool Function() predicate, {
+          Duration timeout = const Duration(seconds: 20),
+          Duration poll = const Duration(milliseconds: 200),
+        }) async {
+          final started = DateTime.now();
+          while (!predicate()) {
+            if (DateTime.now().difference(started) > timeout) {
+              throw TimeoutException('Timed out waiting for condition');
+            }
+            await sleep(poll);
+          }
+        }
+
+        final seed = DateTime.now().millisecondsSinceEpoch % 1000000;
+        final baselineA = (seed * 10) + 101;
+        final baselineB = (seed * 10) + 102;
+        final freshId = (seed * 10) + 103;
+        final checkpointSubId = 'strict-from-${uniqueName('seq')}';
+        final resumedSubId = 'strict-from-resume-${uniqueName('seq')}';
+
+        final writer = await connectJwtClient();
+        StreamSubscription<ChangeEvent>? sub1;
+        StreamSubscription<ChangeEvent>? sub2;
+
+        try {
+          await writer.query(
+            "INSERT INTO $tbl (id, value) VALUES ($baselineA, 'baseline-a')",
+          );
+          await writer.query(
+            "INSERT INTO $tbl (id, value) VALUES ($baselineB, 'baseline-b')",
+          );
+
+          final baselineEvents = <ChangeEvent>[];
+          final baselineStream = client.subscribe(
+            'SELECT id, value FROM $tbl WHERE id >= $baselineA',
+            lastRows: 2,
+            subscriptionId: checkpointSubId,
+          );
+          sub1 = baselineStream.listen(baselineEvents.add);
+
+          await waitFor(
+            () =>
+                hasRowId(baselineEvents, baselineA) &&
+                hasRowId(baselineEvents, baselineB),
+          );
+
+          SeqId? checkpoint;
+          final started = DateTime.now();
+          while (checkpoint == null) {
+            final subs = await client.getSubscriptions();
+            for (final s in subs) {
+              if (s.id == checkpointSubId && s.lastSeqId != null) {
+                checkpoint = s.lastSeqId;
+                break;
+              }
+            }
+            if (checkpoint != null) break;
+            if (DateTime.now().difference(started) >
+                const Duration(seconds: 20)) {
+              throw TimeoutException(
+                'Timed out waiting for strict resume checkpoint',
+              );
+            }
+            await sleep(const Duration(milliseconds: 200));
+          }
+
+          await _safeCancel(sub1);
+          sub1 = null;
+
+          await writer.query(
+            "INSERT INTO $tbl (id, value) VALUES ($freshId, 'fresh-after-checkpoint')",
+          );
+
+          final resumedEvents = <ChangeEvent>[];
+          final resumedStream = client.subscribe(
+            'SELECT id, value FROM $tbl WHERE id >= $baselineA',
+            from: checkpoint,
+            lastRows: 0,
+            subscriptionId: resumedSubId,
+          );
+          sub2 = resumedStream.listen(resumedEvents.add);
+
+          await waitFor(() => resumedEvents.whereType<AckEvent>().isNotEmpty);
+          await waitFor(() => hasRowId(resumedEvents, freshId));
+          final checkpointValue = checkpoint;
+          var resumedAdvanced = false;
+          final resumedStarted = DateTime.now();
+          while (!resumedAdvanced) {
+            final subs = await client.getSubscriptions();
+            for (final s in subs) {
+              final lastSeqId = s.lastSeqId;
+              if (s.id == resumedSubId && lastSeqId != null) {
+                resumedAdvanced = lastSeqId > checkpointValue;
+                break;
+              }
+            }
+            if (resumedAdvanced) break;
+            if (DateTime.now().difference(resumedStarted) >
+                const Duration(seconds: 20)) {
+              throw TimeoutException(
+                'Timed out waiting for resumed subscription checkpoint to advance',
+              );
+            }
+            await sleep(const Duration(milliseconds: 200));
+          }
+
+          expect(
+            hasRowId(resumedEvents, baselineA),
+            isFalse,
+            reason: 'baseline row A must not replay',
+          );
+          expect(
+            hasRowId(resumedEvents, baselineB),
+            isFalse,
+            reason: 'baseline row B must not replay',
+          );
+          expect(
+            hasRowId(resumedEvents, freshId),
+            isTrue,
+            reason: 'fresh row after checkpoint must be delivered',
+          );
+        } finally {
+          if (sub1 != null) {
+            await _safeCancel(sub1);
+          }
+          if (sub2 != null) {
+            await _safeCancel(sub2);
+          }
+          await writer.dispose();
+        }
+      },
+      timeout: const Timeout(Duration(seconds: 120)),
+    );
   });
 
   group('getSubscriptions', skip: skipIfNoIntegration, () {

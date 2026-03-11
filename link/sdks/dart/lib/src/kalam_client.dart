@@ -38,6 +38,8 @@ class KalamClient {
   Future<void>? _connectionEventPump;
   Future<void>? _refreshAuthInFlight;
   Future<void>? _basicAuthExchangeInFlight;
+  bool _skipNextAutoRefreshAuth = false;
+  int _subscriptionIdCounter = 0;
 
   KalamClient._(this._handle, this._connectionHandlers,
       {required Auth initialAuth, required AuthProvider authProvider})
@@ -168,6 +170,7 @@ class KalamClient {
       initialAuth: effectiveAuth,
       authProvider: authProvider,
     );
+    client._armInitialSubscriptionAuthReuse();
     client._startConnectionEventPumpIfNeeded();
 
     // When ws_lazy_connect is enabled (default), defer the WebSocket
@@ -235,6 +238,23 @@ class KalamClient {
     _refreshAuthInFlight =
         refreshTask.whenComplete(() => _refreshAuthInFlight = null);
     return _refreshAuthInFlight;
+  }
+
+  void _armInitialSubscriptionAuthReuse() {
+    _skipNextAutoRefreshAuth = true;
+  }
+
+  Future<void> _refreshAuthBeforeSubscriptionConnect() async {
+    if (_skipNextAutoRefreshAuth) {
+      _skipNextAutoRefreshAuth = false;
+      KalamLogger.debug(
+        'auth',
+        'Skipping immediate auth refresh; reusing credentials resolved during connect()',
+      );
+      return;
+    }
+
+    await refreshAuth();
   }
 
   // ---------------------------------------------------------------------------
@@ -369,12 +389,8 @@ class KalamClient {
   }) {
     late StreamController<ChangeEvent> controller;
     var closed = false;
-
-    // The subscription ID of the currently active subscription.
-    // Used by onCancel to cancel via the shared connection without
-    // needing the DartSubscription Mutex (which would deadlock if
-    // dartSubscriptionNext is blocked on it).
-    String? activeSubId;
+    final logicalSubscriptionId =
+        _ensureSubscriptionId(subscriptionId, prefix: 'sub');
 
     /// Create and run one subscription lifetime (connect → pull → close).
     /// Returns normally when the subscription ends (server close, ping
@@ -382,27 +398,31 @@ class KalamClient {
     Future<void> runSubscription() async {
       bridge.DartSubscription? sub;
       try {
-        // Refresh auth before each connect when a provider is configured.
-        await refreshAuth();
+        // Reuse the credentials resolved during connect() for the first
+        // subscription attempt, then resume normal refresh-on-reconnect.
+        await _refreshAuthBeforeSubscriptionConnect();
         await _ensureJwtForBasicAuth();
+        final resumeFrom = _mergeResumeSeqId(
+          from,
+          await _lookupSubscriptionLastSeqId(logicalSubscriptionId),
+        );
 
         sub = await bridge.dartSubscribe(
           client: _handle,
           sql: sql,
           config: (batchSize != null ||
                   lastRows != null ||
-                  subscriptionId != null ||
-                  from != null)
+                  logicalSubscriptionId.isNotEmpty ||
+                  resumeFrom != null)
               ? gen.DartSubscriptionConfig(
                   sql: sql,
                   batchSize: batchSize,
                   lastRows: lastRows,
-                  id: subscriptionId,
-                  from: from?.toInt(),
+                  id: logicalSubscriptionId,
+                  from: resumeFrom?.toInt(),
                 )
               : null,
         );
-        activeSubId = bridge.dartSubscriptionId(subscription: sub);
 
         while (!closed && !_isDisposed) {
           final event = await bridge.dartSubscriptionNext(subscription: sub);
@@ -415,7 +435,6 @@ class KalamClient {
           controller.addError(error, stackTrace);
         }
       } finally {
-        activeSubId = null;
         if (sub != null) {
           try {
             await bridge.dartSubscriptionClose(subscription: sub);
@@ -471,15 +490,12 @@ class KalamClient {
         // This drops the event channel sender, unblocking dartSubscriptionNext
         // which returns None, allowing runSubscription to reach its finally
         // block and call dartSubscriptionClose for full cleanup.
-        final subId = activeSubId;
-        if (subId != null) {
-          try {
-            await bridge.dartCancelSubscription(
-              client: _handle,
-              subscriptionId: subId,
-            );
-          } catch (_) {}
-        }
+        try {
+          await bridge.dartCancelSubscription(
+            client: _handle,
+            subscriptionId: logicalSubscriptionId,
+          );
+        } catch (_) {}
       },
     );
 
@@ -507,14 +523,18 @@ class KalamClient {
   }) {
     late StreamController<List<T>> controller;
     var closed = false;
-    String? activeSubId;
+    final logicalSubscriptionId =
+        _ensureSubscriptionId(subscriptionId, prefix: 'live');
 
-    List<T> decodeRows(List<String> rowsJson) {
-      final rows = rowsJson
+    List<Map<String, KalamCellValue>> decodeTypedRows(List<String> rowsJson) {
+      return rowsJson
           .map((json) => Map<String, dynamic>.from(jsonDecode(json) as Map))
           .map((row) => row
               .map((key, value) => MapEntry(key, KalamCellValue.from(value))))
           .toList(growable: false);
+    }
+
+    List<T> mapDecodedRows(List<Map<String, KalamCellValue>> rows) {
       final mapper = mapRow;
       if (mapper == null) {
         return rows.cast<T>();
@@ -525,27 +545,30 @@ class KalamClient {
     Future<void> runSubscription() async {
       bridge.DartLiveRowsSubscription? sub;
       try {
-        await refreshAuth();
+        await _refreshAuthBeforeSubscriptionConnect();
         await _ensureJwtForBasicAuth();
+        final resumeFrom = _mergeResumeSeqId(
+          from,
+          await _lookupSubscriptionLastSeqId(logicalSubscriptionId),
+        );
 
         sub = await bridge.dartLiveQueryRowsSubscribe(
           client: _handle,
           sql: sql,
           config: (batchSize != null ||
                   lastRows != null ||
-                  subscriptionId != null ||
-                  from != null)
+                  logicalSubscriptionId.isNotEmpty ||
+                  resumeFrom != null)
               ? gen.DartSubscriptionConfig(
                   sql: sql,
                   batchSize: batchSize,
                   lastRows: lastRows,
-                  id: subscriptionId,
-                  from: from?.toInt(),
+                  id: logicalSubscriptionId,
+                  from: resumeFrom?.toInt(),
                 )
               : null,
           liveConfig: gen.DartLiveRowsConfig(limit: limit),
         );
-        activeSubId = bridge.dartLiveQueryRowsId(subscription: sub);
 
         while (!closed && !_isDisposed) {
           final event = await bridge.dartLiveQueryRowsNext(subscription: sub);
@@ -553,7 +576,8 @@ class KalamClient {
 
           switch (event) {
             case gen.DartLiveRowsEvent_Rows(:final rowsJson):
-              controller.add(decodeRows(rowsJson));
+              final rows = decodeTypedRows(rowsJson);
+              controller.add(mapDecodedRows(rows));
             case gen.DartLiveRowsEvent_Error(
                 :final subscriptionId,
                 :final code,
@@ -574,7 +598,6 @@ class KalamClient {
           controller.addError(error, stackTrace);
         }
       } finally {
-        activeSubId = null;
         if (sub != null) {
           try {
             await bridge.dartLiveQueryRowsClose(subscription: sub);
@@ -623,15 +646,12 @@ class KalamClient {
       onListen: () => reconnectLoop(),
       onCancel: () async {
         closed = true;
-        final subId = activeSubId;
-        if (subId != null) {
-          try {
-            await bridge.dartCancelSubscription(
-              client: _handle,
-              subscriptionId: subId,
-            );
-          } catch (_) {}
-        }
+        try {
+          await bridge.dartCancelSubscription(
+            client: _handle,
+            subscriptionId: logicalSubscriptionId,
+          );
+        } catch (_) {}
       },
     );
 
@@ -714,6 +734,40 @@ class KalamClient {
   /// Re-establish the shared WebSocket connection after a manual
   /// [disconnectWebSocket] or if the automatic reconnection was exhausted.
   Future<void> reconnectWebSocket() => bridge.dartConnect(client: _handle);
+
+  String _ensureSubscriptionId(String? subscriptionId,
+      {required String prefix}) {
+    if (subscriptionId != null && subscriptionId.isNotEmpty) {
+      return subscriptionId;
+    }
+    _subscriptionIdCounter += 1;
+    return '$prefix-${DateTime.now().microsecondsSinceEpoch}-$_subscriptionIdCounter';
+  }
+
+  Future<SeqId?> _lookupSubscriptionLastSeqId(String? subscriptionId) async {
+    if (subscriptionId == null || _isDisposed) return null;
+
+    try {
+      final infos = await bridge.dartListSubscriptions(client: _handle);
+      for (final info in infos) {
+        if (info.id != subscriptionId) continue;
+        return SeqId.tryParse(info.lastSeqId);
+      }
+    } catch (error) {
+      KalamLogger.debug(
+        'subscription',
+        'Failed to read subscription cursor for $subscriptionId: $error',
+      );
+    }
+
+    return null;
+  }
+
+  static SeqId? _mergeResumeSeqId(SeqId? current, SeqId? candidate) {
+    if (candidate == null) return current;
+    if (current == null || candidate > current) return candidate;
+    return current;
+  }
 
   // ---------------------------------------------------------------------------
   // Internal converters

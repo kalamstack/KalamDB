@@ -42,6 +42,7 @@ void main() {
           url: serverUrl,
           authProvider: () async => Auth.jwt(login.accessToken),
           keepaliveInterval: const Duration(seconds: 2),
+          wsLazyConnect: false,
           connectionHandlers: ConnectionHandlers(
             onSend: (msg) => sendEvents.add(msg),
             onReceive: (msg) => receiveEvents.add(msg),
@@ -102,6 +103,7 @@ void main() {
           url: serverUrl,
           authProvider: () async => Auth.jwt(login.accessToken),
           keepaliveInterval: const Duration(seconds: 2),
+          wsLazyConnect: false,
           connectionHandlers: ConnectionHandlers(
             onSend: (msg) {
               if (msg.contains('[ping]')) {
@@ -190,6 +192,7 @@ void main() {
           url: serverUrl,
           authProvider: () async => Auth.jwt(login.accessToken),
           keepaliveInterval: const Duration(seconds: 2),
+          wsLazyConnect: false,
           connectionHandlers: ConnectionHandlers(
             onConnect: () => connectCount[0]++,
             onDisconnect: (reason) => disconnectReasons.add(reason.message),
@@ -242,6 +245,7 @@ void main() {
           url: serverUrl,
           authProvider: () async => Auth.jwt(login.accessToken),
           keepaliveInterval: const Duration(seconds: 2),
+          wsLazyConnect: false,
           connectionHandlers: ConnectionHandlers(
             onSend: (msg) {
               if (msg.contains('[ping]')) {
@@ -290,7 +294,26 @@ void main() {
     test(
       'isConnected stays true during successful keepalive cycle',
       () async {
-        final client = await connectJwtClient();
+        await ensureSdkReady();
+
+        final bootstrap = await KalamClient.connect(
+          url: serverUrl,
+          timeout: const Duration(seconds: 10),
+        );
+        LoginResponse login;
+        try {
+          login = await bootstrap.login(adminUser, adminPass);
+        } finally {
+          await bootstrap.dispose();
+        }
+
+        final client = await KalamClient.connect(
+          url: serverUrl,
+          authProvider: () async => Auth.jwt(login.accessToken),
+          keepaliveInterval: const Duration(seconds: 2),
+          wsLazyConnect: false,
+          timeout: const Duration(seconds: 10),
+        );
         try {
           // Poll isConnected over several keepalive intervals.
           for (var i = 0; i < 5; i++) {
@@ -330,6 +353,7 @@ void main() {
           url: serverUrl,
           authProvider: () async => Auth.jwt(login.accessToken),
           keepaliveInterval: Duration.zero,
+          wsLazyConnect: false,
           connectionHandlers: ConnectionHandlers(
             onSend: (msg) => sendEvents.add(msg),
           ),

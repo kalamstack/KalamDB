@@ -16,6 +16,8 @@ use crate::{
     error::{KalamLinkError, Result},
     event_handlers::{ConnectionError, EventHandlers},
     models::{BatchStatus, ChangeEvent, ConnectionOptions, SubscriptionConfig},
+    seq_id::SeqId,
+    seq_tracking,
     subscription::ws_reader_loop,
     timeouts::KalamLinkTimeouts,
 };
@@ -69,6 +71,8 @@ pub struct SubscriptionManager {
     buffered_changes: Vec<ChangeEvent>,
     /// Whether initial data is still loading.
     is_loading: bool,
+    /// Original `from` cursor used to open this subscription, if any.
+    resume_from: Option<SeqId>,
     timeouts: KalamLinkTimeouts,
     closed: bool,
 }
@@ -89,6 +93,7 @@ impl SubscriptionManager {
             options,
             ws_url,
         } = config;
+        let resume_from = options.as_ref().and_then(|opts| opts.from);
 
         let request_url =
             resolve_ws_url(base_url, ws_url.as_deref(), connection_options.disable_compression)?;
@@ -201,6 +206,7 @@ impl SubscriptionManager {
             event_queue: VecDeque::new(),
             buffered_changes: Vec::new(),
             is_loading: true,
+            resume_from,
             timeouts: timeouts.clone(),
             closed: false,
         })
@@ -214,6 +220,7 @@ impl SubscriptionManager {
         event_rx: mpsc::Receiver<Result<ChangeEvent>>,
         unsubscribe_tx: mpsc::Sender<(String, u64)>,
         generation: u64,
+        resume_from: Option<SeqId>,
         timeouts: &KalamLinkTimeouts,
     ) -> Self {
         Self {
@@ -226,8 +233,38 @@ impl SubscriptionManager {
             event_queue: VecDeque::new(),
             buffered_changes: Vec::new(),
             is_loading: true,
+            resume_from,
             timeouts: timeouts.clone(),
             closed: false,
+        }
+    }
+
+    fn filter_replayed_initial_rows(&self, event: ChangeEvent) -> ChangeEvent {
+        match event {
+            ChangeEvent::InitialDataBatch {
+                subscription_id,
+                mut rows,
+                batch_control,
+            } => {
+                if let Some(from) = self.resume_from {
+                    let removed = seq_tracking::retain_rows_after(&mut rows, from);
+                    if removed > 0 {
+                        log::debug!(
+                            "[kalam-link] [{}] Filtered {} stale initial row(s) at from={}",
+                            subscription_id,
+                            removed,
+                            from
+                        );
+                    }
+                }
+
+                ChangeEvent::InitialDataBatch {
+                    subscription_id,
+                    rows,
+                    batch_control,
+                }
+            },
+            _ => event,
         }
     }
 
@@ -240,6 +277,8 @@ impl SubscriptionManager {
     /// Buffer incoming events: hold live changes while initial data is loading,
     /// then flush them in order once the snapshot is complete.
     fn apply_buffering(&mut self, event: ChangeEvent) {
+        let event = self.filter_replayed_initial_rows(event);
+
         match event {
             ChangeEvent::Ack {
                 ref batch_control, ..
@@ -374,6 +413,7 @@ mod tests {
             event_queue: VecDeque::new(),
             buffered_changes: Vec::new(),
             is_loading: false,
+            resume_from: None,
             timeouts: KalamLinkTimeouts::default(),
             closed: false,
         }

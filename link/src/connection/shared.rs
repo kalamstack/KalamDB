@@ -49,9 +49,14 @@ fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
 }
 
-/// Build a `Vec<SubscriptionInfo>` snapshot from the internal subs map.
-fn snapshot_subscriptions(subs: &HashMap<String, SubEntry>) -> Vec<SubscriptionInfo> {
-    subs.iter()
+/// Build a `Vec<SubscriptionInfo>` snapshot from the internal subs map,
+/// including closed subscriptions whose `last_seq_id` was cached.
+fn snapshot_subscriptions(
+    subs: &HashMap<String, SubEntry>,
+    seq_id_cache: &HashMap<String, SeqId>,
+) -> Vec<SubscriptionInfo> {
+    let mut out: Vec<SubscriptionInfo> = subs
+        .iter()
         .map(|(id, entry)| SubscriptionInfo {
             id: id.clone(),
             query: entry.sql.clone(),
@@ -60,7 +65,25 @@ fn snapshot_subscriptions(subs: &HashMap<String, SubEntry>) -> Vec<SubscriptionI
             created_at_ms: entry.created_at_ms,
             closed: false,
         })
-        .collect()
+        .collect();
+
+    // Include cached seq IDs for recently closed subscriptions so that
+    // callers (e.g. Dart `_lookupSubscriptionLastSeqId`) can resume from
+    // the correct point even after the SubEntry was removed.
+    for (id, &seq) in seq_id_cache {
+        if !subs.contains_key(id) {
+            out.push(SubscriptionInfo {
+                id: id.clone(),
+                query: String::new(),
+                last_seq_id: Some(seq),
+                last_event_time_ms: None,
+                created_at_ms: 0,
+                closed: true,
+            });
+        }
+    }
+
+    out
 }
 
 fn subscription_start_ready(event: &ChangeEvent) -> bool {
@@ -70,6 +93,35 @@ fn subscription_start_ready(event: &ChangeEvent) -> bool {
             | ChangeEvent::InitialDataBatch { batch_control, .. }
                 if batch_control.status == crate::models::BatchStatus::Ready
     )
+}
+
+fn filter_replayed_initial_rows(event: ChangeEvent, resume_from: Option<SeqId>) -> ChangeEvent {
+    match event {
+        ChangeEvent::InitialDataBatch {
+            subscription_id,
+            mut rows,
+            batch_control,
+        } => {
+            if let Some(from) = resume_from {
+                let removed = seq_tracking::retain_rows_after(&mut rows, from);
+                if removed > 0 {
+                    log::debug!(
+                        "[kalam-link] [{}] Filtered {} stale initial row(s) at from={}",
+                        subscription_id,
+                        removed,
+                        from
+                    );
+                }
+            }
+
+            ChangeEvent::InitialDataBatch {
+                subscription_id,
+                rows,
+                batch_control,
+            }
+        },
+        _ => event,
+    }
 }
 
 // ── Commands ────────────────────────────────────────────────────────────────
@@ -386,12 +438,15 @@ async fn route_event(
     event: ChangeEvent,
     ws: &mut WebSocketStream,
     subs: &mut HashMap<String, SubEntry>,
+    seq_id_cache: &mut HashMap<String, SeqId>,
     _event_handlers: &EventHandlers,
 ) {
     let sub_id = match event.subscription_id() {
         Some(id) => id.to_string(),
         None => return,
     };
+    let resume_from = subs.get(&sub_id).and_then(|entry| entry.options.from);
+    let event = filter_replayed_initial_rows(event, resume_from);
 
     if let ChangeEvent::InitialDataBatch {
         ref batch_control, ..
@@ -470,7 +525,11 @@ async fn route_event(
         }
 
         if remove_after_send {
-            subs.remove(&key);
+            if let Some(entry) = subs.remove(&key) {
+                if let Some(seq) = entry.last_seq_id {
+                    seq_id_cache.insert(key, seq);
+                }
+            }
         }
     } else {
         log::debug!("No subscription found for id: {}", sub_id);
@@ -479,17 +538,18 @@ async fn route_event(
 
 async fn resubscribe_all(
     ws: &mut WebSocketStream,
-    subs: &HashMap<String, SubEntry>,
+    subs: &mut HashMap<String, SubEntry>,
     event_handlers: &EventHandlers,
 ) {
     log::info!(
         "[kalam-link] Re-subscribing {} active subscription(s) after reconnect",
         subs.len()
     );
-    for (id, entry) in subs.iter() {
+    for (id, entry) in subs.iter_mut() {
         let mut options = entry.options.clone();
         if let Some(seq_id) = entry.last_seq_id {
             options.from = Some(seq_id);
+            entry.options.from = Some(seq_id);
         }
 
         log::info!(
@@ -521,6 +581,10 @@ async fn connection_task(
     ready_tx: Option<oneshot::Sender<Result<()>>>,
 ) {
     let mut subs: HashMap<String, SubEntry> = HashMap::new();
+    // Preserve last_seq_id for subscriptions that were closed, so that a
+    // re-subscribe with the same ID can resume from the correct point
+    // instead of replaying from the beginning.
+    let mut seq_id_cache: HashMap<String, SeqId> = HashMap::new();
     let mut ws_stream: Option<WebSocketStream> = None;
     let mut shutdown_requested = false;
     let mut next_generation: u64 = 1;
@@ -608,11 +672,25 @@ async fn connection_task(
                                 );
                                 let _ = send_unsubscribe(ws, &id).await;
                                 if let Some(mut old_entry) = subs.remove(&id) {
+                                    if let Some(seq) = old_entry.last_seq_id {
+                                        seq_id_cache.insert(id.clone(), seq);
+                                    }
                                     if let Some(old_tx) = old_entry.pending_result_tx.take() {
                                         let _ = old_tx.send(Err(KalamLinkError::Cancelled));
                                     }
                                 }
                             }
+                            // Inherit last_seq_id from cache (preserved across
+                            // close/resubscribe cycles) so reconnects resume
+                            // from the correct point.
+                            let inherited_seq = seq_id_cache.remove(&id);
+                            let mut options = options;
+                            let effective_from = match (options.from, inherited_seq) {
+                                (Some(explicit), Some(cached)) => Some(explicit.max(cached)),
+                                (explicit, cached) => explicit.or(cached),
+                            };
+                            options.from = effective_from;
+
                             let result = send_subscribe(ws, &id, &sql, options.clone()).await;
                             let gen = next_generation;
                             if result.is_ok() {
@@ -621,7 +699,7 @@ async fn connection_task(
                                     sql,
                                     options,
                                     event_tx,
-                                    last_seq_id: None,
+                                    last_seq_id: inherited_seq,
                                     generation: gen,
                                     created_at_ms: now_ms(),
                                     last_event_time_ms: None,
@@ -638,6 +716,9 @@ async fn connection_task(
                             };
                             if should_remove {
                                 if let Some(mut entry) = subs.remove(&id) {
+                                    if let Some(seq) = entry.last_seq_id {
+                                        seq_id_cache.insert(id.clone(), seq);
+                                    }
                                     if let Some(result_tx) = entry.pending_result_tx.take() {
                                         let _ = result_tx.send(Err(KalamLinkError::Cancelled));
                                     }
@@ -651,7 +732,7 @@ async fn connection_task(
                             }
                         },
                         Some(ConnCmd::ListSubscriptions { result_tx }) => {
-                            let _ = result_tx.send(snapshot_subscriptions(&subs));
+                            let _ = result_tx.send(snapshot_subscriptions(&subs, &seq_id_cache));
                         },
                         Some(ConnCmd::Shutdown) | None => {
                             shutdown_requested = true;
@@ -701,7 +782,7 @@ async fn connection_task(
                             event_handlers.emit_receive(&text);
                             match parse_message(&text) {
                                 Ok(Some(event)) => {
-                                    route_event(event, ws, &mut subs, &event_handlers).await;
+                                    route_event(event, ws, &mut subs, &mut seq_id_cache, &event_handlers).await;
                                 },
                                 Ok(None) => {},
                                 Err(e) => log::warn!("Failed to parse WS message: {}", e),
@@ -713,7 +794,7 @@ async fn connection_task(
                                     event_handlers.emit_receive(&text);
                                     match parse_message(&text) {
                                         Ok(Some(event)) => {
-                                            route_event(event, ws, &mut subs, &event_handlers).await;
+                                            route_event(event, ws, &mut subs, &mut seq_id_cache, &event_handlers).await;
                                         },
                                         Ok(None) => {},
                                         Err(e) => log::warn!("Failed to parse decompressed WS message: {}", e),
@@ -776,11 +857,15 @@ async fn connection_task(
                             None => true,
                         };
                         if should_remove {
-                            subs.remove(&id);
+                            if let Some(entry) = subs.remove(&id) {
+                                if let Some(seq) = entry.last_seq_id {
+                                    seq_id_cache.insert(id, seq);
+                                }
+                            }
                         }
                     },
                     Some(ConnCmd::ListSubscriptions { result_tx }) => {
-                        let _ = result_tx.send(snapshot_subscriptions(&subs));
+                        let _ = result_tx.send(snapshot_subscriptions(&subs, &seq_id_cache));
                     },
                     Some(ConnCmd::Shutdown) | None => return,
                 }
@@ -796,7 +881,10 @@ async fn connection_task(
                         false,
                     ));
                     let err_msg = "Max reconnection attempts reached".to_string();
-                    for (_id, mut entry) in subs.drain() {
+                    for (id, mut entry) in subs.drain() {
+                        if let Some(seq) = entry.last_seq_id {
+                            seq_id_cache.insert(id, seq);
+                        }
                         if let Some(result_tx) = entry.pending_result_tx.take() {
                             let _ = result_tx.send(Err(KalamLinkError::WebSocketError(
                                 err_msg.clone(),
@@ -814,10 +902,14 @@ async fn connection_task(
                                 )));
                             },
                             Some(ConnCmd::Unsubscribe { id, .. }) => {
-                                subs.remove(&id);
+                                if let Some(entry) = subs.remove(&id) {
+                                    if let Some(seq) = entry.last_seq_id {
+                                        seq_id_cache.insert(id, seq);
+                                    }
+                                }
                             },
                             Some(ConnCmd::ListSubscriptions { result_tx }) => {
-                                let _ = result_tx.send(snapshot_subscriptions(&subs));
+                                let _ = result_tx.send(snapshot_subscriptions(&subs, &seq_id_cache));
                             },
                             Some(ConnCmd::Shutdown) | None => return,
                         }
@@ -846,16 +938,27 @@ async fn connection_task(
                             Some(ConnCmd::Subscribe { id, sql, options, event_tx, result_tx }) => {
                                 if subs.contains_key(&id) {
                                     if let Some(mut old_entry) = subs.remove(&id) {
+                                        if let Some(seq) = old_entry.last_seq_id {
+                                            seq_id_cache.insert(id.clone(), seq);
+                                        }
                                         if let Some(old_tx) = old_entry.pending_result_tx.take() {
                                             let _ = old_tx.send(Err(KalamLinkError::Cancelled));
                                         }
                                     }
                                 }
+                                let inherited_seq = seq_id_cache.remove(&id);
+                                let mut options = options;
+                                let effective_from = match (options.from, inherited_seq) {
+                                    (Some(explicit), Some(cached)) => Some(explicit.max(cached)),
+                                    (explicit, cached) => explicit.or(cached),
+                                };
+                                options.from = effective_from;
+
                                 let gen = next_generation;
                                 next_generation += 1;
                                 subs.insert(id, SubEntry {
                                     sql, options, event_tx,
-                                    last_seq_id: None,
+                                    last_seq_id: inherited_seq,
                                     generation: gen,
                                     created_at_ms: now_ms(),
                                     last_event_time_ms: None,
@@ -869,6 +972,9 @@ async fn connection_task(
                                 };
                                 if should_remove {
                                     if let Some(mut entry) = subs.remove(&id) {
+                                        if let Some(seq) = entry.last_seq_id {
+                                            seq_id_cache.insert(id, seq);
+                                        }
                                         if let Some(result_tx) = entry.pending_result_tx.take() {
                                             let _ = result_tx.send(Err(KalamLinkError::Cancelled));
                                         }
@@ -876,7 +982,7 @@ async fn connection_task(
                                 }
                             },
                             Some(ConnCmd::ListSubscriptions { result_tx }) => {
-                                let _ = result_tx.send(snapshot_subscriptions(&subs));
+                                let _ = result_tx.send(snapshot_subscriptions(&subs, &seq_id_cache));
                             },
                             Some(ConnCmd::Shutdown) | None => {
                                 got_shutdown = true;
@@ -907,7 +1013,7 @@ async fn connection_task(
                     reconnect_attempts.store(0, Ordering::SeqCst);
                     connected.store(true, Ordering::SeqCst);
                     event_handlers.emit_connect();
-                    resubscribe_all(&mut stream, &subs, &event_handlers).await;
+                    resubscribe_all(&mut stream, &mut subs, &event_handlers).await;
                     ws_stream = Some(stream);
                     idle_deadline = TokioInstant::now() + keepalive_dur;
                     awaiting_pong = false;
