@@ -6,36 +6,32 @@
 # Option 2: Used in release workflow with pre-compiled binaries:
 #   docker build --build-context binaries=binaries-amd64 -f docker/build/Dockerfile.prebuilt -t jamals86/kalamdb:latest .
 
-# Runtime image only (no build stage needed)
-FROM debian:bookworm-slim
+# Prepare runtime assets without pulling a full distro into the final image.
+FROM busybox:1.36.1-musl AS runtime-prep
 
-# Install runtime dependencies and create user in single layer
-# Note: curl is needed for healthcheck
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        ca-certificates \
-        libssl3 \
-        curl \
-    && rm -rf /var/lib/apt/lists/* /var/cache/apt/* && \
-    useradd -m -u 1000 kalamdb && \
-    mkdir -p /data/rocksdb /data/storage /data/logs /config && \
-    chown -R kalamdb:kalamdb /data /config
+RUN mkdir -p /runtime/usr/local/bin /runtime/data/rocksdb /runtime/data/storage /runtime/data/logs /runtime/config && \
+    cp /bin/busybox /runtime/usr/local/bin/busybox
+
+# Copy default server configuration and normalize the data path before the final stage.
+COPY backend/server.example.toml /runtime/config/server.toml
+RUN sed -i 's|data_path = "\./data"|data_path = "/data"|g' /runtime/config/server.toml
+
+# Distroless runtime keeps the final image smaller and reduces the attack surface.
+FROM gcr.io/distroless/cc-debian12:nonroot
 
 # Copy pre-built binaries from build context (provided via --build-context binaries=...)
 # The build context should contain kalamdb-server and kalam binaries
 COPY --from=binaries --chmod=755 kalamdb-server /usr/local/bin/kalamdb-server
 COPY --from=binaries --chmod=755 kalam /usr/local/bin/kalam-cli
+COPY --from=binaries --chmod=755 kalam /usr/local/bin/kalam
+COPY --from=runtime-prep --chmod=755 /runtime/usr/local/bin/busybox /usr/local/bin/busybox
 
-# Create symlink so 'kalam' command works (docs reference this name)
-RUN ln -s /usr/local/bin/kalam-cli /usr/local/bin/kalam
+# Copy writable runtime paths and the normalized config with non-root ownership.
+COPY --from=runtime-prep --chown=65532:65532 /runtime/data /data
+COPY --from=runtime-prep --chown=65532:65532 /runtime/config /config
 
-# Copy default server configuration (owned by kalamdb user) and normalize data path
-COPY backend/server.example.toml /config/server.toml
-RUN sed -i 's|data_path = "\./data"|data_path = "/data"|g' /config/server.toml && \
-    chown kalamdb:kalamdb /config/server.toml
-
-# Switch to non-root user
-USER kalamdb
+# Distroless nonroot uses uid/gid 65532.
+USER 65532:65532
 
 # Set working directory (server looks for server.toml here)
 WORKDIR /data
@@ -43,9 +39,9 @@ WORKDIR /data
 # Expose default port
 EXPOSE 8080
 
-# Health check using curl (more reliable than CLI which needs auth)
+# Health check using busybox to avoid shipping curl in the runtime image.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -sf http://localhost:8080/health || exit 1
+    CMD ["/usr/local/bin/busybox", "wget", "--spider", "-q", "http://127.0.0.1:8080/health"]
 
 # Default command: run server (looks for server.toml in current directory)
 CMD ["/usr/local/bin/kalamdb-server", "/config/server.toml"]
