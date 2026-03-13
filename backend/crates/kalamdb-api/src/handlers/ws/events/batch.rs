@@ -99,9 +99,14 @@ pub async fn handle_next_batch(
             Ok(())
         },
         Err(e) => {
-            let _ =
-                send_error(session, subscription_id, WsErrorCode::BatchFetchFailed, &e.to_string(), compression_enabled)
-                    .await;
+            let _ = send_error(
+                session,
+                subscription_id,
+                WsErrorCode::BatchFetchFailed,
+                &e.to_string(),
+                compression_enabled,
+            )
+            .await;
             Ok(())
         },
     }

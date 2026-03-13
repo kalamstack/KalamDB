@@ -1,6 +1,6 @@
+use super::helpers::*;
 use crate::common;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
-use super::helpers::*;
 use kalam_link::SubscriptionConfig;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -76,10 +76,7 @@ async fn test_proxy_three_subscriptions_resume_after_server_bounce() {
     ] {
         writer
             .execute_query(
-                &format!(
-                    "INSERT INTO {} (id, value) VALUES ('{}', 'before')",
-                    table, id
-                ),
+                &format!("INSERT INTO {} (id, value) VALUES ('{}', 'before')", table, id),
                 None,
                 None,
                 None,
@@ -103,42 +100,18 @@ async fn test_proxy_three_subscriptions_resume_after_server_bounce() {
             break;
         }
         if !ids_a.iter().any(|id| id == "pre-a") {
-            if let Ok(Some(Ok(ev))) =
-                timeout(Duration::from_millis(900), sub_a.next()).await
-            {
-                collect_ids_and_track_seq(
-                    &ev,
-                    &mut ids_a,
-                    &mut seq_a,
-                    None,
-                    "bounce3 pre A",
-                );
+            if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(900), sub_a.next()).await {
+                collect_ids_and_track_seq(&ev, &mut ids_a, &mut seq_a, None, "bounce3 pre A");
             }
         }
         if !ids_b.iter().any(|id| id == "pre-b") {
-            if let Ok(Some(Ok(ev))) =
-                timeout(Duration::from_millis(900), sub_b.next()).await
-            {
-                collect_ids_and_track_seq(
-                    &ev,
-                    &mut ids_b,
-                    &mut seq_b,
-                    None,
-                    "bounce3 pre B",
-                );
+            if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(900), sub_b.next()).await {
+                collect_ids_and_track_seq(&ev, &mut ids_b, &mut seq_b, None, "bounce3 pre B");
             }
         }
         if !ids_c.iter().any(|id| id == "pre-c") {
-            if let Ok(Some(Ok(ev))) =
-                timeout(Duration::from_millis(900), sub_c.next()).await
-            {
-                collect_ids_and_track_seq(
-                    &ev,
-                    &mut ids_c,
-                    &mut seq_c,
-                    None,
-                    "bounce3 pre C",
-                );
+            if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(900), sub_c.next()).await {
+                collect_ids_and_track_seq(&ev, &mut ids_c, &mut seq_c, None, "bounce3 pre C");
             }
         }
     }
@@ -159,10 +132,7 @@ async fn test_proxy_three_subscriptions_resume_after_server_bounce() {
         }
         sleep(Duration::from_millis(100)).await;
     }
-    assert!(
-        disconnect_count.load(Ordering::SeqCst) > dc_before,
-        "disconnect should fire"
-    );
+    assert!(disconnect_count.load(Ordering::SeqCst) > dc_before, "disconnect should fire");
 
     // Insert gap rows while the proxy is down.
     for (table, id) in [
@@ -172,10 +142,7 @@ async fn test_proxy_three_subscriptions_resume_after_server_bounce() {
     ] {
         writer
             .execute_query(
-                &format!(
-                    "INSERT INTO {} (id, value) VALUES ('{}', 'gap')",
-                    table, id
-                ),
+                &format!("INSERT INTO {} (id, value) VALUES ('{}', 'gap')", table, id),
                 None,
                 None,
                 None,
@@ -203,10 +170,7 @@ async fn test_proxy_three_subscriptions_resume_after_server_bounce() {
     ] {
         writer
             .execute_query(
-                &format!(
-                    "INSERT INTO {} (id, value) VALUES ('{}', 'live')",
-                    table, id
-                ),
+                &format!("INSERT INTO {} (id, value) VALUES ('{}', 'live')", table, id),
                 None,
                 None,
                 None,
@@ -234,9 +198,7 @@ async fn test_proxy_three_subscriptions_resume_after_server_bounce() {
             break;
         }
 
-        if let Ok(Some(Ok(ev))) =
-            timeout(Duration::from_millis(1200), sub_a.next()).await
-        {
+        if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(1200), sub_a.next()).await {
             collect_ids_and_track_seq(
                 &ev,
                 &mut resumed_a,
@@ -245,9 +207,7 @@ async fn test_proxy_three_subscriptions_resume_after_server_bounce() {
                 "bounce3 resumed A",
             );
         }
-        if let Ok(Some(Ok(ev))) =
-            timeout(Duration::from_millis(1200), sub_b.next()).await
-        {
+        if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(1200), sub_b.next()).await {
             collect_ids_and_track_seq(
                 &ev,
                 &mut resumed_b,
@@ -256,9 +216,7 @@ async fn test_proxy_three_subscriptions_resume_after_server_bounce() {
                 "bounce3 resumed B",
             );
         }
-        if let Ok(Some(Ok(ev))) =
-            timeout(Duration::from_millis(1200), sub_c.next()).await
-        {
+        if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(1200), sub_c.next()).await {
             collect_ids_and_track_seq(
                 &ev,
                 &mut resumed_c,
@@ -270,44 +228,17 @@ async fn test_proxy_three_subscriptions_resume_after_server_bounce() {
     }
 
     // All three should receive gap + live rows.
-    assert!(
-        resumed_a.iter().any(|id| id == "gap-a"),
-        "A should get gap row"
-    );
-    assert!(
-        resumed_a.iter().any(|id| id == "live-a"),
-        "A should get live row"
-    );
-    assert!(
-        resumed_b.iter().any(|id| id == "gap-b"),
-        "B should get gap row"
-    );
-    assert!(
-        resumed_b.iter().any(|id| id == "live-b"),
-        "B should get live row"
-    );
-    assert!(
-        resumed_c.iter().any(|id| id == "gap-c"),
-        "C should get gap row"
-    );
-    assert!(
-        resumed_c.iter().any(|id| id == "live-c"),
-        "C should get live row"
-    );
+    assert!(resumed_a.iter().any(|id| id == "gap-a"), "A should get gap row");
+    assert!(resumed_a.iter().any(|id| id == "live-a"), "A should get live row");
+    assert!(resumed_b.iter().any(|id| id == "gap-b"), "B should get gap row");
+    assert!(resumed_b.iter().any(|id| id == "live-b"), "B should get live row");
+    assert!(resumed_c.iter().any(|id| id == "gap-c"), "C should get gap row");
+    assert!(resumed_c.iter().any(|id| id == "live-c"), "C should get live row");
 
     // None should replay pre-bounce rows.
-    assert!(
-        !resumed_a.iter().any(|id| id == "pre-a"),
-        "A must NOT replay pre-a"
-    );
-    assert!(
-        !resumed_b.iter().any(|id| id == "pre-b"),
-        "B must NOT replay pre-b"
-    );
-    assert!(
-        !resumed_c.iter().any(|id| id == "pre-c"),
-        "C must NOT replay pre-c"
-    );
+    assert!(!resumed_a.iter().any(|id| id == "pre-a"), "A must NOT replay pre-a");
+    assert!(!resumed_b.iter().any(|id| id == "pre-b"), "B must NOT replay pre-b");
+    assert!(!resumed_c.iter().any(|id| id == "pre-c"), "C must NOT replay pre-c");
 
     sub_a.close().await.ok();
     sub_b.close().await.ok();

@@ -749,9 +749,7 @@ impl NotificationService {
                             Some(cols) => {
                                 let mut projected: std::collections::HashMap<_, _> = cols
                                     .iter()
-                                    .filter_map(|col| {
-                                        oj.get(col).map(|v| (col.clone(), v.clone()))
-                                    })
+                                    .filter_map(|col| oj.get(col).map(|v| (col.clone(), v.clone())))
                                     .collect();
                                 if let Some(seq_value) = oj.get(SystemColumnNames::SEQ) {
                                     projected

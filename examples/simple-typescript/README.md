@@ -58,8 +58,6 @@ The Playwright test:
 npm test
 ```
 
-(Test files to be added in future iteration)
-
 ## Configuration
 
 ### Environment Variables

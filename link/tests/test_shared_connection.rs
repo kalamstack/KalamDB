@@ -9,12 +9,12 @@
 //! **IMPORTANT**: These tests require a running KalamDB server (auto-started).
 
 use kalam_link::auth::AuthProvider;
-use kalam_link::{
-    ChangeEvent, ConnectionOptions, EventHandlers, KalamLinkClient, KalamLinkTimeouts,
-    LiveRowsConfig, LiveRowsEvent, SubscriptionConfig, SubscriptionOptions, SeqId,
-    KalamCellValue,
-};
 use kalam_link::seq_tracking::{extract_max_seq, row_seq};
+use kalam_link::{
+    ChangeEvent, ConnectionOptions, EventHandlers, KalamCellValue, KalamLinkClient,
+    KalamLinkTimeouts, LiveRowsConfig, LiveRowsEvent, SeqId, SubscriptionConfig,
+    SubscriptionOptions,
+};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
@@ -93,12 +93,7 @@ async fn ensure_table(client: &KalamLinkClient, table: &str) {
 
 async fn query_max_seq(client: &KalamLinkClient, table: &str) -> SeqId {
     let result = client
-        .execute_query(
-            &format!("SELECT MAX(_seq) AS max_seq FROM {}", table),
-            None,
-            None,
-            None,
-        )
+        .execute_query(&format!("SELECT MAX(_seq) AS max_seq FROM {}", table), None, None, None)
         .await
         .expect("max seq query should succeed");
 
@@ -337,10 +332,7 @@ async fn test_shared_subscription_failure_rejects_early() {
     );
 
     let subscriptions = client.subscriptions().await;
-    assert!(
-        subscriptions.is_empty(),
-        "failed subscription should not remain registered"
-    );
+    assert!(subscriptions.is_empty(), "failed subscription should not remain registered");
 
     client.disconnect().await;
 }
@@ -358,15 +350,20 @@ async fn test_shared_live_rows_subscription_materializes_snapshots() {
 
     let table = "default.shared_live_rows_test";
     ensure_table(&client, table).await;
-    let _ = client
-        .execute_query(&format!("DELETE FROM {}", table), None, None, None)
-        .await;
+    let _ = client.execute_query(&format!("DELETE FROM {}", table), None, None, None).await;
 
     client.connect().await.expect("connect");
 
-    let config = SubscriptionConfig::new("shared-live-rows-test", &format!("SELECT * FROM {}", table));
+    let config =
+        SubscriptionConfig::new("shared-live-rows-test", &format!("SELECT * FROM {}", table));
     let mut sub = client
-        .live_query_rows_with_config(config, LiveRowsConfig { limit: Some(10) })
+        .live_query_rows_with_config(
+            config,
+            LiveRowsConfig {
+                limit: Some(10),
+                key_columns: None,
+            },
+        )
         .await
         .expect("live rows subscribe should succeed");
 
@@ -376,7 +373,9 @@ async fn test_shared_live_rows_subscription_materializes_snapshots() {
         .expect("subscription should stay open")
         .expect("initial snapshot should not error");
     match initial {
-        LiveRowsEvent::Rows { rows, .. } => assert!(rows.is_empty(), "new table should start empty"),
+        LiveRowsEvent::Rows { rows, .. } => {
+            assert!(rows.is_empty(), "new table should start empty")
+        },
         other => panic!("unexpected initial live rows event: {:?}", other),
     }
 
@@ -708,33 +707,18 @@ async fn test_three_subscriptions_resume_without_old_rows() {
 
     client.connect().await.expect("reconnect should succeed");
 
-    let mut config_a = SubscriptionConfig::new(
-        "resume3-post-a",
-        format!("SELECT id, value FROM {}", table_a),
-    );
+    let mut config_a =
+        SubscriptionConfig::new("resume3-post-a", format!("SELECT id, value FROM {}", table_a));
     config_a.options = Some(SubscriptionOptions::new().with_from(from_a));
-    let mut sub_a2 = client
-        .subscribe_with_config(config_a)
-        .await
-        .expect("subscribe A post");
-    let mut config_b = SubscriptionConfig::new(
-        "resume3-post-b",
-        format!("SELECT id, value FROM {}", table_b),
-    );
+    let mut sub_a2 = client.subscribe_with_config(config_a).await.expect("subscribe A post");
+    let mut config_b =
+        SubscriptionConfig::new("resume3-post-b", format!("SELECT id, value FROM {}", table_b));
     config_b.options = Some(SubscriptionOptions::new().with_from(from_b));
-    let mut sub_b2 = client
-        .subscribe_with_config(config_b)
-        .await
-        .expect("subscribe B post");
-    let mut config_c = SubscriptionConfig::new(
-        "resume3-post-c",
-        format!("SELECT id, value FROM {}", table_c),
-    );
+    let mut sub_b2 = client.subscribe_with_config(config_b).await.expect("subscribe B post");
+    let mut config_c =
+        SubscriptionConfig::new("resume3-post-c", format!("SELECT id, value FROM {}", table_c));
     config_c.options = Some(SubscriptionOptions::new().with_from(from_c));
-    let mut sub_c2 = client
-        .subscribe_with_config(config_c)
-        .await
-        .expect("subscribe C post");
+    let mut sub_c2 = client.subscribe_with_config(config_c).await.expect("subscribe C post");
 
     let mut seen_a = Vec::<String>::new();
     let mut seen_b = Vec::<String>::new();
@@ -848,16 +832,11 @@ async fn test_fresh_subscribe_with_from_fails_on_any_stale_seq_row() {
     let resumed = create_test_client().expect("create resumed client");
     resumed.connect().await.expect("resumed connect");
 
-    let mut config = SubscriptionConfig::new(
-        "resume-from-fresh",
-        format!("SELECT id, value FROM {}", table),
-    );
+    let mut config =
+        SubscriptionConfig::new("resume-from-fresh", format!("SELECT id, value FROM {}", table));
     config.options = Some(SubscriptionOptions::new().with_from(max_seq));
 
-    let mut resumed_sub = resumed
-        .subscribe_with_config(config)
-        .await
-        .expect("subscribe with from");
+    let mut resumed_sub = resumed.subscribe_with_config(config).await.expect("subscribe with from");
 
     writer
         .execute_query(
@@ -1019,19 +998,37 @@ async fn test_three_subscriptions_repeated_reconnect_cycles() {
 
         if !got_pre_a {
             if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(900), pre_sub_a.next()).await {
-                collect_ids_and_track_seq(&ev, &mut pre_ids_a, &mut last_seq_a, None, "chaos pre A");
+                collect_ids_and_track_seq(
+                    &ev,
+                    &mut pre_ids_a,
+                    &mut last_seq_a,
+                    None,
+                    "chaos pre A",
+                );
                 got_pre_a = pre_ids_a.iter().any(|id| id == pre_a);
             }
         }
         if !got_pre_b {
             if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(900), pre_sub_b.next()).await {
-                collect_ids_and_track_seq(&ev, &mut pre_ids_b, &mut last_seq_b, None, "chaos pre B");
+                collect_ids_and_track_seq(
+                    &ev,
+                    &mut pre_ids_b,
+                    &mut last_seq_b,
+                    None,
+                    "chaos pre B",
+                );
                 got_pre_b = pre_ids_b.iter().any(|id| id == pre_b);
             }
         }
         if !got_pre_c {
             if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(900), pre_sub_c.next()).await {
-                collect_ids_and_track_seq(&ev, &mut pre_ids_c, &mut last_seq_c, None, "chaos pre C");
+                collect_ids_and_track_seq(
+                    &ev,
+                    &mut pre_ids_c,
+                    &mut last_seq_c,
+                    None,
+                    "chaos pre C",
+                );
                 got_pre_c = pre_ids_c.iter().any(|id| id == pre_c);
             }
         }
@@ -1103,28 +1100,19 @@ async fn test_three_subscriptions_repeated_reconnect_cycles() {
             format!("SELECT id, value FROM {}", table_a),
         );
         config_a.options = Some(SubscriptionOptions::new().with_from(last_seq_a));
-        let mut sub_a = client
-            .subscribe_with_config(config_a)
-            .await
-            .expect("subscribe cycle A");
+        let mut sub_a = client.subscribe_with_config(config_a).await.expect("subscribe cycle A");
         let mut config_b = SubscriptionConfig::new(
             format!("resume3-chaos-b-{}", cycle),
             format!("SELECT id, value FROM {}", table_b),
         );
         config_b.options = Some(SubscriptionOptions::new().with_from(last_seq_b));
-        let mut sub_b = client
-            .subscribe_with_config(config_b)
-            .await
-            .expect("subscribe cycle B");
+        let mut sub_b = client.subscribe_with_config(config_b).await.expect("subscribe cycle B");
         let mut config_c = SubscriptionConfig::new(
             format!("resume3-chaos-c-{}", cycle),
             format!("SELECT id, value FROM {}", table_c),
         );
         config_c.options = Some(SubscriptionOptions::new().with_from(last_seq_c));
-        let mut sub_c = client
-            .subscribe_with_config(config_c)
-            .await
-            .expect("subscribe cycle C");
+        let mut sub_c = client.subscribe_with_config(config_c).await.expect("subscribe cycle C");
 
         writer
             .execute_query(
@@ -1211,11 +1199,23 @@ async fn test_three_subscriptions_repeated_reconnect_cycles() {
         }
 
         assert!(seen_a.iter().any(|id| id == &gap_a), "cycle {} A should receive gap row", cycle);
-        assert!(seen_a.iter().any(|id| id == &live_a), "cycle {} A should receive live row", cycle);
+        assert!(
+            seen_a.iter().any(|id| id == &live_a),
+            "cycle {} A should receive live row",
+            cycle
+        );
         assert!(seen_b.iter().any(|id| id == &gap_b), "cycle {} B should receive gap row", cycle);
-        assert!(seen_b.iter().any(|id| id == &live_b), "cycle {} B should receive live row", cycle);
+        assert!(
+            seen_b.iter().any(|id| id == &live_b),
+            "cycle {} B should receive live row",
+            cycle
+        );
         assert!(seen_c.iter().any(|id| id == &gap_c), "cycle {} C should receive gap row", cycle);
-        assert!(seen_c.iter().any(|id| id == &live_c), "cycle {} C should receive live row", cycle);
+        assert!(
+            seen_c.iter().any(|id| id == &live_c),
+            "cycle {} C should receive live row",
+            cycle
+        );
 
         assert!(!seen_a.iter().any(|id| id == pre_a), "cycle {} A replayed pre row", cycle);
         assert!(!seen_b.iter().any(|id| id == pre_b), "cycle {} B replayed pre row", cycle);
@@ -1325,13 +1325,16 @@ async fn test_multiple_subscriptions_with_distinct_from_values_fail_fast_on_stal
             break;
         }
 
-        if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(1200), baseline_sub_a.next()).await {
+        if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(1200), baseline_sub_a.next()).await
+        {
             collect_ids_and_track_seq(&ev, &mut ids_a, &mut from_a, None, "multi baseline A");
         }
-        if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(1200), baseline_sub_b.next()).await {
+        if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(1200), baseline_sub_b.next()).await
+        {
             collect_ids_and_track_seq(&ev, &mut ids_b, &mut from_b, None, "multi baseline B");
         }
-        if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(1200), baseline_sub_c.next()).await {
+        if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(1200), baseline_sub_c.next()).await
+        {
             collect_ids_and_track_seq(&ev, &mut ids_c, &mut from_c, None, "multi baseline C");
         }
     }
@@ -1384,18 +1387,9 @@ async fn test_multiple_subscriptions_with_distinct_from_values_fail_fast_on_stal
     );
     config_c.options = Some(SubscriptionOptions::new().with_from(from_c));
 
-    let mut resumed_a = resumed
-        .subscribe_with_config(config_a)
-        .await
-        .expect("subscribe resumed A");
-    let mut resumed_b = resumed
-        .subscribe_with_config(config_b)
-        .await
-        .expect("subscribe resumed B");
-    let mut resumed_c = resumed
-        .subscribe_with_config(config_c)
-        .await
-        .expect("subscribe resumed C");
+    let mut resumed_a = resumed.subscribe_with_config(config_a).await.expect("subscribe resumed A");
+    let mut resumed_b = resumed.subscribe_with_config(config_b).await.expect("subscribe resumed B");
+    let mut resumed_c = resumed.subscribe_with_config(config_c).await.expect("subscribe resumed C");
 
     let mut resumed_ids_a = Vec::<String>::new();
     let mut resumed_ids_b = Vec::<String>::new();
@@ -1675,10 +1669,7 @@ async fn test_close_resubscribe_resumes_from_last_seq_id() {
 
     let sub_id = "resume-close-test";
     let config = SubscriptionConfig::new(sub_id, format!("SELECT id, value FROM {}", table));
-    let mut sub = client
-        .subscribe_with_config(config)
-        .await
-        .expect("first subscribe");
+    let mut sub = client.subscribe_with_config(config).await.expect("first subscribe");
 
     // Drain until we see the baseline row in initial data.
     let mut first_ids = Vec::<String>::new();
@@ -1686,7 +1677,13 @@ async fn test_close_resubscribe_resumes_from_last_seq_id() {
     for _ in 0..6 {
         match timeout(Duration::from_millis(2000), sub.next()).await {
             Ok(Some(Ok(ev))) => {
-                collect_ids_and_track_seq(&ev, &mut first_ids, &mut first_max_seq, None, "close-resub first");
+                collect_ids_and_track_seq(
+                    &ev,
+                    &mut first_ids,
+                    &mut first_max_seq,
+                    None,
+                    "close-resub first",
+                );
                 if first_ids.iter().any(|id| id == "pre-1") {
                     break;
                 }
@@ -1712,7 +1709,13 @@ async fn test_close_resubscribe_resumes_from_last_seq_id() {
     for _ in 0..8 {
         match timeout(Duration::from_millis(2000), sub.next()).await {
             Ok(Some(Ok(ev))) => {
-                collect_ids_and_track_seq(&ev, &mut first_ids, &mut first_max_seq, None, "close-resub live");
+                collect_ids_and_track_seq(
+                    &ev,
+                    &mut first_ids,
+                    &mut first_max_seq,
+                    None,
+                    "close-resub live",
+                );
                 if first_ids.iter().any(|id| id == "live-1") {
                     break;
                 }
@@ -1735,10 +1738,7 @@ async fn test_close_resubscribe_resumes_from_last_seq_id() {
         cached.is_some(),
         "seq_id_cache should still expose the closed subscription's seq_id"
     );
-    assert!(
-        cached.unwrap().last_seq_id.is_some(),
-        "cached last_seq_id should be set"
-    );
+    assert!(cached.unwrap().last_seq_id.is_some(), "cached last_seq_id should be set");
     assert!(cached.unwrap().closed, "entry should be marked as closed");
 
     // Insert a row while disconnected from the subscription.
@@ -1756,10 +1756,7 @@ async fn test_close_resubscribe_resumes_from_last_seq_id() {
     // The shared connection should inherit the last_seq_id from the cache
     // and resume from there, NOT from the beginning.
     let config2 = SubscriptionConfig::new(sub_id, format!("SELECT id, value FROM {}", table));
-    let mut sub2 = client
-        .subscribe_with_config(config2)
-        .await
-        .expect("second subscribe");
+    let mut sub2 = client.subscribe_with_config(config2).await.expect("second subscribe");
 
     let mut second_ids = Vec::<String>::new();
     let mut second_max_seq: Option<SeqId> = Some(latest_seq);
@@ -1875,10 +1872,7 @@ async fn test_close_resubscribe_with_explicit_from_uses_max() {
     let mut config = SubscriptionConfig::new(sub_id, format!("SELECT id, value FROM {}", table));
     config.options = Some(SubscriptionOptions::new().with_from(from_seq));
 
-    let mut sub = client
-        .subscribe_with_config(config)
-        .await
-        .expect("first subscribe with from");
+    let mut sub = client.subscribe_with_config(config).await.expect("first subscribe with from");
 
     let mut first_ids = Vec::<String>::new();
     let mut first_max_seq: Option<SeqId> = Some(from_seq);
@@ -1901,10 +1895,7 @@ async fn test_close_resubscribe_with_explicit_from_uses_max() {
         }
     }
 
-    assert!(
-        first_ids.iter().any(|id| id == "after-from"),
-        "should observe after-from row"
-    );
+    assert!(first_ids.iter().any(|id| id == "after-from"), "should observe after-from row");
     assert!(
         !first_ids.iter().any(|id| id == "base-a" || id == "base-b"),
         "baseline rows should not appear with from filter"
@@ -1931,10 +1922,7 @@ async fn test_close_resubscribe_with_explicit_from_uses_max() {
     // Re-subscribe with same ID but no explicit from — should resume from
     // cached_seq (the higher value), not from_seq (the original explicit).
     let config2 = SubscriptionConfig::new(sub_id, format!("SELECT id, value FROM {}", table));
-    let mut sub2 = client
-        .subscribe_with_config(config2)
-        .await
-        .expect("second subscribe (no from)");
+    let mut sub2 = client.subscribe_with_config(config2).await.expect("second subscribe (no from)");
 
     let mut second_ids = Vec::<String>::new();
     let mut second_max_seq: Option<SeqId> = Some(cached_seq);
@@ -1957,10 +1945,7 @@ async fn test_close_resubscribe_with_explicit_from_uses_max() {
         }
     }
 
-    assert!(
-        second_ids.iter().any(|id| id == "gap-x"),
-        "gap row should be received"
-    );
+    assert!(second_ids.iter().any(|id| id == "gap-x"), "gap row should be received");
     assert!(
         !second_ids.iter().any(|id| id == "after-from"),
         "after-from should NOT be replayed (was seen in first subscription)"
@@ -2016,10 +2001,7 @@ async fn test_disconnect_reconnect_resubscribe_resumes_seq_id() {
 
     let sub_id = "disc-reconn-test";
     let config = SubscriptionConfig::new(sub_id, format!("SELECT id, value FROM {}", table));
-    let mut sub = client
-        .subscribe_with_config(config)
-        .await
-        .expect("first subscribe");
+    let mut sub = client.subscribe_with_config(config).await.expect("first subscribe");
 
     let mut seen_ids = Vec::<String>::new();
     let mut max_seq: Option<SeqId> = None;
@@ -2027,7 +2009,13 @@ async fn test_disconnect_reconnect_resubscribe_resumes_seq_id() {
     for _ in 0..8 {
         match timeout(Duration::from_millis(2000), sub.next()).await {
             Ok(Some(Ok(ev))) => {
-                collect_ids_and_track_seq(&ev, &mut seen_ids, &mut max_seq, None, "disc-reconn first");
+                collect_ids_and_track_seq(
+                    &ev,
+                    &mut seen_ids,
+                    &mut max_seq,
+                    None,
+                    "disc-reconn first",
+                );
                 if seen_ids.iter().any(|id| id == "row-1") {
                     break;
                 }
@@ -2061,10 +2049,7 @@ async fn test_disconnect_reconnect_resubscribe_resumes_seq_id() {
     let mut config2 = SubscriptionConfig::new(sub_id, format!("SELECT id, value FROM {}", table));
     config2.options = Some(SubscriptionOptions::new().with_from(last_seq));
 
-    let mut sub2 = client
-        .subscribe_with_config(config2)
-        .await
-        .expect("re-subscribe with from");
+    let mut sub2 = client.subscribe_with_config(config2).await.expect("re-subscribe with from");
 
     let mut second_ids = Vec::<String>::new();
     let mut second_max_seq: Option<SeqId> = Some(last_seq);
@@ -2091,10 +2076,7 @@ async fn test_disconnect_reconnect_resubscribe_resumes_seq_id() {
         second_ids.iter().any(|id| id == "row-2"),
         "gap row should be received after reconnect"
     );
-    assert!(
-        !second_ids.iter().any(|id| id == "row-1"),
-        "old row should NOT be replayed"
-    );
+    assert!(!second_ids.iter().any(|id| id == "row-1"), "old row should NOT be replayed");
 
     sub2.close().await.ok();
     client.disconnect().await;

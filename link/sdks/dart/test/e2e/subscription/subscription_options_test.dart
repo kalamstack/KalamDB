@@ -155,40 +155,10 @@ void main() {
     test(
       'from resumes from specific checkpoint without replaying older rows',
       () async {
-        bool hasRowId(List<ChangeEvent> events, int id) {
-          for (final event in events) {
-            switch (event) {
-              case InsertEvent(:final rows):
-                if (rows.any((r) => r['id']?.asInt() == id)) return true;
-              case UpdateEvent(:final rows):
-                if (rows.any((r) => r['id']?.asInt() == id)) return true;
-              case InitialDataBatch(:final rows):
-                if (rows.any((r) => r['id']?.asInt() == id)) return true;
-              case AckEvent() || DeleteEvent() || SubscriptionError():
-                break;
-            }
-          }
-          return false;
-        }
-
-        Future<void> waitFor(
-          bool Function() predicate, {
-          Duration timeout = const Duration(seconds: 20),
-          Duration poll = const Duration(milliseconds: 200),
-        }) async {
-          final started = DateTime.now();
-          while (!predicate()) {
-            if (DateTime.now().difference(started) > timeout) {
-              throw TimeoutException('Timed out waiting for condition');
-            }
-            await sleep(poll);
-          }
-        }
-
         final seed = DateTime.now().millisecondsSinceEpoch % 1000000;
         final preId = (seed * 10) + 1;
-        final gapId = (seed * 10) + 2;
-        final postId = (seed * 10) + 3;
+        final gapIds = [(seed * 10) + 2, (seed * 10) + 3];
+        final postIds = [(seed * 10) + 4, (seed * 10) + 5];
         final checkpointSubId = 'checkpoint-${uniqueName('fromseq')}';
 
         final writer = await connectJwtClient();
@@ -208,10 +178,13 @@ void main() {
           );
           sub1 = firstStream.listen(firstEvents.add);
 
-          await waitFor(() => firstEvents.whereType<AckEvent>().isNotEmpty);
+          await waitForCondition(
+            () => firstEvents.whereType<AckEvent>().isNotEmpty,
+          );
           final firstAck = firstEvents.whereType<AckEvent>().first;
 
-          await waitFor(() => hasRowId(firstEvents, preId));
+          await waitForCondition(
+              () => changeEventsContainRowId(firstEvents, preId));
 
           SeqId? checkpoint;
           final started = DateTime.now();
@@ -235,9 +208,11 @@ void main() {
           await _safeCancel(sub1);
           sub1 = null;
 
-          await writer.query(
-            "INSERT INTO $tbl (id, value) VALUES ($gapId, 'after-checkpoint-before-resub')",
-          );
+          for (final id in gapIds) {
+            await writer.query(
+              "INSERT INTO $tbl (id, value) VALUES ($id, 'after-checkpoint-before-resub-$id')",
+            );
+          }
 
           final secondEvents = <ChangeEvent>[];
           final secondStream = client.subscribe(
@@ -247,21 +222,51 @@ void main() {
           );
           sub2 = secondStream.listen(secondEvents.add);
 
-          await waitFor(() => secondEvents.whereType<AckEvent>().isNotEmpty);
-
-          await writer.query(
-            "INSERT INTO $tbl (id, value) VALUES ($postId, 'post-resub')",
+          await waitForCondition(
+            () => secondEvents.whereType<AckEvent>().isNotEmpty,
           );
 
-          await waitFor(() =>
-              hasRowId(secondEvents, gapId) && hasRowId(secondEvents, postId));
+          for (final id in postIds) {
+            await writer.query(
+              "INSERT INTO $tbl (id, value) VALUES ($id, 'post-resub-$id')",
+            );
+          }
 
-          expect(hasRowId(secondEvents, preId), isFalse,
+          await waitForCondition(
+            () =>
+                gapIds.every(
+                    (id) => changeEventsContainRowId(secondEvents, id)) &&
+                postIds
+                    .every((id) => changeEventsContainRowId(secondEvents, id)),
+          );
+
+          expect(changeEventsContainRowId(secondEvents, preId), isFalse,
               reason: 'row written before checkpoint must not replay');
-          expect(hasRowId(secondEvents, gapId), isTrue,
-              reason: 'row written after checkpoint must be included');
-          expect(hasRowId(secondEvents, postId), isTrue,
-              reason: 'live row after resubscribe must be received');
+          for (final id in gapIds) {
+            expect(
+              changeEventsContainRowId(secondEvents, id),
+              isTrue,
+              reason: 'row $id written after checkpoint must be included',
+            );
+          }
+          for (final id in postIds) {
+            expect(
+              changeEventsContainRowId(secondEvents, id),
+              isTrue,
+              reason: 'live row $id after resubscribe must be received',
+            );
+          }
+          expectNoDuplicateSeqs(
+            secondEvents,
+            reason:
+                'resubscribe from checkpoint must not replay duplicate seq ids',
+          );
+          expectSeqsStrictlyAfterCheckpoint(
+            secondEvents,
+            checkpoint,
+            reason:
+                'resubscribe from checkpoint must only emit seq ids strictly after checkpoint',
+          );
         } finally {
           if (sub1 != null) {
             await _safeCancel(sub1);
@@ -278,40 +283,14 @@ void main() {
     test(
       'from resumes with only seqs strictly greater than checkpoint',
       () async {
-        bool hasRowId(List<ChangeEvent> events, int id) {
-          for (final event in events) {
-            switch (event) {
-              case InsertEvent(:final rows):
-                if (rows.any((r) => r['id']?.asInt() == id)) return true;
-              case UpdateEvent(:final rows):
-                if (rows.any((r) => r['id']?.asInt() == id)) return true;
-              case InitialDataBatch(:final rows):
-                if (rows.any((r) => r['id']?.asInt() == id)) return true;
-              case AckEvent() || DeleteEvent() || SubscriptionError():
-                break;
-            }
-          }
-          return false;
-        }
-
-        Future<void> waitFor(
-          bool Function() predicate, {
-          Duration timeout = const Duration(seconds: 20),
-          Duration poll = const Duration(milliseconds: 200),
-        }) async {
-          final started = DateTime.now();
-          while (!predicate()) {
-            if (DateTime.now().difference(started) > timeout) {
-              throw TimeoutException('Timed out waiting for condition');
-            }
-            await sleep(poll);
-          }
-        }
-
         final seed = DateTime.now().millisecondsSinceEpoch % 1000000;
         final baselineA = (seed * 10) + 101;
         final baselineB = (seed * 10) + 102;
-        final freshId = (seed * 10) + 103;
+        final freshIds = [
+          (seed * 10) + 103,
+          (seed * 10) + 104,
+          (seed * 10) + 105
+        ];
         final checkpointSubId = 'strict-from-${uniqueName('seq')}';
         final resumedSubId = 'strict-from-resume-${uniqueName('seq')}';
 
@@ -335,10 +314,10 @@ void main() {
           );
           sub1 = baselineStream.listen(baselineEvents.add);
 
-          await waitFor(
+          await waitForCondition(
             () =>
-                hasRowId(baselineEvents, baselineA) &&
-                hasRowId(baselineEvents, baselineB),
+                changeEventsContainRowId(baselineEvents, baselineA) &&
+                changeEventsContainRowId(baselineEvents, baselineB),
           );
 
           SeqId? checkpoint;
@@ -364,9 +343,11 @@ void main() {
           await _safeCancel(sub1);
           sub1 = null;
 
-          await writer.query(
-            "INSERT INTO $tbl (id, value) VALUES ($freshId, 'fresh-after-checkpoint')",
-          );
+          for (final id in freshIds) {
+            await writer.query(
+              "INSERT INTO $tbl (id, value) VALUES ($id, 'fresh-after-checkpoint-$id')",
+            );
+          }
 
           final resumedEvents = <ChangeEvent>[];
           final resumedStream = client.subscribe(
@@ -377,8 +358,13 @@ void main() {
           );
           sub2 = resumedStream.listen(resumedEvents.add);
 
-          await waitFor(() => resumedEvents.whereType<AckEvent>().isNotEmpty);
-          await waitFor(() => hasRowId(resumedEvents, freshId));
+          await waitForCondition(
+            () => resumedEvents.whereType<AckEvent>().isNotEmpty,
+          );
+          await waitForCondition(
+            () => freshIds
+                .every((id) => changeEventsContainRowId(resumedEvents, id)),
+          );
           final checkpointValue = checkpoint;
           var resumedAdvanced = false;
           final resumedStarted = DateTime.now();
@@ -402,19 +388,29 @@ void main() {
           }
 
           expect(
-            hasRowId(resumedEvents, baselineA),
+            changeEventsContainRowId(resumedEvents, baselineA),
             isFalse,
             reason: 'baseline row A must not replay',
           );
           expect(
-            hasRowId(resumedEvents, baselineB),
+            changeEventsContainRowId(resumedEvents, baselineB),
             isFalse,
             reason: 'baseline row B must not replay',
           );
           expect(
-            hasRowId(resumedEvents, freshId),
+            freshIds.every((id) => changeEventsContainRowId(resumedEvents, id)),
             isTrue,
-            reason: 'fresh row after checkpoint must be delivered',
+            reason: 'all fresh rows after checkpoint must be delivered',
+          );
+          expectNoDuplicateSeqs(
+            resumedEvents,
+            reason: 'strict from resume must not replay duplicate seq ids',
+          );
+          expectSeqsStrictlyAfterCheckpoint(
+            resumedEvents,
+            checkpoint,
+            reason:
+                'strict from resume must only emit seq ids after checkpoint',
           );
         } finally {
           if (sub1 != null) {

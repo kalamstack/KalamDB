@@ -1,6 +1,6 @@
+use super::helpers::*;
 use crate::common;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
-use super::helpers::*;
 use kalam_link::SubscriptionConfig;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -35,10 +35,7 @@ async fn test_shared_connection_auto_reconnects_after_socket_drop_and_resumes() 
 
     ensure_table(&writer, &table).await;
 
-    client
-        .connect()
-        .await
-        .expect("connect should succeed through proxy");
+    client.connect().await.expect("connect should succeed through proxy");
 
     let mut sub = client
         .subscribe_with_config(SubscriptionConfig::new(
@@ -54,28 +51,30 @@ async fn test_shared_connection_auto_reconnects_after_socket_drop_and_resumes() 
         "proxy should observe the shared websocket connection"
     );
 
-    let pre_id = "71001";
-    let gap_id = "71002";
-    let live_id = "71003";
+    let pre_ids = ["71001", "71002", "71003"];
+    let gap_ids = ["71011", "71012", "71013", "71014"];
+    let live_ids = ["71021", "71022", "71023", "71024"];
 
-    writer
-        .execute_query(
-            &format!(
-                "INSERT INTO {} (id, value) VALUES ('{}', 'before-drop')",
-                table, pre_id
-            ),
-            None,
-            None,
-            None,
-        )
-        .await
-        .expect("insert before drop");
+    for pre_id in pre_ids {
+        writer
+            .execute_query(
+                &format!("INSERT INTO {} (id, value) VALUES ('{}', 'before-drop')", table, pre_id),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("insert before drop");
+    }
 
     let mut pre_seen = Vec::<String>::new();
     let mut observed_seq = None;
     let mut last_pre_event = None;
     for _ in 0..12 {
-        if pre_seen.iter().any(|id| id == pre_id) {
+        if pre_ids
+            .iter()
+            .all(|expected_id| pre_seen.iter().any(|seen_id| seen_id == expected_id))
+        {
             break;
         }
 
@@ -97,8 +96,10 @@ async fn test_shared_connection_auto_reconnects_after_socket_drop_and_resumes() 
     }
 
     assert!(
-        pre_seen.iter().any(|id| id == pre_id),
-        "pre row should be observed before drop"
+        pre_ids
+            .iter()
+            .all(|expected_id| pre_seen.iter().any(|seen_id| seen_id == expected_id)),
+        "all pre rows should be observed before drop"
     );
     let resume_from = query_max_seq(&writer, &table).await;
     assert_eq!(
@@ -134,18 +135,20 @@ async fn test_shared_connection_auto_reconnects_after_socket_drop_and_resumes() 
         "forced socket close should trigger an on_disconnect event"
     );
 
-    writer
-        .execute_query(
-            &format!(
-                "INSERT INTO {} (id, value) VALUES ('{}', 'while-disconnected')",
-                table, gap_id
-            ),
-            None,
-            None,
-            None,
-        )
-        .await
-        .expect("insert while disconnected");
+    for gap_id in gap_ids {
+        writer
+            .execute_query(
+                &format!(
+                    "INSERT INTO {} (id, value) VALUES ('{}', 'while-disconnected')",
+                    table, gap_id
+                ),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("insert while disconnected");
+    }
 
     sleep(Duration::from_millis(300)).await;
     proxy.resume();
@@ -157,33 +160,36 @@ async fn test_shared_connection_auto_reconnects_after_socket_drop_and_resumes() 
         sleep(Duration::from_millis(100)).await;
     }
 
-    assert!(
-        client.is_connected().await,
-        "client should auto reconnect after socket drop"
-    );
+    assert!(client.is_connected().await, "client should auto reconnect after socket drop");
     assert!(
         connect_count.load(Ordering::SeqCst) >= 2,
         "shared connection should emit a second on_connect after reconnect"
     );
 
-    writer
-        .execute_query(
-            &format!(
-                "INSERT INTO {} (id, value) VALUES ('{}', 'after-reconnect')",
-                table, live_id
-            ),
-            None,
-            None,
-            None,
-        )
-        .await
-        .expect("insert after reconnect");
+    for live_id in live_ids {
+        writer
+            .execute_query(
+                &format!(
+                    "INSERT INTO {} (id, value) VALUES ('{}', 'after-reconnect')",
+                    table, live_id
+                ),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("insert after reconnect");
+    }
 
     let mut resumed_ids = Vec::<String>::new();
     let mut resumed_seq = Some(resume_from);
-    for _ in 0..20 {
-        if resumed_ids.iter().any(|id| id == gap_id)
-            && resumed_ids.iter().any(|id| id == live_id)
+    for _ in 0..28 {
+        if gap_ids
+            .iter()
+            .all(|expected_id| resumed_ids.iter().any(|seen_id| seen_id == expected_id))
+            && live_ids
+                .iter()
+                .all(|expected_id| resumed_ids.iter().any(|seen_id| seen_id == expected_id))
         {
             break;
         }
@@ -205,15 +211,21 @@ async fn test_shared_connection_auto_reconnects_after_socket_drop_and_resumes() 
     }
 
     assert!(
-        resumed_ids.iter().any(|id| id == gap_id),
-        "subscription should resume and receive the row written during the disconnect"
+        gap_ids
+            .iter()
+            .all(|expected_id| resumed_ids.iter().any(|seen_id| seen_id == expected_id)),
+        "subscription should resume and receive all rows written during the disconnect"
     );
     assert!(
-        resumed_ids.iter().any(|id| id == live_id),
-        "subscription should continue receiving live rows after reconnect"
+        live_ids
+            .iter()
+            .all(|expected_id| resumed_ids.iter().any(|seen_id| seen_id == expected_id)),
+        "subscription should continue receiving all live rows after reconnect"
     );
     assert!(
-        !resumed_ids.iter().any(|id| id == pre_id),
+        pre_ids
+            .iter()
+            .all(|expected_id| !resumed_ids.iter().any(|seen_id| seen_id == expected_id)),
         "subscription must not replay rows observed before the socket drop"
     );
 

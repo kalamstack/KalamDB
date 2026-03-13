@@ -3,15 +3,16 @@
 //! `models` (subscription models) is always available — no `tokio-runtime` needed.
 //! The WebSocket manager requires the `tokio-runtime` feature.
 
-pub mod models;
+mod checkpoint;
 mod live_rows_config;
 mod live_rows_event;
 mod live_rows_materializer;
+pub mod models;
 
-pub use models::{SubscriptionConfig, SubscriptionInfo, SubscriptionOptions, SubscriptionRequest};
 pub use live_rows_config::LiveRowsConfig;
 pub use live_rows_event::LiveRowsEvent;
 pub use live_rows_materializer::LiveRowsMaterializer;
+pub use models::{SubscriptionConfig, SubscriptionInfo, SubscriptionOptions, SubscriptionRequest};
 
 #[cfg(feature = "tokio-runtime")]
 mod live_rows_subscription;
@@ -19,6 +20,11 @@ mod live_rows_subscription;
 mod manager;
 #[cfg(feature = "tokio-runtime")]
 mod reader;
+pub(crate) use checkpoint::filter_replayed_event;
+#[cfg(feature = "tokio-runtime")]
+pub(crate) use checkpoint::{
+    batch_envelope, buffer_event, event_progress, final_resume_seq, subscription_start_ready,
+};
 #[cfg(feature = "tokio-runtime")]
 pub use live_rows_subscription::LiveRowsSubscription;
 #[cfg(feature = "tokio-runtime")]

@@ -7,8 +7,8 @@
 //! - Similarity queries joined back to document rows
 
 use super::helpers::*;
-use kalamdb_api::handlers::sql::models::{ResponseStatus as ApiResponseStatus, SqlResponse};
 use kalam_link::KalamCellValue;
+use kalamdb_api::handlers::sql::models::{ResponseStatus as ApiResponseStatus, SqlResponse};
 use kalamdb_commons::models::{TableId, UserId};
 use kalamdb_commons::schemas::TableType;
 use kalamdb_commons::{Role, UserName};
@@ -26,10 +26,8 @@ fn parse_file_ref(value: &JsonValue) -> anyhow::Result<FileRef> {
 fn extract_id_list(rows: &[std::collections::HashMap<String, KalamCellValue>]) -> Vec<i64> {
     rows.iter()
         .filter_map(|row| {
-            row.get("id").and_then(|v| {
-                v.as_i64()
-                    .or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok()))
-            })
+            row.get("id")
+                .and_then(|v| v.as_i64().or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok())))
         })
         .collect()
 }
@@ -185,9 +183,8 @@ async fn test_scenario_14_rag_docs_with_files_and_vector_search() -> anyhow::Res
              VALUES ({}, '{}', '{}', '{}')",
             ns, vectors_table, id, doc_vec, file_a_vec, file_b_vec
         );
-        let insert_vectors_resp = user_client
-            .execute_query(&insert_vectors_sql, None, None, None)
-            .await?;
+        let insert_vectors_resp =
+            user_client.execute_query(&insert_vectors_sql, None, None, None).await?;
         assert!(
             insert_vectors_resp.success(),
             "vector INSERT should succeed for id={}: {:?}",
@@ -234,10 +231,9 @@ async fn test_scenario_14_rag_docs_with_files_and_vector_search() -> anyhow::Res
         .manifest_service()
         .ensure_manifest_initialized(&vectors_table_id, Some(&manifest_user))
         .map_err(|e| anyhow::anyhow!("Failed to load vectors manifest: {}", e))?;
-    let cached_table = app_context
-        .schema_registry()
-        .get(&vectors_table_id)
-        .ok_or_else(|| anyhow::anyhow!("Missing cached vectors table {}", vectors_table_id.full_name()))?;
+    let cached_table = app_context.schema_registry().get(&vectors_table_id).ok_or_else(|| {
+        anyhow::anyhow!("Missing cached vectors table {}", vectors_table_id.full_name())
+    })?;
     let storage_cached = cached_table
         .storage_cached(&app_context.storage_registry())
         .map_err(|e| anyhow::anyhow!("Failed to resolve vectors storage cache: {}", e))?;
@@ -274,10 +270,7 @@ async fn test_scenario_14_rag_docs_with_files_and_vector_search() -> anyhow::Res
             None,
         )
         .await?;
-    assert!(
-        seeded_rows_resp.success(),
-        "seeded vector rows query should succeed"
-    );
+    assert!(seeded_rows_resp.success(), "seeded vector rows query should succeed");
     let seeded_ids = extract_id_list(&seeded_rows_resp.rows_as_maps());
     assert_eq!(seeded_ids, vec![1, 2, 3], "expected 3 seeded vector rows");
 
@@ -332,18 +325,8 @@ async fn test_scenario_14_rag_docs_with_files_and_vector_search() -> anyhow::Res
         &user_auth,
         &insert_files_hot_sql,
         vec![
-            (
-                "file_a",
-                "doc4-appendix.txt",
-                b"hot file_a payload".to_vec(),
-                "text/plain",
-            ),
-            (
-                "file_b",
-                "doc4-policy.txt",
-                b"hot file_b payload".to_vec(),
-                "text/plain",
-            ),
+            ("file_a", "doc4-appendix.txt", b"hot file_a payload".to_vec(), "text/plain"),
+            ("file_b", "doc4-policy.txt", b"hot file_b payload".to_vec(), "text/plain"),
         ],
     )
     .await?;
@@ -383,19 +366,10 @@ async fn test_scenario_14_rag_docs_with_files_and_vector_search() -> anyhow::Res
             None,
         )
         .await?;
-    assert!(
-        mixed_tier_resp.success(),
-        "mixed hot+cold vector query should succeed"
-    );
+    assert!(mixed_tier_resp.success(), "mixed hot+cold vector query should succeed");
     let mixed_ids = extract_id_list(&mixed_tier_resp.rows_as_maps());
-    assert!(
-        mixed_ids.contains(&1),
-        "mixed vector results should include cold row id=1"
-    );
-    assert!(
-        mixed_ids.contains(&4),
-        "mixed vector results should include hot row id=4"
-    );
+    assert!(mixed_ids.contains(&1), "mixed vector results should include cold row id=1");
+    assert!(mixed_ids.contains(&4), "mixed vector results should include hot row id=4");
 
     let delete_vector_resp = user_client
         .execute_query(
@@ -422,10 +396,7 @@ async fn test_scenario_14_rag_docs_with_files_and_vector_search() -> anyhow::Res
             None,
         )
         .await?;
-    assert!(
-        after_delete_resp.success(),
-        "vector query after delete should succeed"
-    );
+    assert!(after_delete_resp.success(), "vector query after delete should succeed");
     let after_delete_ids = extract_id_list(&after_delete_resp.rows_as_maps());
     assert!(
         !after_delete_ids.contains(&1),
@@ -441,7 +412,9 @@ async fn test_scenario_14_rag_docs_with_files_and_vector_search() -> anyhow::Res
     let manifest_after_second_flush = app_context
         .manifest_service()
         .ensure_manifest_initialized(&vectors_table_id, Some(&manifest_user))
-        .map_err(|e| anyhow::anyhow!("Failed to load vectors manifest after second flush: {}", e))?;
+        .map_err(|e| {
+            anyhow::anyhow!("Failed to load vectors manifest after second flush: {}", e)
+        })?;
     let doc_meta = manifest_after_second_flush
         .vector_indexes
         .get("doc_embedding")

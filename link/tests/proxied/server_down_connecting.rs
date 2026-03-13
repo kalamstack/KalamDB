@@ -1,6 +1,6 @@
+use super::helpers::*;
 use crate::common;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
-use super::helpers::*;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -26,8 +26,7 @@ async fn test_proxy_server_down_while_connecting() {
         };
 
     // connect() should either error or time out because the proxy rejects.
-    let connect_result =
-        tokio::time::timeout(Duration::from_secs(5), client.connect()).await;
+    let connect_result = tokio::time::timeout(Duration::from_secs(5), client.connect()).await;
     match connect_result {
         Ok(Ok(())) => {
             // Some implementations may return Ok even though the WS handshake

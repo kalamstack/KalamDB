@@ -1,5 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::time::Duration;
 
 use crate::benchmarks::Benchmark;
 use crate::client::KalamClient;
@@ -74,11 +75,11 @@ impl Benchmark for MixedReadWriteBench {
                 let ns = config.namespace.clone();
                 let id = 10_000 + iteration * config.concurrency + i;
                 handles.push(tokio::spawn(async move {
-                    c.sql_ok(&format!(
+                    let sql = format!(
                         "INSERT INTO {}.mixed_bench (id, counter, label) VALUES ({}, {}, 'new_{}')",
                         ns, id, id, id
-                    ))
-                    .await
+                    );
+                    run_sql_with_retry(&c, &sql).await
                 }));
             }
 
@@ -91,7 +92,7 @@ impl Benchmark for MixedReadWriteBench {
                     1 => format!("SELECT COUNT(*) FROM {}.mixed_bench", ns),
                     _ => format!("SELECT * FROM {}.mixed_bench ORDER BY id DESC LIMIT 20", ns),
                 };
-                handles.push(tokio::spawn(async move { c.sql_ok(&query).await }));
+                handles.push(tokio::spawn(async move { run_sql_with_retry(&c, &query).await }));
             }
 
             for h in handles {
@@ -113,4 +114,31 @@ impl Benchmark for MixedReadWriteBench {
             Ok(())
         })
     }
+}
+
+async fn run_sql_with_retry(client: &KalamClient, sql: &str) -> Result<(), String> {
+    let mut delay = Duration::from_millis(100);
+
+    for attempt in 0..4 {
+        match client.sql_ok(sql).await {
+            Ok(_) => return Ok(()),
+            Err(error) if attempt < 3 && is_transient_load_error(&error) => {
+                tokio::time::sleep(delay).await;
+                delay = std::cmp::min(delay * 2, Duration::from_secs(2));
+            },
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err("mixed_read_write exhausted retries".to_string())
+}
+
+fn is_transient_load_error(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("network error")
+        || lower.contains("connection failed")
+        || lower.contains("timed out")
+        || lower.contains("timeout")
+        || lower.contains("connection reset")
+        || lower.contains("broken pipe")
 }

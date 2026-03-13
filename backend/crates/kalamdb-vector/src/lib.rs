@@ -1,8 +1,8 @@
 pub mod flush;
-pub mod hot_staging;
-pub mod sql;
 mod hot_query_cache;
+pub mod hot_staging;
 mod snapshot_codec;
+pub mod sql;
 mod usearch_engine;
 
 pub use flush::{

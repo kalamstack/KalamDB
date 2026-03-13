@@ -15,8 +15,7 @@ const MILLIS_PER_DAY: i64 = 24 * MILLIS_PER_HOUR;
 
 const WEEKDAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_NAMES: [&str; 12] = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov",
-    "Dec",
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,11 +84,7 @@ fn civil_from_days(days: i64) -> Option<(i32, u8, u8)> {
     let m = mp + if mp < 10 { 3 } else { -9 };
     let year = y + if m <= 2 { 1 } else { 0 };
 
-    Some((
-        i32::try_from(year).ok()?,
-        u8::try_from(m).ok()?,
-        u8::try_from(d).ok()?,
-    ))
+    Some((i32::try_from(year).ok()?, u8::try_from(m).ok()?, u8::try_from(d).ok()?))
 }
 
 fn days_from_civil(year: i32, month: u8, day: u8) -> i64 {
@@ -472,12 +467,18 @@ pub fn parse_iso8601(iso: &str) -> Result<i64, ParseError> {
         return Err(ParseError::new("Timestamp must be RFC3339/ISO8601"));
     }
 
-    let year = i32::try_from(parse_digits(bytes, 0, 4)?).map_err(|_| ParseError::new("Invalid year"))?;
-    let month = u8::try_from(parse_digits(bytes, 5, 2)?).map_err(|_| ParseError::new("Invalid month"))?;
-    let day = u8::try_from(parse_digits(bytes, 8, 2)?).map_err(|_| ParseError::new("Invalid day"))?;
-    let hour = u8::try_from(parse_digits(bytes, 11, 2)?).map_err(|_| ParseError::new("Invalid hour"))?;
-    let minute = u8::try_from(parse_digits(bytes, 14, 2)?).map_err(|_| ParseError::new("Invalid minute"))?;
-    let second = u8::try_from(parse_digits(bytes, 17, 2)?).map_err(|_| ParseError::new("Invalid second"))?;
+    let year =
+        i32::try_from(parse_digits(bytes, 0, 4)?).map_err(|_| ParseError::new("Invalid year"))?;
+    let month =
+        u8::try_from(parse_digits(bytes, 5, 2)?).map_err(|_| ParseError::new("Invalid month"))?;
+    let day =
+        u8::try_from(parse_digits(bytes, 8, 2)?).map_err(|_| ParseError::new("Invalid day"))?;
+    let hour =
+        u8::try_from(parse_digits(bytes, 11, 2)?).map_err(|_| ParseError::new("Invalid hour"))?;
+    let minute =
+        u8::try_from(parse_digits(bytes, 14, 2)?).map_err(|_| ParseError::new("Invalid minute"))?;
+    let second =
+        u8::try_from(parse_digits(bytes, 17, 2)?).map_err(|_| ParseError::new("Invalid second"))?;
 
     if !(1..=12).contains(&month)
         || day == 0
@@ -596,10 +597,7 @@ mod tests {
     #[test]
     fn test_format_rfc2822() {
         let formatter = TimestampFormatter::new(TimestampFormat::Rfc2822);
-        assert_eq!(
-            formatter.format(Some(1734190245123)),
-            "Sat, 14 Dec 2024 15:30:45 +0000"
-        );
+        assert_eq!(formatter.format(Some(1734190245123)), "Sat, 14 Dec 2024 15:30:45 +0000");
     }
 
     #[test]

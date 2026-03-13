@@ -374,6 +374,7 @@ fn parse_subscribe_options(options_str: &str) -> DdlResult<SubscriptionOptions> 
         batch_size,
         last_rows,
         from,
+        snapshot_end_seq: None,
     })
 }
 
@@ -571,8 +572,8 @@ mod tests {
     fn test_parse_subscribe_with_from() {
         use kalamdb_commons::ids::SeqId;
 
-        let stmt = SubscribeStatement::parse("SUBSCRIBE TO app.messages OPTIONS (from=12345)")
-            .unwrap();
+        let stmt =
+            SubscribeStatement::parse("SUBSCRIBE TO app.messages OPTIONS (from=12345)").unwrap();
         assert_eq!(stmt.namespace, NamespaceId::from("app"));
         assert_eq!(stmt.table_name, TableName::from("messages"));
         assert_eq!(stmt.options.from, Some(SeqId::new(12345)));
@@ -628,7 +629,8 @@ mod tests {
 
     #[test]
     fn test_parse_subscribe_invalid_from() {
-        let result = SubscribeStatement::parse("SUBSCRIBE TO app.messages OPTIONS (from=not_a_number)");
+        let result =
+            SubscribeStatement::parse("SUBSCRIBE TO app.messages OPTIONS (from=not_a_number)");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Invalid from value"));
     }
@@ -649,8 +651,8 @@ mod tests {
         use kalamdb_commons::ids::SeqId;
 
         // Negative seq_id should be valid (might be used for special cases)
-        let stmt = SubscribeStatement::parse("SUBSCRIBE TO app.messages OPTIONS (from=-1)")
-            .unwrap();
+        let stmt =
+            SubscribeStatement::parse("SUBSCRIBE TO app.messages OPTIONS (from=-1)").unwrap();
         assert_eq!(stmt.options.from, Some(SeqId::new(-1)));
     }
 
@@ -675,8 +677,9 @@ mod tests {
 
     #[test]
     fn test_parse_subscribe_rejects_group_by() {
-        let result =
-            SubscribeStatement::parse("SUBSCRIBE TO SELECT user_id FROM app.messages GROUP BY user_id");
+        let result = SubscribeStatement::parse(
+            "SUBSCRIBE TO SELECT user_id FROM app.messages GROUP BY user_id",
+        );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("GROUP BY"));
     }

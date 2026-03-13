@@ -75,6 +75,19 @@ function assertRowsStrictlyAfter(events, from, context) {
   }
 }
 
+function assertNoDuplicateSeqRows(events, context) {
+  const seen = new Set();
+  for (const row of extractRows(events)) {
+    const seq = row._seq?.asSeqId?.();
+    if (!seq) {
+      continue;
+    }
+    const key = seq.toString();
+    assert.ok(!seen.has(key), `${context}: duplicate _seq replayed: ${key}`);
+    seen.add(key);
+  }
+}
+
 async function shutdownClient(client) {
   if (!client) {
     return;
@@ -415,6 +428,7 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
         });
 
         assertRowsStrictlyAfter(resumedEvents, checkpoint, 'subscribeWithSql(from)');
+        assertNoDuplicateSeqRows(resumedEvents, 'subscribeWithSql(from)');
         assert.ok(!hasRowId(resumedEvents, baselineA), 'should not replay baseline row A');
         assert.ok(!hasRowId(resumedEvents, baselineB), 'should not replay baseline row B');
       } finally {

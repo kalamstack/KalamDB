@@ -29,7 +29,11 @@ pub async fn cleanup_connection(
         match live_query_manager.unregister_connection(uid, &connection_id).await {
             Ok(live_ids) => live_ids,
             Err(e) => {
-                log::warn!("Failed to cleanup live queries for connection {}: {}", connection_id, e);
+                log::warn!(
+                    "Failed to cleanup live queries for connection {}: {}",
+                    connection_id,
+                    e
+                );
                 registry.unregister_connection(&connection_id)
             },
         }

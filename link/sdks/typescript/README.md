@@ -2,7 +2,7 @@
 
 Official TypeScript / JavaScript SDK for [KalamDB](https://kalamdb.org) — SQL, realtime rows, and strong tenant isolation in one client.
 
-> Status: **Alpha** — the API surface is still evolving.
+> Status: **Beta** — the API surface is still evolving.
 
 KalamDB is built for apps where every user or tenant owns a private data space. The same SQL can run for every signed-in customer, while USER tables ensure each query only touches that caller's data. On the frontend, the default realtime API is now `live()`: you get the current materialized row set, not a stream of low-level diff frames that your UI has to reconcile.
 
@@ -40,6 +40,21 @@ Most UIs do not want `subscription_ack`, `initial_data_batch`, `change`, and `er
 - simpler React, Vue, Svelte, and plain browser code
 
 Use `subscribeWithSql()` only when you need the raw event protocol.
+
+If your query does not expose an `id` column, prefer declarative `keyColumns`
+with `live()` so row reconciliation still stays inside the shared Rust core:
+
+```ts
+const stop = await client.live(
+  'SELECT room_id, message_id, body FROM support.messages',
+  (rows) => {
+    console.log(rows.length);
+  },
+  {
+    keyColumns: ['room_id', 'message_id'],
+  },
+);
+```
 
 ## Quick Start
 

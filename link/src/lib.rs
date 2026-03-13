@@ -159,10 +159,10 @@ pub use query::QueryExecutor;
 #[cfg(feature = "tokio-runtime")]
 pub use query::UploadProgressCallback;
 #[cfg(feature = "tokio-runtime")]
+pub use subscription::LiveRowsSubscription;
+#[cfg(feature = "tokio-runtime")]
 pub use subscription::SubscriptionManager;
 pub use subscription::{LiveRowsConfig, LiveRowsEvent, LiveRowsMaterializer};
-#[cfg(feature = "tokio-runtime")]
-pub use subscription::LiveRowsSubscription;
 
 /// Library version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

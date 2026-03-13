@@ -1,6 +1,6 @@
+use super::helpers::*;
 use crate::common;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
-use super::helpers::*;
 use kalam_link::SubscriptionConfig;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -48,10 +48,7 @@ async fn test_proxy_server_down_while_reconnecting() {
     // Insert a pre-outage row.
     writer
         .execute_query(
-            &format!(
-                "INSERT INTO {} (id, value) VALUES ('pre-1', 'v')",
-                table
-            ),
+            &format!("INSERT INTO {} (id, value) VALUES ('pre-1', 'v')", table),
             None,
             None,
             None,
@@ -104,10 +101,7 @@ async fn test_proxy_server_down_while_reconnecting() {
     // Insert data while doubly-disconnected.
     writer
         .execute_query(
-            &format!(
-                "INSERT INTO {} (id, value) VALUES ('gap-double', 'g')",
-                table
-            ),
+            &format!("INSERT INTO {} (id, value) VALUES ('gap-double', 'g')", table),
             None,
             None,
             None,
@@ -126,18 +120,12 @@ async fn test_proxy_server_down_while_reconnecting() {
         }
         sleep(Duration::from_millis(100)).await;
     }
-    assert!(
-        client.is_connected().await,
-        "client should recover after double outage"
-    );
+    assert!(client.is_connected().await, "client should recover after double outage");
 
     // Insert a live row.
     writer
         .execute_query(
-            &format!(
-                "INSERT INTO {} (id, value) VALUES ('live-after-double', 'l')",
-                table
-            ),
+            &format!("INSERT INTO {} (id, value) VALUES ('live-after-double', 'l')", table),
             None,
             None,
             None,

@@ -218,6 +218,14 @@ fn test_subscription_options_deserialization_alias() {
 }
 
 #[test]
+fn test_subscription_options_deserialization_string_seq_id() {
+    let json = r#"{"from":"922337203685477500"}"#;
+    let opts: SubscriptionOptions = serde_json::from_str(json).unwrap();
+
+    assert_eq!(opts.from, Some(SeqId::from(922337203685477500i64)));
+}
+
+#[test]
 fn test_subscription_options_deserialization_empty() {
     let json = r#"{}"#;
     let opts: SubscriptionOptions = serde_json::from_str(json).unwrap();

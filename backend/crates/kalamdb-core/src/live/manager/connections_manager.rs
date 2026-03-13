@@ -227,57 +227,54 @@ impl ConnectionsManager {
     ///
     /// Returns the list of removed LiveQueryIds for cleanup.
     pub fn unregister_connection(&self, connection_id: &ConnectionId) -> Vec<LiveQueryId> {
-        debug!(
-            "unregister_connection: starting cleanup for connection {}",
-            connection_id
-        );
-        let removed_live_ids =
-            if let Some((_, shared_state)) = self.connections.remove(connection_id) {
-                self.total_connections.fetch_sub(1, Ordering::AcqRel);
+        debug!("unregister_connection: starting cleanup for connection {}", connection_id);
+        let removed_live_ids = if let Some((_, shared_state)) =
+            self.connections.remove(connection_id)
+        {
+            self.total_connections.fetch_sub(1, Ordering::AcqRel);
 
-                let state = shared_state.read();
+            let state = shared_state.read();
 
-                // Remove from user_table_subscriptions and shared_table_subscriptions indices
-                if let Some(user_id) = &state.user_id {
-                    for entry in state.subscriptions.iter() {
-                        let sub = entry.value();
-                        // Try user_table_subscriptions first
-                        let key = (user_id.clone(), sub.table_id.clone());
-                        if let Some(entries) = self.user_table_subscriptions.get(&key) {
-                            entries.remove(&sub.live_id);
-                        }
-                        // Atomically remove outer entry only if inner map is now empty.
-                        // This avoids a TOCTOU race where index_subscription adds a
-                        // new handle between is_empty() and remove().
-                        self.user_table_subscriptions
-                            .remove_if(&key, |_, handles| handles.is_empty());
-
-                        // Also try shared_table_subscriptions
-                        if let Some(entries) = self.shared_table_subscriptions.get(&sub.table_id) {
-                            entries.remove(&sub.live_id);
-                        }
-                        self.shared_table_subscriptions
-                            .remove_if(&sub.table_id, |_, handles| handles.is_empty());
-                    }
-                }
-
-                // Collect and remove all subscriptions
-                let mut removed = Vec::with_capacity(state.subscriptions.len());
+            // Remove from user_table_subscriptions and shared_table_subscriptions indices
+            if let Some(user_id) = &state.user_id {
                 for entry in state.subscriptions.iter() {
                     let sub = entry.value();
-                    removed.push(sub.live_id.clone());
-                    self.live_id_to_connection.remove(&sub.live_id);
-                }
+                    // Try user_table_subscriptions first
+                    let key = (user_id.clone(), sub.table_id.clone());
+                    if let Some(entries) = self.user_table_subscriptions.get(&key) {
+                        entries.remove(&sub.live_id);
+                    }
+                    // Atomically remove outer entry only if inner map is now empty.
+                    // This avoids a TOCTOU race where index_subscription adds a
+                    // new handle between is_empty() and remove().
+                    self.user_table_subscriptions.remove_if(&key, |_, handles| handles.is_empty());
 
-                let sub_count = removed.len();
-                if sub_count > 0 {
-                    self.total_subscriptions.fetch_sub(sub_count, Ordering::AcqRel);
+                    // Also try shared_table_subscriptions
+                    if let Some(entries) = self.shared_table_subscriptions.get(&sub.table_id) {
+                        entries.remove(&sub.live_id);
+                    }
+                    self.shared_table_subscriptions
+                        .remove_if(&sub.table_id, |_, handles| handles.is_empty());
                 }
+            }
 
-                removed
-            } else {
-                Vec::new()
-            };
+            // Collect and remove all subscriptions
+            let mut removed = Vec::with_capacity(state.subscriptions.len());
+            for entry in state.subscriptions.iter() {
+                let sub = entry.value();
+                removed.push(sub.live_id.clone());
+                self.live_id_to_connection.remove(&sub.live_id);
+            }
+
+            let sub_count = removed.len();
+            if sub_count > 0 {
+                self.total_subscriptions.fetch_sub(sub_count, Ordering::AcqRel);
+            }
+
+            removed
+        } else {
+            Vec::new()
+        };
 
         if !removed_live_ids.is_empty() {
             debug!(
@@ -1194,11 +1191,8 @@ mod tests {
                     registry
                         .register_connection(conn_id.clone(), ConnectionInfo::new(None))
                         .unwrap();
-                    let live_id = LiveQueryId::new(
-                        user_id,
-                        conn_id.clone(),
-                        format!("parallel_sub_{}", i),
-                    );
+                    let live_id =
+                        LiveQueryId::new(user_id, conn_id.clone(), format!("parallel_sub_{}", i));
                     let (tx, rx) = mpsc::channel(64);
                     registry.index_shared_subscription(
                         &conn_id,
@@ -1222,10 +1216,8 @@ mod tests {
             "expected all parallel subscriptions to register"
         );
 
-        let notification = Notification::insert(
-            "parallel".to_string(),
-            vec![std::collections::HashMap::new()],
-        );
+        let notification =
+            Notification::insert("parallel".to_string(), vec![std::collections::HashMap::new()]);
         registry.notify_shared_table(&table_id, notification);
 
         for mut rx in receivers {
@@ -1234,7 +1226,6 @@ mod tests {
             assert!(msg.unwrap().is_some(), "subscriber channel closed");
         }
     }
-
 
     #[tokio::test]
     async fn test_shared_subscription_mixed_with_user_subscriptions() {

@@ -289,19 +289,23 @@ impl LiveQueryManager {
 
         // Fetch initial data if requested
         let initial_data = if let Some(mut fetch_options) = initial_data_options {
-            // Compute snapshot boundary (MAX(_seq)) before initial load
-            let snapshot_seq = self
-                .initial_data_fetcher
-                .compute_snapshot_end_seq(
-                    &live_id,
-                    user_role,
-                    &table_id,
-                    table_def.table_type,
-                    &fetch_options,
-                    where_clause.as_deref(),
-                )
-                .await?
-                .unwrap_or_else(|| SeqId::from(0));
+            // Compute snapshot boundary (MAX(_seq)) before initial load unless a
+            // reconnect already supplied the original boundary.
+            let snapshot_seq = if let Some(snapshot_seq) = fetch_options.until_seq {
+                snapshot_seq
+            } else {
+                self.initial_data_fetcher
+                    .compute_snapshot_end_seq(
+                        &live_id,
+                        user_role,
+                        &table_id,
+                        table_def.table_type,
+                        &fetch_options,
+                        where_clause.as_deref(),
+                    )
+                    .await?
+                    .unwrap_or_else(|| SeqId::from(0))
+            };
 
             fetch_options.until_seq = Some(snapshot_seq);
             self.subscription_service.update_snapshot_end_seq(

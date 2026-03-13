@@ -425,13 +425,9 @@ impl OutputFormatter {
         data_type: Option<&KalamDataType>,
     ) -> String {
         match data_type {
-            Some(KalamDataType::Timestamp) => {
-                self.format_timestamp_value(value, TimestampUnit::Nanoseconds)
-            },
+            Some(KalamDataType::Timestamp) => self.format_timestamp_value(value),
             Some(KalamDataType::Date) => self.format_date_value(value),
-            Some(KalamDataType::DateTime) => {
-                self.format_timestamp_value(value, TimestampUnit::Auto)
-            },
+            Some(KalamDataType::DateTime) => self.format_timestamp_value(value),
             _ => self.format_json_value(value),
         }
     }
@@ -442,7 +438,7 @@ impl OutputFormatter {
             .unwrap_or_else(|| "NULL".to_string())
     }
 
-    fn format_timestamp_value(&self, value: &JsonValue, unit: TimestampUnit) -> String {
+    fn format_timestamp_value(&self, value: &JsonValue) -> String {
         match value {
             JsonValue::Object(map) if map.len() == 1 => {
                 let (type_name, inner_value) = map.iter().next().unwrap();
@@ -478,20 +474,23 @@ impl OutputFormatter {
                 }
             },
             _ => {
-                let ms = self.parse_i64(value).map(|raw| match unit {
-                    TimestampUnit::Nanoseconds => raw / 1_000_000,
-                    TimestampUnit::Microseconds => raw / 1000,
-                    TimestampUnit::Auto => {
-                        if raw.abs() >= 100_000_000_000_000 {
-                            raw / 1000
-                        } else {
-                            raw
-                        }
-                    },
-                });
+                let ms = self.parse_i64(value).map(|raw| self.raw_timestamp_millis(raw));
                 ms.map(|val| self.timestamp_formatter.format(Some(val)))
                     .unwrap_or_else(|| "NULL".to_string())
             },
+        }
+    }
+
+    fn raw_timestamp_millis(&self, raw: i64) -> i64 {
+        let magnitude = raw.abs();
+        if magnitude >= 100_000_000_000_000_000 {
+            raw / 1_000_000
+        } else if magnitude >= 100_000_000_000_000 {
+            raw / 1000
+        } else if magnitude >= 100_000_000_000 {
+            raw
+        } else {
+            raw * 1000
         }
     }
 
@@ -516,12 +515,6 @@ impl OutputFormatter {
             s
         }
     }
-}
-
-enum TimestampUnit {
-    Nanoseconds,
-    Microseconds,
-    Auto,
 }
 
 #[cfg(test)]
@@ -581,5 +574,37 @@ mod tests {
         // Should return a reasonable default if terminal size unavailable
         let width = OutputFormatter::get_terminal_width();
         assert!(width >= 80); // Should be at least 80 columns
+    }
+
+    #[test]
+    fn test_format_timestamp_value_auto_infers_milliseconds() {
+        let formatter = OutputFormatter::new(
+            OutputFormat::Table,
+            false,
+            TimestampFormatter::new(TimestampFormat::Iso8601),
+        );
+
+        let rendered = formatter
+            .format_json_value_with_type(&JsonValue::Number(1735689600000_i64.into()), Some(&KalamDataType::Timestamp));
+
+        assert_eq!(rendered, "2025-01-01T00:00:00.000Z");
+    }
+
+    #[test]
+    fn test_raw_timestamp_millis_auto_handles_microseconds_and_nanoseconds() {
+        let formatter = OutputFormatter::new(
+            OutputFormat::Table,
+            false,
+            TimestampFormatter::new(TimestampFormat::Iso8601),
+        );
+
+        assert_eq!(
+            formatter.raw_timestamp_millis(1735689600000000),
+            1735689600000
+        );
+        assert_eq!(
+            formatter.raw_timestamp_millis(1735689600000000000),
+            1735689600000
+        );
     }
 }

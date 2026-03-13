@@ -9,6 +9,7 @@ use kalamdb_commons::models::{ConnectionId, ConnectionInfo, LiveQueryId, TableId
 use kalamdb_commons::Notification;
 use kalamdb_commons::Role;
 use parking_lot::{Mutex, RwLock};
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -27,6 +28,12 @@ pub const NOTIFICATION_CHANNEL_CAPACITY: usize = 1000;
 /// At high connection counts, the heartbeat checker may queue multiple events
 /// (ping, timeout, shutdown) before the handler processes them.
 pub const EVENT_CHANNEL_CAPACITY: usize = 64;
+
+/// Maximum buffered notifications per subscription while initial snapshot loading is in progress.
+///
+/// Without this bound, a slow initial snapshot can accumulate unbounded change events and
+/// exhaust memory under high write volume or many concurrent subscribers.
+pub const MAX_BUFFERED_NOTIFICATIONS_PER_SUBSCRIPTION: usize = 1_024;
 
 /// Type alias for sending notifications to WebSocket or consumer clients
 pub type NotificationSender = mpsc::Sender<Arc<Notification>>;
@@ -83,7 +90,7 @@ pub struct SubscriptionFlowControl {
     snapshot_end_seq: AtomicI64,
     has_snapshot: AtomicBool,
     initial_complete: AtomicBool,
-    buffer: Mutex<Vec<BufferedNotification>>,
+    buffer: Mutex<VecDeque<BufferedNotification>>,
 }
 
 impl SubscriptionFlowControl {
@@ -92,7 +99,9 @@ impl SubscriptionFlowControl {
             snapshot_end_seq: AtomicI64::new(0),
             has_snapshot: AtomicBool::new(false),
             initial_complete: AtomicBool::new(false),
-            buffer: Mutex::new(Vec::new()),
+            buffer: Mutex::new(VecDeque::with_capacity(
+                MAX_BUFFERED_NOTIFICATIONS_PER_SUBSCRIPTION,
+            )),
         }
     }
 
@@ -130,12 +139,15 @@ impl SubscriptionFlowControl {
 
     pub fn buffer_notification(&self, notification: Arc<Notification>, seq: Option<SeqId>) {
         let mut buffer = self.buffer.lock();
-        buffer.push(BufferedNotification { seq, notification });
+        if buffer.len() >= MAX_BUFFERED_NOTIFICATIONS_PER_SUBSCRIPTION {
+            buffer.pop_front();
+        }
+        buffer.push_back(BufferedNotification { seq, notification });
     }
 
     pub fn drain_buffered_notifications(&self) -> Vec<BufferedNotification> {
         let mut buffer = self.buffer.lock();
-        let mut drained = std::mem::take(&mut *buffer);
+        let mut drained: Vec<_> = buffer.drain(..).collect();
         drained.sort_by(|a, b| match (a.seq, b.seq) {
             (Some(a_seq), Some(b_seq)) => a_seq.as_i64().cmp(&b_seq.as_i64()),
             (Some(_), None) => std::cmp::Ordering::Less,
@@ -340,4 +352,53 @@ pub struct ConnectionRegistration {
     pub state: SharedConnectionState,
     pub notification_rx: NotificationReceiver,
     pub event_rx: EventReceiver,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn make_notification(subscription_id: &str) -> Arc<Notification> {
+        Arc::new(Notification::insert(subscription_id.to_string(), vec![HashMap::new()]))
+    }
+
+    #[test]
+    fn test_subscription_flow_control_limits_buffer_growth() {
+        let flow_control = SubscriptionFlowControl::new();
+
+        for seq in 1..=2_048 {
+            flow_control.buffer_notification(make_notification("sub-1"), Some(SeqId::from(seq)));
+        }
+
+        let buffered = flow_control.drain_buffered_notifications();
+
+        assert_eq!(
+            buffered.len(),
+            MAX_BUFFERED_NOTIFICATIONS_PER_SUBSCRIPTION,
+            "buffered notifications should be capped to avoid unbounded per-subscription growth"
+        );
+        assert_eq!(
+            buffered.first().and_then(|item| item.seq),
+            Some(SeqId::from((2_048 - MAX_BUFFERED_NOTIFICATIONS_PER_SUBSCRIPTION + 1) as i64))
+        );
+        assert_eq!(buffered.last().and_then(|item| item.seq), Some(SeqId::from(2_048)));
+    }
+
+    #[test]
+    fn test_subscription_flow_control_drains_in_seq_order() {
+        let flow_control = SubscriptionFlowControl::new();
+
+        flow_control.buffer_notification(make_notification("sub-ordered"), Some(SeqId::from(9)));
+        flow_control.buffer_notification(make_notification("sub-ordered"), Some(SeqId::from(3)));
+        flow_control.buffer_notification(make_notification("sub-ordered"), Some(SeqId::from(6)));
+
+        let buffered = flow_control.drain_buffered_notifications();
+        let seqs: Vec<_> = buffered
+            .into_iter()
+            .map(|item| item.seq.expect("seq should be present").as_i64())
+            .collect();
+
+        assert_eq!(seqs, vec![3, 6, 9]);
+    }
 }

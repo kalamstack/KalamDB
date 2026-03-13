@@ -44,6 +44,11 @@ pub struct SubscriptionOptions {
     /// Typically set automatically during reconnection to resume from last received event.
     #[serde(skip_serializing_if = "Option::is_none", alias = "from_seq_id")]
     pub from: Option<SeqId>,
+
+    /// Preserve the original snapshot boundary across reconnects while the
+    /// initial load is still in progress.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot_end_seq: Option<SeqId>,
 }
 
 impl SubscriptionOptions {
@@ -68,6 +73,12 @@ impl SubscriptionOptions {
     /// Used during reconnection to continue from where we left off.
     pub fn with_from(mut self, seq_id: SeqId) -> Self {
         self.from = Some(seq_id);
+        self
+    }
+
+    /// Preserve the original snapshot boundary across reconnects.
+    pub fn with_snapshot_end_seq(mut self, seq_id: SeqId) -> Self {
+        self.snapshot_end_seq = Some(seq_id);
         self
     }
 

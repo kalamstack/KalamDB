@@ -3,10 +3,11 @@ import test from 'node:test';
 
 import { createClient } from '../dist/src/index.js';
 
-function createFakeWasmClient({ subscribeError } = {}) {
+function createFakeWasmClient({ subscribeError, disconnectError } = {}) {
   let connected = false;
   let nextSubscriptionId = 0;
   const callbacks = new Map();
+  const subscriptions = [];
 
   return {
     connectCalls: 0,
@@ -39,6 +40,7 @@ function createFakeWasmClient({ subscribeError } = {}) {
       nextSubscriptionId += 1;
       const subscriptionId = `sub-${nextSubscriptionId}`;
       callbacks.set(subscriptionId, callback);
+      subscriptions.push({ id: subscriptionId, query: _sql });
       return subscriptionId;
     },
     async liveQueryRowsWithSql(_sql, _optionsJson, callback) {
@@ -49,13 +51,22 @@ function createFakeWasmClient({ subscribeError } = {}) {
       nextSubscriptionId += 1;
       const subscriptionId = `sub-${nextSubscriptionId}`;
       callbacks.set(subscriptionId, callback);
+      subscriptions.push({ id: subscriptionId, query: _sql });
       return subscriptionId;
     },
     async unsubscribe(subscriptionId) {
       callbacks.delete(subscriptionId);
+      const index = subscriptions.findIndex((sub) => sub.id === subscriptionId);
+      if (index >= 0) {
+        subscriptions.splice(index, 1);
+      }
     },
     async disconnect() {
       connected = false;
+      subscriptions.splice(0, subscriptions.length);
+      if (disconnectError) {
+        throw new Error(disconnectError);
+      }
     },
     emit(subscriptionId, event) {
       const callback = callbacks.get(subscriptionId);
@@ -65,7 +76,13 @@ function createFakeWasmClient({ subscribeError } = {}) {
       callback(JSON.stringify(event));
     },
     getSubscriptions() {
-      return '[]';
+      return JSON.stringify(subscriptions);
+    },
+    dropRemoteSubscription(subscriptionId) {
+      const index = subscriptions.findIndex((sub) => sub.id === subscriptionId);
+      if (index >= 0) {
+        subscriptions.splice(index, 1);
+      }
     },
   };
 }
@@ -116,6 +133,45 @@ test('failed subscriptions do not leak local subscription state', async () => {
 
   assert.equal(fakeWasmClient.connectCalls, 1);
   assert.equal(fakeWasmClient.subscribeCalls, 1);
+  assert.equal(client.getSubscriptionCount(), 0);
+});
+
+test('getSubscriptions trusts wasm empty snapshots over stale local metadata', async () => {
+  const client = createClient({
+    url: 'http://127.0.0.1:8080',
+    authProvider: async () => ({ type: 'none' }),
+  });
+
+  const fakeWasmClient = createFakeWasmClient();
+
+  client.initialized = true;
+  client.wasmClient = fakeWasmClient;
+
+  await client.subscribeWithSql('SELECT * FROM chat_demo.messages', () => {});
+  assert.equal(client.getSubscriptionCount(), 1);
+
+  fakeWasmClient.dropRemoteSubscription('sub-1');
+  assert.equal(client.getSubscriptionCount(), 0);
+});
+
+test('disconnect clears local subscription metadata even when wasm disconnect fails', async () => {
+  const client = createClient({
+    url: 'http://127.0.0.1:8080',
+    authProvider: async () => ({ type: 'none' }),
+  });
+
+  const fakeWasmClient = createFakeWasmClient({
+    disconnectError: 'disconnect failed',
+  });
+
+  client.initialized = true;
+  client.wasmClient = fakeWasmClient;
+
+  await client.subscribeWithSql('SELECT * FROM chat_demo.messages', () => {});
+  await client.subscribeWithSql('SELECT * FROM chat_demo.agent_events', () => {});
+  assert.equal(client.getSubscriptionCount(), 2);
+
+  await assert.rejects(client.disconnect(), /disconnect failed/);
   assert.equal(client.getSubscriptionCount(), 0);
 });
 

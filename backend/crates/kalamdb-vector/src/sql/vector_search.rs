@@ -402,14 +402,13 @@ impl TableProvider for VectorSearchTableProvider {
                             )));
                         }
                         let loaded_index =
-                            load_index(parsed.dimensions, parsed.metric, &parsed.index_blob).map_err(
-                                |e| {
+                            load_index(parsed.dimensions, parsed.metric, &parsed.index_blob)
+                                .map_err(|e| {
                                     DataFusionError::Execution(format!(
                                         "Failed to load vector snapshot index '{}': {}",
                                         snapshot_path, e
                                     ))
-                                },
-                            )?;
+                                })?;
                         for entry in parsed.entries {
                             base_snapshot_key_to_pk.insert(entry.key, entry.pk);
                         }
@@ -428,8 +427,7 @@ impl TableProvider for VectorSearchTableProvider {
 
         let requested_limit = limit.unwrap_or(self.args.top_k);
         let final_limit = requested_limit.min(self.args.top_k);
-        let candidate_limit =
-            final_limit.saturating_mul(CANDIDATE_MULTIPLIER).max(final_limit);
+        let candidate_limit = final_limit.saturating_mul(CANDIDATE_MULTIPLIER).max(final_limit);
 
         let hot_search = search_hot_candidates(
             Arc::clone(&scope.backend),
@@ -448,10 +446,11 @@ impl TableProvider for VectorSearchTableProvider {
             .max(candidate_limit);
 
         if let Some(index) = &base_index {
-            let raw = search_index(index, &self.args.query_vector, cold_candidate_limit)
-                .map_err(|e| {
+            let raw = search_index(index, &self.args.query_vector, cold_candidate_limit).map_err(
+                |e| {
                     DataFusionError::Execution(format!("Failed to search base vector index: {}", e))
-                })?;
+                },
+            )?;
             for (key, distance) in raw {
                 let Some(pk) = base_snapshot_key_to_pk.get(&key) else {
                     continue;
@@ -464,10 +463,7 @@ impl TableProvider for VectorSearchTableProvider {
         }
 
         let mut best_distance_by_pk: HashMap<String, f32> = HashMap::new();
-        for (pk, distance) in base_candidates
-            .into_iter()
-            .chain(hot_search.candidates.into_iter())
-        {
+        for (pk, distance) in base_candidates.into_iter().chain(hot_search.candidates.into_iter()) {
             match best_distance_by_pk.get_mut(&pk) {
                 Some(existing) => {
                     if distance < *existing {
@@ -485,8 +481,10 @@ impl TableProvider for VectorSearchTableProvider {
         ranked.truncate(final_limit);
 
         let row_ids: Vec<String> = ranked.iter().map(|(pk, _)| pk.clone()).collect();
-        let scores: Vec<f32> =
-            ranked.iter().map(|(_, distance)| distance_to_score(scope.metric, *distance)).collect();
+        let scores: Vec<f32> = ranked
+            .iter()
+            .map(|(_, distance)| distance_to_score(scope.metric, *distance))
+            .collect();
 
         let batch = RecordBatch::try_new(
             self.schema(),

@@ -436,6 +436,11 @@ impl TypedStatementHandler<DropTableStatement> for DropTableHandler {
             .await
             .map_err(|e| KalamDbError::ExecutionError(format!("DROP TABLE failed: {}", e)))?;
 
+        // Release RocksDB partitions immediately so DROP TABLE reduces the
+        // physical storage footprint and descriptor pressure before the
+        // asynchronous cleanup job handles cold-storage cleanup.
+        cleanup_table_data_internal(&self.app_context, &table_id, actual_type).await?;
+
         // Create cleanup job for async data removal (with retry on failure)
         let params = CleanupParams {
             table_id: table_id.clone(),
@@ -498,5 +503,124 @@ impl TypedStatementHandler<DropTableStatement> for DropTableHandler {
         }
         // Allow users to attempt; execute() will enforce per-table RBAC
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{cleanup_table_data_internal, DropTableHandler};
+    use crate::sql::context::{ExecutionContext, ExecutionResult};
+    use crate::sql::executor::handlers::table::create::CreateTableHandler;
+    use crate::sql::executor::handlers::typed::TypedStatementHandler;
+    use crate::test_helpers::{
+        create_test_session_simple, test_app_context, test_app_context_simple,
+    };
+    use arrow::datatypes::{DataType, Field, Schema};
+    use kalamdb_commons::models::{NamespaceId, TableName, UserId};
+    use kalamdb_commons::schemas::TableType;
+    use kalamdb_commons::Role;
+    use kalamdb_sql::ddl::{CreateTableStatement, DropTableStatement, TableKind};
+    use kalamdb_store::EntityStore;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    fn create_test_context(role: Role) -> ExecutionContext {
+        ExecutionContext::new(UserId::new("test_user"), role, create_test_session_simple())
+    }
+
+    fn create_user_table_statement(table_name: TableName) -> CreateTableStatement {
+        let schema = Arc::new(Schema::new(vec![
+            Arc::new(Field::new("id", DataType::Int64, false)),
+            Arc::new(Field::new("name", DataType::Utf8, false)),
+        ]));
+
+        CreateTableStatement {
+            namespace_id: NamespaceId::default(),
+            table_name,
+            table_type: TableType::User,
+            schema,
+            column_defaults: HashMap::new(),
+            primary_key_column: Some("id".to_string()),
+            storage_id: None,
+            use_user_storage: false,
+            flush_policy: None,
+            deleted_retention_hours: None,
+            ttl_seconds: None,
+            if_not_exists: false,
+            access_level: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn cleanup_table_data_drops_user_table_partitions() {
+        let app_ctx = test_app_context_simple();
+        let table_name =
+            TableName::new(format!("cleanup_drop_{}", chrono::Utc::now().timestamp_millis()));
+        let table_id = kalamdb_commons::models::TableId::new(NamespaceId::default(), table_name);
+
+        let store = kalamdb_tables::new_indexed_user_table_store(
+            app_ctx.storage_backend(),
+            &table_id,
+            "id",
+        );
+        let main_partition = store.partition();
+        let pk_partition = store.indexes()[0].partition();
+
+        assert!(app_ctx.storage_backend().partition_exists(&main_partition));
+        assert!(app_ctx.storage_backend().partition_exists(&pk_partition));
+
+        cleanup_table_data_internal(&app_ctx, &table_id, TableType::User)
+            .await
+            .expect("cleanup table data");
+
+        assert!(!app_ctx.storage_backend().partition_exists(&main_partition));
+        assert!(!app_ctx.storage_backend().partition_exists(&pk_partition));
+    }
+
+    #[ignore = "Requires Raft for CREATE/DROP TABLE"]
+    #[tokio::test]
+    async fn drop_table_releases_user_partitions_before_returning() {
+        let app_ctx = test_app_context();
+        let table_name =
+            TableName::new(format!("drop_release_{}", chrono::Utc::now().timestamp_millis()));
+        let create_handler = CreateTableHandler::new(app_ctx.clone());
+        let drop_handler = DropTableHandler::new(app_ctx.clone());
+        let ctx = create_test_context(Role::Dba);
+
+        let create_result = create_handler
+            .execute(create_user_table_statement(table_name.clone()), vec![], &ctx)
+            .await;
+        assert!(create_result.is_ok(), "CREATE TABLE failed: {:?}", create_result);
+
+        let table_id =
+            kalamdb_commons::models::TableId::new(NamespaceId::default(), table_name.clone());
+        let main_partition =
+            kalamdb_store::storage_trait::Partition::new(format!("user_{}", table_id));
+        let pk_partition =
+            kalamdb_store::storage_trait::Partition::new(format!("user_{}_pk_idx", table_id));
+
+        assert!(app_ctx.storage_backend().partition_exists(&main_partition));
+        assert!(app_ctx.storage_backend().partition_exists(&pk_partition));
+
+        let drop_result = drop_handler
+            .execute(
+                DropTableStatement {
+                    namespace_id: NamespaceId::default(),
+                    table_name,
+                    table_type: TableKind::User,
+                    if_exists: false,
+                },
+                vec![],
+                &ctx,
+            )
+            .await;
+
+        assert!(drop_result.is_ok(), "DROP TABLE failed: {:?}", drop_result);
+        assert!(!app_ctx.storage_backend().partition_exists(&main_partition));
+        assert!(!app_ctx.storage_backend().partition_exists(&pk_partition));
+
+        if let Ok(ExecutionResult::Success { message }) = drop_result {
+            assert!(message.contains("Cleanup job"));
+        }
     }
 }

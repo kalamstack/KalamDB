@@ -235,10 +235,12 @@ impl KalamLinkClient {
                 let (event_rx, generation, resume_from) =
                     conn.subscribe(config.id.clone(), config.sql, options).await?;
                 let unsub_tx = conn.unsubscribe_tx();
+                let progress_tx = conn.progress_tx();
                 return Ok(SubscriptionManager::from_shared(
                     config.id,
                     event_rx,
                     unsub_tx,
+                    progress_tx,
                     generation,
                     resume_from,
                     &self.timeouts,

@@ -116,11 +116,7 @@ impl SchemasStore {
 
         // Update the latest pointer
         let latest_key = TableVersionId::latest(table_id.clone());
-        log::debug!(
-            "[SchemasStore::put_version] table_id={}, latest_key={}",
-            table_id,
-            latest_key
-        );
+        log::debug!("[SchemasStore::put_version] table_id={}, latest_key={}", table_id, latest_key);
         self.put(&latest_key, table_def)?;
 
         Ok(())

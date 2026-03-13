@@ -18,3 +18,6 @@ mod test_cli_auth;
 
 #[path = "cli/test_cli_auth_admin.rs"]
 mod test_cli_auth_admin;
+
+#[path = "cli/test_cli_doc_matrix.rs"]
+mod test_cli_doc_matrix;

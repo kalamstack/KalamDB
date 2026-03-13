@@ -26,6 +26,9 @@ use crate::{
     },
     seq_id::SeqId,
     seq_tracking,
+    subscription::{
+        batch_envelope, filter_replayed_event, final_resume_seq, subscription_start_ready,
+    },
     timeouts::KalamLinkTimeouts,
 };
 use bytes::Bytes;
@@ -60,7 +63,7 @@ fn snapshot_subscriptions(
         .map(|(id, entry)| SubscriptionInfo {
             id: id.clone(),
             query: entry.sql.clone(),
-            last_seq_id: entry.last_seq_id,
+            last_seq_id: effective_entry_seq(entry),
             last_event_time_ms: entry.last_event_time_ms,
             created_at_ms: entry.created_at_ms,
             closed: false,
@@ -86,120 +89,109 @@ fn snapshot_subscriptions(
     out
 }
 
-fn subscription_start_ready(event: &ChangeEvent) -> bool {
-    matches!(
-        event,
-        ChangeEvent::Ack { batch_control, .. }
-            | ChangeEvent::InitialDataBatch { batch_control, .. }
-                if batch_control.status == crate::models::BatchStatus::Ready
-    )
+fn effective_entry_seq(entry: &SubEntry) -> Option<SeqId> {
+    final_resume_seq(entry.last_seq_id, entry.consumed_seq_id)
 }
 
-fn filter_replayed_rows(event: ChangeEvent, resume_from: Option<SeqId>) -> Option<ChangeEvent> {
-    let Some(from) = resume_from else {
-        return Some(event);
-    };
-
-    match event {
-        ChangeEvent::InitialDataBatch {
-            subscription_id,
-            mut rows,
-            batch_control,
-        } => {
-            let removed = seq_tracking::retain_rows_after(&mut rows, from);
-            if removed > 0 {
-                log::debug!(
-                    "[kalam-link] [{}] Filtered {} stale initial row(s) at from={}",
-                    subscription_id,
-                    removed,
-                    from
-                );
-            }
-
-            Some(ChangeEvent::InitialDataBatch {
-                subscription_id,
-                rows,
-                batch_control,
-            })
-        },
-        ChangeEvent::Insert {
-            subscription_id,
-            mut rows,
-        } => {
-            let removed = seq_tracking::retain_rows_after(&mut rows, from);
-            if removed > 0 {
-                log::debug!(
-                    "[kalam-link] [{}] Filtered {} stale insert row(s) at from={}",
-                    subscription_id,
-                    removed,
-                    from
-                );
-            }
-            if rows.is_empty() {
-                None
-            } else {
-                Some(ChangeEvent::Insert { subscription_id, rows })
-            }
-        },
-        ChangeEvent::Update {
-            subscription_id,
-            mut rows,
-            mut old_rows,
-        } => {
-            let removed_new = seq_tracking::retain_rows_after(&mut rows, from);
-            let removed_old = seq_tracking::retain_rows_after(&mut old_rows, from);
-            let removed = removed_new.max(removed_old);
-            if removed > 0 {
-                log::debug!(
-                    "[kalam-link] [{}] Filtered {} stale update row(s) at from={}",
-                    subscription_id,
-                    removed,
-                    from
-                );
-            }
-            if rows.is_empty() && old_rows.is_empty() {
-                None
-            } else {
-                Some(ChangeEvent::Update {
-                    subscription_id,
-                    rows,
-                    old_rows,
-                })
-            }
-        },
-        ChangeEvent::Delete {
-            subscription_id,
-            mut old_rows,
-        } => {
-            let removed = seq_tracking::retain_rows_after(&mut old_rows, from);
-            if removed > 0 {
-                log::debug!(
-                    "[kalam-link] [{}] Filtered {} stale delete row(s) at from={}",
-                    subscription_id,
-                    removed,
-                    from
-                );
-            }
-            if old_rows.is_empty() {
-                None
-            } else {
-                Some(ChangeEvent::Delete {
-                    subscription_id,
-                    old_rows,
-                })
-            }
-        },
-        _ => Some(event),
+fn cache_entry_seq(
+    seq_id_cache: &mut HashMap<String, SeqId>,
+    id: impl Into<String>,
+    entry: &SubEntry,
+) {
+    if let Some(seq) = effective_entry_seq(entry) {
+        seq_id_cache.insert(id.into(), seq);
     }
+}
+
+fn merge_resume_from(
+    options: &mut SubscriptionOptions,
+    inherited_seq: Option<SeqId>,
+) -> Option<SeqId> {
+    let effective_from = match (options.from, inherited_seq) {
+        (Some(explicit), Some(cached)) => Some(explicit.max(cached)),
+        (explicit, cached) => explicit.or(cached),
+    };
+    options.from = effective_from;
+    effective_from
+}
+
+fn register_subscription_entry(
+    subs: &mut HashMap<String, SubEntry>,
+    seq_id_cache: &mut HashMap<String, SeqId>,
+    next_generation: &mut u64,
+    id: String,
+    sql: String,
+    mut options: SubscriptionOptions,
+    event_tx: mpsc::Sender<Result<ChangeEvent>>,
+    result_tx: oneshot::Sender<Result<(u64, Option<SeqId>)>>,
+) -> (u64, Option<SeqId>) {
+    let effective_from = merge_resume_from(&mut options, seq_id_cache.remove(&id));
+    let generation = *next_generation;
+    *next_generation += 1;
+
+    subs.insert(
+        id,
+        SubEntry {
+            sql,
+            options,
+            event_tx,
+            last_seq_id: effective_from,
+            consumed_seq_id: effective_from,
+            batch_seq_id: None,
+            snapshot_end_seq: None,
+            is_loading: true,
+            generation,
+            created_at_ms: now_ms(),
+            last_event_time_ms: None,
+            pending_result_tx: Some(result_tx),
+        },
+    );
+
+    (generation, effective_from)
+}
+
+fn remove_subscription_entry(
+    subs: &mut HashMap<String, SubEntry>,
+    seq_id_cache: &mut HashMap<String, SeqId>,
+    id: &str,
+    generation: Option<u64>,
+) -> Option<SubEntry> {
+    let should_remove = match generation {
+        Some(expected_generation) => {
+            subs.get(id).is_some_and(|entry| entry.generation == expected_generation)
+        },
+        None => true,
+    };
+    if !should_remove {
+        return None;
+    }
+
+    subs.remove(id)
+        .inspect(|entry| cache_entry_seq(seq_id_cache, id.to_string(), entry))
+}
+
+fn advance_entry_progress(
+    entry: &mut SubEntry,
+    generation: u64,
+    seq_id: SeqId,
+    advance_resume: bool,
+) {
+    if entry.generation != generation {
+        return;
+    }
+
+    seq_tracking::advance_seq(&mut entry.consumed_seq_id, seq_id);
+    if advance_resume {
+        seq_tracking::advance_seq(&mut entry.last_seq_id, seq_id);
+    }
+    entry.last_event_time_ms = Some(now_ms());
 }
 
 fn resolve_subscription_key(sub_id: &str, subs: &HashMap<String, SubEntry>) -> Option<String> {
     if subs.contains_key(sub_id) {
         Some(sub_id.to_string())
     } else {
-        subs.keys()
-            .find(|client_id| sub_id.ends_with(client_id.as_str()))
-            .cloned()
+        subs.keys().find(|client_id| sub_id.ends_with(client_id.as_str())).cloned()
     }
 }
 
@@ -218,6 +210,12 @@ enum ConnCmd {
         id: String,
         generation: Option<u64>,
     },
+    Progress {
+        id: String,
+        generation: u64,
+        seq_id: SeqId,
+        advance_resume: bool,
+    },
     ListSubscriptions {
         result_tx: oneshot::Sender<Vec<SubscriptionInfo>>,
     },
@@ -231,7 +229,9 @@ struct SubEntry {
     options: SubscriptionOptions,
     event_tx: mpsc::Sender<Result<ChangeEvent>>,
     last_seq_id: Option<SeqId>,
+    consumed_seq_id: Option<SeqId>,
     batch_seq_id: Option<SeqId>,
+    snapshot_end_seq: Option<SeqId>,
     is_loading: bool,
     generation: u64,
     created_at_ms: u64,
@@ -244,10 +244,12 @@ struct SubEntry {
 pub(crate) struct SharedConnection {
     cmd_tx: mpsc::Sender<ConnCmd>,
     unsub_tx: mpsc::Sender<(String, u64)>,
+    progress_tx: mpsc::Sender<(String, u64, SeqId, bool)>,
     connected: Arc<AtomicBool>,
     _reconnect_attempts: Arc<AtomicU32>,
     _task: JoinHandle<()>,
     _unsub_bridge: JoinHandle<()>,
+    _progress_bridge: JoinHandle<()>,
 }
 
 impl SharedConnection {
@@ -305,13 +307,30 @@ impl SharedConnection {
             }
         });
 
+        let (progress_tx, mut progress_rx) = mpsc::channel::<(String, u64, SeqId, bool)>(256);
+        let cmd_tx_progress = cmd_tx.clone();
+        let progress_bridge = tokio::spawn(async move {
+            while let Some((id, generation, seq_id, advance_resume)) = progress_rx.recv().await {
+                let _ = cmd_tx_progress
+                    .send(ConnCmd::Progress {
+                        id,
+                        generation,
+                        seq_id,
+                        advance_resume,
+                    })
+                    .await;
+            }
+        });
+
         Ok(Self {
             cmd_tx,
             unsub_tx,
+            progress_tx,
             connected,
             _reconnect_attempts: reconnect_attempts,
             _task: task,
             _unsub_bridge: unsub_bridge,
+            _progress_bridge: progress_bridge,
         })
     }
 
@@ -386,6 +405,10 @@ impl SharedConnection {
 
     pub(crate) fn unsubscribe_tx(&self) -> mpsc::Sender<(String, u64)> {
         self.unsub_tx.clone()
+    }
+
+    pub(crate) fn progress_tx(&self) -> mpsc::Sender<(String, u64, SeqId, bool)> {
+        self.progress_tx.clone()
     }
 }
 
@@ -529,48 +552,28 @@ async fn route_event(
     let matched_key = resolve_subscription_key(&incoming_sub_id, subs);
     let resume_from = matched_key
         .as_ref()
-        .and_then(|key| subs.get(key))
-        .and_then(|entry| entry.options.from);
-    let Some(event) = filter_replayed_rows(event, resume_from) else {
+        .and_then(|key| subs.get(key.as_str()))
+        .and_then(effective_entry_seq);
+    let Some(event) = filter_replayed_event(event, resume_from) else {
         return;
     };
 
-    if let ChangeEvent::InitialDataBatch {
-        ref batch_control, ..
-    } = event
-    {
+    let auto_request_next_batch = matches!(event, ChangeEvent::InitialDataBatch { .. });
+
+    if let Some(batch) = batch_envelope(&event) {
         if let Some(key) = matched_key.as_ref() {
             if let Some(entry) = subs.get_mut(key) {
-                if let Some(seq_id) = batch_control.last_seq_id {
+                if let Some(seq_id) = batch.last_seq_id {
                     entry.batch_seq_id = Some(seq_id);
                 }
-                entry.is_loading = batch_control.status != crate::models::BatchStatus::Ready;
+                if let Some(snapshot_end_seq) = batch.snapshot_end_seq {
+                    entry.snapshot_end_seq = Some(snapshot_end_seq);
+                }
+                entry.is_loading = batch.status != crate::models::BatchStatus::Ready;
                 entry.last_event_time_ms = Some(now_ms());
             }
         }
-        if batch_control.has_more {
-            let last_seq = matched_key
-                .as_ref()
-                .and_then(|key| subs.get(key))
-                .and_then(|entry| entry.batch_seq_id.or(entry.last_seq_id));
-            if let Err(e) = send_next_batch_request(ws, &incoming_sub_id, last_seq).await {
-                log::warn!("Failed to send NextBatch for {}: {}", incoming_sub_id, e);
-            }
-        }
-    } else if let ChangeEvent::Ack {
-        ref batch_control, ..
-    } = event
-    {
-        if let Some(key) = matched_key.as_ref() {
-            if let Some(entry) = subs.get_mut(key) {
-                if let Some(seq_id) = batch_control.last_seq_id {
-                    entry.batch_seq_id = Some(seq_id);
-                }
-                entry.is_loading = batch_control.status != crate::models::BatchStatus::Ready;
-                entry.last_event_time_ms = Some(now_ms());
-            }
-        }
-        if batch_control.has_more {
+        if auto_request_next_batch && batch.has_more {
             let last_seq = matched_key
                 .as_ref()
                 .and_then(|key| subs.get(key))
@@ -586,23 +589,18 @@ async fn route_event(
     // remembered — any Insert/Update/Delete events after that would be
     // replayed on reconnect.
     match &event {
-        ChangeEvent::Insert { ref rows, .. }
-        | ChangeEvent::Update { ref rows, .. } => {
+        ChangeEvent::Insert { .. } | ChangeEvent::Update { .. } => {
             if let Some(key) = matched_key.as_ref() {
                 if let Some(entry) = subs.get_mut(key) {
-                    if !entry.is_loading {
-                        seq_tracking::track_rows(&mut entry.last_seq_id, rows);
-                    }
+                    entry.last_event_time_ms = Some(now_ms());
                 }
             }
         },
         ChangeEvent::InitialDataBatch { .. } => {},
-        ChangeEvent::Delete { ref old_rows, .. } => {
+        ChangeEvent::Delete { .. } => {
             if let Some(key) = matched_key.as_ref() {
                 if let Some(entry) = subs.get_mut(key) {
-                    if !entry.is_loading {
-                        seq_tracking::track_rows(&mut entry.last_seq_id, old_rows);
-                    }
+                    entry.last_event_time_ms = Some(now_ms());
                 }
             }
         },
@@ -640,9 +638,7 @@ async fn route_event(
 
         if remove_after_send {
             if let Some(entry) = subs.remove(&key) {
-                if let Some(seq) = entry.last_seq_id {
-                    seq_id_cache.insert(key, seq);
-                }
+                cache_entry_seq(seq_id_cache, key, &entry);
             }
         }
     } else {
@@ -661,15 +657,24 @@ async fn resubscribe_all(
     );
     for (id, entry) in subs.iter_mut() {
         let mut options = entry.options.clone();
-        if let Some(seq_id) = entry.last_seq_id {
+        let was_loading = entry.is_loading;
+        entry.batch_seq_id = None;
+        entry.is_loading = true;
+        if let Some(seq_id) = effective_entry_seq(entry) {
             options.from = Some(seq_id);
             entry.options.from = Some(seq_id);
         }
+        options.snapshot_end_seq = if was_loading {
+            entry.snapshot_end_seq
+        } else {
+            None
+        };
 
         log::info!(
-            "[kalam-link] Re-subscribing '{}' with from={:?}",
+            "[kalam-link] Re-subscribing '{}' with from={:?}, snapshot_end={:?}",
             id,
-            entry.last_seq_id.map(|s| s.to_string())
+            entry.options.from.map(|s| s.to_string()),
+            options.snapshot_end_seq.map(|s| s.to_string())
         );
 
         if let Err(e) = send_subscribe(ws, id, &entry.sql, options).await {
@@ -785,59 +790,39 @@ async fn connection_task(
                                     id,
                                 );
                                 let _ = send_unsubscribe(ws, &id).await;
-                                if let Some(mut old_entry) = subs.remove(&id) {
-                                    if let Some(seq) = old_entry.last_seq_id {
-                                        seq_id_cache.insert(id.clone(), seq);
-                                    }
+                                if let Some(mut old_entry) =
+                                    remove_subscription_entry(&mut subs, &mut seq_id_cache, &id, None)
+                                {
                                     if let Some(old_tx) = old_entry.pending_result_tx.take() {
                                         let _ = old_tx.send(Err(KalamLinkError::Cancelled));
                                     }
                                 }
                             }
-                            // Inherit last_seq_id from cache (preserved across
-                            // close/resubscribe cycles) so reconnects resume
-                            // from the correct point.
-                            let inherited_seq = seq_id_cache.remove(&id);
-                            let mut options = options;
-                            let effective_from = match (options.from, inherited_seq) {
-                                (Some(explicit), Some(cached)) => Some(explicit.max(cached)),
-                                (explicit, cached) => explicit.or(cached),
-                            };
-                            options.from = effective_from;
-
-                            let result = send_subscribe(ws, &id, &sql, options.clone()).await;
-                            let gen = next_generation;
+                            let inherited_seq = seq_id_cache.get(&id).copied();
+                            let mut send_options = options.clone();
+                            let effective_from = merge_resume_from(&mut send_options, inherited_seq);
+                            let result = send_subscribe(ws, &id, &sql, send_options).await;
                             if result.is_ok() {
-                                next_generation += 1;
-                                subs.insert(id.clone(), SubEntry {
+                                register_subscription_entry(
+                                    &mut subs,
+                                    &mut seq_id_cache,
+                                    &mut next_generation,
+                                    id.clone(),
                                     sql,
                                     options,
                                     event_tx,
-                                    last_seq_id: effective_from,
-                                    batch_seq_id: None,
-                                    is_loading: true,
-                                    generation: gen,
-                                    created_at_ms: now_ms(),
-                                    last_event_time_ms: None,
-                                    pending_result_tx: Some(result_tx),
-                                });
+                                    result_tx,
+                                );
                             } else {
-                                let _ = result_tx.send(result.map(|()| (gen, effective_from)));
+                                let _ = result_tx.send(result.map(|()| (next_generation, effective_from)));
                             }
                         },
                         Some(ConnCmd::Unsubscribe { id, generation }) => {
-                            let should_remove = match generation {
-                                Some(gen) => subs.get(&id).map_or(false, |e| e.generation == gen),
-                                None => true,
-                            };
-                            if should_remove {
-                                if let Some(mut entry) = subs.remove(&id) {
-                                    if let Some(seq) = entry.last_seq_id {
-                                        seq_id_cache.insert(id.clone(), seq);
-                                    }
-                                    if let Some(result_tx) = entry.pending_result_tx.take() {
-                                        let _ = result_tx.send(Err(KalamLinkError::Cancelled));
-                                    }
+                            if let Some(mut entry) =
+                                remove_subscription_entry(&mut subs, &mut seq_id_cache, &id, generation)
+                            {
+                                if let Some(result_tx) = entry.pending_result_tx.take() {
+                                    let _ = result_tx.send(Err(KalamLinkError::Cancelled));
                                 }
                                 let _ = send_unsubscribe(ws, &id).await;
                             } else {
@@ -845,6 +830,11 @@ async fn connection_task(
                                     "[kalam-link] Ignoring stale unsubscribe for '{}' (gen={:?})",
                                     id, generation,
                                 );
+                            }
+                        },
+                        Some(ConnCmd::Progress { id, generation, seq_id, advance_resume }) => {
+                            if let Some(entry) = subs.get_mut(&id) {
+                                advance_entry_progress(entry, generation, seq_id, advance_resume);
                             }
                         },
                         Some(ConnCmd::ListSubscriptions { result_tx }) => {
@@ -968,16 +958,21 @@ async fn connection_task(
                         )));
                     },
                     Some(ConnCmd::Unsubscribe { id, generation }) => {
-                        let should_remove = match generation {
-                            Some(gen) => subs.get(&id).map_or(false, |e| e.generation == gen),
-                            None => true,
-                        };
-                        if should_remove {
-                            if let Some(entry) = subs.remove(&id) {
-                                if let Some(seq) = entry.last_seq_id {
-                                    seq_id_cache.insert(id, seq);
-                                }
-                            }
+                        let _ = remove_subscription_entry(
+                            &mut subs,
+                            &mut seq_id_cache,
+                            &id,
+                            generation,
+                        );
+                    },
+                    Some(ConnCmd::Progress {
+                        id,
+                        generation,
+                        seq_id,
+                        advance_resume,
+                    }) => {
+                        if let Some(entry) = subs.get_mut(&id) {
+                            advance_entry_progress(entry, generation, seq_id, advance_resume);
                         }
                     },
                     Some(ConnCmd::ListSubscriptions { result_tx }) => {
@@ -998,13 +993,10 @@ async fn connection_task(
                     ));
                     let err_msg = "Max reconnection attempts reached".to_string();
                     for (id, mut entry) in subs.drain() {
-                        if let Some(seq) = entry.last_seq_id {
-                            seq_id_cache.insert(id, seq);
-                        }
+                        cache_entry_seq(&mut seq_id_cache, id, &entry);
                         if let Some(result_tx) = entry.pending_result_tx.take() {
-                            let _ = result_tx.send(Err(KalamLinkError::WebSocketError(
-                                err_msg.clone(),
-                            )));
+                            let _ = result_tx
+                                .send(Err(KalamLinkError::WebSocketError(err_msg.clone())));
                         }
                         let _ = entry
                             .event_tx
@@ -1018,14 +1010,31 @@ async fn connection_task(
                                 )));
                             },
                             Some(ConnCmd::Unsubscribe { id, .. }) => {
-                                if let Some(entry) = subs.remove(&id) {
-                                    if let Some(seq) = entry.last_seq_id {
-                                        seq_id_cache.insert(id, seq);
-                                    }
+                                let _ = remove_subscription_entry(
+                                    &mut subs,
+                                    &mut seq_id_cache,
+                                    &id,
+                                    None,
+                                );
+                            },
+                            Some(ConnCmd::Progress {
+                                id,
+                                generation,
+                                seq_id,
+                                advance_resume,
+                            }) => {
+                                if let Some(entry) = subs.get_mut(&id) {
+                                    advance_entry_progress(
+                                        entry,
+                                        generation,
+                                        seq_id,
+                                        advance_resume,
+                                    );
                                 }
                             },
                             Some(ConnCmd::ListSubscriptions { result_tx }) => {
-                                let _ = result_tx.send(snapshot_subscriptions(&subs, &seq_id_cache));
+                                let _ =
+                                    result_tx.send(snapshot_subscriptions(&subs, &seq_id_cache));
                             },
                             Some(ConnCmd::Shutdown) | None => return,
                         }
@@ -1053,50 +1062,37 @@ async fn connection_task(
                         match cmd {
                             Some(ConnCmd::Subscribe { id, sql, options, event_tx, result_tx }) => {
                                 if subs.contains_key(&id) {
-                                    if let Some(mut old_entry) = subs.remove(&id) {
-                                        if let Some(seq) = old_entry.last_seq_id {
-                                            seq_id_cache.insert(id.clone(), seq);
-                                        }
+                                    if let Some(mut old_entry) =
+                                        remove_subscription_entry(&mut subs, &mut seq_id_cache, &id, None)
+                                    {
                                         if let Some(old_tx) = old_entry.pending_result_tx.take() {
                                             let _ = old_tx.send(Err(KalamLinkError::Cancelled));
                                         }
                                     }
                                 }
-                                let inherited_seq = seq_id_cache.remove(&id);
-                                let mut options = options;
-                                let effective_from = match (options.from, inherited_seq) {
-                                    (Some(explicit), Some(cached)) => Some(explicit.max(cached)),
-                                    (explicit, cached) => explicit.or(cached),
-                                };
-                                options.from = effective_from;
-
-                                let gen = next_generation;
-                                next_generation += 1;
-                                subs.insert(id, SubEntry {
-                                    sql, options, event_tx,
-                                    last_seq_id: effective_from,
-                                    batch_seq_id: None,
-                                    is_loading: true,
-                                    generation: gen,
-                                    created_at_ms: now_ms(),
-                                    last_event_time_ms: None,
-                                    pending_result_tx: Some(result_tx),
-                                });
+                                register_subscription_entry(
+                                    &mut subs,
+                                    &mut seq_id_cache,
+                                    &mut next_generation,
+                                    id,
+                                    sql,
+                                    options,
+                                    event_tx,
+                                    result_tx,
+                                );
                             },
                             Some(ConnCmd::Unsubscribe { id, generation }) => {
-                                let should_remove = match generation {
-                                    Some(gen) => subs.get(&id).map_or(false, |e| e.generation == gen),
-                                    None => true,
-                                };
-                                if should_remove {
-                                    if let Some(mut entry) = subs.remove(&id) {
-                                        if let Some(seq) = entry.last_seq_id {
-                                            seq_id_cache.insert(id, seq);
-                                        }
-                                        if let Some(result_tx) = entry.pending_result_tx.take() {
-                                            let _ = result_tx.send(Err(KalamLinkError::Cancelled));
-                                        }
+                                if let Some(mut entry) =
+                                    remove_subscription_entry(&mut subs, &mut seq_id_cache, &id, generation)
+                                {
+                                    if let Some(result_tx) = entry.pending_result_tx.take() {
+                                        let _ = result_tx.send(Err(KalamLinkError::Cancelled));
                                     }
+                                }
+                            },
+                            Some(ConnCmd::Progress { id, generation, seq_id, advance_resume }) => {
+                                if let Some(entry) = subs.get_mut(&id) {
+                                    advance_entry_progress(entry, generation, seq_id, advance_resume);
                                 }
                             },
                             Some(ConnCmd::ListSubscriptions { result_tx }) => {

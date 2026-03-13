@@ -478,6 +478,11 @@ export interface SubscriptionOptions {
      * Typically set automatically during reconnection to resume from last received event.
      */
     from?: SeqId;
+    /**
+     * Preserve the original snapshot boundary across reconnects while the
+     * initial load is still in progress.
+     */
+    snapshot_end_seq?: SeqId;
 }
 
 /**

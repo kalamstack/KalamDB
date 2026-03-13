@@ -66,6 +66,17 @@ function assertRowsStrictlyAfter(events, from, context) {
   }
 }
 
+function assertNoDuplicateSeqRows(events, context) {
+  const seen = new Set();
+  for (const row of extractRows(events)) {
+    const seq = row._seq?.asSeqId?.();
+    if (!seq) continue;
+    const key = seq.toString();
+    assert.ok(!seen.has(key), `${context}: duplicate _seq replayed: ${key}`);
+    seen.add(key);
+  }
+}
+
 async function shutdownClient(client) {
   if (!client) return;
   if (typeof client.shutdown === 'function') {
@@ -169,6 +180,7 @@ describe('Resume from checkpoint after disconnect', { timeout: 120_000 }, () => 
         'pre-disconnect row must NOT be replayed',
       );
       assertRowsStrictlyAfter(resumedEvents, checkpoint, 'resume-live');
+      assertNoDuplicateSeqRows(resumedEvents, 'resume-live');
 
       await unsub2();
     } finally {
@@ -275,6 +287,9 @@ describe('Resume from checkpoint after disconnect', { timeout: 120_000 }, () => 
       assertRowsStrictlyAfter(rEvA, cpA, 'resume3 A');
       assertRowsStrictlyAfter(rEvB, cpB, 'resume3 B');
       assertRowsStrictlyAfter(rEvC, cpC, 'resume3 C');
+      assertNoDuplicateSeqRows(rEvA, 'resume3 A');
+      assertNoDuplicateSeqRows(rEvB, 'resume3 B');
+      assertNoDuplicateSeqRows(rEvC, 'resume3 C');
 
       await rUnsubA();
       await rUnsubB();
@@ -343,6 +358,7 @@ describe('Resume from checkpoint after disconnect', { timeout: 120_000 }, () => 
 
       assert.ok(!hasRowId(resumedEvents, preId), 'pre row must NOT be replayed');
       assertRowsStrictlyAfter(resumedEvents, checkpoint, 'double-disconnect');
+      assertNoDuplicateSeqRows(resumedEvents, 'double-disconnect');
 
       await unsub2();
     } finally {

@@ -292,7 +292,7 @@ color = true
         .arg("-u")
         .arg(server_url())
         .arg("--username")
-        .arg(default_username())
+        .arg("root")
         .arg("--password")
         .arg(root_password())
         .arg("--command")
@@ -340,7 +340,7 @@ format = "csv"
         .arg("-u")
         .arg(server_url()) // Override URL
         .arg("--username")
-        .arg(default_username())
+        .arg("root")
         .arg("--password")
         .arg(root_password())
         .arg("--json") // Override format

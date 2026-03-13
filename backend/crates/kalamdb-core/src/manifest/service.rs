@@ -13,9 +13,11 @@ use kalamdb_configs::ManifestCacheSettings;
 use kalamdb_filestore::StorageRegistry;
 use kalamdb_store::{StorageBackend, StorageError};
 use kalamdb_system::providers::ManifestTableProvider;
-use kalamdb_system::{ManifestService as ManifestServiceTrait, SchemaRegistry as SchemaRegistryTrait};
 use kalamdb_system::{
     FileSubfolderState, Manifest, ManifestCacheEntry, SegmentMetadata, SyncState,
+};
+use kalamdb_system::{
+    ManifestService as ManifestServiceTrait, SchemaRegistry as SchemaRegistryTrait,
 };
 use kalamdb_tables::TableError;
 use log::{debug, info, warn};

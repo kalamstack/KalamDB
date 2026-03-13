@@ -1,5 +1,9 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
+use std::time::Duration;
+
+use tokio::sync::Semaphore;
 
 use crate::benchmarks::Benchmark;
 use crate::client::KalamClient;
@@ -65,10 +69,13 @@ impl Benchmark for Sql1kUsersBench {
         Box::pin(async move {
             let total_queries = 1000u32;
             let mut handles = Vec::with_capacity(total_queries as usize);
+            let max_in_flight = (client.urls().len().max(1) * 128).min(total_queries as usize);
+            let semaphore = Arc::new(Semaphore::new(max_in_flight));
 
             for i in 0..total_queries {
                 let c = client.clone();
                 let ns = config.namespace.clone();
+                let semaphore = semaphore.clone();
                 // Mix of query patterns to simulate realistic load
                 let query = match i % 4 {
                     0 => format!("SELECT * FROM {}.load_1k WHERE id = {}", ns, i % 500),
@@ -80,7 +87,10 @@ impl Benchmark for Sql1kUsersBench {
                     ),
                     _ => format!("SELECT name, score FROM {}.load_1k LIMIT 20", ns),
                 };
-                handles.push(tokio::spawn(async move { c.sql_ok(&query).await }));
+                handles.push(tokio::spawn(async move {
+                    let _permit = semaphore.acquire().await.map_err(|e| e.to_string())?;
+                    run_sql_with_retry(&c, &query).await
+                }));
             }
 
             let mut errors = 0u32;
@@ -114,4 +124,31 @@ impl Benchmark for Sql1kUsersBench {
             Ok(())
         })
     }
+}
+
+async fn run_sql_with_retry(client: &KalamClient, sql: &str) -> Result<(), String> {
+    let mut delay = Duration::from_millis(100);
+
+    for attempt in 0..4 {
+        match client.sql_ok(sql).await {
+            Ok(_) => return Ok(()),
+            Err(error) if attempt < 3 && is_transient_load_error(&error) => {
+                tokio::time::sleep(delay).await;
+                delay = std::cmp::min(delay * 2, Duration::from_secs(2));
+            },
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err("SQL load benchmark exhausted retries".to_string())
+}
+
+fn is_transient_load_error(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("network error")
+        || lower.contains("connection failed")
+        || lower.contains("timed out")
+        || lower.contains("timeout")
+        || lower.contains("connection reset")
+        || lower.contains("broken pipe")
 }

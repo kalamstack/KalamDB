@@ -127,9 +127,7 @@ async fn test_storage_flush_table_returns_noop_when_no_pending_writes() {
     let exec_ctx =
         ExecutionContext::new(UserId::from("admin"), Role::Dba, app_ctx.base_session_context());
 
-    let create_namespace = executor
-        .execute("CREATE NAMESPACE flush_test", &exec_ctx, vec![])
-        .await;
+    let create_namespace = executor.execute("CREATE NAMESPACE flush_test", &exec_ctx, vec![]).await;
     assert!(create_namespace.is_ok(), "CREATE NAMESPACE should succeed");
 
     let create_table = executor
@@ -147,7 +145,8 @@ async fn test_storage_flush_table_returns_noop_when_no_pending_writes() {
         .expect("flush with no pending writes should succeed");
     match flush {
         ExecutionResult::Success { message } => {
-            assert!(message.contains("Storage flush skipped: no pending writes for table 'flush_test.docs'"));
+            assert!(message
+                .contains("Storage flush skipped: no pending writes for table 'flush_test.docs'"));
         },
         other => panic!("Expected success result for no-op flush, got {:?}", other),
     }
@@ -161,9 +160,7 @@ async fn test_storage_flush_table_returns_noop_when_flush_already_in_progress() 
     let exec_ctx =
         ExecutionContext::new(UserId::from("admin"), Role::Dba, app_ctx.base_session_context());
 
-    let create_namespace = executor
-        .execute("CREATE NAMESPACE flush_busy", &exec_ctx, vec![])
-        .await;
+    let create_namespace = executor.execute("CREATE NAMESPACE flush_busy", &exec_ctx, vec![]).await;
     assert!(create_namespace.is_ok(), "CREATE NAMESPACE should succeed");
 
     let create_table = executor
@@ -176,11 +173,7 @@ async fn test_storage_flush_table_returns_noop_when_flush_already_in_progress() 
     assert!(create_table.is_ok(), "CREATE TABLE should succeed");
 
     let insert = executor
-        .execute(
-            "INSERT INTO flush_busy.docs (id, body) VALUES (1, 'hello')",
-            &exec_ctx,
-            vec![],
-        )
+        .execute("INSERT INTO flush_busy.docs (id, body) VALUES (1, 'hello')", &exec_ctx, vec![])
         .await;
     assert!(insert.is_ok(), "INSERT should succeed");
 

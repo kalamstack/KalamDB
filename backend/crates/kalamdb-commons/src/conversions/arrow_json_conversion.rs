@@ -254,11 +254,7 @@ fn coerce_embedding_scalar(
     let parsed = match serde_json::from_str::<Vec<f32>>(normalized) {
         Ok(v) => v,
         Err(json_err) => parse_debug_embedding_repr(normalized).ok_or_else(|| {
-            format!(
-                "Invalid embedding JSON for column '{}': {}",
-                field.name(),
-                json_err
-            )
+            format!("Invalid embedding JSON for column '{}': {}", field.name(), json_err)
         })?,
     };
 

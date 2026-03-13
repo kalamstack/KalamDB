@@ -4,8 +4,8 @@ use crate::app_context::AppContext;
 use crate::error::KalamDbError;
 use crate::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
 use crate::sql::executor::handlers::typed::TypedStatementHandler;
-use arrow::array::{RecordBatch, StringArray};
-use arrow::datatypes::{DataType, Field, Schema};
+use arrow::array::{RecordBatch, StringArray, TimestampMicrosecondArray};
+use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use kalamdb_sql::ddl::ShowExportStatement;
 use kalamdb_system::providers::jobs::models::{Job, JobFilter, JobSortField, SortOrder};
 use kalamdb_system::JobType;
@@ -21,6 +21,20 @@ pub struct ShowExportHandler {
 impl ShowExportHandler {
     pub fn new(app_context: Arc<AppContext>) -> Self {
         Self { app_context }
+    }
+
+    fn result_schema() -> Arc<Schema> {
+        Arc::new(Schema::new(vec![
+            Field::new("job_id", DataType::Utf8, false),
+            Field::new("status", DataType::Utf8, false),
+            Field::new("created_at", DataType::Timestamp(TimeUnit::Microsecond, None), false),
+            Field::new("message", DataType::Utf8, true),
+            Field::new("download_url", DataType::Utf8, true),
+        ]))
+    }
+
+    fn created_at_micros(created_at_millis: i64) -> i64 {
+        created_at_millis.saturating_mul(1_000)
     }
 
     /// Build a download URL for a completed export
@@ -75,13 +89,7 @@ impl TypedStatementHandler<ShowExportStatement> for ShowExportHandler {
             .collect();
 
         // Build result schema
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("job_id", DataType::Utf8, false),
-            Field::new("status", DataType::Utf8, false),
-            Field::new("created_at", DataType::Utf8, false),
-            Field::new("message", DataType::Utf8, true),
-            Field::new("download_url", DataType::Utf8, true),
-        ]));
+        let schema = Self::result_schema();
 
         if user_jobs.is_empty() {
             let batch = RecordBatch::new_empty(schema.clone());
@@ -101,11 +109,7 @@ impl TypedStatementHandler<ShowExportStatement> for ShowExportHandler {
         for job in &user_jobs {
             job_ids.push(job.job_id.as_str().to_string());
             statuses.push(format!("{}", job.status));
-            created_ats.push(
-                chrono::DateTime::from_timestamp_millis(job.created_at)
-                    .map(|dt| dt.to_rfc3339())
-                    .unwrap_or_else(|| job.created_at.to_string()),
-            );
+            created_ats.push(Self::created_at_micros(job.created_at));
             messages.push(job.message.clone().unwrap_or_default());
 
             // Build download URL only for completed jobs
@@ -126,7 +130,7 @@ impl TypedStatementHandler<ShowExportStatement> for ShowExportHandler {
             vec![
                 Arc::new(StringArray::from(job_ids)),
                 Arc::new(StringArray::from(statuses)),
-                Arc::new(StringArray::from(created_ats)),
+                Arc::new(TimestampMicrosecondArray::from(created_ats)),
                 Arc::new(StringArray::from(messages)),
                 Arc::new(StringArray::from(download_urls)),
             ],
@@ -149,5 +153,26 @@ impl TypedStatementHandler<ShowExportStatement> for ShowExportHandler {
     ) -> Result<(), KalamDbError> {
         // Any authenticated user can view their own exports
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn show_export_schema_uses_timestamp_for_created_at() {
+        let schema = ShowExportHandler::result_schema();
+        let field = schema.field_with_name("created_at").expect("created_at field");
+
+        assert!(matches!(
+            field.data_type(),
+            DataType::Timestamp(TimeUnit::Microsecond, None)
+        ));
+    }
+
+    #[test]
+    fn show_export_created_at_converts_millis_to_micros() {
+        assert_eq!(ShowExportHandler::created_at_micros(1_741_900_245_123), 1_741_900_245_123_000);
     }
 }

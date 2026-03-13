@@ -15,10 +15,10 @@ use crate::{
     },
     error::{KalamLinkError, Result},
     event_handlers::{ConnectionError, EventHandlers},
-    models::{BatchStatus, ChangeEvent, ConnectionOptions, SubscriptionConfig},
+    models::{ChangeEvent, ConnectionOptions, SubscriptionConfig},
     seq_id::SeqId,
-    seq_tracking,
-    subscription::ws_reader_loop,
+    subscription::buffer_event,
+    subscription::{event_progress, ws_reader_loop},
     timeouts::KalamLinkTimeouts,
 };
 use std::collections::VecDeque;
@@ -63,6 +63,8 @@ pub struct SubscriptionManager {
     /// When using a shared connection, this sender lets us unsubscribe.
     /// The channel carries `(subscription_id, generation)`.
     shared_unsubscribe_tx: Option<mpsc::Sender<(String, u64)>>,
+    /// Sends consumer-observed checkpoint progress back to the shared connection.
+    shared_progress_tx: Option<mpsc::Sender<(String, u64, SeqId, bool)>>,
     /// Generation tag assigned by the shared `connection_task`.
     generation: u64,
     /// Local event buffer for yielding batched events from a single WS message.
@@ -202,6 +204,7 @@ impl SubscriptionManager {
             close_tx: Some(close_tx),
             _reader_handle: Some(reader_handle),
             shared_unsubscribe_tx: None,
+            shared_progress_tx: None,
             generation: 0,
             event_queue: VecDeque::new(),
             buffered_changes: Vec::new(),
@@ -219,6 +222,7 @@ impl SubscriptionManager {
         subscription_id: String,
         event_rx: mpsc::Receiver<Result<ChangeEvent>>,
         unsubscribe_tx: mpsc::Sender<(String, u64)>,
+        progress_tx: mpsc::Sender<(String, u64, SeqId, bool)>,
         generation: u64,
         resume_from: Option<SeqId>,
         timeouts: &KalamLinkTimeouts,
@@ -229,6 +233,7 @@ impl SubscriptionManager {
             close_tx: None,
             _reader_handle: None,
             shared_unsubscribe_tx: Some(unsubscribe_tx),
+            shared_progress_tx: Some(progress_tx),
             generation,
             event_queue: VecDeque::new(),
             buffered_changes: Vec::new(),
@@ -239,143 +244,29 @@ impl SubscriptionManager {
         }
     }
 
-    fn filter_replayed_rows(&self, event: ChangeEvent) -> Option<ChangeEvent> {
-        let Some(from) = self.resume_from else {
-            return Some(event);
+    async fn report_shared_progress(&self, event: &ChangeEvent) {
+        let Some(progress_tx) = self.shared_progress_tx.as_ref() else {
+            return;
+        };
+        let Some((seq_id, advance_resume)) = event_progress(event) else {
+            return;
         };
 
-        match event {
-            ChangeEvent::InitialDataBatch {
-                subscription_id,
-                mut rows,
-                batch_control,
-            } => {
-                let removed = seq_tracking::retain_rows_after(&mut rows, from);
-                if removed > 0 {
-                    log::debug!(
-                        "[kalam-link] [{}] Filtered {} stale initial row(s) at from={}",
-                        subscription_id,
-                        removed,
-                        from
-                    );
-                }
-
-                Some(ChangeEvent::InitialDataBatch {
-                    subscription_id,
-                    rows,
-                    batch_control,
-                })
-            },
-            ChangeEvent::Insert {
-                subscription_id,
-                mut rows,
-            } => {
-                let removed = seq_tracking::retain_rows_after(&mut rows, from);
-                if removed > 0 {
-                    log::debug!(
-                        "[kalam-link] [{}] Filtered {} stale insert row(s) at from={}",
-                        subscription_id,
-                        removed,
-                        from
-                    );
-                }
-                if rows.is_empty() {
-                    None
-                } else {
-                    Some(ChangeEvent::Insert { subscription_id, rows })
-                }
-            },
-            ChangeEvent::Update {
-                subscription_id,
-                mut rows,
-                mut old_rows,
-            } => {
-                let removed_new = seq_tracking::retain_rows_after(&mut rows, from);
-                let removed_old = seq_tracking::retain_rows_after(&mut old_rows, from);
-                let removed = removed_new.max(removed_old);
-                if removed > 0 {
-                    log::debug!(
-                        "[kalam-link] [{}] Filtered {} stale update row(s) at from={}",
-                        subscription_id,
-                        removed,
-                        from
-                    );
-                }
-                if rows.is_empty() && old_rows.is_empty() {
-                    None
-                } else {
-                    Some(ChangeEvent::Update {
-                        subscription_id,
-                        rows,
-                        old_rows,
-                    })
-                }
-            },
-            ChangeEvent::Delete {
-                subscription_id,
-                mut old_rows,
-            } => {
-                let removed = seq_tracking::retain_rows_after(&mut old_rows, from);
-                if removed > 0 {
-                    log::debug!(
-                        "[kalam-link] [{}] Filtered {} stale delete row(s) at from={}",
-                        subscription_id,
-                        removed,
-                        from
-                    );
-                }
-                if old_rows.is_empty() {
-                    None
-                } else {
-                    Some(ChangeEvent::Delete {
-                        subscription_id,
-                        old_rows,
-                    })
-                }
-            },
-            _ => Some(event),
-        }
-    }
-
-    fn flush_buffered_changes(&mut self) {
-        for change in self.buffered_changes.drain(..) {
-            self.event_queue.push_back(change);
-        }
+        let _ = progress_tx
+            .send((self.subscription_id.clone(), self.generation, seq_id, advance_resume))
+            .await;
     }
 
     /// Buffer incoming events: hold live changes while initial data is loading,
     /// then flush them in order once the snapshot is complete.
     fn apply_buffering(&mut self, event: ChangeEvent) {
-        let Some(event) = self.filter_replayed_rows(event) else {
-            return;
-        };
-
-        match event {
-            ChangeEvent::Ack {
-                ref batch_control, ..
-            }
-            | ChangeEvent::InitialDataBatch {
-                ref batch_control, ..
-            } => {
-                self.is_loading = batch_control.status != BatchStatus::Ready;
-                self.event_queue.push_back(event);
-                if !self.is_loading {
-                    self.flush_buffered_changes();
-                }
-            },
-            ChangeEvent::Insert { .. }
-            | ChangeEvent::Update { .. }
-            | ChangeEvent::Delete { .. } => {
-                if self.is_loading {
-                    self.buffered_changes.push(event);
-                } else {
-                    self.event_queue.push_back(event);
-                }
-            },
-            _ => {
-                self.event_queue.push_back(event);
-            },
-        }
+        buffer_event(
+            &mut self.event_queue,
+            &mut self.buffered_changes,
+            &mut self.is_loading,
+            self.resume_from,
+            event,
+        );
     }
 
     /// Receive the next change event from the subscription.
@@ -385,6 +276,7 @@ impl SubscriptionManager {
         loop {
             // 1. Drain local event queue first
             if let Some(event) = self.event_queue.pop_front() {
+                self.report_shared_progress(&event).await;
                 return Some(Ok(event));
             }
 
@@ -480,6 +372,7 @@ mod tests {
             close_tx: Some(close_tx),
             _reader_handle: Some(handle),
             shared_unsubscribe_tx: None,
+            shared_progress_tx: None,
             generation: 0,
             event_queue: VecDeque::new(),
             buffered_changes: Vec::new(),

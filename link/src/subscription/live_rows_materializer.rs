@@ -7,14 +7,17 @@ use super::{LiveRowsConfig, LiveRowsEvent};
 pub struct LiveRowsMaterializer {
     rows: Vec<RowData>,
     limit: Option<usize>,
+    key_columns: Vec<String>,
 }
 
 impl LiveRowsMaterializer {
     /// Create a new materializer.
     pub fn new(config: LiveRowsConfig) -> Self {
+        let key_columns = config.normalized_key_columns();
         Self {
             rows: Vec::new(),
             limit: config.limit,
+            key_columns,
         }
     }
 
@@ -32,7 +35,9 @@ impl LiveRowsMaterializer {
                 batch_control,
                 ..
             } => {
-                if total_rows == 0 || matches!(batch_control.status, crate::models::BatchStatus::Ready) {
+                if total_rows == 0
+                    || matches!(batch_control.status, crate::models::BatchStatus::Ready)
+                {
                     return Some(LiveRowsEvent::Rows {
                         subscription_id,
                         rows: self.rows.clone(),
@@ -99,11 +104,13 @@ impl LiveRowsMaterializer {
 
     fn upsert_rows(&mut self, incoming: Vec<RowData>) {
         for row in incoming {
-            if let Some(key) = row_key(&row) {
-                if let Some(existing_index) = self.rows.iter().position(|entry| row_key(entry).as_deref() == Some(key.as_str())) {
-                    self.rows[existing_index] = row;
-                    continue;
-                }
+            if let Some(existing_index) = self
+                .rows
+                .iter()
+                .position(|entry| rows_match_on_key_columns(entry, &row, &self.key_columns))
+            {
+                self.rows[existing_index] = row;
+                continue;
             }
 
             self.rows.push(row);
@@ -114,11 +121,8 @@ impl LiveRowsMaterializer {
 
     fn remove_rows(&mut self, incoming: &[RowData]) {
         for row in incoming {
-            let Some(key) = row_key(row) else {
-                continue;
-            };
             self.rows
-                .retain(|entry| row_key(entry).as_deref() != Some(key.as_str()));
+                .retain(|entry| !rows_match_on_key_columns(entry, row, &self.key_columns));
         }
     }
 
@@ -127,22 +131,23 @@ impl LiveRowsMaterializer {
             return;
         };
 
-        if self.rows.len() > limit {
-            let start = self.rows.len() - limit;
-            self.rows = self.rows.split_off(start);
+        let excess = self.rows.len().saturating_sub(limit);
+        if excess > 0 {
+            self.rows.drain(..excess);
         }
     }
 }
 
-fn row_key(row: &RowData) -> Option<String> {
-    let value = row.get("id")?;
-    match value {
-        KalamCellValue(inner) => match inner {
-            serde_json::Value::String(text) => Some(text.clone()),
-            serde_json::Value::Number(number) => Some(number.to_string()),
-            _ => value.as_text().map(ToOwned::to_owned),
-        },
+fn rows_match_on_key_columns(left: &RowData, right: &RowData, key_columns: &[String]) -> bool {
+    for column in key_columns {
+        match (left.get(column), right.get(column)) {
+            (Some(KalamCellValue(left_value)), Some(KalamCellValue(right_value)))
+                if left_value == right_value => {},
+            _ => return false,
+        }
     }
+
+    true
 }
 
 #[cfg(test)]
@@ -214,7 +219,10 @@ mod tests {
 
     #[test]
     fn applies_update_delete_and_limit() {
-        let mut materializer = LiveRowsMaterializer::new(LiveRowsConfig { limit: Some(2) });
+        let mut materializer = LiveRowsMaterializer::new(LiveRowsConfig {
+            limit: Some(2),
+            key_columns: None,
+        });
 
         let _ = materializer.apply(ChangeEvent::InitialDataBatch {
             subscription_id: "sub-2".to_string(),
@@ -247,7 +255,10 @@ mod tests {
 
         match updated {
             LiveRowsEvent::Rows { rows, .. } => {
-                assert_eq!(rows[1].get("value").and_then(KalamCellValue::as_text), Some("two-updated"));
+                assert_eq!(
+                    rows[1].get("value").and_then(KalamCellValue::as_text),
+                    Some("two-updated")
+                );
             },
             other => panic!("unexpected event: {:?}", other),
         }
@@ -264,6 +275,56 @@ mod tests {
                 assert_eq!(rows.len(), 1);
                 assert_eq!(rows[0].get("id").and_then(KalamCellValue::as_text), Some("3"));
             },
+            other => panic!("unexpected event: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn supports_custom_key_columns() {
+        fn keyed_row(room_id: &str, message_id: &str, value: &str) -> RowData {
+            let mut row = RowData::new();
+            row.insert("room_id".to_string(), KalamCellValue::text(room_id));
+            row.insert("message_id".to_string(), KalamCellValue::text(message_id));
+            row.insert("value".to_string(), KalamCellValue::text(value));
+            row
+        }
+
+        let mut materializer = LiveRowsMaterializer::new(LiveRowsConfig {
+            limit: None,
+            key_columns: Some(vec!["room_id".to_string(), "message_id".to_string()]),
+        });
+
+        let _ = materializer.apply(ChangeEvent::InitialDataBatch {
+            subscription_id: "sub-3".to_string(),
+            rows: vec![keyed_row("room-1", "msg-1", "hello")],
+            batch_control: batch_control(BatchStatus::Ready),
+        });
+
+        let updated = materializer
+            .apply(ChangeEvent::Update {
+                subscription_id: "sub-3".to_string(),
+                rows: vec![keyed_row("room-1", "msg-1", "updated")],
+                old_rows: vec![keyed_row("room-1", "msg-1", "hello")],
+            })
+            .expect("update should emit");
+
+        let deleted = materializer
+            .apply(ChangeEvent::Delete {
+                subscription_id: "sub-3".to_string(),
+                old_rows: vec![keyed_row("room-1", "msg-1", "updated")],
+            })
+            .expect("delete should emit");
+
+        match updated {
+            LiveRowsEvent::Rows { rows, .. } => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0].get("value").and_then(KalamCellValue::as_text), Some("updated"));
+            },
+            other => panic!("unexpected event: {:?}", other),
+        }
+
+        match deleted {
+            LiveRowsEvent::Rows { rows, .. } => assert!(rows.is_empty()),
             other => panic!("unexpected event: {:?}", other),
         }
     }

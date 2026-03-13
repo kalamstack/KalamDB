@@ -10,8 +10,8 @@ use kalamdb_core::app_context::AppContext;
 use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult};
 use kalamdb_core::sql::executor::SqlExecutor;
 use kalamdb_core::vector::flush_shared_scope_vectors;
-use kalamdb_store::EntityStore;
 use kalamdb_store::test_utils::TestDb;
+use kalamdb_store::EntityStore;
 use kalamdb_store::Partition;
 use kalamdb_system::providers::storages::models::StorageType;
 use kalamdb_system::{Storage, VectorMetric};
@@ -662,14 +662,8 @@ async fn test_cosine_distance_query_combines_hot_and_cold_rows_after_index_flush
             assert_eq!(row_count, 3);
             let ids = extract_id_values(&batches);
             assert_eq!(ids.first().copied(), Some(1));
-            assert!(
-                ids.contains(&1),
-                "top-k should include a row already flushed to cold storage"
-            );
-            assert!(
-                ids.contains(&4),
-                "top-k should include a newly inserted hot-storage row"
-            );
+            assert!(ids.contains(&1), "top-k should include a row already flushed to cold storage");
+            assert!(ids.contains(&4), "top-k should include a newly inserted hot-storage row");
         },
         other => panic!("Expected row result, got {:?}", other),
     }
@@ -948,12 +942,7 @@ async fn test_vector_delete_stages_hot_tombstone_and_flushes_cleanup() {
         .and_then(|m| m.snapshot_path.clone())
         .expect("snapshot path after initial flush");
 
-    execute_sql(
-        &executor,
-        &exec_ctx,
-        "DELETE FROM test_ns.docs_delete_cleanup WHERE id = 1",
-    )
-    .await;
+    execute_sql(&executor, &exec_ctx, "DELETE FROM test_ns.docs_delete_cleanup WHERE id = 1").await;
 
     let staged = store
         .scan_all_typed(Some(128), None, None)
@@ -998,10 +987,8 @@ async fn test_vector_delete_stages_hot_tombstone_and_flushes_cleanup() {
         delete_meta.last_applied_seq.as_i64() > initial_last_applied,
         "delete flush should advance last_applied_seq watermark"
     );
-    let delete_snapshot = delete_meta
-        .snapshot_path
-        .as_ref()
-        .expect("snapshot path after delete flush");
+    let delete_snapshot =
+        delete_meta.snapshot_path.as_ref().expect("snapshot path after delete flush");
     assert_ne!(
         delete_snapshot, &initial_snapshot,
         "flush after delete should rotate vector snapshot file"
@@ -1135,7 +1122,10 @@ async fn test_multiple_vector_indexes_with_mixed_rows_and_null_embeddings() {
             assert_eq!(row_count, 3);
             let ids = extract_id_values(&batches);
             assert_eq!(ids.first().copied(), Some(1));
-            assert!(!ids.contains(&3), "row with NULL embedding_alt should not rank for embedding_alt");
+            assert!(
+                !ids.contains(&3),
+                "row with NULL embedding_alt should not rank for embedding_alt"
+            );
         },
         other => panic!("Expected rows for alt embedding query, got {:?}", other),
     }

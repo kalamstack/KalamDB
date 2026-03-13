@@ -134,7 +134,5 @@ pub(crate) fn extract_refresh_or_bearer_token(req: &HttpRequest) -> Result<Strin
         return Ok(token.to_string());
     }
 
-    Err(AuthError::MissingAuthorization(
-        "No refresh token found".to_string(),
-    ))
+    Err(AuthError::MissingAuthorization("No refresh token found".to_string()))
 }

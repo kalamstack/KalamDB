@@ -301,40 +301,10 @@ void main() {
     test(
       'reconnect then resubscribe from lastSeqId continues without replay',
       () async {
-        bool hasRowId(List<ChangeEvent> events, int id) {
-          for (final event in events) {
-            switch (event) {
-              case InsertEvent(:final rows):
-                if (rows.any((r) => r['id']?.asInt() == id)) return true;
-              case UpdateEvent(:final rows):
-                if (rows.any((r) => r['id']?.asInt() == id)) return true;
-              case InitialDataBatch(:final rows):
-                if (rows.any((r) => r['id']?.asInt() == id)) return true;
-              case AckEvent() || DeleteEvent() || SubscriptionError():
-                break;
-            }
-          }
-          return false;
-        }
-
-        Future<void> waitFor(
-          bool Function() predicate, {
-          Duration timeout = const Duration(seconds: 20),
-          Duration poll = const Duration(milliseconds: 200),
-        }) async {
-          final started = DateTime.now();
-          while (!predicate()) {
-            if (DateTime.now().difference(started) > timeout) {
-              throw TimeoutException('Timed out waiting for condition');
-            }
-            await sleep(poll);
-          }
-        }
-
         final seed = DateTime.now().millisecondsSinceEpoch % 1000000;
-        final preId = (seed * 10) + 1;
-        final gapId = (seed * 10) + 2;
-        final postId = (seed * 10) + 3;
+        final preIds = [(seed * 10) + 1, (seed * 10) + 2];
+        final gapIds = [(seed * 10) + 3, (seed * 10) + 4];
+        final postIds = [(seed * 10) + 5, (seed * 10) + 6];
         final checkpointSubId = 'recon-checkpoint-${uniqueName('sub')}';
 
         final writer = await connectJwtClient();
@@ -342,20 +312,27 @@ void main() {
         StreamSubscription<ChangeEvent>? sub2;
 
         try {
-          await writer.query(
-            "INSERT INTO $tbl (id, payload) VALUES ($preId, 'pre-checkpoint')",
-          );
+          for (final id in preIds) {
+            await writer.query(
+              "INSERT INTO $tbl (id, payload) VALUES ($id, 'pre-checkpoint-$id')",
+            );
+          }
 
           final eventsBefore = <ChangeEvent>[];
           final streamBefore = client.subscribe(
-            'SELECT id, payload FROM $tbl WHERE id >= $preId',
-            lastRows: 1,
+            'SELECT id, payload FROM $tbl WHERE id >= ${preIds.first}',
+            lastRows: preIds.length,
             subscriptionId: checkpointSubId,
           );
           sub1 = streamBefore.listen(eventsBefore.add);
 
-          await waitFor(() => eventsBefore.whereType<AckEvent>().isNotEmpty);
-          await waitFor(() => hasRowId(eventsBefore, preId));
+          await waitForCondition(
+            () => eventsBefore.whereType<AckEvent>().isNotEmpty,
+          );
+          await waitForCondition(
+            () => preIds
+                .every((id) => changeEventsContainRowId(eventsBefore, id)),
+          );
 
           SeqId? checkpoint;
           final started = DateTime.now();
@@ -382,38 +359,76 @@ void main() {
           await client.disconnectWebSocket();
           expect(await client.isConnected, isFalse);
 
-          await writer.query(
-            "INSERT INTO $tbl (id, payload) VALUES ($gapId, 'during-disconnect')",
-          );
+          for (final id in gapIds) {
+            await writer.query(
+              "INSERT INTO $tbl (id, payload) VALUES ($id, 'during-disconnect-$id')",
+            );
+          }
 
           await client.reconnectWebSocket();
           expect(await client.isConnected, isTrue);
 
           final eventsAfter = <ChangeEvent>[];
           final streamAfter = client.subscribe(
-            'SELECT id, payload FROM $tbl WHERE id >= $preId',
+            'SELECT id, payload FROM $tbl WHERE id >= ${preIds.first}',
             from: checkpoint,
             lastRows: 0,
           );
           sub2 = streamAfter.listen(eventsAfter.add);
 
-          await waitFor(() => eventsAfter.whereType<AckEvent>().isNotEmpty);
-
-          await writer.query(
-            "INSERT INTO $tbl (id, payload) VALUES ($postId, 'post-reconnect')",
+          await waitForCondition(
+            () => eventsAfter.whereType<AckEvent>().isNotEmpty,
           );
 
-          await waitFor(() =>
-              hasRowId(eventsAfter, gapId) && hasRowId(eventsAfter, postId));
+          for (final id in postIds) {
+            await writer.query(
+              "INSERT INTO $tbl (id, payload) VALUES ($id, 'post-reconnect-$id')",
+            );
+          }
 
-          expect(hasRowId(eventsAfter, preId), isFalse,
+          await waitForCondition(
+            () =>
+                gapIds
+                    .every((id) => changeEventsContainRowId(eventsAfter, id)) &&
+                postIds.every(
+                  (id) => changeEventsContainRowId(eventsAfter, id),
+                ),
+          );
+
+          for (final id in preIds) {
+            expect(
+              changeEventsContainRowId(eventsAfter, id),
+              isFalse,
               reason:
-                  'pre-checkpoint row must not replay after reconnect resume');
-          expect(hasRowId(eventsAfter, gapId), isTrue,
+                  'pre-checkpoint row $id must not replay after reconnect resume',
+            );
+          }
+          for (final id in gapIds) {
+            expect(
+              changeEventsContainRowId(eventsAfter, id),
+              isTrue,
               reason:
-                  'row written during disconnect must be resumed from checkpoint');
-          expect(hasRowId(eventsAfter, postId), isTrue,
-              reason: 'row written after reconnect must be received live');
+                  'row $id written during disconnect must be resumed from checkpoint',
+            );
+          }
+          for (final id in postIds) {
+            expect(
+              changeEventsContainRowId(eventsAfter, id),
+              isTrue,
+              reason: 'row $id written after reconnect must be received live',
+            );
+          }
+          expectNoDuplicateSeqs(
+            eventsAfter,
+            reason:
+                'reconnect resume must not emit duplicate seq ids after checkpoint',
+          );
+          expectSeqsStrictlyAfterCheckpoint(
+            eventsAfter,
+            checkpoint,
+            reason:
+                'reconnect resume must only emit seq ids strictly after checkpoint',
+          );
         } finally {
           if (sub1 != null) {
             await _safeCancel(sub1);

@@ -47,7 +47,8 @@ if curl -sf "$KALAMDB_URL/health" > /dev/null 2>&1; then
     tests/e2e/ddl/ddl.test.mjs \
     tests/e2e/lifecycle/lifecycle.test.mjs \
     tests/e2e/subscription/subscription.test.mjs \
-    tests/e2e/reconnect/reconnect.test.mjs
+    tests/e2e/reconnect/reconnect.test.mjs \
+    tests/e2e/reconnect/resume.test.mjs
   echo ""
   echo "✅ All TypeScript SDK tests passed!"
 else

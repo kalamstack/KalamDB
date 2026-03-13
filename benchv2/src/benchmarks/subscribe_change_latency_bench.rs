@@ -55,6 +55,14 @@ impl Benchmark for SubscribeChangeLatencyBench {
     ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
         Box::pin(async move {
             let ns = config.namespace.clone();
+            client
+                .sql_ok(&format!(
+                    "CREATE USER TABLE IF NOT EXISTS {}.change_latency (id INT PRIMARY KEY, ts TEXT)",
+                    ns
+                ))
+                .await?;
+            tokio::time::sleep(Duration::from_millis(25)).await;
+
             let change_received = Arc::new(AtomicU32::new(0));
             let counter = change_received.clone();
 
