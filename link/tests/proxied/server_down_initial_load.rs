@@ -1,7 +1,8 @@
+use super::helpers::*;
 use crate::common;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
-use super::helpers::*;
 use kalam_link::SubscriptionConfig;
+use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::time::{sleep, timeout};
@@ -38,10 +39,7 @@ async fn test_proxy_server_down_during_initial_load() {
     for i in 0..5 {
         writer
             .execute_query(
-                &format!(
-                    "INSERT INTO {} (id, value) VALUES ('seed-{}', 'val-{}')",
-                    table, i, i
-                ),
+                &format!("INSERT INTO {} (id, value) VALUES ('seed-{}', 'val-{}')", table, i, i),
                 None,
                 None,
                 None,
@@ -66,12 +64,18 @@ async fn test_proxy_server_down_during_initial_load() {
 
     // The subscription should detect the disconnect.
     let disconnects_before = disconnect_count.load(Ordering::SeqCst);
+    let mut seen_ids = HashSet::<String>::new();
     for _ in 0..40 {
         if disconnect_count.load(Ordering::SeqCst) > disconnects_before {
             break;
         }
         // Drain any events that arrived before the disconnect.
-        let _ = timeout(Duration::from_millis(100), sub.next()).await;
+        if let Ok(Some(Ok(ev))) = timeout(Duration::from_millis(100), sub.next()).await {
+            let mut seq = None;
+            let mut ids = Vec::new();
+            collect_ids_and_track_seq(&ev, &mut ids, &mut seq, None, "init-load-drop pre");
+            seen_ids.extend(ids);
+        }
     }
 
     // Bring the proxy back.
@@ -84,21 +88,19 @@ async fn test_proxy_server_down_during_initial_load() {
         sleep(Duration::from_millis(100)).await;
     }
 
-    assert!(
-        client.is_connected().await,
-        "client should auto-reconnect after proxy resumes"
-    );
+    assert!(client.is_connected().await, "client should auto-reconnect after proxy resumes");
 
     // After reconnect the subscription should eventually deliver all seed rows.
-    let mut seen_ids = Vec::<String>::new();
     for _ in 0..20 {
-        if (0..5).all(|i| seen_ids.iter().any(|id| id == &format!("seed-{}", i))) {
+        if (0..5).all(|i| seen_ids.contains(&format!("seed-{}", i))) {
             break;
         }
         match timeout(Duration::from_millis(1500), sub.next()).await {
             Ok(Some(Ok(ev))) => {
                 let mut _seq = None;
-                collect_ids_and_track_seq(&ev, &mut seen_ids, &mut _seq, None, "init-load-drop");
+                let mut ids = Vec::new();
+                collect_ids_and_track_seq(&ev, &mut ids, &mut _seq, None, "init-load-drop post");
+                seen_ids.extend(ids);
             },
             _ => {},
         }
@@ -107,7 +109,7 @@ async fn test_proxy_server_down_during_initial_load() {
     for i in 0..5 {
         let expected = format!("seed-{}", i);
         assert!(
-            seen_ids.iter().any(|id| id == &expected),
+            seen_ids.contains(&expected),
             "seed row {} should be delivered after reconnect",
             expected
         );

@@ -297,6 +297,11 @@ impl InitialDataFetcher {
             }
         }
 
+        rows_with_seq.sort_unstable_by_key(|(seq_id, _)| *seq_id);
+        if options.fetch_last {
+            rows_with_seq.reverse();
+        }
+
         // Determine has_more and slice to limit
         let total_fetched = rows_with_seq.len();
         let has_more = total_fetched > limit;

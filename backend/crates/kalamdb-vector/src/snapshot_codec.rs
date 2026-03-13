@@ -66,10 +66,7 @@ pub(crate) fn decode_snapshot(input: &[u8]) -> Result<VixSnapshotFile, String> {
 
     let version = read_u8(input, &mut cursor)?;
     if version != VIX_CODEC_VERSION {
-        return Err(format!(
-            "Unsupported .vix snapshot codec version {}",
-            version
-        ));
+        return Err(format!("Unsupported .vix snapshot codec version {}", version));
     }
 
     let table_id = read_string(input, &mut cursor)?;
@@ -228,4 +225,3 @@ mod tests {
         assert_eq!(decoded, snapshot);
     }
 }
-

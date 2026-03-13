@@ -20,16 +20,12 @@ static CURRENT_ROLE_CALL_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)\bCURRENT_ROLE\s*\(\s*\)").expect("valid regex"));
 static CURRENT_USER_ID_CALL_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)\bCURRENT_USER_ID\s*\(\s*\)").expect("valid regex"));
-static CURRENT_USER_KEYWORD_RE: Lazy<Regex> =
-    Lazy::new(|| {
-        Regex::new(r"(?i)(^|[^A-Za-z0-9_])(CURRENT_USER)([^A-Za-z0-9_(]|$)")
-            .expect("valid regex")
-    });
-static CURRENT_ROLE_KEYWORD_RE: Lazy<Regex> =
-    Lazy::new(|| {
-        Regex::new(r"(?i)(^|[^A-Za-z0-9_])(CURRENT_ROLE)([^A-Za-z0-9_(]|$)")
-            .expect("valid regex")
-    });
+static CURRENT_USER_KEYWORD_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)(^|[^A-Za-z0-9_])(CURRENT_USER)([^A-Za-z0-9_(]|$)").expect("valid regex")
+});
+static CURRENT_ROLE_KEYWORD_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)(^|[^A-Za-z0-9_])(CURRENT_ROLE)([^A-Za-z0-9_(]|$)").expect("valid regex")
+});
 
 /// Default sqlparser options used across KalamDB
 pub fn parser_options() -> ParserOptions {
@@ -67,10 +63,10 @@ pub fn parse_sql_statements(
 ) -> Result<Vec<Statement>, ParserError> {
     let parse_with_sql = |candidate: &str| {
         Parser::new(dialect)
-        .with_options(parser_options())
-        .with_recursion_limit(DEFAULT_SQL_RECURSION_LIMIT)
-        .try_with_sql(candidate)?
-        .parse_statements()
+            .with_options(parser_options())
+            .with_recursion_limit(DEFAULT_SQL_RECURSION_LIMIT)
+            .try_with_sql(candidate)?
+            .parse_statements()
     };
 
     match parse_with_sql(sql) {
@@ -506,9 +502,8 @@ mod tests {
 
     #[test]
     fn test_normalize_context_keyword_calls_for_sqlparser() {
-        let normalized = normalize_context_keyword_calls_for_sqlparser(
-            "SELECT CURRENT_USER(), CURRENT_ROLE()",
-        );
+        let normalized =
+            normalize_context_keyword_calls_for_sqlparser("SELECT CURRENT_USER(), CURRENT_ROLE()");
         assert_eq!(normalized, "SELECT CURRENT_USER, CURRENT_ROLE");
     }
 
@@ -528,9 +523,6 @@ mod tests {
         let rewritten = rewrite_context_functions_for_datafusion(
             "SELECT CURRENT_USER AS username, CURRENT_ROLE AS role",
         );
-        assert_eq!(
-            rewritten,
-            "SELECT KDB_CURRENT_USER() AS username, KDB_CURRENT_ROLE() AS role"
-        );
+        assert_eq!(rewritten, "SELECT KDB_CURRENT_USER() AS username, KDB_CURRENT_ROLE() AS role");
     }
 }

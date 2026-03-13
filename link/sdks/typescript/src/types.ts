@@ -184,8 +184,22 @@ export interface LiveRowsOptions<T> {
    */
   mapRow?: (row: import('./cell_value.js').RowData) => T;
   /**
+   * Column names that together identify a stable row in Rust-side materialization.
+   *
+   * Use this when your query does not expose a plain `id` column but does
+   * expose a stable natural or composite key.
+   */
+  keyColumns?: string[];
+  /**
+   * Deprecated alias for `keyColumns`.
+   */
+  keyColumn?: string | string[];
+  /**
    * Resolve a stable key for upsert/delete handling.
-   * Defaults to `row.id` when available.
+   *
+   * When this is provided, live row reconciliation falls back to the
+   * TypeScript layer because arbitrary JavaScript callbacks cannot be shared
+   * with the Rust core.
    */
   getKey?: (row: T) => string | null | undefined;
   /**

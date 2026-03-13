@@ -13,9 +13,7 @@
 //   cargo test --test smoke smoke_subscription_multi_reconnect
 
 use crate::common::*;
-use kalam_link::{
-    models::ChangeEvent, KalamLinkClient, KalamLinkTimeouts, SubscriptionConfig,
-};
+use kalam_link::{models::ChangeEvent, KalamLinkClient, KalamLinkTimeouts, SubscriptionConfig};
 use std::time::Duration;
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -58,11 +56,11 @@ where
                 if predicate(&events) {
                     break;
                 }
-            }
+            },
             Ok(Some(Err(e))) => {
                 eprintln!("[collect_until] subscription error: {}", e);
                 break;
-            }
+            },
             Ok(None) => break,
             Err(_) => break,
         }

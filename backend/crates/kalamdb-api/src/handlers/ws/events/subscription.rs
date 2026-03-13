@@ -68,7 +68,7 @@ pub async fn handle_subscribe(
     // - batch_size: Hint for server-side batch sizing
     let initial_opts = if let Some(from_seq) = subscription.options.from {
         // Resume from specific sequence ID - use since_seq for filtering
-        InitialDataOptions::batch(Some(from_seq), None, batch_size)
+        InitialDataOptions::batch(Some(from_seq), subscription.options.snapshot_end_seq, batch_size)
     } else if let Some(n) = subscription.options.last_rows {
         // Fetch last N rows
         InitialDataOptions::last(n as usize)
@@ -200,7 +200,8 @@ pub async fn handle_subscribe(
                     );
                 },
             }
-            let _ = send_error(session, &subscription_id, code, &message, compression_enabled).await;
+            let _ =
+                send_error(session, &subscription_id, code, &message, compression_enabled).await;
             Ok(())
         },
     }

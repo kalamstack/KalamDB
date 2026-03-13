@@ -136,13 +136,14 @@ fn load_existing_vector_state(
         )));
     }
 
-    let index = load_index(dimensions, metric, &snapshot.index_blob)
-        .map_err(|e| VectorFlushError::new(format!("Failed to load usearch snapshot index: {}", e)))?;
+    let index = load_index(dimensions, metric, &snapshot.index_blob).map_err(|e| {
+        VectorFlushError::new(format!("Failed to load usearch snapshot index: {}", e))
+    })?;
 
     for entry in snapshot.entries {
-        if let Some(vector) = export_vector(&index, entry.key, dimensions)
-            .map_err(|e| VectorFlushError::new(format!("Failed to export vector from index: {}", e)))?
-        {
+        if let Some(vector) = export_vector(&index, entry.key, dimensions).map_err(|e| {
+            VectorFlushError::new(format!("Failed to export vector from index: {}", e))
+        })? {
             vectors_by_pk.insert(entry.pk, (entry.key, vector));
         }
     }
@@ -297,9 +298,10 @@ pub fn flush_user_scope_vectors(
 
         let store = new_indexed_user_vector_hot_store(backend.clone(), table_id, &column_name);
         let prefix = UserVectorHotOpId::user_prefix(user_id);
-        let scanned = store.scan_with_raw_prefix(&prefix, None, VECTOR_SCAN_LIMIT).map_err(|e| {
-            VectorFlushError::with_prefix("Failed to scan user vector hot store", e)
-        })?;
+        let scanned =
+            store.scan_with_raw_prefix(&prefix, None, VECTOR_SCAN_LIMIT).map_err(|e| {
+                VectorFlushError::with_prefix("Failed to scan user vector hot store", e)
+            })?;
 
         if scanned.is_empty() {
             continue;
@@ -482,4 +484,3 @@ pub fn flush_shared_scope_vectors(
 
     Ok(())
 }
-

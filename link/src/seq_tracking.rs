@@ -18,9 +18,7 @@ pub const SEQ_COLUMN: &str = "_seq";
 
 /// Extract a row-level `_seq` value, if present and parseable.
 pub fn row_seq(row: &HashMap<String, KalamCellValue>) -> Option<SeqId> {
-    row.get(SEQ_COLUMN)
-        .and_then(KalamCellValue::as_big_int)
-        .map(SeqId::from_i64)
+    row.get(SEQ_COLUMN).and_then(KalamCellValue::as_big_int).map(SeqId::from_i64)
 }
 
 /// Extract the maximum `_seq` value from a slice of named-column rows.
@@ -47,10 +45,7 @@ pub fn extract_max_seq(rows: &[HashMap<String, KalamCellValue>]) -> Option<SeqId
 ///
 /// Rows without a parseable `_seq` are retained because the client cannot
 /// prove they are stale.
-pub fn retain_rows_after(
-    rows: &mut Vec<HashMap<String, KalamCellValue>>,
-    after: SeqId,
-) -> usize {
+pub fn retain_rows_after(rows: &mut Vec<HashMap<String, KalamCellValue>>, after: SeqId) -> usize {
     let original_len = rows.len();
     rows.retain(|row| row_seq(row).map_or(true, |seq| seq > after));
     original_len.saturating_sub(rows.len())

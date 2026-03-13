@@ -32,6 +32,7 @@ fn create_test_subscription_request(
             batch_size: None,
             last_rows,
             from: None,
+            snapshot_end_seq: None,
         },
     }
 }

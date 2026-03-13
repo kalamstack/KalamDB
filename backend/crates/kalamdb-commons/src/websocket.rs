@@ -270,6 +270,11 @@ pub struct SubscriptionOptions {
     /// Typically set automatically during reconnection to resume from last received event
     #[serde(skip_serializing_if = "Option::is_none", alias = "from_seq_id")]
     pub from: Option<SeqId>,
+
+    /// Preserve the original snapshot boundary across reconnects while the
+    /// initial load is still in progress.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot_end_seq: Option<SeqId>,
 }
 
 /// Batch control metadata for paginated initial data loading

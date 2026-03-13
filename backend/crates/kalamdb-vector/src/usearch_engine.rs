@@ -11,7 +11,8 @@ pub(crate) fn create_index(
     options.metric = metric_to_usearch(metric);
     options.quantization = ScalarKind::F32;
 
-    let index = Index::new(&options).map_err(|e| format!("Failed to create usearch index: {}", e))?;
+    let index =
+        Index::new(&options).map_err(|e| format!("Failed to create usearch index: {}", e))?;
     if capacity > 0 {
         index
             .reserve(capacity)
@@ -91,4 +92,3 @@ pub(crate) fn metric_to_usearch(metric: VectorMetric) -> MetricKind {
         VectorMetric::Dot => MetricKind::IP,
     }
 }
-

@@ -1731,7 +1731,11 @@ impl SseDecode for crate::models::DartLiveRowsConfig {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_limit = <Option<i32>>::sse_decode(deserializer);
-        return crate::models::DartLiveRowsConfig { limit: var_limit };
+        let mut var_keyColumns = <Option<Vec<String>>>::sse_decode(deserializer);
+        return crate::models::DartLiveRowsConfig {
+            limit: var_limit,
+            key_columns: var_keyColumns,
+        };
     }
 }
 
@@ -2153,6 +2157,17 @@ impl SseDecode for Option<i64> {
     }
 }
 
+impl SseDecode for Option<Vec<String>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<Vec<String>>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for u8 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2523,7 +2538,11 @@ impl flutter_rust_bridge::IntoIntoDart<crate::models::DartHealthCheckResponse>
 // Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::models::DartLiveRowsConfig {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [self.limit.into_into_dart().into_dart()].into_dart()
+        [
+            self.limit.into_into_dart().into_dart(),
+            self.key_columns.into_into_dart().into_dart(),
+        ]
+        .into_dart()
     }
 }
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
@@ -3088,6 +3107,7 @@ impl SseEncode for crate::models::DartLiveRowsConfig {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <Option<i32>>::sse_encode(self.limit, serializer);
+        <Option<Vec<String>>>::sse_encode(self.key_columns, serializer);
     }
 }
 
@@ -3412,6 +3432,16 @@ impl SseEncode for Option<i64> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <i64>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<Vec<String>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <Vec<String>>::sse_encode(value, serializer);
         }
     }
 }

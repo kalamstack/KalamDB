@@ -262,11 +262,42 @@ test('liveTableRows delegates to live using SELECT * sugar', async () => {
 
   assert.equal(fakeWasmClient.liveSubscribeCalls[0].sql, 'SELECT * FROM demo.tasks');
   assert.deepEqual(JSON.parse(fakeWasmClient.liveSubscribeCalls[0].optionsJson), {
-    subscription_options: { last_rows: 5, from: 10 },
+    subscription_options: { last_rows: 5, from: '10' },
   });
 
   fakeWasmClient.emitLiveRows('live-1', [{ id: 1 }, { id: 2 }], 12);
   assert.deepEqual(snapshots[0], [1, 2]);
+
+  await unsub();
+});
+
+test('live passes key columns through to Rust materialization', async () => {
+  const client = createClient({
+    url: 'http://127.0.0.1:8080',
+    authProvider: async () => Auth.none(),
+  });
+  const fakeWasmClient = createRuntimeCoverageWasmClient();
+  client.initialized = true;
+  client.wasmClient = fakeWasmClient;
+
+  const snapshots = [];
+  const unsub = await client.live('SELECT * FROM demo.messages', (rows) => {
+    snapshots.push(rows.map((row) => row.message_id.asString()));
+  }, {
+    keyColumn: ['room_id', 'message_id'],
+    subscriptionOptions: { last_rows: 10 },
+  });
+
+  assert.deepEqual(JSON.parse(fakeWasmClient.liveSubscribeCalls[0].optionsJson), {
+    key_columns: ['room_id', 'message_id'],
+    subscription_options: { last_rows: 10 },
+  });
+
+  fakeWasmClient.emitLiveRows('live-1', [
+    { room_id: 'room-1', message_id: 'm-1' },
+    { room_id: 'room-1', message_id: 'm-2' },
+  ], 21);
+  assert.deepEqual(snapshots[0], ['m-1', 'm-2']);
 
   await unsub();
 });

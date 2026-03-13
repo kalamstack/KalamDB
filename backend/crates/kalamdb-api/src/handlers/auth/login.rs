@@ -130,18 +130,18 @@ pub async fn login_handler(
         .cookie(auth_cookie)
         .cookie(refresh_cookie)
         .json(LoginResponse {
-        user: UserInfo {
-            id: user.user_id.clone(),
-            username: user.username.clone(),
-            role: user.role,
-            email: user.email,
-            created_at,
-            updated_at,
-        },
-        admin_ui_access,
-        expires_at: expires_at.to_rfc3339(),
-        access_token: token,
-        refresh_token,
-        refresh_expires_at: refresh_expires_at.to_rfc3339(),
-    })
+            user: UserInfo {
+                id: user.user_id.clone(),
+                username: user.username.clone(),
+                role: user.role,
+                email: user.email,
+                created_at,
+                updated_at,
+            },
+            admin_ui_access,
+            expires_at: expires_at.to_rfc3339(),
+            access_token: token,
+            refresh_token,
+            refresh_expires_at: refresh_expires_at.to_rfc3339(),
+        })
 }

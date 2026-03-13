@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KalamDB Benchmark Report</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1017;
+    --surface: #151922;
+    --surface2: #1c2130;
+    --surface3: #232839;
+    --border: #2a3044;
+    --border-light: #353b52;
+    --text: #e6e9f0;
+    --text2: #8891a8;
+    --text3: #5c6580;
+    --accent: #6366f1;
+    --accent2: #818cf8;
+    --accent-glow: rgba(99,102,241,0.12);
+    --green: #22c55e;
+    --green-bg: rgba(34,197,94,0.08);
+    --red: #ef4444;
+    --red-bg: rgba(239,68,68,0.08);
+    --orange: #f59e0b;
+    --blue: #3b82f6;
+    --purple: #a855f7;
+    --cyan: #06b6d4;
+    --radius: 10px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    font-size: 15px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { width: 100%; padding: 2rem 2.5rem; }
+
+  /* ── Header ── */
+  header {
+    text-align: center;
+    padding: 2.5rem 0 2rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 2rem;
+  }
+  header h1 {
+    font-size: 2.2rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    background: linear-gradient(135deg, var(--accent), var(--purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 0.4rem;
+  }
+  header .subtitle { color: var(--text2); font-size: 0.92rem; }
+  .meta {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: center;
+    margin-top: 1rem;
+    flex-wrap: wrap;
+  }
+  .meta span {
+    background: var(--surface);
+    padding: 0.35rem 0.9rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    border: 1px solid var(--border);
+    color: var(--text2);
+  }
+
+  /* ── Summary cards ── */
+  .summary-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.4rem;
+    text-align: center;
+    transition: border-color .2s;
+  }
+  .card:hover { border-color: var(--border-light); }
+  .card .value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--accent2);
+    letter-spacing: -0.02em;
+  }
+  .card .label { color: var(--text2); font-size: 0.82rem; margin-top: 0.3rem; }
+  .card.pass .value { color: var(--green); }
+  .card.fail .value { color: var(--red); }
+
+  .sys-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.2rem;
+    margin-bottom: 1.5rem;
+  }
+  .sys-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0.8rem 1.1rem;
+  }
+  .sys-item {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.55rem 0.75rem;
+  }
+  .sys-item .k {
+    color: var(--text3);
+    font-size: 0.73rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.2rem;
+  }
+  .sys-item .v {
+    color: var(--text);
+    font-size: 0.88rem;
+    font-weight: 500;
+    word-break: break-word;
+  }
+
+  /* ── Charts ── */
+  .charts {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+    margin-bottom: 2rem;
+  }
+  .chart-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.4rem;
+  }
+  .chart-box h3 {
+    margin-bottom: 1rem;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .chart-box.wide { grid-column: 1 / -1; }
+
+  /* ── Table ── */
+  .section-title {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+    color: var(--text);
+  }
+  .table-wrap {
+    overflow-x: auto;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    margin-bottom: 2rem;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--surface);
+    font-size: 0.88rem;
+  }
+  th {
+    background: var(--surface2);
+    padding: 0.75rem 0.9rem;
+    text-align: left;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text3);
+    font-weight: 600;
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+    border-bottom: 2px solid var(--border);
+    border-right: 1px solid var(--border);
+  }
+  th:last-child { border-right: none; }
+  td {
+    padding: 0.65rem 0.9rem;
+    border-top: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  td:last-child { border-right: none; }
+  td.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 0.84rem;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  td.ops { color: var(--cyan); font-weight: 600; }
+  td.desc-col {
+    color: var(--text2);
+    max-width: 260px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  tr:hover td { background: var(--surface2); }
+  tbody tr:nth-child(even) td { background: rgba(255,255,255,0.012); }
+  tbody tr:nth-child(even):hover td { background: var(--surface2); }
+
+  /* ── Badges ── */
+  .badge {
+    display: inline-block;
+    padding: 0.2rem 0.65rem;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+  .badge-pass { background: var(--green-bg); color: var(--green); border: 1px solid rgba(34,197,94,0.2); }
+  .badge-fail { background: var(--red-bg); color: var(--red); border: 1px solid rgba(239,68,68,0.2); }
+  .cat-badge {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    background: var(--accent-glow);
+    color: var(--accent2);
+  }
+  .error-msg { color: var(--red); font-size: 0.78rem; }
+
+  /* ── Verdict badges ── */
+  .verdict {
+    display: inline-block;
+    padding: 0.2rem 0.65rem;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .verdict-excellent { background: var(--green-bg); color: var(--green); border: 1px solid rgba(34,197,94,0.25); }
+  .verdict-acceptable { background: rgba(245,158,11,0.08); color: var(--orange); border: 1px solid rgba(245,158,11,0.25); }
+  .verdict-slow { background: var(--red-bg); color: var(--red); border: 1px solid rgba(239,68,68,0.25); }
+  .verdict-failed { background: var(--red-bg); color: var(--red); border: 1px solid rgba(239,68,68,0.25); }
+
+  /* ── Comparison delta ── */
+  .delta {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .delta-faster { background: var(--green-bg); color: var(--green); }
+  .delta-slower { background: var(--red-bg); color: var(--red); }
+  .delta-same { color: var(--text3); }
+  .delta-none { color: var(--text3); }
+
+  footer {
+    text-align: center;
+    padding: 1.5rem 0;
+    color: var(--text3);
+    font-size: 0.78rem;
+    border-top: 1px solid var(--border);
+    margin-top: 1rem;
+  }
+
+  @media (max-width: 1000px) {
+    .page { padding: 1rem; }
+    .charts { grid-template-columns: 1fr; }
+    .chart-box.wide { grid-column: 1; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header>
+  <h1>KalamDB Benchmark Report</h1>
+  <div class="subtitle">Performance analysis &mdash; v0.4.1-beta</div>
+  <div class="meta">
+    <span>http://localhost:8080</span>
+    <span>2026-03-13T13:18:45.938287+00:00</span>
+    <span>100 iters</span>
+    <span>5 warmup</span>
+    <span>10 concurrency</span>
+  </div>
+</header>
+
+<div class="summary-cards">
+  <div class="card">
+    <div class="value">37</div>
+    <div class="label">Total Benchmarks</div>
+  </div>
+  <div class="card pass">
+    <div class="value">37</div>
+    <div class="label">Passed</div>
+  </div>
+  <div class="card fail">
+    <div class="value">0</div>
+    <div class="label">Failed</div>
+  </div>
+  <div class="card">
+    <div class="value">785.95s</div>
+    <div class="label">Total Duration</div>
+  </div>
+</div>
+
+<div class="sys-panel">
+  <div class="section-title">System Information</div>
+  <div class="sys-grid">
+    <div class="sys-item"><div class="k">Hostname</div><div class="v">Jamals-MacBook-Pro.local</div></div>
+    <div class="sys-item"><div class="k">Machine Model</div><div class="v">MacBookPro18,3</div></div>
+    <div class="sys-item"><div class="k">CPU Model</div><div class="v">Apple M1 Pro</div></div>
+    <div class="sys-item"><div class="k">CPU Cores</div><div class="v">10 logical / 10 physical</div></div>
+    <div class="sys-item"><div class="k">Total Memory</div><div class="v">16.00 GiB</div></div>
+    <div class="sys-item"><div class="k">Available Memory</div><div class="v">4.44 GiB</div></div>
+    <div class="sys-item"><div class="k">Used Memory</div><div class="v">11.56 GiB</div></div>
+    <div class="sys-item"><div class="k">Memory Usage</div><div class="v">72.2%</div></div>
+    <div class="sys-item"><div class="k">OS</div><div class="v">Darwin macOS 26.4</div></div>
+    <div class="sys-item"><div class="k">Kernel</div><div class="v">25.4.0</div></div>
+    <div class="sys-item"><div class="k">Architecture</div><div class="v">aarch64</div></div>
+  </div>
+</div>
+
+<div class="charts">
+  <div class="chart-box wide">
+    <h3>Latency by Operation (µs)</h3>
+    <canvas id="latencyChart" height="70"></canvas>
+  </div>
+  <div class="chart-box">
+    <h3>Throughput (ops/sec)</h3>
+    <canvas id="throughputChart" height="120"></canvas>
+  </div>
+  <div class="chart-box">
+    <h3>Avg Latency by Category (µs)</h3>
+    <canvas id="categoryChart" height="120"></canvas>
+  </div>
+</div>
+
+<div class="section-title">Detailed Results</div>
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr>
+      <th>Status</th>
+      <th>Benchmark</th>
+      <th>Category</th>
+      <th>Description</th>
+      <th style="text-align:right">Iters</th>
+      <th style="text-align:right">Mean</th>
+      <th style="text-align:right">P50</th>
+      <th style="text-align:right">P95</th>
+      <th style="text-align:right">P99</th>
+      <th style="text-align:right">Min</th>
+      <th style="text-align:right">Max</th>
+      <th style="text-align:right">Ops/sec</th>
+      <th style="text-align:right">Total</th>
+      <th>Verdict</th>
+      <th>vs Prev</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td><span class="badge badge-pass">PASS</span></td><td><strong>create_table</strong></td><td><span class="cat-badge">DDL</span></td><td class="desc-col">CREATE TABLE with 3 columns</td><td class="num">100</td><td class="num">38.4ms</td><td class="num">39.7ms</td><td class="num">59.9ms</td><td class="num">61.5ms</td><td class="num">12.8ms</td><td class="num">61.7ms</td><td class="num ops">26</td><td class="num">3.84s</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-faster">↑25% faster</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>drop_table</strong></td><td><span class="cat-badge">DDL</span></td><td class="desc-col">DROP TABLE on a previously created table</td><td class="num">100</td><td class="num">107.7ms</td><td class="num">107.8ms</td><td class="num">175.3ms</td><td class="num">184.4ms</td><td class="num">30.7ms</td><td class="num">184.7ms</td><td class="num ops">9</td><td class="num">10.77s</td><td><span class="verdict verdict-acceptable">🟡 Acceptable</span></td><td><span class="delta delta-slower">↓116% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>single_insert</strong></td><td><span class="cat-badge">Insert</span></td><td class="desc-col">INSERT a single row into a table</td><td class="num">100</td><td class="num">466µs</td><td class="num">374µs</td><td class="num">725µs</td><td class="num">2.6ms</td><td class="num">292µs</td><td class="num">3.8ms</td><td class="num ops">2.1K</td><td class="num">46.6ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓66% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>bulk_insert</strong></td><td><span class="cat-badge">Insert</span></td><td class="desc-col">INSERT 50 rows in a single statement</td><td class="num">100</td><td class="num">1.1ms</td><td class="num">1.0ms</td><td class="num">1.4ms</td><td class="num">2.3ms</td><td class="num">868µs</td><td class="num">2.4ms</td><td class="num ops">913</td><td class="num">109.5ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓69% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>select_all</strong></td><td><span class="cat-badge">Select</span></td><td class="desc-col">SELECT * from a 200-row table</td><td class="num">100</td><td class="num">1.6ms</td><td class="num">1.5ms</td><td class="num">2.0ms</td><td class="num">3.4ms</td><td class="num">1.3ms</td><td class="num">3.7ms</td><td class="num ops">615</td><td class="num">162.7ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓42% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>select_by_filter</strong></td><td><span class="cat-badge">Select</span></td><td class="desc-col">SELECT with WHERE clause on a 200-row table</td><td class="num">100</td><td class="num">709µs</td><td class="num">656µs</td><td class="num">924µs</td><td class="num">1.8ms</td><td class="num">492µs</td><td class="num">2.6ms</td><td class="num ops">1.4K</td><td class="num">70.9ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓52% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>select_count</strong></td><td><span class="cat-badge">Select</span></td><td class="desc-col">SELECT COUNT(*) on a 200-row table</td><td class="num">100</td><td class="num">1.3ms</td><td class="num">1.2ms</td><td class="num">1.5ms</td><td class="num">3.2ms</td><td class="num">1.0ms</td><td class="num">3.3ms</td><td class="num ops">781</td><td class="num">128.1ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓48% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>select_order_by_limit</strong></td><td><span class="cat-badge">Select</span></td><td class="desc-col">SELECT with ORDER BY + LIMIT 10 on a 200-row table</td><td class="num">100</td><td class="num">1.5ms</td><td class="num">1.5ms</td><td class="num">1.8ms</td><td class="num">3.2ms</td><td class="num">1.3ms</td><td class="num">3.6ms</td><td class="num ops">650</td><td class="num">154.0ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓36% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>single_update</strong></td><td><span class="cat-badge">Update</span></td><td class="desc-col">UPDATE a single row by filter condition</td><td class="num">100</td><td class="num">1000µs</td><td class="num">890µs</td><td class="num">1.2ms</td><td class="num">4.2ms</td><td class="num">689µs</td><td class="num">4.3ms</td><td class="num ops">1.0K</td><td class="num">100.0ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓84% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>single_delete</strong></td><td><span class="cat-badge">Delete</span></td><td class="desc-col">DELETE a single row by filter condition</td><td class="num">100</td><td class="num">851µs</td><td class="num">740µs</td><td class="num">1.0ms</td><td class="num">4.2ms</td><td class="num">600µs</td><td class="num">5.1ms</td><td class="num ops">1.2K</td><td class="num">85.1ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓93% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>concurrent_insert</strong></td><td><span class="cat-badge">Concurrent</span></td><td class="desc-col">N concurrent INSERT operations in parallel (N = concurrency setting)</td><td class="num">100</td><td class="num">2.2ms</td><td class="num">1.3ms</td><td class="num">11.5ms</td><td class="num">12.9ms</td><td class="num">943µs</td><td class="num">13.3ms</td><td class="num ops">456</td><td class="num">219.5ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓257% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>concurrent_select</strong></td><td><span class="cat-badge">Concurrent</span></td><td class="desc-col">N concurrent SELECT operations in parallel (N = concurrency setting)</td><td class="num">100</td><td class="num">1.6ms</td><td class="num">1.5ms</td><td class="num">1.8ms</td><td class="num">4.2ms</td><td class="num">1.3ms</td><td class="num">4.4ms</td><td class="num ops">630</td><td class="num">158.7ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓72% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>point_lookup</strong></td><td><span class="cat-badge">Select</span></td><td class="desc-col">SELECT by primary key from a 10K-row table (single row lookup)</td><td class="num">100</td><td class="num">693µs</td><td class="num">658µs</td><td class="num">848µs</td><td class="num">924µs</td><td class="num">522µs</td><td class="num">2.2ms</td><td class="num ops">1.4K</td><td class="num">69.3ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓59% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>aggregate_query</strong></td><td><span class="cat-badge">Select</span></td><td class="desc-col">GROUP BY + SUM/AVG/COUNT on a 10K-row table (analytical query performance)</td><td class="num">100</td><td class="num">40.6ms</td><td class="num">40.5ms</td><td class="num">42.8ms</td><td class="num">43.8ms</td><td class="num">37.3ms</td><td class="num">45.2ms</td><td class="num ops">25</td><td class="num">4.06s</td><td><span class="verdict verdict-slow">🔴 Slow</span></td><td><span class="delta delta-slower">↓7% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>multi_table_join</strong></td><td><span class="cat-badge">Select</span></td><td class="desc-col">SELECT with subquery across two tables (200 customers, 1000 orders)</td><td class="num">100</td><td class="num">4.7ms</td><td class="num">4.7ms</td><td class="num">5.2ms</td><td class="num">6.1ms</td><td class="num">4.2ms</td><td class="num">6.3ms</td><td class="num ops">212</td><td class="num">471.1ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓18% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>large_payload_insert</strong></td><td><span class="cat-badge">Insert</span></td><td class="desc-col">INSERT rows with ~4KB TEXT payloads (serialization + storage throughput)</td><td class="num">100</td><td class="num">2.2ms</td><td class="num">2.0ms</td><td class="num">3.0ms</td><td class="num">3.2ms</td><td class="num">1.6ms</td><td class="num">3.3ms</td><td class="num ops">454</td><td class="num">220.3ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓147% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>wide_column_insert</strong></td><td><span class="cat-badge">Insert</span></td><td class="desc-col">INSERT into a 20-column table (wide schema overhead)</td><td class="num">100</td><td class="num">1.1ms</td><td class="num">1.0ms</td><td class="num">1.3ms</td><td class="num">2.0ms</td><td class="num">862µs</td><td class="num">2.2ms</td><td class="num ops">943</td><td class="num">106.0ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓66% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>bulk_delete</strong></td><td><span class="cat-badge">Delete</span></td><td class="desc-col">DELETE 100 rows at once with a range filter (bulk deletion)</td><td class="num">100</td><td class="num">182.9ms</td><td class="num">183.3ms</td><td class="num">199.2ms</td><td class="num">201.9ms</td><td class="num">162.3ms</td><td class="num">211.2ms</td><td class="num ops">5</td><td class="num">18.29s</td><td><span class="verdict verdict-acceptable">🟡 Acceptable</span></td><td><span class="delta delta-slower">↓4% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>sequential_crud</strong></td><td><span class="cat-badge">DML</span></td><td class="desc-col">INSERT → UPDATE → SELECT → DELETE full DML lifecycle per iteration</td><td class="num">100</td><td class="num">3.0ms</td><td class="num">2.7ms</td><td class="num">5.8ms</td><td class="num">6.1ms</td><td class="num">2.3ms</td><td class="num">6.3ms</td><td class="num ops">334</td><td class="num">299.6ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓55% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>alter_table</strong></td><td><span class="cat-badge">DDL</span></td><td class="desc-col">ALTER TABLE ADD COLUMN + DROP COLUMN (schema evolution latency)</td><td class="num">100</td><td class="num">3.2ms</td><td class="num">2.9ms</td><td class="num">6.0ms</td><td class="num">6.5ms</td><td class="num">2.2ms</td><td class="num">6.5ms</td><td class="num ops">314</td><td class="num">318.6ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓62% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>concurrent_update</strong></td><td><span class="cat-badge">Concurrent</span></td><td class="desc-col">N concurrent UPDATE operations on the same table (write contention test)</td><td class="num">100</td><td class="num">4.1ms</td><td class="num">3.5ms</td><td class="num">10.9ms</td><td class="num">11.1ms</td><td class="num">2.0ms</td><td class="num">11.6ms</td><td class="num ops">243</td><td class="num">411.0ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓100% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>concurrent_mixed_dml</strong></td><td><span class="cat-badge">Concurrent</span></td><td class="desc-col">Concurrent INSERT + UPDATE + DELETE on the same table (multi-op contention)</td><td class="num">100</td><td class="num">4.8ms</td><td class="num">4.5ms</td><td class="num">8.4ms</td><td class="num">8.7ms</td><td class="num">3.2ms</td><td class="num">8.8ms</td><td class="num ops">207</td><td class="num">483.7ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓27% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>namespace_isolation</strong></td><td><span class="cat-badge">Concurrent</span></td><td class="desc-col">Concurrent queries across 5 different namespaces (isolation test)</td><td class="num">100</td><td class="num">4.3ms</td><td class="num">4.1ms</td><td class="num">8.8ms</td><td class="num">9.1ms</td><td class="num">2.8ms</td><td class="num">9.2ms</td><td class="num ops">231</td><td class="num">433.5ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓109% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>subscribe_initial_load</strong></td><td><span class="cat-badge">Subscribe</span></td><td class="desc-col">Subscribe to a 1000-row user table and receive the full initial data batch</td><td class="num">100</td><td class="num">11.0ms</td><td class="num">10.5ms</td><td class="num">11.8ms</td><td class="num">18.9ms</td><td class="num">9.9ms</td><td class="num">29.5ms</td><td class="num ops">91</td><td class="num">1.10s</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-same">~ 10808µs prior</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>subscribe_change_latency</strong></td><td><span class="cat-badge">Subscribe</span></td><td class="desc-col">Latency from INSERT to subscriber receiving the change notification</td><td class="num">100</td><td class="num">5.02s</td><td class="num">5.01s</td><td class="num">5.02s</td><td class="num">5.21s</td><td class="num">5.00s</td><td class="num">5.26s</td><td class="num ops">0</td><td class="num">502.03s</td><td><span class="verdict verdict-slow">🔴 Slow</span></td><td><span class="delta delta-same">~ 5018104µs prior</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>reconnect_subscribe</strong></td><td><span class="cat-badge">Subscribe</span></td><td class="desc-col">Disconnect and re-subscribe to a user table (reconnection overhead)</td><td class="num">100</td><td class="num">11.9ms</td><td class="num">12.0ms</td><td class="num">12.7ms</td><td class="num">12.9ms</td><td class="num">10.4ms</td><td class="num">13.0ms</td><td class="num ops">84</td><td class="num">1.19s</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-faster">↑27% faster</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>flushed_parquet_query</strong></td><td><span class="cat-badge">Storage</span></td><td class="desc-col">SELECT from a shared table with 20 flushed Parquet files (200K rows)</td><td class="num">100</td><td class="num">260.7ms</td><td class="num">309.4ms</td><td class="num">360.1ms</td><td class="num">367.2ms</td><td class="num">92.0ms</td><td class="num">371.6ms</td><td class="num ops">4</td><td class="num">26.07s</td><td><span class="verdict verdict-slow">🔴 Slow</span></td><td><span class="delta delta-none">—</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>concurrent_subscribers</strong></td><td><span class="cat-badge">Load</span></td><td class="desc-col">N WebSocket live-query subscribers receiving changes from concurrent writes</td><td class="num">100</td><td class="num">1.58s</td><td class="num">1.57s</td><td class="num">1.61s</td><td class="num">1.64s</td><td class="num">1.54s</td><td class="num">1.65s</td><td class="num ops">1</td><td class="num">157.76s</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓4% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>concurrent_publishers</strong></td><td><span class="cat-badge">Load</span></td><td class="desc-col">N concurrent INSERTs into a topic-sourced table (measures publish overhead)</td><td class="num">100</td><td class="num">2.2ms</td><td class="num">1.3ms</td><td class="num">9.2ms</td><td class="num">13.0ms</td><td class="num">896µs</td><td class="num">13.2ms</td><td class="num ops">459</td><td class="num">217.7ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓187% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>concurrent_consumers</strong></td><td><span class="cat-badge">Load</span></td><td class="desc-col">N concurrent topic CONSUME calls pulling messages in parallel</td><td class="num">100</td><td class="num">616µs</td><td class="num">612µs</td><td class="num">683µs</td><td class="num">701µs</td><td class="num">546µs</td><td class="num">747µs</td><td class="num ops">1.6K</td><td class="num">61.6ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-same">~ 628µs prior</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>sql_1k_concurrent</strong></td><td><span class="cat-badge">Load</span></td><td class="desc-col">1000 concurrent SQL SELECT queries at once (RPS degradation test)</td><td class="num">100</td><td class="num">429.8ms</td><td class="num">318.8ms</td><td class="num">911.4ms</td><td class="num">2.80s</td><td class="num">259.4ms</td><td class="num">3.12s</td><td class="num ops">2</td><td class="num">42.98s</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓64% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>create_user</strong></td><td><span class="cat-badge">Load</span></td><td class="desc-col">CREATE USER (auth subsystem stress test)</td><td class="num">100</td><td class="num">1.9ms</td><td class="num">1.7ms</td><td class="num">2.7ms</td><td class="num">3.9ms</td><td class="num">1.4ms</td><td class="num">5.9ms</td><td class="num ops">533</td><td class="num">187.6ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓10% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>drop_user</strong></td><td><span class="cat-badge">Load</span></td><td class="desc-col">DROP USER (auth subsystem teardown stress test)</td><td class="num">100</td><td class="num">551µs</td><td class="num">502µs</td><td class="num">813µs</td><td class="num">1.1ms</td><td class="num">397µs</td><td class="num">1.3ms</td><td class="num ops">1.8K</td><td class="num">55.1ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓5% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>connection_storm</strong></td><td><span class="cat-badge">Load</span></td><td class="desc-col">N simultaneous login + SQL + cycles (connection setup overhead)</td><td class="num">100</td><td class="num">6.2ms</td><td class="num">5.6ms</td><td class="num">9.5ms</td><td class="num">10.3ms</td><td class="num">4.5ms</td><td class="num">11.0ms</td><td class="num ops">162</td><td class="num">618.0ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓29% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>mixed_read_write</strong></td><td><span class="cat-badge">Load</span></td><td class="desc-col">50/50 concurrent reads + writes on same table (contention test)</td><td class="num">100</td><td class="num">3.8ms</td><td class="num">3.5ms</td><td class="num">7.8ms</td><td class="num">8.5ms</td><td class="num">2.1ms</td><td class="num">8.6ms</td><td class="num ops">261</td><td class="num">383.1ms</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓27% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>wide_fanout_query</strong></td><td><span class="cat-badge">Load</span></td><td class="desc-col">N concurrent large-result-set SELECTs (serialization + memory pressure)</td><td class="num">100</td><td class="num">19.2ms</td><td class="num">17.9ms</td><td class="num">30.9ms</td><td class="num">35.6ms</td><td class="num">10.7ms</td><td class="num">39.2ms</td><td class="num ops">52</td><td class="num">1.92s</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-slower">↓53% slower</span></td></tr><tr><td><span class="badge badge-pass">PASS</span></td><td><strong>subscriber_scale</strong></td><td><span class="cat-badge">Scale</span></td><td class="desc-col">Progressive subscriber scale test (up to --max-subscribers, default 100K)</td><td class="num">1</td><td class="num">10.36s</td><td class="num">10.36s</td><td class="num">10.36s</td><td class="num">10.36s</td><td class="num">10.36s</td><td class="num">10.36s</td><td class="num ops">0</td><td class="num">10.36s</td><td><span class="verdict verdict-excellent">🟢 Excellent</span></td><td><span class="delta delta-none">—</span></td></tr>
+  </tbody>
+</table>
+</div>
+
+<footer>
+  KalamDB v0.4.1-beta &mdash; Generated 2026-03-13T13:18:45.938287+00:00
+</footer>
+
+</div>
+
+<script>
+Chart.defaults.color = '#8891a8';
+Chart.defaults.borderColor = '#2a3044';
+Chart.defaults.font.family = "'Inter', -apple-system, sans-serif";
+const COLORS = ['#6366f1','#22c55e','#f59e0b','#3b82f6','#ef4444','#a855f7','#ec4899','#06b6d4','#f97316','#84cc16','#64748b'];
+
+// Latency chart
+new Chart(document.getElementById('latencyChart'), {
+  type: 'bar',
+  data: {
+    labels: ["create_table","drop_table","single_insert","bulk_insert","select_all","select_by_filter","select_count","select_order_by_limit","single_update","single_delete","concurrent_insert","concurrent_select","point_lookup","aggregate_query","multi_table_join","large_payload_insert","wide_column_insert","bulk_delete","sequential_crud","alter_table","concurrent_update","concurrent_mixed_dml","namespace_isolation","subscribe_initial_load","subscribe_change_latency","reconnect_subscribe","flushed_parquet_query","concurrent_subscribers","concurrent_publishers","concurrent_consumers","sql_1k_concurrent","create_user","drop_user","connection_storm","mixed_read_write","wide_fanout_query","subscriber_scale"],
+    datasets: [
+      { label: 'Mean', data: [38449.6,107720.3,466.0,1094.8,1626.7,708.5,1280.9,1539.6,1000.0,850.7,2195.2,1586.9,693.0,40565.5,4710.6,2203.4,1059.9,182858.5,2996.2,3185.8,4110.5,4837.2,4334.8,11023.6,5020286.1,11931.8,260745.9,1577599.3,2176.9,615.8,429756.9,1876.4,550.9,6180.5,3830.6,19239.1,10361432.0], backgroundColor: '#6366f1cc', borderRadius: 3 },
+      { label: 'P95',  data: [59933.9,175260.1,725.2,1410.2,2028.0,924.5,1480.0,1814.3,1200.3,1032.6,11473.8,1793.6,847.5,42799.9,5229.9,3042.8,1307.3,199206.9,5814.9,6005.0,10865.0,8365.6,8844.4,11781.4,5023353.3,12705.8,360089.5,1610469.3,9234.9,683.1,911398.0,2703.9,813.4,9517.9,7789.4,30863.4,10361432.0],  backgroundColor: '#f59e0bcc', borderRadius: 3 },
+      { label: 'P99',  data: [61495.2,184415.6,2602.7,2295.1,3433.8,1817.5,3179.8,3192.8,4167.2,4179.5,12931.3,4175.4,924.1,43809.7,6072.2,3213.1,1997.8,201897.0,6119.6,6502.5,11120.0,8744.2,9077.9,18870.0,5210699.7,12885.5,367234.5,1643947.4,12975.2,701.5,2797227.6,3941.9,1084.3,10253.7,8476.6,35648.6,10361432.0],  backgroundColor: '#ef4444cc', borderRadius: 3 },
+    ]
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { position: 'top' } },
+    scales: {
+      y: { beginAtZero: true, title: { display: true, text: 'Latency (µs)' }, grid: { color: '#1c2130' } },
+      x: { ticks: { maxRotation: 45 }, grid: { color: '#1c2130' } }
+    }
+  }
+});
+
+// Throughput chart
+new Chart(document.getElementById('throughputChart'), {
+  type: 'bar',
+  data: {
+    labels: ["create_table","drop_table","single_insert","bulk_insert","select_all","select_by_filter","select_count","select_order_by_limit","single_update","single_delete","concurrent_insert","concurrent_select","point_lookup","aggregate_query","multi_table_join","large_payload_insert","wide_column_insert","bulk_delete","sequential_crud","alter_table","concurrent_update","concurrent_mixed_dml","namespace_isolation","subscribe_initial_load","subscribe_change_latency","reconnect_subscribe","flushed_parquet_query","concurrent_subscribers","concurrent_publishers","concurrent_consumers","sql_1k_concurrent","create_user","drop_user","connection_storm","mixed_read_write","wide_fanout_query","subscriber_scale"],
+    datasets: [{ label: 'Ops/sec', data: [26.0,9.3,2146.0,913.4,614.7,1411.4,780.7,649.5,1000.0,1175.5,455.5,630.1,1443.1,24.7,212.3,453.8,943.5,5.5,333.8,313.9,243.3,206.7,230.7,90.7,0.2,83.8,3.8,0.6,459.4,1623.8,2.3,532.9,1815.1,161.8,261.1,52.0,0.1], backgroundColor: COLORS, borderRadius: 3 }]
+  },
+  options: {
+    indexAxis: 'y',
+    responsive: true,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { beginAtZero: true, title: { display: true, text: 'Operations / second' }, grid: { color: '#1c2130' } },
+      y: { grid: { display: false } }
+    }
+  }
+});
+
+// Category chart
+new Chart(document.getElementById('categoryChart'), {
+  type: 'doughnut',
+  data: {
+    labels: ["DDL","Insert","Select","Update","Delete","Concurrent","DML","Subscribe","Storage","Load","Scale"],
+    datasets: [{ data: [49785.2,1206.0,7303.5,1000.0,91854.6,3412.9,2996.2,1681080.5,260745.9,226869.6,10361432.0], backgroundColor: COLORS, borderWidth: 0 }]
+  },
+  options: {
+    responsive: true,
+    cutout: '55%',
+    plugins: {
+      legend: { position: 'right' },
+      tooltip: { callbacks: { label: (ctx) => ctx.label + ': ' + ctx.parsed.toFixed(0) + ' µs avg' } }
+    }
+  }
+});
+</script>
+</body>
+</html>

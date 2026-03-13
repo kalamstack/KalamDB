@@ -1,16 +1,38 @@
 use crate::common;
 use kalam_link::auth::AuthProvider;
+use kalam_link::seq_tracking::{extract_max_seq, row_seq};
 use kalam_link::{
     ChangeEvent, ConnectionOptions, EventHandlers, KalamCellValue, KalamLinkClient,
     KalamLinkTimeouts, SeqId,
 };
-use kalam_link::seq_tracking::{extract_max_seq, row_seq};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-pub const TEST_TIMEOUT: Duration = Duration::from_secs(15);
+pub const TEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn reconnect_test_timeouts() -> KalamLinkTimeouts {
+    KalamLinkTimeouts {
+        connection_timeout: Duration::from_secs(2),
+        receive_timeout: Duration::from_secs(5),
+        send_timeout: Duration::from_secs(2),
+        subscribe_timeout: Duration::from_secs(2),
+        auth_timeout: Duration::from_secs(2),
+        initial_data_timeout: Duration::from_secs(10),
+        idle_timeout: Duration::ZERO,
+        keepalive_interval: Duration::from_secs(1),
+        pong_timeout: Duration::from_secs(1),
+    }
+}
+
+fn reconnect_test_connection_options() -> ConnectionOptions {
+    ConnectionOptions::new()
+        .with_auto_reconnect(true)
+        .with_reconnect_delay_ms(150)
+        .with_max_reconnect_delay_ms(1_500)
+        .with_ping_interval_ms(1_000)
+}
 
 /// Create a test client authenticated with root credentials.
 pub fn create_test_client() -> Result<KalamLinkClient, kalam_link::KalamLinkError> {
@@ -24,10 +46,10 @@ pub fn create_test_client_for_base_url(
         .map_err(|e| kalam_link::KalamLinkError::InternalError(e.to_string()))?;
     KalamLinkClient::builder()
         .base_url(base_url)
-        .timeout(Duration::from_secs(30))
+        .timeout(Duration::from_secs(10))
         .auth(AuthProvider::jwt_token(token))
-        .timeouts(KalamLinkTimeouts::default())
-        .connection_options(ConnectionOptions::new().with_auto_reconnect(true))
+        .timeouts(reconnect_test_timeouts())
+        .connection_options(reconnect_test_connection_options())
         .build()
 }
 
@@ -44,7 +66,7 @@ pub fn create_test_client_with_events_for_base_url(
 
     let client = KalamLinkClient::builder()
         .base_url(base_url)
-        .timeout(Duration::from_secs(30))
+        .timeout(Duration::from_secs(10))
         .auth(AuthProvider::jwt_token(token))
         .event_handlers(
             EventHandlers::new()
@@ -55,7 +77,8 @@ pub fn create_test_client_with_events_for_base_url(
                     dc.fetch_add(1, Ordering::SeqCst);
                 }),
         )
-        .connection_options(ConnectionOptions::new().with_auto_reconnect(true))
+        .timeouts(reconnect_test_timeouts())
+        .connection_options(reconnect_test_connection_options())
         .build()?;
 
     Ok((client, connect_count, disconnect_count))
@@ -65,10 +88,7 @@ pub fn create_test_client_with_events_for_base_url(
 pub async fn ensure_table(client: &KalamLinkClient, table: &str) {
     let _ = client
         .execute_query(
-            &format!(
-                "CREATE TABLE IF NOT EXISTS {} (id TEXT PRIMARY KEY, value TEXT)",
-                table
-            ),
+            &format!("CREATE TABLE IF NOT EXISTS {} (id TEXT PRIMARY KEY, value TEXT)", table),
             None,
             None,
             None,
@@ -78,12 +98,7 @@ pub async fn ensure_table(client: &KalamLinkClient, table: &str) {
 
 pub async fn query_max_seq(client: &KalamLinkClient, table: &str) -> SeqId {
     let result = client
-        .execute_query(
-            &format!("SELECT MAX(_seq) AS max_seq FROM {}", table),
-            None,
-            None,
-            None,
-        )
+        .execute_query(&format!("SELECT MAX(_seq) AS max_seq FROM {}", table), None, None, None)
         .await
         .expect("max seq query should succeed");
 
@@ -99,6 +114,7 @@ pub fn change_event_rows(event: &ChangeEvent) -> Option<&[HashMap<String, KalamC
         ChangeEvent::Insert { rows, .. }
         | ChangeEvent::Update { rows, .. }
         | ChangeEvent::InitialDataBatch { rows, .. } => Some(rows.as_slice()),
+        ChangeEvent::Delete { old_rows, .. } => Some(old_rows.as_slice()),
         _ => None,
     }
 }

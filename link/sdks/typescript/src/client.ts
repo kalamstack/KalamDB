@@ -11,6 +11,18 @@ import init, { KalamClient as WasmClient } from '../wasm/kalam_link.js';
 import type { AuthCredentials, AuthProvider } from './auth.js';
 import { buildAuthHeader } from './auth.js';
 import { resolveAuthProviderWithRetry } from './helpers/auth_provider_retry.js';
+import {
+  defaultRowKey,
+  type NormalizedSubscriptionEvent,
+  normalizeLiveRowsOptions,
+  normalizeLiveRowsWasmEvent,
+  normalizeSubscriptionEvent,
+  normalizeSubscriptionOptions,
+  readSubscriptionInfos,
+  removeMaterializedRows,
+  trackSubscriptionMetadata,
+  upsertLimited,
+} from './helpers/subscription_helpers.js';
 
 import type {
   ClientOptions,
@@ -28,14 +40,14 @@ import type {
   OnReceiveCallback,
   OnSendCallback,
   QueryResponse,
-  ServerMessage,
   SubscriptionCallback,
   SubscriptionErrorEvent,
-  SubscriptionInfo,
   SubscriptionOptions,
   Unsubscribe,
   UploadProgress,
   Username,
+  ServerMessage,
+  SubscriptionInfo,
 } from './types.js';
 
 import { LogLevel } from './types.js';
@@ -48,7 +60,7 @@ import type {
   ConsumeResponse,
 } from '../wasm/kalam_link.js';
 
-import { KalamCellValue, wrapRowMap } from './cell_value.js';
+import { wrapRowMap } from './cell_value.js';
 import type { RowData } from './cell_value.js';
 
 import {
@@ -61,23 +73,6 @@ import {
 // Re-export so consumers of client.ts don't need a separate file_ref import.
 export { KalamChange, KalamRow, wrapRows };
 export type { FileRefContext };
-
-type NormalizedSubscriptionEvent = ServerMessage & {
-  rows?: RowData[];
-  old_values?: RowData[];
-};
-
-type LiveRowsWasmEvent = {
-  type: 'rows' | 'error';
-  subscription_id: string;
-  rows?: RowData[];
-  code?: string;
-  message?: string;
-};
-
-type LegacySubscriptionOptions = SubscriptionOptions & {
-  from_seq_id?: SeqId | number | string;
-};
 
 type DynamicImport = (specifier: string) => Promise<Record<string, unknown>>;
 
@@ -117,130 +112,6 @@ function getNodeProcess(): NodeProcessShim | undefined {
     process?: NodeProcessShim;
   };
   return runtime.process;
-}
-
-function wrapSubscriptionRows(rows: unknown): RowData[] | undefined {
-  if (!Array.isArray(rows)) {
-    return undefined;
-  }
-
-  return rows.map((row) => wrapRowMap((row ?? {}) as Record<string, unknown>));
-}
-
-function normalizeSubscriptionOptions(
-  options?: LegacySubscriptionOptions,
-): { batch_size?: number; last_rows?: number; from?: number } | undefined {
-  if (!options) {
-    return undefined;
-  }
-
-  const from = options.from ?? options.from_seq_id;
-  const normalized: { batch_size?: number; last_rows?: number; from?: number } = {};
-
-  if (options.batch_size !== undefined) {
-    normalized.batch_size = options.batch_size;
-  }
-
-  if (options.last_rows !== undefined) {
-    normalized.last_rows = options.last_rows;
-  }
-
-  if (from !== undefined) {
-    normalized.from = from instanceof SeqId ? from.toJSON() : SeqId.from(from).toJSON();
-  }
-
-  return Object.keys(normalized).length > 0 ? normalized : undefined;
-}
-
-function normalizeSubscriptionEvent(event: ServerMessage): NormalizedSubscriptionEvent {
-  const normalized = { ...event } as NormalizedSubscriptionEvent;
-
-  if ('rows' in normalized) {
-    normalized.rows = wrapSubscriptionRows(normalized.rows);
-  }
-  if ('old_values' in normalized) {
-    normalized.old_values = wrapSubscriptionRows(normalized.old_values);
-  }
-
-  return normalized;
-}
-
-function normalizeLiveRowsWasmEvent(event: {
-  type: 'rows' | 'error';
-  subscription_id: string;
-  rows?: unknown;
-  code?: string;
-  message?: string;
-}): LiveRowsWasmEvent {
-  return {
-    ...event,
-    rows: wrapSubscriptionRows(event.rows),
-  };
-}
-
-function defaultRowKey(value: unknown): string | null {
-  if (!value || typeof value !== 'object') {
-    return null;
-  }
-
-  const candidate = (value as { id?: unknown }).id;
-  if (typeof candidate === 'string') {
-    return candidate;
-  }
-  if (candidate instanceof KalamCellValue) {
-    return candidate.asString();
-  }
-
-  return null;
-}
-
-function upsertLimited<T>(
-  current: T[],
-  incoming: T[],
-  getKey: (row: T) => string | null | undefined,
-  limit?: number,
-): T[] {
-  const next = [...current];
-
-  for (const item of incoming) {
-    const key = getKey(item);
-    if (key) {
-      const existingIndex = next.findIndex((entry) => getKey(entry) === key);
-      if (existingIndex >= 0) {
-        next[existingIndex] = item;
-        continue;
-      }
-    }
-
-    next.push(item);
-  }
-
-  if (typeof limit === 'number' && limit >= 0 && next.length > limit) {
-    return next.slice(-limit);
-  }
-
-  return next;
-}
-
-function removeMaterializedRows<T>(
-  current: T[],
-  removed: T[],
-  getKey: (row: T) => string | null | undefined,
-): T[] {
-  const keys = new Set(
-    removed
-      .map((row) => getKey(row))
-      .filter((key): key is string => typeof key === 'string' && key.length > 0),
-  );
-
-  if (keys.size === 0) {
-    return current;
-  }
-
-  return current.filter((row) => {
-    const key = getKey(row);
-    return !key || !keys.has(key);
-  });
 }
 
 /* ================================================================== */
@@ -300,8 +171,8 @@ export class KalamDBClient {
   /** Optional log listener for redirecting SDK logs. */
   private _logListener?: LogListener;
 
-  /** Track active subscriptions for management */
-  private subscriptions: Map<string, SubscriptionInfo> = new Map();
+  /** Local metadata only; WASM remains the source of truth for live subscription state. */
+  private subscriptionMetadata = new Map<string, { tableName: string; createdAtMs: number }>();
 
   /** Connection lifecycle event handlers */
   private _onConnect?: OnConnectCallback;
@@ -550,13 +421,18 @@ export class KalamDBClient {
   /** Disconnect and clean up all subscriptions */
   async disconnect(): Promise<void> {
     this.log(LogLevel.Info, 'connection', 'Disconnecting...');
-    if (this.wasmClient) {
-      this.wasmClient.setAutoReconnect(false);
+    this.clearSubscriptionMetadata();
+    if (!this.wasmClient) {
+      return;
+    }
+
+    this.wasmClient.setAutoReconnect(false);
+    try {
       await this.wasmClient.disconnect();
       await new Promise((resolve) => setTimeout(resolve, 0));
+    } finally {
+      this.log(LogLevel.Debug, 'connection', 'Disconnected and subscriptions cleared');
     }
-    this.subscriptions.clear();
-    this.log(LogLevel.Debug, 'connection', 'Disconnected and subscriptions cleared');
   }
 
   /**
@@ -575,7 +451,7 @@ export class KalamDBClient {
     this.wasmClient = null;
     this.initialized = false;
     this.connecting = null;
-    this.subscriptions.clear();
+    this.clearSubscriptionMetadata();
 
     if (!wasmClient) {
       return;
@@ -1282,35 +1158,15 @@ export class KalamDBClient {
     options?: SubscriptionOptions,
   ): Promise<Unsubscribe> {
     this.log(LogLevel.Debug, 'subscription', `Subscribing to: ${sql.substring(0, 120)}`);
-    await this.ensureConnected();
-    if (!this.wasmClient) throw new Error('WASM client not initialized');
-
-    const logFn = this.log.bind(this);
-    const wrappedCallback = (eventJson: string) => {
-      try {
-        const event = normalizeSubscriptionEvent(JSON.parse(eventJson) as ServerMessage);
-        logFn(LogLevel.Verbose, 'subscription', `Event: type=${event.type}`);
-        callback(event);
-      } catch (error) {
-        logFn(LogLevel.Error, 'subscription', `Failed to parse subscription event: ${error}`);
-      }
-    };
-
-    const optionsJson = JSON.stringify(normalizeSubscriptionOptions(options));
-    const subscriptionId = await this.wasmClient.subscribeWithSql(
+    const optionsJson = this.stringifyOptions(normalizeSubscriptionOptions(options));
+    const subscriptionId = await this.startTrackedSubscription(
       sql,
-      optionsJson === undefined ? undefined : optionsJson,
-      wrappedCallback as unknown as Function,
+      (wasmClient) => wasmClient.subscribeWithSql(
+        sql,
+        optionsJson,
+        this.createRawSubscriptionCallback(callback) as unknown as Function,
+      ),
     );
-    this.log(LogLevel.Info, 'subscription', `Subscribed: id=${subscriptionId}`);
-
-    this.subscriptions.set(subscriptionId, {
-      id: subscriptionId,
-      tableName: sql,
-      createdAt: new Date(),
-      lastSeqId: undefined,
-      closed: false,
-    });
 
     return async () => {
       await this.unsubscribe(subscriptionId);
@@ -1332,64 +1188,17 @@ export class KalamDBClient {
       return this.liveFallback(sql, callback, options);
     }
 
-    await this.ensureConnected();
-    if (!this.wasmClient) throw new Error('WASM client not initialized');
-
-    const wasmClient = this.wasmClient as typeof this.wasmClient & {
-      liveQueryRowsWithSql?: (
-        sql: string,
-        optionsJson: string | undefined,
-        callback: Function,
-      ) => Promise<string>;
-    };
-
-    if (typeof wasmClient.liveQueryRowsWithSql !== 'function') {
-      return this.liveFallback(sql, callback, options);
-    }
-
     const mapRow = options.mapRow ?? ((row: RowData) => row as unknown as T);
-    const wrappedCallback = (eventJson: string) => {
-      try {
-        const event = normalizeLiveRowsWasmEvent(JSON.parse(eventJson) as {
-          type: 'rows' | 'error';
-          subscription_id: string;
-          rows?: unknown;
-          code?: string;
-          message?: string;
-        });
-
-        if (event.type === 'error') {
-          options.onError?.({
-            type: 'error',
-            subscription_id: event.subscription_id,
-            code: event.code ?? 'unknown',
-            message: event.message ?? 'Live query failed',
-          });
-          return;
-        }
-
-        callback((event.rows ?? []).map(mapRow));
-      } catch (error) {
-        this.log(LogLevel.Error, 'subscription', `Failed to parse live rows event: ${error}`);
-      }
-    };
-
-    const optionsJson = JSON.stringify({
-      subscription_options: normalizeSubscriptionOptions(options.subscriptionOptions),
-    });
-    const subscriptionId = await wasmClient.liveQueryRowsWithSql(
+    const normalizedOptions = normalizeLiveRowsOptions(options);
+    const optionsJson = this.stringifyOptions(normalizedOptions);
+    const subscriptionId = await this.startTrackedSubscription(
       sql,
-      optionsJson,
-      wrappedCallback as unknown as Function,
+      (wasmClient) => wasmClient.liveQueryRowsWithSql(
+        sql,
+        optionsJson,
+        this.createLiveRowsCallback(callback, mapRow, options.onError) as unknown as Function,
+      ),
     );
-
-    this.subscriptions.set(subscriptionId, {
-      id: subscriptionId,
-      tableName: sql,
-      createdAt: new Date(),
-      lastSeqId: undefined,
-      closed: false,
-    });
 
     return async () => {
       await this.unsubscribe(subscriptionId);
@@ -1457,53 +1266,44 @@ export class KalamDBClient {
   async unsubscribe(subscriptionId: string): Promise<void> {
     this.log(LogLevel.Debug, 'subscription', `Unsubscribing: id=${subscriptionId}`);
     if (!this.wasmClient) throw new Error('WASM client not initialized');
-    await this.wasmClient.unsubscribe(subscriptionId);
-    this.subscriptions.delete(subscriptionId);
-    this.log(LogLevel.Info, 'subscription', `Unsubscribed: id=${subscriptionId}`);
+    this.forgetSubscriptionMetadata(subscriptionId);
+    try {
+      await this.wasmClient.unsubscribe(subscriptionId);
+      this.log(LogLevel.Info, 'subscription', `Unsubscribed: id=${subscriptionId}`);
+    } catch (error) {
+      this.log(LogLevel.Warn, 'subscription', `Unsubscribe failed for ${subscriptionId}: ${error}`);
+      throw error;
+    }
   }
 
   /** Number of active subscriptions */
   getSubscriptionCount(): number {
-    return this.subscriptions.size;
+    return this.getSubscriptions().filter((subscription) => !subscription.closed).length;
   }
 
-  /** Info about all active subscriptions, enriched with WASM-side seq tracking */
+  /** Info about active subscriptions, using Rust/WASM state as the source of truth. */
   getSubscriptions(): SubscriptionInfo[] {
-    // Merge WASM-side state (lastSeqId) into local tracking
-    if (this.wasmClient) {
-      try {
-        const raw = this.wasmClient.getSubscriptions();
-        const wasmSubs: Array<{ id: string; query: string; lastSeqId?: string }> =
-          typeof raw === 'string' ? JSON.parse(raw) : [];
-        const wasmMap = new Map(wasmSubs.map((s) => [s.id, s]));
-        for (const [id, info] of this.subscriptions) {
-          const ws = wasmMap.get(id);
-          if (ws && ws.lastSeqId) {
-            try {
-              info.lastSeqId = SeqId.from(ws.lastSeqId);
-            } catch {
-              // best-effort parse
-            }
-          }
-        }
-      } catch {
-        // best-effort merge
-      }
+    if (!this.wasmClient) {
+      return readSubscriptionInfos(undefined, this.subscriptionMetadata);
     }
-    return Array.from(this.subscriptions.values());
+
+    return readSubscriptionInfos(this.wasmClient.getSubscriptions(), this.subscriptionMetadata);
   }
 
   /** Whether there is an active subscription for the given table/SQL */
   isSubscribedTo(tableName: string): boolean {
-    for (const sub of this.subscriptions.values()) {
-      if (sub.tableName === tableName) return true;
-    }
-    return false;
+    return this.getSubscriptions().some((subscription) => (
+      !subscription.closed && subscription.tableName === tableName
+    ));
   }
 
   /** Unsubscribe from all active subscriptions */
   async unsubscribeAll(): Promise<void> {
-    const ids = Array.from(this.subscriptions.keys());
+    const ids = Array.from(new Set(
+      this.getSubscriptions()
+        .filter((subscription) => !subscription.closed)
+        .map((subscription) => subscription.id),
+    ));
     for (const id of ids) {
       await this.unsubscribe(id);
     }
@@ -1675,6 +1475,94 @@ export class KalamDBClient {
   /* ---------------------------------------------------------------- */
   /*  Private helpers                                                 */
   /* ---------------------------------------------------------------- */
+
+  private async startTrackedSubscription(
+    tableName: string,
+    register: (wasmClient: WasmClient) => Promise<string>,
+  ): Promise<string> {
+    await this.ensureConnected();
+    if (!this.wasmClient) {
+      throw new Error('WASM client not initialized');
+    }
+
+    const subscriptionId = await register(this.wasmClient);
+    this.trackSubscriptionMetadata(subscriptionId, tableName);
+    this.log(LogLevel.Info, 'subscription', `Subscribed: id=${subscriptionId}`);
+    return subscriptionId;
+  }
+
+  private createRawSubscriptionCallback(
+    callback: SubscriptionCallback,
+  ): (eventJson: string) => void {
+    return this.createJsonCallback(
+      'subscription',
+      (eventJson) => normalizeSubscriptionEvent(JSON.parse(eventJson) as ServerMessage),
+      (event) => {
+        this.log(LogLevel.Verbose, 'subscription', `Event: type=${event.type}`);
+        callback(event);
+      },
+    );
+  }
+
+  private createLiveRowsCallback<T>(
+    callback: LiveRowsCallback<T>,
+    mapRow: (row: RowData) => T,
+    onError?: (event: SubscriptionErrorEvent) => void,
+  ): (eventJson: string) => void {
+    return this.createJsonCallback(
+      'subscription',
+      (eventJson) => normalizeLiveRowsWasmEvent(JSON.parse(eventJson) as {
+        type: 'rows' | 'error';
+        subscription_id: string;
+        rows?: unknown;
+        code?: string;
+        message?: string;
+      }),
+      (event) => {
+        if (event.type === 'error') {
+          onError?.({
+            type: 'error',
+            subscription_id: event.subscription_id,
+            code: event.code ?? 'unknown',
+            message: event.message ?? 'Live query failed',
+          });
+          return;
+        }
+
+        callback((event.rows ?? []).map(mapRow));
+      },
+    );
+  }
+
+  private createJsonCallback<T>(
+    tag: string,
+    parse: (payload: string) => T,
+    handle: (value: T) => void,
+  ): (payload: string) => void {
+    return (payload: string) => {
+      try {
+        handle(parse(payload));
+      } catch (error) {
+        this.log(LogLevel.Error, tag, `Failed to parse callback payload: ${error}`);
+      }
+    };
+  }
+
+  private stringifyOptions<T>(options: T | undefined): string | undefined {
+    return options === undefined ? undefined : JSON.stringify(options);
+  }
+
+  private trackSubscriptionMetadata(subscriptionId: string, tableName: string): void {
+    trackSubscriptionMetadata(this.subscriptionMetadata, subscriptionId, tableName);
+  }
+
+  private forgetSubscriptionMetadata(subscriptionId: string): void {
+    this.subscriptionMetadata.delete(subscriptionId);
+  }
+
+  private clearSubscriptionMetadata(): void {
+    this.subscriptionMetadata.clear();
+  }
 
   private requireInit(): void {
     if (!this.wasmClient) {

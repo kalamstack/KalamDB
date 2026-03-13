@@ -1,5 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::time::{Duration, Instant};
 
 use crate::benchmarks::Benchmark;
 use crate::client::KalamClient;
@@ -13,6 +14,7 @@ pub struct FlushedParquetQueryBench;
 const PARQUET_FILES: u32 = 20;
 const ROWS_PER_FLUSH: u32 = 10_000;
 const BATCH_SIZE: u32 = 50;
+const FLUSH_VISIBILITY_TIMEOUT: Duration = Duration::from_secs(120);
 
 impl Benchmark for FlushedParquetQueryBench {
     fn name(&self) -> &str {
@@ -44,7 +46,7 @@ impl Benchmark for FlushedParquetQueryBench {
                 .await;
             client
                 .sql_ok(&format!(
-                    "CREATE TABLE {}.parquet_bench (id INT PRIMARY KEY, category TEXT, amount INT, description TEXT)",
+                    "CREATE SHARED TABLE {}.parquet_bench (id INT PRIMARY KEY, category TEXT, amount INT, description TEXT)",
                     config.namespace
                 ))
                 .await?;
@@ -81,8 +83,7 @@ impl Benchmark for FlushedParquetQueryBench {
                     .sql_ok(&format!("STORAGE FLUSH TABLE {}.parquet_bench", config.namespace))
                     .await?;
 
-                // Wait for flush job to complete
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                wait_for_visible_row_count(client, &config.namespace, global_id as i64).await?;
             }
             println!("\r    Loaded {} Parquet files ({} total rows)    ", PARQUET_FILES, global_id);
             Ok(())
@@ -111,7 +112,7 @@ impl Benchmark for FlushedParquetQueryBench {
                         if let Some(rows) = &result.rows {
                             if let Some(first) = rows.first() {
                                 if let Some(cnt) = first.first() {
-                                    let count = cnt.as_i64().unwrap_or(0);
+                                    let count = parse_count_value(cnt);
                                     if count < (PARQUET_FILES * ROWS_PER_FLUSH) as i64 {
                                         return Err(format!(
                                             "Expected >= {} rows, got {}",
@@ -177,4 +178,53 @@ impl Benchmark for FlushedParquetQueryBench {
             Ok(())
         })
     }
+}
+
+async fn wait_for_visible_row_count(
+    client: &KalamClient,
+    namespace: &str,
+    expected_count: i64,
+) -> Result<(), String> {
+    let deadline = Instant::now() + FLUSH_VISIBILITY_TIMEOUT;
+
+    loop {
+        let visible_count = query_visible_row_count(client, namespace).await?;
+        if visible_count >= expected_count {
+            return Ok(());
+        }
+
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "Timed out waiting for flushed rows to become visible in {}.parquet_bench (expected at least {}, got {})",
+                namespace, expected_count, visible_count
+            ));
+        }
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+async fn query_visible_row_count(client: &KalamClient, namespace: &str) -> Result<i64, String> {
+    let resp = client
+        .sql_ok(&format!(
+            "SELECT COUNT(*) as cnt FROM {}.parquet_bench",
+            namespace
+        ))
+        .await?;
+
+    Ok(resp
+        .results
+        .first()
+        .and_then(|result| result.rows.as_ref())
+        .and_then(|rows| rows.first())
+        .and_then(|row| row.first())
+        .map(parse_count_value)
+        .unwrap_or(0))
+}
+
+fn parse_count_value(value: &serde_json::Value) -> i64 {
+    value
+        .as_i64()
+        .or_else(|| value.as_str().and_then(|raw| raw.parse::<i64>().ok()))
+        .unwrap_or(0)
 }

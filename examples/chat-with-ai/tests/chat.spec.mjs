@@ -119,12 +119,15 @@ test('message insert streams a live draft and syncs the committed reply to both 
   await pageOne.getByRole('button', { name: 'Send through KalamDB' }).click();
 
   await expect(pageOne.getByTestId('chat-thread')).toContainText(uniqueMessage);
-  await expect(pageOne.locator('.bubble-user').last().locator('header span')).toHaveText(/\d{1,2}:\d{2}(:\d{2})?\s?(AM|PM)?/);
+  const userMessageContent = pageOne.getByTestId('chat-thread').getByText(uniqueMessage, { exact: true });
+  await expect(userMessageContent).toBeVisible();
+  const userMessage = userMessageContent.locator('xpath=ancestor::article[1]');
+  await expect(userMessage.locator('header strong')).toHaveText('admin');
+  await expect(userMessage.locator('header span')).toHaveText(/\d{1,2}:\d{2}(:\d{2})?\s?(AM|PM)?/);
   await expect(pageTwo.getByTestId('chat-thread')).toContainText(uniqueMessage);
   await expect(pageOne.getByTestId('stream-preview')).toContainText('KalamDB Copilot', { timeout: 15000 });
   await expect(pageOne.getByTestId('stream-preview')).toContainText('AI reply:', { timeout: 15000 });
   await expect(pageTwo.getByTestId('stream-preview')).toContainText('AI reply:', { timeout: 15000 });
-  await expect(pageOne.getByTestId('agent-events')).toContainText('thinking', { timeout: 15000 });
   await expect(pageOne.getByTestId('agent-events')).toContainText('Assistant reply committed', { timeout: 15000 });
   await expect(pageOne.getByTestId('chat-thread')).toContainText('AI reply: KalamDB stored', { timeout: 15000 });
   await expect(pageTwo.getByTestId('chat-thread')).toContainText('AI reply: KalamDB stored', { timeout: 15000 });

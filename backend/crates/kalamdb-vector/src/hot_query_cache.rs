@@ -46,7 +46,11 @@ struct HotCacheState {
 }
 
 impl HotCacheState {
-    fn new(dimensions: u32, metric: VectorMetric, base_last_applied_seq: i64) -> Result<Self, String> {
+    fn new(
+        dimensions: u32,
+        metric: VectorMetric,
+        base_last_applied_seq: i64,
+    ) -> Result<Self, String> {
         Ok(Self {
             base_last_applied_seq,
             last_scanned_seq: base_last_applied_seq,
@@ -193,22 +197,24 @@ pub(crate) fn search_hot_candidates(
     );
 
     if !HOT_QUERY_CACHE.contains_key(&cache_key) {
-        let state = HotCacheState::new(dimensions, metric, last_applied_seq.as_i64())
-            .map_err(|e| DataFusionError::Execution(format!("Failed to initialize hot cache: {}", e)))?;
+        let state =
+            HotCacheState::new(dimensions, metric, last_applied_seq.as_i64()).map_err(|e| {
+                DataFusionError::Execution(format!("Failed to initialize hot cache: {}", e))
+            })?;
         HOT_QUERY_CACHE.insert(cache_key.clone(), state);
     }
 
-    let mut state = HOT_QUERY_CACHE
-        .get_mut(&cache_key)
-        .ok_or_else(|| DataFusionError::Execution("Failed to access hot cache state".to_string()))?;
+    let mut state = HOT_QUERY_CACHE.get_mut(&cache_key).ok_or_else(|| {
+        DataFusionError::Execution("Failed to access hot cache state".to_string())
+    })?;
 
     if state.dimensions != dimensions
         || state.metric != metric
         || state.base_last_applied_seq != last_applied_seq.as_i64()
     {
-        state
-            .reset(dimensions, metric, last_applied_seq.as_i64())
-            .map_err(|e| DataFusionError::Execution(format!("Failed to reset hot cache state: {}", e)))?;
+        state.reset(dimensions, metric, last_applied_seq.as_i64()).map_err(|e| {
+            DataFusionError::Execution(format!("Failed to reset hot cache state: {}", e))
+        })?;
     }
 
     match table_type {
@@ -216,10 +222,15 @@ pub(crate) fn search_hot_candidates(
             let store = new_indexed_user_vector_hot_store(backend, table_id, column_name);
             let prefix = UserVectorHotOpId::user_prefix(session_user);
             let start_seq = state.last_scanned_seq.saturating_add(1);
-            let start_key = UserVectorHotOpId::new(session_user.clone(), SeqId::from(start_seq), "");
+            let start_key =
+                UserVectorHotOpId::new(session_user.clone(), SeqId::from(start_seq), "");
             let start_key_bytes = start_key.storage_key();
             let staged = store
-                .scan_with_raw_prefix(&prefix, Some(start_key_bytes.as_slice()), HOT_INCREMENTAL_SCAN_LIMIT)
+                .scan_with_raw_prefix(
+                    &prefix,
+                    Some(start_key_bytes.as_slice()),
+                    HOT_INCREMENTAL_SCAN_LIMIT,
+                )
                 .map_err(|e| {
                     DataFusionError::Execution(format!(
                         "Failed to scan user vector hot staging incrementally: {}",
@@ -231,9 +242,9 @@ pub(crate) fn search_hot_candidates(
                 if seq <= last_applied_seq.as_i64() || seq <= state.last_scanned_seq {
                     continue;
                 }
-                state
-                    .apply_hot_op(seq, &op)
-                    .map_err(|e| DataFusionError::Execution(format!("Failed to apply hot user op: {}", e)))?;
+                state.apply_hot_op(seq, &op).map_err(|e| {
+                    DataFusionError::Execution(format!("Failed to apply hot user op: {}", e))
+                })?;
             }
         },
         TableType::Shared => {
@@ -241,7 +252,11 @@ pub(crate) fn search_hot_candidates(
             let start_seq = state.last_scanned_seq.saturating_add(1);
             let start_key = SharedVectorHotOpId::new(SeqId::from(start_seq), "");
             let staged = store
-                .scan_typed_with_prefix_and_start(None, Some(&start_key), HOT_INCREMENTAL_SCAN_LIMIT)
+                .scan_typed_with_prefix_and_start(
+                    None,
+                    Some(&start_key),
+                    HOT_INCREMENTAL_SCAN_LIMIT,
+                )
                 .map_err(|e| {
                     DataFusionError::Execution(format!(
                         "Failed to scan shared vector hot staging incrementally: {}",
@@ -253,9 +268,9 @@ pub(crate) fn search_hot_candidates(
                 if seq <= last_applied_seq.as_i64() || seq <= state.last_scanned_seq {
                     continue;
                 }
-                state
-                    .apply_hot_op(seq, &op)
-                    .map_err(|e| DataFusionError::Execution(format!("Failed to apply hot shared op: {}", e)))?;
+                state.apply_hot_op(seq, &op).map_err(|e| {
+                    DataFusionError::Execution(format!("Failed to apply hot shared op: {}", e))
+                })?;
             }
         },
         TableType::System | TableType::Stream => unreachable!(),
@@ -295,13 +310,19 @@ pub(crate) fn clear_hot_query_cache_for_tests() {
 mod tests {
     use super::*;
     use crate::hot_staging::{
-        new_indexed_shared_vector_hot_store, new_indexed_user_vector_hot_store, SharedVectorHotOpId,
-        UserVectorHotOpId, VectorHotOp, VectorHotOpType,
+        new_indexed_shared_vector_hot_store, new_indexed_user_vector_hot_store,
+        SharedVectorHotOpId, UserVectorHotOpId, VectorHotOp, VectorHotOpType,
     };
     use kalamdb_commons::ids::SeqId;
     use kalamdb_store::test_utils::TestDb;
 
-    fn shared_op(table_id: &TableId, column_name: &str, pk: &str, vector: Option<Vec<f32>>, op_type: VectorHotOpType) -> VectorHotOp {
+    fn shared_op(
+        table_id: &TableId,
+        column_name: &str,
+        pk: &str,
+        vector: Option<Vec<f32>>,
+        op_type: VectorHotOpType,
+    ) -> VectorHotOp {
         VectorHotOp::new(
             table_id.clone(),
             column_name.to_string(),
@@ -314,7 +335,13 @@ mod tests {
         )
     }
 
-    fn user_op(table_id: &TableId, column_name: &str, pk: &str, vector: Option<Vec<f32>>, op_type: VectorHotOpType) -> VectorHotOp {
+    fn user_op(
+        table_id: &TableId,
+        column_name: &str,
+        pk: &str,
+        vector: Option<Vec<f32>>,
+        op_type: VectorHotOpType,
+    ) -> VectorHotOp {
         VectorHotOp::new(
             table_id.clone(),
             column_name.to_string(),

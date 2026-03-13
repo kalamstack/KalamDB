@@ -248,6 +248,14 @@ Live SQL must stay within the strict supported shape: `SELECT ... FROM ... WHERE
 Do not use `ORDER BY` or `LIMIT` inside `subscribe()` or materialized live-query SQL.
 Use `lastRows` for rewind and apply ordering / capping in your app after rows arrive.
 
+The Dart SDK keeps this layer intentionally thin:
+
+- Rust owns the shared WebSocket, reconnect, checkpoint tracking, and replay filtering.
+- Dart wraps the Rust subscription handles as streams and decodes typed rows.
+
+That means reconnect and resume behavior is aligned with the core `kalam-link`
+logic instead of being reimplemented separately in Flutter code.
+
 ```dart
 final stream = client.subscribe(
   'SELECT * FROM chat.messages WHERE room_id = $1',
@@ -489,4 +497,3 @@ Apache-2.0
 ---
 
 > Native performance on iOS and Android is powered by [flutter_rust_bridge](https://cjycode.com/flutter_rust_bridge/).
-

@@ -32,11 +32,12 @@ Future<void> _waitForCondition(
   bool Function() predicate, {
   Duration timeout = const Duration(seconds: 20),
   Duration interval = const Duration(milliseconds: 200),
+  String? reason,
 }) async {
   final deadline = DateTime.now().add(timeout);
   while (!predicate()) {
     if (DateTime.now().isAfter(deadline)) {
-      throw TimeoutException('Timed out waiting for condition');
+      throw TimeoutException(reason ?? 'Timed out waiting for condition');
     }
     await sleep(interval);
   }
@@ -46,6 +47,26 @@ Set<int> _insertedIds(Iterable<ChangeEvent> events) {
   final ids = <int>{};
   for (final event in events.whereType<InsertEvent>()) {
     for (final row in event.rows) {
+      final id = row['id']?.asInt();
+      if (id != null) {
+        ids.add(id);
+      }
+    }
+  }
+  return ids;
+}
+
+Set<int> _observedIds(Iterable<ChangeEvent> events) {
+  final ids = <int>{};
+  for (final event in events) {
+    final rows = switch (event) {
+      InsertEvent(:final rows) => rows,
+      UpdateEvent(:final rows) => rows,
+      InitialDataBatch(:final rows) => rows,
+      AckEvent() || DeleteEvent() || SubscriptionError() =>
+        const <Map<String, KalamCellValue>>[],
+    };
+    for (final row in rows) {
       final id = row['id']?.asInt();
       if (id != null) {
         ids.add(id);
@@ -321,6 +342,8 @@ void main() {
         );
         final subscriberEvents = List.generate(3, (_) => <ChangeEvent>[]);
         final subscriptions = <StreamSubscription<ChangeEvent>>[];
+        final subscriptionIds =
+            List.generate(3, (index) => 'fanout_${uniqueName('$index')}');
         final baseId = (DateTime.now().millisecondsSinceEpoch % 1000000) * 100;
         final insertedIds = List.generate(8, (index) => baseId + index + 1);
 
@@ -329,6 +352,7 @@ void main() {
             final stream = subscriberClients[index].subscribe(
               'SELECT id, body FROM $tbl WHERE id >= $baseId',
               lastRows: 0,
+              subscriptionId: subscriptionIds[index],
             );
             subscriptions.add(stream.listen(subscriberEvents[index].add));
           }
@@ -337,26 +361,45 @@ void main() {
             () => subscriberEvents.every(
               (events) => events.any((event) => event is AckEvent),
             ),
+            reason: 'Timed out waiting for subscription ack events',
           );
 
-          await Future.wait(
-            insertedIds.asMap().entries.map((entry) {
-              final writer = writerClients[entry.key % writerClients.length];
-              return writer.query(
-                "INSERT INTO $tbl (id, body) VALUES (${entry.value}, 'fanout_${entry.key}')",
-              );
-            }),
+          await waitForAsyncCondition(
+            () async {
+              for (var index = 0; index < subscriberClients.length; index++) {
+                final subscriptions =
+                    await subscriberClients[index].getSubscriptions();
+                final hasRegistered = subscriptions.any(
+                  (subscription) => subscription.id == subscriptionIds[index],
+                );
+                if (!hasRegistered) {
+                  return false;
+                }
+              }
+              return true;
+            },
+            timeout: const Duration(seconds: 20),
           );
 
-          await _waitForCondition(
-            () => subscriberEvents.every(
-              (events) => _insertedIds(events).containsAll(insertedIds),
-            ),
-            timeout: const Duration(seconds: 30),
-          );
+          for (final entry in insertedIds.asMap().entries) {
+            final writer = writerClients[entry.key % writerClients.length];
+            final insertedId = entry.value;
+            await writer.query(
+              "INSERT INTO $tbl (id, body) VALUES ($insertedId, 'fanout_${entry.key}')",
+            );
+
+            await _waitForCondition(
+              () => subscriberEvents.every(
+                (events) => _observedIds(events).contains(insertedId),
+              ),
+              timeout: const Duration(seconds: 12),
+              reason:
+                  'Timed out waiting for row $insertedId to reach every subscriber',
+            );
+          }
 
           for (final events in subscriberEvents) {
-            expect(_insertedIds(events), containsAll(insertedIds));
+            expect(_observedIds(events), containsAll(insertedIds));
           }
         } finally {
           for (final sub in subscriptions) {

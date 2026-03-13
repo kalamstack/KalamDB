@@ -455,7 +455,11 @@ fn query_response_to_sql_response(resp: QueryResponse) -> SqlResponse {
         .map(|r| SqlResult {
             row_count: Some(r.row_count as u64),
             message: r.message.clone(),
-            rows: r.rows.clone(),
+            rows: r.rows.clone().map(|rows| {
+                rows.into_iter()
+                    .map(|row| row.into_iter().map(Value::from).collect())
+                    .collect()
+            }),
         })
         .collect();
 

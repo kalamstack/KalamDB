@@ -190,11 +190,17 @@ pub(crate) async fn resubscribe_all(
     ws_ref: Rc<RefCell<Option<WebSocket>>>,
     subscription_state: Rc<RefCell<HashMap<String, SubscriptionState>>>,
 ) {
-    let states: Vec<(String, SubscriptionState)> = subscription_state
-        .borrow()
-        .iter()
-        .map(|(id, state)| (id.clone(), state.clone()))
-        .collect();
+    let states: Vec<(String, SubscriptionState)> = {
+        let mut subs = subscription_state.borrow_mut();
+        subs.iter_mut()
+            .map(|(id, state)| {
+                if let Some(seq_id) = state.last_seq_id {
+                    state.options.from = Some(seq_id);
+                }
+                (id.clone(), state.clone())
+            })
+            .collect()
+    };
 
     for (subscription_id, state) in states {
         console_log(&format!(

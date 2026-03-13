@@ -105,7 +105,11 @@ impl TcpDisconnectProxy {
 
     /// Wait until at least `min_count` proxy connections are active, or until
     /// `timeout_dur` has elapsed. Returns `true` if the condition was met.
-    pub async fn wait_for_active_connections(&self, min_count: usize, timeout_dur: Duration) -> bool {
+    pub async fn wait_for_active_connections(
+        &self,
+        min_count: usize,
+        timeout_dur: Duration,
+    ) -> bool {
         let start = std::time::Instant::now();
         loop {
             if self.active_connections.lock().await.len() >= min_count {

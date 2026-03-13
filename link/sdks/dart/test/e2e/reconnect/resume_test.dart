@@ -23,50 +23,6 @@ Future<void> _safeCancel(StreamSubscription<dynamic> sub) async {
   }
 }
 
-bool _hasRowId(List<ChangeEvent> events, int id) {
-  for (final event in events) {
-    switch (event) {
-      case InsertEvent(:final rows):
-        if (rows.any((r) => r['id']?.asInt() == id)) return true;
-      case UpdateEvent(:final rows):
-        if (rows.any((r) => r['id']?.asInt() == id)) return true;
-      case InitialDataBatch(:final rows):
-        if (rows.any((r) => r['id']?.asInt() == id)) return true;
-      case AckEvent() || DeleteEvent() || SubscriptionError():
-        break;
-    }
-  }
-  return false;
-}
-
-Future<void> _waitFor(
-  bool Function() predicate, {
-  Duration timeout = const Duration(seconds: 20),
-  Duration poll = const Duration(milliseconds: 200),
-}) async {
-  final started = DateTime.now();
-  while (!predicate()) {
-    if (DateTime.now().difference(started) > timeout) {
-      throw TimeoutException('Timed out waiting for condition');
-    }
-    await sleep(poll);
-  }
-}
-
-Future<void> _waitForAsync(
-  Future<bool> Function() predicate, {
-  Duration timeout = const Duration(seconds: 20),
-  Duration poll = const Duration(milliseconds: 200),
-}) async {
-  final started = DateTime.now();
-  while (!await predicate()) {
-    if (DateTime.now().difference(started) > timeout) {
-      throw TimeoutException('Timed out waiting for condition');
-    }
-    await sleep(poll);
-  }
-}
-
 void main() {
   group('Resume from checkpoint after disconnect', skip: skipIfNoIntegration,
       () {
@@ -93,9 +49,9 @@ void main() {
         );
 
         final writer = await connectJwtClient();
-        const preId = 91001;
-        const gapId = 91002;
-        const liveId = 91003;
+        const preIds = [91001, 91002];
+        const gapIds = [91003, 91004, 91005];
+        const liveIds = [91006, 91007, 91008];
         final sql = 'SELECT id, value FROM $tbl';
 
         StreamSubscription<ChangeEvent>? sub1;
@@ -107,17 +63,22 @@ void main() {
           final stream1 = client.subscribe(sql, lastRows: 0);
           sub1 = stream1.listen(preEvents.add);
 
-          await _waitFor(() => preEvents.whereType<AckEvent>().isNotEmpty);
-
-          // Insert before-disconnect row
-          await writer.query(
-            "INSERT INTO $tbl (id, value) VALUES ($preId, 'before')",
+          await waitForCondition(
+            () => preEvents.whereType<AckEvent>().isNotEmpty,
           );
-          await _waitFor(() => _hasRowId(preEvents, preId));
+
+          for (final id in preIds) {
+            await writer.query(
+              "INSERT INTO $tbl (id, value) VALUES ($id, 'before-$id')",
+            );
+          }
+          await waitForCondition(
+            () => preIds.every((id) => changeEventsContainRowId(preEvents, id)),
+          );
 
           // Capture checkpoint
           SeqId? checkpoint;
-          await _waitForAsync(() async {
+          await waitForAsyncCondition(() async {
             final subs = await client.getSubscriptions();
             for (final s in subs) {
               if (s.lastSeqId != null) {
@@ -137,10 +98,11 @@ void main() {
           await client.disconnectWebSocket();
           expect(await client.isConnected, isFalse);
 
-          // Insert gap row during disconnect
-          await writer.query(
-            "INSERT INTO $tbl (id, value) VALUES ($gapId, 'gap')",
-          );
+          for (final id in gapIds) {
+            await writer.query(
+              "INSERT INTO $tbl (id, value) VALUES ($id, 'gap-$id')",
+            );
+          }
 
           // Reconnect
           await client.reconnectWebSocket();
@@ -151,21 +113,43 @@ void main() {
           final stream2 = client.subscribe(sql, lastRows: 0, from: checkpoint);
           sub2 = stream2.listen(resumedEvents.add);
 
-          await _waitFor(() => resumedEvents.whereType<AckEvent>().isNotEmpty);
-
-          // Insert live row after reconnect
-          await writer.query(
-            "INSERT INTO $tbl (id, value) VALUES ($liveId, 'live')",
+          await waitForCondition(
+            () => resumedEvents.whereType<AckEvent>().isNotEmpty,
           );
 
-          // Wait for gap + live rows
-          await _waitFor(() =>
-              _hasRowId(resumedEvents, gapId) &&
-              _hasRowId(resumedEvents, liveId));
+          for (final id in liveIds) {
+            await writer.query(
+              "INSERT INTO $tbl (id, value) VALUES ($id, 'live-$id')",
+            );
+          }
+
+          await waitForCondition(
+            () =>
+                gapIds.every(
+                    (id) => changeEventsContainRowId(resumedEvents, id)) &&
+                liveIds.every(
+                  (id) => changeEventsContainRowId(resumedEvents, id),
+                ),
+          );
 
           // Verify no replay
-          expect(_hasRowId(resumedEvents, preId), isFalse,
-              reason: 'pre-disconnect row must NOT be replayed');
+          for (final id in preIds) {
+            expect(
+              changeEventsContainRowId(resumedEvents, id),
+              isFalse,
+              reason: 'pre-disconnect row $id must NOT be replayed',
+            );
+          }
+          expectNoDuplicateSeqs(
+            resumedEvents,
+            reason: 'resumed subscription must not emit duplicate events',
+          );
+          expectSeqsStrictlyAfterCheckpoint(
+            resumedEvents,
+            checkpoint!,
+            reason:
+                'resumed subscription must only emit events strictly after the checkpoint',
+          );
 
           await _safeCancel(sub2);
           sub2 = null;
@@ -213,7 +197,7 @@ void main() {
           subs.add(client.subscribe(sqlB, lastRows: 0).listen(evB.add));
           subs.add(client.subscribe(sqlC, lastRows: 0).listen(evC.add));
 
-          await _waitFor(() =>
+          await waitForCondition(() =>
               evA.whereType<AckEvent>().isNotEmpty &&
               evB.whereType<AckEvent>().isNotEmpty &&
               evC.whereType<AckEvent>().isNotEmpty);
@@ -226,14 +210,14 @@ void main() {
           await writer
               .query("INSERT INTO $tblC (id, value) VALUES ($preC, 'pre-c')");
 
-          await _waitFor(() =>
-              _hasRowId(evA, preA) &&
-              _hasRowId(evB, preB) &&
-              _hasRowId(evC, preC));
+          await waitForCondition(() =>
+              changeEventsContainRowId(evA, preA) &&
+              changeEventsContainRowId(evB, preB) &&
+              changeEventsContainRowId(evC, preC));
 
           // Capture checkpoints
           SeqId? cpA, cpB, cpC;
-          await _waitForAsync(() async {
+          await waitForAsyncCondition(() async {
             final allSubs = await client.getSubscriptions();
             for (final s in allSubs) {
               if (s.lastSeqId != null) {
@@ -277,7 +261,7 @@ void main() {
           subs.add(
               client.subscribe(sqlC, lastRows: 0, from: cpC).listen(rEvC.add));
 
-          await _waitFor(() =>
+          await waitForCondition(() =>
               rEvA.whereType<AckEvent>().isNotEmpty &&
               rEvB.whereType<AckEvent>().isNotEmpty &&
               rEvC.whereType<AckEvent>().isNotEmpty);
@@ -291,21 +275,48 @@ void main() {
               .query("INSERT INTO $tblC (id, value) VALUES ($liveC, 'live-c')");
 
           // Wait for gap + live on all three
-          await _waitFor(() =>
-              _hasRowId(rEvA, gapA) &&
-              _hasRowId(rEvA, liveA) &&
-              _hasRowId(rEvB, gapB) &&
-              _hasRowId(rEvB, liveB) &&
-              _hasRowId(rEvC, gapC) &&
-              _hasRowId(rEvC, liveC));
+          await waitForCondition(() =>
+              changeEventsContainRowId(rEvA, gapA) &&
+              changeEventsContainRowId(rEvA, liveA) &&
+              changeEventsContainRowId(rEvB, gapB) &&
+              changeEventsContainRowId(rEvB, liveB) &&
+              changeEventsContainRowId(rEvC, gapC) &&
+              changeEventsContainRowId(rEvC, liveC));
 
           // No replay
-          expect(_hasRowId(rEvA, preA), isFalse,
+          expect(changeEventsContainRowId(rEvA, preA), isFalse,
               reason: 'A must NOT replay pre row');
-          expect(_hasRowId(rEvB, preB), isFalse,
+          expect(changeEventsContainRowId(rEvB, preB), isFalse,
               reason: 'B must NOT replay pre row');
-          expect(_hasRowId(rEvC, preC), isFalse,
+          expect(changeEventsContainRowId(rEvC, preC), isFalse,
               reason: 'C must NOT replay pre row');
+          expectNoDuplicateSeqs(
+            rEvA,
+            reason: 'subscription A must not replay duplicate seq ids',
+          );
+          expectNoDuplicateSeqs(
+            rEvB,
+            reason: 'subscription B must not replay duplicate seq ids',
+          );
+          expectNoDuplicateSeqs(
+            rEvC,
+            reason: 'subscription C must not replay duplicate seq ids',
+          );
+          expectSeqsStrictlyAfterCheckpoint(
+            rEvA,
+            cpA!,
+            reason: 'subscription A must only emit seq ids after checkpoint',
+          );
+          expectSeqsStrictlyAfterCheckpoint(
+            rEvB,
+            cpB!,
+            reason: 'subscription B must only emit seq ids after checkpoint',
+          );
+          expectSeqsStrictlyAfterCheckpoint(
+            rEvC,
+            cpC!,
+            reason: 'subscription C must only emit seq ids after checkpoint',
+          );
         } finally {
           for (final s in subs) {
             await _safeCancel(s);
@@ -342,16 +353,19 @@ void main() {
           final stream1 = client.subscribe(sql, lastRows: 0);
           sub1 = stream1.listen(preEvents.add);
 
-          await _waitFor(() => preEvents.whereType<AckEvent>().isNotEmpty);
+          await waitForCondition(
+            () => preEvents.whereType<AckEvent>().isNotEmpty,
+          );
 
           await writer.query(
             "INSERT INTO $tbl (id, value) VALUES ($preId, 'pre')",
           );
-          await _waitFor(() => _hasRowId(preEvents, preId));
+          await waitForCondition(
+              () => changeEventsContainRowId(preEvents, preId));
 
           // Capture checkpoint
           SeqId? checkpoint;
-          await _waitForAsync(() async {
+          await waitForAsyncCondition(() async {
             final subs = await client.getSubscriptions();
             for (final s in subs) {
               if (s.lastSeqId != null) {
@@ -385,18 +399,31 @@ void main() {
           final stream2 = client.subscribe(sql, lastRows: 0, from: checkpoint);
           sub2 = stream2.listen(resumedEvents.add);
 
-          await _waitFor(() => resumedEvents.whereType<AckEvent>().isNotEmpty);
+          await waitForCondition(
+            () => resumedEvents.whereType<AckEvent>().isNotEmpty,
+          );
 
           await writer.query(
             "INSERT INTO $tbl (id, value) VALUES ($liveId, 'live')",
           );
 
-          await _waitFor(() =>
-              _hasRowId(resumedEvents, gapId) &&
-              _hasRowId(resumedEvents, liveId));
+          await waitForCondition(() =>
+              changeEventsContainRowId(resumedEvents, gapId) &&
+              changeEventsContainRowId(resumedEvents, liveId));
 
-          expect(_hasRowId(resumedEvents, preId), isFalse,
+          expect(changeEventsContainRowId(resumedEvents, preId), isFalse,
               reason: 'pre row must NOT be replayed');
+          expectNoDuplicateSeqs(
+            resumedEvents,
+            reason:
+                'double-disconnect resume must not replay duplicate seq ids',
+          );
+          expectSeqsStrictlyAfterCheckpoint(
+            resumedEvents,
+            checkpoint!,
+            reason:
+                'double-disconnect resume must only emit seq ids after checkpoint',
+          );
 
           await _safeCancel(sub2);
           sub2 = null;

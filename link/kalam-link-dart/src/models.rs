@@ -393,12 +393,20 @@ pub enum DartChangeEvent {
 /// Configuration for Rust-side live row materialization.
 pub struct DartLiveRowsConfig {
     pub limit: Option<i32>,
+    pub key_columns: Option<Vec<String>>,
 }
 
 impl DartLiveRowsConfig {
     pub(crate) fn into_native(self) -> LiveRowsConfig {
         LiveRowsConfig {
             limit: self.limit.map(|value| value.max(0) as usize),
+            key_columns: self.key_columns.map(|columns| {
+                columns
+                    .into_iter()
+                    .map(|column| column.trim().to_string())
+                    .filter(|column| !column.is_empty())
+                    .collect()
+            }),
         }
     }
 }
@@ -547,6 +555,7 @@ impl DartSubscriptionConfig {
                 batch_size: self.batch_size.map(|v| v as usize),
                 last_rows: self.last_rows.map(|v| v as u32),
                 from: self.from.map(kalam_link::SeqId::new),
+                snapshot_end_seq: None,
             }),
             ws_url: None,
         }

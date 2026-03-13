@@ -1,6 +1,6 @@
+use super::helpers::*;
 use crate::common;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
-use super::helpers::*;
 use kalam_link::SubscriptionConfig;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -48,24 +48,26 @@ async fn test_proxy_server_down_during_live_updates_resumes() {
     let _ = timeout(TEST_TIMEOUT, sub.next()).await;
 
     // Insert a "before" row and observe it.
-    let before_id = "before-drop-1";
-    writer
-        .execute_query(
-            &format!(
-                "INSERT INTO {} (id, value) VALUES ('{}', 'pre')",
-                table, before_id
-            ),
-            None,
-            None,
-            None,
-        )
-        .await
-        .expect("insert before row");
+    let before_ids = ["before-drop-1", "before-drop-2", "before-drop-3"];
+    for before_id in before_ids {
+        writer
+            .execute_query(
+                &format!("INSERT INTO {} (id, value) VALUES ('{}', 'pre')", table, before_id),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("insert before row");
+    }
 
     let mut pre_seen = Vec::<String>::new();
     let mut observed_seq = None;
     for _ in 0..12 {
-        if pre_seen.iter().any(|id| id == before_id) {
+        if before_ids
+            .iter()
+            .all(|expected_id| pre_seen.iter().any(|seen_id| seen_id == expected_id))
+        {
             break;
         }
         match timeout(Duration::from_millis(1200), sub.next()).await {
@@ -82,8 +84,10 @@ async fn test_proxy_server_down_during_live_updates_resumes() {
         }
     }
     assert!(
-        pre_seen.iter().any(|id| id == before_id),
-        "should observe the before-drop row"
+        before_ids
+            .iter()
+            .all(|expected_id| pre_seen.iter().any(|seen_id| seen_id == expected_id)),
+        "should observe all before-drop rows"
     );
     let resume_from = query_max_seq(&writer, &table).await;
 
@@ -103,19 +107,23 @@ async fn test_proxy_server_down_during_live_updates_resumes() {
     );
 
     // Insert rows while the proxy is down.
-    let gap_id = "gap-during-down-1";
-    writer
-        .execute_query(
-            &format!(
-                "INSERT INTO {} (id, value) VALUES ('{}', 'gap')",
-                table, gap_id
-            ),
-            None,
-            None,
-            None,
-        )
-        .await
-        .expect("insert gap row");
+    let gap_ids = [
+        "gap-during-down-1",
+        "gap-during-down-2",
+        "gap-during-down-3",
+        "gap-during-down-4",
+    ];
+    for gap_id in gap_ids {
+        writer
+            .execute_query(
+                &format!("INSERT INTO {} (id, value) VALUES ('{}', 'gap')", table, gap_id),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("insert gap row");
+    }
 
     // Bring the proxy back.
     proxy.simulate_server_up();
@@ -129,26 +137,34 @@ async fn test_proxy_server_down_during_live_updates_resumes() {
     assert!(client.is_connected().await, "should auto-reconnect");
 
     // Insert another after reconnect.
-    let live_id = "live-after-reconnect-1";
-    writer
-        .execute_query(
-            &format!(
-                "INSERT INTO {} (id, value) VALUES ('{}', 'live')",
-                table, live_id
-            ),
-            None,
-            None,
-            None,
-        )
-        .await
-        .expect("insert live row");
+    let live_ids = [
+        "live-after-reconnect-1",
+        "live-after-reconnect-2",
+        "live-after-reconnect-3",
+        "live-after-reconnect-4",
+    ];
+    for live_id in live_ids {
+        writer
+            .execute_query(
+                &format!("INSERT INTO {} (id, value) VALUES ('{}', 'live')", table, live_id),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("insert live row");
+    }
 
     // Collect resumed events and verify sequencing.
     let mut resumed_ids = Vec::<String>::new();
     let mut resumed_seq = Some(resume_from);
-    for _ in 0..20 {
-        if resumed_ids.iter().any(|id| id == gap_id)
-            && resumed_ids.iter().any(|id| id == live_id)
+    for _ in 0..28 {
+        if gap_ids
+            .iter()
+            .all(|expected_id| resumed_ids.iter().any(|seen_id| seen_id == expected_id))
+            && live_ids
+                .iter()
+                .all(|expected_id| resumed_ids.iter().any(|seen_id| seen_id == expected_id))
         {
             break;
         }
@@ -167,16 +183,22 @@ async fn test_proxy_server_down_during_live_updates_resumes() {
     }
 
     assert!(
-        resumed_ids.iter().any(|id| id == gap_id),
-        "gap row written during disconnect should be received"
+        gap_ids
+            .iter()
+            .all(|expected_id| resumed_ids.iter().any(|seen_id| seen_id == expected_id)),
+        "all gap rows written during disconnect should be received"
     );
     assert!(
-        resumed_ids.iter().any(|id| id == live_id),
-        "live row written after reconnect should be received"
+        live_ids
+            .iter()
+            .all(|expected_id| resumed_ids.iter().any(|seen_id| seen_id == expected_id)),
+        "all live rows written after reconnect should be received"
     );
     assert!(
-        !resumed_ids.iter().any(|id| id == before_id),
-        "row observed before the drop must NOT be replayed"
+        before_ids
+            .iter()
+            .all(|expected_id| !resumed_ids.iter().any(|seen_id| seen_id == expected_id)),
+        "rows observed before the drop must NOT be replayed"
     );
 
     sub.close().await.ok();

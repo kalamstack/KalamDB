@@ -146,6 +146,111 @@ Future<void> safeAwait(
 /// Sleep for the given duration.
 Future<void> sleep(Duration duration) => Future<void>.delayed(duration);
 
+/// Return whether any change event includes the given integer row id.
+bool changeEventsContainRowId(List<ChangeEvent> events, int id) {
+  for (final event in events) {
+    switch (event) {
+      case InsertEvent(:final rows):
+        if (rows.any((r) => r['id']?.asInt() == id)) return true;
+      case UpdateEvent(:final rows):
+        if (rows.any((r) => r['id']?.asInt() == id)) return true;
+      case InitialDataBatch(:final rows):
+        if (rows.any((r) => r['id']?.asInt() == id)) return true;
+      case AckEvent() || DeleteEvent() || SubscriptionError():
+        break;
+    }
+  }
+  return false;
+}
+
+/// Collect all `_seq` values that arrived inside change events.
+List<int> changeEventSeqValues(Iterable<ChangeEvent> events) {
+  final seqs = <int>[];
+  for (final event in events) {
+    final rows = switch (event) {
+      InsertEvent(:final rows) => rows,
+      UpdateEvent(:final rows) => rows,
+      InitialDataBatch(:final rows) => rows,
+      AckEvent() ||
+      DeleteEvent() ||
+      SubscriptionError() =>
+        const <Map<String, KalamCellValue>>[],
+    };
+    for (final row in rows) {
+      final seq = row['_seq']?.asInt();
+      if (seq != null) {
+        seqs.add(seq);
+      }
+    }
+  }
+  return seqs;
+}
+
+/// Wait until [predicate] becomes true or throw after [timeout].
+Future<void> waitForCondition(
+  bool Function() predicate, {
+  Duration timeout = const Duration(seconds: 20),
+  Duration poll = const Duration(milliseconds: 200),
+}) async {
+  final started = DateTime.now();
+  while (!predicate()) {
+    if (DateTime.now().difference(started) > timeout) {
+      throw TimeoutException('Timed out waiting for condition');
+    }
+    await sleep(poll);
+  }
+}
+
+/// Async variant of [waitForCondition].
+Future<void> waitForAsyncCondition(
+  Future<bool> Function() predicate, {
+  Duration timeout = const Duration(seconds: 20),
+  Duration poll = const Duration(milliseconds: 200),
+}) async {
+  final started = DateTime.now();
+  while (!await predicate()) {
+    if (DateTime.now().difference(started) > timeout) {
+      throw TimeoutException('Timed out waiting for condition');
+    }
+    await sleep(poll);
+  }
+}
+
+/// Assert that there are no repeated `_seq` values in [events].
+void expectNoDuplicateSeqs(
+  Iterable<ChangeEvent> events, {
+  required String reason,
+}) {
+  final seen = <int>{};
+  final duplicates = <int>{};
+  for (final seq in changeEventSeqValues(events)) {
+    if (!seen.add(seq)) {
+      duplicates.add(seq);
+    }
+  }
+  expect(
+    duplicates,
+    isEmpty,
+    reason: '$reason. duplicate _seq values: ${duplicates.toList()..sort()}',
+  );
+}
+
+/// Assert that every observed `_seq` value is strictly greater than [checkpoint].
+void expectSeqsStrictlyAfterCheckpoint(
+  Iterable<ChangeEvent> events,
+  SeqId checkpoint, {
+  required String reason,
+}) {
+  final offending = changeEventSeqValues(events)
+      .where((seq) => seq <= checkpoint.value)
+      .toList(growable: false);
+  expect(
+    offending,
+    isEmpty,
+    reason: '$reason. offending _seq values: $offending',
+  );
+}
+
 // ── Native bridge build ───────────────────────────────────────────────
 
 Future<void> _ensureNativeBridgeReady() async {

@@ -16,9 +16,8 @@ pub mod services;
 // Re-export commonly used types
 pub use errors::error::{AuthError, AuthResult};
 pub use helpers::cookie::{
-    create_auth_cookie, create_logout_cookie, create_refresh_cookie,
-    create_refresh_logout_cookie, extract_auth_token, extract_refresh_token, CookieConfig,
-    AUTH_COOKIE_NAME,
+    create_auth_cookie, create_logout_cookie, create_refresh_cookie, create_refresh_logout_cookie,
+    extract_auth_token, extract_refresh_token, CookieConfig, AUTH_COOKIE_NAME,
 };
 pub use helpers::extractor::{AuthExtractError, AuthSessionExtractor};
 // Re-export unified session type from kalamdb-session

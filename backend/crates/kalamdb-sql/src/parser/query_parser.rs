@@ -6,8 +6,7 @@
 use crate::parser::utils::parse_sql_statements;
 use kalamdb_commons::constants::SystemColumnNames;
 use sqlparser::ast::{
-    Expr, GroupByExpr, Query, Select, SelectItem, SetExpr, Statement, TableFactor,
-    TableWithJoins,
+    Expr, GroupByExpr, Query, Select, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins,
 };
 use sqlparser::dialect::GenericDialect;
 
@@ -469,8 +468,8 @@ mod tests {
 
     #[test]
     fn test_validate_subscription_query_rejects_seq_projection() {
-        let err = QueryParser::validate_subscription_query("SELECT _seq FROM chat.messages")
-            .unwrap_err();
+        let err =
+            QueryParser::validate_subscription_query("SELECT _seq FROM chat.messages").unwrap_err();
 
         assert!(err.to_string().contains(SystemColumnNames::SEQ));
     }

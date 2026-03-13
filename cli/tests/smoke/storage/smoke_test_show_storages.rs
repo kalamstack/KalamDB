@@ -75,6 +75,36 @@ fn smoke_show_storages_basic() {
 
 #[ntest::timeout(60_000)]
 #[test]
+fn smoke_show_storages_cli_timestamps_are_not_epoch_shifted() {
+    if !is_server_running() {
+        println!(
+            "Skipping smoke_show_storages_cli_timestamps_are_not_epoch_shifted: server not running at {}",
+            server_url()
+        );
+        return;
+    }
+
+    let output = execute_sql_via_cli_as(
+        default_username(),
+        default_password(),
+        "SELECT storage_id, created_at, updated_at FROM system.storages WHERE storage_id = 'local'",
+    )
+    .expect("SELECT from system.storages via CLI should succeed");
+
+    assert!(output.contains("storage_id"), "CLI output should include table headers: {output}");
+    assert!(output.contains("local"), "CLI output should include the local storage row: {output}");
+    assert!(
+        !output.contains("1970-01-01T"),
+        "CLI output should not render storage timestamps as 1970 dates: {output}"
+    );
+    assert!(
+        output.contains("20"),
+        "CLI output should contain a human-readable modern timestamp: {output}"
+    );
+}
+
+#[ntest::timeout(60_000)]
+#[test]
 fn smoke_show_storages_user_access() {
     if !is_server_running() {
         println!(

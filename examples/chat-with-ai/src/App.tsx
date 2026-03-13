@@ -27,7 +27,7 @@ type LiveDraft = {
   preview: string;
 };
 
-const MAX_CHAT_MESSAGES = 40;
+const MAX_CHAT_MESSAGES = 80;
 const MAX_AGENT_EVENTS = 24;
 
 const ROOM = import.meta.env.VITE_CHAT_ROOM ?? 'main';

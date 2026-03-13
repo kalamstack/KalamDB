@@ -68,12 +68,19 @@ impl Benchmark for ConnectionStormBench {
 
                 handles.push(tokio::spawn(async move {
                     // Each task does a fresh login → query → independently
-                    // Retry on 429 (rate limiting) with exponential backoff
+                    // Retry on rate limits and transient transport failures with exponential backoff.
                     let mut delay = std::time::Duration::from_millis(200);
+                    let mut attempts = 0u32;
                     let fresh = loop {
                         match KalamClient::login_single(&url, &user, &pass).await {
                             Ok(c) => break c,
-                            Err(e) if e.contains("429") || e.contains("rate_limited") => {
+                            Err(e)
+                                if attempts < 5
+                                    && (e.contains("429")
+                                        || e.contains("rate_limited")
+                                        || is_transient_load_error(&e)) =>
+                            {
+                                attempts += 1;
                                 tokio::time::sleep(delay).await;
                                 delay = std::cmp::min(delay * 2, std::time::Duration::from_secs(5));
                             },
@@ -107,4 +114,14 @@ impl Benchmark for ConnectionStormBench {
             Ok(())
         })
     }
+}
+
+fn is_transient_load_error(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("network error")
+        || lower.contains("connection failed")
+        || lower.contains("timed out")
+        || lower.contains("timeout")
+        || lower.contains("connection reset")
+        || lower.contains("broken pipe")
 }

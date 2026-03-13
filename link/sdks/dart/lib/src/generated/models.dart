@@ -224,20 +224,23 @@ class DartHealthCheckResponse {
 /// Configuration for Rust-side live row materialization.
 class DartLiveRowsConfig {
   final int? limit;
+  final List<String>? keyColumns;
 
   const DartLiveRowsConfig({
     this.limit,
+    this.keyColumns,
   });
 
   @override
-  int get hashCode => limit.hashCode;
+  int get hashCode => limit.hashCode ^ keyColumns.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is DartLiveRowsConfig &&
           runtimeType == other.runtimeType &&
-          limit == other.limit;
+          limit == other.limit &&
+          keyColumns == other.keyColumns;
 }
 
 @freezed

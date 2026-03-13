@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # KalamDB Benchmark Runner
-# Usage: ./run-benchmarks.sh [--urls URLS] [--user USER] [--password PASS] [--iterations N]
+# Usage: ./run-benchmarks.sh [--urls URLS] [--user USER] [--password PASS] [--iterations N] [--max-subscribers N]
 set -euo pipefail
 
 # Raise file-descriptor limit for the benchmark process (WebSocket connections, etc.)
@@ -13,7 +13,9 @@ cd "$SCRIPT_DIR"
 URLS="${KALAMDB_URLS:-${KALAMDB_URL:-http://localhost:8080}}"
 USER="${KALAMDB_USER:-admin}"
 PASSWORD="${KALAMDB_PASSWORD:-kalamdb123}"
-EXTRA_ARGS=""
+MAX_SUBSCRIBERS="${KALAMDB_MAX_SUBSCRIBERS:-}"
+DEFAULT_SINGLE_TARGET_MAX_SUBSCRIBERS=25000
+EXTRA_ARGS=()
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -21,20 +23,38 @@ while [[ $# -gt 0 ]]; do
         --urls) URLS="$2"; shift 2;;
         --user) USER="$2"; shift 2;;
         --password) PASSWORD="$2"; shift 2;;
-        *) EXTRA_ARGS="$EXTRA_ARGS $1"; shift;;
+        --max-subscribers) MAX_SUBSCRIBERS="$2"; shift 2;;
+        *) EXTRA_ARGS+=("$1"); shift;;
     esac
 done
 
+IFS=',' read -r -a URL_ARRAY <<< "$URLS"
+if [[ -z "$MAX_SUBSCRIBERS" && "${#URL_ARRAY[@]}" -eq 1 ]]; then
+    MAX_SUBSCRIBERS="$DEFAULT_SINGLE_TARGET_MAX_SUBSCRIBERS"
+fi
+
 echo "🚀 KalamDB Benchmark Suite"
 echo "   Servers: $URLS"
+if [[ -n "$MAX_SUBSCRIBERS" ]]; then
+    echo "   Max subscribers: $MAX_SUBSCRIBERS"
+fi
 echo ""
 
 # Build and run
-cargo run --release -- \
-    --urls "$URLS" \
-    --user "$USER" \
-    --password "$PASSWORD" \
-    $EXTRA_ARGS
+CMD=(cargo run --release --
+    --urls "$URLS"
+    --user "$USER"
+    --password "$PASSWORD")
+
+if [[ -n "$MAX_SUBSCRIBERS" ]]; then
+    CMD+=(--max-subscribers "$MAX_SUBSCRIBERS")
+fi
+
+if (( ${#EXTRA_ARGS[@]} > 0 )); then
+    CMD+=("${EXTRA_ARGS[@]}")
+fi
+
+"${CMD[@]}"
 
 echo ""
 echo "📊 Reports saved to results/"

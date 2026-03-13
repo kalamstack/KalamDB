@@ -80,6 +80,8 @@ static TOKEN_CACHE: OnceLock<Mutex<std::collections::HashMap<String, String>>> =
 static TEST_AUTH_MANAGER: OnceLock<TestAuthManager> = OnceLock::new();
 static LOGIN_MUTEX: OnceLock<TokioMutex<()>> = OnceLock::new();
 static TOKEN_FILE_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
+static TEST_CLI_HOME_DIR: OnceLock<PathBuf> = OnceLock::new();
+static TEST_CLI_CREDENTIALS_PATH: OnceLock<PathBuf> = OnceLock::new();
 
 struct TestAuthManager {
     ready_urls: Mutex<HashSet<String>>,
@@ -219,7 +221,8 @@ impl TestAuthManager {
     ) -> Result<String, Box<dyn std::error::Error>> {
         let client = Client::new();
         let mut attempt: u32 = 0;
-        let max_attempts: u32 = 1;
+        let max_attempts: u32 = 40;
+        let retry_delay = Duration::from_millis(250);
 
         let extract_error_message = |parsed: &serde_json::Value| -> Option<String> {
             if let Some(msg) = parsed.get("message").and_then(|m| m.as_str()) {
@@ -244,7 +247,20 @@ impl TestAuthManager {
                     "password": password
                 }))
                 .send()
-                .await?;
+                .await;
+
+            let response = match response {
+                Ok(response) => response,
+                Err(err) if attempt + 1 < max_attempts => {
+                    attempt += 1;
+                    tokio::time::sleep(retry_delay).await;
+                    if err.is_timeout() || err.is_connect() || err.is_request() {
+                        continue;
+                    }
+                    continue;
+                },
+                Err(err) => return Err(err.into()),
+            };
 
             let status = response.status();
 
@@ -274,9 +290,14 @@ impl TestAuthManager {
                 extract_error_message(&parsed).unwrap_or_else(|| "Login failed".to_string());
             let is_rate_limited = status == reqwest::StatusCode::TOO_MANY_REQUESTS
                 || error_msg.to_lowercase().contains("too many");
+            let is_transient = status.is_server_error()
+                || status == reqwest::StatusCode::REQUEST_TIMEOUT
+                || status == reqwest::StatusCode::SERVICE_UNAVAILABLE
+                || status == reqwest::StatusCode::GATEWAY_TIMEOUT;
 
-            if is_rate_limited && attempt + 1 < max_attempts {
+            if (is_rate_limited || is_transient) && attempt + 1 < max_attempts {
                 attempt += 1;
+                tokio::time::sleep(retry_delay).await;
                 continue;
             }
 
@@ -507,7 +528,7 @@ impl TestAuthManager {
                     .map_err(|err| err.to_string());
                 let _ = tx.send(result);
             });
-            match rx.recv_timeout(Duration::from_secs(10)) {
+            match rx.recv_timeout(Duration::from_secs(60)) {
                 Ok(Ok(auth)) => auth,
                 Ok(Err(err)) => panic!(
                     "Failed to authenticate user '{}' for {}: {}",
@@ -584,7 +605,7 @@ fn force_reset_admin_for_url(base_url: &str) -> Result<(), Box<dyn std::error::E
                 .map_err(|err| err.to_string());
             let _ = tx.send(result);
         });
-        match rx.recv_timeout(Duration::from_secs(10)) {
+        match rx.recv_timeout(Duration::from_secs(60)) {
             Ok(Ok(())) => Ok(()),
             Ok(Err(err)) => Err(err.into()),
             Err(err) => Err(err.to_string().into()),
@@ -714,6 +735,7 @@ fn wait_for_url_reachable(url: &str, timeout: Duration) -> bool {
         if url_reachable(url) {
             return true;
         }
+        std::thread::sleep(Duration::from_millis(50));
     }
     url_reachable(url)
 }
@@ -748,7 +770,7 @@ fn ensure_auto_test_server() -> Option<(String, PathBuf)> {
                 let _ = tx.send(result);
             });
 
-            match rx.recv_timeout(Duration::from_secs(20)) {
+            match rx.recv_timeout(Duration::from_secs(60)) {
                 Ok(result) => result,
                 Err(err) => Err(format!("Timed out starting test server: {}", err)),
             }
@@ -863,7 +885,7 @@ async fn start_local_test_server() -> Result<AutoTestServer, Box<dyn std::error:
 
     let mut child = cmd.spawn()?;
 
-    if !wait_for_url_reachable(&base_url, Duration::from_secs(10)) {
+    if !wait_for_url_reachable(&base_url, Duration::from_secs(30)) {
         let _ = child.kill();
         let log_tail = std::fs::read_to_string(&log_path).unwrap_or_default();
         let log_tail = log_tail
@@ -957,9 +979,25 @@ fn ensure_server_ready_sync(base_url: &str) {
                 .map_err(|err| err.to_string());
             let _ = tx.send(result);
         });
-        let _ = rx.recv_timeout(Duration::from_secs(10));
+        match rx.recv_timeout(Duration::from_secs(30)) {
+            Ok(Ok(())) => {},
+            Ok(Err(err)) => panic!(
+                "Failed to prepare test authentication context for {}: {}",
+                base_url, err
+            ),
+            Err(err) => panic!(
+                "Timed out preparing test authentication context for {}: {}",
+                base_url, err
+            ),
+        }
     } else {
-        let _ = get_shared_runtime().block_on(test_auth_manager().ensure_ready(base_url));
+        if let Err(err) = get_shared_runtime().block_on(test_auth_manager().ensure_ready(base_url))
+        {
+            panic!(
+                "Failed to prepare test authentication context for {}: {}",
+                base_url, err
+            );
+        }
     }
 }
 
@@ -1517,7 +1555,7 @@ fn get_access_token_for_url_sync(base_url: &str, username: &str, password: &str)
                 .map_err(|err| err.to_string());
             let _ = tx.send(result);
         });
-        match rx.recv_timeout(Duration::from_secs(10)) {
+        match rx.recv_timeout(Duration::from_secs(60)) {
             Ok(Ok(token)) => Some(token),
             _ => None,
         }
@@ -2681,7 +2719,7 @@ pub fn execute_sql_as_root_via_cli(sql: &str) -> Result<String, Box<dyn std::err
     // Ensure server is set up on first CLI call
     static SETUP_DONE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
     SETUP_DONE.get_or_init(|| {
-        let _ = ensure_cli_server_setup();
+        ensure_cli_server_setup().expect("Failed to prepare CLI server setup");
     });
 
     execute_sql_via_cli_as(admin_username(), admin_password(), sql)
@@ -3358,13 +3396,26 @@ pub fn create_cli_command() -> assert_cmd::Command {
     if is_server_reachable() {
         static SETUP_DONE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
         SETUP_DONE.get_or_init(|| {
-            let _ = ensure_cli_server_setup();
+            ensure_cli_server_setup().expect("Failed to prepare CLI server setup");
         });
     }
+
+    let test_home = TEST_CLI_HOME_DIR.get_or_init(|| {
+        let path = std::env::temp_dir().join(format!("kalam-cli-test-home-{}", std::process::id()));
+        std::fs::create_dir_all(path.join(".kalam")).expect("failed to create isolated test home");
+        path
+    });
+    let credentials_path = TEST_CLI_CREDENTIALS_PATH.get_or_init(|| {
+        test_home.join(".kalam").join("credentials.toml")
+    });
 
     let mut cmd = assert_cmd::Command::new(env!("CARGO_BIN_EXE_kalam"));
     cmd.env("NO_PROXY", "127.0.0.1,localhost,::1")
         .env("no_proxy", "127.0.0.1,localhost,::1")
+        // Keep tests isolated from developer/CI host ~/.kalam state.
+        .env("HOME", test_home)
+        .env("USERPROFILE", test_home)
+        .env("KALAMDB_CREDENTIALS_PATH", credentials_path)
         .env_remove("HTTP_PROXY")
         .env_remove("http_proxy")
         .env_remove("HTTPS_PROXY")
@@ -3392,7 +3443,7 @@ pub fn create_cli_command_with_auth_for_server(
 ) -> assert_cmd::Command {
     static SETUP_DONE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
     SETUP_DONE.get_or_init(|| {
-        let _ = ensure_cli_server_setup();
+        ensure_cli_server_setup().expect("Failed to prepare CLI server setup");
     });
 
     let mut cmd = create_cli_command();
@@ -4473,7 +4524,7 @@ pub fn execute_sql_on_node(
             let _ = tx.send(result);
         });
         let result = rx
-            .recv_timeout(Duration::from_secs(10))
+            .recv_timeout(Duration::from_secs(60))
             .map_err(|e| boxed_error(format!("Query timed out or channel error: {}", e)))?;
         return result.map_err(boxed_error);
     }

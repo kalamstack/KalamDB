@@ -16,7 +16,6 @@ use crate::models::{
     ClientMessage, ConnectionOptions, QueryRequest, ServerMessage, SubscriptionOptions,
     SubscriptionRequest,
 };
-use crate::seq_tracking;
 use base64::Engine;
 
 use super::auth::WasmAuthProvider;
@@ -24,7 +23,8 @@ use super::console_log;
 use super::helpers::{create_promise, subscription_hash};
 use super::reconnect::{self, reconnect_internal_with_auth, resubscribe_all};
 use super::state::{
-    live_rows_payload, SubscriptionCallbackMode, SubscriptionState, WasmLiveRowsOptions,
+    callback_payload, filter_subscription_event, track_subscription_checkpoint,
+    SubscriptionCallbackMode, SubscriptionState, WasmLiveRowsOptions,
 };
 use super::validation::{
     quote_table_name, validate_column_name, validate_row_id, validate_sql_identifier,
@@ -227,6 +227,175 @@ fn reject_pending_subscriptions(
     }
 }
 
+struct SubscriptionDispatch {
+    callback: Option<js_sys::Function>,
+    payload: Option<String>,
+    resolve_subscribe: Option<js_sys::Function>,
+    reject_subscribe: Option<(js_sys::Function, String)>,
+}
+
+impl SubscriptionDispatch {
+    fn invoke(self) {
+        if let Some(cb) = self.callback {
+            if let Some(payload) = self.payload {
+                let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&payload));
+            }
+        }
+        if let Some(resolve) = self.resolve_subscribe {
+            let _ = resolve.call0(&JsValue::NULL);
+        }
+        if let Some((reject, reason)) = self.reject_subscribe {
+            let _ = reject.call1(&JsValue::NULL, &JsValue::from_str(&reason));
+        }
+    }
+}
+
+fn subscription_id_from_server_message(event: &ServerMessage) -> Option<String> {
+    match event {
+        ServerMessage::SubscriptionAck {
+            subscription_id,
+            total_rows,
+            ..
+        } => {
+            console_log(&format!(
+                "KalamClient: Parsed SubscriptionAck - id: {}, total_rows: {}",
+                subscription_id, total_rows
+            ));
+            Some(subscription_id.clone())
+        },
+        ServerMessage::InitialDataBatch {
+            subscription_id,
+            batch_control,
+            rows,
+        } => {
+            console_log(&format!(
+                "KalamClient: Parsed InitialDataBatch - id: {}, rows: {}, status: {:?}",
+                subscription_id,
+                rows.len(),
+                batch_control.status
+            ));
+            Some(subscription_id.clone())
+        },
+        ServerMessage::Change {
+            subscription_id,
+            change_type,
+            rows,
+            old_values: _,
+        } => {
+            console_log(&format!(
+                "KalamClient: Parsed Change - id: {}, type: {:?}, rows: {:?}",
+                subscription_id,
+                change_type,
+                rows.as_ref().map(|value| value.len())
+            ));
+            Some(subscription_id.clone())
+        },
+        ServerMessage::Error {
+            subscription_id,
+            code,
+            message,
+            ..
+        } => {
+            console_log(&format!(
+                "KalamClient: Parsed Error - id: {}, code: {}, msg: {}",
+                subscription_id, code, message
+            ));
+            Some(subscription_id.clone())
+        },
+        _ => None,
+    }
+}
+
+fn resolve_subscription_key(
+    subscription_id: &str,
+    subscriptions: &HashMap<String, SubscriptionState>,
+) -> Option<String> {
+    if subscriptions.contains_key(subscription_id) {
+        Some(subscription_id.to_string())
+    } else {
+        subscriptions
+            .keys()
+            .find(|client_id| subscription_id.ends_with(client_id.as_str()))
+            .cloned()
+    }
+}
+
+fn dispatch_subscription_server_message(
+    subscriptions: &Rc<RefCell<HashMap<String, SubscriptionState>>>,
+    event: &ServerMessage,
+) -> Option<SubscriptionDispatch> {
+    let subscription_id = subscription_id_from_server_message(event)?;
+    let matched_key = {
+        let subs = subscriptions.borrow();
+        console_log(&format!(
+            "KalamClient: Looking for callback for subscription_id: {} (registered subs: {})",
+            subscription_id,
+            subs.len()
+        ));
+        resolve_subscription_key(&subscription_id, &subs)
+    };
+
+    let Some(client_id) = matched_key else {
+        console_log(&format!(
+            "KalamClient: No callback found for subscription_id: {}",
+            subscription_id
+        ));
+        return None;
+    };
+
+    let mut callback = None;
+    let mut payload = None;
+    let mut resolve_subscribe = None;
+    let mut reject_subscribe = None;
+    let mut remove_state = false;
+
+    {
+        let mut subs = subscriptions.borrow_mut();
+        if let Some(state) = subs.get_mut(&client_id) {
+            callback = Some(state.callback.clone());
+            if let Some(filtered_event) = filter_subscription_event(&state.options, event) {
+                track_subscription_checkpoint(&mut state.last_seq_id, &filtered_event);
+                payload = callback_payload(&mut state.callback_mode, &filtered_event);
+            }
+
+            match event {
+                ServerMessage::SubscriptionAck { .. } => {
+                    if state.awaiting_initial_response {
+                        state.awaiting_initial_response = false;
+                        state.pending_subscribe_reject = None;
+                        resolve_subscribe = state.pending_subscribe_resolve.take();
+                    }
+                },
+                ServerMessage::Error { code, message, .. } => {
+                    if state.awaiting_initial_response {
+                        state.awaiting_initial_response = false;
+                        state.pending_subscribe_resolve = None;
+                        if let Some(reject) = state.pending_subscribe_reject.take() {
+                            reject_subscribe = Some((
+                                reject,
+                                format!("Subscription failed ({}): {}", code, message),
+                            ));
+                        }
+                        remove_state = true;
+                    }
+                },
+                _ => {},
+            }
+        }
+
+        if remove_state {
+            subs.remove(&client_id);
+        }
+    }
+
+    Some(SubscriptionDispatch {
+        callback,
+        payload,
+        resolve_subscribe,
+        reject_subscribe,
+    })
+}
+
 fn emit_runtime_ws_error(
     on_error_cb: &Rc<RefCell<Option<js_sys::Function>>>,
     message: &str,
@@ -234,16 +403,9 @@ fn emit_runtime_ws_error(
 ) {
     if let Some(cb) = on_error_cb.borrow().as_ref() {
         let err_obj = js_sys::Object::new();
-        let _ = js_sys::Reflect::set(
-            &err_obj,
-            &"message".into(),
-            &JsValue::from_str(message),
-        );
-        let _ = js_sys::Reflect::set(
-            &err_obj,
-            &"recoverable".into(),
-            &JsValue::from_bool(recoverable),
-        );
+        let _ = js_sys::Reflect::set(&err_obj, &"message".into(), &JsValue::from_str(message));
+        let _ =
+            js_sys::Reflect::set(&err_obj, &"recoverable".into(), &JsValue::from_bool(recoverable));
         let _ = cb.call1(&JsValue::NULL, &err_obj);
     }
 }
@@ -290,15 +452,9 @@ fn install_runtime_disconnect_handlers(
             let _ = cb.call1(&JsValue::NULL, &reason_obj);
         }
         let close_message = if e.reason().is_empty() {
-            format!(
-                "WebSocket closed before the subscription was acknowledged (code {})",
-                e.code()
-            )
+            format!("WebSocket closed before the subscription was acknowledged (code {})", e.code())
         } else {
-            format!(
-                "WebSocket closed before the subscription was acknowledged: {}",
-                e.reason()
-            )
+            format!("WebSocket closed before the subscription was acknowledged: {}", e.reason())
         };
         reject_pending_subscriptions(&subscriptions_for_close, &close_message);
     }) as Box<dyn FnMut(CloseEvent)>);
@@ -378,163 +534,8 @@ fn install_runtime_message_handler(
         }
 
         if let Ok(event) = serde_json::from_str::<ServerMessage>(&message) {
-            let subscription_id = match &event {
-                ServerMessage::SubscriptionAck {
-                    subscription_id,
-                    total_rows,
-                    ..
-                } => {
-                    console_log(&format!(
-                        "KalamClient: Parsed SubscriptionAck - id: {}, total_rows: {}",
-                        subscription_id, total_rows
-                    ));
-                    Some(subscription_id.clone())
-                },
-                ServerMessage::InitialDataBatch {
-                    subscription_id,
-                    batch_control,
-                    rows,
-                } => {
-                    console_log(&format!(
-                        "KalamClient: Parsed InitialDataBatch - id: {}, rows: {}, status: {:?}",
-                        subscription_id, rows.len(), batch_control.status
-                    ));
-                    if let Some(seq_id) = &batch_control.last_seq_id {
-                        let mut subs = subscriptions.borrow_mut();
-                        if let Some(state) = subs.get_mut(subscription_id) {
-                            seq_tracking::advance_seq(&mut state.last_seq_id, *seq_id);
-                        }
-                    }
-                    {
-                        let mut subs = subscriptions.borrow_mut();
-                        if let Some(state) = subs.get_mut(subscription_id) {
-                            seq_tracking::track_rows(&mut state.last_seq_id, &rows);
-                        }
-                    }
-                    Some(subscription_id.clone())
-                },
-                ServerMessage::Change {
-                    subscription_id,
-                    change_type,
-                    rows,
-                    old_values,
-                } => {
-                    console_log(&format!(
-                        "KalamClient: Parsed Change - id: {}, type: {:?}, rows: {:?}",
-                        subscription_id,
-                        change_type,
-                        rows.as_ref().map(|r| r.len())
-                    ));
-                    {
-                        let mut subs = subscriptions.borrow_mut();
-                        if let Some(state) = subs.get_mut(subscription_id) {
-                            if let Some(r) = rows.as_ref() {
-                                seq_tracking::track_rows(&mut state.last_seq_id, r);
-                            }
-                            if let Some(old) = old_values.as_ref() {
-                                seq_tracking::track_rows(&mut state.last_seq_id, old);
-                            }
-                        }
-                    }
-                    Some(subscription_id.clone())
-                },
-                ServerMessage::Error {
-                    subscription_id,
-                    code,
-                    message,
-                    ..
-                } => {
-                    console_log(&format!(
-                        "KalamClient: Parsed Error - id: {}, code: {}, msg: {}",
-                        subscription_id, code, message
-                    ));
-                    Some(subscription_id.clone())
-                },
-                _ => None,
-            };
-
-            if let Some(id) = subscription_id.clone() {
-                let matched_key = {
-                    let subs = subscriptions.borrow();
-                    console_log(&format!(
-                        "KalamClient: Looking for callback for subscription_id: {} (registered subs: {:?})",
-                        id,
-                        subs.keys().collect::<Vec<_>>()
-                    ));
-                    if subs.contains_key(&id) {
-                        Some(id.clone())
-                    } else {
-                        subs.keys().find(|client_id| id.ends_with(client_id.as_str())).cloned()
-                    }
-                };
-
-                if let Some(client_id) = matched_key {
-                    let mut callback: Option<js_sys::Function> = None;
-                    let mut callback_payload: Option<String> = None;
-                    let mut resolve_subscribe: Option<js_sys::Function> = None;
-                    let mut reject_subscribe: Option<(js_sys::Function, String)> = None;
-                    let mut remove_state = false;
-
-                    {
-                        let mut subs = subscriptions.borrow_mut();
-                        if let Some(state) = subs.get_mut(&client_id) {
-                            callback = Some(state.callback.clone());
-                            callback_payload = live_rows_payload(
-                                &mut state.callback_mode,
-                                &message,
-                                &event,
-                            );
-
-                            match &event {
-                                ServerMessage::SubscriptionAck { .. } => {
-                                    if state.awaiting_initial_response {
-                                        state.awaiting_initial_response = false;
-                                        state.pending_subscribe_reject = None;
-                                        resolve_subscribe = state.pending_subscribe_resolve.take();
-                                    }
-                                },
-                                ServerMessage::Error { code, message, .. } => {
-                                    if state.awaiting_initial_response {
-                                        state.awaiting_initial_response = false;
-                                        state.pending_subscribe_resolve = None;
-                                        if let Some(reject) = state.pending_subscribe_reject.take() {
-                                            reject_subscribe = Some((
-                                                reject,
-                                                format!(
-                                                    "Subscription failed ({}): {}",
-                                                    code, message
-                                                ),
-                                            ));
-                                        }
-                                        remove_state = true;
-                                    }
-                                },
-                                _ => {},
-                            }
-                        }
-
-                        if remove_state {
-                            subs.remove(&client_id);
-                        }
-                    }
-
-                    if let Some(cb) = callback {
-                        if let Some(payload) = callback_payload {
-                            let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&payload));
-                        }
-                    }
-                    if let Some(resolve) = resolve_subscribe {
-                        let _ = resolve.call0(&JsValue::NULL);
-                    }
-                    if let Some((reject, reason)) = reject_subscribe {
-                        let _ = reject.call1(&JsValue::NULL, &JsValue::from_str(&reason));
-                    }
-                } else {
-                    console_log(&format!(
-                        "KalamClient: No callback found for subscription_id: {}",
-                        id
-                    ));
-                }
+            if let Some(dispatch) = dispatch_subscription_server_message(&subscriptions, &event) {
+                dispatch.invoke();
             }
         }
     }) as Box<dyn FnMut(MessageEvent)>);
@@ -1011,10 +1012,7 @@ impl KalamClient {
                     e.code()
                 )
             } else {
-                format!(
-                    "WebSocket closed before the subscription was acknowledged: {}",
-                    e.reason()
-                )
+                format!("WebSocket closed before the subscription was acknowledged: {}", e.reason())
             };
             reject_pending_subscriptions(&subscriptions_for_close, &close_message);
             // Note: Auto-reconnection is handled via the setup_auto_reconnect callback
@@ -1163,168 +1161,9 @@ impl KalamClient {
                     }
                 }
 
-                // Look for subscription_id in the event and update last_seq_id
-                let subscription_id =
-                    match &event {
-                        ServerMessage::SubscriptionAck {
-                            subscription_id,
-                            total_rows,
-                            ..
-                        } => {
-                            console_log(&format!(
-                                "KalamClient: Parsed SubscriptionAck - id: {}, total_rows: {}",
-                                subscription_id, total_rows
-                            ));
-                            Some(subscription_id.clone())
-                        },
-                        ServerMessage::InitialDataBatch {
-                            subscription_id,
-                            batch_control,
-                            rows,
-                        } => {
-                            console_log(&format!(
-                            "KalamClient: Parsed InitialDataBatch - id: {}, rows: {}, status: {:?}",
-                            subscription_id, rows.len(), batch_control.status
-                        ));
-                            // Update last_seq_id from batch_control
-                            if let Some(seq_id) = &batch_control.last_seq_id {
-                                let mut subs = subscriptions.borrow_mut();
-                                if let Some(state) = subs.get_mut(subscription_id) {
-                                    seq_tracking::advance_seq(&mut state.last_seq_id, *seq_id);
-                                }
-                            }
-                            // Also track _seq from row data
-                            {
-                                let mut subs = subscriptions.borrow_mut();
-                                if let Some(state) = subs.get_mut(subscription_id) {
-                                    seq_tracking::track_rows(&mut state.last_seq_id, &rows);
-                                }
-                            }
-                            Some(subscription_id.clone())
-                        },
-                        ServerMessage::Change {
-                            subscription_id,
-                            change_type,
-                            rows,
-                            old_values,
-                        } => {
-                            console_log(&format!(
-                                "KalamClient: Parsed Change - id: {}, type: {:?}, rows: {:?}",
-                                subscription_id,
-                                change_type,
-                                rows.as_ref().map(|r| r.len())
-                            ));
-                            // Track _seq from change event rows
-                            {
-                                let mut subs = subscriptions.borrow_mut();
-                                if let Some(state) = subs.get_mut(subscription_id) {
-                                    if let Some(r) = rows.as_ref() {
-                                        seq_tracking::track_rows(&mut state.last_seq_id, r);
-                                    }
-                                    if let Some(old) = old_values.as_ref() {
-                                        seq_tracking::track_rows(&mut state.last_seq_id, old);
-                                    }
-                                }
-                            }
-                            Some(subscription_id.clone())
-                        },
-                        ServerMessage::Error {
-                            subscription_id,
-                            code,
-                            message,
-                            ..
-                        } => {
-                            console_log(&format!(
-                                "KalamClient: Parsed Error - id: {}, code: {}, msg: {}",
-                                subscription_id, code, message
-                            ));
-                            Some(subscription_id.clone())
-                        },
-                        _ => None, // Auth messages don't have subscription_id
-                    };
-
-                if let Some(id) = subscription_id.clone() {
-                    let matched_key = {
-                        let subs = subscriptions.borrow();
-                        console_log(&format!(
-                            "KalamClient: Looking for callback for subscription_id: {} (registered subs: {:?})",
-                            id,
-                            subs.keys().collect::<Vec<_>>()
-                        ));
-                        if subs.contains_key(&id) {
-                            Some(id.clone())
-                        } else {
-                            subs.keys().find(|client_id| id.ends_with(client_id.as_str())).cloned()
-                        }
-                    };
-
-                    if let Some(client_id) = matched_key {
-                        let mut callback: Option<js_sys::Function> = None;
-                        let mut callback_payload: Option<String> = None;
-                        let mut resolve_subscribe: Option<js_sys::Function> = None;
-                        let mut reject_subscribe: Option<(js_sys::Function, String)> = None;
-                        let mut remove_state = false;
-
-                        {
-                            let mut subs = subscriptions.borrow_mut();
-                            if let Some(state) = subs.get_mut(&client_id) {
-                                callback = Some(state.callback.clone());
-                                callback_payload = live_rows_payload(
-                                    &mut state.callback_mode,
-                                    &message,
-                                    &event,
-                                );
-
-                                match &event {
-                                    ServerMessage::SubscriptionAck { .. } => {
-                                        if state.awaiting_initial_response {
-                                            state.awaiting_initial_response = false;
-                                            state.pending_subscribe_reject = None;
-                                            resolve_subscribe = state.pending_subscribe_resolve.take();
-                                        }
-                                    },
-                                    ServerMessage::Error { code, message, .. } => {
-                                        if state.awaiting_initial_response {
-                                            state.awaiting_initial_response = false;
-                                            state.pending_subscribe_resolve = None;
-                                            if let Some(reject) = state.pending_subscribe_reject.take() {
-                                                reject_subscribe = Some((
-                                                    reject,
-                                                    format!(
-                                                        "Subscription failed ({}): {}",
-                                                        code, message
-                                                    ),
-                                                ));
-                                            }
-                                            remove_state = true;
-                                        }
-                                    },
-                                    _ => {},
-                                }
-                            }
-
-                            if remove_state {
-                                subs.remove(&client_id);
-                            }
-                        }
-
-                        if let Some(cb) = callback {
-                            if let Some(payload) = callback_payload {
-                                let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&payload));
-                            }
-                        }
-                        if let Some(resolve) = resolve_subscribe {
-                            let _ = resolve.call0(&JsValue::NULL);
-                        }
-                        if let Some((reject, reason)) = reject_subscribe {
-                            let _ = reject.call1(&JsValue::NULL, &JsValue::from_str(&reason));
-                        }
-                    } else {
-                        console_log(&format!(
-                            "KalamClient: No callback found for subscription_id: {}",
-                            id
-                        ));
-                    }
+                if let Some(dispatch) = dispatch_subscription_server_message(&subscriptions, &event)
+                {
+                    dispatch.invoke();
                 }
             }
         }) as Box<dyn FnMut(MessageEvent)>);
@@ -1677,6 +1516,7 @@ impl KalamClient {
             callback,
             SubscriptionCallbackMode::live_rows(crate::subscription::LiveRowsConfig {
                 limit: parsed_options.limit,
+                key_columns: parsed_options.key_columns,
             }),
         )
         .await
@@ -2185,9 +2025,10 @@ fn install_auto_reconnect_listener(
 ) {
     let source_ws = ws.clone();
     let onclose_reconnect = Closure::wrap(Box::new(move |_e: CloseEvent| {
-        let is_active_socket = ws_ref.borrow().as_ref().is_some_and(|current_ws| {
-            js_sys::Object::is(current_ws.as_ref(), source_ws.as_ref())
-        });
+        let is_active_socket = ws_ref
+            .borrow()
+            .as_ref()
+            .is_some_and(|current_ws| js_sys::Object::is(current_ws.as_ref(), source_ws.as_ref()));
         if !is_active_socket {
             return;
         }
@@ -2200,10 +2041,7 @@ fn install_auto_reconnect_listener(
         let current_attempts = *reconnect_attempts.borrow();
         if let Some(max) = opts.max_reconnect_attempts {
             if current_attempts >= max {
-                console_log(&format!(
-                    "KalamClient: Max reconnection attempts ({}) reached",
-                    max
-                ));
+                console_log(&format!("KalamClient: Max reconnection attempts ({}) reached", max));
                 return;
             }
         }

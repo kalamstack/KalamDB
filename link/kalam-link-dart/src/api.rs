@@ -562,14 +562,16 @@ pub async fn dart_live_query_rows_subscribe(
     config: Option<DartSubscriptionConfig>,
     live_config: Option<DartLiveRowsConfig>,
 ) -> anyhow::Result<DartLiveRowsSubscription> {
-    let native_live_config = live_config.unwrap_or(DartLiveRowsConfig { limit: None }).into_native();
+    let native_live_config = live_config
+        .unwrap_or(DartLiveRowsConfig {
+            limit: None,
+            key_columns: None,
+        })
+        .into_native();
     let sub = if let Some(cfg) = config {
         let mut native_cfg = cfg.into_native();
         native_cfg.sql = sql;
-        client
-            .inner
-            .live_query_rows_with_config(native_cfg, native_live_config)
-            .await?
+        client.inner.live_query_rows_with_config(native_cfg, native_live_config).await?
     } else {
         let native_cfg = kalam_link::SubscriptionConfig::new(
             format!(
@@ -581,10 +583,7 @@ pub async fn dart_live_query_rows_subscribe(
             ),
             sql,
         );
-        client
-            .inner
-            .live_query_rows_with_config(native_cfg, native_live_config)
-            .await?
+        client.inner.live_query_rows_with_config(native_cfg, native_live_config).await?
     };
 
     let sub_id = sub.subscription_id().to_owned();
