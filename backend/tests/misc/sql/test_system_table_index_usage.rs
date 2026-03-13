@@ -445,10 +445,7 @@ async fn test_index_performance_scaling() {
             .await;
     }
 
-    let query = format!(
-        "SELECT user_id FROM system.users WHERE username = '{}'",
-        lookup_username
-    );
+    let query = format!("SELECT user_id FROM system.users WHERE username = '{}'", lookup_username);
     let sample_count = 15usize;
 
     let mut samples_50 = Vec::with_capacity(sample_count);

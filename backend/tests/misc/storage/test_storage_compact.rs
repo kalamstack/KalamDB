@@ -8,6 +8,7 @@
 use super::test_support::{fixtures, TestServer};
 use anyhow::Result;
 use kalam_link::models::ResponseStatus;
+use kalamdb_system::Manifest;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
@@ -50,6 +51,43 @@ fn latest_sst_mtime(root: &Path) -> Option<SystemTime> {
     let mut latest = None;
     recurse(root, &mut latest);
     latest
+}
+
+fn find_manifest_files(root: &Path) -> Vec<PathBuf> {
+    fn recurse(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                recurse(&path, out);
+            } else if path.file_name().and_then(|name| name.to_str()) == Some("manifest.json") {
+                out.push(path);
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    recurse(root, &mut out);
+    out
+}
+
+fn find_batch_files(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+
+    entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.starts_with("batch-") && name.ends_with(".parquet"))
+                .unwrap_or(false)
+        })
+        .collect()
 }
 
 async fn wait_for_compact_jobs(
@@ -132,6 +170,52 @@ async fn wait_for_compact_jobs(
         }
 
         sleep(Duration::from_millis(100)).await;
+    }
+}
+
+async fn wait_for_flush_job_completed(
+    server: &TestServer,
+    namespace: &str,
+    table: &str,
+    timeout: Duration,
+) -> Result<()> {
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        let resp = server
+            .execute_sql(
+                "SELECT job_type, status, parameters FROM system.jobs WHERE job_type = 'flush'",
+            )
+            .await;
+
+        if resp.status == ResponseStatus::Success {
+            if let Some(first) = resp.results.first() {
+                let maps = first.rows_as_maps();
+                let maybe_job = maps.iter().find(|row| {
+                    row.get("parameters")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.contains(namespace) && s.contains(table))
+                        .unwrap_or(false)
+                });
+
+                if let Some(job) = maybe_job {
+                    let status = job.get("status").and_then(|v| v.as_str()).unwrap_or("");
+                    if status == "completed" {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
+        if Instant::now() >= deadline {
+            anyhow::bail!(
+                "Timed out waiting for flush job to complete for {}.{}",
+                namespace,
+                table
+            );
+        }
+
+        sleep(Duration::from_millis(50)).await;
     }
 }
 
@@ -247,4 +331,101 @@ async fn test_storage_compact_rejects_stream_and_empty_namespace() -> Result<()>
     );
 
     Ok(())
+}
+
+#[tokio::test]
+#[ntest::timeout(90000)]
+async fn test_storage_compact_cleans_empty_shared_segments_and_parquet_files() -> Result<()> {
+    let server = TestServer::new_shared().await;
+    let namespace = unique_name("compact_cleanup_ns");
+    let table = unique_name("compact_cleanup_shared");
+
+    fixtures::create_namespace(&server, &namespace).await;
+
+    let create_shared = format!(
+        "CREATE TABLE {}.{} (id INT PRIMARY KEY, value TEXT) WITH (TYPE = 'SHARED', FLUSH_POLICY = 'rows:5')",
+        namespace, table
+    );
+    let resp = server.execute_sql(&create_shared).await;
+    assert_eq!(resp.status, ResponseStatus::Success, "create shared table failed");
+
+    for i in 1..=6 {
+        let insert = format!(
+            "INSERT INTO {}.{} (id, value) VALUES ({}, 'value_{}')",
+            namespace, table, i, i
+        );
+        let resp = server.execute_sql(&insert).await;
+        assert_eq!(resp.status, ResponseStatus::Success, "insert shared failed");
+    }
+
+    let flush_sql = format!("STORAGE FLUSH TABLE {}.{}", namespace, table);
+    let resp = server.execute_sql(&flush_sql).await;
+    assert_eq!(resp.status, ResponseStatus::Success, "flush shared table failed");
+
+    wait_for_flush_job_completed(&server, &namespace, &table, Duration::from_secs(30)).await?;
+
+    let storage_root =
+        PathBuf::from(server.app_context.config().storage.data_path.clone()).join("storage");
+    let manifest_path = find_manifest_files(&storage_root)
+        .into_iter()
+        .find(|path| {
+            path.to_string_lossy().contains(&namespace) && path.to_string_lossy().contains(&table)
+        })
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Expected manifest.json for {}.{} under {}",
+                namespace,
+                table,
+                storage_root.display()
+            )
+        })?;
+
+    let table_dir = manifest_path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("manifest.json missing parent directory"))?;
+    let batch_files_before = find_batch_files(table_dir);
+    assert!(
+        !batch_files_before.is_empty(),
+        "Expected flushed parquet files before compaction cleanup in {}",
+        table_dir.display()
+    );
+
+    let delete_sql = format!("DELETE FROM {}.{} WHERE id >= 1", namespace, table);
+    let resp = server.execute_sql(&delete_sql).await;
+    assert_eq!(resp.status, ResponseStatus::Success, "delete shared failed");
+
+    let compact_sql = format!("STORAGE COMPACT TABLE {}.{}", namespace, table);
+    let resp = server.execute_sql(&compact_sql).await;
+    assert_eq!(resp.status, ResponseStatus::Success, "compact shared table failed");
+
+    wait_for_compact_jobs(
+        &server,
+        &namespace,
+        std::slice::from_ref(&table),
+        Duration::from_secs(20),
+    )
+    .await?;
+
+    let cleanup_deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let manifest_json = std::fs::read_to_string(&manifest_path)?;
+        let manifest: Manifest = serde_json::from_str(&manifest_json)?;
+        let batch_files_after = find_batch_files(table_dir);
+
+        if manifest.segments.is_empty() && batch_files_after.is_empty() {
+            return Ok(());
+        }
+
+        if Instant::now() >= cleanup_deadline {
+            anyhow::bail!(
+                "Expected empty manifest and no parquet files after compaction cleanup for {}.{} (segments={}, files={:?})",
+                namespace,
+                table,
+                manifest.segments.len(),
+                batch_files_after
+            );
+        }
+
+        sleep(Duration::from_millis(50)).await;
+    }
 }

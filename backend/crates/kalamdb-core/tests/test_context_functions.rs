@@ -137,7 +137,7 @@ async fn test_current_user_id_with_dba_role() {
 
 #[tokio::test]
 async fn test_current_user_id_with_system_role() {
-    let user_id = UserId::new("system");
+    let user_id = UserId::system();
     let role = Role::System;
 
     // Create ExecutionContext
@@ -277,7 +277,7 @@ async fn test_current_role_dba() {
 
 #[tokio::test]
 async fn test_current_role_system() {
-    let user_id = UserId::new("system");
+    let user_id = UserId::system();
     let role = Role::System;
 
     let exec_ctx = ExecutionContext::new(user_id, role, create_test_session());

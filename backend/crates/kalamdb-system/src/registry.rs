@@ -419,7 +419,7 @@ impl SystemTablesRegistry {
         let tables: HashSet<SystemTable> = definitions
             .into_iter()
             .filter(|def| def.table_type == TableType::System)
-            .filter(|def| def.namespace_id.as_str() == "system")
+            .filter(|def| def.namespace_id.is_system_namespace())
             .filter_map(|def| SystemTable::from_name(def.table_name.as_str()).ok())
             .filter(|table| !table.is_view())
             .collect();

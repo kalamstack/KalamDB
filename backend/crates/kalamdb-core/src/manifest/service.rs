@@ -278,6 +278,10 @@ impl ManifestService {
 
         match self.provider.get_cache_entry(&rocksdb_key) {
             Ok(Some(old_entry)) => {
+                if old_entry.sync_state == SyncState::PendingWrite {
+                    return Ok(());
+                }
+
                 let mut new_entry = old_entry.clone();
                 new_entry.mark_pending_write();
                 self.provider
@@ -549,6 +553,61 @@ impl ManifestService {
         self.flush_manifest(table_id, user_id)?;
         self.update_after_flush(table_id, user_id, manifest, None)?;
         Ok(())
+    }
+
+    /// Clear all manifest segments for a table scope and delete their associated Parquet files.
+    ///
+    /// This is the first step of cold-storage compaction cleanup for scopes that
+    /// resolve to zero live rows after flush. It keeps an empty manifest on disk
+    /// so future flushes can continue with a clean state.
+    pub fn clear_segments_and_delete_files(
+        &self,
+        table_id: &TableId,
+        user_id: Option<&UserId>,
+    ) -> Result<usize, StorageError> {
+        let schema_registry = self.get_schema_registry();
+        let storage_registry = self.get_storage_registry();
+
+        let table = schema_registry
+            .get_table_if_exists(table_id)
+            .map_err(|e| StorageError::Other(e.to_string()))?
+            .ok_or_else(|| StorageError::Other(format!("Table not found: {}", table_id)))?;
+        let storage_id = schema_registry
+            .get_storage_id(table_id)
+            .map_err(|e| StorageError::Other(e.to_string()))?;
+        let storage_cached = storage_registry
+            .get_cached(&storage_id)
+            .map_err(|e| StorageError::Other(e.to_string()))?
+            .ok_or_else(|| {
+                StorageError::Other(format!("Storage '{}' not found in registry", storage_id))
+            })?;
+
+        let mut manifest = self.ensure_manifest_initialized(table_id, user_id)?;
+        if manifest.segments.is_empty() {
+            return Ok(0);
+        }
+
+        let segment_paths =
+            manifest.segments.iter().map(|segment| segment.path.clone()).collect::<Vec<_>>();
+
+        manifest.segments.clear();
+        manifest.last_sequence_number = 0;
+        manifest.updated_at = chrono::Utc::now().timestamp_millis();
+        manifest.version += 1;
+
+        self.persist_manifest(table_id, user_id, &manifest)?;
+
+        let mut deleted_files = 0;
+        for path in segment_paths {
+            let delete_result = storage_cached
+                .delete_sync(table.table_type, table_id, user_id, &path)
+                .map_err(|e| StorageError::IoError(e.to_string()))?;
+            if delete_result.existed {
+                deleted_files += 1;
+            }
+        }
+
+        Ok(deleted_files)
     }
 
     /// Flush manifest: Write to Cold Store (storage via StorageCached).
@@ -1061,6 +1120,29 @@ mod tests {
         service.update_after_flush(&table_id, Some(&user_id), &manifest, None).unwrap();
         assert_eq!(service.pending_count().unwrap(), 0);
         assert!(!service.has_pending_writes(&table_id, Some(&user_id)).unwrap());
+    }
+
+    #[test]
+    fn test_mark_pending_write_is_idempotent() {
+        let service = create_test_service();
+        let table_id = build_table_id("ns1", "tbl1");
+        let user_id = UserId::from("u_123");
+        let manifest = create_test_manifest(&table_id, Some(&user_id));
+
+        service.stage_before_flush(&table_id, Some(&user_id), &manifest).unwrap();
+
+        service.mark_pending_write(&table_id, Some(&user_id)).unwrap();
+        let pending = service.get_or_load(&table_id, Some(&user_id)).unwrap().unwrap();
+        let pending_last_refreshed = pending.last_refreshed_millis();
+        assert_eq!(pending.sync_state, SyncState::PendingWrite);
+        assert!(service.has_pending_writes(&table_id, Some(&user_id)).unwrap());
+
+        service.mark_pending_write(&table_id, Some(&user_id)).unwrap();
+
+        let pending_again = service.get_or_load(&table_id, Some(&user_id)).unwrap().unwrap();
+        assert_eq!(pending_again.sync_state, SyncState::PendingWrite);
+        assert_eq!(pending_again.last_refreshed_millis(), pending_last_refreshed);
+        assert_eq!(service.pending_count().unwrap(), 1);
     }
 
     #[test]

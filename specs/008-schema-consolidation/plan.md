@@ -1089,14 +1089,14 @@ async fn test_authorization_system_namespace_user_role_denied() {
     let context = ExecutionContext {
         user_id: UserId::new("alice"),
         role: UserRole::User,
-        namespace_id: NamespaceId::new("system"),
+        namespace_id: NamespaceId::system(),
         ...
     };
     
     let result = AuthorizationHandler::check_authorization(
         &SqlStatement::Select,
         &statement,
-        &NamespaceId::new("system"),
+        &NamespaceId::system(),
         &context,
     );
     

@@ -1,0 +1,29 @@
+[package]
+name = "kalamdb-dba"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Bootstrap-managed DBA namespace tables and typed repositories"
+
+[dependencies]
+kalamdb-commons = { path = "../kalamdb-commons", features = ["full"] }
+kalamdb-core = { path = "../kalamdb-core" }
+kalamdb-macros = { path = "../kalamdb-macros" }
+kalamdb-system = { path = "../kalamdb-system" }
+kalamdb-tables = { path = "../kalamdb-tables" }
+
+chrono = { workspace = true }
+datafusion = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+
+[lib]
+name = "kalamdb_dba"
+path = "src/lib.rs"
+doctest = false

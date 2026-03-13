@@ -1240,7 +1240,7 @@ mod tests {
 
     fn base_table_definition() -> TableDefinition {
         TableDefinition::new(
-            NamespaceId::new("system"),
+            NamespaceId::system(),
             TableName::new("reconcile_test"),
             TableType::System,
             vec![

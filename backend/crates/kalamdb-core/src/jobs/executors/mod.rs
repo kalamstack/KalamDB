@@ -21,6 +21,7 @@ pub mod job_cleanup;
 pub mod manifest_eviction;
 pub mod restore;
 pub mod retention;
+pub(crate) mod shared_table_cleanup;
 pub mod stream_eviction;
 pub mod topic_cleanup;
 pub mod topic_retention;

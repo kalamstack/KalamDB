@@ -165,10 +165,7 @@ mod tests {
         let schema = ShowExportHandler::result_schema();
         let field = schema.field_with_name("created_at").expect("created_at field");
 
-        assert!(matches!(
-            field.data_type(),
-            DataType::Timestamp(TimeUnit::Microsecond, None)
-        ));
+        assert!(matches!(field.data_type(), DataType::Timestamp(TimeUnit::Microsecond, None)));
     }
 
     #[test]

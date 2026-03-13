@@ -30,6 +30,7 @@
 use crate::app_context::AppContext;
 use crate::error::KalamDbError;
 use crate::error_extensions::KalamDbResultExt;
+use crate::jobs::executors::shared_table_cleanup::cleanup_empty_shared_scope_if_needed;
 use crate::jobs::executors::{JobContext, JobDecision, JobExecutor, JobParams};
 use crate::manifest::flush::{SharedTableFlushJob, TableFlush, UserTableFlushJob};
 use async_trait::async_trait;
@@ -291,6 +292,10 @@ impl FlushExecutor {
                 // Log compaction failure but don't fail the flush job
                 ctx.log_warn(&format!("RocksDB compaction failed (non-critical): {}", e));
             },
+        }
+
+        if matches!(table_type, TableType::Shared) {
+            cleanup_empty_shared_scope_if_needed(ctx, table_id.as_ref()).await?;
         }
 
         Ok(JobDecision::Completed {

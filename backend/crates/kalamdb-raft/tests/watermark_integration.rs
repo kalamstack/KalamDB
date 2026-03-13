@@ -343,7 +343,7 @@ async fn test_shared_data_buffering() {
 
     // Create a command with required_meta_index well above current
     let cmd = SharedDataCommand::Insert {
-        table_id: TableId::new(NamespaceId::new("system"), "shared_table".into()),
+        table_id: TableId::new(NamespaceId::system(), "shared_table".into()),
         rows: vec![Row {
             values: BTreeMap::new(),
         }],
@@ -362,7 +362,7 @@ async fn test_shared_data_buffering() {
 
     // Apply another command to trigger drain
     let cmd2 = SharedDataCommand::Insert {
-        table_id: TableId::new(NamespaceId::new("system"), "other".into()),
+        table_id: TableId::new(NamespaceId::system(), "other".into()),
         rows: vec![Row {
             values: BTreeMap::new(),
         }],
@@ -385,7 +385,7 @@ async fn test_shared_data_snapshot_roundtrip() {
     let current_meta = get_coordinator().current_index();
 
     let cmd = SharedDataCommand::Insert {
-        table_id: TableId::new(NamespaceId::new("system"), "config".into()),
+        table_id: TableId::new(NamespaceId::system(), "config".into()),
         rows: vec![Row {
             values: BTreeMap::new(),
         }],

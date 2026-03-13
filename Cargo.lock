@@ -3851,6 +3851,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "kalamdb-dba"
+version = "0.4.1-beta"
+dependencies = [
+ "chrono",
+ "datafusion",
+ "kalamdb-commons",
+ "kalamdb-core",
+ "kalamdb-macros",
+ "kalamdb-system",
+ "kalamdb-tables",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "kalamdb-filestore"
 version = "0.4.1-beta"
 dependencies = [
@@ -3997,6 +4015,7 @@ dependencies = [
  "kalamdb-commons",
  "kalamdb-configs",
  "kalamdb-core",
+ "kalamdb-dba",
  "kalamdb-raft",
  "kalamdb-sharding",
  "kalamdb-sql",

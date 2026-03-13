@@ -68,7 +68,7 @@ function getStatusColor(status: string): string {
   return STATUS_COLORS[status] || 'bg-gray-100 text-gray-800';
 }
 
-function formatDuration(startedAt: string | null, completedAt: string | null): string {
+function formatDuration(startedAt: string | null, finishedAt: string | null): string {
   if (!startedAt) return '-';
   
   // Parse timestamps - they could be ISO strings or numeric timestamps
@@ -85,12 +85,12 @@ function formatDuration(startedAt: string | null, completedAt: string | null): s
     startMs = new Date(startedAt).getTime();
   }
   
-  if (completedAt) {
-    const endNum = Number(completedAt);
+  if (finishedAt) {
+    const endNum = Number(finishedAt);
     if (!isNaN(endNum) && endNum > 1000000000) {
       endMs = toMilliseconds(endNum);
     } else {
-      endMs = new Date(completedAt).getTime();
+      endMs = new Date(finishedAt).getTime();
     }
   } else {
     endMs = Date.now();
@@ -310,7 +310,7 @@ export function JobList({ initialFilters, compact = false, onJobClick }: JobList
                         {formatDuration(job.started_at, null)}
                       </span>
                     ) : (
-                      formatDuration(job.started_at, job.completed_at)
+                      formatDuration(job.started_at, job.finished_at)
                     )}
                   </TableCell>
                   {!compact && (
@@ -377,12 +377,12 @@ export function JobList({ initialFilters, compact = false, onJobClick }: JobList
                   <p>{formatTimestamp(selectedJob.started_at)}</p>
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-muted-foreground">Completed At</label>
-                  <p>{formatTimestamp(selectedJob.completed_at)}</p>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-muted-foreground">Duration</label>
-                  <p>{formatDuration(selectedJob.started_at, selectedJob.completed_at)}</p>
+                    <label className="text-sm font-medium text-muted-foreground">Finished At</label>
+                    <p>{formatTimestamp(selectedJob.finished_at)}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Duration</label>
+                    <p>{formatDuration(selectedJob.started_at, selectedJob.finished_at)}</p>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-muted-foreground">Node</label>

@@ -1,28 +1,39 @@
-import { useMemo } from "react";
+import { useEffect, useState } from "react";
 import {
-  Activity,
-  AlertTriangle,
+  Briefcase,
   Clock3,
   Database,
   FolderTree,
   HardDrive,
   RefreshCw,
   Server,
-  Users,
   Wifi,
-  Briefcase,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useAuth } from "@/lib/auth";
-import { useGetStatsQuery } from "@/store/apiSlice";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { MetricsChart } from "@/components/dashboard/MetricsChart";
+import { StorageUsageChart } from "@/components/dashboard/StorageUsageChart";
 import { PageLayout } from "@/components/layout/PageLayout";
+import { useAuth } from "@/lib/auth";
+import {
+  useCheckStorageHealthMutation,
+  useGetDbaStatsQuery,
+  useGetStatsQuery,
+  useGetStoragesQuery,
+} from "@/store/apiSlice";
 
 function parseInteger(value: string | undefined): number {
   if (!value) {
     return 0;
   }
+
   const parsed = Number.parseInt(value, 10);
   return Number.isNaN(parsed) ? 0 : parsed;
 }
@@ -43,35 +54,60 @@ function formatUptime(seconds: string | undefined): string {
   if (hours > 0) {
     return `${hours}h ${minutes}m`;
   }
+
   return `${minutes}m`;
 }
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const [timeRange, setTimeRange] = useState("24 HOURS");
+  const [selectedStorageId, setSelectedStorageId] = useState("");
+
   const {
     data: stats = {},
     isFetching: isLoading,
     error,
-    refetch,
+    refetch: refetchStats,
   } = useGetStatsQuery();
+  const {
+    data: dbaStats = [],
+    isFetching: isDbaStatsLoading,
+    refetch: refetchDbaStats,
+  } = useGetDbaStatsQuery(timeRange);
+  const {
+    data: storages = [],
+    refetch: refetchStorages,
+  } = useGetStoragesQuery();
+  const [checkStorageHealth, { data: storageHealth, isLoading: isStorageHealthLoading, error: storageHealthError }] =
+    useCheckStorageHealthMutation();
 
-  const criticalQueue = useMemo(() => {
-    const totalJobs = parseInteger(stats.total_jobs);
-    const activeConnections = parseInteger(stats.active_connections);
-    const failedEstimate = Math.max(0, Math.floor(totalJobs * 0.07));
-    const retryEstimate = Math.max(0, Math.floor(totalJobs * 0.03));
-    return {
-      failedEstimate,
-      retryEstimate,
-      pressure: activeConnections > 500 ? "high" : activeConnections > 150 ? "medium" : "low",
-    };
-  }, [stats.total_jobs, stats.active_connections]);
+  useEffect(() => {
+    if (!selectedStorageId && storages.length > 0) {
+      setSelectedStorageId(storages[0].storage_id);
+    }
+  }, [selectedStorageId, storages]);
+
+  useEffect(() => {
+    if (!selectedStorageId) {
+      return;
+    }
+
+    void checkStorageHealth({ storageId: selectedStorageId, extended: true });
+  }, [checkStorageHealth, selectedStorageId]);
+
+  async function handleRefresh(): Promise<void> {
+    await Promise.all([refetchStats(), refetchDbaStats(), refetchStorages()]);
+
+    if (selectedStorageId) {
+      await checkStorageHealth({ storageId: selectedStorageId, extended: true });
+    }
+  }
 
   const cards = [
     {
-      title: "Server",
+      title: "Version",
       value: stats.server_version || "v0.1.1",
-      subtitle: "KalamDB node",
+      subtitle: "Server build",
       icon: Server,
     },
     {
@@ -93,15 +129,27 @@ export default function Dashboard() {
       icon: Database,
     },
     {
-      title: "Users",
-      value: parseInteger(stats.total_users).toLocaleString(),
-      subtitle: "Provisioned accounts",
-      icon: Users,
+      title: "Connections",
+      value: parseInteger(stats.active_connections).toLocaleString(),
+      subtitle: "Active sessions",
+      icon: Wifi,
     },
     {
-      title: "Jobs",
-      value: parseInteger(stats.total_jobs).toLocaleString(),
-      subtitle: "Queued + running + completed",
+      title: "Subscriptions",
+      value: parseInteger(stats.active_subscriptions).toLocaleString(),
+      subtitle: "Live query listeners",
+      icon: Wifi,
+    },
+    {
+      title: "Running Jobs",
+      value: parseInteger(stats.jobs_running).toLocaleString(),
+      subtitle: "Active background work",
+      icon: Briefcase,
+    },
+    {
+      title: "Queued Jobs",
+      value: parseInteger(stats.jobs_queued).toLocaleString(),
+      subtitle: "Pending execution",
       icon: Briefcase,
     },
     {
@@ -110,78 +158,38 @@ export default function Dashboard() {
       subtitle: "Configured backends",
       icon: HardDrive,
     },
-    {
-      title: "Connections",
-      value: parseInteger(stats.active_connections).toLocaleString(),
-      subtitle: "Active sessions",
-      icon: Wifi,
-    },
   ];
 
   return (
     <PageLayout
       title="Dashboard"
       description={`Welcome back, ${user?.username ?? "admin"}`}
-      actions={(
-        <Button variant="outline" size="sm" onClick={() => void refetch()} disabled={isLoading}>
-          <RefreshCw className={`mr-1.5 h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-          Refresh
-        </Button>
-      )}
+      actions={
+        <div className="flex items-center gap-3">
+          <Select value={timeRange} onValueChange={setTimeRange}>
+            <SelectTrigger className="h-9 w-[140px]">
+              <SelectValue placeholder="Time range" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="1 HOURS">Last 1 Hour</SelectItem>
+              <SelectItem value="6 HOURS">Last 6 Hours</SelectItem>
+              <SelectItem value="24 HOURS">Last 24 Hours</SelectItem>
+              <SelectItem value="7 DAYS">Last 7 Days</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleRefresh()}
+            disabled={isLoading || isDbaStatsLoading || isStorageHealthLoading}
+          >
+            <RefreshCw className={`mr-1.5 h-4 w-4 ${isLoading || isDbaStatsLoading || isStorageHealthLoading ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
+        </div>
+      }
     >
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm uppercase tracking-[0.18em] text-muted-foreground">Health Strip</CardTitle>
-        </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
-          <Badge variant="secondary" className="bg-emerald-100 text-emerald-900">API Healthy</Badge>
-          <Badge variant="secondary" className="bg-emerald-100 text-emerald-900">Query Engine Healthy</Badge>
-          <Badge variant="secondary" className="bg-amber-100 text-amber-900">Storage 82%</Badge>
-          <Badge variant="secondary" className="bg-emerald-100 text-emerald-900">WebSocket Live</Badge>
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm uppercase tracking-[0.18em] text-muted-foreground">Critical Work Queue</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-amber-500" />
-                Failed jobs
-              </span>
-              <span className="font-semibold">{criticalQueue.failedEstimate}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="inline-flex items-center gap-2">
-                <Activity className="h-4 w-4 text-blue-500" />
-                Retrying jobs
-              </span>
-              <span className="font-semibold">{criticalQueue.retryEstimate}</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm uppercase tracking-[0.18em] text-muted-foreground">Pressure Indicators</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <div className="flex items-center justify-between">
-              <span>Live query load</span>
-              <span className="font-semibold uppercase">{criticalQueue.pressure}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span>Ingest pressure</span>
-              <span className="font-semibold uppercase">medium</span>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {cards.map((card) => (
           <Card key={card.title}>
             <CardContent className="pt-4">
@@ -195,6 +203,17 @@ export default function Dashboard() {
           </Card>
         ))}
       </div>
+
+      <MetricsChart data={dbaStats} isLoading={isDbaStatsLoading} />
+
+      <StorageUsageChart
+        storages={storages}
+        selectedStorageId={selectedStorageId}
+        onStorageChange={setSelectedStorageId}
+        health={storageHealth ?? null}
+        isLoading={isStorageHealthLoading}
+        error={storageHealthError && "error" in storageHealthError ? storageHealthError.error : null}
+      />
 
       {error && (
         <Card className="border-destructive/30 bg-destructive/5">

@@ -5,7 +5,7 @@ use std::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::constants::RESERVED_NAMESPACE_NAMES;
+use crate::constants::{RESERVED_NAMESPACE_NAMES, SYSTEM_NAMESPACE};
 use crate::StorageKey;
 
 /// Error returned when a namespace ID fails validation.
@@ -121,7 +121,7 @@ impl NamespaceId {
     /// Create system namespace ID
     #[inline]
     pub fn system() -> Self {
-        Self("system".to_string())
+        Self(SYSTEM_NAMESPACE.to_string())
     }
 
     /// Create default namespace ID
@@ -139,7 +139,10 @@ impl NamespaceId {
     /// - `datafusion`: DataFusion internal catalog
     #[inline]
     pub fn is_system_namespace(&self) -> bool {
-        matches!(self.as_str(), "system" | "information_schema" | "pg_catalog" | "datafusion")
+        matches!(
+            self.as_str(),
+            SYSTEM_NAMESPACE | "information_schema" | "pg_catalog" | "datafusion"
+        )
     }
 
     /// If default namespace
@@ -157,8 +160,8 @@ impl NamespaceId {
     /// ```
     /// use kalamdb_commons::NamespaceId;
     ///
-    /// assert!(NamespaceId::new("system").is_reserved());
-    /// assert!(NamespaceId::new("SYSTEM").is_reserved());
+    /// assert!(NamespaceId::system().is_reserved());
+    /// assert!(NamespaceId::system().is_reserved());
     /// assert!(NamespaceId::new("kalamdb").is_reserved());
     /// assert!(!NamespaceId::new("my_app").is_reserved());
     /// ```
@@ -223,7 +226,7 @@ mod tests {
 
     #[test]
     fn test_is_reserved_lowercase() {
-        assert!(NamespaceId::new("system").is_reserved());
+        assert!(NamespaceId::system().is_reserved());
         assert!(NamespaceId::new("sys").is_reserved());
         assert!(NamespaceId::new("root").is_reserved());
         assert!(NamespaceId::new("kalamdb").is_reserved());
@@ -240,8 +243,8 @@ mod tests {
 
     #[test]
     fn test_is_reserved_case_insensitive() {
-        assert!(NamespaceId::new("SYSTEM").is_reserved());
-        assert!(NamespaceId::new("System").is_reserved());
+        assert!(NamespaceId::system().is_reserved());
+        assert!(NamespaceId::system().is_reserved());
         assert!(NamespaceId::new("KalamDB").is_reserved());
         assert!(NamespaceId::new("INFORMATION_SCHEMA").is_reserved());
     }
@@ -256,7 +259,7 @@ mod tests {
 
     #[test]
     fn test_is_system_namespace() {
-        assert!(NamespaceId::new("system").is_system_namespace());
+        assert!(NamespaceId::system().is_system_namespace());
         assert!(NamespaceId::new("information_schema").is_system_namespace());
         assert!(NamespaceId::new("pg_catalog").is_system_namespace());
         assert!(NamespaceId::new("datafusion").is_system_namespace());

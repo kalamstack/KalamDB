@@ -5,6 +5,7 @@
 
 use actix_web::{web, HttpRequest, HttpResponse};
 use kalamdb_auth::{
+    errors::error::AuthError,
     extract_client_ip_secure,
     security::password::{hash_password, validate_password},
     UserRepository,
@@ -18,6 +19,27 @@ use std::sync::Arc;
 
 use super::models::{AuthErrorResponse, ServerSetupRequest, ServerSetupResponse, UserInfo};
 use crate::limiter::RateLimiter;
+
+fn build_setup_response(user: &User, message: String) -> ServerSetupResponse {
+    let created_at_str = chrono::DateTime::from_timestamp_millis(user.created_at)
+        .unwrap_or_else(chrono::Utc::now)
+        .to_rfc3339();
+    let updated_at_str = chrono::DateTime::from_timestamp_millis(user.updated_at)
+        .unwrap_or_else(chrono::Utc::now)
+        .to_rfc3339();
+
+    ServerSetupResponse {
+        user: UserInfo {
+            id: user.user_id.clone(),
+            username: user.username.clone(),
+            role: user.role,
+            email: user.email.clone(),
+            created_at: created_at_str,
+            updated_at: updated_at_str,
+        },
+        message,
+    }
+}
 
 /// POST /v1/api/auth/setup
 ///
@@ -156,14 +178,39 @@ pub async fn server_setup_handler(
     };
 
     if let Err(e) = user_repo.create_user(dba_user.clone()).await {
-        log::error!("Failed to create DBA user: {}", e);
+        match e {
+            AuthError::DatabaseError(message) if message.contains("already exists") => {
+                match user_repo.get_user_by_username(&dba_username).await {
+                    Ok(existing_user) => {
+                        log::info!(
+                            "Server setup raced with another caller; reusing existing DBA user '{}'",
+                            dba_username
+                        );
+                        return HttpResponse::Ok().json(build_setup_response(
+                            &existing_user,
+                            format!(
+                                "Server setup already completed for DBA user '{}'. Please login to continue.",
+                                existing_user.username
+                            ),
+                        ));
+                    },
+                    Err(fetch_error) => {
+                        log::error!(
+                            "Failed to load existing DBA user '{}' after create race: {}",
+                            dba_username,
+                            fetch_error
+                        );
+                    },
+                }
+            },
+            other => {
+                log::error!("Failed to create DBA user: {}", other);
+            },
+        }
+
         return HttpResponse::InternalServerError()
             .json(AuthErrorResponse::new("internal_error", "Failed to create DBA user"));
     }
-
-    let created_at_str = chrono::DateTime::from_timestamp_millis(created_at)
-        .unwrap_or_else(chrono::Utc::now)
-        .to_rfc3339();
 
     log::info!(
         "Server setup completed: root password set, DBA user '{}' created",
@@ -171,20 +218,13 @@ pub async fn server_setup_handler(
     );
 
     // Return user info only - user must login separately to get tokens
-    HttpResponse::Ok().json(ServerSetupResponse {
-        user: UserInfo {
-            id: dba_user.user_id,
-            username: dba_user.username,
-            role: dba_user.role,
-            email: dba_user.email,
-            created_at: created_at_str.clone(),
-            updated_at: created_at_str,
-        },
-        message: format!(
+    HttpResponse::Ok().json(build_setup_response(
+        &dba_user,
+        format!(
             "Server setup complete. Root password configured and DBA user '{}' created. Please login to continue.",
             body.username
         ),
-    })
+    ))
 }
 
 /// GET /v1/api/auth/status

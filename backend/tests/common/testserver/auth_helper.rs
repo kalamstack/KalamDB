@@ -63,7 +63,7 @@ pub async fn create_test_user(
     );
 
     // Use system user to create the user
-    let system_user_id = UserId::new("system");
+    let system_user_id = UserId::system();
     let session = server.app_context.base_session_context();
     let exec_ctx = ExecutionContext::new(system_user_id, Role::System, session);
 

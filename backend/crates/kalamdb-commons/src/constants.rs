@@ -51,7 +51,7 @@ impl SystemColumnNames {
 // pub const SYSTEM_COLUMNS: SystemColumnNames = SystemColumnNames;
 
 // /// Reserved namespace name for system tables.
-// pub const SYSTEM_NAMESPACE: &str = "system";
+pub const SYSTEM_NAMESPACE: &str = "system";
 
 // /// Default namespace name for user tables when not specified.
 // pub const DEFAULT_NAMESPACE: &str = "default";
@@ -73,6 +73,9 @@ impl AuthConstants {
 
     /// Default system user ID created on first database initialization
     pub const DEFAULT_ROOT_USER_ID: &'static str = "root";
+
+    /// Default system user id
+    pub const DEFAULT_SYSTEM_USER_ID: &'static str = SYSTEM_NAMESPACE;
 
     /// Anonymous user ID constant (matches ExecutionContext::anonymous())
     pub const ANONYMOUS_USER_ID: &str = "anonymous";

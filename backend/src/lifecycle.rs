@@ -14,6 +14,7 @@ use kalamdb_core::live::ConnectionsManager;
 use kalamdb_core::live_query::LiveQueryManager;
 use kalamdb_core::sql::datafusion_session::DataFusionSessionFactory;
 use kalamdb_core::sql::executor::SqlExecutor;
+use kalamdb_dba::{initialize_dba_namespace, start_stats_recorder};
 use kalamdb_store::open_storage_backend;
 use kalamdb_system::providers::storages::models::StorageMode;
 use log::debug;
@@ -274,6 +275,9 @@ pub async fn bootstrap(
         phase_start.elapsed().as_secs_f64() * 1000.0
     );
 
+    initialize_dba_namespace(app_context.clone())?;
+    debug!("DBA namespace bootstrap completed");
+
     // Now that all infrastructure is ready (system tables, storages, user/shared tables),
     // restore state machines from persisted snapshots. This sets the state machine's
     // internal last_applied_index to prevent duplicate application of log entries.
@@ -334,6 +338,11 @@ pub async fn bootstrap(
     // T125-T127: Create default system user on first startup
     create_default_system_user(users_provider_for_init.clone(), config.auth.root_password.clone())
         .await?;
+    if let Err(error) = start_stats_recorder(app_context.clone()).await {
+        log::error!("Failed to start DBA stats recorder: {}", error);
+    } else {
+        debug!("DBA stats recorder started");
+    }
 
     // // Security warning: Check if remote access is enabled with empty root password
     // check_remote_access_security(config, users_provider_for_init).await?;
@@ -449,6 +458,7 @@ pub async fn bootstrap_isolated(
     live_query_manager.set_sql_executor(sql_executor.clone());
 
     sql_executor.load_existing_tables().await?;
+    initialize_dba_namespace(app_context.clone())?;
 
     // Now that all infrastructure is ready, restore state machines from snapshots
     app_context.restore_raft_state_machines().await;
@@ -471,6 +481,9 @@ pub async fn bootstrap_isolated(
     let users_provider_for_init = app_context.system_tables().users();
     create_default_system_user(users_provider_for_init.clone(), config.auth.root_password.clone())
         .await?;
+    if let Err(error) = start_stats_recorder(app_context.clone()).await {
+        log::error!("Failed to start DBA stats recorder: {}", error);
+    }
     // check_remote_access_security(config, users_provider_for_init).await?;
 
     let components = ApplicationComponents {

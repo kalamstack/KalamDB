@@ -2,7 +2,9 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
     parse::{Parse, ParseStream},
-    parse_macro_input, Attribute, Ident, ItemStruct, LitBool, LitInt, LitStr, Result,
+    parse_macro_input,
+    spanned::Spanned,
+    Attribute, Ident, ItemStruct, LitBool, LitInt, LitStr, Result,
 };
 
 #[proc_macro_attribute]
@@ -83,7 +85,7 @@ pub fn table(attr: TokenStream, item: TokenStream) -> TokenStream {
         let column_comment = spec.args.comment_expr();
 
         quote! {
-            crate::schemas::ColumnDefinition::new(
+            kalamdb_commons::schemas::ColumnDefinition::new(
                 #column_id,
                 #column_name,
                 #ordinal_position,
@@ -97,15 +99,58 @@ pub fn table(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     });
 
-    let TableArgs { name, comment } = table_args;
+    let TableArgs {
+        name,
+        namespace,
+        table_type,
+        access_level,
+        comment,
+    } = table_args;
 
-    let namespace_expr = quote!(crate::NamespaceId::system());
+    if access_level.is_some() && table_type != TableKind::Shared {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "#[table(access_level = ...)] is only supported for shared tables",
+        )
+        .to_compile_error()
+        .into();
+    }
+
+    let namespace_str = namespace.unwrap_or_else(|| "system".to_string());
+    let namespace_expr = if namespace_str == "system" {
+        quote!(kalamdb_commons::NamespaceId::system())
+    } else {
+        quote!(kalamdb_commons::NamespaceId::new(#namespace_str))
+    };
     let table_name = name.clone();
-    let namespace_for_error = "system".to_string();
-    let table_type = quote!(crate::schemas::TableType::System);
+    let namespace_for_error = namespace_str.clone();
+    let table_type_expr = table_type.expr();
     let table_comment = match comment {
         Some(comment) => quote!(Some(#comment.to_string())),
         None => quote!(None),
+    };
+    let table_option_mutation = match access_level {
+        Some(TableAccessKind::Public) => quote! {
+            if let kalamdb_commons::schemas::TableOptions::Shared(options) = &mut table_def.table_options {
+                options.access_level = Some(kalamdb_commons::TableAccess::Public);
+            }
+        },
+        Some(TableAccessKind::Private) => quote! {
+            if let kalamdb_commons::schemas::TableOptions::Shared(options) = &mut table_def.table_options {
+                options.access_level = Some(kalamdb_commons::TableAccess::Private);
+            }
+        },
+        Some(TableAccessKind::Restricted) => quote! {
+            if let kalamdb_commons::schemas::TableOptions::Shared(options) = &mut table_def.table_options {
+                options.access_level = Some(kalamdb_commons::TableAccess::Restricted);
+            }
+        },
+        Some(TableAccessKind::Dba) => quote! {
+            if let kalamdb_commons::schemas::TableOptions::Shared(options) = &mut table_def.table_options {
+                options.access_level = Some(kalamdb_commons::TableAccess::Dba);
+            }
+        },
+        None => quote! {},
     };
     let error_message =
         format!("Failed to create {}.{} table definition", namespace_for_error, table_name);
@@ -114,19 +159,23 @@ pub fn table(attr: TokenStream, item: TokenStream) -> TokenStream {
         #item_struct
 
         impl #struct_ident {
-            pub fn definition() -> crate::schemas::TableDefinition {
+            pub fn definition() -> kalamdb_commons::schemas::TableDefinition {
                 let columns = vec![
                     #(#column_defs,)*
                 ];
 
-                crate::schemas::TableDefinition::new_with_defaults(
+                let mut table_def = kalamdb_commons::schemas::TableDefinition::new_with_defaults(
                     #namespace_expr,
-                    crate::TableName::new(#table_name),
-                    #table_type,
+                    kalamdb_commons::TableName::new(#table_name),
+                    #table_type_expr,
                     columns,
                     #table_comment,
                 )
-                .expect(#error_message)
+                .expect(#error_message);
+
+                #table_option_mutation
+
+                table_def
             }
         }
     };
@@ -163,6 +212,9 @@ fn extract_column_attr(attrs: &mut Vec<Attribute>) -> Option<ColumnArgs> {
 #[derive(Default)]
 struct TableArgs {
     name: String,
+    namespace: Option<String>,
+    table_type: TableKind,
+    access_level: Option<TableAccessKind>,
     comment: Option<String>,
 }
 
@@ -184,6 +236,16 @@ impl Parse for TableArgs {
                     let value: LitStr = input.parse()?;
                     args.name = value.value();
                 },
+                "namespace" => {
+                    let value: LitStr = input.parse()?;
+                    args.namespace = Some(value.value());
+                },
+                "table_type" => {
+                    args.table_type = parse_table_kind_value(input)?;
+                },
+                "access_level" => {
+                    args.access_level = Some(parse_table_access_value(input)?);
+                },
                 "comment" => {
                     let value: LitStr = input.parse()?;
                     args.comment = Some(value.value());
@@ -204,6 +266,99 @@ impl Parse for TableArgs {
 
         Ok(args)
     }
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum TableKind {
+    User,
+    Shared,
+    Stream,
+    #[default]
+    System,
+}
+
+impl TableKind {
+    fn parse(value: &LitStr) -> Result<Self> {
+        match value.value().to_lowercase().as_str() {
+            "user" => Ok(Self::User),
+            "shared" => Ok(Self::Shared),
+            "stream" => Ok(Self::Stream),
+            "system" => Ok(Self::System),
+            _ => Err(syn::Error::new_spanned(
+                value,
+                "unsupported table_type; expected user|shared|stream|system",
+            )),
+        }
+    }
+
+    fn expr(&self) -> proc_macro2::TokenStream {
+        match self {
+            Self::User => quote!(kalamdb_commons::schemas::TableType::User),
+            Self::Shared => quote!(kalamdb_commons::schemas::TableType::Shared),
+            Self::Stream => quote!(kalamdb_commons::schemas::TableType::Stream),
+            Self::System => quote!(kalamdb_commons::schemas::TableType::System),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum TableAccessKind {
+    Public,
+    Private,
+    Restricted,
+    Dba,
+}
+
+impl TableAccessKind {
+    fn parse_str(value: &str, span: proc_macro2::Span) -> Result<Self> {
+        match value.to_lowercase().as_str() {
+            "public" => Ok(Self::Public),
+            "private" => Ok(Self::Private),
+            "restricted" => Ok(Self::Restricted),
+            "dba" => Ok(Self::Dba),
+            _ => Err(syn::Error::new(
+                span,
+                "unsupported access_level; expected public|private|restricted|dba",
+            )),
+        }
+    }
+
+    fn parse(value: &LitStr) -> Result<Self> {
+        Self::parse_str(&value.value(), value.span())
+    }
+}
+
+fn parse_table_kind_value(input: ParseStream<'_>) -> Result<TableKind> {
+    if input.peek(LitStr) {
+        let value: LitStr = input.parse()?;
+        return TableKind::parse(&value);
+    }
+
+    let value: syn::Path = input.parse()?;
+    let ident = value
+        .segments
+        .last()
+        .ok_or_else(|| syn::Error::new_spanned(&value, "expected table type enum variant"))?
+        .ident
+        .to_string();
+    let lit = LitStr::new(&ident, value.span());
+    TableKind::parse(&lit)
+}
+
+fn parse_table_access_value(input: ParseStream<'_>) -> Result<TableAccessKind> {
+    if input.peek(LitStr) {
+        let value: LitStr = input.parse()?;
+        return TableAccessKind::parse(&value);
+    }
+
+    let value: syn::Path = input.parse()?;
+    let ident = value
+        .segments
+        .last()
+        .ok_or_else(|| syn::Error::new_spanned(&value, "expected access level enum variant"))?
+        .ident
+        .to_string();
+    TableAccessKind::parse_str(&ident, value.span())
 }
 
 #[derive(Default)]
@@ -248,7 +403,13 @@ impl ColumnArgs {
         }
 
         match self.default_value.as_str() {
-            "None" => quote!(crate::schemas::ColumnDefault::None),
+            "None" => quote!(kalamdb_commons::schemas::ColumnDefault::None),
+            "Literal(false)" => quote!(kalamdb_commons::schemas::ColumnDefault::Literal(
+                serde_json::Value::Bool(false)
+            )),
+            "Literal(true)" => quote!(kalamdb_commons::schemas::ColumnDefault::Literal(
+                serde_json::Value::Bool(true)
+            )),
             other if other.starts_with("Function(") && other.ends_with(')') => {
                 let inner = &other["Function(".len()..other.len() - 1];
                 if inner.trim().is_empty() {
@@ -258,12 +419,15 @@ impl ColumnArgs {
                     )
                     .to_compile_error()
                 } else {
-                    quote!(crate::schemas::ColumnDefault::function(#inner, vec![]))
+                    quote!(kalamdb_commons::schemas::ColumnDefault::function(#inner, vec![]))
                 }
             },
             other => syn::Error::new(
                 proc_macro2::Span::call_site(),
-                format!("unsupported default '{}'; expected None or Function(NAME)", other),
+                format!(
+                    "unsupported default '{}'; expected None, Literal(true|false), or Function(NAME)",
+                    other
+                ),
             )
             .to_compile_error(),
         }

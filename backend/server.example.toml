@@ -110,6 +110,10 @@ default_time_interval = 300
 # Rows with _deleted=true will be kept in Parquet files for this duration
 default_deleted_retention_hours = 168
 
+# Number of days to preserve samples in dba.stats (default: 7 days)
+# Set to 0 to disable automatic cleanup of historical DBA metrics
+dba_stats_retention_days = 7
+
 [stream]
 # Default TTL for stream table rows in seconds (default: 10 seconds)
 # Stream tables are ephemeral - rows expire after this duration

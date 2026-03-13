@@ -93,7 +93,7 @@ impl SystemTable {
 
     /// Get the fully-qualified TableId for this system table/view
     pub fn table_id(&self) -> TableId {
-        TableId::from_strings("system", self.table_name())
+        TableId::from_strings(crate::constants::SYSTEM_NAMESPACE, self.table_name())
     }
 
     /// Returns true if this is a virtual view (computed on-demand, not persisted)

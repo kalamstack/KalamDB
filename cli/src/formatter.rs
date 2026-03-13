@@ -584,8 +584,10 @@ mod tests {
             TimestampFormatter::new(TimestampFormat::Iso8601),
         );
 
-        let rendered = formatter
-            .format_json_value_with_type(&JsonValue::Number(1735689600000_i64.into()), Some(&KalamDataType::Timestamp));
+        let rendered = formatter.format_json_value_with_type(
+            &JsonValue::Number(1735689600000_i64.into()),
+            Some(&KalamDataType::Timestamp),
+        );
 
         assert_eq!(rendered, "2025-01-01T00:00:00.000Z");
     }
@@ -598,13 +600,7 @@ mod tests {
             TimestampFormatter::new(TimestampFormat::Iso8601),
         );
 
-        assert_eq!(
-            formatter.raw_timestamp_millis(1735689600000000),
-            1735689600000
-        );
-        assert_eq!(
-            formatter.raw_timestamp_millis(1735689600000000000),
-            1735689600000
-        );
+        assert_eq!(formatter.raw_timestamp_millis(1735689600000000), 1735689600000);
+        assert_eq!(formatter.raw_timestamp_millis(1735689600000000000), 1735689600000);
     }
 }

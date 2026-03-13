@@ -31,7 +31,7 @@ async fn test_schema_store_persistence() {
         .expect("Failed to register system tables");
 
     // Verify all 7 system table schemas are persisted
-    let system_namespace = NamespaceId::from("system");
+    let system_namespace = NamespaceId::system();
     let all_schemas = schema_store
         .scan_namespace(&system_namespace)
         .expect("Failed to scan namespace");
@@ -76,7 +76,7 @@ async fn test_schema_cache_basic_operations() {
     let (_jobs_provider, schema_store) = register_system_tables(&system_schema, backend.clone())
         .expect("Failed to register system tables");
 
-    let system_namespace = NamespaceId::from("system");
+    let system_namespace = NamespaceId::system();
     let users_table_id = TableId::new(system_namespace, TableName::from("users"));
 
     // Check if schema is already cached (may be pre-loaded during registration)
@@ -114,7 +114,7 @@ async fn test_schema_versioning() {
     let (_jobs_provider, schema_store) = register_system_tables(&system_schema, backend.clone())
         .expect("Failed to register system tables");
 
-    let system_namespace = NamespaceId::from("system");
+    let system_namespace = NamespaceId::system();
     let users_table_id = TableId::new(system_namespace, TableName::from("users"));
 
     let schema = schema_store
@@ -152,7 +152,7 @@ async fn test_all_system_tables_have_schemas() {
     let (_jobs_provider, schema_store) = register_system_tables(&system_schema, backend.clone())
         .expect("Failed to register system tables");
 
-    let system_namespace = NamespaceId::from("system");
+    let system_namespace = NamespaceId::system();
 
     // All 7 system tables should have schema definitions
     let expected_tables = vec![
@@ -207,7 +207,7 @@ async fn test_internal_api_schema_matches_describe_table() {
     let (_jobs_provider, schema_store) = register_system_tables(&system_schema, backend.clone())
         .expect("Failed to register system tables");
 
-    let system_namespace = NamespaceId::from("system");
+    let system_namespace = NamespaceId::system();
     let users_table_id = TableId::new(system_namespace.clone(), TableName::from("users"));
 
     // Get schema from internal API (TableSchemaStore)

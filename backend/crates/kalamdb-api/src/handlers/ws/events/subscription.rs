@@ -131,6 +131,22 @@ pub async fn handle_subscribe(
                         Ok(json) => rows_json.push(json),
                         Err(e) => {
                             error!("Failed to convert row to JSON: {}", e);
+                            // Cleanup: unregister the subscription since we can't
+                            // deliver initial data and the client will get an error
+                            if let Err(cleanup_err) = live_query_manager
+                                .unregister_subscription(
+                                    connection_state,
+                                    &subscription_id,
+                                    &result.live_id,
+                                )
+                                .await
+                            {
+                                error!(
+                                    "Failed to cleanup subscription {} after conversion error: {}",
+                                    subscription_id, cleanup_err
+                                );
+                            }
+                            rate_limiter.decrement_subscription(&user_id);
                             return send_error(
                                 session,
                                 &subscription_id,

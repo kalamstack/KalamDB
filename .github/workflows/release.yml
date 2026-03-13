@@ -1627,27 +1627,32 @@ jobs:
                       continue
 
                   try:
-                      event = json.loads(line)
+                  parsed = json.loads(line)
                   except json.JSONDecodeError:
                       continue
 
+                events = parsed if isinstance(parsed, list) else [parsed]
+                for event in events:
+                  if not isinstance(event, dict):
+                    continue
+
                   event_type = event.get("type")
                   if event_type == "testStart":
-                      test_info = event.get("test", {})
-                      test_id = test_info.get("id")
-                      if test_id is not None:
-                          hidden[test_id] = bool(test_info.get("hidden", False))
+                    test_info = event.get("test", {})
+                    test_id = test_info.get("id")
+                    if test_id is not None:
+                      hidden[test_id] = bool(test_info.get("hidden", False))
                   elif event_type == "testDone":
-                      test_id = event.get("testID")
-                      if hidden.get(test_id, False):
-                          continue
+                    test_id = event.get("testID")
+                    if hidden.get(test_id, False):
+                      continue
 
-                      total += 1
-                      result = event.get("result")
-                      if result == "success":
-                          passed += 1
-                      elif result in {"failure", "error"}:
-                          failed += 1
+                    total += 1
+                    result = event.get("result")
+                    if result == "success":
+                      passed += 1
+                    elif result in {"failure", "error"}:
+                      failed += 1
 
           outcome = os.environ.get("STEP_OUTCOME", "failure")
           if total == 0 and outcome == "success":

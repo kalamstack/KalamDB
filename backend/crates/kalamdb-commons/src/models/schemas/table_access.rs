@@ -11,6 +11,7 @@ pub enum TableAccess {
     Public,
     Private,
     Restricted,
+    Dba,
 }
 
 impl TableAccess {
@@ -19,6 +20,7 @@ impl TableAccess {
             TableAccess::Public => "public",
             TableAccess::Private => "private",
             TableAccess::Restricted => "restricted",
+            TableAccess::Dba => "dba",
         }
     }
 
@@ -27,6 +29,7 @@ impl TableAccess {
             "public" => Some(TableAccess::Public),
             "private" => Some(TableAccess::Private),
             "restricted" => Some(TableAccess::Restricted),
+            "dba" => Some(TableAccess::Dba),
             _ => None,
         }
     }
@@ -51,6 +54,7 @@ impl From<&str> for TableAccess {
             "public" => TableAccess::Public,
             "private" => TableAccess::Private,
             "restricted" => TableAccess::Restricted,
+            "dba" => TableAccess::Dba,
             _ => TableAccess::Private,
         }
     }

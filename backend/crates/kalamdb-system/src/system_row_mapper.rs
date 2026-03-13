@@ -104,7 +104,7 @@ mod tests {
         };
 
         let table_def = TableDefinition::new(
-            NamespaceId::new("system"),
+            NamespaceId::system(),
             TableName::new("test_models"),
             kalamdb_commons::schemas::TableType::System,
             vec![
@@ -152,7 +152,7 @@ mod tests {
         };
 
         let table_def = TableDefinition::new(
-            NamespaceId::new("system"),
+            NamespaceId::system(),
             TableName::new("uuid_decimal_models"),
             kalamdb_commons::schemas::TableType::System,
             vec![

@@ -10,6 +10,7 @@ members = [
     "backend/crates/kalamdb-session",
     "backend/crates/kalamdb-system",
     "backend/crates/kalamdb-tables",
+    "backend/crates/kalamdb-dba",
     "backend/crates/kalamdb-observability",
     "backend/crates/kalamdb-vector",
     "backend/crates/kalamdb-core",

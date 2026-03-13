@@ -981,22 +981,17 @@ fn ensure_server_ready_sync(base_url: &str) {
         });
         match rx.recv_timeout(Duration::from_secs(30)) {
             Ok(Ok(())) => {},
-            Ok(Err(err)) => panic!(
-                "Failed to prepare test authentication context for {}: {}",
-                base_url, err
-            ),
-            Err(err) => panic!(
-                "Timed out preparing test authentication context for {}: {}",
-                base_url, err
-            ),
+            Ok(Err(err)) => {
+                panic!("Failed to prepare test authentication context for {}: {}", base_url, err)
+            },
+            Err(err) => {
+                panic!("Timed out preparing test authentication context for {}: {}", base_url, err)
+            },
         }
     } else {
         if let Err(err) = get_shared_runtime().block_on(test_auth_manager().ensure_ready(base_url))
         {
-            panic!(
-                "Failed to prepare test authentication context for {}: {}",
-                base_url, err
-            );
+            panic!("Failed to prepare test authentication context for {}: {}", base_url, err);
         }
     }
 }
@@ -3405,9 +3400,8 @@ pub fn create_cli_command() -> assert_cmd::Command {
         std::fs::create_dir_all(path.join(".kalam")).expect("failed to create isolated test home");
         path
     });
-    let credentials_path = TEST_CLI_CREDENTIALS_PATH.get_or_init(|| {
-        test_home.join(".kalam").join("credentials.toml")
-    });
+    let credentials_path =
+        TEST_CLI_CREDENTIALS_PATH.get_or_init(|| test_home.join(".kalam").join("credentials.toml"));
 
     let mut cmd = assert_cmd::Command::new(env!("CARGO_BIN_EXE_kalam"));
     cmd.env("NO_PROXY", "127.0.0.1,localhost,::1")

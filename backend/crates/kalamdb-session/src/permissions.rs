@@ -333,30 +333,22 @@ pub fn shared_table_access_level(def: &TableDefinition) -> TableAccess {
 /// Check if a role can access (read) a shared table.
 #[inline]
 pub fn can_access_shared_table(access_level: TableAccess, role: Role) -> bool {
-    // Admins and service accounts can access everything
-    if matches!(role, Role::System | Role::Dba | Role::Service) {
-        return true;
-    }
-
     match access_level {
+        TableAccess::Dba => matches!(role, Role::System | Role::Dba),
+        TableAccess::Restricted => matches!(role, Role::System | Role::Dba | Role::Service),
+        TableAccess::Private => matches!(role, Role::System | Role::Dba | Role::Service),
         TableAccess::Public => true, // All authenticated users can read public tables
-        TableAccess::Private => false, // Only privileged roles (checked above)
-        TableAccess::Restricted => false, // TODO: Only owner (future grants) or privileged roles
     }
 }
 
 /// Check if a role can write (INSERT/UPDATE/DELETE) a shared table.
 #[inline]
 pub fn can_write_shared_table(access_level: TableAccess, role: Role) -> bool {
-    // Admins and service accounts can write to everything
-    if matches!(role, Role::System | Role::Dba | Role::Service) {
-        return true;
-    }
-
     match access_level {
-        TableAccess::Public => false, // Regular users cannot write public shared tables
-        TableAccess::Private => false, // Only privileged roles (checked above)
-        TableAccess::Restricted => false, // TODO: Only owner (future grants) or privileged roles
+        TableAccess::Dba => matches!(role, Role::System | Role::Dba),
+        TableAccess::Restricted => matches!(role, Role::System | Role::Dba | Role::Service),
+        TableAccess::Private => matches!(role, Role::System | Role::Dba | Role::Service),
+        TableAccess::Public => matches!(role, Role::System | Role::Dba | Role::Service),
     }
 }
 
@@ -543,7 +535,7 @@ mod tests {
     #[test]
     fn test_session_error_display() {
         let err = SessionError::AccessDenied {
-            namespace_id: NamespaceId::new("system"),
+            namespace_id: NamespaceId::system(),
             table_name: TableName::new("users"),
             role: Role::User,
             reason: "Test reason".to_string(),
@@ -552,5 +544,25 @@ mod tests {
         assert!(display.contains("Access denied"));
         assert!(display.contains("system.users"));
         assert!(display.contains("User"));
+    }
+
+    #[test]
+    fn test_dba_shared_access_level_is_dba_only() {
+        assert!(can_access_shared_table(TableAccess::Dba, Role::Dba));
+        assert!(can_access_shared_table(TableAccess::Dba, Role::System));
+        assert!(!can_access_shared_table(TableAccess::Dba, Role::Service));
+        assert!(!can_access_shared_table(TableAccess::Dba, Role::User));
+
+        assert!(can_write_shared_table(TableAccess::Dba, Role::Dba));
+        assert!(can_write_shared_table(TableAccess::Dba, Role::System));
+        assert!(!can_write_shared_table(TableAccess::Dba, Role::Service));
+    }
+
+    #[test]
+    fn test_public_shared_write_access_allows_admin_and_service_only() {
+        assert!(can_write_shared_table(TableAccess::Public, Role::System));
+        assert!(can_write_shared_table(TableAccess::Public, Role::Dba));
+        assert!(can_write_shared_table(TableAccess::Public, Role::Service));
+        assert!(!can_write_shared_table(TableAccess::Public, Role::User));
     }
 }
