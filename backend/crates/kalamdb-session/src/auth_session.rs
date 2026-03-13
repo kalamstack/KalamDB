@@ -307,7 +307,7 @@ mod tests {
         assert!(dba.is_admin());
         assert!(!dba.is_system());
 
-        let system = AuthSession::new(UserId::new("system"), Role::System);
+        let system = AuthSession::new(UserId::system(), Role::System);
         assert!(system.is_admin());
         assert!(system.is_system());
     }

@@ -46,6 +46,7 @@
     "react-redux": "^9.2.0",
     "react-resizable-panels": "^4.7.2",
     "react-router-dom": "^7.13.1",
+    "recharts": "^3.8.0",
     "tailwind-merge": "^3.5.0",
     "tailwindcss-animate": "^1.0.7",
     "zod": "^4.3.6"

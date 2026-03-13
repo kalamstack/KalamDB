@@ -25,6 +25,23 @@ fn find_manifest_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
     out
 }
 
+fn find_batch_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+
+    entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.starts_with("batch-") && name.ends_with(".parquet"))
+                .unwrap_or(false)
+        })
+        .collect()
+}
+
 async fn wait_for_flush_job_completed(
     server: &super::test_support::http_server::HttpTestServer,
     ns: &str,
@@ -135,4 +152,108 @@ async fn test_shared_flush_creates_manifest_json_over_http() -> anyhow::Result<(
     assert_eq!(resp.status, ResponseStatus::Success);
 
     Ok(())
+}
+
+#[tokio::test]
+async fn test_shared_flush_cleans_empty_segments_and_parquet_files() -> anyhow::Result<()> {
+    let server = super::test_support::http_server::get_global_server().await;
+    let namespace = unique_namespace("test_manifest_empty_cleanup");
+    let table = "metrics";
+
+    let resp = server.execute_sql(&format!("CREATE NAMESPACE {}", namespace)).await?;
+    assert_eq!(resp.status, ResponseStatus::Success);
+
+    let resp = server
+        .execute_sql(&format!(
+            "CREATE TABLE {}.{} (id INT PRIMARY KEY, name TEXT) WITH (TYPE = 'SHARED', FLUSH_POLICY = 'rows:5')",
+            namespace, table
+        ))
+        .await?;
+    assert_eq!(resp.status, ResponseStatus::Success);
+
+    for i in 1..=6 {
+        let resp = server
+            .execute_sql(&format!(
+                "INSERT INTO {}.{} (id, name) VALUES ({}, 'item_{}')",
+                namespace, table, i, i
+            ))
+            .await?;
+        assert_eq!(resp.status, ResponseStatus::Success);
+    }
+
+    let resp = server
+        .execute_sql(&format!("STORAGE FLUSH TABLE {}.{}", namespace, table))
+        .await?;
+    assert_eq!(resp.status, ResponseStatus::Success);
+
+    wait_for_flush_job_completed(server, &namespace, table).await?;
+
+    let storage_root = server.storage_root();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let manifest_path = loop {
+        let candidates = find_manifest_files(&storage_root);
+        if let Some(path) = candidates.iter().find(|p| {
+            p.to_string_lossy().contains(&namespace) && p.to_string_lossy().contains(table)
+        }) {
+            break path.to_path_buf();
+        }
+
+        if Instant::now() >= deadline {
+            anyhow::bail!(
+                "Expected manifest.json for {}.{} under {} (found: {:?})",
+                namespace,
+                table,
+                storage_root.display(),
+                candidates
+            );
+        }
+
+        sleep(Duration::from_millis(50)).await;
+    };
+
+    let table_dir = manifest_path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("manifest.json missing parent directory"))?
+        .to_path_buf();
+    let batch_files_before = find_batch_files(&table_dir);
+    assert!(
+        !batch_files_before.is_empty(),
+        "Expected flushed parquet files before cleanup in {}",
+        table_dir.display()
+    );
+
+    let resp = server
+        .execute_sql(&format!("DELETE FROM {}.{} WHERE id >= 1", namespace, table))
+        .await?;
+    assert_eq!(resp.status, ResponseStatus::Success);
+
+    let resp = server
+        .execute_sql(&format!("STORAGE FLUSH TABLE {}.{}", namespace, table))
+        .await?;
+    assert_eq!(resp.status, ResponseStatus::Success);
+
+    wait_for_flush_job_completed(server, &namespace, table).await?;
+
+    let cleanup_deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let manifest_json = std::fs::read_to_string(&manifest_path)?;
+        let manifest: Manifest = serde_json::from_str(&manifest_json)?;
+        let batch_files_after = find_batch_files(&table_dir);
+
+        if manifest.segments.is_empty() && batch_files_after.is_empty() {
+            return Ok(());
+        }
+
+        if Instant::now() >= cleanup_deadline {
+            anyhow::bail!(
+                "Expected empty manifest and no parquet files after cleanup for {}.{} (segments={}, files={:?})",
+                namespace,
+                table,
+                manifest.segments.len(),
+                batch_files_after
+            );
+        }
+
+        sleep(Duration::from_millis(50)).await;
+    }
 }

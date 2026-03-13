@@ -572,6 +572,11 @@ pub struct RetentionSettings {
     /// Default retention hours for soft-deleted rows (default: 168 hours = 7 days)
     #[serde(default = "default_deleted_retention_hours")]
     pub default_deleted_retention_hours: i32,
+
+    /// Number of days to preserve dba.stats samples (default: 7 days)
+    /// Set to 0 to disable automatic cleanup.
+    #[serde(default = "default_dba_stats_retention_days")]
+    pub dba_stats_retention_days: u64,
 }
 
 /// Stream table defaults
@@ -916,6 +921,7 @@ impl Default for RetentionSettings {
     fn default() -> Self {
         Self {
             default_deleted_retention_hours: default_deleted_retention_hours(),
+            dba_stats_retention_days: default_dba_stats_retention_days(),
         }
     }
 }

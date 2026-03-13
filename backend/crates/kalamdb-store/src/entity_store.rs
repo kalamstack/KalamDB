@@ -955,6 +955,7 @@ where
     /// - `Some(TableAccess::Public)`: Publicly readable
     /// - `Some(TableAccess::Private)`: Owner-only
     /// - `Some(TableAccess::Restricted)`: Service+ roles only
+    /// - `Some(TableAccess::Dba)`: DBA-only
     fn table_access(&self) -> Option<TableAccess>;
 
     /// Checks if a user with the given role can read this table.
@@ -965,6 +966,7 @@ where
     /// - **Public tables**: All roles can read
     /// - **Private tables**: No cross-user access (owner only)
     /// - **Restricted tables**: Service/dba/system roles only
+    /// - **DBA tables**: DBA role only
     ///
     /// ## Example
     ///
@@ -986,6 +988,7 @@ where
             Some(TableAccess::Restricted) => {
                 matches!(user_role, Role::Service | Role::Dba | Role::System)
             },
+            Some(TableAccess::Dba) => matches!(user_role, Role::System | Role::Dba),
         }
     }
 }

@@ -295,7 +295,7 @@ impl JobsManager {
                 // Periodic health metrics logging (all nodes)
                 _ = health_interval.tick() => {
                     let app_ctx = self.get_attached_app_context();
-                    if let Err(e) = HealthMonitor::log_metrics(self, app_ctx).await {
+                    if let Err(e) = HealthMonitor::log_metrics(app_ctx).await {
                         log::warn!("Failed to log health metrics: {}", e);
                     }
                     continue;

@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { useGetServerLogsQuery } from '@/store/apiSlice';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Loader2, Search, Pause, X, Info, AlertTriangle, AlertCircle, Bug } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -9,7 +11,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Search, Pause, X, Info, AlertTriangle, AlertCircle, Bug } from 'lucide-react';
 import { formatTimestamp } from '@/lib/formatters';
 
 const LEVEL_CONFIG: Record<string, { color: string; icon: typeof AlertCircle }> = {
@@ -24,19 +25,28 @@ function getLevelConfig(level: string) {
   return LEVEL_CONFIG[level.toUpperCase()] || { color: 'text-gray-500', icon: Info };
 }
 
-export function ServerLogList() {
-  const [isPaused, setIsPaused] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [caseSensitive, setCaseSensitive] = useState(false);
-  const [logType, setLogType] = useState('all');
+  export function ServerLogList() {
+    const [isPaused, setIsPaused] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [caseSensitive, setCaseSensitive] = useState(false);
+    const [logType, setLogType] = useState('all');
+  
+    const {
+      data: logs = [],
+      isLoading,
+      error: queryError,
+      refetch
+    } = useGetServerLogsQuery({ limit: 500 }, {
+      pollingInterval: isPaused ? 0 : 2000,
+    });
+  
+    const error = queryError && "error" in queryError && typeof queryError.error === "string" 
+      ? queryError.error 
+      : queryError 
+        ? "Failed to fetch server logs" 
+        : null;
 
-  const {
-    data: logs = [],
-  } = useGetServerLogsQuery({ limit: 500 }, {
-    pollingInterval: isPaused ? 0 : 2000,
-  });
-
-  const filteredLogs = useMemo(() => {
+    const filteredLogs = useMemo(() => {
     return logs.filter(log => {
       if (logType !== 'all' && log.level.toLowerCase() !== logType.toLowerCase()) return false;
       
@@ -138,7 +148,23 @@ export function ServerLogList() {
 
       {/* Table Body */}
       <div className="flex-1 overflow-auto bg-background">
-        {filteredLogs.length === 0 ? (
+        {error ? (
+          <div className="p-4">
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription className="mt-2 space-y-3">
+                <p>{error}</p>
+                <Button variant="outline" onClick={() => refetch()}>
+                  Retry
+                </Button>
+              </AlertDescription>
+            </Alert>
+          </div>
+        ) : isLoading && filteredLogs.length === 0 ? (
+          <div className="flex items-center justify-center h-full">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : filteredLogs.length === 0 ? (
           <div className="flex items-center justify-center h-full text-muted-foreground font-sans">
             No logs found
           </div>

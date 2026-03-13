@@ -174,6 +174,10 @@ pub fn default_deleted_retention_hours() -> i32 {
     168 // 7 days
 }
 
+pub fn default_dba_stats_retention_days() -> u64 {
+    7
+}
+
 // Stream defaults
 pub fn default_stream_ttl() -> u64 {
     10 // 10 seconds

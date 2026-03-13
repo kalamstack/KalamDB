@@ -38,6 +38,8 @@ import {
 import {
   fetchSystemSettings,
   fetchSystemStats,
+  fetchDbaStats,
+  type DbaStatRow,
   type SystemStatsMap,
 } from "@/services/systemTableService";
 import {
@@ -109,6 +111,18 @@ export const apiSlice = createApi({
           return { data };
         } catch (error) {
           const message = error instanceof Error ? error.message : "Failed to fetch stats";
+          return { error: { status: "CUSTOM_ERROR", error: message } };
+        }
+      },
+      providesTags: ["Stats"],
+    }),
+    getDbaStats: builder.query<DbaStatRow[], string>({
+      async queryFn(timeRange) {
+        try {
+          const data = await fetchDbaStats(timeRange || "24 HOURS");
+          return { data };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Failed to fetch dba stats";
           return { error: { status: "CUSTOM_ERROR", error: message } };
         }
       },
@@ -363,6 +377,7 @@ export const apiSlice = createApi({
 export const {
   useGetSettingsQuery,
   useGetStatsQuery,
+  useGetDbaStatsQuery,
   useGetUsersListQuery,
   useCreateUserMutation,
   useUpdateUserMutation,

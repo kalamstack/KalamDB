@@ -136,7 +136,7 @@ mod tests {
     #[test]
     fn test_block_system_namespace_modification() {
         // System namespaces should be blocked
-        let system_ns = NamespaceId::from("system");
+        let system_ns = NamespaceId::system();
         let result =
             block_system_namespace_modification(&system_ns, "ALTER", "TABLE", Some("users"));
         assert!(result.is_err());

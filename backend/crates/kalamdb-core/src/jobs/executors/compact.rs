@@ -19,6 +19,7 @@
 //! ```
 
 use crate::error::KalamDbError;
+use crate::jobs::executors::shared_table_cleanup::cleanup_empty_shared_scope_if_needed;
 use crate::jobs::executors::{JobContext, JobDecision, JobExecutor, JobParams};
 use async_trait::async_trait;
 use kalamdb_commons::constants::ColumnFamilyNames;
@@ -105,9 +106,15 @@ impl JobExecutor for CompactExecutor {
 
         let backend = ctx.app_ctx.storage_backend();
         match backend.compact_partition_async(&partition).await {
-            Ok(()) => Ok(JobDecision::Completed {
-                message: Some(format!("Compaction completed for {}", table_id)),
-            }),
+            Ok(()) => {
+                if matches!(table_type, TableType::Shared) {
+                    cleanup_empty_shared_scope_if_needed(ctx, &table_id).await?;
+                }
+
+                Ok(JobDecision::Completed {
+                    message: Some(format!("Compaction completed for {}", table_id)),
+                })
+            },
             Err(e) => {
                 ctx.log_error(&format!("Compaction failed: {}", e));
                 Ok(JobDecision::Failed {

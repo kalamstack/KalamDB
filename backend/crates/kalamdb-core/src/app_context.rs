@@ -22,6 +22,7 @@ use crate::views::system_schema_provider::SystemSchemaProvider;
 use async_trait::async_trait;
 use datafusion::catalog::SchemaProvider;
 use datafusion::prelude::SessionContext;
+use kalamdb_commons::constants::SYSTEM_NAMESPACE;
 use kalamdb_commons::models::{NamespaceId, UserId};
 use kalamdb_commons::{constants::ColumnFamilyNames, NodeId};
 use kalamdb_configs::ServerConfig;
@@ -266,7 +267,10 @@ impl AppContext {
             // Register the system schema provider with the catalog
             // Views are created on first access, not eagerly at startup
             catalog
-                .register_schema("system", Arc::clone(&system_schema) as Arc<dyn SchemaProvider>)
+                .register_schema(
+                    SYSTEM_NAMESPACE,
+                    Arc::clone(&system_schema) as Arc<dyn SchemaProvider>,
+                )
                 .expect("Failed to register system schema");
 
             // Register existing namespaces as DataFusion schemas

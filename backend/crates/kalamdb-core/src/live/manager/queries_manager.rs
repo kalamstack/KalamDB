@@ -287,47 +287,74 @@ impl LiveQueryManager {
             )
             .await?;
 
-        // Fetch initial data if requested
+        // Fetch initial data if requested.
+        // IMPORTANT: If anything fails after register_subscription succeeded,
+        // we must unregister the subscription to avoid orphaned entries in
+        // system.live_queries and the in-memory registry.
         let initial_data = if let Some(mut fetch_options) = initial_data_options {
-            // Compute snapshot boundary (MAX(_seq)) before initial load unless a
-            // reconnect already supplied the original boundary.
-            let snapshot_seq = if let Some(snapshot_seq) = fetch_options.until_seq {
-                snapshot_seq
-            } else {
+            let fetch_result: Result<InitialDataResult, KalamDbError> = async {
+                // Compute snapshot boundary (MAX(_seq)) before initial load unless a
+                // reconnect already supplied the original boundary.
+                let snapshot_seq = if let Some(snapshot_seq) = fetch_options.until_seq {
+                    snapshot_seq
+                } else {
+                    self.initial_data_fetcher
+                        .compute_snapshot_end_seq(
+                            &live_id,
+                            user_role,
+                            &table_id,
+                            table_def.table_type,
+                            &fetch_options,
+                            where_clause.as_deref(),
+                        )
+                        .await?
+                        .unwrap_or_else(|| SeqId::from(0))
+                };
+
+                fetch_options.until_seq = Some(snapshot_seq);
+                self.subscription_service.update_snapshot_end_seq(
+                    connection_state,
+                    &request.id,
+                    snapshot_seq,
+                );
+
                 self.initial_data_fetcher
-                    .compute_snapshot_end_seq(
+                    .fetch_initial_data(
                         &live_id,
                         user_role,
                         &table_id,
                         table_def.table_type,
-                        &fetch_options,
+                        fetch_options,
                         where_clause.as_deref(),
+                        projections.as_deref(),
                     )
-                    .await?
-                    .unwrap_or_else(|| SeqId::from(0))
-            };
+                    .await
+            }
+            .await;
 
-            fetch_options.until_seq = Some(snapshot_seq);
-            self.subscription_service.update_snapshot_end_seq(
-                connection_state,
-                &request.id,
-                snapshot_seq,
-            );
-
-            let result = self
-                .initial_data_fetcher
-                .fetch_initial_data(
-                    &live_id,
-                    user_role,
-                    &table_id,
-                    table_def.table_type,
-                    fetch_options,
-                    where_clause.as_deref(),
-                    projections.as_deref(),
-                )
-                .await?;
-
-            Some(result)
+            match fetch_result {
+                Ok(result) => Some(result),
+                Err(e) => {
+                    // Cleanup: unregister the subscription we just registered
+                    log::warn!(
+                        "Initial data fetch failed for subscription {}, cleaning up: {}",
+                        request.id,
+                        e
+                    );
+                    if let Err(cleanup_err) = self
+                        .subscription_service
+                        .unregister_subscription(connection_state, &request.id, &live_id)
+                        .await
+                    {
+                        log::error!(
+                            "Failed to cleanup subscription {} after initial data error: {}",
+                            request.id,
+                            cleanup_err
+                        );
+                    }
+                    return Err(e);
+                },
+            }
         } else {
             None
         };
@@ -572,7 +599,7 @@ mod tests {
 
     fn system_table_def() -> TableDefinition {
         TableDefinition {
-            namespace_id: NamespaceId::from("system"),
+            namespace_id: NamespaceId::system(),
             table_name: TableName::from("users"),
             table_type: TableType::System,
             columns: vec![],

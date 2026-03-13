@@ -161,7 +161,7 @@ mod tests {
         assert!(ctx.is_admin());
         assert!(!ctx.is_system());
 
-        let ctx = UserContext::client(UserId::new("system"), Role::System);
+        let ctx = UserContext::client(UserId::system(), Role::System);
         assert!(ctx.is_admin());
         assert!(ctx.is_system());
     }

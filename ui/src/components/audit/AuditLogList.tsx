@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useState, useMemo } from 'react';
 import type { AuditLog, AuditLogFilters } from '@/services/auditLogService';
-import { subscribeRows, type RowData } from '@/lib/kalam-client';
-import { buildAuditLogsSubscriptionQuery } from '@/services/sql/queries/auditLogQueries';
+import { useGetAuditLogsQuery } from '@/store/apiSlice';
 import {
   Table,
   TableBody,
@@ -54,107 +53,42 @@ function formatTimestamp(timestamp: string): string {
   }
 }
 
-export function AuditLogList() {
-  const [showFilters, setShowFilters] = useState(false);
-  const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
-  const [logs, setLogs] = useState<AuditLog[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [draftFilters, setDraftFilters] = useState<AuditLogFilters>({
-    limit: 100,
-  });
-  const [appliedFilters, setAppliedFilters] = useState<AuditLogFilters>({
-    limit: 100,
-  });
-  const [refreshKey, setRefreshKey] = useState(0);
-
-  const auditLogSql = useMemo(
-    () => buildAuditLogsSubscriptionQuery(appliedFilters),
-    [appliedFilters],
-  );
-
-  useEffect(() => {
-    let active = true;
-    let unsubscribe: (() => Promise<void>) | undefined;
-
-    const toAuditLog = (row: RowData): AuditLog => ({
-      audit_id: row.audit_id?.asString() ?? '',
-      timestamp: row.timestamp?.asString() ?? '',
-      actor_user_id: row.actor_user_id?.asString() ?? '',
-      actor_username: row.actor_username?.asString() ?? '',
-      action: row.action?.asString() ?? '',
-      target: row.target?.asString() ?? '',
-      details: row.details?.asString() ?? null,
-      ip_address: row.ip_address?.asString() ?? null,
+  export function AuditLogList() {
+    const [showFilters, setShowFilters] = useState(false);
+    const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
+    const [draftFilters, setDraftFilters] = useState<AuditLogFilters>({
+      limit: 100,
     });
-
-    const start = async (): Promise<void> => {
-      try {
-        setIsLoading(true);
-        setError(null);
-        unsubscribe = await subscribeRows(
-          auditLogSql,
-          (rows) => {
-            if (!active) {
-              return;
-            }
-
-            setLogs(
-              [...rows]
-                .sort(
-                  (left, right) =>
-                    new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime(),
-                )
-                .slice(0, appliedFilters.limit ?? 100),
-            );
-            setIsLoading(false);
-          },
-          {
-            mapRow: toAuditLog,
-            subscriptionOptions: { last_rows: appliedFilters.limit ?? 100 },
-            onError: (event) => {
-              if (!active) {
-                return;
-              }
-
-              setError(`${event.code}: ${event.message}`);
-              setIsLoading(false);
-            },
-          },
-        );
-      } catch (caughtError) {
-        if (!active) {
-          return;
-        }
-
-        setError(caughtError instanceof Error ? caughtError.message : String(caughtError));
-        setIsLoading(false);
-      }
+    const [appliedFilters, setAppliedFilters] = useState<AuditLogFilters>({
+      limit: 100,
+    });
+    const { data: fetchedLogs, isLoading, error: queryError, refetch } = useGetAuditLogsQuery(appliedFilters, {
+      pollingInterval: 5000,
+    });
+  
+    const logs = fetchedLogs || [];
+  
+    const error = queryError && "error" in queryError && typeof queryError.error === "string" 
+      ? queryError.error 
+      : queryError 
+        ? "Failed to fetch audit logs" 
+        : null;
+  
+    const handleApplyFilters = () => {
+      setAppliedFilters({ ...draftFilters });
+      setShowFilters(false);
     };
-
-    void start();
-
-    return () => {
-      active = false;
-      void unsubscribe?.();
+  
+    const handleClearFilters = () => {
+      const clearedFilters = { limit: 100 };
+      setDraftFilters(clearedFilters);
+      setAppliedFilters(clearedFilters);
+      setShowFilters(false);
     };
-  }, [appliedFilters.limit, auditLogSql, refreshKey]);
-
-  const handleApplyFilters = () => {
-    setAppliedFilters({ ...draftFilters });
-    setShowFilters(false);
-  };
-
-  const handleClearFilters = () => {
-    const clearedFilters = { limit: 100 };
-    setDraftFilters(clearedFilters);
-    setAppliedFilters(clearedFilters);
-    setShowFilters(false);
-  };
-
-  const handleRefresh = () => {
-    setRefreshKey((current) => current + 1);
-  };
+  
+    const handleRefresh = () => {
+      refetch();
+    };
 
   const hasActiveFilters = useMemo(
     () =>

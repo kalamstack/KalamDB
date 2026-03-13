@@ -3,6 +3,7 @@ pub use kalamdb_observability::{
     collect_runtime_metrics, RuntimeMetrics, BUILD_DATE, GIT_BRANCH, GIT_COMMIT_HASH,
     SERVER_VERSION,
 };
+use kalamdb_system::JobStatus;
 
 /// Compute all server metrics from the application context.
 ///
@@ -19,6 +20,18 @@ pub fn compute_metrics(ctx: &crate::app_context::AppContext) -> Vec<(String, Str
     // Runtime metrics from sysinfo (shared with console logging)
     let runtime = collect_runtime_metrics(ctx.server_start_time());
     metrics.extend(runtime.as_pairs());
+
+    let (open_files_total, open_file_breakdown) =
+        kalamdb_observability::HealthMonitor::collect_open_file_metrics();
+    metrics.push(("open_files_total".to_string(), open_files_total.to_string()));
+    if let Some(breakdown) = open_file_breakdown {
+        metrics.push(("open_files_regular".to_string(), breakdown.regular.to_string()));
+        metrics.push(("open_files_directories".to_string(), breakdown.directories.to_string()));
+        metrics.push(("open_files_kqueue".to_string(), breakdown.kqueue.to_string()));
+        metrics.push(("open_files_unix".to_string(), breakdown.unix.to_string()));
+        metrics.push(("open_files_ipv4".to_string(), breakdown.ipv4.to_string()));
+        metrics.push(("open_files_other".to_string(), breakdown.other.to_string()));
+    }
 
     // Count entities from system tables
     // Users count
@@ -42,11 +55,27 @@ pub fn compute_metrics(ctx: &crate::app_context::AppContext) -> Vec<(String, Str
         metrics.push(("total_tables".to_string(), "0".to_string()));
     }
 
+    let storage_partition_count = ctx
+        .storage_backend()
+        .list_partitions()
+        .map(|partitions| partitions.len())
+        .unwrap_or(0);
+    metrics.push(("storage_partition_count".to_string(), storage_partition_count.to_string()));
+
     // Jobs count
     if let Ok(jobs) = ctx.system_tables().jobs().list_jobs() {
+        let running_jobs = jobs.iter().filter(|job| job.status == JobStatus::Running).count();
+        let queued_jobs = jobs.iter().filter(|job| job.status == JobStatus::Queued).count();
+        let failed_jobs = jobs.iter().filter(|job| job.status == JobStatus::Failed).count();
         metrics.push(("total_jobs".to_string(), jobs.len().to_string()));
+        metrics.push(("jobs_running".to_string(), running_jobs.to_string()));
+        metrics.push(("jobs_queued".to_string(), queued_jobs.to_string()));
+        metrics.push(("jobs_failed".to_string(), failed_jobs.to_string()));
     } else {
         metrics.push(("total_jobs".to_string(), "0".to_string()));
+        metrics.push(("jobs_running".to_string(), "0".to_string()));
+        metrics.push(("jobs_queued".to_string(), "0".to_string()));
+        metrics.push(("jobs_failed".to_string(), "0".to_string()));
     }
 
     // Storages count
@@ -70,6 +99,10 @@ pub fn compute_metrics(ctx: &crate::app_context::AppContext) -> Vec<(String, Str
     // Active Subscriptions
     let active_subscriptions = ctx.connection_registry().subscription_count();
     metrics.push(("active_subscriptions".to_string(), active_subscriptions.to_string()));
+    metrics.push((
+        "websocket_sessions".to_string(),
+        kalamdb_observability::get_websocket_session_count().to_string(),
+    ));
 
     // Schema cache size and stats
     let cache_size = ctx.schema_registry().len();
@@ -78,28 +111,31 @@ pub fn compute_metrics(ctx: &crate::app_context::AppContext) -> Vec<(String, Str
     // Schema registry size (returns usize now, not a tuple)
     let registry_size = ctx.schema_registry().stats();
     metrics.push(("schema_registry_size".to_string(), registry_size.to_string()));
+    metrics.push((
+        "schema_cache_total_entries".to_string(),
+        ctx.schema_registry().total_len().to_string(),
+    ));
 
-    // Manifest Cache Metrics
-    // Manifests in hot cache (memory)
-    // let manifests_in_memory = ctx.manifest_service().hot_cache_len();
-    // metrics.push(("manifests_in_memory".to_string(), manifests_in_memory.to_string()));
+    if let Some(sql_executor) = ctx.try_sql_executor() {
+        metrics.push(("plan_cache_size".to_string(), sql_executor.plan_cache_len().to_string()));
+    }
 
-    // // Manifests in RocksDB (persistent cache)
-    // if let Ok(manifests_in_rocksdb) = ctx.manifest_service().count() {
-    //     metrics.push(("manifests_in_rocksdb".to_string(), manifests_in_rocksdb.to_string()));
-    // } else {
-    //     metrics.push(("manifests_in_rocksdb".to_string(), "0".to_string()));
-    // }
+    let topic_cache_stats = ctx.topic_publisher().cache_stats();
+    metrics
+        .push(("topic_cache_topic_count".to_string(), topic_cache_stats.topic_count.to_string()));
+    metrics.push((
+        "topic_cache_table_route_count".to_string(),
+        topic_cache_stats.table_route_count.to_string(),
+    ));
+    metrics.push((
+        "topic_cache_total_routes".to_string(),
+        topic_cache_stats.total_routes.to_string(),
+    ));
 
-    // Manifest cache breakdown (shared vs user tables)
-    // let (shared_manifests, user_manifests, total_weight) = ctx.manifest_service().cache_stats();
-    // metrics.push(("manifests_shared_tables".to_string(), shared_manifests.to_string()));
-    // metrics.push(("manifests_user_tables".to_string(), user_manifests.to_string()));
-    // metrics.push(("manifests_cache_weight".to_string(), total_weight.to_string()));
-    // metrics.push((
-    //     "manifests_max_capacity".to_string(),
-    //     ctx.manifest_service().max_weighted_capacity().to_string(),
-    // ));
+    metrics.push((
+        "string_interner_unique_strings".to_string(),
+        kalamdb_commons::helpers::string_interner::stats().unique_strings.to_string(),
+    ));
 
     // Node ID
     metrics.push(("node_id".to_string(), ctx.node_id().to_string()));

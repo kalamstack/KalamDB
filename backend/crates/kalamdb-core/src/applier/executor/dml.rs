@@ -250,7 +250,7 @@ impl DmlExecutor {
             .ok_or_else(|| ApplierError::not_found("Shared table provider", table_id))?;
 
         if let Some(provider) = provider_arc.as_any().downcast_ref::<SharedTableProvider>() {
-            let system_user = UserId::from("system");
+            let system_user = UserId::system();
             let row_ids = provider
                 .insert_batch(&system_user, rows.to_vec())
                 .await
@@ -286,7 +286,7 @@ impl DmlExecutor {
             .ok_or_else(|| ApplierError::not_found("Shared table provider", table_id))?;
 
         if let Some(provider) = provider_arc.as_any().downcast_ref::<SharedTableProvider>() {
-            let system_user = UserId::from("system");
+            let system_user = UserId::system();
             let update_row = updates[0].clone();
 
             let prior_row = match find_row_by_pk(provider, None, pk_value).await {
@@ -356,7 +356,7 @@ impl DmlExecutor {
             .ok_or_else(|| ApplierError::not_found("Shared table provider", table_id))?;
 
         if let Some(provider) = provider_arc.as_any().downcast_ref::<SharedTableProvider>() {
-            let system_user = UserId::from("system");
+            let system_user = UserId::system();
             let mut deleted_count = 0;
 
             for pk_value in pk_values {

@@ -125,6 +125,12 @@ impl UserId {
         Self(AuthConstants::DEFAULT_ROOT_USER_ID.to_string())
     }
 
+    /// Creates a default 'system' user ID.\
+    #[inline]
+    pub fn system() -> Self {
+        Self(AuthConstants::DEFAULT_SYSTEM_USER_ID.to_string())
+    }
+
     /// Is admin user?
     #[inline]
     pub fn is_admin(&self) -> bool {

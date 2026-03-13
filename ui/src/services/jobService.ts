@@ -13,7 +13,7 @@ export interface Job {
   cpu_used: number | null;
   created_at: string;
   started_at: string | null;
-  completed_at: string | null;
+  finished_at: string | null;
   node_id: string;
 }
 
@@ -31,7 +31,7 @@ export async function fetchJobs(filters?: JobFilters): Promise<Job[]> {
     cpu_used: row.cpu_used as number | null,
     created_at: String(row.created_at ?? ""),
     started_at: row.started_at as string | null,
-    completed_at: row.completed_at as string | null,
+    finished_at: row.finished_at as string | null,
     node_id: String(row.node_id ?? ""),
   }));
 }

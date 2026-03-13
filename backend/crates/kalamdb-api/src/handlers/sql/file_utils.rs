@@ -289,7 +289,7 @@ pub async fn stage_and_finalize_files(
 
     // Create a temporary staging directory
     let request_id = uuid::Uuid::new_v4().to_string();
-    let system_id = kalamdb_commons::UserId::new("system");
+    let system_id = kalamdb_commons::UserId::system();
     let uid = user_id.unwrap_or(&system_id);
 
     let staging_dir = file_service.create_staging_dir(&request_id, uid).map_err(|e| {

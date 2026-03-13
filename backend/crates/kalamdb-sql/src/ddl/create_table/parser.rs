@@ -217,7 +217,8 @@ impl CreateTableStatement {
                                     "PUBLIC" => Some(TableAccess::Public),
                                     "PRIVATE" => Some(TableAccess::Private),
                                     "RESTRICTED" => Some(TableAccess::Restricted),
-                                    _ => return Err(format!("Invalid ACCESS_LEVEL '{}'. Supported: PUBLIC, PRIVATE, RESTRICTED", value_str)),
+                                    "DBA" => Some(TableAccess::Dba),
+                                    _ => return Err(format!("Invalid ACCESS_LEVEL '{}'. Supported: PUBLIC, PRIVATE, RESTRICTED, DBA", value_str)),
                                 };
                             },
                             _ => return Err(format!("Unknown table option '{}'", key_str)),

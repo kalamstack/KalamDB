@@ -22,109 +22,448 @@ fn test_docs_matrix_has_execution_tests_for_documented_flags_and_commands() {
     // This is the canonical docs inventory from KalamSite/content/getting-started/cli.mdx.
     let matrix = vec![
         // Connection/auth flags
-        Coverage { item: "--url", tests: &["test_cli_help_command", "test_cli_runtime_timeout_and_spinner_flags_work"] },
-        Coverage { item: "--host", tests: &["test_cli_parse_missing_documented_flags_without_server", "test_cli_host_and_port_work_against_running_server"] },
-        Coverage { item: "--port", tests: &["test_cli_parse_missing_documented_flags_without_server", "test_cli_host_and_port_work_against_running_server"] },
-        Coverage { item: "--token", tests: &["test_cli_invalid_token"] },
-        Coverage { item: "--username", tests: &["test_cli_color_output"] },
-        Coverage { item: "--password", tests: &["test_cli_color_output"] },
-        Coverage { item: "--instance", tests: &["test_cli_multiple_instances"] },
+        Coverage {
+            item: "--url",
+            tests: &[
+                "test_cli_help_command",
+                "test_cli_runtime_timeout_and_spinner_flags_work",
+            ],
+        },
+        Coverage {
+            item: "--host",
+            tests: &[
+                "test_cli_parse_missing_documented_flags_without_server",
+                "test_cli_host_and_port_work_against_running_server",
+            ],
+        },
+        Coverage {
+            item: "--port",
+            tests: &[
+                "test_cli_parse_missing_documented_flags_without_server",
+                "test_cli_host_and_port_work_against_running_server",
+            ],
+        },
+        Coverage {
+            item: "--token",
+            tests: &["test_cli_invalid_token"],
+        },
+        Coverage {
+            item: "--username",
+            tests: &["test_cli_color_output"],
+        },
+        Coverage {
+            item: "--password",
+            tests: &["test_cli_color_output"],
+        },
+        Coverage {
+            item: "--instance",
+            tests: &["test_cli_multiple_instances"],
+        },
         // Query/output flags
-        Coverage { item: "--command", tests: &["test_cli_color_output"] },
-        Coverage { item: "--file", tests: &["test_cli_batch_file_execution"] },
-        Coverage { item: "--format", tests: &["test_cli_config_precedence"] },
-        Coverage { item: "--json", tests: &["test_cli_config_precedence"] },
-        Coverage { item: "--csv", tests: &["test_cli_csv_output_format"] },
-        Coverage { item: "--no-color", tests: &["test_cli_color_output"] },
-        Coverage { item: "--no-spinner", tests: &["test_cli_runtime_timeout_and_spinner_flags_work"] },
-        Coverage { item: "--loading-threshold-ms", tests: &["test_cli_runtime_timeout_and_spinner_flags_work"] },
+        Coverage {
+            item: "--command",
+            tests: &["test_cli_color_output"],
+        },
+        Coverage {
+            item: "--file",
+            tests: &["test_cli_batch_file_execution"],
+        },
+        Coverage {
+            item: "--format",
+            tests: &["test_cli_config_precedence"],
+        },
+        Coverage {
+            item: "--json",
+            tests: &["test_cli_config_precedence"],
+        },
+        Coverage {
+            item: "--csv",
+            tests: &["test_cli_csv_output_format"],
+        },
+        Coverage {
+            item: "--no-color",
+            tests: &["test_cli_color_output"],
+        },
+        Coverage {
+            item: "--no-spinner",
+            tests: &["test_cli_runtime_timeout_and_spinner_flags_work"],
+        },
+        Coverage {
+            item: "--loading-threshold-ms",
+            tests: &["test_cli_runtime_timeout_and_spinner_flags_work"],
+        },
         // Credential flags
-        Coverage { item: "--list-instances", tests: &["test_cli_list_instances_command"] },
-        Coverage { item: "--show-credentials", tests: &["test_cli_show_credentials_command"] },
-        Coverage { item: "--update-credentials", tests: &["test_cli_parse_missing_documented_flags_without_server"] },
-        Coverage { item: "--delete-credentials", tests: &["test_cli_delete_credentials"] },
-        Coverage { item: "--save-credentials", tests: &["test_cli_save_credentials_creates_file"] },
+        Coverage {
+            item: "--list-instances",
+            tests: &["test_cli_list_instances_command"],
+        },
+        Coverage {
+            item: "--show-credentials",
+            tests: &["test_cli_show_credentials_command"],
+        },
+        Coverage {
+            item: "--update-credentials",
+            tests: &["test_cli_parse_missing_documented_flags_without_server"],
+        },
+        Coverage {
+            item: "--delete-credentials",
+            tests: &["test_cli_delete_credentials"],
+        },
+        Coverage {
+            item: "--save-credentials",
+            tests: &["test_cli_save_credentials_creates_file"],
+        },
         // Subscription flags
-        Coverage { item: "--subscribe", tests: &["test_cli_subscribe_flags_work_end_to_end"] },
-        Coverage { item: "--subscription-timeout", tests: &["test_cli_subscribe_flags_work_end_to_end"] },
-        Coverage { item: "--initial-data-timeout", tests: &["test_cli_subscribe_flags_work_end_to_end"] },
-        Coverage { item: "--list-subscriptions", tests: &["test_cli_subscription_commands"] },
-        Coverage { item: "--unsubscribe", tests: &["test_cli_subscription_commands"] },
+        Coverage {
+            item: "--subscribe",
+            tests: &["test_cli_subscribe_flags_work_end_to_end"],
+        },
+        Coverage {
+            item: "--subscription-timeout",
+            tests: &["test_cli_subscribe_flags_work_end_to_end"],
+        },
+        Coverage {
+            item: "--initial-data-timeout",
+            tests: &["test_cli_subscribe_flags_work_end_to_end"],
+        },
+        Coverage {
+            item: "--list-subscriptions",
+            tests: &["test_cli_subscription_commands"],
+        },
+        Coverage {
+            item: "--unsubscribe",
+            tests: &["test_cli_subscription_commands"],
+        },
         // Consume flags
-        Coverage { item: "--consume", tests: &["test_cli_consume_flags_work_end_to_end"] },
-        Coverage { item: "--topic", tests: &["test_cli_consume_flags_work_end_to_end"] },
-        Coverage { item: "--group", tests: &["test_cli_consume_flags_work_end_to_end"] },
-        Coverage { item: "--from", tests: &["test_cli_consume_flags_work_end_to_end"] },
-        Coverage { item: "--consume-limit", tests: &["test_cli_consume_flags_work_end_to_end"] },
-        Coverage { item: "--consume-timeout", tests: &["test_cli_consume_flags_work_end_to_end"] },
+        Coverage {
+            item: "--consume",
+            tests: &["test_cli_consume_flags_work_end_to_end"],
+        },
+        Coverage {
+            item: "--topic",
+            tests: &["test_cli_consume_flags_work_end_to_end"],
+        },
+        Coverage {
+            item: "--group",
+            tests: &["test_cli_consume_flags_work_end_to_end"],
+        },
+        Coverage {
+            item: "--from",
+            tests: &["test_cli_consume_flags_work_end_to_end"],
+        },
+        Coverage {
+            item: "--consume-limit",
+            tests: &["test_cli_consume_flags_work_end_to_end"],
+        },
+        Coverage {
+            item: "--consume-timeout",
+            tests: &["test_cli_consume_flags_work_end_to_end"],
+        },
         // Init agent flags
-        Coverage { item: "--init-agent", tests: &["test_cli_init_agent_non_interactive_generates_project"] },
-        Coverage { item: "--init-agent-non-interactive", tests: &["test_cli_init_agent_non_interactive_generates_project"] },
-        Coverage { item: "--agent-name", tests: &["test_cli_init_agent_non_interactive_generates_project"] },
-        Coverage { item: "--agent-output", tests: &["test_cli_init_agent_non_interactive_generates_project"] },
-        Coverage { item: "--agent-table", tests: &["test_cli_init_agent_non_interactive_generates_project"] },
-        Coverage { item: "--agent-topic", tests: &["test_cli_init_agent_non_interactive_generates_project"] },
-        Coverage { item: "--agent-group", tests: &["test_cli_init_agent_non_interactive_generates_project"] },
-        Coverage { item: "--agent-id-column", tests: &["test_cli_parse_missing_documented_agent_flags_without_server"] },
-        Coverage { item: "--agent-input-column", tests: &["test_cli_parse_missing_documented_agent_flags_without_server"] },
-        Coverage { item: "--agent-output-column", tests: &["test_cli_parse_missing_documented_agent_flags_without_server"] },
-        Coverage { item: "--agent-system-prompt", tests: &["test_cli_parse_missing_documented_agent_flags_without_server"] },
+        Coverage {
+            item: "--init-agent",
+            tests: &["test_cli_init_agent_non_interactive_generates_project"],
+        },
+        Coverage {
+            item: "--init-agent-non-interactive",
+            tests: &["test_cli_init_agent_non_interactive_generates_project"],
+        },
+        Coverage {
+            item: "--agent-name",
+            tests: &["test_cli_init_agent_non_interactive_generates_project"],
+        },
+        Coverage {
+            item: "--agent-output",
+            tests: &["test_cli_init_agent_non_interactive_generates_project"],
+        },
+        Coverage {
+            item: "--agent-table",
+            tests: &["test_cli_init_agent_non_interactive_generates_project"],
+        },
+        Coverage {
+            item: "--agent-topic",
+            tests: &["test_cli_init_agent_non_interactive_generates_project"],
+        },
+        Coverage {
+            item: "--agent-group",
+            tests: &["test_cli_init_agent_non_interactive_generates_project"],
+        },
+        Coverage {
+            item: "--agent-id-column",
+            tests: &["test_cli_parse_missing_documented_agent_flags_without_server"],
+        },
+        Coverage {
+            item: "--agent-input-column",
+            tests: &["test_cli_parse_missing_documented_agent_flags_without_server"],
+        },
+        Coverage {
+            item: "--agent-output-column",
+            tests: &["test_cli_parse_missing_documented_agent_flags_without_server"],
+        },
+        Coverage {
+            item: "--agent-system-prompt",
+            tests: &["test_cli_parse_missing_documented_agent_flags_without_server"],
+        },
         // Timeout/runtime flags
-        Coverage { item: "--timeout", tests: &["test_cli_runtime_timeout_and_spinner_flags_work"] },
-        Coverage { item: "--connection-timeout", tests: &["test_cli_runtime_timeout_and_spinner_flags_work"] },
-        Coverage { item: "--receive-timeout", tests: &["test_cli_runtime_timeout_and_spinner_flags_work"] },
-        Coverage { item: "--auth-timeout", tests: &["test_cli_runtime_timeout_and_spinner_flags_work"] },
-        Coverage { item: "--fast-timeouts", tests: &["test_cli_runtime_timeout_presets_work"] },
-        Coverage { item: "--relaxed-timeouts", tests: &["test_cli_runtime_timeout_presets_work"] },
-        Coverage { item: "--config", tests: &["test_cli_load_config_file"] },
-        Coverage { item: "--verbose", tests: &["test_cli_verbose_output"] },
-        Coverage { item: "--version", tests: &["test_cli_version_command"] },
+        Coverage {
+            item: "--timeout",
+            tests: &["test_cli_runtime_timeout_and_spinner_flags_work"],
+        },
+        Coverage {
+            item: "--connection-timeout",
+            tests: &["test_cli_runtime_timeout_and_spinner_flags_work"],
+        },
+        Coverage {
+            item: "--receive-timeout",
+            tests: &["test_cli_runtime_timeout_and_spinner_flags_work"],
+        },
+        Coverage {
+            item: "--auth-timeout",
+            tests: &["test_cli_runtime_timeout_and_spinner_flags_work"],
+        },
+        Coverage {
+            item: "--fast-timeouts",
+            tests: &["test_cli_runtime_timeout_presets_work"],
+        },
+        Coverage {
+            item: "--relaxed-timeouts",
+            tests: &["test_cli_runtime_timeout_presets_work"],
+        },
+        Coverage {
+            item: "--config",
+            tests: &["test_cli_load_config_file"],
+        },
+        Coverage {
+            item: "--verbose",
+            tests: &["test_cli_verbose_output"],
+        },
+        Coverage {
+            item: "--version",
+            tests: &["test_cli_version_command"],
+        },
         // Interactive commands covered by parser + execution smoke
-        Coverage { item: "\\help", tests: &["test_parse_help", "test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\?", tests: &["test_parse_help", "test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\quit", tests: &["test_parse_quit", "test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\q", tests: &["test_parse_quit", "test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\info", tests: &["test_cli_authenticate_and_check_info", "test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\session", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\history", tests: &["test_parse_history", "test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\h", tests: &["test_parse_history", "test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\health", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\stats", tests: &["test_parse_stats", "test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\metrics", tests: &["test_parse_stats", "test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\dt", tests: &["smoke_cli_list_tables_command", "test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\tables", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\d", tests: &["smoke_cli_describe_table_command", "test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\describe", tests: &["test_parse_describe", "test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\format", tests: &["smoke_cli_format_json_command", "test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\refresh-tables", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\refresh", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\show-credentials", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\credentials", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\update-credentials", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\delete-credentials", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\subscribe", tests: &["test_cli_subscribe_flags_work_end_to_end"] },
-        Coverage { item: "\\watch", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\unsubscribe", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\unwatch", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\consume", tests: &["test_cli_consume_flags_work_end_to_end"] },
-        Coverage { item: "\\flush", tests: &["smoke_cli_flush_command", "test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\pause", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\continue", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\cluster snapshot", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\cluster purge", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\cluster trigger-election", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\cluster trigger election", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\cluster transfer-leader", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\cluster transfer leader", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\cluster stepdown", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\cluster step-down", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\cluster clear", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\cluster list", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\cluster ls", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\cluster list groups", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\cluster status", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\cluster join", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
-        Coverage { item: "\\cluster leave", tests: &["test_cli_meta_commands_doc_smoke_non_interactive"] },
+        Coverage {
+            item: "\\help",
+            tests: &[
+                "test_parse_help",
+                "test_cli_meta_commands_doc_smoke_non_interactive",
+            ],
+        },
+        Coverage {
+            item: "\\?",
+            tests: &[
+                "test_parse_help",
+                "test_cli_meta_commands_doc_smoke_non_interactive",
+            ],
+        },
+        Coverage {
+            item: "\\quit",
+            tests: &[
+                "test_parse_quit",
+                "test_cli_meta_commands_doc_smoke_non_interactive",
+            ],
+        },
+        Coverage {
+            item: "\\q",
+            tests: &[
+                "test_parse_quit",
+                "test_cli_meta_commands_doc_smoke_non_interactive",
+            ],
+        },
+        Coverage {
+            item: "\\info",
+            tests: &[
+                "test_cli_authenticate_and_check_info",
+                "test_cli_meta_commands_doc_smoke_non_interactive",
+            ],
+        },
+        Coverage {
+            item: "\\session",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\history",
+            tests: &[
+                "test_parse_history",
+                "test_cli_meta_commands_doc_smoke_non_interactive",
+            ],
+        },
+        Coverage {
+            item: "\\h",
+            tests: &[
+                "test_parse_history",
+                "test_cli_meta_commands_doc_smoke_non_interactive",
+            ],
+        },
+        Coverage {
+            item: "\\health",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\stats",
+            tests: &[
+                "test_parse_stats",
+                "test_cli_meta_commands_doc_smoke_non_interactive",
+            ],
+        },
+        Coverage {
+            item: "\\metrics",
+            tests: &[
+                "test_parse_stats",
+                "test_cli_meta_commands_doc_smoke_non_interactive",
+            ],
+        },
+        Coverage {
+            item: "\\dt",
+            tests: &[
+                "smoke_cli_list_tables_command",
+                "test_cli_meta_commands_doc_smoke_non_interactive",
+            ],
+        },
+        Coverage {
+            item: "\\tables",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\d",
+            tests: &[
+                "smoke_cli_describe_table_command",
+                "test_cli_meta_commands_doc_smoke_non_interactive",
+            ],
+        },
+        Coverage {
+            item: "\\describe",
+            tests: &[
+                "test_parse_describe",
+                "test_cli_meta_commands_doc_smoke_non_interactive",
+            ],
+        },
+        Coverage {
+            item: "\\format",
+            tests: &[
+                "smoke_cli_format_json_command",
+                "test_cli_meta_commands_doc_smoke_non_interactive",
+            ],
+        },
+        Coverage {
+            item: "\\refresh-tables",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\refresh",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\show-credentials",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\credentials",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\update-credentials",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\delete-credentials",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\subscribe",
+            tests: &["test_cli_subscribe_flags_work_end_to_end"],
+        },
+        Coverage {
+            item: "\\watch",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\unsubscribe",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\unwatch",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\consume",
+            tests: &["test_cli_consume_flags_work_end_to_end"],
+        },
+        Coverage {
+            item: "\\flush",
+            tests: &[
+                "smoke_cli_flush_command",
+                "test_cli_meta_commands_doc_smoke_non_interactive",
+            ],
+        },
+        Coverage {
+            item: "\\pause",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\continue",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\cluster snapshot",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\cluster purge",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\cluster trigger-election",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\cluster trigger election",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\cluster transfer-leader",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\cluster transfer leader",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\cluster stepdown",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\cluster step-down",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\cluster clear",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\cluster list",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\cluster ls",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\cluster list groups",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\cluster status",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\cluster join",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
+        Coverage {
+            item: "\\cluster leave",
+            tests: &["test_cli_meta_commands_doc_smoke_non_interactive"],
+        },
     ];
 
     let test_sources = concat!(
@@ -143,7 +482,8 @@ fn test_docs_matrix_has_execution_tests_for_documented_flags_and_commands() {
     let missing: Vec<String> = matrix
         .into_iter()
         .filter_map(|row| {
-            let has_execution_test = row.tests.iter().any(|test_name| test_sources.contains(test_name));
+            let has_execution_test =
+                row.tests.iter().any(|test_name| test_sources.contains(test_name));
             if has_execution_test {
                 None
             } else {
@@ -152,11 +492,7 @@ fn test_docs_matrix_has_execution_tests_for_documented_flags_and_commands() {
         })
         .collect();
 
-    assert!(
-        missing.is_empty(),
-        "Missing docs coverage for:\n{}",
-        missing.join("\n")
-    );
+    assert!(missing.is_empty(), "Missing docs coverage for:\n{}", missing.join("\n"));
 }
 
 #[test]
@@ -331,8 +667,11 @@ fn test_cli_consume_flags_work_end_to_end() {
     ))
     .expect("create table");
     execute_sql_as_root_via_client(&format!("CREATE TOPIC {}", topic)).expect("create topic");
-    execute_sql_as_root_via_client(&format!("ALTER TOPIC {} ADD SOURCE {} ON INSERT", topic, full_table))
-        .expect("add topic source");
+    execute_sql_as_root_via_client(&format!(
+        "ALTER TOPIC {} ADD SOURCE {} ON INSERT",
+        topic, full_table
+    ))
+    .expect("add topic source");
 
     let deadline = Instant::now() + Duration::from_secs(10);
     let readiness_sql = format!("SELECT routes FROM system.topics WHERE topic_id = '{}'", topic);
