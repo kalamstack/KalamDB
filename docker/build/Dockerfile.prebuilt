@@ -16,9 +16,13 @@ RUN mkdir -p /runtime/usr/local/bin /runtime/data/rocksdb /runtime/data/storage 
 COPY backend/server.example.toml /runtime/config/server.toml
 RUN sed -i 's|data_path = "\./data"|data_path = "/data"|g' /runtime/config/server.toml
 
-# Distroless runtime keeps the final image smaller and reduces the attack surface.
-# Debian 13 provides a newer glibc that matches the release-built Linux binaries.
-FROM gcr.io/distroless/cc-debian13:nonroot
+# Debian 13 slim keeps the runtime minimal while still providing glibc and bash.
+# This trades a slightly larger image for a usable interactive shell and standard userland.
+FROM debian:13-slim
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends bash ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
 ARG OCI_IMAGE_TITLE="KalamDB"
 ARG OCI_IMAGE_DESCRIPTION="SQL-first realtime state database for AI agents, chat products, and multi-tenant SaaS"
@@ -55,7 +59,7 @@ COPY --from=runtime-prep --chmod=755 /runtime/usr/local/bin/busybox /usr/local/b
 COPY --from=runtime-prep --chown=65532:65532 /runtime/data /data
 COPY --from=runtime-prep --chown=65532:65532 /runtime/config /config
 
-# Distroless nonroot uses uid/gid 65532.
+# Run as the same non-root uid/gid used by the previous distroless image.
 USER 65532:65532
 
 # Set working directory (server looks for server.toml here)
@@ -64,7 +68,7 @@ WORKDIR /data
 # Expose default port
 EXPOSE 8080
 
-# Health check using busybox to avoid shipping curl in the runtime image.
+# Health check uses busybox wget to avoid pulling extra packages into the runtime image.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["/usr/local/bin/busybox", "wget", "--spider", "-q", "http://127.0.0.1:8080/health"]
 

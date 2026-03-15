@@ -1,262 +1,261 @@
-# Docker Deployment Guide
+# KalamDB Docker Guide
 
-**Feature**: 006-docker-wasm-examples  
-**Purpose**: Docker containerization for KalamDB backend with CLI included
+KalamDB is a SQL-first realtime state database for AI agents, chat products, and multi-tenant SaaS. This directory contains the Docker image definitions and compose setups used to run KalamDB as a single node or a 3-node cluster.
 
----
+The Docker image ships with both binaries:
 
-## Overview
+- `kalamdb-server` for the database server
+- `kalam` and `kalam-cli` for the command-line client
 
-This directory contains Docker configurations for deploying KalamDB in containerized environments.
+## What Is Here
 
-### Directory Structure
-
-```
+```text
 docker/
 ├── build/
-│   ├── Dockerfile           # Multi-stage build for kalamdb-server + kalam-cli
-│   ├── Dockerfile.prebuilt  # Runtime image from prebuilt binaries
-│   ├── build-and-test-local.sh # Build + smoke test (prebuilt)
-│   └── test-docker-image.sh # Docker image smoke tests
+│   ├── Dockerfile             # Full source build image
+│   ├── Dockerfile.prebuilt    # Runtime image from prebuilt binaries
+│   ├── build-and-test-local.sh
+│   └── test-docker-image.sh
 └── run/
-  ├── single/
-  │   ├── docker-compose.yml
-  │   ├── server.toml
-  │   └── .env.example
-  └── cluster/
-    ├── docker-compose.yml
-    ├── server1.toml
-    ├── server2.toml
-    └── server3.toml
+    ├── single/
+    │   ├── docker-compose.yml
+    │   └── server.toml
+    └── cluster/
+        ├── docker-compose.yml
+        ├── server1.toml
+        ├── server2.toml
+        └── server3.toml
 ```
-
----
 
 ## Quick Start
 
-### 1. Build Image
+### Pull and run the published image
 
 ```bash
-cd docker/build
-docker build -f Dockerfile -t jamals86/kalamdb:latest ../..
+docker pull jamals86/kalamdb:latest
+
+docker run -d \
+  --name kalamdb \
+  -p 8080:8080 \
+  -e KALAMDB_SERVER_HOST=0.0.0.0 \
+  -e KALAMDB_ROOT_PASSWORD=kalamdb123 \
+  -e KALAMDB_JWT_SECRET="replace-with-a-32-char-secret" \
+  -v kalamdb_data:/data \
+  jamals86/kalamdb:latest
 ```
 
-This creates `kalamdb:latest` with both server and CLI binaries.
-
-### 2. Start Container
+Verify the server is healthy:
 
 ```bash
-cd ../run/single
-docker-compose up -d
-```
-
-### 3. Create User
-
-```bash
-docker exec -it kalamdb kalam-cli user create --name "myuser" --role "user"
-```
-
-**Save the API key** - you'll need it for authentication!
-
-### 4. Test
-
-```bash
-# Health check
 curl http://localhost:8080/health
+curl http://localhost:8080/v1/api/healthcheck
+```
 
-# Query with API key
-curl -X POST http://localhost:8080/sql \
+### Run with Docker Compose
+
+The single-node compose file maps container port `8080` to host port `8088` by default.
+
+```bash
+cd docker/run/single
+export KALAMDB_JWT_SECRET="replace-with-a-32-char-secret"
+docker compose up -d
+```
+
+Open the server at `http://localhost:8088`.
+
+To change the host port:
+
+```bash
+KALAMDB_PORT=8080 docker compose up -d
+```
+
+### Start a 3-node cluster
+
+```bash
+cd docker/run/cluster
+export KALAMDB_JWT_SECRET="replace-with-a-32-char-secret"
+docker compose up -d
+```
+
+Default node endpoints:
+
+- Node 1: `http://localhost:8081`
+- Node 2: `http://localhost:8082`
+- Node 3: `http://localhost:8083`
+
+## Build the Image Locally
+
+### Recommended: build from prebuilt binaries
+
+This is the path used by the release workflow. Build the Rust binaries once, then create the smaller runtime image.
+
+```bash
+./docker/build/build-and-test-local.sh kalamdb:local
+```
+
+That script will:
+
+1. Build `kalamdb-server` and `kalam` in release mode
+2. Stage them as a Docker build context
+3. Build `docker/build/Dockerfile.prebuilt`
+4. Run smoke tests against the resulting image
+
+### Manual prebuilt image build
+
+```bash
+cd /path/to/KalamDB
+mkdir -p binaries-amd64
+cp backend/target/release/kalamdb-server binaries-amd64/
+cp backend/target/release/kalam binaries-amd64/
+
+docker build \
+  --build-context binaries=binaries-amd64 \
+  -f docker/build/Dockerfile.prebuilt \
+  -t kalamdb:local \
+  .
+```
+
+### Full source build inside Docker
+
+For maintainers, `docker/build/Dockerfile` performs a full multi-stage source build and then packages the server and CLI into a runtime image.
+
+```bash
+docker build -f docker/build/Dockerfile -t kalamdb:source-build .
+```
+
+## Authentication and First Login
+
+If you set `KALAMDB_ROOT_PASSWORD`, you can authenticate immediately after startup.
+
+```bash
+curl -X POST http://localhost:8080/v1/api/auth/login \
   -H "Content-Type: application/json" \
-  -H "X-API-KEY: <your-api-key-here>" \
-  -d '{"query": "SELECT 1"}'
+  -d '{"username":"root","password":"kalamdb123"}'
 ```
 
----
-
-## Build Options
-
-### Custom Tag
+Then run a SQL request with the returned bearer token:
 
 ```bash
-docker build -f Dockerfile -t myregistry.com/kalamdb:v1.0.0 ../..
+curl -X POST http://localhost:8080/v1/api/sql \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"sql":"SELECT 1 AS ok"}'
 ```
 
-### No Cache
+## Using the CLI in the Container
+
+The image includes the Kalam CLI under both `kalam` and `kalam-cli`.
 
 ```bash
-docker build --no-cache -f Dockerfile -t jamals86/kalamdb:latest ../..
+docker exec -it kalamdb kalam --version
+docker exec -it kalamdb kalam-cli --version
 ```
 
-### Build and Push
+If you want an interactive shell in the container, use bash:
 
 ```bash
-docker build -f Dockerfile -t myregistry.com/kalamdb:v1.0.0 ../..
-docker push myregistry.com/kalamdb:v1.0.0
+docker exec -it kalamdb bash
 ```
 
----
+## Configuration
 
-## Environment Variables
+The container starts with:
 
-Create a `.env` file in `docker/run/single/` to override defaults:
+- data under `/data`
+- config under `/config/server.toml`
+- server command `kalamdb-server /config/server.toml`
 
-```bash
-# Server configuration
-KALAMDB_SERVER_PORT=8080
-KALAMDB_SERVER_HOST=0.0.0.0
+The single-node compose file already mounts a persistent volume for `/data`. To provide your own config, mount a custom `server.toml` over `/config/server.toml`.
 
-# Data directory (inside container)
-KALAMDB_DATA_DIR=/data
-
-# Logging
-KALAMDB_LOG_LEVEL=info
-KALAMDB_LOG_FILE=/data/logs/kalamdb.log
-KALAMDB_LOG_TO_CONSOLE=true
-
-# Connection limits
-KALAMDB_MAX_CONNECTIONS=100
-```
-
-**Supported log levels**: `debug`, `info`, `warn`, `error`
-
----
-
-## Volume Management
-
-### Default Volume
-
-```bash
-# Inspect volume
-docker volume inspect kalamdb_data
-
-# Backup data
-docker run --rm -v kalamdb_data:/data -v $(pwd):/backup alpine tar czf /backup/kalamdb-backup.tar.gz /data
-
-# Restore data
-docker run --rm -v kalamdb_data:/data -v $(pwd):/backup alpine tar xzf /backup/kalamdb-backup.tar.gz -C /
-```
-
-### Custom Host Path
-
-Edit `docker-compose.yml`:
-
-```yaml
-volumes:
-  kalamdb_data:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: /path/to/host/data  # Your custom path
-```
-
----
-
-## Using CLI Inside Container
-
-### Interactive Mode
-
-```bash
-docker exec -it kalamdb kalam-cli
-```
-
-### Execute Single Command
-
-```bash
-docker exec kalamdb kalam-cli exec "SELECT * FROM system.users"
-```
-
-### Load SQL File
-
-```bash
-# Copy file into container
-docker cp schema.sql kalamdb:/tmp/schema.sql
-
-# Execute
-docker exec kalamdb kalam-cli load /tmp/schema.sql
-```
-
----
-
-## Production Deployment
-
-### Multi-Node Setup
-
-Use Docker Swarm or Kubernetes for multi-node deployments:
-
-```bash
-# Docker Swarm example
-docker swarm init
-docker stack deploy -c docker-compose.yml kalamdb-stack
-```
-
-### TLS/SSL
-
-Mount certificates and update environment:
-
-```yaml
-volumes:
-  - ./certs:/etc/kalamdb/certs:ro
-environment:
-  KALAMDB_TLS_CERT: /etc/kalamdb/certs/server.crt
-  KALAMDB_TLS_KEY: /etc/kalamdb/certs/server.key
-```
-
-### Resource Limits
+Example:
 
 ```yaml
 services:
   kalamdb:
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 4G
-        reservations:
-          cpus: '1'
-          memory: 2G
+    volumes:
+      - kalamdb_data:/data
+      - ./server.toml:/config/server.toml:ro
 ```
 
----
+Important environment variables used by the compose files:
+
+- `KALAMDB_JWT_SECRET`: required for safe non-localhost deployments
+- `KALAMDB_ROOT_PASSWORD`: optional root password for immediate login
+- `KALAMDB_PORT`: host port override for the single-node compose setup
+- `RUST_LOG`: server log level
+
+## Persistence
+
+The default compose setup stores data in Docker-managed volumes.
+
+Inspect the single-node volume:
+
+```bash
+docker volume inspect kalamdb_data
+```
+
+Back up the data volume:
+
+```bash
+docker run --rm \
+  -v kalamdb_data:/data \
+  -v "$PWD":/backup \
+  alpine \
+  tar czf /backup/kalamdb-data.tar.gz /data
+```
+
+## Smoke Testing
+
+To validate an image locally:
+
+```bash
+./docker/build/test-docker-image.sh kalamdb:local
+```
+
+The smoke test checks:
+
+- server startup and health endpoints
+- presence of `kalamdb-server`, `kalam-cli`, and `kalam`
+- root login flow
+- SQL execution through the HTTP API
 
 ## Troubleshooting
 
-### Container Won't Start
+### Container starts but is unreachable
+
+Make sure the server is bound to `0.0.0.0` when publishing ports from Docker.
 
 ```bash
-# Check logs
-docker-compose logs kalamdb
-
-# Common issues:
-# - Port 8080 already in use
-# - Volume permission errors
-# - Config file errors
+docker logs kalamdb
 ```
 
-### Data Not Persisting
+### Compose stack is healthy but login fails
+
+If you did not set `KALAMDB_ROOT_PASSWORD`, set one explicitly and recreate the container.
+
+### Port collision on the host
+
+Override the published port:
 
 ```bash
-# Verify volume exists
-docker volume ls | grep kalamdb_data
-
-# Check mount points
-docker inspect kalamdb | grep -A 10 "Mounts"
+KALAMDB_PORT=8090 docker compose up -d
 ```
 
-### Performance Issues
+### Clean reset
 
 ```bash
-# Check resource usage
-docker stats kalamdb
-
-# Increase resources in docker-compose.yml (see Production Deployment)
+docker compose down -v
+docker volume prune
 ```
 
-### API Key Issues
+Use volume deletion carefully. It removes persisted KalamDB data.
 
-```bash
-# List users (requires localhost or API key)
-docker exec kalamdb kalam-cli exec "SELECT user_id, username, role FROM system.users"
+## Related Links
+
+- Main project README: `../README.md`
+- Docker single-node compose: `run/single/docker-compose.yml`
+- Docker cluster compose: `run/cluster/docker-compose.yml`
+- Project docs: <https://kalamdb.org/docs>
 
 # Create new user
 docker exec kalamdb kalam-cli user create --name "newuser" --role "user"

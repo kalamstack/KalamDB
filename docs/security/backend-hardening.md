@@ -88,9 +88,11 @@ max_request_body_size = 10485760
 max_ws_message_size = 1048576
 strict_ws_origin_check = true
 allowed_ws_origins = ["https://app.example.com"]
+trusted_proxy_ranges = ["10.0.1.9", "10.0.0.0/8"]
 ```
 
 KalamDB also rejects localhost-spoofing via proxy headers for connection protection logic (helps prevent rate-limit bypass tricks).
+Only proxies listed in `security.trusted_proxy_ranges` are allowed to supply `X-Forwarded-For` or `X-Real-IP` when they are not loopback.
 
 ## 6) CORS hardening
 

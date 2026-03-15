@@ -14,6 +14,7 @@ toml = { workspace = true }
 anyhow = { workspace = true }
 num_cpus = { workspace = true }
 openraft = { workspace = true }
+ipnet = { workspace = true }
 
 [lib]
 name = "kalamdb_configs"

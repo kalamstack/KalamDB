@@ -38,6 +38,7 @@ impl ServerConfig {
     /// - KALAMDB_COOKIE_SECURE: Override auth.cookie_secure
     /// - KALAMDB_ALLOW_REMOTE_SETUP: Override auth.allow_remote_setup
     /// - KALAMDB_AUTH_AUTO_CREATE_USERS_FROM_PROVIDER: Override auth.auto_create_users_from_provider
+    /// - KALAMDB_SECURITY_TRUSTED_PROXY_RANGES: Override security.trusted_proxy_ranges
     /// - KALAMDB_RATE_LIMIT_AUTH_REQUESTS_PER_IP_PER_SEC: Override rate_limit.max_auth_requests_per_ip_per_sec
     /// - KALAMDB_WEBSOCKET_CLIENT_TIMEOUT_SECS: Override websocket.client_timeout_secs
     /// - KALAMDB_WEBSOCKET_AUTH_TIMEOUT_SECS: Override websocket.auth_timeout_secs
@@ -144,6 +145,17 @@ impl ServerConfig {
         if let Ok(val) = env::var("KALAMDB_AUTH_AUTO_CREATE_USERS_FROM_PROVIDER") {
             self.auth.auto_create_users_from_provider =
                 val.to_lowercase() == "true" || val == "1" || val.to_lowercase() == "yes";
+        }
+
+        // Trusted proxy ranges used for X-Forwarded-For / X-Real-IP trust.
+        if let Ok(val) = env::var("KALAMDB_SECURITY_TRUSTED_PROXY_RANGES")
+            .or_else(|_| env::var("KALAMDB_TRUSTED_PROXY_RANGES"))
+        {
+            self.security.trusted_proxy_ranges = val
+                .split(',')
+                .map(|entry| entry.trim().to_string())
+                .filter(|entry| !entry.is_empty())
+                .collect();
         }
 
         // Auth rate limit per IP
@@ -354,5 +366,24 @@ mod tests {
         assert_eq!(config.logging.level, "debug");
 
         env::remove_var("KALAMDB_LOG_LEVEL");
+    }
+
+    #[test]
+    fn test_env_override_trusted_proxy_ranges() {
+        let _guard = acquire_env_lock();
+        env::set_var(
+            "KALAMDB_SECURITY_TRUSTED_PROXY_RANGES",
+            "10.0.1.9,192.168.0.0/24",
+        );
+
+        let mut config = ServerConfig::default();
+        config.apply_env_overrides().unwrap();
+
+        assert_eq!(
+            config.security.trusted_proxy_ranges,
+            vec!["10.0.1.9".to_string(), "192.168.0.0/24".to_string()]
+        );
+
+        env::remove_var("KALAMDB_SECURITY_TRUSTED_PROXY_RANGES");
     }
 }

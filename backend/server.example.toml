@@ -305,6 +305,11 @@ allowed_ws_origins = []
 # If true, rejects WebSocket connections without Origin header
 strict_ws_origin_check = false
 
+# Trusted reverse proxy source IPs or CIDR ranges for forwarded client IP headers.
+# Only peers in this list may supply X-Forwarded-For / X-Real-IP.
+# Examples: ["10.0.1.9", "10.0.0.0/8", "192.168.0.0/24"]
+trusted_proxy_ranges = []
+
 # CORS Configuration (uses actix-cors)
 # See: https://docs.rs/actix-cors
 [security.cors]

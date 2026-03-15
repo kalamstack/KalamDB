@@ -91,7 +91,9 @@ pub(crate) async fn ws_reader_loop(
 
     let keepalive_dur = keepalive_interval.unwrap_or(FAR_FUTURE);
     let has_keepalive = keepalive_interval.is_some();
-    let mut idle_deadline = TokioInstant::now() + keepalive_dur;
+    // Keep application-level heartbeats periodic even while inbound change
+    // events are flowing, otherwise the server can time out a busy stream.
+    let mut ping_deadline = TokioInstant::now() + keepalive_dur;
 
     // Pong timeout tracking
     let has_pong_timeout = has_keepalive && !pong_timeout.is_zero();
@@ -99,8 +101,8 @@ pub(crate) async fn ws_reader_loop(
     let mut pong_deadline = TokioInstant::now() + FAR_FUTURE;
 
     loop {
-        let idle_sleep = tokio::time::sleep_until(idle_deadline);
-        tokio::pin!(idle_sleep);
+        let ping_sleep = tokio::time::sleep_until(ping_deadline);
+        tokio::pin!(ping_sleep);
 
         let pong_sleep = tokio::time::sleep_until(pong_deadline);
         tokio::pin!(pong_sleep);
@@ -137,7 +139,7 @@ pub(crate) async fn ws_reader_loop(
             }
 
             // Keepalive idle timer (only fires when we are NOT already awaiting a pong).
-            _ = &mut idle_sleep, if has_keepalive && !awaiting_pong => {
+            _ = &mut ping_sleep, if has_keepalive && !awaiting_pong => {
                 log::debug!(
                     "[kalam-link] [{}] Keepalive: sending Ping (interval={:?})",
                     subscription_id, keepalive_dur,
@@ -153,6 +155,22 @@ pub(crate) async fn ws_reader_loop(
                     );
                     return;
                 }
+                if let Ok(payload) = serde_json::to_string(&ClientMessage::Ping) {
+                    if let Err(e) = ws_stream.send(Message::Text(payload.into())).await {
+                        let _ = event_tx
+                            .send(Err(KalamLinkError::WebSocketError(format!(
+                                "Failed to send keepalive heartbeat: {}", e
+                            ))))
+                            .await;
+                        event_handlers.emit_disconnect(
+                            DisconnectReason::new(format!(
+                                "Keepalive heartbeat failed: {}",
+                                e
+                            )),
+                        );
+                        return;
+                    }
+                }
                 event_handlers.emit_send("[ping]");
                 // Arm the pong timeout.
                 if has_pong_timeout {
@@ -163,14 +181,13 @@ pub(crate) async fn ws_reader_loop(
                         subscription_id, pong_timeout,
                     );
                 }
-                idle_deadline = TokioInstant::now() + keepalive_dur;
+                ping_deadline = TokioInstant::now() + keepalive_dur;
                 continue;
             }
 
             // Normal path: read the next WebSocket frame.
             msg = ws_stream.next() => {
                 // Any frame received proves the connection is alive.
-                idle_deadline = TokioInstant::now() + keepalive_dur;
                 if awaiting_pong {
                     log::debug!(
                         "[kalam-link] [{}] Keepalive: frame received, clearing pong timeout",
