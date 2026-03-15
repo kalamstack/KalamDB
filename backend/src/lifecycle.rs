@@ -569,6 +569,7 @@ pub async fn run(
 
     // Initialize shared JWT configuration for kalamdb-auth
     kalamdb_auth::services::unified::init_auth_config(&config.auth, &config.oauth);
+    kalamdb_auth::init_trusted_proxy_ranges(&config.security.trusted_proxy_ranges)?;
 
     // Share auth settings with HTTP handlers
     let auth_settings = config.auth.clone();
@@ -809,6 +810,7 @@ pub async fn run_for_tests(
     let connection_registry_for_handler = connection_registry.clone();
 
     kalamdb_auth::services::unified::init_auth_config(&config.auth, &config.oauth);
+    kalamdb_auth::init_trusted_proxy_ranges(&config.security.trusted_proxy_ranges)?;
     let auth_settings = config.auth.clone();
     let ui_path = config.server.ui_path.clone();
 

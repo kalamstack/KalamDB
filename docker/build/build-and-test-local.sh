@@ -31,11 +31,9 @@ main() {
     
     # Step 1: Build release binaries
     log_info "Step 1/4: Building release binaries..."
-    if [ ! -f "backend/target/release/kalamdb-server" ] || [ ! -f "backend/target/release/kalam" ]; then
+    if [ ! -f "target/release/kalamdb-server" ] || [ ! -f "target/release/kalam" ]; then
         log_info "Building with cargo (this may take a while)..."
-        cd backend
-        cargo build --release --bin kalamdb-server --bin kalam
-        cd ..
+        cargo build --release -p kalamdb-server -p kalam-cli --bin kalamdb-server --bin kalam
     else
         log_warn "Using existing release binaries (run 'cargo clean' to rebuild)"
     fi
@@ -43,8 +41,8 @@ main() {
     # Step 2: Prepare binaries directory
     log_info "Step 2/4: Preparing binaries directory..."
     mkdir -p binaries-amd64
-    cp backend/target/release/kalamdb-server binaries-amd64/
-    cp backend/target/release/kalam binaries-amd64/
+    cp target/release/kalamdb-server binaries-amd64/
+    cp target/release/kalam binaries-amd64/
     chmod +x binaries-amd64/kalamdb-server binaries-amd64/kalam
     log_info "Binaries ready:"
     ls -lh binaries-amd64/

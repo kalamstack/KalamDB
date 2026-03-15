@@ -51,6 +51,7 @@ tracing = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true }
+ipnet = { workspace = true }
 
 # Time handling
 chrono = { workspace = true }

@@ -34,7 +34,10 @@ String _uniqueTableName(String prefix) {
   return '${prefix}_$ts';
 }
 
-Future<KalamClient> _connectJwtClient() async {
+Future<KalamClient> _connectJwtClient({
+  Duration? keepaliveInterval,
+  ConnectionHandlers? connectionHandlers,
+}) async {
   _nativeBridgeReady ??= _ensureNativeBridgeReady();
   await _nativeBridgeReady;
   _sdkInitialized ??= KalamClient.init();
@@ -59,6 +62,8 @@ Future<KalamClient> _connectJwtClient() async {
       authProvider: () async => Auth.jwt(login.accessToken),
       timeout: const Duration(seconds: 10),
       maxRetries: 2,
+      keepaliveInterval: keepaliveInterval,
+      connectionHandlers: connectionHandlers,
     );
   } finally {
     await anonClient.dispose();
@@ -299,6 +304,141 @@ void main() {
 
           expect(received.row['id']?.asInt(), 202);
           expect(received.row['title']?.asString(), 'from-writer');
+        } finally {
+          if (sub != null) {
+            await _safeAwait(sub.cancel());
+          }
+          await _safeAwait(
+            subscriberClient
+                .query('DROP TABLE IF EXISTS $fullTable')
+                .then((_) {}),
+          );
+          await _safeAwait(
+            writerClient.query('DROP TABLE IF EXISTS $fullTable').then((_) {}),
+          );
+          await _safeAwait(writerClient.dispose());
+          await _safeAwait(subscriberClient.dispose());
+        }
+      },
+      timeout: const Timeout(Duration(seconds: 90)),
+      skip: skipReason,
+    );
+
+    test(
+      'shared connection keeps heartbeats flowing during sustained traffic',
+      () async {
+        final disconnects = <DisconnectReason>[];
+        var pingCount = 0;
+
+        final subscriberClient = await _connectJwtClient(
+          keepaliveInterval: const Duration(seconds: 1),
+          connectionHandlers: ConnectionHandlers(
+            onDisconnect: disconnects.add,
+            onSend: (message) {
+              if (message == '[ping]') {
+                pingCount += 1;
+              }
+            },
+          ),
+        );
+        final writerClient = await _connectJwtClient();
+        final namespace = _uniqueTableName('sdk_dart_it_ns');
+        final table = _uniqueTableName('sdk_dart_it_hb');
+        final fullTable = '$namespace.$table';
+
+        StreamSubscription<ChangeEvent>? sub;
+        final enoughTraffic = Completer<void>();
+        final seenIds = <int>{};
+
+        try {
+          final createNamespace = await subscriberClient.query(
+            'CREATE NAMESPACE IF NOT EXISTS $namespace',
+          );
+          expect(createNamespace.success, isTrue);
+
+          final create = await subscriberClient.query(
+            'CREATE TABLE IF NOT EXISTS $fullTable (id INT PRIMARY KEY, title TEXT)',
+          );
+          expect(create.success, isTrue);
+
+          sub = subscriberClient
+              .subscribe(
+            'SELECT id, title FROM $fullTable',
+            batchSize: 100,
+          )
+              .listen(
+            (event) {
+              if (event case InsertEvent()) {
+                for (final row in event.rows) {
+                  final id = row['id']?.asInt();
+                  if (id != null) {
+                    seenIds.add(id);
+                  }
+                }
+
+                if (seenIds.length >= 8 && pingCount >= 2) {
+                  if (!enoughTraffic.isCompleted) {
+                    enoughTraffic.complete();
+                  }
+                }
+                return;
+              }
+
+              if (event case SubscriptionError()) {
+                if (!enoughTraffic.isCompleted) {
+                  enoughTraffic.completeError(
+                    StateError(
+                      'SubscriptionError(${event.code}): ${event.message}',
+                    ),
+                  );
+                }
+              }
+            },
+            onError: (Object error, StackTrace stackTrace) {
+              if (!enoughTraffic.isCompleted) {
+                enoughTraffic.completeError(error, stackTrace);
+              }
+            },
+          );
+
+          await Future<void>.delayed(const Duration(milliseconds: 300));
+
+          final writer = () async {
+            for (var i = 0; i < 20; i++) {
+              if (disconnects.isNotEmpty) {
+                break;
+              }
+              final insert = await writerClient.query(
+                r'INSERT INTO '
+                '$fullTable'
+                r' (id, title) VALUES ($1, $2)',
+                params: [i, 'heartbeat-$i'],
+              );
+              expect(insert.success, isTrue);
+              await Future<void>.delayed(const Duration(milliseconds: 250));
+            }
+          }();
+
+          await enoughTraffic.future.timeout(const Duration(seconds: 12));
+          await writer;
+
+          expect(
+            disconnects,
+            isEmpty,
+            reason:
+                'connection disconnected during sustained traffic: $disconnects',
+          );
+          expect(
+            pingCount,
+            greaterThanOrEqualTo(2),
+            reason:
+                'expected periodic keepalive pings while traffic was active',
+          );
+          expect(
+            seenIds.length,
+            greaterThanOrEqualTo(8),
+            reason: 'expected sustained insert traffic to reach the subscriber',
+          );
         } finally {
           if (sub != null) {
             await _safeAwait(sub.cancel());

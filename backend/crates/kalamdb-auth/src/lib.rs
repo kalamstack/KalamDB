@@ -23,7 +23,10 @@ pub use helpers::extractor::{AuthExtractError, AuthSessionExtractor};
 // Re-export unified session type from kalamdb-session
 pub use kalamdb_session::AuthSession;
 // Re-export items needed by extractor
-pub use helpers::ip_extractor::{extract_client_ip_secure, is_localhost_address};
+pub use helpers::ip_extractor::{
+    extract_client_ip_addr_secure, extract_client_ip_secure, init_trusted_proxy_ranges,
+    is_localhost_address,
+};
 pub use models::impersonation::{ImpersonationContext, ImpersonationOrigin};
 pub use providers::jwt_auth::{
     create_and_sign_refresh_token, create_and_sign_token, generate_jwt_token, refresh_jwt_token,

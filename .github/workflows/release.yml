@@ -1319,19 +1319,19 @@ jobs:
           tags: |
             ${{ steps.vars.outputs.docker_repo }}:${{ needs.read_version.outputs.version }}-amd64
 
-      - name: Test Docker image (linux/amd64)
-        continue-on-error: true
+      - name: Test Docker startup (linux/amd64)
         shell: bash
         run: |
           set -euo pipefail
           export KALAMDB_JWT_SECRET="$(openssl rand -base64 32)"
+          export DOCKER_PLATFORM="linux/amd64"
           
           # Pull the just-built image
           docker pull ${{ steps.vars.outputs.docker_repo }}:${{ needs.read_version.outputs.version }}-amd64
           
-          # Run smoke test
-          chmod +x docker/build/test-docker-image.sh
-          ./docker/build/test-docker-image.sh ${{ steps.vars.outputs.docker_repo }}:${{ needs.read_version.outputs.version }}-amd64
+          # Require at least a clean startup before publishing multi-arch tags
+          chmod +x docker/build/test-docker-startup.sh
+          ./docker/build/test-docker-startup.sh ${{ steps.vars.outputs.docker_repo }}:${{ needs.read_version.outputs.version }}-amd64
 
       - name: Build and push Docker image (linux/arm64)
         uses: docker/build-push-action@v6
@@ -1379,6 +1379,14 @@ jobs:
             "${REPO}:${VERSION}-arm64"
 
           echo "✅ Multi-arch manifest created for ${REPO}:${VERSION}, ${REPO}:${VERSION_COMMIT_TAG}, and ${REPO}:latest"
+
+      - name: Update Docker Hub repository README
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ steps.vars.outputs.docker_repo }}
+          readme-filepath: ./docker/REPO-README.md
 
   # ═══════════════════════════════════════════════════════════════════════════
   # INTEGRATION TESTS - Smoke + TypeScript SDK + Dart SDK against Docker image

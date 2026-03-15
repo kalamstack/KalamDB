@@ -714,7 +714,10 @@ async fn connection_task(
         jitter_keepalive_interval(timeouts.keepalive_interval, "shared-conn")
     };
     let has_keepalive = !timeouts.keepalive_interval.is_zero();
-    let mut idle_deadline = TokioInstant::now() + keepalive_dur;
+    // Keep heartbeats on a fixed cadence even when the server is actively
+    // streaming data, otherwise sustained inbound traffic can indefinitely
+    // postpone the JSON ping the server expects for liveness.
+    let mut ping_deadline = TokioInstant::now() + keepalive_dur;
 
     let pong_timeout_dur = timeouts.pong_timeout;
     let has_pong_timeout = has_keepalive && !pong_timeout_dur.is_zero();
@@ -728,7 +731,7 @@ async fn connection_task(
             ws_stream = Some(stream);
             connected.store(true, Ordering::SeqCst);
             event_handlers.emit_connect();
-            idle_deadline = TokioInstant::now() + keepalive_dur;
+            ping_deadline = TokioInstant::now() + keepalive_dur;
             if let Some(tx) = ready_tx {
                 let _ = tx.send(Ok(()));
             }
@@ -757,8 +760,8 @@ async fn connection_task(
         }
 
         if let Some(ref mut ws) = ws_stream {
-            let idle_sleep = tokio::time::sleep_until(idle_deadline);
-            tokio::pin!(idle_sleep);
+            let ping_sleep = tokio::time::sleep_until(ping_deadline);
+            tokio::pin!(ping_sleep);
 
             let pong_sleep = tokio::time::sleep_until(pong_deadline);
             tokio::pin!(pong_sleep);
@@ -847,7 +850,7 @@ async fn connection_task(
                     }
                 }
 
-                _ = &mut idle_sleep, if has_keepalive && !awaiting_pong => {
+                _ = &mut ping_sleep, if has_keepalive && !awaiting_pong => {
                     if let Err(e) = ws.send(Message::Ping(Bytes::new())).await {
                         log::warn!("Keepalive ping failed: {}", e);
                         event_handlers.emit_disconnect(DisconnectReason::new(format!(
@@ -869,11 +872,10 @@ async fn connection_task(
                         awaiting_pong = true;
                         pong_deadline = TokioInstant::now() + pong_timeout_dur;
                     }
-                    idle_deadline = TokioInstant::now() + keepalive_dur;
+                    ping_deadline = TokioInstant::now() + keepalive_dur;
                 }
 
                 frame = ws.next() => {
-                    idle_deadline = TokioInstant::now() + keepalive_dur;
                     if awaiting_pong {
                         awaiting_pong = false;
                         pong_deadline = TokioInstant::now() + FAR_FUTURE;
@@ -1129,7 +1131,7 @@ async fn connection_task(
                     event_handlers.emit_connect();
                     resubscribe_all(&mut stream, &mut subs, &event_handlers).await;
                     ws_stream = Some(stream);
-                    idle_deadline = TokioInstant::now() + keepalive_dur;
+                    ping_deadline = TokioInstant::now() + keepalive_dur;
                     awaiting_pong = false;
                     pong_deadline = TokioInstant::now() + FAR_FUTURE;
                 },

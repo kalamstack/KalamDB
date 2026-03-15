@@ -133,6 +133,11 @@ pub struct SecuritySettings {
     #[serde(default)]
     pub cors: CorsSettings,
 
+    /// Direct peer IPs or CIDR ranges allowed to supply proxy headers such as
+    /// X-Forwarded-For and X-Real-IP.
+    #[serde(default)]
+    pub trusted_proxy_ranges: Vec<String>,
+
     /// Allowed WebSocket origins for connection validation
     /// If empty, falls back to CORS allowed_origins
     #[serde(default)]
@@ -155,6 +160,7 @@ impl Default for SecuritySettings {
     fn default() -> Self {
         Self {
             cors: CorsSettings::default(),
+            trusted_proxy_ranges: Vec::new(),
             allowed_ws_origins: Vec::new(),
             max_ws_message_size: default_max_ws_message_size(),
             strict_ws_origin_check: false,

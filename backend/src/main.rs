@@ -201,6 +201,7 @@ async fn main() -> Result<()> {
     // ========================================================================
     // Initialize auth JWT config from server.toml (after env overrides are applied).
     kalamdb_auth::services::unified::init_auth_config(&config.auth, &config.oauth);
+    kalamdb_auth::init_trusted_proxy_ranges(&config.security.trusted_proxy_ranges)?;
 
     // ========================================================================
     // Security: Validate critical configuration at startup
@@ -281,7 +282,8 @@ async fn main() -> Result<()> {
         Some(&config.logging.targets),
         &config.logging.format,
         &config.logging.otlp,
-    )?;
+    )
+    .map_err(|error| anyhow::anyhow!("Failed to initialize logging at '{}': {}", server_log_path, error))?;
 
     // Display enhanced version information
     info!("KalamDB Server v{:<10} | Build: {}", SERVER_VERSION, BUILD_DATE);

@@ -1,4 +1,5 @@
 use super::types::ServerConfig;
+use super::trusted_proxies::parse_trusted_proxy_entries;
 use crate::file_helpers::normalize_dir_path;
 use std::fs;
 use std::path::Path;
@@ -106,6 +107,13 @@ impl ServerConfig {
             return Err(anyhow::anyhow!("cleanup_job_schedule cannot be empty"));
         }
 
+        parse_trusted_proxy_entries(&self.security.trusted_proxy_ranges).map_err(|error| {
+            anyhow::anyhow!(
+                "Invalid security.trusted_proxy_ranges configuration: {}",
+                error
+            )
+        })?;
+
         Ok(())
     }
 }
@@ -131,6 +139,13 @@ mod tests {
     fn test_invalid_log_level() {
         let mut config = ServerConfig::default();
         config.logging.level = "invalid".to_string();
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_invalid_trusted_proxy_ranges() {
+        let mut config = ServerConfig::default();
+        config.security.trusted_proxy_ranges = vec!["nope".to_string()];
         assert!(config.validate().is_err());
     }
 }

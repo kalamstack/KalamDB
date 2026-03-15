@@ -35,12 +35,14 @@ services:
       KALAMDB_JWT_SECRET: "${KALAMDB_JWT_SECRET:-kalamdb-docker-dev-secret-please-change-32chars}"
       # Allow initial setup from host machine when running in Docker
       KALAMDB_ALLOW_REMOTE_SETUP: "true"
+      # TRUSTED_PROXY_RANGES is required when running in Docker to allow proper client IP detection for security features
+      KALAMDB_SECURITY_TRUSTED_PROXY_RANGES: "10.0.1.9,10.0.0.0/8"
     
     restart: unless-stopped
     command: ["/usr/local/bin/kalamdb-server", "/config/server.toml"]
     
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8080/v1/api/healthcheck"]
+      test: ["CMD", "/usr/local/bin/busybox", "wget", "--spider", "-q", "http://127.0.0.1:8080/v1/api/healthcheck"]
       interval: 30s
       timeout: 5s
       start_period: 10s
