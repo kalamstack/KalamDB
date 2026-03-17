@@ -70,13 +70,13 @@ rocksdb = { version = "0.24.0", default-features = false, features = ["snappy", 
 
 # Apache Arrow ecosystem
 # IMPORTANT: arrow, arrow-schema and parquet MUST match the version used by DataFusion.
-# DataFusion 52.x uses arrow 57.x — using a different major version causes duplicate
-# arrow_array crates in the binary and type-mismatch compilation errors.
-# To upgrade arrow, first upgrade DataFusion to a version that uses the desired arrow version.
+# DataFusion 52.3.0 resolves to Arrow 57.3.0; mixing in Arrow 58 pulls a second
+# arrow_array crate into the graph and causes FixedSizeListArray type mismatches.
+# Upgrade DataFusion first before bumping Arrow/Parquet beyond this family.
 arrow = { version = "57.3.0", default-features = false, features = ["prettyprint", "json"] }
 arrow-schema = { version = "57.3.0" }
-datafusion = { version = "52.2.0", default-features = false, features = ["sql", "parquet", "recursive_protection", "nested_expressions"] }
-datafusion-common = { version = "52.2.0" }
+datafusion = { version = "52.3.0", default-features = false, features = ["sql", "parquet", "recursive_protection", "nested_expressions"] }
+datafusion-common = { version = "52.3.0" }
 sqlparser = { version = "0.61.0" }
 parquet = { version = "57.3.0", default-features = false, features = ["snap", "zstd", "arrow"] }
 
@@ -105,16 +105,16 @@ toml = "0.9.8"
 dotenv = "0.15"
 
 # CLI tools
-clap = { version = "4.5.60", features = ["derive", "color"] }
+clap = { version = "4.6.0", features = ["derive", "color"] }
 rustyline = { version = "17.0.2" }
 
 # System
 num_cpus = "1.16"
-sysinfo = "0.38.2"
+sysinfo = "0.38.4"
 hostname = "0.4"
 
 # Testing
-tempfile = "3.25.0"
+tempfile = "3.27.0"
 wait-timeout = "0.2"
 serial_test = "3.3.1"
 
@@ -144,20 +144,20 @@ rpassword = "7.3"
 dirs = "6.0"
 term_size = "0.3"
 crossterm = "0.29.0"
-assert_cmd = "2.1.2"
+assert_cmd = "2.2.0"
 predicates = "3.1.4"
 futures-util = { version = "0.3.32", default-features = false }
 base64 = "0.22"
 flatbuffers = "25.12.19"
 flexbuffers = "25.9.23"
 async-trait = "0.1.74"
-once_cell = "1.20"
+once_cell = "1.21.4"
 regex = "1.12.3"
 dashmap = "6.1"
 bytes = "1.11.1"
 http-body = "1.0.0"
 http-body-util = "0.1.2"
-cc = "1.2.56"
+cc = "1.2.57"
 proc-macro2 = "1.0.106"
 quote = "1.0.44"
 syn = { version = "2.0.117", features = ["full", "extra-traits"] }
@@ -188,8 +188,8 @@ tsify-next = { version = "0.5", default-features = false, features = ["js"] }
 serde-wasm-bindgen = "0.6"
 flate2 = "1.1.9"
 tar = "0.4"
-zip = { version = "4.2", default-features = false, features = ["deflate"] }
-miniz_oxide = "0.9.0"
+zip = { version = "8.2.0", default-features = false, features = ["deflate"] }
+miniz_oxide = "0.9.1"
 flutter_rust_bridge = "=2.11.1"
 rust-embed = { version = "8.11.0", features = ["compression"] }
 mime_guess = "2.0"
@@ -198,7 +198,7 @@ kalamdb-server = { path = "backend" }
 
 # Tracing / observability
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json", "fmt"] }
 tracing-actix-web = "0.7.21"
 tracing-log = "0.2"
 tracing-opentelemetry = "0.32.1"

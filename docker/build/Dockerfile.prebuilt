@@ -16,12 +16,29 @@ RUN mkdir -p /runtime/usr/local/bin /runtime/data/rocksdb /runtime/data/storage 
 COPY backend/server.example.toml /runtime/config/server.toml
 RUN sed -i 's|data_path = "\./data"|data_path = "/data"|g' /runtime/config/server.toml
 
-# Debian 13 slim keeps the runtime minimal while still providing glibc and bash.
-# This trades a slightly larger image for a usable interactive shell and standard userland.
-FROM debian:13-slim
+# Prepare release-built Linux binaries for the runtime image.
+# Strip debug/symbol data when possible to keep the final image smaller.
+FROM ubuntu:24.04 AS binary-prep
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends bash ca-certificates && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends binutils && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /staged/usr/local/bin
+
+COPY --from=binaries kalamdb-server /staged/usr/local/bin/kalamdb-server
+COPY --from=binaries kalam /staged/usr/local/bin/kalam-cli
+
+RUN chmod 755 /staged/usr/local/bin/kalamdb-server /staged/usr/local/bin/kalam-cli && \
+    strip --strip-unneeded /staged/usr/local/bin/kalamdb-server /staged/usr/local/bin/kalam-cli || true
+
+# Ubuntu 24.04 is the current LTS release. The base image already includes bash,
+# so only install CA certificates to keep the runtime as small as possible while
+# preserving HTTPS support for CLI and runtime tooling.
+FROM ubuntu:24.04
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 ARG OCI_IMAGE_TITLE="KalamDB"
@@ -48,12 +65,11 @@ LABEL org.opencontainers.image.title="${OCI_IMAGE_TITLE}" \
     org.opencontainers.image.revision="${OCI_IMAGE_REVISION}" \
     org.opencontainers.image.created="${OCI_IMAGE_CREATED}"
 
-# Copy pre-built binaries from build context (provided via --build-context binaries=...)
-# The build context should contain kalamdb-server and kalam binaries
-COPY --from=binaries --chmod=755 kalamdb-server /usr/local/bin/kalamdb-server
-COPY --from=binaries --chmod=755 kalam /usr/local/bin/kalam-cli
-COPY --from=binaries --chmod=755 kalam /usr/local/bin/kalam
+# Copy pre-built binaries from the prepared binary stage.
 COPY --from=runtime-prep --chmod=755 /runtime/usr/local/bin/busybox /usr/local/bin/busybox
+COPY --from=binary-prep --chmod=755 /staged/usr/local/bin/kalamdb-server /usr/local/bin/kalamdb-server
+COPY --from=binary-prep --chmod=755 /staged/usr/local/bin/kalam-cli /usr/local/bin/kalam-cli
+RUN ln -sf /usr/local/bin/kalam-cli /usr/local/bin/kalam
 
 # Copy writable runtime paths and the normalized config with non-root ownership.
 COPY --from=runtime-prep --chown=65532:65532 /runtime/data /data

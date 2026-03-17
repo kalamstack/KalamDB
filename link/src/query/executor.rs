@@ -81,6 +81,10 @@ impl QueryExecutor {
         }
     }
 
+    pub(crate) fn set_auth(&mut self, auth: AuthProvider) {
+        self.auth = auth;
+    }
+
     fn is_retry_safe_sql(sql: &str) -> bool {
         matches!(
             Self::first_keyword(sql).as_deref(),

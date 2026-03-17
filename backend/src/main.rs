@@ -283,7 +283,9 @@ async fn main() -> Result<()> {
         &config.logging.format,
         &config.logging.otlp,
     )
-    .map_err(|error| anyhow::anyhow!("Failed to initialize logging at '{}': {}", server_log_path, error))?;
+    .map_err(|error| {
+        anyhow::anyhow!("Failed to initialize logging at '{}': {}", server_log_path, error)
+    })?;
 
     // Display enhanced version information
     info!("KalamDB Server v{:<10} | Build: {}", SERVER_VERSION, BUILD_DATE);

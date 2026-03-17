@@ -2137,7 +2137,7 @@ pub fn setup_test_environment() {
 env:
   KALAMDB_ENV: test
   KALAMDB_JWT_SECRET: ${{ secrets.TEST_JWT_SECRET }}
-  RUST_LOG: warn,kalamdb=debug
+  KALAMDB_LOG_LEVEL: warn,kalamdb=debug
 
 jobs:
   test:

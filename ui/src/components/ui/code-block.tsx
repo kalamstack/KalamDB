@@ -14,9 +14,38 @@ interface NormalizedCode {
   isJson: boolean;
 }
 
+function unwrapSerializableValue(value: unknown): unknown {
+  if (value instanceof KalamCellValue) {
+    return unwrapSerializableValue(value.toJson());
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => unwrapSerializableValue(item));
+  }
+
+  if (value && typeof value === "object") {
+    const maybeSerializable = value as { toJson?: () => unknown };
+    if (typeof maybeSerializable.toJson === "function") {
+      try {
+        return unwrapSerializableValue(maybeSerializable.toJson());
+      } catch {
+        // Fall through to entry-wise unwrap.
+      }
+    }
+
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+        key,
+        unwrapSerializableValue(entry),
+      ]),
+    );
+  }
+
+  return value;
+}
+
 function normalizeCode(value: unknown, jsonPreferred: boolean): NormalizedCode {
-  // Unwrap KalamCellValue wrappers before normalizing
-  const raw = value instanceof KalamCellValue ? value.toJson() : value;
+  const raw = unwrapSerializableValue(value);
 
   if (raw === null || raw === undefined) {
     return { text: "null", isJson: true };
@@ -90,8 +119,8 @@ export function CodeBlock({
   const highlighted = normalized.isJson ? highlightJson(normalized.text) : null;
 
   return (
-    <div className={cn("rounded-md border border-slate-700 bg-black h-full flex flex-col", className)}>
-      <ScrollArea className={cn("w-full flex-1", maxHeightClassName)}>
+    <div className={cn("flex h-full min-h-0 flex-col rounded-md border border-slate-700 bg-black", className)}>
+      <ScrollArea className={cn("min-h-0 w-full flex-1", maxHeightClassName)}>
         {normalized.isJson && highlighted ? (
           <pre className="whitespace-pre p-3 font-mono text-xs leading-5 text-slate-200">
             <code dangerouslySetInnerHTML={{ __html: highlighted }} />

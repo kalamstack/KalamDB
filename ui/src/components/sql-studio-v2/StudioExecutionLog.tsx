@@ -104,7 +104,7 @@ export function StudioExecutionLog({ logs, status }: StudioExecutionLogProps) {
       open={responseViewer.open}
       onOpenChange={(open) => setResponseViewer((previous) => ({ ...previous, open }))}
     >
-      <DialogContent className="flex max-h-[85vh] max-w-3xl flex-col overflow-hidden">
+      <DialogContent className="flex h-[85vh] max-h-[85vh] max-w-3xl min-h-0 flex-col overflow-hidden">
         <DialogHeader className="shrink-0">
           <DialogTitle>{responseViewer.title}</DialogTitle>
         </DialogHeader>

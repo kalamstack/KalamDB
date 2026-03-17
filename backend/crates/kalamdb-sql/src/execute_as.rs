@@ -322,11 +322,10 @@ mod tests {
 
     #[test]
     fn parse_escaped_quote_in_username() {
-        let result = parse_execute_as(
-            "EXECUTE AS USER 'alice''o' (INSERT INTO default.t VALUES (1))",
-        )
-        .expect("should parse")
-        .expect("should be an envelope");
+        let result =
+            parse_execute_as("EXECUTE AS USER 'alice''o' (INSERT INTO default.t VALUES (1))")
+                .expect("should parse")
+                .expect("should be an envelope");
 
         assert_eq!(result.username, "alice'o");
         assert_eq!(result.inner_sql, "INSERT INTO default.t VALUES (1)");
@@ -341,10 +340,7 @@ mod tests {
         .expect("should be an envelope");
 
         assert_eq!(result.username, "alice");
-        assert_eq!(
-            result.inner_sql,
-            "INSERT INTO default.t VALUES ('hello (', 'done')"
-        );
+        assert_eq!(result.inner_sql, "INSERT INTO default.t VALUES ('hello (', 'done')");
     }
 
     #[test]
@@ -352,10 +348,7 @@ mod tests {
         let inner = extract_inner_sql(
             "EXECUTE AS USER 'alice' (INSERT INTO default.t VALUES ('hello (', 'done'))",
         );
-        assert_eq!(
-            inner.as_deref(),
-            Some("INSERT INTO default.t VALUES ('hello (', 'done')")
-        );
+        assert_eq!(inner.as_deref(), Some("INSERT INTO default.t VALUES ('hello (', 'done')"));
     }
 
     #[test]

@@ -104,19 +104,8 @@ impl DmlExecutor {
             .ok_or_else(|| ApplierError::not_found("Table provider", table_id))?;
 
         if let Some(provider) = provider_arc.as_any().downcast_ref::<UserTableProvider>() {
-            let prior_row = match find_row_by_pk(provider, Some(user_id), pk_value).await {
-                Ok(Some((_key, row))) => Some(row.fields),
-                Ok(None) => None,
-                Err(err) => {
-                    log::warn!(
-                        "Failed to load row for update file cleanup in {} (pk={}): {}",
-                        table_id,
-                        pk_value,
-                        err
-                    );
-                    None
-                },
-            };
+            let prior_row =
+                self.load_user_row_for_cleanup(provider, table_id, user_id, pk_value).await;
 
             let replaced_refs = prior_row.as_ref().map_or_else(Vec::new, |row| {
                 collect_replaced_file_refs_for_update(
@@ -175,21 +164,12 @@ impl DmlExecutor {
         if let Some(provider) = provider_arc.as_any().downcast_ref::<UserTableProvider>() {
             let mut deleted_count = 0;
             for pk_value in pk_values {
-                let file_refs = match find_row_by_pk(provider, Some(user_id), pk_value).await {
-                    Ok(Some((_key, row))) => {
-                        collect_file_refs_from_row(self.app_context.as_ref(), table_id, &row.fields)
-                    },
-                    Ok(None) => Vec::new(),
-                    Err(err) => {
-                        log::warn!(
-                            "Failed to load row for file cleanup in {} (pk={}): {}",
-                            table_id,
-                            pk_value,
-                            err
-                        );
-                        Vec::new()
-                    },
-                };
+                let file_refs = self
+                    .load_user_row_for_cleanup(provider, table_id, user_id, pk_value)
+                    .await
+                    .map_or_else(Vec::new, |row| {
+                        collect_file_refs_from_row(self.app_context.as_ref(), table_id, &row)
+                    });
 
                 if provider
                     .delete_by_id_field(user_id, pk_value)
@@ -289,19 +269,7 @@ impl DmlExecutor {
             let system_user = UserId::system();
             let update_row = updates[0].clone();
 
-            let prior_row = match find_row_by_pk(provider, None, pk_value).await {
-                Ok(Some((_key, row))) => Some(row.fields),
-                Ok(None) => None,
-                Err(err) => {
-                    log::warn!(
-                        "Failed to load row for update file cleanup in {} (pk={}): {}",
-                        table_id,
-                        pk_value,
-                        err
-                    );
-                    None
-                },
-            };
+            let prior_row = self.load_shared_row_for_cleanup(provider, table_id, pk_value).await;
 
             let replaced_refs = prior_row.as_ref().map_or_else(Vec::new, |row| {
                 collect_replaced_file_refs_for_update(
@@ -360,21 +328,12 @@ impl DmlExecutor {
             let mut deleted_count = 0;
 
             for pk_value in pk_values {
-                let file_refs = match find_row_by_pk(provider, None, pk_value).await {
-                    Ok(Some((_key, row))) => {
-                        collect_file_refs_from_row(self.app_context.as_ref(), table_id, &row.fields)
-                    },
-                    Ok(None) => Vec::new(),
-                    Err(err) => {
-                        log::warn!(
-                            "Failed to load row for file cleanup in {} (pk={}): {}",
-                            table_id,
-                            pk_value,
-                            err
-                        );
-                        Vec::new()
-                    },
-                };
+                let file_refs = self
+                    .load_shared_row_for_cleanup(provider, table_id, pk_value)
+                    .await
+                    .map_or_else(Vec::new, |row| {
+                        collect_file_refs_from_row(self.app_context.as_ref(), table_id, &row)
+                    });
 
                 if provider
                     .delete_by_id_field(&system_user, pk_value)
@@ -406,6 +365,135 @@ impl DmlExecutor {
     // =========================================================================
     // Helper Methods
     // =========================================================================
+
+    async fn load_user_row_for_cleanup(
+        &self,
+        provider: &UserTableProvider,
+        table_id: &TableId,
+        user_id: &UserId,
+        pk_value: &str,
+    ) -> Option<Row> {
+        let pk_name = provider.primary_key_field_name();
+        let schema = provider.schema_ref();
+        let pk_field = match schema.field_with_name(pk_name) {
+            Ok(field) => field,
+            Err(err) => {
+                log::warn!(
+                    "Failed to resolve PK field for file cleanup in {} (pk={}): {}",
+                    table_id,
+                    pk_value,
+                    err
+                );
+                return None;
+            },
+        };
+
+        let pk_scalar = match kalamdb_commons::conversions::parse_string_as_scalar(
+            pk_value,
+            pk_field.data_type(),
+        ) {
+            Ok(value) => value,
+            Err(err) => {
+                log::warn!(
+                    "Failed to parse PK value for file cleanup in {} (pk={}): {}",
+                    table_id,
+                    pk_value,
+                    err
+                );
+                return None;
+            },
+        };
+
+        match provider.find_by_pk(user_id, &pk_scalar).await {
+            Ok(Some((_key, row))) => Some(row.fields),
+            Ok(None) => match find_row_by_pk(provider, Some(user_id), pk_value).await {
+                Ok(Some((_key, row))) => Some(row.fields),
+                Ok(None) => None,
+                Err(err) => {
+                    log::warn!(
+                        "Failed to load cold row for file cleanup in {} (pk={}): {}",
+                        table_id,
+                        pk_value,
+                        err
+                    );
+                    None
+                },
+            },
+            Err(err) => {
+                log::warn!(
+                    "Failed to load hot row for file cleanup in {} (pk={}): {}",
+                    table_id,
+                    pk_value,
+                    err
+                );
+                None
+            },
+        }
+    }
+
+    async fn load_shared_row_for_cleanup(
+        &self,
+        provider: &SharedTableProvider,
+        table_id: &TableId,
+        pk_value: &str,
+    ) -> Option<Row> {
+        let pk_name = provider.primary_key_field_name();
+        let schema = provider.schema_ref();
+        let pk_field = match schema.field_with_name(pk_name) {
+            Ok(field) => field,
+            Err(err) => {
+                log::warn!(
+                    "Failed to resolve PK field for file cleanup in {} (pk={}): {}",
+                    table_id,
+                    pk_value,
+                    err
+                );
+                return None;
+            },
+        };
+
+        let pk_scalar = match kalamdb_commons::conversions::parse_string_as_scalar(
+            pk_value,
+            pk_field.data_type(),
+        ) {
+            Ok(value) => value,
+            Err(err) => {
+                log::warn!(
+                    "Failed to parse PK value for file cleanup in {} (pk={}): {}",
+                    table_id,
+                    pk_value,
+                    err
+                );
+                return None;
+            },
+        };
+
+        match provider.find_by_pk(&pk_scalar).await {
+            Ok(Some((_key, row))) => Some(row.fields),
+            Ok(None) => match find_row_by_pk(provider, None, pk_value).await {
+                Ok(Some((_key, row))) => Some(row.fields),
+                Ok(None) => None,
+                Err(err) => {
+                    log::warn!(
+                        "Failed to load cold row for file cleanup in {} (pk={}): {}",
+                        table_id,
+                        pk_value,
+                        err
+                    );
+                    None
+                },
+            },
+            Err(err) => {
+                log::warn!(
+                    "Failed to load hot row for file cleanup in {} (pk={}): {}",
+                    table_id,
+                    pk_value,
+                    err
+                );
+                None
+            },
+        }
+    }
 
     /// Update with fallback for UserTableProvider
     async fn update_user_provider(

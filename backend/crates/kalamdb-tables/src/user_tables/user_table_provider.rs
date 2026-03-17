@@ -39,7 +39,8 @@ use kalamdb_session::{can_read_all_users, check_user_table_access, check_user_ta
 use kalamdb_store::EntityStore;
 use kalamdb_system::VectorMetric;
 use kalamdb_vector::{
-    new_indexed_user_vector_hot_store, UserVectorHotOpId, VectorHotOp, VectorHotOpType,
+    new_indexed_user_vector_hot_store, UserVectorHotOpId, UserVectorHotStore, VectorHotOp,
+    VectorHotOpType,
 };
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -70,6 +71,9 @@ pub struct UserTableProvider {
 
     /// Embedding columns tracked by vector hot staging: (column_name, dimensions).
     vector_columns: Vec<(String, u32)>,
+
+    /// Cached vector staging stores keyed by embedding column name.
+    vector_stores: HashMap<String, Arc<UserVectorHotStore>>,
 }
 
 impl UserTableProvider {
@@ -80,7 +84,7 @@ impl UserTableProvider {
     /// * `store` - IndexedEntityStore with PK index for this table
     pub fn new(core: Arc<TableProviderCore>, store: Arc<UserTableIndexedStore>) -> Self {
         let pk_index = UserTablePkIndex::new(core.table_id(), core.primary_key_field_name());
-        let vector_columns = core
+        let vector_columns: Vec<(String, u32)> = core
             .table_def()
             .columns
             .iter()
@@ -89,6 +93,20 @@ impl UserTableProvider {
                     Some((column.column_name.clone(), *dim as u32))
                 },
                 _ => None,
+            })
+            .collect();
+        let backend = store.backend().clone();
+        let vector_stores: HashMap<String, Arc<UserVectorHotStore>> = vector_columns
+            .iter()
+            .map(|(column_name, _)| {
+                (
+                    column_name.clone(),
+                    Arc::new(new_indexed_user_vector_hot_store(
+                        backend.clone(),
+                        core.table_id(),
+                        column_name,
+                    )),
+                )
             })
             .collect();
 
@@ -106,6 +124,7 @@ impl UserTableProvider {
             store,
             pk_index,
             vector_columns,
+            vector_stores,
         }
     }
 
@@ -188,7 +207,7 @@ impl UserTableProvider {
         }
     }
 
-    fn stage_vector_upsert(
+    async fn stage_vector_upsert(
         &self,
         user_id: &UserId,
         seq: SeqId,
@@ -200,8 +219,6 @@ impl UserTableProvider {
 
         let pk =
             crate::utils::unified_dml::extract_user_pk_value(row, self.primary_key_field_name())?;
-        let backend = self.store.backend().clone();
-
         for (column_name, dimensions) in &self.vector_columns {
             let Some(value) = row.get(column_name.as_str()) else {
                 continue;
@@ -210,11 +227,12 @@ impl UserTableProvider {
                 continue;
             };
 
-            let store = new_indexed_user_vector_hot_store(
-                backend.clone(),
-                self.core.table_id(),
-                column_name,
-            );
+            let store = self.vector_stores.get(column_name).ok_or_else(|| {
+                KalamDbError::InvalidOperation(format!(
+                    "Missing cached vector store for column '{}'",
+                    column_name
+                ))
+            })?;
             let key = UserVectorHotOpId::new(user_id.clone(), seq, pk.clone());
             let op = VectorHotOp::new(
                 self.core.table_id().clone(),
@@ -226,7 +244,7 @@ impl UserTableProvider {
                 *dimensions,
                 VectorMetric::Cosine,
             );
-            store.insert(&key, &op).map_err(|e| {
+            store.insert_async(key, op).await.map_err(|e| {
                 KalamDbError::InvalidOperation(format!("Failed to stage vector upsert op: {}", e))
             })?;
         }
@@ -234,7 +252,67 @@ impl UserTableProvider {
         Ok(())
     }
 
-    fn stage_vector_delete(
+    async fn stage_vector_upsert_batch(
+        &self,
+        user_id: &UserId,
+        entries: &[(UserTableRowId, UserTableRow)],
+    ) -> Result<(), KalamDbError> {
+        if self.vector_columns.is_empty() || entries.is_empty() {
+            return Ok(());
+        }
+
+        let mut ops_by_column: HashMap<String, Vec<(UserVectorHotOpId, VectorHotOp)>> =
+            HashMap::new();
+
+        for (row_key, entity) in entries {
+            let pk = crate::utils::unified_dml::extract_user_pk_value(
+                &entity.fields,
+                self.primary_key_field_name(),
+            )?;
+
+            for (column_name, dimensions) in &self.vector_columns {
+                let Some(value) = entity.fields.get(column_name.as_str()) else {
+                    continue;
+                };
+                let Some(vector) = Self::extract_embedding_vector(value, *dimensions) else {
+                    continue;
+                };
+
+                ops_by_column.entry(column_name.clone()).or_default().push((
+                    UserVectorHotOpId::new(user_id.clone(), row_key.seq, pk.clone()),
+                    VectorHotOp::new(
+                        self.core.table_id().clone(),
+                        column_name.clone(),
+                        pk.clone(),
+                        VectorHotOpType::Upsert,
+                        Some(vector),
+                        None,
+                        *dimensions,
+                        VectorMetric::Cosine,
+                    ),
+                ));
+            }
+        }
+
+        for (column_name, ops) in ops_by_column {
+            let store = self.vector_stores.get(&column_name).ok_or_else(|| {
+                KalamDbError::InvalidOperation(format!(
+                    "Missing cached vector store for column '{}'",
+                    column_name
+                ))
+            })?;
+            store.insert_batch_async(ops).await.map_err(|e| {
+                KalamDbError::InvalidOperation(format!(
+                    "Failed to batch stage vector upsert ops for column '{}': {}",
+                    column_name, e
+                ))
+            })?;
+        }
+
+        Ok(())
+    }
+
+    async fn stage_vector_delete(
         &self,
         user_id: &UserId,
         seq: SeqId,
@@ -244,13 +322,13 @@ impl UserTableProvider {
             return Ok(());
         }
 
-        let backend = self.store.backend().clone();
         for (column_name, dimensions) in &self.vector_columns {
-            let store = new_indexed_user_vector_hot_store(
-                backend.clone(),
-                self.core.table_id(),
-                column_name,
-            );
+            let store = self.vector_stores.get(column_name).ok_or_else(|| {
+                KalamDbError::InvalidOperation(format!(
+                    "Missing cached vector store for column '{}'",
+                    column_name
+                ))
+            })?;
             let key = UserVectorHotOpId::new(user_id.clone(), seq, pk.to_string());
             let op = VectorHotOp::new(
                 self.core.table_id().clone(),
@@ -262,7 +340,7 @@ impl UserTableProvider {
                 *dimensions,
                 VectorMetric::Cosine,
             );
-            store.insert(&key, &op).map_err(|e| {
+            store.insert_async(key, op).await.map_err(|e| {
                 KalamDbError::InvalidOperation(format!("Failed to stage vector delete op: {}", e))
             })?;
         }
@@ -297,34 +375,30 @@ impl UserTableProvider {
     ///
     /// # Returns
     /// Option<(UserTableRowId, UserTableRow)> if found
-    pub fn find_by_pk(
+    async fn latest_hot_pk_entry(
         &self,
         user_id: &UserId,
         pk_value: &ScalarValue,
     ) -> Result<Option<(UserTableRowId, UserTableRow)>, KalamDbError> {
-        // Build prefix for PK index scan
         let prefix = self.pk_index.build_prefix_for_pk(user_id, pk_value);
+        self.store
+            .get_latest_by_index_prefix_async(0, prefix)
+            .await
+            .into_kalamdb_error("PK index scan failed")
+    }
 
-        // Scan index for all versions with this PK
-        let index_results = self
-            .store
-            .scan_by_index(0, Some(&prefix), None)
-            .into_kalamdb_error("PK index scan failed")?;
-
-        if index_results.is_empty() {
-            return Ok(None);
-        }
-
-        if let Some((row_id, row)) = index_results.into_iter().max_by_key(|(row_id, _)| row_id.seq)
-        {
+    pub async fn find_by_pk(
+        &self,
+        user_id: &UserId,
+        pk_value: &ScalarValue,
+    ) -> Result<Option<(UserTableRowId, UserTableRow)>, KalamDbError> {
+        Ok(self.latest_hot_pk_entry(user_id, pk_value).await?.and_then(|(row_id, row)| {
             if row._deleted {
-                Ok(None)
+                None
             } else {
-                Ok(Some((row_id, row)))
+                Some((row_id, row))
             }
-        } else {
-            Ok(None)
-        }
+        }))
     }
 
     /// Returns true if the latest hot-storage version of this PK is a tombstone
@@ -333,19 +407,14 @@ impl UserTableProvider {
     ///
     /// Used in the PK fast-path of `scan_rows` to prevent cold storage (Parquet)
     /// from surfacing a row that has already been deleted in hot storage.
-    fn pk_tombstoned_in_hot(
+    async fn pk_tombstoned_in_hot(
         &self,
         user_id: &UserId,
         pk_value: &ScalarValue,
     ) -> Result<bool, KalamDbError> {
-        let prefix = self.pk_index.build_prefix_for_pk(user_id, pk_value);
-        let index_results = self
-            .store
-            .scan_by_index(0, Some(&prefix), None)
-            .into_kalamdb_error("PK index scan failed")?;
-        Ok(index_results
-            .into_iter()
-            .max_by_key(|(row_id, _)| row_id.seq)
+        Ok(self
+            .latest_hot_pk_entry(user_id, pk_value)
+            .await?
             .map(|(_, row)| row._deleted)
             .unwrap_or(false))
     }
@@ -441,25 +510,7 @@ impl UserTableProvider {
         state: &dyn Session,
         filters: &[Expr],
     ) -> DataFusionResult<Vec<Row>> {
-        let (user_id, _role) =
-            extract_user_context(state).map_err(|e| DataFusionError::Execution(e.to_string()))?;
-
-        let kvs = self
-            .scan_with_version_resolution_to_kvs_async(user_id, None, None, None, false)
-            .await
-            .map_err(|e| DataFusionError::Execution(e.to_string()))?;
-
-        let schema = self.schema_ref();
-        let mut matched = Vec::new();
-        for (_row_key, row) in kvs {
-            let fields = Self::build_notification_row(&row);
-            if crate::utils::datafusion_dml::row_matches_filters(state, &schema, &fields, filters)?
-            {
-                matched.push(fields);
-            }
-        }
-
-        Ok(matched)
+        crate::utils::datafusion_dml::collect_matching_rows(self, state, filters).await
     }
 }
 
@@ -500,24 +551,13 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         // Use shared helper to parse PK value
         let pk_value = crate::utils::pk::parse_pk_value(id_value);
 
-        // Fast path: check hot storage for a non-deleted version
-        if let Some((row_id, _row)) = self.find_by_pk(user_id, &pk_value)? {
+        if let Some((row_id, row)) = self.latest_hot_pk_entry(user_id, &pk_value).await? {
+            if row._deleted {
+                log::trace!("[UserTableProvider] PK {} latest hot version is tombstoned", id_value);
+                return Ok(None);
+            }
             log::trace!("[UserTableProvider] PK collision in hot storage: id={}", id_value);
             return Ok(Some(row_id));
-        }
-
-        // If hot storage has entries but all are deleted, the PK can be reused.
-        let hot_prefix = self.pk_index.build_prefix_for_pk(user_id, &pk_value);
-        let hot_has_versions = self
-            .store
-            .exists_by_index(0, &hot_prefix)
-            .into_kalamdb_error("PK index scan failed")?;
-        if hot_has_versions {
-            log::trace!(
-                "[UserTableProvider] PK {} has only deleted versions in hot storage",
-                id_value
-            );
-            return Ok(None);
         }
 
         log::trace!("[UserTableProvider] PK {} not in hot storage, checking cold", id_value);
@@ -584,13 +624,13 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         //            user_id.as_str(), seq_id);
 
         // Store the entity in RocksDB (hot storage) with PK index maintenance
-        self.store.insert(&row_key, &entity).map_err(|e| {
+        self.store.insert_async(row_key.clone(), entity.clone()).await.map_err(|e| {
             KalamDbError::InvalidOperation(format!("Failed to insert user table row: {}", e))
         })?;
 
         log::debug!("Inserted user table row for user {} with _seq {}", user_id.as_str(), seq_id);
 
-        if let Err(e) = self.stage_vector_upsert(user_id, seq_id, &entity.fields) {
+        if let Err(e) = self.stage_vector_upsert(user_id, seq_id, &entity.fields).await {
             log::warn!(
                 "Failed to stage vector upsert for table={}, user={}, seq={}: {}",
                 self.core.table_id(),
@@ -694,53 +734,59 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         // Batch PK validation: collect all user-provided PK values and their prefixes
         tracing::debug!(row_count, "insert_batch.pk_validation start");
         let pk_name = self.primary_key_field_name();
-        let mut pk_values_to_check: Vec<(String, Vec<u8>)> = Vec::new();
+        let mut pk_values_to_check: Vec<(String, ScalarValue)> = Vec::new();
+        let mut seen_batch_pks = HashSet::new();
         {
             for row_data in &coerced_rows {
                 if let Some(pk_value) = row_data.get(pk_name) {
                     if !matches!(pk_value, ScalarValue::Null) {
                         let pk_str =
                             crate::utils::unified_dml::extract_user_pk_value(row_data, pk_name)?;
-                        let prefix = self.pk_index.build_prefix_for_pk(user_id, &pk_value);
-                        pk_values_to_check.push((pk_str, prefix));
+                        if !seen_batch_pks.insert(pk_str.clone()) {
+                            return Err(KalamDbError::AlreadyExists(format!(
+                                "Primary key violation: value '{}' appears multiple times in the insert batch for column '{}'",
+                                pk_str, pk_name
+                            )));
+                        }
+                        pk_values_to_check.push((pk_str, pk_value.clone()));
                     }
                 }
             }
 
-            // OPTIMIZED: Check all PKs in single index scan + HashSet lookup
-            // For small batches (1-2 PKs), use individual lookups to avoid scan overhead
+            // Check only the latest hot version for each requested PK. Tombstoned
+            // latest versions are reusable and should not fail the insert.
             if !pk_values_to_check.is_empty() {
-                if pk_values_to_check.len() <= 2 {
-                    // Small batch: individual lookups are faster
-                    for (pk_str, _prefix) in &pk_values_to_check {
-                        if self.find_row_key_by_id_field(user_id, pk_str).await?.is_some() {
+                for (pk_str, pk_value) in &pk_values_to_check {
+                    if let Some((_row_id, row)) =
+                        self.latest_hot_pk_entry(user_id, pk_value).await?
+                    {
+                        if !row._deleted {
                             return Err(KalamDbError::AlreadyExists(format!(
                                 "Primary key violation: value '{}' already exists in column '{}'",
                                 pk_str, pk_name
                             )));
                         }
                     }
-                } else {
-                    // Larger batch: use batch index scan for efficiency
-                    // Build common prefix for this user's PKs
-                    let user_prefix = self.pk_index.build_user_prefix(user_id);
-                    let prefixes: Vec<Vec<u8>> =
-                        pk_values_to_check.iter().map(|(_, p)| p.clone()).collect();
+                }
 
-                    let existing = self
-                        .store
-                        .exists_batch_by_index(0, &user_prefix, &prefixes)
-                        .into_kalamdb_error("Batch PK index scan failed")?;
-
-                    // Check if any of the requested PKs already exist
-                    for (pk_str, prefix) in &pk_values_to_check {
-                        if existing.contains(prefix) {
-                            return Err(KalamDbError::AlreadyExists(format!(
-                                "Primary key violation: value '{}' already exists in column '{}'",
-                                pk_str, pk_name
-                            )));
-                        }
-                    }
+                let pk_column_id = self.core.primary_key_column_id();
+                let pk_values: Vec<String> =
+                    pk_values_to_check.iter().map(|(pk, _)| pk.clone()).collect();
+                if let Some(found_pk) = base::pk_exists_batch_in_cold(
+                    &self.core,
+                    self.core.table_id(),
+                    self.core.table_type(),
+                    Some(user_id),
+                    pk_name,
+                    pk_column_id,
+                    &pk_values,
+                )
+                .await?
+                {
+                    return Err(KalamDbError::AlreadyExists(format!(
+                        "Primary key violation: value '{}' already exists in column '{}'",
+                        found_pk, pk_name
+                    )));
                 }
             }
         }
@@ -784,26 +830,23 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         let entries: Vec<(UserTableRowId, UserTableRow)> =
             row_keys.iter().cloned().zip(user_rows.into_iter()).collect();
 
-        {
-            let _write_span = tracing::info_span!("insert_batch.store_write", row_count).entered();
-            self.store.insert_batch_preencoded(&entries, encoded_values).map_err(|e| {
+        self.store
+            .insert_batch_preencoded_async(entries.clone(), encoded_values)
+            .await
+            .map_err(|e| {
                 KalamDbError::InvalidOperation(format!(
                     "Failed to batch insert user table rows: {}",
                     e
                 ))
             })?;
-        }
 
-        for (row_key, entity) in &entries {
-            if let Err(e) = self.stage_vector_upsert(user_id, row_key.seq, &entity.fields) {
-                log::warn!(
-                    "Failed to stage vector upsert for table={}, user={}, seq={}: {}",
-                    self.core.table_id(),
-                    user_id.as_str(),
-                    row_key.seq.as_i64(),
-                    e
-                );
-            }
+        if let Err(e) = self.stage_vector_upsert_batch(user_id, &entries).await {
+            log::warn!(
+                "Failed to batch stage vector upserts for table={}, user={}: {}",
+                self.core.table_id(),
+                user_id.as_str(),
+                e
+            );
         }
 
         // Mark manifest as having pending writes (hot data needs to be flushed)
@@ -937,8 +980,13 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         // Find latest resolved row for this PK under same user
         // First try hot storage (O(1) via PK index), then fall back to cold storage (Parquet scan)
         let (_latest_key, latest_row) =
-            if let Some(result) = self.find_by_pk(user_id, &pk_value_scalar)? {
+            if let Some(result) = self.find_by_pk(user_id, &pk_value_scalar).await? {
                 result
+            } else if self.pk_tombstoned_in_hot(user_id, &pk_value_scalar).await? {
+                return Err(KalamDbError::NotFound(format!(
+                    "Row with {}={} was deleted",
+                    pk_name, pk_value
+                )));
             } else {
                 // Not in hot storage, check cold storage
                 log::debug!(
@@ -988,11 +1036,11 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
             pk_value,
             seq_id.as_i64()
         );
-        self.store.insert(&row_key, &entity).map_err(|e| {
+        self.store.insert_async(row_key.clone(), entity.clone()).await.map_err(|e| {
             KalamDbError::InvalidOperation(format!("Failed to update user table row: {}", e))
         })?;
 
-        if let Err(e) = self.stage_vector_upsert(user_id, seq_id, &entity.fields) {
+        if let Err(e) = self.stage_vector_upsert(user_id, seq_id, &entity.fields).await {
             log::warn!(
                 "Failed to stage vector upsert for table={}, user={}, seq={}: {}",
                 self.core.table_id(),
@@ -1099,22 +1147,25 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
 
         // Find latest resolved row for this PK under same user
         // First try hot storage (O(1) via PK index), then fall back to cold storage (Parquet scan)
-        let latest_row = if let Some((_key, row)) = self.find_by_pk(user_id, &pk_value_scalar)? {
-            row
-        } else {
-            // Not in hot storage, check cold storage
-            match base::find_row_by_pk(self, Some(user_id), pk_value).await? {
-                Some((_key, row)) => row,
-                None => {
-                    log::trace!(
-                        "[UserProvider DELETE_BY_PK] Row with {}={} not found",
-                        pk_name,
-                        pk_value
-                    );
-                    return Ok(false);
-                },
-            }
-        };
+        let latest_row =
+            if let Some((_key, row)) = self.find_by_pk(user_id, &pk_value_scalar).await? {
+                row
+            } else if self.pk_tombstoned_in_hot(user_id, &pk_value_scalar).await? {
+                return Ok(false);
+            } else {
+                // Not in hot storage, check cold storage
+                match base::find_row_by_pk(self, Some(user_id), pk_value).await? {
+                    Some((_key, row)) => row,
+                    None => {
+                        log::trace!(
+                            "[UserProvider DELETE_BY_PK] Row with {}={} not found",
+                            pk_name,
+                            pk_value
+                        );
+                        return Ok(false);
+                    },
+                }
+            };
 
         let sys_cols = self.core.services.system_columns.clone();
         let seq_id = sys_cols.generate_seq_id().map_err(|e| {
@@ -1139,11 +1190,11 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
             seq_id.as_i64()
         );
         // Insert tombstone version (MVCC - all writes are inserts with new SeqId)
-        self.store.insert(&row_key, &entity).map_err(|e| {
+        self.store.insert_async(row_key.clone(), entity.clone()).await.map_err(|e| {
             KalamDbError::InvalidOperation(format!("Failed to delete user table row: {}", e))
         })?;
 
-        if let Err(e) = self.stage_vector_delete(user_id, seq_id, pk_value) {
+        if let Err(e) = self.stage_vector_delete(user_id, seq_id, pk_value).await {
             log::warn!(
                 "Failed to stage vector delete for table={}, user={}, seq={}, pk={}: {}",
                 self.core.table_id(),
@@ -1229,7 +1280,7 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
                     };
 
                     // Hot storage PK index (O(1))
-                    let found = self.find_by_pk(user_id, &pk_scalar)?;
+                    let found = self.find_by_pk(user_id, &pk_scalar).await?;
                     if let Some((row_id, row)) = found {
                         log::debug!(
                             "[UserProvider] PK fast-path hit for {}={}, user={}",
@@ -1249,7 +1300,7 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
                     // If so, the row has been deleted — do NOT fall back to cold storage.
                     // Returning the Parquet version would surface a row whose latest
                     // version is a tombstone, violating MVCC visibility rules.
-                    if self.pk_tombstoned_in_hot(user_id, &pk_scalar)? {
+                    if self.pk_tombstoned_in_hot(user_id, &pk_scalar).await? {
                         log::debug!(
                             "[UserProvider] PK fast-path tombstone for {}={}, user={}",
                             pk_name,

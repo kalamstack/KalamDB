@@ -111,7 +111,7 @@ export function StudioInspectorPanel({
         </span>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" className="h-7 flex-1 text-xs">Discard</Button>
-          <Button size="sm" className="h-7 flex-1 bg-primary text-xs text-foreground hover:bg-primary">Commit</Button>
+          <Button size="sm" className="h-7 flex-1 text-xs">Commit</Button>
         </div>
       </div>
     </div>

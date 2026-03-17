@@ -185,7 +185,7 @@ These are the most useful environment variables for setup and day-to-day use.
 | `KALAMDB_SERVER_HOST` | Bind address inside the container | `0.0.0.0` |
 | `KALAMDB_ROOT_PASSWORD` | Root user password for initial login | `kalamdb123` |
 | `KALAMDB_JWT_SECRET` | JWT signing secret, should be at least 32 chars | `super-secret-value` |
-| `RUST_LOG` | Logging level | `info` |
+| `KALAMDB_LOG_LEVEL` | Logging level | `info` |
 | `KALAMDB_PORT` | Host port override in single-node compose | `8080` |
 | `KALAMDB_ALLOW_REMOTE_SETUP` | Allow initial remote setup in Docker-based development flows | `true` |
 | `KALAMDB_CLUSTER_ID` | Cluster identifier for multi-node deployments | `docker-cluster` |

@@ -55,8 +55,6 @@ mod tests {
     #[test]
     fn rejects_invalid_entries() {
         let error = parse_trusted_proxy_entries(&["not-an-ip".to_string()]).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("invalid trusted proxy entry 'not-an-ip'"));
+        assert!(error.to_string().contains("invalid trusted proxy entry 'not-an-ip'"));
     }
 }

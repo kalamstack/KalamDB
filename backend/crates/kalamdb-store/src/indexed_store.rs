@@ -762,6 +762,34 @@ where
         Ok(Box::new(mapped))
     }
 
+    /// Returns the newest entity matching an index prefix.
+    ///
+    /// This uses reverse index iteration so hot-path PK lookups can fetch the
+    /// latest MVCC version without walking every historical version.
+    pub fn get_latest_by_index_prefix(
+        &self,
+        index_idx: usize,
+        prefix: &[u8],
+    ) -> Result<Option<(K, V)>> {
+        let index_partition = self
+            .index_partitions
+            .get(index_idx)
+            .ok_or_else(|| StorageError::Other(format!("Index {} not found", index_idx)))?
+            .clone();
+        let mut iter = self.backend.scan_reverse(&index_partition, Some(prefix), None, Some(1))?;
+
+        while let Some((_index_key, primary_key_bytes)) = iter.next() {
+            let primary_key = K::from_storage_key(&primary_key_bytes)
+                .map_err(StorageError::SerializationError)?;
+
+            if let Some(entity) = self.get(&primary_key)? {
+                return Ok(Some((primary_key, entity)));
+            }
+        }
+
+        Ok(None)
+    }
+
     /// Scans an index and returns only the primary keys (no entity fetch).
     ///
     /// More efficient when you only need the keys.
@@ -1041,6 +1069,16 @@ where
             .map_err(|e| StorageError::Other(format!("spawn_blocking error: {}", e)))?
     }
 
+    /// Async version of `insert_batch()`.
+    ///
+    /// Uses `spawn_blocking` to avoid blocking the async runtime.
+    pub async fn insert_batch_async(&self, entries: Vec<(K, V)>) -> Result<()> {
+        let store = self.clone();
+        tokio::task::spawn_blocking(move || store.insert_batch(&entries))
+            .await
+            .map_err(|e| StorageError::Other(format!("spawn_blocking error: {}", e)))?
+    }
+
     /// Async version of `update()`.
     ///
     /// Uses `spawn_blocking` to avoid blocking the async runtime.
@@ -1076,6 +1114,34 @@ where
         })
         .await
         .map_err(|e| StorageError::Other(format!("spawn_blocking error: {}", e)))?
+    }
+
+    /// Async version of `get_latest_by_index_prefix()`.
+    ///
+    /// Uses `spawn_blocking` to avoid blocking the async runtime.
+    pub async fn get_latest_by_index_prefix_async(
+        &self,
+        index_idx: usize,
+        prefix: Vec<u8>,
+    ) -> Result<Option<(K, V)>> {
+        let store = self.clone();
+        tokio::task::spawn_blocking(move || store.get_latest_by_index_prefix(index_idx, &prefix))
+            .await
+            .map_err(|e| StorageError::Other(format!("spawn_blocking error: {}", e)))?
+    }
+
+    /// Async version of `insert_batch_preencoded()`.
+    ///
+    /// Uses `spawn_blocking` to avoid blocking the async runtime.
+    pub async fn insert_batch_preencoded_async(
+        &self,
+        entries: Vec<(K, V)>,
+        encoded_values: Vec<Vec<u8>>,
+    ) -> Result<()> {
+        let store = self.clone();
+        tokio::task::spawn_blocking(move || store.insert_batch_preencoded(&entries, encoded_values))
+            .await
+            .map_err(|e| StorageError::Other(format!("spawn_blocking error: {}", e)))?
     }
 
     /// Async version of `get()` from EntityStore.
@@ -1337,6 +1403,33 @@ mod tests {
         assert_eq!(new_jobs.len(), 0);
     }
 
+    #[test]
+    fn test_get_latest_by_index_prefix_returns_last_matching_entry() {
+        let backend: Arc<dyn StorageBackend> = Arc::new(InMemoryBackend::new());
+        let store =
+            IndexedEntityStore::new(backend.clone(), "test_jobs", vec![Arc::new(TestStatusIndex)]);
+
+        let mut older = create_test_job("job-old", JobStatus::Running);
+        older.created_at = 100;
+        older.updated_at = 100;
+
+        let mut newer = create_test_job("job-new", JobStatus::Running);
+        newer.created_at = 200;
+        newer.updated_at = 200;
+
+        let mut completed = create_test_job("job-done", JobStatus::Completed);
+        completed.created_at = 300;
+        completed.updated_at = 300;
+
+        store.insert(&older.job_id, &older).unwrap();
+        store.insert(&newer.job_id, &newer).unwrap();
+        store.insert(&completed.job_id, &completed).unwrap();
+
+        let latest = store.get_latest_by_index_prefix(0, &[2]).unwrap().expect("latest running");
+        assert_eq!(latest.0, newer.job_id);
+        assert_eq!(latest.1.created_at, 200);
+    }
+
     #[tokio::test]
     async fn test_async_operations() {
         let backend: Arc<dyn StorageBackend> = Arc::new(InMemoryBackend::new());
@@ -1356,6 +1449,23 @@ mod tests {
         // Async scan
         let running = store.scan_by_index_async(0, Some(vec![2]), None).await.unwrap();
         assert_eq!(running.len(), 1);
+
+        let latest = store.get_latest_by_index_prefix_async(0, vec![2]).await.unwrap();
+        assert_eq!(latest.expect("latest running").0, job_id);
+
+        let queued_job = create_test_job("job2", JobStatus::Queued);
+        let completed_job = create_test_job("job3", JobStatus::Completed);
+        store
+            .insert_batch_async(vec![
+                (queued_job.job_id.clone(), queued_job.clone()),
+                (completed_job.job_id.clone(), completed_job.clone()),
+            ])
+            .await
+            .unwrap();
+
+        let queued = store.scan_by_index_async(0, Some(vec![1]), None).await.unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].0, queued_job.job_id);
 
         // Async delete
         store.delete_async(job_id.clone()).await.unwrap();

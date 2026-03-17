@@ -13,8 +13,9 @@ use clap::ValueEnum;
 use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use kalam_link::{
+    credentials::{CredentialStore, Credentials},
     AuthProvider, ConnectionOptions, KalamLinkClient, KalamLinkError, KalamLinkTimeouts,
-    SubscriptionConfig, SubscriptionOptions, TimestampFormatter, UploadProgress,
+    QueryResponse, SubscriptionConfig, SubscriptionOptions, TimestampFormatter, UploadProgress,
     UploadProgressCallback,
 };
 use rustyline::completion::Completer;
@@ -374,6 +375,91 @@ impl CLISession {
         })
     }
 
+    async fn execute_query_with_auth_retry(
+        &mut self,
+        sql: &str,
+    ) -> std::result::Result<QueryResponse, KalamLinkError> {
+        let result = self.client.execute_query(sql, None, None, None).await;
+        match result {
+            Err(error) if Self::is_expired_token_error(&error) => {
+                if self.try_refresh_session_token().await {
+                    self.client.execute_query(sql, None, None, None).await
+                } else {
+                    Err(error)
+                }
+            },
+            other => other,
+        }
+    }
+
+    fn is_expired_token_error(error: &KalamLinkError) -> bool {
+        fn message_matches(message: &str) -> bool {
+            let lowered = message.to_ascii_lowercase();
+            lowered.contains("token expired") || lowered.contains("expired token")
+        }
+
+        match error {
+            KalamLinkError::ServerError {
+                status_code,
+                message,
+            } => *status_code == 401 && message_matches(message),
+            KalamLinkError::AuthenticationError(message) => message_matches(message),
+            _ => false,
+        }
+    }
+
+    async fn try_refresh_session_token(&mut self) -> bool {
+        let Some(instance) = self.instance.clone() else {
+            return false;
+        };
+
+        let Some(creds) = self
+            .credential_store
+            .as_ref()
+            .and_then(|store| store.get_credentials(&instance).ok().flatten())
+        else {
+            return false;
+        };
+
+        if !creds.can_refresh() {
+            return false;
+        }
+
+        let Some(refresh_token) = creds.refresh_token.as_deref() else {
+            return false;
+        };
+
+        let Ok(login_response) = self.client.refresh_access_token(refresh_token).await else {
+            return false;
+        };
+
+        let username = login_response.user.username.clone();
+        let access_token = login_response.access_token.clone();
+        let refreshed_creds = Credentials::with_refresh_token(
+            instance.clone(),
+            access_token.clone(),
+            username.clone(),
+            login_response.expires_at.clone(),
+            creds.server_url.clone().or_else(|| Some(self.server_url.clone())),
+            login_response.refresh_token.clone().or_else(|| creds.refresh_token.clone()),
+            login_response
+                .refresh_expires_at
+                .clone()
+                .or_else(|| creds.refresh_expires_at.clone()),
+        );
+
+        if let Some(store) = self.credential_store.as_mut() {
+            if let Err(error) = store.set_credentials(&refreshed_creds) {
+                eprintln!("Warning: Could not save refreshed credentials: {}", error);
+            }
+        }
+
+        self.client.set_auth(AuthProvider::jwt_token(access_token));
+        self.username = username;
+        self.credentials_loaded = true;
+        true
+    }
+
     /// Execute a SQL query with loading indicator
     ///
     /// **Implements T092**: Execute SQL via kalam-link client
@@ -430,7 +516,7 @@ impl CLISession {
 
         // Execute the query
         let result = if upload_parts.is_empty() {
-            self.client.execute_query(sql, None, None, None).await
+            self.execute_query_with_auth_retry(&sql_to_send).await
         } else {
             let mut parts_for_send = Vec::with_capacity(upload_parts.len());
             for part in upload_parts.iter_mut() {
@@ -2817,6 +2903,213 @@ impl Helper for CLIHelper {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::credentials::FileCredentialStore;
+    use kalam_link::credentials::{CredentialStore, Credentials};
+    use ntest::timeout;
+    use serde_json::json;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio::sync::Mutex as AsyncMutex;
+
+    #[derive(Debug, Default)]
+    struct TestServerState {
+        sql_authorization_headers: Vec<String>,
+        refresh_authorization_headers: Vec<String>,
+    }
+
+    struct TestServer {
+        base_url: String,
+        state: Arc<AsyncMutex<TestServerState>>,
+        task: tokio::task::JoinHandle<()>,
+    }
+
+    impl TestServer {
+        async fn spawn() -> Self {
+            let listener =
+                TcpListener::bind("127.0.0.1:0").await.expect("bind test server listener");
+            let address = listener.local_addr().expect("read local addr");
+            let state = Arc::new(AsyncMutex::new(TestServerState::default()));
+            let state_clone = Arc::clone(&state);
+
+            let task = tokio::spawn(async move {
+                loop {
+                    let Ok((stream, _)) = listener.accept().await else {
+                        break;
+                    };
+                    let state = Arc::clone(&state_clone);
+                    tokio::spawn(async move {
+                        let _ = handle_test_connection(stream, state).await;
+                    });
+                }
+            });
+
+            Self {
+                base_url: format!("http://{}", address),
+                state,
+                task,
+            }
+        }
+    }
+
+    impl Drop for TestServer {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+
+    async fn handle_test_connection(
+        mut stream: TcpStream,
+        state: Arc<AsyncMutex<TestServerState>>,
+    ) -> std::io::Result<()> {
+        let request = read_http_request(&mut stream).await?;
+        let authorization = request.headers.get("authorization").cloned();
+
+        let (status_line, body) = match request.path.as_str() {
+            "/v1/api/healthcheck" => (
+                "HTTP/1.1 200 OK",
+                json!({
+                    "status": "healthy",
+                    "version": "test",
+                    "api_version": "v1",
+                    "build_date": null
+                })
+                .to_string(),
+            ),
+            "/v1/api/sql" => {
+                if let Some(header) = authorization.clone() {
+                    state.lock().await.sql_authorization_headers.push(header.clone());
+                    match header.as_str() {
+                        "Bearer expired-token" => {
+                            ("HTTP/1.1 401 Unauthorized", "Token expired".to_string())
+                        },
+                        "Bearer fresh-token" => (
+                            "HTTP/1.1 200 OK",
+                            json!({
+                                "status": "success",
+                                "results": [{
+                                    "schema": [{
+                                        "name": "count",
+                                        "data_type": "BigInt",
+                                        "index": 0
+                                    }],
+                                    "rows": [["1"]],
+                                    "row_count": 1
+                                }],
+                                "took": 1.0
+                            })
+                            .to_string(),
+                        ),
+                        _ => ("HTTP/1.1 401 Unauthorized", "Unauthorized".to_string()),
+                    }
+                } else {
+                    ("HTTP/1.1 401 Unauthorized", "Missing authorization".to_string())
+                }
+            },
+            "/v1/api/auth/refresh" => {
+                if let Some(header) = authorization.clone() {
+                    state.lock().await.refresh_authorization_headers.push(header.clone());
+                    if header == "Bearer refresh-token" {
+                        (
+                            "HTTP/1.1 200 OK",
+                            json!({
+                                "user": {
+                                    "id": "user-1",
+                                    "username": "admin",
+                                    "role": "dba",
+                                    "email": null,
+                                    "created_at": "2026-03-17T00:00:00Z",
+                                    "updated_at": "2026-03-17T00:00:00Z"
+                                },
+                                "expires_at": "2099-01-01T00:00:00Z",
+                                "access_token": "fresh-token",
+                                "refresh_token": "fresh-refresh-token",
+                                "refresh_expires_at": "2099-02-01T00:00:00Z"
+                            })
+                            .to_string(),
+                        )
+                    } else {
+                        ("HTTP/1.1 401 Unauthorized", "Invalid refresh token".to_string())
+                    }
+                } else {
+                    ("HTTP/1.1 401 Unauthorized", "Missing authorization".to_string())
+                }
+            },
+            _ => ("HTTP/1.1 404 Not Found", "Not found".to_string()),
+        };
+
+        let response = format!(
+            "{status_line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).await?;
+        stream.shutdown().await
+    }
+
+    struct TestHttpRequest {
+        path: String,
+        headers: HashMap<String, String>,
+    }
+
+    async fn read_http_request(stream: &mut TcpStream) -> std::io::Result<TestHttpRequest> {
+        let mut buffer = Vec::new();
+        let mut temp = [0_u8; 1024];
+        let mut header_end = None;
+        let mut content_length = 0_usize;
+
+        loop {
+            let bytes_read = stream.read(&mut temp).await?;
+            if bytes_read == 0 {
+                break;
+            }
+            buffer.extend_from_slice(&temp[..bytes_read]);
+
+            if header_end.is_none() {
+                if let Some(position) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
+                    header_end = Some(position + 4);
+                    let header_text = String::from_utf8_lossy(&buffer[..position]);
+                    for line in header_text.lines().skip(1) {
+                        if let Some((name, value)) = line.split_once(':') {
+                            if name.eq_ignore_ascii_case("content-length") {
+                                content_length = value.trim().parse().unwrap_or(0);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some(end) = header_end {
+                if buffer.len() >= end + content_length {
+                    break;
+                }
+            }
+        }
+
+        let header_end = header_end.expect("request should include headers");
+        let header_text = String::from_utf8_lossy(&buffer[..header_end - 4]);
+        let mut lines = header_text.lines();
+        let request_line = lines.next().expect("request line");
+        let path = request_line.split_whitespace().nth(1).expect("request path").to_string();
+
+        let mut headers = HashMap::new();
+        for line in lines {
+            if let Some((name, value)) = line.split_once(':') {
+                headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
+            }
+        }
+
+        Ok(TestHttpRequest { path, headers })
+    }
+
+    fn create_temp_store() -> (FileCredentialStore, TempDir) {
+        let temp_dir = TempDir::new().expect("create temp dir");
+        let store_path = temp_dir.path().join("credentials.toml");
+        let store = FileCredentialStore::with_path(store_path).expect("create credential store");
+        (store, temp_dir)
+    }
 
     #[test]
     fn test_output_format() {
@@ -2844,5 +3137,67 @@ mod tests {
             CLISession::extract_subscribe_options("SELECT * FROM table OPTIONS (last_rows=50);");
         assert_eq!(sql, "SELECT * FROM table");
         assert!(options.is_some());
+    }
+
+    #[tokio::test]
+    #[timeout(5000)]
+    async fn test_execute_refreshes_expired_token_during_active_session() {
+        let server = TestServer::spawn().await;
+        let (mut store, _temp_dir) = create_temp_store();
+        let creds = Credentials::with_refresh_token(
+            "local".to_string(),
+            "expired-token".to_string(),
+            "admin".to_string(),
+            "2000-01-01T00:00:00Z".to_string(),
+            Some(server.base_url.clone()),
+            Some("refresh-token".to_string()),
+            Some("2099-01-01T00:00:00Z".to_string()),
+        );
+        store.set_credentials(&creds).expect("store initial credentials");
+
+        let mut session = CLISession::with_auth_and_instance(
+            server.base_url.clone(),
+            AuthProvider::jwt_token("expired-token".to_string()),
+            OutputFormat::Json,
+            false,
+            Some("local".to_string()),
+            Some(store),
+            Some("admin".to_string()),
+            Some(0),
+            false,
+            Some(Duration::from_secs(2)),
+            None,
+            None,
+            CLIConfiguration::default(),
+            crate::config::default_config_path(),
+            true,
+        )
+        .await
+        .expect("create session");
+
+        session
+            .execute("SELECT count(*) FROM dba.stats")
+            .await
+            .expect("query should succeed after token refresh");
+
+        let stored = session
+            .credential_store
+            .as_ref()
+            .expect("credential store available")
+            .get_credentials("local")
+            .expect("load refreshed credentials")
+            .expect("stored credentials present");
+        assert_eq!(stored.jwt_token, "fresh-token");
+        assert_eq!(stored.refresh_token.as_deref(), Some("fresh-refresh-token"));
+
+        let state = server.state.lock().await;
+        assert_eq!(
+            state.sql_authorization_headers,
+            vec![
+                "Bearer expired-token".to_string(),
+                "Bearer fresh-token".to_string()
+            ]
+        );
+        assert_eq!(state.refresh_authorization_headers, vec!["Bearer refresh-token".to_string()]);
     }
 }

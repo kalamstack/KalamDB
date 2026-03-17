@@ -90,6 +90,10 @@ export function CellDisplay({ value, dataType, namespace, tableName }: CellDispl
     } else if (normalizedType.includes('16') || normalizedType.includes('8') || normalizedType === 'SMALLINT') {
       displayType = 'SMALLINT';
     }
+
+    if (displayType === 'BIGINT' && (typeof rawValue === 'string' || typeof rawValue === 'bigint')) {
+      return <NumberDisplay value={rawValue} dataType={displayType} />;
+    }
     
     const numericValue =
       typeof rawValue === 'number'

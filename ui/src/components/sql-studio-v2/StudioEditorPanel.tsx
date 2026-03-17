@@ -328,7 +328,7 @@ export function StudioEditorPanel({
           </Button>
           <Button
             size="sm"
-            className="shrink-0 bg-primary text-foreground hover:bg-primary"
+            className="shrink-0"
             onClick={onRun}
             disabled={isRunning || !sql.trim() || liveStatus === "connecting"}
           >
@@ -412,17 +412,9 @@ export function StudioEditorPanel({
               value={subscriptionOptions?.from ?? ""}
               onChange={(e) => {
                 const raw = e.target.value.trim();
-                let val: number | string | undefined;
-                if (!raw) {
-                  val = undefined;
-                } else if (/^\d+$/.test(raw)) {
-                  val = parseInt(raw, 10);
-                } else {
-                  val = raw;
-                }
                 onSubscriptionOptionsChange({
                   ...subscriptionOptions,
-                  from: val,
+                  from: raw || undefined,
                 });
               }}
               className="h-7 w-28 border-border bg-background text-xs"

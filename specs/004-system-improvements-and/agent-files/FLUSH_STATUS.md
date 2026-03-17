@@ -96,7 +96,7 @@ To fix this, the scheduler needs access to:
 ### Test Direct Flush Execution
 ```bash
 cd backend
-$env:RUST_LOG="kalamdb_core::flush=debug"
+$env:KALAMDB_LOG_LEVEL="kalamdb_core::flush=debug"
 cargo test test_user_table_flush_single_user --lib -- --nocapture
 ```
 
@@ -108,7 +108,7 @@ Once the scheduler is wired:
 1. Start server with debug logging:
 ```bash
 cd backend
-$env:RUST_LOG="debug"
+$env:KALAMDB_LOG_LEVEL="debug"
 cargo run --bin kalamdb-server
 ```
 

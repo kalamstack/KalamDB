@@ -5,7 +5,7 @@ type PanelLayout = [number, number];
 interface PersistedSubscriptionOptions {
   batch_size?: number;
   last_rows?: number;
-  from?: number | string;
+  from?: string;
 }
 
 export interface SqlStudioPersistedQueryTab {
@@ -88,7 +88,7 @@ function normalizeSubscriptionOptions(value: unknown): PersistedSubscriptionOpti
     result.last_rows = record.last_rows;
   }
   if (typeof record.from === "number" || typeof record.from === "string") {
-    result.from = record.from;
+    result.from = String(record.from);
   }
   return Object.keys(result).length > 0 ? result : undefined;
 }
