@@ -1,0 +1,138 @@
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile.prebuilt
+#1 transferring dockerfile: 3.90kB done
+#1 DONE 0.0s
+
+#2 [context binaries] load .dockerignore
+#2 transferring binaries: 2B done
+#2 DONE 0.0s
+
+#3 [internal] load metadata for docker.io/library/ubuntu:24.04@sha256:d1e2e92c075e5ca139d51a140fff46f84315c0fdce203eab2807c7e495eff4f9
+#3 DONE 0.0s
+
+#4 [internal] load metadata for docker.io/library/busybox:1.36.1-musl
+#4 DONE 760.5s
+
+#5 [internal] load .dockerignore
+#5 transferring context: 555B done
+#5 DONE 0.0s
+
+#6 [stage-1 1/9] FROM docker.io/library/ubuntu:24.04@sha256:d1e2e92c075e5ca139d51a140fff46f84315c0fdce203eab2807c7e495eff4f9
+#6 resolve docker.io/library/ubuntu:24.04@sha256:d1e2e92c075e5ca139d51a140fff46f84315c0fdce203eab2807c7e495eff4f9 0.0s done
+#6 CACHED
+
+#7 [runtime-prep 1/4] FROM docker.io/library/busybox:1.36.1-musl@sha256:3c6ae8008e2c2eedd141725c30b20d9c36b026eb796688f88205845ef17aa213
+#7 resolve docker.io/library/busybox:1.36.1-musl@sha256:3c6ae8008e2c2eedd141725c30b20d9c36b026eb796688f88205845ef17aa213 0.0s done
+#7 DONE 0.0s
+
+#8 [internal] load build context
+#8 transferring context: 77B done
+#8 DONE 0.0s
+
+#9 [context binaries] load from client
+#9 transferring binaries: 5.08MB 0.1s
+#9 transferring binaries: 10.04MB 0.2s done
+#9 DONE 0.2s
+
+#10 [context binaries] load from client
+#10 transferring binaries: 170.72MB 1.7s done
+#10 DONE 1.8s
+
+#11 [runtime-prep 3/4] COPY backend/server.example.toml /runtime/config/server.toml
+#11 CACHED
+
+#12 [runtime-prep 2/4] RUN mkdir -p /runtime/usr/local/bin /runtime/data/rocksdb /runtime/data/storage /runtime/data/logs /runtime/config &&     cp /bin/busybox /runtime/usr/local/bin/busybox
+#12 CACHED
+
+#13 [runtime-prep 4/4] RUN sed -i 's|data_path = "\./data"|data_path = "/data"|g' /runtime/config/server.toml
+#13 CACHED
+
+#14 [stage-1 2/9] RUN apt-get update &&     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates &&     rm -rf /var/lib/apt/lists/*
+#14 0.485 Get:1 http://ports.ubuntu.com/ubuntu-ports noble InRelease [256 kB]
+#14 0.980 Get:2 http://ports.ubuntu.com/ubuntu-ports noble-updates InRelease [126 kB]
+#14 1.097 Get:3 http://ports.ubuntu.com/ubuntu-ports noble-backports InRelease [126 kB]
+#14 1.214 Get:4 http://ports.ubuntu.com/ubuntu-ports noble-security InRelease [126 kB]
+#14 1.332 Get:5 http://ports.ubuntu.com/ubuntu-ports noble/universe arm64 Packages [19.0 MB]
+#14 2.039 Get:6 http://ports.ubuntu.com/ubuntu-ports noble/multiverse arm64 Packages [274 kB]
+#14 2.039 Get:7 http://ports.ubuntu.com/ubuntu-ports noble/restricted arm64 Packages [113 kB]
+#14 2.039 Get:8 http://ports.ubuntu.com/ubuntu-ports noble/main arm64 Packages [1776 kB]
+#14 2.086 Get:9 http://ports.ubuntu.com/ubuntu-ports noble-updates/universe arm64 Packages [1977 kB]
+#14 2.122 Get:10 http://ports.ubuntu.com/ubuntu-ports noble-updates/restricted arm64 Packages [4990 kB]
+#14 2.238 Get:11 http://ports.ubuntu.com/ubuntu-ports noble-updates/main arm64 Packages [2437 kB]
+#14 2.444 Get:12 http://ports.ubuntu.com/ubuntu-ports noble-updates/multiverse arm64 Packages [41.7 kB]
+#14 2.446 Get:13 http://ports.ubuntu.com/ubuntu-ports noble-backports/multiverse arm64 Packages [695 B]
+#14 2.446 Get:14 http://ports.ubuntu.com/ubuntu-ports noble-backports/universe arm64 Packages [36.1 kB]
+#14 2.446 Get:15 http://ports.ubuntu.com/ubuntu-ports noble-backports/main arm64 Packages [49.5 kB]
+#14 2.447 Get:16 http://ports.ubuntu.com/ubuntu-ports noble-security/universe arm64 Packages [1262 kB]
+#14 2.533 Get:17 http://ports.ubuntu.com/ubuntu-ports noble-security/multiverse arm64 Packages [42.1 kB]
+#14 2.535 Get:18 http://ports.ubuntu.com/ubuntu-ports noble-security/restricted arm64 Packages [4797 kB]
+#14 2.638 Get:19 http://ports.ubuntu.com/ubuntu-ports noble-security/main arm64 Packages [2075 kB]
+#14 3.370 Fetched 39.5 MB in 3s (12.9 MB/s)
+#14 3.370 Reading package lists...
+#14 4.319 Reading package lists...
+#14 5.327 Building dependency tree...
+#14 5.480 Reading state information...
+#14 5.724 The following additional packages will be installed:
+#14 5.724   openssl
+#14 5.757 The following NEW packages will be installed:
+#14 5.758   ca-certificates openssl
+#14 5.943 0 upgraded, 2 newly installed, 0 to remove and 11 not upgraded.
+#14 5.943 Need to get 1144 kB of archives.
+#14 5.943 After this operation, 2338 kB of additional disk space will be used.
+#14 5.943 Get:1 http://ports.ubuntu.com/ubuntu-ports noble-updates/main arm64 openssl arm64 3.0.13-0ubuntu3.7 [985 kB]
+#14 6.566 Get:2 http://ports.ubuntu.com/ubuntu-ports noble/main arm64 ca-certificates all 20240203 [159 kB]
+#14 6.772 debconf: delaying package configuration, since apt-utils is not installed
+#14 6.807 Fetched 1144 kB in 1s (1425 kB/s)
+#14 6.823 Selecting previously unselected package openssl.
+#14 6.823 (Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 4376 files and directories currently installed.)
+#14 6.829 Preparing to unpack .../openssl_3.0.13-0ubuntu3.7_arm64.deb ...
+#14 6.830 Unpacking openssl (3.0.13-0ubuntu3.7) ...
+#14 6.864 Selecting previously unselected package ca-certificates.
+#14 6.865 Preparing to unpack .../ca-certificates_20240203_all.deb ...
+#14 6.867 Unpacking ca-certificates (20240203) ...
+#14 6.918 Setting up openssl (3.0.13-0ubuntu3.7) ...
+#14 6.924 Setting up ca-certificates (20240203) ...
+#14 7.171 Updating certificates in /etc/ssl/certs...
+#14 7.458 146 added, 0 removed; done.
+#14 7.469 Processing triggers for ca-certificates (20240203) ...
+#14 7.472 Updating certificates in /etc/ssl/certs...
+#14 7.676 0 added, 0 removed; done.
+#14 7.676 Running hooks in /etc/ca-certificates/update.d...
+#14 7.677 done.
+#14 DONE 7.8s
+
+#15 [stage-1 3/9] COPY --from=binaries --chmod=755 kalamdb-server /usr/local/bin/kalamdb-server
+#15 DONE 0.4s
+
+#16 [stage-1 4/9] COPY --from=binaries --chmod=755 kalam /usr/local/bin/kalam-cli
+#16 DONE 0.1s
+
+#17 [stage-1 5/9] COPY --from=binaries --chmod=755 kalam /usr/local/bin/kalam
+#17 DONE 0.1s
+
+#18 [stage-1 6/9] COPY --from=runtime-prep --chmod=755 /runtime/usr/local/bin/busybox /usr/local/bin/busybox
+#18 DONE 0.0s
+
+#19 [stage-1 7/9] COPY --from=runtime-prep --chown=65532:65532 /runtime/data /data
+#19 DONE 0.0s
+
+#20 [stage-1 8/9] COPY --from=runtime-prep --chown=65532:65532 /runtime/config /config
+#20 DONE 0.0s
+
+#21 [stage-1 9/9] WORKDIR /data
+#21 DONE 0.0s
+
+#22 exporting to image
+#22 exporting layers
+#22 exporting layers 5.0s done
+#22 exporting manifest sha256:459dbb6e8d6c61039a4494a29e9020ced28f9be0cbc530ecad900d357fdd273b
+#22 exporting manifest sha256:459dbb6e8d6c61039a4494a29e9020ced28f9be0cbc530ecad900d357fdd273b 0.0s done
+#22 exporting config sha256:4b9e143b4f0ec0d80c63a79f9311fd1a2ff1d5417f2fdb234f3bffad9c409bee 0.0s done
+#22 exporting attestation manifest sha256:7f31ed67287c27603324cf735b56082b6811accf233f9c13cc60904a88c64353 0.0s done
+#22 exporting manifest list sha256:1bc8d7fc05244a56b43f3990ff9b349ced76d4dc809103acb40c2d2c87919b29 0.0s done
+#22 naming to docker.io/library/kalamdb:ubuntu24-lts-min
+#22 naming to docker.io/library/kalamdb:ubuntu24-lts-min done
+#22 unpacking to docker.io/library/kalamdb:ubuntu24-lts-min
+#22 unpacking to docker.io/library/kalamdb:ubuntu24-lts-min 1.5s done
+#22 DONE 6.7s

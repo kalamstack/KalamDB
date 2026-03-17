@@ -1,5 +1,5 @@
 interface NumberDisplayProps {
-  value: number;
+  value: number | string | bigint;
   dataType?: 'INT' | 'BIGINT' | 'SMALLINT' | 'FLOAT' | 'DOUBLE' | 'DECIMAL';
 }
 
@@ -16,7 +16,7 @@ export function NumberDisplay({ value, dataType }: NumberDisplayProps) {
       maximumFractionDigits: 6,
     });
   } else if (dataType === 'BIGINT') {
-    // Show BigInt as raw number without thousand separators
+    // Preserve the exact textual representation for 64-bit integers.
     formatted = String(value);
   } else {
     formatted = Number(value).toLocaleString();

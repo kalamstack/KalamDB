@@ -371,10 +371,7 @@ mod tests {
     #[test]
     fn test_env_override_trusted_proxy_ranges() {
         let _guard = acquire_env_lock();
-        env::set_var(
-            "KALAMDB_SECURITY_TRUSTED_PROXY_RANGES",
-            "10.0.1.9,192.168.0.0/24",
-        );
+        env::set_var("KALAMDB_SECURITY_TRUSTED_PROXY_RANGES", "10.0.1.9,192.168.0.0/24");
 
         let mut config = ServerConfig::default();
         config.apply_env_overrides().unwrap();

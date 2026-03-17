@@ -17,6 +17,8 @@ import {
   type LiveRowsOptions,
   type LogEntry,
   type LogListener,
+  type OnReceiveCallback,
+  type OnSendCallback,
   type QueryResponse,
   type RowData,
   type ServerMessage,
@@ -27,6 +29,8 @@ import {
 let client: KalamDBClient | null = null;
 let currentToken: string | null = null;
 let isInitialized = false;
+let currentReceiveListener: OnReceiveCallback | undefined;
+let currentSendListener: OnSendCallback | undefined;
 const isDebugLoggingEnabled = import.meta.env.DEV;
 
 function debugLog(...args: unknown[]): void {
@@ -119,6 +123,12 @@ export async function initializeClient(jwtToken: string): Promise<KalamDBClient>
     client = nextClient;
     currentToken = jwtToken;
     isInitialized = true;
+    if (currentReceiveListener) {
+      nextClient.onReceive(currentReceiveListener);
+    }
+    if (currentSendListener) {
+      nextClient.onSend(currentSendListener);
+    }
     debugLog('[kalam-client] WASM initialized successfully');
     return nextClient;
   });
@@ -337,7 +347,7 @@ function parseOptionsFromSql(sql: string): { sql: string; options: SubscriptionO
         } else if (keyLower === 'batch_size') {
           options.batch_size = parseInt(value, 10);
         } else if (keyLower === 'from') {
-          options.from = parseInt(value, 10);
+          options.from = value;
         }
       }
     }
@@ -460,11 +470,25 @@ export function setClientLogListener(listener: LogListener | undefined): void {
   }
 }
 
+export function setClientReceiveListener(listener: OnReceiveCallback | undefined): void {
+  currentReceiveListener = listener;
+  if (client) {
+    client.onReceive(listener ?? (() => {}));
+  }
+}
+
+export function setClientSendListener(listener: OnSendCallback | undefined): void {
+  currentSendListener = listener;
+  if (client) {
+    client.onSend(listener ?? (() => {}));
+  }
+}
+
 /**
  * Get the SDK LogLevel enum for external use.
  */
 export { LogLevel };
-export type { LogEntry, LogListener };
+export type { LogEntry, LogListener, OnReceiveCallback, OnSendCallback };
 
 // Re-export types for convenience
 export type { LiveRowsOptions, QueryResponse, RowData, ServerMessage, SubscriptionOptions, Unsubscribe };

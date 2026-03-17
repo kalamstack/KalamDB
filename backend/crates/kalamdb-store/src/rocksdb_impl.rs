@@ -245,6 +245,87 @@ impl StorageBackend for RocksDBBackend {
         Ok(Box::new(iter))
     }
 
+    fn scan_reverse(
+        &self,
+        partition: &Partition,
+        prefix: Option<&[u8]>,
+        start_key: Option<&[u8]>,
+        limit: Option<usize>,
+    ) -> Result<Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + Send + '_>> {
+        let _span = tracing::debug_span!(
+            "rocksdb.scan_reverse",
+            partition = %partition.name(),
+            has_prefix = prefix.is_some(),
+            limit = ?limit
+        )
+        .entered();
+        use rocksdb::Direction;
+
+        let cf = self.get_cf(partition)?;
+        let snapshot = self.db.snapshot();
+        let prefix_vec = prefix.map(|p| p.to_vec());
+
+        let mut readopts = rocksdb::ReadOptions::default();
+        readopts.set_snapshot(&snapshot);
+        if let Some(p) = &prefix_vec {
+            readopts.set_iterate_range(PrefixRange(p.clone()));
+        }
+
+        // When a prefix bound is present, IteratorMode::End starts at the high end
+        // of that bounded range. This is required for storekey-encoded composite
+        // prefixes where appending a null byte does not produce a valid upper bound.
+        let iter_mode = if let Some(start) = start_key {
+            IteratorMode::From(start, Direction::Reverse)
+        } else {
+            IteratorMode::End
+        };
+
+        let inner = self.db.iterator_cf_opt(&cf, readopts, iter_mode);
+
+        struct SnapshotReverseScanIter<'a, D: rocksdb::DBAccess> {
+            _snapshot: rocksdb::SnapshotWithThreadMode<'a, D>,
+            inner: rocksdb::DBIteratorWithThreadMode<'a, D>,
+            prefix: Option<Vec<u8>>,
+            remaining: Option<usize>,
+        }
+
+        impl<'a, D: rocksdb::DBAccess> Iterator for SnapshotReverseScanIter<'a, D> {
+            type Item = (Vec<u8>, Vec<u8>);
+
+            fn next(&mut self) -> Option<Self::Item> {
+                if let Some(0) = self.remaining {
+                    return None;
+                }
+
+                match self.inner.next()? {
+                    Ok((k, v)) => {
+                        if let Some(ref prefix) = self.prefix {
+                            if !k.starts_with(prefix) {
+                                return None;
+                            }
+                        }
+                        if let Some(ref mut left) = self.remaining {
+                            if *left > 0 {
+                                *left -= 1;
+                            }
+                        }
+                        Some((k.to_vec(), v.to_vec()))
+                    },
+                    Err(_) => None,
+                }
+            }
+        }
+
+        let iter = SnapshotReverseScanIter::<DB> {
+            _snapshot: snapshot,
+            inner,
+            prefix: prefix_vec,
+            remaining: limit,
+        };
+
+        Ok(Box::new(iter))
+    }
+
     fn partition_exists(&self, partition: &Partition) -> bool {
         self.db.cf_handle(partition.name()).is_some()
     }
@@ -428,6 +509,7 @@ impl StorageBackend for RocksDBBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kalamdb_commons::{encode_key, encode_prefix};
     use tempfile::TempDir;
 
     fn create_test_db() -> (Arc<DB>, TempDir) {
@@ -561,6 +643,33 @@ mod tests {
         let results: Vec<_> = backend.scan(&partition, None, None, Some(2)).unwrap().collect();
 
         assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_scan_reverse_with_storekey_prefix_returns_latest_match() {
+        let (db, _temp) = create_test_db();
+        let backend = RocksDBBackend::new(db);
+
+        let partition = Partition::new("test_cf");
+        backend.create_partition(&partition).unwrap();
+
+        let prefix = encode_prefix(&("user1", 42_i64));
+        let older_key = encode_key(&("user1", 42_i64, 100_i64));
+        let newer_key = encode_key(&("user1", 42_i64, 200_i64));
+        let other_key = encode_key(&("user1", 99_i64, 300_i64));
+
+        backend.put(&partition, &older_key, b"older").unwrap();
+        backend.put(&partition, &newer_key, b"newer").unwrap();
+        backend.put(&partition, &other_key, b"other").unwrap();
+
+        let results: Vec<_> = backend
+            .scan_reverse(&partition, Some(&prefix), None, Some(1))
+            .unwrap()
+            .collect();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, newer_key);
+        assert_eq!(results[0].1, b"newer".to_vec());
     }
 
     #[test]

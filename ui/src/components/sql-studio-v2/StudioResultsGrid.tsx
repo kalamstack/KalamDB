@@ -111,6 +111,31 @@ function compareValues(left: unknown, right: unknown): number {
   return String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: "base" });
 }
 
+function unwrapCellValue(value: unknown): unknown {
+  return value instanceof KalamCellValue ? value.toJson() : value;
+}
+
+function parseSeqValue(value: unknown): bigint | null {
+  const raw = unwrapCellValue(value);
+  if (typeof raw === "bigint") {
+    return raw;
+  }
+  if (typeof raw === "number" && Number.isInteger(raw)) {
+    return BigInt(raw);
+  }
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (/^-?\d+$/.test(trimmed)) {
+      try {
+        return BigInt(trimmed);
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
 export function StudioResultsGrid({
   result,
   isRunning,
@@ -220,6 +245,10 @@ export function StudioResultsGrid({
   const parsedTableContext = useMemo(() => extractTableContext(activeSql), [activeSql]);
   const cellNamespace = parsedTableContext?.namespace ?? selectedTable?.namespace;
   const cellTableName = parsedTableContext?.tableName ?? selectedTable?.name;
+  const isSystemTable = cellNamespace?.toLowerCase() === "system";
+  const isSuccess = !isRunning && result?.status === "success";
+  const hasTabularResults = isSuccess && schema.length > 0;
+  const canMutateRows = hasTabularResults && !isLiveMode && !isSystemTable;
 
   const sortedRowIndices = useMemo(() => {
     const indices = sourceRows.map((_, rowIndex) => rowIndex);
@@ -237,30 +266,24 @@ export function StudioResultsGrid({
     }
 
     if (isLiveMode) {
-      // Live mode: sort by PK with new inserts at top
-      const pkColumns = schema
-        .filter((f) => f.isPrimaryKey)
-        .sort((a, b) => a.index - b.index)
-        .map((f) => f.name);
-      
+      // Live mode: sort newest-first by _seq when present.
       indices.sort((leftIndex, rightIndex) => {
         const leftRow = sourceRows[leftIndex];
         const rightRow = sourceRows[rightIndex];
+        const leftSeq = parseSeqValue(leftRow?._seq);
+        const rightSeq = parseSeqValue(rightRow?._seq);
+
+        if (leftSeq !== null && rightSeq !== null) {
+          if (leftSeq === rightSeq) return 0;
+          return leftSeq > rightSeq ? -1 : 1;
+        }
+        if (leftSeq !== null) return -1;
+        if (rightSeq !== null) return 1;
+
         const leftChangeType = leftRow?.[LIVE_META.CHANGE_TYPE] as string | undefined;
         const rightChangeType = rightRow?.[LIVE_META.CHANGE_TYPE] as string | undefined;
-        
-        // New inserts go to top
-        const leftIsInsert = leftChangeType === "insert";
-        const rightIsInsert = rightChangeType === "insert";
-        if (leftIsInsert && !rightIsInsert) return -1;
-        if (!leftIsInsert && rightIsInsert) return 1;
-        
-        // Otherwise sort by PK ascending
-        for (const pkCol of pkColumns) {
-          const leftValue = leftRow?.[pkCol];
-          const rightValue = rightRow?.[pkCol];
-          const comparison = compareValues(leftValue, rightValue);
-          if (comparison !== 0) return comparison;
+        if (leftChangeType !== rightChangeType) {
+          return String(rightChangeType ?? "").localeCompare(String(leftChangeType ?? ""));
         }
         return 0;
       });
@@ -290,6 +313,14 @@ export function StudioResultsGrid({
       setSelectedCell(null);
     }
   }, [selectedCell, currentPageRows]);
+
+  useEffect(() => {
+    if (canMutateRows) {
+      return;
+    }
+
+    setSelectedRows(new Set());
+  }, [canMutateRows]);
 
   useEffect(() => {
     if (!isLiveMode) {
@@ -349,6 +380,9 @@ export function StudioResultsGrid({
   };
 
   const handleEditCell = (rowIndex: number, columnName: string, currentValue: unknown) => {
+    if (!canMutateRows) {
+      return;
+    }
     openCellViewer(currentValue, columnName, rowIndex, true);
   };
 
@@ -358,12 +392,21 @@ export function StudioResultsGrid({
     oldValue: unknown,
     newValue: unknown,
   ) => {
+    if (!canMutateRows) {
+      setInlineEditContext(null);
+      return;
+    }
+
     const pkValues = getPrimaryKeyValues(rowIndex);
     editCell(rowIndex, columnName, oldValue, newValue, pkValues);
     setInlineEditContext(null);
   };
 
   const handleDeleteRow = (rowIndex: number) => {
+    if (!canMutateRows) {
+      return;
+    }
+
     const row = sourceRows[rowIndex];
     if (!row) {
       return;
@@ -379,6 +422,10 @@ export function StudioResultsGrid({
   };
 
   const handleDeleteSelectedRows = () => {
+    if (!canMutateRows) {
+      return;
+    }
+
     const targetRows = Array.from(selectedRows);
     targetRows.forEach((rowIndex) => {
       const row = sourceRows[rowIndex];
@@ -403,10 +450,10 @@ export function StudioResultsGrid({
         dataType,
         rowIndex,
         columnName,
-        canEdit: editable && !isLiveMode,
+        canEdit: editable && canMutateRows,
       });
     },
-    [schema, isLiveMode],
+    [canMutateRows, schema],
   );
 
   const moveSelectionByArrow = useCallback(
@@ -477,6 +524,10 @@ export function StudioResultsGrid({
   }, [selectedCell, moveSelectionByArrow]);
 
   const handleReviewChanges = () => {
+    if (!canMutateRows) {
+      return;
+    }
+
     const parsed = extractTableContext(activeSql);
     const namespace = parsed?.namespace ?? selectedTable?.namespace;
     const tableName = parsed?.tableName ?? selectedTable?.name;
@@ -510,10 +561,8 @@ export function StudioResultsGrid({
 
   const editCount = edits.size;
   const deleteCount = deletions.size;
-  const isSuccess = !isRunning && result?.status === "success";
-  const hasTabularResults = isSuccess && schema.length > 0;
   const logCount = result?.logs.length ?? 0;
-  const showTableEditorBars = hasTabularResults && resultView === "results";
+  const showResultsTable = hasTabularResults && resultView === "results";
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
@@ -554,7 +603,7 @@ export function StudioResultsGrid({
                 showing first {MAX_RENDERED_ROWS.toLocaleString()}
               </span>
             )}
-            {resultView === "results" && selectedRows.size > 0 && (
+            {canMutateRows && resultView === "results" && selectedRows.size > 0 && (
               <span className="rounded bg-sky-500/20 px-1.5 py-0.5 text-[10px] text-sky-700">
                 {selectedRows.size} selected
               </span>
@@ -567,9 +616,9 @@ export function StudioResultsGrid({
             <Button
               size="sm"
               variant="destructive"
-              className={cn("h-7 gap-1.5", (resultView !== "results" || selectedRows.size === 0 || isLiveMode) && "invisible pointer-events-none")}
+              className={cn("h-7 gap-1.5", (!canMutateRows || resultView !== "results" || selectedRows.size === 0) && "invisible pointer-events-none")}
               onClick={handleDeleteSelectedRows}
-              disabled={resultView !== "results" || selectedRows.size === 0 || isLiveMode}
+              disabled={!canMutateRows || resultView !== "results" || selectedRows.size === 0}
             >
               <Trash2 className="h-3.5 w-3.5" />
               Delete selected
@@ -613,34 +662,36 @@ export function StudioResultsGrid({
         </div>
       )}
 
-      {!isRunning && showTableEditorBars && (
+      {!isRunning && showResultsTable && (
         <>
-          <div className="flex h-10 items-center justify-between border-b border-border bg-amber-50/70 px-3 /20">
-            <div className="truncate text-xs text-amber-700">
-              {changeCount === 0
-                ? "No pending table changes"
-                : `${changeCount} change${changeCount === 1 ? "" : "s"} • ${editCount} edit${editCount === 1 ? "" : "s"} • ${deleteCount} delete${deleteCount === 1 ? "" : "s"}`}
+          {canMutateRows && (
+            <div className="flex h-10 items-center justify-between border-b border-border bg-amber-50/70 px-3 /20">
+              <div className="truncate text-xs text-amber-700">
+                {changeCount === 0
+                  ? "No pending table changes"
+                  : `${changeCount} change${changeCount === 1 ? "" : "s"} • ${editCount} edit${editCount === 1 ? "" : "s"} • ${deleteCount} delete${deleteCount === 1 ? "" : "s"}`}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={discardAll}
+                  disabled={changeCount === 0}
+                  className="h-7 gap-1.5 text-amber-700 hover:bg-amber-100 hover:text-amber-900 :bg-amber-900/40 :text-amber-200"
+                >
+                  Discard
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleReviewChanges}
+                  disabled={changeCount === 0}
+                  className="h-7 gap-1.5"
+                >
+                  Review & Commit
+                </Button>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={discardAll}
-                disabled={changeCount === 0}
-                className="h-7 gap-1.5 text-amber-700 hover:bg-amber-100 hover:text-amber-900 :bg-amber-900/40 :text-amber-200"
-              >
-                Discard
-              </Button>
-              <Button
-                size="sm"
-                onClick={handleReviewChanges}
-                disabled={changeCount === 0}
-                className="h-7 gap-1.5"
-              >
-                Review & Commit
-              </Button>
-            </div>
-          </div>
+          )}
 
           <ScrollArea className="min-h-0 flex-1">
             <div className="min-w-max">
@@ -654,7 +705,7 @@ export function StudioResultsGrid({
                           Change
                         </span>
                       </div>
-                    ) : (
+                    ) : canMutateRows ? (
                       <div className="flex items-center justify-center">
                         <input
                           type="checkbox"
@@ -673,6 +724,8 @@ export function StudioResultsGrid({
                           className="h-3.5 w-3.5 rounded border-border bg-transparent disabled:opacity-40"
                         />
                       </div>
+                    ) : (
+                      <div className="h-3.5 w-3.5" />
                     )}
                   </th>
                   {schema.map((field) => {
@@ -784,7 +837,7 @@ export function StudioResultsGrid({
                               </>
                             )}
                           </div>
-                        ) : (
+                        ) : canMutateRows ? (
                           <div className="flex items-center justify-center">
                             <input
                               type="checkbox"
@@ -803,6 +856,8 @@ export function StudioResultsGrid({
                               className="h-3.5 w-3.5 rounded border-border bg-transparent disabled:opacity-40"
                             />
                           </div>
+                        ) : (
+                          <div className="h-3.5 w-3.5" />
                         )}
                       </td>
 
@@ -823,7 +878,7 @@ export function StudioResultsGrid({
                                 });
                               }}
                               onDoubleClick={() => {
-                                openCellViewer(value, field.name, rowIndex, true);
+                                openCellViewer(value, field.name, rowIndex, canMutateRows);
                               }}
                               onContextMenu={(event) => {
                                 event.preventDefault();
@@ -839,6 +894,7 @@ export function StudioResultsGrid({
                                   value,
                                   rowStatus,
                                   cellEdited,
+                                  canMutate: canMutateRows,
                                 });
                               }}
                               className={cn(

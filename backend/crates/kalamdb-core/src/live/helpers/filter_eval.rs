@@ -14,6 +14,7 @@ use datafusion::sql::sqlparser::ast::{BinaryOperator, Expr, Statement, Value};
 use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
 use datafusion::sql::sqlparser::parser::Parser;
 use kalamdb_commons::models::rows::Row;
+use regex::RegexBuilder;
 
 /// Parse a WHERE clause string into an Expr AST
 ///
@@ -136,6 +137,38 @@ fn evaluate_expr(expr: &Expr, row_data: &Row, depth: usize) -> Result<bool, Kala
             },
         },
 
+        Expr::Like {
+            negated,
+            any,
+            expr,
+            pattern,
+            escape_char,
+        } => evaluate_like_pattern(
+            expr,
+            pattern,
+            row_data,
+            *negated,
+            *any,
+            parse_like_escape_char(escape_char.as_ref())?,
+            false,
+        ),
+
+        Expr::ILike {
+            negated,
+            any,
+            expr,
+            pattern,
+            escape_char,
+        } => evaluate_like_pattern(
+            expr,
+            pattern,
+            row_data,
+            *negated,
+            *any,
+            parse_like_escape_char(escape_char.as_ref())?,
+            true,
+        ),
+
         _ => Err(KalamDbError::InvalidOperation(format!(
             "Unsupported expression type: {:?}",
             expr
@@ -212,6 +245,113 @@ fn compare_numeric(
         ">=" => left_num >= right_num,
         _ => return Err(KalamDbError::InvalidOperation(format!("Unknown operator: {}", op))),
     })
+}
+
+fn evaluate_like_pattern(
+    expr: &Expr,
+    pattern: &Expr,
+    row_data: &Row,
+    negated: bool,
+    any: bool,
+    escape_char: Option<char>,
+    case_insensitive: bool,
+) -> Result<bool, KalamDbError> {
+    if any {
+        return Err(KalamDbError::InvalidOperation(
+            "LIKE ANY expressions are not supported in live query filters".to_string(),
+        ));
+    }
+
+    let value = extract_value(expr, row_data)?;
+    let pattern_value = extract_value(pattern, row_data)?;
+
+    let value_str = as_str(&value).ok_or_else(|| {
+        KalamDbError::InvalidOperation(format!(
+            "Cannot evaluate LIKE against non-string value: {:?}",
+            value
+        ))
+    })?;
+    let pattern_str = as_str(&pattern_value).ok_or_else(|| {
+        KalamDbError::InvalidOperation(format!(
+            "LIKE pattern must be a string literal or column value, got: {:?}",
+            pattern_value
+        ))
+    })?;
+
+    let regex_pattern = build_like_regex_pattern(pattern_str, escape_char)?;
+    let regex = RegexBuilder::new(&regex_pattern)
+        .case_insensitive(case_insensitive)
+        .build()
+        .map_err(|error| {
+            KalamDbError::InvalidOperation(format!(
+                "Invalid LIKE pattern {:?}: {}",
+                pattern_str, error
+            ))
+        })?;
+
+    let matches = regex.is_match(value_str);
+    Ok(if negated { !matches } else { matches })
+}
+
+fn build_like_regex_pattern(
+    pattern: &str,
+    escape_char: Option<char>,
+) -> Result<String, KalamDbError> {
+    let mut regex_pattern = String::with_capacity(pattern.len() + 2);
+    regex_pattern.push('^');
+
+    let mut escaped = false;
+    for ch in pattern.chars() {
+        if escaped {
+            regex_pattern.push_str(&regex::escape(&ch.to_string()));
+            escaped = false;
+            continue;
+        }
+
+        if Some(ch) == escape_char {
+            escaped = true;
+            continue;
+        }
+
+        match ch {
+            '%' => regex_pattern.push_str(".*"),
+            '_' => regex_pattern.push('.'),
+            _ => regex_pattern.push_str(&regex::escape(&ch.to_string())),
+        }
+    }
+
+    if escaped {
+        return Err(KalamDbError::InvalidOperation(format!(
+            "LIKE pattern has dangling escape character: {:?}",
+            pattern
+        )));
+    }
+
+    regex_pattern.push('$');
+    Ok(regex_pattern)
+}
+
+fn parse_like_escape_char(escape_char: Option<&Value>) -> Result<Option<char>, KalamDbError> {
+    match escape_char {
+        None => Ok(None),
+        Some(Value::SingleQuotedString(value)) | Some(Value::DoubleQuotedString(value)) => {
+            let mut chars = value.chars();
+            let ch = chars.next().ok_or_else(|| {
+                KalamDbError::InvalidOperation("LIKE ESCAPE cannot be empty".to_string())
+            })?;
+            if chars.next().is_some() {
+                return Err(KalamDbError::InvalidOperation(format!(
+                    "LIKE ESCAPE must be a single character, got {:?}",
+                    value
+                )));
+            }
+            Ok(Some(ch))
+        },
+        Some(other) => Err(KalamDbError::InvalidOperation(format!(
+            "Unsupported LIKE ESCAPE value: {:?}",
+            other
+        ))),
+    }
 }
 
 /// Extract a value from an expression
@@ -396,6 +536,28 @@ mod tests {
 
         let non_matching_row2 = to_row(json!({"user_id": "user1", "read": true}));
         assert!(!matches(&expr, &non_matching_row2).unwrap());
+    }
+
+    #[test]
+    fn test_like_filter() {
+        let expr = parse_where_clause("metric_name LIKE 'open_files_%'").unwrap();
+
+        let matching_row = to_row(json!({"metric_name": "open_files_other"}));
+        assert!(matches(&expr, &matching_row).unwrap());
+
+        let non_matching_row = to_row(json!({"metric_name": "closed_files_other"}));
+        assert!(!matches(&expr, &non_matching_row).unwrap());
+    }
+
+    #[test]
+    fn test_ilike_filter() {
+        let expr = parse_where_clause("metric_name ILIKE 'OPEN_FILES_%'").unwrap();
+
+        let matching_row = to_row(json!({"metric_name": "open_files_other"}));
+        assert!(matches(&expr, &matching_row).unwrap());
+
+        let non_matching_row = to_row(json!({"metric_name": "closed_files_other"}));
+        assert!(!matches(&expr, &non_matching_row).unwrap());
     }
 
     #[test]

@@ -107,9 +107,14 @@ pub fn decode_key<T: Decode>(bytes: &[u8]) -> Result<T, String> {
 
 /// Compute the next lexicographic key after the provided encoded bytes.
 ///
-/// This is used to make range scans exclusive of a specific key. It appends
-/// a null byte which is safe for storekey-encoded values because the encoded
-/// bytes are prefix-free for complete keys.
+/// This is used to make range scans exclusive of a specific complete key. It
+/// appends a null byte which is safe for storekey-encoded values because the
+/// encoded bytes are prefix-free for complete keys.
+///
+/// Do not use this as an upper bound for encoded prefixes. For composite
+/// storekey prefixes like `encode_prefix(&(user_id, pk))`, the resulting bytes
+/// are not guaranteed to sort after every longer key that starts with that
+/// prefix.
 pub fn next_storage_key_bytes(bytes: &[u8]) -> Vec<u8> {
     let mut next = Vec::with_capacity(bytes.len() + 1);
     next.extend_from_slice(bytes);

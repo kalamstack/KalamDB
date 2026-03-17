@@ -119,6 +119,43 @@ pub trait StorageBackend: Send + Sync {
         limit: Option<usize>,
     ) -> Result<KvIterator<'_>>;
 
+    /// Scans keys in reverse order, optionally filtered by prefix and limit.
+    ///
+    /// This is used by hot-path latest-version lookups where the newest entry is
+    /// stored last in the keyspace. Backends with native reverse iterators should
+    /// override this; the default implementation falls back to a forward scan and
+    /// reverses the collected rows.
+    fn scan_reverse(
+        &self,
+        partition: &Partition,
+        prefix: Option<&[u8]>,
+        start_key: Option<&[u8]>,
+        limit: Option<usize>,
+    ) -> Result<KvIterator<'_>> {
+        if matches!(limit, Some(0)) {
+            return Ok(Box::new(std::iter::empty()));
+        }
+
+        let mut items: Vec<(Vec<u8>, Vec<u8>)> =
+            self.scan(partition, prefix, None, None)?.collect();
+
+        if let Some(start) = start_key {
+            items.retain(|(key, _)| key.as_slice() <= start);
+        }
+
+        if let Some(prefix) = prefix {
+            items.retain(|(key, _)| key.starts_with(prefix));
+        }
+
+        items.reverse();
+
+        if let Some(limit) = limit {
+            items.truncate(limit);
+        }
+
+        Ok(Box::new(items.into_iter()))
+    }
+
     /// Checks if a partition exists.
     fn partition_exists(&self, partition: &Partition) -> bool;
 

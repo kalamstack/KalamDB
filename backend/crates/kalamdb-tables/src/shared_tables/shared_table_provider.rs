@@ -40,7 +40,8 @@ use kalamdb_session::{check_shared_table_access, check_shared_table_write_access
 use kalamdb_store::EntityStore;
 use kalamdb_system::VectorMetric;
 use kalamdb_vector::{
-    new_indexed_shared_vector_hot_store, SharedVectorHotOpId, VectorHotOp, VectorHotOpType,
+    new_indexed_shared_vector_hot_store, SharedVectorHotOpId, SharedVectorHotStore, VectorHotOp,
+    VectorHotOpType,
 };
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -69,6 +70,9 @@ pub struct SharedTableProvider {
 
     /// Embedding columns tracked by vector hot staging: (column_name, dimensions).
     vector_columns: Vec<(String, u32)>,
+
+    /// Cached vector staging stores keyed by embedding column name.
+    vector_stores: HashMap<String, Arc<SharedVectorHotStore>>,
 }
 
 impl SharedTableProvider {
@@ -79,7 +83,7 @@ impl SharedTableProvider {
     /// * `store` - SharedTableIndexedStore for this table
     pub fn new(core: Arc<TableProviderCore>, store: Arc<SharedTableIndexedStore>) -> Self {
         let pk_index = SharedTablePkIndex::new(core.table_id(), core.primary_key_field_name());
-        let vector_columns = core
+        let vector_columns: Vec<(String, u32)> = core
             .table_def()
             .columns
             .iter()
@@ -90,12 +94,27 @@ impl SharedTableProvider {
                 _ => None,
             })
             .collect();
+        let backend = store.backend().clone();
+        let vector_stores: HashMap<String, Arc<SharedVectorHotStore>> = vector_columns
+            .iter()
+            .map(|(column_name, _)| {
+                (
+                    column_name.clone(),
+                    Arc::new(new_indexed_shared_vector_hot_store(
+                        backend.clone(),
+                        core.table_id(),
+                        column_name,
+                    )),
+                )
+            })
+            .collect();
 
         Self {
             core,
             store,
             pk_index,
             vector_columns,
+            vector_stores,
         }
     }
 
@@ -233,14 +252,17 @@ impl SharedTableProvider {
         }
     }
 
-    fn stage_vector_upsert(&self, seq: SharedTableRowId, row: &Row) -> Result<(), KalamDbError> {
+    async fn stage_vector_upsert(
+        &self,
+        seq: SharedTableRowId,
+        row: &Row,
+    ) -> Result<(), KalamDbError> {
         if self.vector_columns.is_empty() {
             return Ok(());
         }
 
         let pk =
             crate::utils::unified_dml::extract_user_pk_value(row, self.primary_key_field_name())?;
-        let backend = self.store.backend().clone();
 
         for (column_name, dimensions) in &self.vector_columns {
             let Some(value) = row.get(column_name.as_str()) else {
@@ -250,11 +272,12 @@ impl SharedTableProvider {
                 continue;
             };
 
-            let store = new_indexed_shared_vector_hot_store(
-                backend.clone(),
-                self.core.table_id(),
-                column_name,
-            );
+            let store = self.vector_stores.get(column_name).ok_or_else(|| {
+                KalamDbError::InvalidOperation(format!(
+                    "Missing cached vector store for column '{}'",
+                    column_name
+                ))
+            })?;
             let key = SharedVectorHotOpId::new(seq, pk.clone());
             let op = VectorHotOp::new(
                 self.core.table_id().clone(),
@@ -266,7 +289,7 @@ impl SharedTableProvider {
                 *dimensions,
                 VectorMetric::Cosine,
             );
-            store.insert(&key, &op).map_err(|e| {
+            store.insert_async(key, op).await.map_err(|e| {
                 KalamDbError::InvalidOperation(format!("Failed to stage vector upsert op: {}", e))
             })?;
         }
@@ -274,18 +297,81 @@ impl SharedTableProvider {
         Ok(())
     }
 
-    fn stage_vector_delete(&self, seq: SharedTableRowId, pk: &str) -> Result<(), KalamDbError> {
+    async fn stage_vector_upsert_batch(
+        &self,
+        entries: &[(SharedTableRowId, SharedTableRow)],
+    ) -> Result<(), KalamDbError> {
+        if self.vector_columns.is_empty() || entries.is_empty() {
+            return Ok(());
+        }
+
+        let mut ops_by_column: HashMap<String, Vec<(SharedVectorHotOpId, VectorHotOp)>> =
+            HashMap::new();
+
+        for (row_key, entity) in entries {
+            let pk = crate::utils::unified_dml::extract_user_pk_value(
+                &entity.fields,
+                self.primary_key_field_name(),
+            )?;
+
+            for (column_name, dimensions) in &self.vector_columns {
+                let Some(value) = entity.fields.get(column_name.as_str()) else {
+                    continue;
+                };
+                let Some(vector) = Self::extract_embedding_vector(value, *dimensions) else {
+                    continue;
+                };
+
+                ops_by_column.entry(column_name.clone()).or_default().push((
+                    SharedVectorHotOpId::new(*row_key, pk.clone()),
+                    VectorHotOp::new(
+                        self.core.table_id().clone(),
+                        column_name.clone(),
+                        pk.clone(),
+                        VectorHotOpType::Upsert,
+                        Some(vector),
+                        None,
+                        *dimensions,
+                        VectorMetric::Cosine,
+                    ),
+                ));
+            }
+        }
+
+        for (column_name, ops) in ops_by_column {
+            let store = self.vector_stores.get(&column_name).ok_or_else(|| {
+                KalamDbError::InvalidOperation(format!(
+                    "Missing cached vector store for column '{}'",
+                    column_name
+                ))
+            })?;
+            store.insert_batch_async(ops).await.map_err(|e| {
+                KalamDbError::InvalidOperation(format!(
+                    "Failed to batch stage vector upsert ops for column '{}': {}",
+                    column_name, e
+                ))
+            })?;
+        }
+
+        Ok(())
+    }
+
+    async fn stage_vector_delete(
+        &self,
+        seq: SharedTableRowId,
+        pk: &str,
+    ) -> Result<(), KalamDbError> {
         if self.vector_columns.is_empty() {
             return Ok(());
         }
 
-        let backend = self.store.backend().clone();
         for (column_name, dimensions) in &self.vector_columns {
-            let store = new_indexed_shared_vector_hot_store(
-                backend.clone(),
-                self.core.table_id(),
-                column_name,
-            );
+            let store = self.vector_stores.get(column_name).ok_or_else(|| {
+                KalamDbError::InvalidOperation(format!(
+                    "Missing cached vector store for column '{}'",
+                    column_name
+                ))
+            })?;
             let key = SharedVectorHotOpId::new(seq, pk.to_string());
             let op = VectorHotOp::new(
                 self.core.table_id().clone(),
@@ -297,7 +383,7 @@ impl SharedTableProvider {
                 *dimensions,
                 VectorMetric::Cosine,
             );
-            store.insert(&key, &op).map_err(|e| {
+            store.insert_async(key, op).await.map_err(|e| {
                 KalamDbError::InvalidOperation(format!("Failed to stage vector delete op: {}", e))
             })?;
         }
@@ -338,33 +424,28 @@ impl SharedTableProvider {
     ///
     /// This method uses the PK index to find all versions of a row with the given PK value,
     /// then returns the latest non-deleted version.
-    fn find_by_pk(
+    async fn latest_hot_pk_entry(
         &self,
         pk_value: &ScalarValue,
     ) -> Result<Option<(SharedTableRowId, SharedTableRow)>, KalamDbError> {
-        // Build index prefix for this PK value
         let prefix = self.pk_index.build_prefix_for_pk(pk_value);
+        self.store
+            .get_latest_by_index_prefix_async(0, prefix)
+            .await
+            .into_kalamdb_error("PK index scan failed")
+    }
 
-        // Use scan_by_index on the IndexedEntityStore (index 0 is the PK index)
-        // scan_by_index returns (key, entity) pairs directly
-        let results = self
-            .store
-            .scan_by_index(0, Some(&prefix), None)
-            .into_kalamdb_error("PK index scan failed")?;
-
-        if results.is_empty() {
-            return Ok(None);
-        }
-
-        if let Some((row_id, row)) = results.into_iter().max_by_key(|(row_id, _)| row_id.as_i64()) {
+    pub async fn find_by_pk(
+        &self,
+        pk_value: &ScalarValue,
+    ) -> Result<Option<(SharedTableRowId, SharedTableRow)>, KalamDbError> {
+        Ok(self.latest_hot_pk_entry(pk_value).await?.and_then(|(row_id, row)| {
             if row._deleted {
-                Ok(None)
+                None
             } else {
-                Ok(Some((row_id, row)))
+                Some((row_id, row))
             }
-        } else {
-            Ok(None)
-        }
+        }))
     }
 
     /// Returns true if the latest hot-storage version of this PK is a tombstone
@@ -373,15 +454,10 @@ impl SharedTableProvider {
     ///
     /// Used in the PK fast-path of `scan_rows` to prevent cold storage (Parquet)
     /// from surfacing a row that has already been deleted in hot storage.
-    fn pk_tombstoned_in_hot(&self, pk_value: &ScalarValue) -> Result<bool, KalamDbError> {
-        let prefix = self.pk_index.build_prefix_for_pk(pk_value);
-        let results = self
-            .store
-            .scan_by_index(0, Some(&prefix), None)
-            .into_kalamdb_error("PK index scan failed")?;
-        Ok(results
-            .into_iter()
-            .max_by_key(|(row_id, _)| row_id.as_i64())
+    async fn pk_tombstoned_in_hot(&self, pk_value: &ScalarValue) -> Result<bool, KalamDbError> {
+        Ok(self
+            .latest_hot_pk_entry(pk_value)
+            .await?
             .map(|(_, row)| row._deleted)
             .unwrap_or(false))
     }
@@ -614,19 +690,11 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
         // Use shared helper to parse PK value
         let pk_value = crate::utils::pk::parse_pk_value(id_value);
 
-        // Fast path: return the latest non-deleted row from hot storage if it exists.
-        if let Some((row_id, _row)) = self.find_by_pk(&pk_value)? {
+        if let Some((row_id, row)) = self.latest_hot_pk_entry(&pk_value).await? {
+            if row._deleted {
+                return Ok(None);
+            }
             return Ok(Some(row_id));
-        }
-
-        // If hot storage has entries but they're all deleted, allow PK reuse.
-        let prefix = self.pk_index.build_prefix_for_pk(&pk_value);
-        let hot_has_versions = self
-            .store
-            .exists_by_index(0, &prefix)
-            .into_kalamdb_error("PK index scan failed")?;
-        if hot_has_versions {
-            return Ok(None);
         }
 
         // Not found in hot storage - check cold storage using optimized manifest-based lookup
@@ -681,13 +749,13 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
         let row_key = seq_id;
 
         // Store the entity in RocksDB (hot storage) using insert() to update PK index
-        self.store.insert(&row_key, &entity).map_err(|e| {
+        self.store.insert_async(row_key, entity.clone()).await.map_err(|e| {
             KalamDbError::InvalidOperation(format!("Failed to insert shared table row: {}", e))
         })?;
 
         log::debug!("Inserted shared table row with _seq {}", seq_id);
 
-        if let Err(e) = self.stage_vector_upsert(seq_id, &entity.fields) {
+        if let Err(e) = self.stage_vector_upsert(seq_id, &entity.fields).await {
             log::warn!(
                 "Failed to stage vector upsert for table={}, seq={}: {}",
                 self.core.table_id(),
@@ -774,70 +842,43 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
 
         // Batch PK validation: collect all user-provided PK values
         let pk_name = self.primary_key_field_name();
-        let mut pk_values_to_check: Vec<String> = Vec::new();
+        let mut pk_values_to_check: Vec<(String, ScalarValue)> = Vec::new();
+        let mut seen_batch_pks = HashSet::new();
         for row_data in &coerced_rows {
             if let Some(pk_value) = row_data.get(pk_name) {
                 if !matches!(pk_value, ScalarValue::Null) {
                     let pk_str =
                         crate::utils::unified_dml::extract_user_pk_value(row_data, pk_name)?;
-                    pk_values_to_check.push(pk_str);
+                    if !seen_batch_pks.insert(pk_str.clone()) {
+                        return Err(KalamDbError::AlreadyExists(format!(
+                            "Primary key violation: value '{}' appears multiple times in the insert batch for column '{}'",
+                            pk_str, pk_name
+                        )));
+                    }
+                    pk_values_to_check.push((pk_str, pk_value.clone()));
                 }
             }
         }
 
-        // OPTIMIZED: Check PK existence in hot storage only (cold storage handled below)
-        // For small batches (≤2 rows), use direct lookups. For larger batches, use batch scan.
+        // Check only the latest hot version for each PK. Tombstoned latest
+        // versions are reusable and should not fail the insert.
         if !pk_values_to_check.is_empty() {
-            if pk_values_to_check.len() <= 2 {
-                // Small batch: individual O(1) lookups are efficient
-                for pk_str in &pk_values_to_check {
-                    let prefix = self.pk_index.build_pk_prefix(pk_str);
-                    if self
-                        .store
-                        .exists_by_index(0, &prefix)
-                        .into_kalamdb_error("PK index check failed")?
-                    {
+            for (pk_str, pk_value) in &pk_values_to_check {
+                if let Some((_row_id, row)) = self.latest_hot_pk_entry(pk_value).await? {
+                    if !row._deleted {
                         return Err(KalamDbError::AlreadyExists(format!(
                             "Primary key violation: value '{}' already exists in column '{}'",
                             pk_str, pk_name
                         )));
                     }
                 }
-            } else {
-                // Larger batch: build all prefixes and use batch scan
-                let prefixes: Vec<Vec<u8>> = pk_values_to_check
-                    .iter()
-                    .map(|pk_str| self.pk_index.build_pk_prefix(pk_str))
-                    .collect();
-
-                // Use empty common prefix for shared tables (no user scoping)
-                let existing = self
-                    .store
-                    .exists_batch_by_index(0, &[], &prefixes)
-                    .into_kalamdb_error("Batch PK index check failed")?;
-
-                if !existing.is_empty() {
-                    // Find which PK matched
-                    for pk_str in &pk_values_to_check {
-                        let prefix = self.pk_index.build_pk_prefix(pk_str);
-                        if existing.contains(&prefix) {
-                            return Err(KalamDbError::AlreadyExists(format!(
-                                "Primary key violation: value '{}' already exists in column '{}'",
-                                pk_str, pk_name
-                            )));
-                        }
-                    }
-                    // Fallback if we couldn't match the prefix back (shouldn't happen)
-                    return Err(KalamDbError::AlreadyExists(format!(
-                        "Primary key violation: a value already exists in column '{}'",
-                        pk_name
-                    )));
-                }
             }
 
             // OPTIMIZED: Batch cold storage check - O(files) instead of O(files × N)
             // This reads Parquet files ONCE for all PK values instead of N times
             let pk_column_id = self.core.primary_key_column_id();
+            let pk_values: Vec<String> =
+                pk_values_to_check.iter().map(|(pk, _)| pk.clone()).collect();
             if let Some(found_pk) = base::pk_exists_batch_in_cold(
                 &self.core,
                 self.core.table_id(),
@@ -845,7 +886,7 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
                 None, // No user scoping for shared tables
                 pk_name,
                 pk_column_id,
-                &pk_values_to_check,
+                &pk_values,
             )
             .await?
             {
@@ -896,22 +937,22 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
         let entries: Vec<(SharedTableRowId, SharedTableRow)> =
             row_keys.iter().copied().zip(shared_rows.into_iter()).collect();
 
-        self.store.insert_batch_preencoded(&entries, encoded_values).map_err(|e| {
-            KalamDbError::InvalidOperation(format!(
-                "Failed to batch insert shared table rows: {}",
-                e
-            ))
-        })?;
-
-        for (row_key, entity) in &entries {
-            if let Err(e) = self.stage_vector_upsert(*row_key, &entity.fields) {
-                log::warn!(
-                    "Failed to stage vector upsert for table={}, seq={}: {}",
-                    self.core.table_id(),
-                    row_key.as_i64(),
+        self.store
+            .insert_batch_preencoded_async(entries.clone(), encoded_values)
+            .await
+            .map_err(|e| {
+                KalamDbError::InvalidOperation(format!(
+                    "Failed to batch insert shared table rows: {}",
                     e
-                );
-            }
+                ))
+            })?;
+
+        if let Err(e) = self.stage_vector_upsert_batch(&entries).await {
+            log::warn!(
+                "Failed to batch stage vector upserts for table={}: {}",
+                self.core.table_id(),
+                e
+            );
         }
 
         // Mark manifest as having pending writes (hot data needs to be flushed)
@@ -1035,22 +1076,28 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
 
         // Resolve latest per PK - first try hot storage (O(1) via PK index),
         // then fall back to cold storage (Parquet scan)
-        let (_latest_key, latest_row) = if let Some(result) = self.find_by_pk(&pk_value_scalar)? {
-            result
-        } else {
-            // Not in hot storage, check cold storage
-            log::debug!(
-                "[UPDATE] PK {} not found in hot storage, querying cold storage for pk={}",
-                pk_name,
-                pk_value
-            );
-            base::find_row_by_pk(self, None, pk_value).await?.ok_or_else(|| {
-                KalamDbError::NotFound(format!(
-                    "Row with {}={} not found (checked both hot and cold storage)",
+        let (_latest_key, latest_row) =
+            if let Some(result) = self.find_by_pk(&pk_value_scalar).await? {
+                result
+            } else if self.pk_tombstoned_in_hot(&pk_value_scalar).await? {
+                return Err(KalamDbError::NotFound(format!(
+                    "Row with {}={} was deleted",
                     pk_name, pk_value
-                ))
-            })?
-        };
+                )));
+            } else {
+                // Not in hot storage, check cold storage
+                log::debug!(
+                    "[UPDATE] PK {} not found in hot storage, querying cold storage for pk={}",
+                    pk_name,
+                    pk_value
+                );
+                base::find_row_by_pk(self, None, pk_value).await?.ok_or_else(|| {
+                    KalamDbError::NotFound(format!(
+                        "Row with {}={} not found (checked both hot and cold storage)",
+                        pk_name, pk_value
+                    ))
+                })?
+            };
 
         let mut merged = latest_row.fields.values.clone();
         for (k, v) in &updates.values {
@@ -1069,11 +1116,11 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
         };
         let row_key = seq_id;
         // Use insert() to update PK index for the new MVCC version
-        self.store.insert(&row_key, &entity).map_err(|e| {
+        self.store.insert_async(row_key, entity.clone()).await.map_err(|e| {
             KalamDbError::InvalidOperation(format!("Failed to update shared table row: {}", e))
         })?;
 
-        if let Err(e) = self.stage_vector_upsert(seq_id, &entity.fields) {
+        if let Err(e) = self.stage_vector_upsert(seq_id, &entity.fields).await {
             log::warn!(
                 "Failed to stage vector upsert for table={}, seq={}: {}",
                 self.core.table_id(),
@@ -1178,8 +1225,10 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
 
         // Find latest resolved row for this PK
         // First try hot storage (O(1) via PK index), then fall back to cold storage (Parquet scan)
-        let latest_row = if let Some((_key, row)) = self.find_by_pk(&pk_value_scalar)? {
+        let latest_row = if let Some((_key, row)) = self.find_by_pk(&pk_value_scalar).await? {
             row
+        } else if self.pk_tombstoned_in_hot(&pk_value_scalar).await? {
+            return Ok(false);
         } else {
             // Not in hot storage, check cold storage
             match base::find_row_by_pk(self, None, pk_value).await? {
@@ -1215,11 +1264,11 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
             seq_id.as_i64()
         );
         // Use insert() to update PK index for the tombstone record
-        self.store.insert(&row_key, &entity).map_err(|e| {
+        self.store.insert_async(row_key, entity.clone()).await.map_err(|e| {
             KalamDbError::InvalidOperation(format!("Failed to delete shared table row: {}", e))
         })?;
 
-        if let Err(e) = self.stage_vector_delete(seq_id, pk_value) {
+        if let Err(e) = self.stage_vector_delete(seq_id, pk_value).await {
             log::warn!(
                 "Failed to stage vector delete for table={}, seq={}, pk={}: {}",
                 self.core.table_id(),
@@ -1295,7 +1344,7 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
                 };
 
                 // Try hot storage PK index (O(1))
-                let found = self.find_by_pk(&pk_scalar)?;
+                let found = self.find_by_pk(&pk_scalar).await?;
                 if let Some((row_id, row)) = found {
                     log::debug!(
                         "[SharedProvider] PK fast-path hit for {}={}, _seq={}",
@@ -1314,7 +1363,7 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
                 // Not in hot storage — check if it is tombstoned before trying cold storage.
                 // A tombstone in hot storage means the row was deleted; falling back to Parquet
                 // would surface a stale version and violate MVCC visibility rules.
-                if self.pk_tombstoned_in_hot(&pk_scalar)? {
+                if self.pk_tombstoned_in_hot(&pk_scalar).await? {
                     log::debug!(
                         "[SharedProvider] PK fast-path tombstone for {}={}",
                         pk_name,

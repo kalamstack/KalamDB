@@ -404,10 +404,12 @@ fn extract_access_level(option: &SqlOption) -> DdlResult<Option<TableAccess>> {
                 "PRIVATE" => TableAccess::Private,
                 "RESTRICTED" => TableAccess::Restricted,
                 "DBA" => TableAccess::Dba,
-                other => return Err(format!(
+                other => {
+                    return Err(format!(
                     "Invalid ACCESS_LEVEL '{}'. Supported values: PUBLIC, PRIVATE, RESTRICTED, DBA",
                     other
-                )),
+                ))
+                },
             };
             return Ok(Some(access_level));
         }

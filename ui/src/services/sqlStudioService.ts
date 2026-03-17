@@ -150,6 +150,93 @@ function hasTabularPayload(result: RawSqlStatementResult): boolean {
   );
 }
 
+function ensureNamespace(
+  namespaces: Map<string, StudioNamespace>,
+  databaseName: string,
+  namespaceName: string,
+): StudioNamespace {
+  let namespace = namespaces.get(namespaceName);
+  if (!namespace) {
+    namespace = {
+      database: databaseName,
+      name: namespaceName,
+      tables: [],
+    };
+    namespaces.set(namespaceName, namespace);
+  }
+  return namespace;
+}
+
+function ensureTable(
+  namespaces: Map<string, StudioNamespace>,
+  tableMap: Map<string, StudioTable>,
+  databaseName: string,
+  namespaceName: string,
+  tableName: string,
+  tableType: string,
+): StudioTable {
+  const tableKey = `${namespaceName}.${tableName}`;
+  let table = tableMap.get(tableKey);
+
+  if (!table) {
+    table = {
+      database: databaseName,
+      namespace: namespaceName,
+      name: tableName,
+      tableType,
+      columns: [],
+    };
+    tableMap.set(tableKey, table);
+    ensureNamespace(namespaces, databaseName, namespaceName).tables.push(table);
+  }
+
+  return table;
+}
+
+function normalizeNullable(value: unknown): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "yes" || normalized === "true" || normalized === "1") {
+      return true;
+    }
+    if (normalized === "no" || normalized === "false" || normalized === "0") {
+      return false;
+    }
+  }
+
+  return Boolean(value);
+}
+
+function inferExplorerTableType(namespaceName: string, tableType: unknown): string {
+  const normalizedNamespace = namespaceName.trim().toLowerCase();
+  if (
+    normalizedNamespace === "system" ||
+    normalizedNamespace === "information_schema" ||
+    normalizedNamespace === "pg_catalog" ||
+    normalizedNamespace === "datafusion"
+  ) {
+    return "system";
+  }
+
+  const normalizedTableType = String(tableType ?? "").trim().toLowerCase();
+  if (normalizedTableType === "stream" || normalizedTableType === "shared" || normalizedTableType === "user") {
+    return normalizedTableType;
+  }
+  if (normalizedTableType.includes("view")) {
+    return "view";
+  }
+
+  return "user";
+}
+
 export async function fetchSqlStudioSchemaTree(): Promise<StudioNamespace[]> {
   const databaseName = "database";
 
@@ -167,11 +254,7 @@ export async function fetchSqlStudioSchemaTree(): Promise<StudioNamespace[]> {
       return;
     }
 
-    namespaces.set(namespaceName, {
-      database: databaseName,
-      name: namespaceName,
-      tables: [],
-    });
+    ensureNamespace(namespaces, databaseName, namespaceName);
   });
 
   const tableAndColumnsResult = await executeSql(`
@@ -200,41 +283,113 @@ export async function fetchSqlStudioSchemaTree(): Promise<StudioNamespace[]> {
       return;
     }
 
-    if (!namespaces.has(namespaceName)) {
-      namespaces.set(namespaceName, {
-        database: databaseName,
-        name: namespaceName,
-        tables: [],
-      });
-    }
-
-    const tableKey = `${namespaceName}.${tableName}`;
-    let table = tableMap.get(tableKey);
-
-    if (!table) {
-      table = {
-        database: databaseName,
-        namespace: namespaceName,
-        name: tableName,
-        tableType: String(row.table_type ?? "user"),
-        columns: [],
-      };
-      tableMap.set(tableKey, table);
-      namespaces.get(namespaceName)?.tables.push(table);
-    }
+    const table = ensureTable(
+      namespaces,
+      tableMap,
+      databaseName,
+      namespaceName,
+      tableName,
+      inferExplorerTableType(namespaceName, row.table_type),
+    );
 
     if (row.column_name) {
       table.columns.push({
         name: String(row.column_name),
         dataType: String(row.data_type ?? "unknown"),
-        isNullable: Boolean(row.nullable),
+        isNullable: normalizeNullable(row.nullable),
         isPrimaryKey: Boolean(row.primary_key),
         ordinal: Number(row.ordinal ?? table.columns.length),
       });
     }
   });
 
-  return Array.from(namespaces.values());
+  const infoSchemaTablesResult = await executeSql(`
+    SELECT
+      table_schema AS namespace_id,
+      table_name,
+      table_type
+    FROM information_schema.tables
+    ORDER BY table_schema, table_name
+  `);
+
+  const infoSchemaColumnsResult = await executeSql(`
+    SELECT
+      table_schema AS namespace_id,
+      table_name,
+      column_name,
+      data_type,
+      is_nullable,
+      ordinal_position
+    FROM information_schema.columns
+    ORDER BY table_schema, table_name, ordinal_position
+  `);
+
+  const infoColumnsByTable = new Map<string, Record<string, unknown>[]>();
+
+  infoSchemaColumnsResult.forEach((row) => {
+    const namespaceName = String(row.namespace_id ?? "");
+    const tableName = String(row.table_name ?? "");
+    if (!namespaceName || !tableName || !row.column_name) {
+      return;
+    }
+
+    const tableKey = `${namespaceName}.${tableName}`;
+    const tableColumns = infoColumnsByTable.get(tableKey);
+    if (tableColumns) {
+      tableColumns.push(row);
+      return;
+    }
+    infoColumnsByTable.set(tableKey, [row]);
+  });
+
+  infoSchemaTablesResult.forEach((row) => {
+    const namespaceName = String(row.namespace_id ?? "");
+    const tableName = String(row.table_name ?? "");
+    if (!namespaceName || !tableName) {
+      return;
+    }
+
+    const table = ensureTable(
+      namespaces,
+      tableMap,
+      databaseName,
+      namespaceName,
+      tableName,
+      inferExplorerTableType(namespaceName, row.table_type),
+    );
+
+    const existingColumns = new Set(table.columns.map((column) => column.name));
+    const infoColumns = infoColumnsByTable.get(`${namespaceName}.${tableName}`) ?? [];
+    infoColumns.forEach((column) => {
+      const columnName = String(column.column_name ?? "");
+      if (!columnName || existingColumns.has(columnName)) {
+        return;
+      }
+
+      table.columns.push({
+        name: columnName,
+        dataType: String(column.data_type ?? "unknown"),
+        isNullable: normalizeNullable(column.is_nullable),
+        isPrimaryKey: false,
+        ordinal: Number(column.ordinal_position ?? table.columns.length + 1),
+      });
+      existingColumns.add(columnName);
+    });
+  });
+
+  const sortedNamespaces = Array.from(namespaces.values())
+    .map((namespace) => ({
+      ...namespace,
+      tables: namespace.tables
+        .map((table) => ({
+          ...table,
+          columns: [...table.columns].sort((left, right) => left.ordinal - right.ordinal),
+        }))
+        .sort((left, right) => left.name.localeCompare(right.name)),
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+
+  return sortedNamespaces;
 }
 
 export async function executeSqlStudioQuery(sql: string): Promise<QueryResultData> {

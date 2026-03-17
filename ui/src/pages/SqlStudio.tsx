@@ -10,7 +10,13 @@ import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { useAuth } from "@/lib/auth";
-import { subscribe, setClientLogListener, type Unsubscribe } from "@/lib/kalam-client";
+import {
+  subscribe,
+  setClientLogListener,
+  setClientReceiveListener,
+  setClientSendListener,
+  type Unsubscribe,
+} from "@/lib/kalam-client";
 import type { ServerMessage, ChangeTypeRaw, SchemaField } from "kalam-link";
 import type {
   QueryRunSummary,
@@ -96,6 +102,40 @@ function normalizeLiveRows(rows: unknown[]): Record<string, unknown>[] {
     }
     return { value: row };
   });
+}
+
+function parseWirePayload(message: string): unknown {
+  try {
+    return JSON.parse(message) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function createWireLogEntry(
+  direction: "send" | "receive",
+  rawMessage: string,
+  asUser?: string,
+) {
+  const parsed = parseWirePayload(rawMessage);
+  const parsedRecord =
+    parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined;
+  const messageType =
+    typeof parsedRecord?.type === "string"
+      ? parsedRecord.type
+      : "message";
+
+  return createLogEntry(
+    `WS ${direction.toUpperCase()} · ${messageType}`,
+    "info",
+    asUser,
+    {
+      raw: rawMessage,
+      parsed,
+    },
+  );
 }
 
 export default function SqlStudio() {
@@ -359,6 +399,8 @@ export default function SqlStudio() {
     }
     // Clear the SDK log listener when stopping
     setClientLogListener(undefined);
+    setClientReceiveListener(undefined);
+    setClientSendListener(undefined);
     updateTab(tabId, { liveStatus: "idle" });
   }, [updateTab]);
 
@@ -394,6 +436,18 @@ export default function SqlStudio() {
           user?.username,
           entry,
         ),
+      }));
+    });
+    setClientSendListener((message) => {
+      dispatch(appendWorkspaceResultLog({
+        tabId: tab.id,
+        entry: createWireLogEntry("send", message, user?.username),
+      }));
+    });
+    setClientReceiveListener((message) => {
+      dispatch(appendWorkspaceResultLog({
+        tabId: tab.id,
+        entry: createWireLogEntry("receive", message, user?.username),
       }));
     });
 

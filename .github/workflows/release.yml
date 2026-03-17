@@ -1381,12 +1381,20 @@ jobs:
           echo "✅ Multi-arch manifest created for ${REPO}:${VERSION}, ${REPO}:${VERSION_COMMIT_TAG}, and ${REPO}:latest"
 
       - name: Update Docker Hub repository README
+        id: dockerhub_readme
+        continue-on-error: true
         uses: peter-evans/dockerhub-description@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           repository: ${{ steps.vars.outputs.docker_repo }}
           readme-filepath: ./docker/REPO-README.md
+
+      - name: Warn if Docker Hub README update failed
+        if: steps.dockerhub_readme.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Docker image publish succeeded, but Docker Hub README update failed. Ensure DOCKERHUB_USERNAME is a repo admin and DOCKERHUB_TOKEN has read/write/delete scope."
 
   # ═══════════════════════════════════════════════════════════════════════════
   # INTEGRATION TESTS - Smoke + TypeScript SDK + Dart SDK against Docker image

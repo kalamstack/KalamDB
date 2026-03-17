@@ -10,6 +10,7 @@ export interface CellContextMenuState {
   value: unknown;
   rowStatus: "deleted" | "edited" | null;
   cellEdited: boolean;
+  canMutate: boolean;
 }
 
 interface CellContextMenuProps {
@@ -62,6 +63,7 @@ export function CellContextMenu({
 
   const isDeleted = context.rowStatus === "deleted";
   const isEdited = context.rowStatus === "edited";
+  const canMutate = context.canMutate;
   const hasViewableData =
     context.value !== null &&
     (typeof context.value === "object" ||
@@ -83,7 +85,7 @@ export function CellContextMenu({
         </div>
         <div className="-mx-1 my-1 h-px bg-muted" />
 
-        {!isDeleted && (
+        {canMutate && !isDeleted && (
           <button
             className={itemClassName}
             onClick={() => {
@@ -96,7 +98,7 @@ export function CellContextMenu({
           </button>
         )}
 
-        {!isDeleted && (
+        {canMutate && !isDeleted && (
           <button
             className={cn(itemClassName, "text-destructive hover:bg-destructive/10 hover:text-destructive")}
             onClick={() => {
@@ -109,7 +111,7 @@ export function CellContextMenu({
           </button>
         )}
 
-        {isDeleted && (
+        {canMutate && isDeleted && (
           <button
             className={itemClassName}
             onClick={() => {
@@ -122,7 +124,7 @@ export function CellContextMenu({
           </button>
         )}
 
-        {isEdited && !isDeleted && (
+        {canMutate && isEdited && !isDeleted && (
           <button
             className={itemClassName}
             onClick={() => {

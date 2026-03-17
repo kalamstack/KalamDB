@@ -1,5 +1,5 @@
-use super::types::ServerConfig;
 use super::trusted_proxies::parse_trusted_proxy_entries;
+use super::types::ServerConfig;
 use crate::file_helpers::normalize_dir_path;
 use std::fs;
 use std::path::Path;
@@ -108,10 +108,7 @@ impl ServerConfig {
         }
 
         parse_trusted_proxy_entries(&self.security.trusted_proxy_ranges).map_err(|error| {
-            anyhow::anyhow!(
-                "Invalid security.trusted_proxy_ranges configuration: {}",
-                error
-            )
+            anyhow::anyhow!("Invalid security.trusted_proxy_ranges configuration: {}", error)
         })?;
 
         Ok(())

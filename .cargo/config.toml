@@ -40,7 +40,6 @@ rustflags = []
 
 [build]
 incremental = true
-rustc-wrapper = "sccache"
 # Parallel compilation will use default (all available cores)
 
 # Use sparse registry protocol for faster dependency resolution

@@ -43,16 +43,16 @@ static TRUSTED_PROXY_RANGES: Lazy<RwLock<Vec<IpNet>>> = Lazy::new(|| RwLock::new
 /// ```
 pub fn init_trusted_proxy_ranges(entries: &[String]) -> anyhow::Result<()> {
     let parsed = kalamdb_configs::parse_trusted_proxy_entries(entries)?;
-    *TRUSTED_PROXY_RANGES
-        .write()
-        .expect("trusted proxy ranges lock poisoned") = parsed;
+    *TRUSTED_PROXY_RANGES.write().expect("trusted proxy ranges lock poisoned") = parsed;
     Ok(())
 }
 
-pub fn extract_client_ip_addr_secure(peer_addr: Option<IpAddr>, headers: &HeaderMap) -> Option<IpAddr> {
-    let trusted_proxy_ranges = TRUSTED_PROXY_RANGES
-        .read()
-        .expect("trusted proxy ranges lock poisoned");
+pub fn extract_client_ip_addr_secure(
+    peer_addr: Option<IpAddr>,
+    headers: &HeaderMap,
+) -> Option<IpAddr> {
+    let trusted_proxy_ranges =
+        TRUSTED_PROXY_RANGES.read().expect("trusted proxy ranges lock poisoned");
     extract_client_ip_addr_with_trusted_ranges(peer_addr, headers, &trusted_proxy_ranges)
 }
 
@@ -68,7 +68,9 @@ fn extract_client_ip_addr_with_trusted_ranges(
     trusted_proxy_ranges: &[IpNet],
 ) -> Option<IpAddr> {
     if peer_addr.is_some_and(|ip| is_trusted_proxy_peer(ip, trusted_proxy_ranges)) {
-        if let Some(ip) = extract_proxy_header_ip(headers.get("X-Forwarded-For"), true, "X-Forwarded-For") {
+        if let Some(ip) =
+            extract_proxy_header_ip(headers.get("X-Forwarded-For"), true, "X-Forwarded-For")
+        {
             return Some(ip);
         }
 
@@ -76,10 +78,7 @@ fn extract_client_ip_addr_with_trusted_ranges(
             return Some(ip);
         }
     } else if headers.contains_key("X-Forwarded-For") || headers.contains_key("X-Real-IP") {
-        warn!(
-            "Security: Ignoring proxy headers from untrusted peer {:?}",
-            peer_addr
-        );
+        warn!("Security: Ignoring proxy headers from untrusted peer {:?}", peer_addr);
     }
 
     peer_addr
@@ -215,10 +214,8 @@ mod tests {
             HeaderName::from_static("x-forwarded-for"),
             HeaderValue::from_static("203.0.113.8"),
         );
-        let trusted_ranges = kalamdb_configs::parse_trusted_proxy_entries(&[
-            "10.0.0.0/8".to_string(),
-        ])
-        .unwrap();
+        let trusted_ranges =
+            kalamdb_configs::parse_trusted_proxy_entries(&["10.0.0.0/8".to_string()]).unwrap();
 
         let ip = extract_client_ip_addr_with_trusted_ranges(
             Some("10.0.1.9".parse().unwrap()),
@@ -253,10 +250,8 @@ mod tests {
             HeaderName::from_static("x-forwarded-for"),
             HeaderValue::from_static("127.0.0.1"),
         );
-        let trusted_ranges = kalamdb_configs::parse_trusted_proxy_entries(&[
-            "10.0.0.0/8".to_string(),
-        ])
-        .unwrap();
+        let trusted_ranges =
+            kalamdb_configs::parse_trusted_proxy_entries(&["10.0.0.0/8".to_string()]).unwrap();
 
         let ip = extract_client_ip_addr_with_trusted_ranges(
             Some("10.0.1.9".parse().unwrap()),

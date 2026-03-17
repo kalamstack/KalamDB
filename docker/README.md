@@ -182,7 +182,7 @@ Important environment variables used by the compose files:
 - `KALAMDB_JWT_SECRET`: required for safe non-localhost deployments
 - `KALAMDB_ROOT_PASSWORD`: optional root password for immediate login
 - `KALAMDB_PORT`: host port override for the single-node compose setup
-- `RUST_LOG`: server log level
+- `KALAMDB_LOG_LEVEL`: server log level
 
 ## Persistence
 
