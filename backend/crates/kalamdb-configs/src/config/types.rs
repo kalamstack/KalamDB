@@ -523,6 +523,11 @@ pub struct FlushSettings {
     /// Lower values reduce memory usage but may increase flush duration
     #[serde(default = "default_flush_batch_size")]
     pub flush_batch_size: usize,
+
+    /// How often (in seconds) the background scheduler checks for tables with
+    /// pending writes and creates flush jobs (default: 60s). Set to 0 to disable.
+    #[serde(default = "default_flush_check_interval")]
+    pub check_interval_seconds: u64,
 }
 
 /// Manifest cache settings (Phase 4 - US6)
@@ -919,6 +924,7 @@ impl Default for FlushSettings {
             default_row_limit: default_flush_row_limit(),
             default_time_interval: default_flush_time_interval(),
             flush_batch_size: default_flush_batch_size(),
+            check_interval_seconds: default_flush_check_interval(),
         }
     }
 }

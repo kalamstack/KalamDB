@@ -50,4 +50,33 @@ pub trait KalamTableProvider: TableProvider + Send + Sync {
         let _count = self.insert_rows(user_id, rows).await?;
         Ok(Vec::new())
     }
+
+    /// Update a single row addressed by primary key.
+    ///
+    /// Returns `Ok(true)` if a row was updated, `Ok(false)` if no matching row exists.
+    async fn update_row_by_pk(
+        &self,
+        user_id: &UserId,
+        pk_value: &str,
+        updates: Row,
+    ) -> Result<bool, KalamDbError> {
+        let _ = (user_id, pk_value, updates);
+        Err(KalamDbError::InvalidOperation(
+            "UPDATE not supported for this table type".into(),
+        ))
+    }
+
+    /// Delete a single row addressed by primary key.
+    ///
+    /// Returns `Ok(true)` if a row was deleted, `Ok(false)` if no matching row exists.
+    async fn delete_row_by_pk(
+        &self,
+        user_id: &UserId,
+        pk_value: &str,
+    ) -> Result<bool, KalamDbError> {
+        let _ = (user_id, pk_value);
+        Err(KalamDbError::InvalidOperation(
+            "DELETE not supported for this table type".into(),
+        ))
+    }
 }

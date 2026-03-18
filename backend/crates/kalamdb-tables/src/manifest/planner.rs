@@ -8,6 +8,7 @@ use crate::error_extensions::KalamDbResultExt;
 use datafusion::arrow::compute::cast;
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
+use futures_util::future::try_join_all;
 use kalamdb_commons::ids::SeqId;
 use kalamdb_commons::models::UserId;
 use kalamdb_commons::schemas::TableType;
@@ -160,19 +161,34 @@ impl ManifestAccessPlanner {
         }
 
         let mut all_batches = Vec::new();
-        for parquet_file in &parquet_files {
-            let batches = storage_cached
-                .read_parquet_files(table_type, table_id, user_id, &[parquet_file.clone()])
-                .await
-                .into_kalamdb_error("Failed to read Parquet file")?;
+
+        // Read all parquet files concurrently instead of sequentially.
+        // Each file is independent so we can issue all reads in parallel.
+        let read_futures: Vec<_> = parquet_files
+            .iter()
+            .map(|parquet_file| {
+                let sc = storage_cached.clone();
+                let file = parquet_file.clone();
+                async move {
+                    sc.read_parquet_files(table_type, table_id, user_id, &[file])
+                        .await
+                        .into_kalamdb_error("Failed to read Parquet file")
+                }
+            })
+            .collect();
+
+        let results = try_join_all(read_futures).await?;
+
+        // Look up current schema version once for all files
+        let current_version = schema_registry
+            .get_table_if_exists(table_id)?
+            .map(|table_def| table_def.schema_version)
+            .unwrap_or(1);
+
+        for (parquet_file, batches) in parquet_files.iter().zip(results) {
             let file_schema_version = file_schema_versions.get(parquet_file).copied().unwrap_or(1);
 
             for batch in batches {
-                let current_version = schema_registry
-                    .get_table_if_exists(table_id)?
-                    .map(|table_def| table_def.schema_version)
-                    .unwrap_or(1);
-
                 let projected_batch = if file_schema_version != current_version {
                     self.project_batch_to_current_schema(
                         batch,

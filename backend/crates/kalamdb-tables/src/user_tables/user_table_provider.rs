@@ -45,6 +45,7 @@ use kalamdb_vector::{
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
+use tracing::Instrument;
 
 // Arrow <-> JSON helpers
 use crate::utils::version_resolution::{merge_versioned_rows, parquet_batch_to_rows};
@@ -592,13 +593,19 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         user_id: &UserId,
         row_data: Row,
     ) -> Result<UserTableRowId, KalamDbError> {
-        tracing::info!(table_id = %self.core.table_id(), "table.insert");
-        ensure_manifest_ready(
-            &self.core,
-            self.core.table_type(),
-            Some(user_id),
-            "UserTableProvider",
-        )?;
+        let span = tracing::debug_span!(
+            "table.insert",
+            table_id = %self.core.table_id(),
+            user_id = %user_id.as_str(),
+            column_count = row_data.values.len()
+        );
+        async move {
+            ensure_manifest_ready(
+                &self.core,
+                self.core.table_type(),
+                Some(user_id),
+                "UserTableProvider",
+            )?;
 
         // Validate PRIMARY KEY uniqueness if user provided PK value
         base::ensure_unique_pk_value(self, Some(user_id), &row_data).await?;
@@ -679,7 +686,10 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
             }
         }
 
-        Ok(row_key)
+            Ok(row_key)
+        }
+        .instrument(span)
+        .await
     }
 
     /// Optimized batch insert using single RocksDB WriteBatch
@@ -701,10 +711,16 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         rows: Vec<Row>,
     ) -> Result<Vec<UserTableRowId>, KalamDbError> {
         let row_count = rows.len();
-        tracing::debug!(table_id = %self.core.table_id(), row_count, "table.insert_batch start");
-        if rows.is_empty() {
-            return Ok(Vec::new());
-        }
+        let span = tracing::debug_span!(
+            "table.insert_batch",
+            table_id = %self.core.table_id(),
+            user_id = %user_id.as_str(),
+            row_count
+        );
+        async move {
+            if rows.is_empty() {
+                return Ok(Vec::new());
+            }
 
         // Ensure manifest is ready
         ensure_manifest_ready(
@@ -716,7 +732,7 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
 
         // Coerce rows to match schema types (e.g. String -> Timestamp)
         let coerced_rows = {
-            let _coerce_span = tracing::info_span!("insert_batch.coerce_rows").entered();
+            let _coerce_span = tracing::debug_span!("insert_batch.coerce_rows").entered();
             coerce_rows(rows, &self.schema_ref()).map_err(|e| {
                 KalamDbError::InvalidOperation(format!("Schema coercion failed: {}", e))
             })?
@@ -816,7 +832,7 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         // This reuses the inner FlatBufferBuilder across rows (reset() retains capacity),
         // saving N-1 builder allocations and eliminating per-row .to_vec() copies.
         let encoded_values = {
-            let _encode_span = tracing::info_span!("insert_batch.encode", row_count).entered();
+            let _encode_span = tracing::debug_span!("insert_batch.encode", row_count).entered();
             kalamdb_commons::serialization::row_codec::batch_encode_user_table_rows(&user_rows)
                 .map_err(|e| {
                     KalamDbError::InvalidOperation(format!(
@@ -909,7 +925,10 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
             }
         }
 
-        Ok(row_keys)
+            Ok(row_keys)
+        }
+        .instrument(span)
+        .await
     }
 
     async fn update(
@@ -960,7 +979,15 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         pk_value: &str,
         updates: Row,
     ) -> Result<UserTableRowId, KalamDbError> {
-        let pk_name = self.primary_key_field_name().to_string();
+        let span = tracing::debug_span!(
+            "table.update",
+            table_id = %self.core.table_id(),
+            user_id = %user_id.as_str(),
+            pk = pk_value,
+            update_columns = updates.values.len()
+        );
+        async move {
+            let pk_name = self.primary_key_field_name().to_string();
 
         // Get PK column data type from schema for proper type coercion
         let schema = self.schema();
@@ -1030,12 +1057,6 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         };
         let row_key = UserTableRowId::new(user_id.clone(), seq_id);
         // Insert new version (MVCC - all writes are inserts with new SeqId)
-        log::trace!(
-            "[UserProvider UPDATE] Inserting new version: user={}, pk={}, _seq={}",
-            user_id.as_str(),
-            pk_value,
-            seq_id.as_i64()
-        );
         self.store.insert_async(row_key.clone(), entity.clone()).await.map_err(|e| {
             KalamDbError::InvalidOperation(format!("Failed to update user table row: {}", e))
         })?;
@@ -1090,7 +1111,10 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
                 );
             }
         }
-        Ok(row_key)
+            Ok(row_key)
+        }
+        .instrument(span)
+        .await
     }
 
     async fn delete(&self, user_id: &UserId, key: &UserTableRowId) -> Result<(), KalamDbError> {
@@ -1132,7 +1156,14 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         user_id: &UserId,
         pk_value: &str,
     ) -> Result<bool, KalamDbError> {
-        let pk_name = self.primary_key_field_name().to_string();
+        let span = tracing::debug_span!(
+            "table.delete",
+            table_id = %self.core.table_id(),
+            user_id = %user_id.as_str(),
+            pk = pk_value
+        );
+        async move {
+            let pk_name = self.primary_key_field_name().to_string();
         let schema = self.schema();
         let pk_field = schema.field_with_name(&pk_name).map_err(|e| {
             KalamDbError::InvalidOperation(format!(
@@ -1183,7 +1214,7 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
             fields: Row::new(values),
         };
         let row_key = UserTableRowId::new(user_id.clone(), seq_id);
-        log::info!(
+        log::debug!(
             "[UserProvider DELETE_BY_PK] Writing tombstone: user={}, pk={}, _seq={}",
             user_id.as_str(),
             pk_value,
@@ -1243,7 +1274,10 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
                 );
             }
         }
-        Ok(true)
+            Ok(true)
+        }
+        .instrument(span)
+        .await
     }
 
     async fn scan_rows(
@@ -1420,17 +1454,20 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         //  Need to scan more than requested limit because we'll filter by user_id
         let scan_limit = base::calculate_scan_limit(limit) * 10; // Buffer for filtering
 
-        // Using async version to avoid blocking the runtime
-        let hot_rows = self
+        // Run hot storage (RocksDB) and cold storage (Parquet) scans concurrently
+        let hot_future = self
             .store
-            .scan_with_raw_prefix_async(&user_prefix, start_key_bytes.as_deref(), scan_limit)
-            .await
-            .map_err(|e| {
-                KalamDbError::InvalidOperation(format!(
-                    "Failed to scan user table hot storage: {}",
-                    e
-                ))
-            })?;
+            .scan_with_raw_prefix_async(&user_prefix, start_key_bytes.as_deref(), scan_limit);
+        let cold_future = self.scan_parquet_files_as_batch_async(user_id, filter);
+
+        let (hot_result, cold_result) = tokio::join!(hot_future, cold_future);
+
+        let hot_rows = hot_result.map_err(|e| {
+            KalamDbError::InvalidOperation(format!(
+                "Failed to scan user table hot storage: {}",
+                e
+            ))
+        })?;
 
         log::trace!(
             "[UserProvider] Hot scan: {} rows for user={} (table={})",
@@ -1439,9 +1476,8 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
             table_id
         );
 
-        // 2) Scan cold storage (Parquet files) - pass filter for pruning
-        // Use async version to avoid blocking the runtime
-        let parquet_batch = self.scan_parquet_files_as_batch_async(user_id, filter).await?;
+        // 2) Scan cold storage (Parquet files)
+        let parquet_batch = cold_result?;
 
         let cold_rows: Vec<(UserTableRowId, UserTableRow)> = parquet_batch_to_rows(&parquet_batch)?
             .into_iter()
@@ -1696,5 +1732,26 @@ impl crate::utils::dml_provider::KalamTableProvider for UserTableProvider {
     ) -> Result<Vec<ScalarValue>, KalamDbError> {
         let keys = self.insert_batch(user_id, rows).await?;
         Ok(keys.into_iter().map(|k| ScalarValue::Int64(Some(k.seq.as_i64()))).collect())
+    }
+
+    async fn update_row_by_pk(
+        &self,
+        user_id: &UserId,
+        pk_value: &str,
+        updates: Row,
+    ) -> Result<bool, KalamDbError> {
+        match self.update_by_pk_value(user_id, pk_value, updates).await {
+            Ok(_) => Ok(true),
+            Err(KalamDbError::NotFound(_)) => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn delete_row_by_pk(
+        &self,
+        user_id: &UserId,
+        pk_value: &str,
+    ) -> Result<bool, KalamDbError> {
+        self.delete_by_pk_value(user_id, pk_value).await
     }
 }

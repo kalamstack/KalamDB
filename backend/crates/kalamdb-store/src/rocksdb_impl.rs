@@ -171,7 +171,7 @@ impl StorageBackend for RocksDBBackend {
         start_key: Option<&[u8]>,
         limit: Option<usize>,
     ) -> Result<Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + Send + '_>> {
-        let _span = tracing::debug_span!("rocksdb.scan", partition = %partition.name(), has_prefix = prefix.is_some(), limit = ?limit).entered();
+        let _span = tracing::trace_span!("rocksdb.scan", partition = %partition.name(), has_prefix = prefix.is_some(), limit = ?limit).entered();
         use rocksdb::Direction;
 
         let cf = self.get_cf(partition)?;
@@ -252,7 +252,7 @@ impl StorageBackend for RocksDBBackend {
         start_key: Option<&[u8]>,
         limit: Option<usize>,
     ) -> Result<Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + Send + '_>> {
-        let _span = tracing::debug_span!(
+        let _span = tracing::trace_span!(
             "rocksdb.scan_reverse",
             partition = %partition.name(),
             has_prefix = prefix.is_some(),

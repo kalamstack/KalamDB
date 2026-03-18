@@ -40,7 +40,7 @@
 use crate::app_context::AppContext;
 use crate::error::KalamDbError;
 use kalamdb_system::JobType;
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -175,6 +175,11 @@ impl<T: JobParams> JobContext<T> {
     /// Log debug message with [JobId] prefix
     pub fn log_debug(&self, message: &str) {
         debug!("[{}] {}", self.job_id, message);
+    }
+
+    /// Log trace message with [JobId] prefix
+    pub fn log_trace(&self, message: &str) {
+        trace!("[{}] {}", self.job_id, message);
     }
 
     /// Log info message with [JobId] prefix

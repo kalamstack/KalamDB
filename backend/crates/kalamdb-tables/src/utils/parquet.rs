@@ -38,7 +38,7 @@ pub(crate) async fn scan_parquet_files_as_batch_async(
     })?;
 
     let manifest_service = core.services.manifest_service.clone();
-    log::debug!(
+    log::trace!(
         "[PARQUET_SCAN_ASYNC] About to get_or_load manifest: table={} {}",
         table_id,
         scope_label
@@ -50,7 +50,7 @@ pub(crate) async fn scan_parquet_files_as_batch_async(
     match &cache_result {
         Ok(Some(entry)) => {
             let manifest = entry.manifest.clone();
-            log::debug!(
+            log::trace!(
                 "[PARQUET_SCAN_ASYNC] Got manifest: table={} {} segments={} sync_state={:?}",
                 table_id,
                 scope_label,
@@ -108,7 +108,7 @@ pub(crate) async fn scan_parquet_files_as_batch_async(
             }
         },
         Ok(None) => {
-            log::debug!(
+            log::trace!(
                 "[PARQUET_SCAN_ASYNC] Manifest cache MISS | table={} | {} | fallback=directory_scan",
                 table_id,
                 scope_label
@@ -149,7 +149,7 @@ pub(crate) async fn scan_parquet_files_as_batch_async(
         )
         .await?;
 
-    log::debug!(
+    log::trace!(
         "[PARQUET_SCAN_ASYNC] Scan complete: table={} {} total_batches={} skipped={} scanned={} rows={} use_degraded_mode={}",
         table_id,
         scope_label,
@@ -161,7 +161,7 @@ pub(crate) async fn scan_parquet_files_as_batch_async(
     );
 
     if total_batches > 0 {
-        log::debug!(
+        log::trace!(
             "[Manifest Pruning] table={} {} batches_total={} skipped={} scanned={} rows={}",
             table_id,
             scope_label,

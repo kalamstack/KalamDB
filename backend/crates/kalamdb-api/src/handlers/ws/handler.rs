@@ -128,6 +128,13 @@ pub async fn websocket_handler(
 
     // Extract client IP with security checks against spoofing
     let client_ip = kalamdb_auth::extract_client_ip_secure(&req);
+    let _connect_span = tracing::debug_span!(
+        "ws.connect",
+        connection_id = %connection_id,
+        client_ip = ?client_ip,
+        compression_enabled
+    )
+    .entered();
 
     debug!("New WebSocket connection: {} (auth required within 3s)", connection_id);
 

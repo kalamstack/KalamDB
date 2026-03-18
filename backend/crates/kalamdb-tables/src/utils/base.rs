@@ -778,35 +778,14 @@ pub async fn pk_exists_in_cold(
     let files_to_scan: Vec<String> = if let Some(ref m) = manifest {
         let pruned_paths = planner.plan_by_pk_value(m, pk_column_id, pk_value);
         if pruned_paths.is_empty() {
-            let list_result = match storage_cached.list(table_type, table_id, user_id).await {
-                Ok(result) => result,
-                Err(_) => {
-                    log::trace!(
-                        "[pk_exists_in_cold] No storage dir for {}.{} {} - PK not in cold",
-                        namespace.as_str(),
-                        table.as_str(),
-                        scope_label
-                    );
-                    return Ok(false);
-                },
-            };
-            if list_result.is_empty() {
-                log::trace!(
-                    "[pk_exists_in_cold] No files in storage for {}.{} {} - PK not in cold",
-                    namespace.as_str(),
-                    table.as_str(),
-                    scope_label
-                );
-                return Ok(false);
-            }
             log::trace!(
-                "[pk_exists_in_cold] Manifest pruning returned no candidate segments for PK {} on {}.{} {} - falling back to full parquet scan",
+                "[pk_exists_in_cold] Manifest pruning returned no candidate segments for PK {} on {}.{} {} - PK not in cold",
                 pk_value,
                 namespace.as_str(),
                 table.as_str(),
                 scope_label
             );
-            collect_parquet_files_from_list(&list_result)
+            return Ok(false);
         } else {
             log::trace!(
                 "[pk_exists_in_cold] Manifest pruning: {} of {} segments may contain PK {} for {}.{} {}",
@@ -1003,34 +982,13 @@ pub async fn pk_exists_batch_in_cold(
             relevant_files.extend(pruned_paths);
         }
         if relevant_files.is_empty() {
-            let list_result = match storage_cached.list(table_type, table_id, user_id).await {
-                Ok(result) => result,
-                Err(_) => {
-                    log::trace!(
-                        "[pk_exists_batch_in_cold] No storage dir for {}.{} {} - PK not in cold",
-                        namespace.as_str(),
-                        table.as_str(),
-                        scope_label
-                    );
-                    return Ok(None);
-                },
-            };
-            if list_result.is_empty() {
-                log::trace!(
-                    "[pk_exists_batch_in_cold] No files in storage for {}.{} {} - PK not in cold",
-                    namespace.as_str(),
-                    table.as_str(),
-                    scope_label
-                );
-                return Ok(None);
-            }
             log::trace!(
-                "[pk_exists_batch_in_cold] Manifest pruning returned no candidate segments for {}.{} {} - falling back to full parquet scan",
+                "[pk_exists_batch_in_cold] Manifest pruning returned no candidate segments for {}.{} {} - PKs not in cold",
                 namespace.as_str(),
                 table.as_str(),
                 scope_label
             );
-            collect_parquet_files_from_list(&list_result)
+            return Ok(None);
         } else {
             log::trace!(
                 "[pk_exists_batch_in_cold] Manifest pruning: {} of {} segments may contain {} PKs for {}.{} {}",

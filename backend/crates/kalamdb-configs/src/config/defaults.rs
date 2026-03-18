@@ -147,6 +147,10 @@ pub fn default_flush_batch_size() -> usize {
     10000 // 10k rows per batch to avoid loading all into memory
 }
 
+pub fn default_flush_check_interval() -> u64 {
+    60 // Check for pending writes every 60 seconds
+}
+
 // Manifest cache defaults (Phase 4 - US6)
 pub fn default_manifest_cache_eviction_interval() -> i64 {
     300 // 5 minutes

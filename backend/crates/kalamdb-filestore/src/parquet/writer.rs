@@ -26,12 +26,10 @@ pub(crate) fn serialize_to_parquet(
     batches: Vec<RecordBatch>,
     bloom_filter_columns: Option<Vec<String>>,
 ) -> Result<Bytes> {
-    let batch_count = batches.len();
     let row_count: u64 = batches.iter().map(|batch| batch.num_rows() as u64).sum();
     let bloom_filter_count = bloom_filter_columns.as_ref().map_or(0, Vec::len);
-    let span = tracing::info_span!(
+    let span = tracing::debug_span!(
         "parquet.serialize",
-        batch_count = batch_count,
         row_count = row_count,
         bloom_filter_count = bloom_filter_count
     );

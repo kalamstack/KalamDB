@@ -345,6 +345,12 @@ impl VirtualView for SettingsView {
                         "Default time interval for flush (seconds)",
                         "flush"
                     ),
+                    (
+                        "flush.check_interval_seconds",
+                        config.flush.check_interval_seconds,
+                        "How often the background scheduler checks for pending flushes (seconds, 0 = disabled)",
+                        "flush"
+                    ),
                 ]
             );
 

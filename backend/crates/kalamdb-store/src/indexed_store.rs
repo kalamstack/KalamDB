@@ -459,7 +459,7 @@ where
     /// store.insert_batch(&entries)?;  // Single atomic write for all
     /// ```
     pub fn insert_batch(&self, entries: &[(K, V)]) -> Result<()> {
-        let _span = tracing::info_span!("store.insert_batch", count = entries.len()).entered();
+        let _span = tracing::debug_span!("store.insert_batch", count = entries.len()).entered();
         if entries.is_empty() {
             return Ok(());
         }
@@ -517,7 +517,7 @@ where
         encoded_values: Vec<Vec<u8>>,
     ) -> Result<()> {
         let _span =
-            tracing::info_span!("store.insert_batch_preencoded", count = entries.len()).entered();
+            tracing::debug_span!("store.insert_batch_preencoded", count = entries.len()).entered();
         if entries.is_empty() {
             return Ok(());
         }

@@ -105,6 +105,10 @@ default_row_limit = 10000
 # Tables will flush to Parquet after this duration
 default_time_interval = 300
 
+# How often the background scheduler checks for tables with pending writes
+# and creates flush jobs (default: 60 seconds). Set to 0 to disable.
+check_interval_seconds = 60
+
 [retention]
 # Default retention hours for soft-deleted rows (default: 168 hours = 7 days)
 # Rows with _deleted=true will be kept in Parquet files for this duration

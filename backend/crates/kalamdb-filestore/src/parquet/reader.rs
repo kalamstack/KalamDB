@@ -42,11 +42,9 @@ pub async fn read_parquet_batches(
     user_id: Option<&UserId>,
     parquet_filename: &str,
 ) -> Result<Vec<RecordBatch>> {
-    let span = tracing::info_span!(
+    let span = tracing::debug_span!(
         "parquet.read",
-        table_type = ?table_type,
         table_id = %table_id,
-        has_user_id = user_id.is_some(),
         filename = parquet_filename
     );
     async move {
@@ -133,7 +131,7 @@ pub fn read_parquet_schema_sync(
 /// let batches = parse_parquet_from_bytes(result.data)?;
 /// ```
 pub fn parse_parquet_from_bytes(bytes: bytes::Bytes) -> Result<Vec<RecordBatch>> {
-    let span = tracing::debug_span!("parquet.decode_bytes", bytes = bytes.len());
+    let span = tracing::trace_span!("parquet.decode_bytes", bytes = bytes.len());
     let _span_guard = span.entered();
     let batches = build_and_collect(
         ParquetRecordBatchReaderBuilder::try_new(bytes)

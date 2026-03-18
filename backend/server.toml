@@ -103,6 +103,10 @@ default_time_interval = 300
 # Set to 0 to load all rows at once (not recommended for large tables)
 flush_batch_size = 10000
 
+# How often the background scheduler checks for tables with pending writes
+# and creates flush jobs (default: 60 seconds). Set to 0 to disable.
+check_interval_seconds = 60
+
 [retention]
 # Default retention hours for soft-deleted rows (default: 168 hours = 7 days)
 # Rows with _deleted=true will be kept in Parquet files for this duration
@@ -176,7 +180,7 @@ slow_query_threshold_ms = 1000
 
 [logging.otlp]
 # Export tracing spans to Jaeger OTLP receiver
-enabled = false
+enabled = true
 # Jaeger gRPC OTLP endpoint
 endpoint = "http://127.0.0.1:4317"
 # Protocol: "grpc" or "http"

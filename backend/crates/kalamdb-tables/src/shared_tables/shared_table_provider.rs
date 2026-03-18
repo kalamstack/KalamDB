@@ -46,6 +46,7 @@ use kalamdb_vector::{
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
+use tracing::Instrument;
 
 // Arrow <-> JSON helpers
 use crate::utils::version_resolution::{merge_versioned_rows, parquet_batch_to_rows};
@@ -727,7 +728,14 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
         _user_id: &UserId,
         row_data: Row,
     ) -> Result<SharedTableRowId, KalamDbError> {
-        ensure_manifest_ready(&self.core, self.core.table_type(), None, "SharedTableProvider")?;
+        let span = tracing::debug_span!(
+            "table.insert",
+            table_id = %self.core.table_id(),
+            scope = "shared",
+            column_count = row_data.values.len()
+        );
+        async move {
+            ensure_manifest_ready(&self.core, self.core.table_type(), None, "SharedTableProvider")?;
 
         // IGNORE user_id parameter - no RLS for shared tables
         base::ensure_unique_pk_value(self, None, &row_data).await?;
@@ -798,7 +806,10 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
             }
         }
 
-        Ok(row_key)
+            Ok(row_key)
+        }
+        .instrument(span)
+        .await
     }
 
     /// Optimized batch insert using single RocksDB WriteBatch
@@ -819,9 +830,17 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
         _user_id: &UserId,
         rows: Vec<Row>,
     ) -> Result<Vec<SharedTableRowId>, KalamDbError> {
-        if rows.is_empty() {
-            return Ok(Vec::new());
-        }
+        let row_count = rows.len();
+        let span = tracing::debug_span!(
+            "table.insert_batch",
+            table_id = %self.core.table_id(),
+            scope = "shared",
+            row_count
+        );
+        async move {
+            if rows.is_empty() {
+                return Ok(Vec::new());
+            }
 
         // Ensure manifest is ready
         ensure_manifest_ready(&self.core, self.core.table_type(), None, "SharedTableProvider")?;
@@ -1004,7 +1023,10 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
             }
         }
 
-        Ok(row_keys)
+            Ok(row_keys)
+        }
+        .instrument(span)
+        .await
     }
 
     async fn update(
@@ -1056,8 +1078,16 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
         pk_value: &str,
         updates: Row,
     ) -> Result<SharedTableRowId, KalamDbError> {
-        // IGNORE user_id parameter - no RLS for shared tables
-        let pk_name = self.primary_key_field_name().to_string();
+        let span = tracing::debug_span!(
+            "table.update",
+            table_id = %self.core.table_id(),
+            scope = "shared",
+            pk = pk_value,
+            update_columns = updates.values.len()
+        );
+        async move {
+            // IGNORE user_id parameter - no RLS for shared tables
+            let pk_name = self.primary_key_field_name().to_string();
 
         // Get PK column data type from schema for proper type coercion
         let schema = self.schema();
@@ -1166,7 +1196,10 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
             }
         }
 
-        Ok(row_key)
+            Ok(row_key)
+        }
+        .instrument(span)
+        .await
     }
 
     async fn delete(&self, _user_id: &UserId, key: &SharedTableRowId) -> Result<(), KalamDbError> {
@@ -1209,8 +1242,15 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
         _user_id: &UserId,
         pk_value: &str,
     ) -> Result<bool, KalamDbError> {
-        // IGNORE user_id parameter - no RLS for shared tables
-        let pk_name = self.primary_key_field_name().to_string();
+        let span = tracing::debug_span!(
+            "table.delete",
+            table_id = %self.core.table_id(),
+            scope = "shared",
+            pk = pk_value
+        );
+        async move {
+            // IGNORE user_id parameter - no RLS for shared tables
+            let pk_name = self.primary_key_field_name().to_string();
         let schema = self.schema();
         let pk_field = schema.field_with_name(&pk_name).map_err(|e| {
             KalamDbError::InvalidOperation(format!(
@@ -1258,7 +1298,7 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
             fields: Row::new(values),
         };
         let row_key = seq_id;
-        log::info!(
+        log::debug!(
             "[SharedProvider DELETE_BY_PK] Writing tombstone: pk={}, _seq={}",
             pk_value,
             seq_id.as_i64()
@@ -1312,7 +1352,10 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
             }
         }
 
-        Ok(true)
+            Ok(true)
+        }
+        .instrument(span)
+        .await
     }
 
     async fn scan_rows(
@@ -1455,22 +1498,23 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
         // Calculate scan limit using common helper
         let scan_limit = base::calculate_scan_limit(limit);
 
-        // Use async version to avoid blocking the runtime
-        let hot_rows = self
+        // Run hot storage (RocksDB) and cold storage (Parquet) scans concurrently
+        let hot_future = self
             .store
-            .scan_typed_with_prefix_and_start_async(None, start_key.as_ref(), scan_limit)
-            .await
-            .map_err(|e| {
-                KalamDbError::InvalidOperation(format!(
-                    "Failed to scan shared table hot storage: {}",
-                    e
-                ))
-            })?;
-        log::debug!("[SharedProvider] RocksDB scan returned {} rows", hot_rows.len());
+            .scan_typed_with_prefix_and_start_async(None, start_key.as_ref(), scan_limit);
+        let cold_future = self.scan_parquet_files_as_batch_async(filter);
 
-        // Scan cold storage (Parquet files) - pass filter for pruning
-        // Use async version to avoid blocking the runtime
-        let parquet_batch = self.scan_parquet_files_as_batch_async(filter).await?;
+        let (hot_result, cold_result) = tokio::join!(hot_future, cold_future);
+
+        let hot_rows = hot_result.map_err(|e| {
+            KalamDbError::InvalidOperation(format!(
+                "Failed to scan shared table hot storage: {}",
+                e
+            ))
+        })?;
+        log::trace!("[SharedProvider] RocksDB scan returned {} rows", hot_rows.len());
+
+        let parquet_batch = cold_result?;
 
         let pk_name = self.primary_key_field_name().to_string();
 
@@ -1495,7 +1539,7 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
         // Apply limit after resolution using common helper
         base::apply_limit(&mut result, limit);
 
-        log::debug!(
+        log::trace!(
             "[SharedProvider] Version-resolved rows (post-tombstone filter): {}",
             result.len()
         );
@@ -1738,6 +1782,43 @@ impl crate::utils::dml_provider::KalamTableProvider for SharedTableProvider {
         }
         let keys = self.insert_batch(user_id, rows).await?;
         Ok(keys.len())
+    }
+
+    async fn update_row_by_pk(
+        &self,
+        _user_id: &UserId,
+        pk_value: &str,
+        updates: Row,
+    ) -> Result<bool, KalamDbError> {
+        if self.core.services.cluster_coordinator.is_cluster_mode().await {
+            let is_leader = self.core.services.cluster_coordinator.is_leader_for_shared().await;
+            if !is_leader {
+                let leader_addr = self.core.services.cluster_coordinator.leader_addr_for_shared().await;
+                return Err(KalamDbError::NotLeader { leader_addr });
+            }
+        }
+
+        match self.update_by_pk_value(base::system_user_id(), pk_value, updates).await {
+            Ok(_) => Ok(true),
+            Err(KalamDbError::NotFound(_)) => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn delete_row_by_pk(
+        &self,
+        _user_id: &UserId,
+        pk_value: &str,
+    ) -> Result<bool, KalamDbError> {
+        if self.core.services.cluster_coordinator.is_cluster_mode().await {
+            let is_leader = self.core.services.cluster_coordinator.is_leader_for_shared().await;
+            if !is_leader {
+                let leader_addr = self.core.services.cluster_coordinator.leader_addr_for_shared().await;
+                return Err(KalamDbError::NotLeader { leader_addr });
+            }
+        }
+
+        self.delete_by_pk_value(base::system_user_id(), pk_value).await
     }
 
     async fn insert_rows_returning(

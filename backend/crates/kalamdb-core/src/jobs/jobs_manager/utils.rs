@@ -9,6 +9,17 @@ use kalamdb_system::providers::jobs::models::JobFilter;
 use kalamdb_system::{JobStatus, JobType};
 use log::Level;
 
+/// Lazy-formatting version of log_job_event.
+/// Avoids String allocation when the log level is disabled.
+macro_rules! log_job {
+    ($self:expr, $job_id:expr, $level:expr, $($arg:tt)+) => {
+        if log::log_enabled!($level) {
+            $self.log_job_event($job_id, &$level, &format!($($arg)+));
+        }
+    };
+}
+pub(crate) use log_job;
+
 impl JobsManager {
     /// Generate typed JobId with prefix
     ///

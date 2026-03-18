@@ -286,12 +286,10 @@ impl StorageCached {
         table_id: &TableId,
         user_id: Option<&UserId>,
     ) -> Result<ListResult> {
-        let span = tracing::info_span!(
+        let span = tracing::debug_span!(
             "storage.list",
             storage_id = %self.storage.storage_id,
-            table_type = ?table_type,
-            table_id = %table_id,
-            has_user_id = user_id.is_some()
+            table_id = %table_id
         );
         async move {
             let store = self.object_store_internal()?;
@@ -340,12 +338,10 @@ impl StorageCached {
         user_id: Option<&UserId>,
         manifest: &serde_json::Value,
     ) -> Result<()> {
-        let span = tracing::info_span!(
+        let span = tracing::debug_span!(
             "manifest.write",
             storage_id = %self.storage.storage_id,
-            table_type = ?table_type,
-            table_id = %table_id,
-            has_user_id = user_id.is_some()
+            table_id = %table_id
         );
         let _span_guard = span.entered();
         let data = serde_json::to_vec_pretty(manifest)
@@ -557,12 +553,10 @@ impl StorageCached {
         user_id: Option<&UserId>,
         filename: &str,
     ) -> Result<GetResult> {
-        let span = tracing::info_span!(
+        let span = tracing::debug_span!(
             "storage.get",
             storage_id = %self.storage.storage_id,
-            table_type = ?table_type,
             table_id = %table_id,
-            has_user_id = user_id.is_some(),
             filename = filename
         );
         async move {
@@ -625,12 +619,10 @@ impl StorageCached {
         data: Bytes,
     ) -> Result<PutResult> {
         let bytes_len = data.len();
-        let span = tracing::info_span!(
+        let span = tracing::debug_span!(
             "storage.put",
             storage_id = %self.storage.storage_id,
-            table_type = ?table_type,
             table_id = %table_id,
-            has_user_id = user_id.is_some(),
             filename = filename,
             bytes = bytes_len
         );
@@ -683,16 +675,12 @@ impl StorageCached {
         batches: Vec<RecordBatch>,
         bloom_filter_columns: Option<Vec<String>>,
     ) -> Result<ParquetWriteResult> {
-        let batch_count = batches.len();
         let row_count: usize = batches.iter().map(RecordBatch::num_rows).sum();
-        let span = tracing::info_span!(
+        let span = tracing::debug_span!(
             "parquet.write",
             storage_id = %self.storage.storage_id,
-            table_type = ?table_type,
             table_id = %table_id,
-            has_user_id = user_id.is_some(),
             filename = filename,
-            batch_count = batch_count,
             row_count = row_count
         );
         async move {
@@ -755,12 +743,10 @@ impl StorageCached {
         user_id: Option<&UserId>,
         filename: &str,
     ) -> Result<DeleteResult> {
-        let span = tracing::info_span!(
+        let span = tracing::debug_span!(
             "storage.delete",
             storage_id = %self.storage.storage_id,
-            table_type = ?table_type,
             table_id = %table_id,
-            has_user_id = user_id.is_some(),
             filename = filename
         );
         async move {

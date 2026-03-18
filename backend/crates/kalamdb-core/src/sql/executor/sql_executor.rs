@@ -305,19 +305,43 @@ impl SqlExecutor {
         let parsed_statement = metadata.parsed_statement.as_ref();
         self.block_system_namespace_dml(metadata.table_id.as_ref(), dml_kind)?;
 
-        // Fast-path: bypass DataFusion for simple INSERT INTO ... VALUES (...)
-        // This avoids ~2.6ms of optimizer + physical planner overhead per INSERT.
-        if matches!(dml_kind, DmlKind::Insert) && params.is_empty() {
+        // Fast-path: bypass DataFusion for simple point DML that can route directly
+        // to the Kalam provider without planning a DataFusion query.
+        if params.is_empty() {
             let schema_registry = self.app_context.schema_registry();
             let fast_insert_result = if let Some(statement) = parsed_statement {
-                super::fast_insert::try_fast_insert(
-                    statement,
-                    exec_ctx,
-                    &schema_registry,
-                    metadata.table_id.as_ref(),
-                    metadata.table_type,
-                )
-                .await
+                match dml_kind {
+                    DmlKind::Insert => {
+                        super::fast_insert::try_fast_insert(
+                            statement,
+                            exec_ctx,
+                            &schema_registry,
+                            metadata.table_id.as_ref(),
+                            metadata.table_type,
+                        )
+                        .await
+                    },
+                    DmlKind::Update => {
+                        super::fast_point_dml::try_fast_update(
+                            statement,
+                            exec_ctx,
+                            &schema_registry,
+                            metadata.table_id.as_ref(),
+                            metadata.table_type,
+                        )
+                        .await
+                    },
+                    DmlKind::Delete => {
+                        super::fast_point_dml::try_fast_delete(
+                            statement,
+                            exec_ctx,
+                            &schema_registry,
+                            metadata.table_id.as_ref(),
+                            metadata.table_type,
+                        )
+                        .await
+                    },
+                }
             } else {
                 Ok(None)
             };
