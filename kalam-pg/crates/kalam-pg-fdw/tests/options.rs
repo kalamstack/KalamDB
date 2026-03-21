@@ -14,10 +14,44 @@ fn parses_embedded_server_options() {
     let parsed = ServerOptions::parse(&options).expect("parse server options");
 
     assert_eq!(
-        parsed.embedded_runtime.storage_base_path,
+        parsed
+            .embedded_runtime
+            .as_ref()
+            .expect("embedded runtime config")
+            .storage_base_path,
         PathBuf::from("/tmp/kalam-pg")
     );
-    assert_eq!(parsed.embedded_runtime.node_id, "pg-node-1");
+    assert_eq!(
+        parsed.embedded_runtime.as_ref().expect("embedded runtime config").node_id,
+        "pg-node-1"
+    );
+    assert_eq!(parsed.remote, None);
+}
+
+#[test]
+fn parses_remote_server_options() {
+    let options = BTreeMap::from([
+        ("host".to_string(), "127.0.0.1".to_string()),
+        ("port".to_string(), "50051".to_string()),
+    ]);
+
+    let parsed = ServerOptions::parse(&options).expect("parse remote server options");
+
+    assert_eq!(parsed.remote.as_ref().expect("remote config").host, "127.0.0.1");
+    assert_eq!(parsed.remote.as_ref().expect("remote config").port, 50051);
+    assert_eq!(parsed.embedded_runtime, None);
+}
+
+#[test]
+fn rejects_mixed_remote_and_embedded_server_options() {
+    let options = BTreeMap::from([
+        ("host".to_string(), "127.0.0.1".to_string()),
+        ("port".to_string(), "50051".to_string()),
+        ("storage_base_path".to_string(), "/tmp/kalam-pg".to_string()),
+    ]);
+
+    let err = ServerOptions::parse(&options).expect_err("mixed server options should fail");
+    assert!(err.to_string().contains("remote") && err.to_string().contains("embedded"));
 }
 
 #[test]

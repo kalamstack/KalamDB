@@ -737,74 +737,74 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
         async move {
             ensure_manifest_ready(&self.core, self.core.table_type(), None, "SharedTableProvider")?;
 
-        // IGNORE user_id parameter - no RLS for shared tables
-        base::ensure_unique_pk_value(self, None, &row_data).await?;
+            // IGNORE user_id parameter - no RLS for shared tables
+            base::ensure_unique_pk_value(self, None, &row_data).await?;
 
-        // Generate new SeqId via SystemColumnsService
-        let sys_cols = self.core.services.system_columns.clone();
-        let seq_id = sys_cols.generate_seq_id().map_err(|e| {
-            KalamDbError::InvalidOperation(format!("SeqId generation failed: {}", e))
-        })?;
+            // Generate new SeqId via SystemColumnsService
+            let sys_cols = self.core.services.system_columns.clone();
+            let seq_id = sys_cols.generate_seq_id().map_err(|e| {
+                KalamDbError::InvalidOperation(format!("SeqId generation failed: {}", e))
+            })?;
 
-        // Create SharedTableRow directly
-        let entity = SharedTableRow {
-            _seq: seq_id,
-            _deleted: false,
-            fields: row_data,
-        };
+            // Create SharedTableRow directly
+            let entity = SharedTableRow {
+                _seq: seq_id,
+                _deleted: false,
+                fields: row_data,
+            };
 
-        // Key is just the SeqId (SharedTableRowId is type alias for SeqId)
-        let row_key = seq_id;
+            // Key is just the SeqId (SharedTableRowId is type alias for SeqId)
+            let row_key = seq_id;
 
-        // Store the entity in RocksDB (hot storage) using insert() to update PK index
-        self.store.insert_async(row_key, entity.clone()).await.map_err(|e| {
-            KalamDbError::InvalidOperation(format!("Failed to insert shared table row: {}", e))
-        })?;
+            // Store the entity in RocksDB (hot storage) using insert() to update PK index
+            self.store.insert_async(row_key, entity.clone()).await.map_err(|e| {
+                KalamDbError::InvalidOperation(format!("Failed to insert shared table row: {}", e))
+            })?;
 
-        log::debug!("Inserted shared table row with _seq {}", seq_id);
+            log::debug!("Inserted shared table row with _seq {}", seq_id);
 
-        if let Err(e) = self.stage_vector_upsert(seq_id, &entity.fields).await {
-            log::warn!(
-                "Failed to stage vector upsert for table={}, seq={}: {}",
-                self.core.table_id(),
-                seq_id.as_i64(),
-                e
-            );
-        }
-
-        // Mark manifest as having pending writes (hot data needs to be flushed)
-        let manifest_service = self.core.services.manifest_service.clone();
-        if let Err(e) = manifest_service.mark_pending_write(self.core.table_id(), None) {
-            log::warn!(
-                "Failed to mark manifest as pending_write for {}: {}",
-                self.core.table_id(),
-                e
-            );
-        }
-
-        // Fire topic/CDC notification (INSERT) - no user_id for shared tables
-        let notification_service = self.core.services.notification_service.clone();
-        let table_id = self.core.table_id().clone();
-
-        let has_topics = self.core.has_topic_routes(&table_id);
-        let has_live_subs = notification_service.has_subscribers(None, &table_id);
-        if has_topics || has_live_subs {
-            let row = Self::build_notification_row(&entity);
-            if has_topics {
-                self.core
-                    .publish_to_topics(
-                        &table_id,
-                        kalamdb_commons::models::TopicOp::Insert,
-                        &row,
-                        None,
-                    )
-                    .await;
+            if let Err(e) = self.stage_vector_upsert(seq_id, &entity.fields).await {
+                log::warn!(
+                    "Failed to stage vector upsert for table={}, seq={}: {}",
+                    self.core.table_id(),
+                    seq_id.as_i64(),
+                    e
+                );
             }
-            if has_live_subs {
-                let notification = ChangeNotification::insert(table_id.clone(), row);
-                notification_service.notify_table_change(None, table_id, notification);
+
+            // Mark manifest as having pending writes (hot data needs to be flushed)
+            let manifest_service = self.core.services.manifest_service.clone();
+            if let Err(e) = manifest_service.mark_pending_write(self.core.table_id(), None) {
+                log::warn!(
+                    "Failed to mark manifest as pending_write for {}: {}",
+                    self.core.table_id(),
+                    e
+                );
             }
-        }
+
+            // Fire topic/CDC notification (INSERT) - no user_id for shared tables
+            let notification_service = self.core.services.notification_service.clone();
+            let table_id = self.core.table_id().clone();
+
+            let has_topics = self.core.has_topic_routes(&table_id);
+            let has_live_subs = notification_service.has_subscribers(None, &table_id);
+            if has_topics || has_live_subs {
+                let row = Self::build_notification_row(&entity);
+                if has_topics {
+                    self.core
+                        .publish_to_topics(
+                            &table_id,
+                            kalamdb_commons::models::TopicOp::Insert,
+                            &row,
+                            None,
+                        )
+                        .await;
+                }
+                if has_live_subs {
+                    let notification = ChangeNotification::insert(table_id.clone(), row);
+                    notification_service.notify_table_change(None, table_id, notification);
+                }
+            }
 
             Ok(row_key)
         }
@@ -1115,112 +1115,116 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
             // IGNORE user_id parameter - no RLS for shared tables
             let pk_name = self.primary_key_field_name().to_string();
 
-        // Get PK column data type from schema for proper type coercion
-        let schema = self.schema();
-        let pk_field = schema.field_with_name(&pk_name).map_err(|e| {
-            KalamDbError::InvalidOperation(format!(
-                "PK column '{}' not found in schema: {}",
-                pk_name, e
-            ))
-        })?;
-        let pk_column_type = pk_field.data_type();
+            // Get PK column data type from schema for proper type coercion
+            let schema = self.schema();
+            let pk_field = schema.field_with_name(&pk_name).map_err(|e| {
+                KalamDbError::InvalidOperation(format!(
+                    "PK column '{}' not found in schema: {}",
+                    pk_name, e
+                ))
+            })?;
+            let pk_column_type = pk_field.data_type();
 
-        // Convert string PK value to proper ScalarValue based on column type
-        use kalamdb_commons::conversions::parse_string_as_scalar;
-        let pk_value_scalar = parse_string_as_scalar(pk_value, pk_column_type)
-            .map_err(|e| KalamDbError::InvalidOperation(e))?;
+            // Convert string PK value to proper ScalarValue based on column type
+            use kalamdb_commons::conversions::parse_string_as_scalar;
+            let pk_value_scalar = parse_string_as_scalar(pk_value, pk_column_type)
+                .map_err(|e| KalamDbError::InvalidOperation(e))?;
 
-        // Resolve latest per PK - first try hot storage (O(1) via PK index),
-        // then fall back to cold storage (Parquet scan)
-        let (_latest_key, latest_row) =
-            if let Some(result) = self.find_by_pk(&pk_value_scalar).await? {
-                result
-            } else if self.pk_tombstoned_in_hot(&pk_value_scalar).await? {
-                return Err(KalamDbError::NotFound(format!(
-                    "Row with {}={} was deleted",
-                    pk_name, pk_value
-                )));
-            } else {
-                // Not in hot storage, check cold storage
-                log::debug!(
-                    "[UPDATE] PK {} not found in hot storage, querying cold storage for pk={}",
-                    pk_name,
-                    pk_value
-                );
-                base::find_row_by_pk(self, None, pk_value).await?.ok_or_else(|| {
-                    KalamDbError::NotFound(format!(
-                        "Row with {}={} not found (checked both hot and cold storage)",
+            // Resolve latest per PK - first try hot storage (O(1) via PK index),
+            // then fall back to cold storage (Parquet scan)
+            let (_latest_key, latest_row) =
+                if let Some(result) = self.find_by_pk(&pk_value_scalar).await? {
+                    result
+                } else if self.pk_tombstoned_in_hot(&pk_value_scalar).await? {
+                    return Err(KalamDbError::NotFound(format!(
+                        "Row with {}={} was deleted",
                         pk_name, pk_value
-                    ))
-                })?
+                    )));
+                } else {
+                    // Not in hot storage, check cold storage
+                    log::debug!(
+                        "[UPDATE] PK {} not found in hot storage, querying cold storage for pk={}",
+                        pk_name,
+                        pk_value
+                    );
+                    base::find_row_by_pk(self, None, pk_value).await?.ok_or_else(|| {
+                        KalamDbError::NotFound(format!(
+                            "Row with {}={} not found (checked both hot and cold storage)",
+                            pk_name, pk_value
+                        ))
+                    })?
+                };
+
+            let mut merged = latest_row.fields.values.clone();
+            for (k, v) in &updates.values {
+                merged.insert(k.clone(), v.clone());
+            }
+            let new_fields = Row::new(merged);
+
+            let sys_cols = self.core.services.system_columns.clone();
+            let seq_id = sys_cols.generate_seq_id().map_err(|e| {
+                KalamDbError::InvalidOperation(format!("SeqId generation failed: {}", e))
+            })?;
+            let entity = SharedTableRow {
+                _seq: seq_id,
+                _deleted: false,
+                fields: new_fields,
             };
+            let row_key = seq_id;
+            // Use insert() to update PK index for the new MVCC version
+            self.store.insert_async(row_key, entity.clone()).await.map_err(|e| {
+                KalamDbError::InvalidOperation(format!("Failed to update shared table row: {}", e))
+            })?;
 
-        let mut merged = latest_row.fields.values.clone();
-        for (k, v) in &updates.values {
-            merged.insert(k.clone(), v.clone());
-        }
-        let new_fields = Row::new(merged);
-
-        let sys_cols = self.core.services.system_columns.clone();
-        let seq_id = sys_cols.generate_seq_id().map_err(|e| {
-            KalamDbError::InvalidOperation(format!("SeqId generation failed: {}", e))
-        })?;
-        let entity = SharedTableRow {
-            _seq: seq_id,
-            _deleted: false,
-            fields: new_fields,
-        };
-        let row_key = seq_id;
-        // Use insert() to update PK index for the new MVCC version
-        self.store.insert_async(row_key, entity.clone()).await.map_err(|e| {
-            KalamDbError::InvalidOperation(format!("Failed to update shared table row: {}", e))
-        })?;
-
-        if let Err(e) = self.stage_vector_upsert(seq_id, &entity.fields).await {
-            log::warn!(
-                "Failed to stage vector upsert for table={}, seq={}: {}",
-                self.core.table_id(),
-                seq_id.as_i64(),
-                e
-            );
-        }
-
-        // Mark manifest as having pending writes (hot data needs to be flushed)
-        let manifest_service = self.core.services.manifest_service.clone();
-        if let Err(e) = manifest_service.mark_pending_write(self.core.table_id(), None) {
-            log::warn!(
-                "Failed to mark manifest as pending_write for {}: {}",
-                self.core.table_id(),
-                e
-            );
-        }
-
-        // Fire topic/CDC notification (UPDATE) - no user_id for shared tables
-        let notification_service = self.core.services.notification_service.clone();
-        let table_id = self.core.table_id().clone();
-
-        let has_topics = self.core.has_topic_routes(&table_id);
-        let has_live_subs = notification_service.has_subscribers(None, &table_id);
-        if has_topics || has_live_subs {
-            let new_row = Self::build_notification_row(&entity);
-            if has_topics {
-                self.core
-                    .publish_to_topics(
-                        &table_id,
-                        kalamdb_commons::models::TopicOp::Update,
-                        &new_row,
-                        None,
-                    )
-                    .await;
+            if let Err(e) = self.stage_vector_upsert(seq_id, &entity.fields).await {
+                log::warn!(
+                    "Failed to stage vector upsert for table={}, seq={}: {}",
+                    self.core.table_id(),
+                    seq_id.as_i64(),
+                    e
+                );
             }
-            if has_live_subs {
-                let old_row = Self::build_notification_row(&latest_row);
-                let pk_col = self.primary_key_field_name().to_string();
-                let notification =
-                    ChangeNotification::update(table_id.clone(), old_row, new_row, vec![pk_col]);
-                notification_service.notify_table_change(None, table_id, notification);
+
+            // Mark manifest as having pending writes (hot data needs to be flushed)
+            let manifest_service = self.core.services.manifest_service.clone();
+            if let Err(e) = manifest_service.mark_pending_write(self.core.table_id(), None) {
+                log::warn!(
+                    "Failed to mark manifest as pending_write for {}: {}",
+                    self.core.table_id(),
+                    e
+                );
             }
-        }
+
+            // Fire topic/CDC notification (UPDATE) - no user_id for shared tables
+            let notification_service = self.core.services.notification_service.clone();
+            let table_id = self.core.table_id().clone();
+
+            let has_topics = self.core.has_topic_routes(&table_id);
+            let has_live_subs = notification_service.has_subscribers(None, &table_id);
+            if has_topics || has_live_subs {
+                let new_row = Self::build_notification_row(&entity);
+                if has_topics {
+                    self.core
+                        .publish_to_topics(
+                            &table_id,
+                            kalamdb_commons::models::TopicOp::Update,
+                            &new_row,
+                            None,
+                        )
+                        .await;
+                }
+                if has_live_subs {
+                    let old_row = Self::build_notification_row(&latest_row);
+                    let pk_col = self.primary_key_field_name().to_string();
+                    let notification = ChangeNotification::update(
+                        table_id.clone(),
+                        old_row,
+                        new_row,
+                        vec![pk_col],
+                    );
+                    notification_service.notify_table_change(None, table_id, notification);
+                }
+            }
 
             Ok(row_key)
         }
@@ -1277,106 +1281,106 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
         async move {
             // IGNORE user_id parameter - no RLS for shared tables
             let pk_name = self.primary_key_field_name().to_string();
-        let schema = self.schema();
-        let pk_field = schema.field_with_name(&pk_name).map_err(|e| {
-            KalamDbError::InvalidOperation(format!(
-                "PK column '{}' not found in schema: {}",
-                pk_name, e
-            ))
-        })?;
-        let pk_column_type = pk_field.data_type();
-        let pk_value_scalar =
-            kalamdb_commons::conversions::parse_string_as_scalar(pk_value, pk_column_type)
-                .map_err(KalamDbError::InvalidOperation)?;
+            let schema = self.schema();
+            let pk_field = schema.field_with_name(&pk_name).map_err(|e| {
+                KalamDbError::InvalidOperation(format!(
+                    "PK column '{}' not found in schema: {}",
+                    pk_name, e
+                ))
+            })?;
+            let pk_column_type = pk_field.data_type();
+            let pk_value_scalar =
+                kalamdb_commons::conversions::parse_string_as_scalar(pk_value, pk_column_type)
+                    .map_err(KalamDbError::InvalidOperation)?;
 
-        // Find latest resolved row for this PK
-        // First try hot storage (O(1) via PK index), then fall back to cold storage (Parquet scan)
-        let latest_row = if let Some((_key, row)) = self.find_by_pk(&pk_value_scalar).await? {
-            row
-        } else if self.pk_tombstoned_in_hot(&pk_value_scalar).await? {
-            return Ok(false);
-        } else {
-            // Not in hot storage, check cold storage
-            match base::find_row_by_pk(self, None, pk_value).await? {
-                Some((_key, row)) => row,
-                None => {
-                    log::trace!(
-                        "[SharedProvider DELETE_BY_PK] Row with {}={} not found",
-                        pk_name,
-                        pk_value
-                    );
-                    return Ok(false);
-                },
-            }
-        };
+            // Find latest resolved row for this PK
+            // First try hot storage (O(1) via PK index), then fall back to cold storage (Parquet scan)
+            let latest_row = if let Some((_key, row)) = self.find_by_pk(&pk_value_scalar).await? {
+                row
+            } else if self.pk_tombstoned_in_hot(&pk_value_scalar).await? {
+                return Ok(false);
+            } else {
+                // Not in hot storage, check cold storage
+                match base::find_row_by_pk(self, None, pk_value).await? {
+                    Some((_key, row)) => row,
+                    None => {
+                        log::trace!(
+                            "[SharedProvider DELETE_BY_PK] Row with {}={} not found",
+                            pk_name,
+                            pk_value
+                        );
+                        return Ok(false);
+                    },
+                }
+            };
 
-        let sys_cols = self.core.services.system_columns.clone();
-        let seq_id = sys_cols.generate_seq_id().map_err(|e| {
-            KalamDbError::InvalidOperation(format!("SeqId generation failed: {}", e))
-        })?;
+            let sys_cols = self.core.services.system_columns.clone();
+            let seq_id = sys_cols.generate_seq_id().map_err(|e| {
+                KalamDbError::InvalidOperation(format!("SeqId generation failed: {}", e))
+            })?;
 
-        // Preserve ALL fields in the tombstone
-        let values = latest_row.fields.values.clone();
+            // Preserve ALL fields in the tombstone
+            let values = latest_row.fields.values.clone();
 
-        let entity = SharedTableRow {
-            _seq: seq_id,
-            _deleted: true,
-            fields: Row::new(values),
-        };
-        let row_key = seq_id;
-        log::debug!(
-            "[SharedProvider DELETE_BY_PK] Writing tombstone: pk={}, _seq={}",
-            pk_value,
-            seq_id.as_i64()
-        );
-        // Use insert() to update PK index for the tombstone record
-        self.store.insert_async(row_key, entity.clone()).await.map_err(|e| {
-            KalamDbError::InvalidOperation(format!("Failed to delete shared table row: {}", e))
-        })?;
-
-        if let Err(e) = self.stage_vector_delete(seq_id, pk_value).await {
-            log::warn!(
-                "Failed to stage vector delete for table={}, seq={}, pk={}: {}",
-                self.core.table_id(),
-                seq_id.as_i64(),
+            let entity = SharedTableRow {
+                _seq: seq_id,
+                _deleted: true,
+                fields: Row::new(values),
+            };
+            let row_key = seq_id;
+            log::debug!(
+                "[SharedProvider DELETE_BY_PK] Writing tombstone: pk={}, _seq={}",
                 pk_value,
-                e
+                seq_id.as_i64()
             );
-        }
+            // Use insert() to update PK index for the tombstone record
+            self.store.insert_async(row_key, entity.clone()).await.map_err(|e| {
+                KalamDbError::InvalidOperation(format!("Failed to delete shared table row: {}", e))
+            })?;
 
-        // Mark manifest as having pending writes (hot data needs to be flushed)
-        let manifest_service = self.core.services.manifest_service.clone();
-        if let Err(e) = manifest_service.mark_pending_write(self.core.table_id(), None) {
-            log::warn!(
-                "Failed to mark manifest as pending_write for {}: {}",
-                self.core.table_id(),
-                e
-            );
-        }
-
-        // Fire topic/CDC notification (DELETE) - no user_id for shared tables
-        let notification_service = self.core.services.notification_service.clone();
-        let table_id = self.core.table_id().clone();
-
-        let has_topics = self.core.has_topic_routes(&table_id);
-        let has_live_subs = notification_service.has_subscribers(None, &table_id);
-        if has_topics || has_live_subs {
-            let row = Self::build_notification_row(&entity);
-            if has_topics {
-                self.core
-                    .publish_to_topics(
-                        &table_id,
-                        kalamdb_commons::models::TopicOp::Delete,
-                        &row,
-                        None,
-                    )
-                    .await;
+            if let Err(e) = self.stage_vector_delete(seq_id, pk_value).await {
+                log::warn!(
+                    "Failed to stage vector delete for table={}, seq={}, pk={}: {}",
+                    self.core.table_id(),
+                    seq_id.as_i64(),
+                    pk_value,
+                    e
+                );
             }
-            if has_live_subs {
-                let notification = ChangeNotification::delete_soft(table_id.clone(), row);
-                notification_service.notify_table_change(None, table_id, notification);
+
+            // Mark manifest as having pending writes (hot data needs to be flushed)
+            let manifest_service = self.core.services.manifest_service.clone();
+            if let Err(e) = manifest_service.mark_pending_write(self.core.table_id(), None) {
+                log::warn!(
+                    "Failed to mark manifest as pending_write for {}: {}",
+                    self.core.table_id(),
+                    e
+                );
             }
-        }
+
+            // Fire topic/CDC notification (DELETE) - no user_id for shared tables
+            let notification_service = self.core.services.notification_service.clone();
+            let table_id = self.core.table_id().clone();
+
+            let has_topics = self.core.has_topic_routes(&table_id);
+            let has_live_subs = notification_service.has_subscribers(None, &table_id);
+            if has_topics || has_live_subs {
+                let row = Self::build_notification_row(&entity);
+                if has_topics {
+                    self.core
+                        .publish_to_topics(
+                            &table_id,
+                            kalamdb_commons::models::TopicOp::Delete,
+                            &row,
+                            None,
+                        )
+                        .await;
+                }
+                if has_live_subs {
+                    let notification = ChangeNotification::delete_soft(table_id.clone(), row);
+                    notification_service.notify_table_change(None, table_id, notification);
+                }
+            }
 
             Ok(true)
         }
@@ -1525,9 +1529,9 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
         let scan_limit = base::calculate_scan_limit(limit);
 
         // Run hot storage (RocksDB) and cold storage (Parquet) scans concurrently
-        let hot_future = self
-            .store
-            .scan_typed_with_prefix_and_start_async(None, start_key.as_ref(), scan_limit);
+        let hot_future =
+            self.store
+                .scan_typed_with_prefix_and_start_async(None, start_key.as_ref(), scan_limit);
         let cold_future = self.scan_parquet_files_as_batch_async(filter);
 
         let (hot_result, cold_result) = tokio::join!(hot_future, cold_future);
@@ -1819,7 +1823,8 @@ impl crate::utils::dml_provider::KalamTableProvider for SharedTableProvider {
         if self.core.services.cluster_coordinator.is_cluster_mode().await {
             let is_leader = self.core.services.cluster_coordinator.is_leader_for_shared().await;
             if !is_leader {
-                let leader_addr = self.core.services.cluster_coordinator.leader_addr_for_shared().await;
+                let leader_addr =
+                    self.core.services.cluster_coordinator.leader_addr_for_shared().await;
                 return Err(KalamDbError::NotLeader { leader_addr });
             }
         }
@@ -1839,7 +1844,8 @@ impl crate::utils::dml_provider::KalamTableProvider for SharedTableProvider {
         if self.core.services.cluster_coordinator.is_cluster_mode().await {
             let is_leader = self.core.services.cluster_coordinator.is_leader_for_shared().await;
             if !is_leader {
-                let leader_addr = self.core.services.cluster_coordinator.leader_addr_for_shared().await;
+                let leader_addr =
+                    self.core.services.cluster_coordinator.leader_addr_for_shared().await;
                 return Err(KalamDbError::NotLeader { leader_addr });
             }
         }

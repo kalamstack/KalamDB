@@ -123,7 +123,7 @@ RUN echo '# Auto-generated for Docker build' > version.toml && \
     echo "build_date = \"$(date -u '+%Y-%m-%d %H:%M:%S UTC')\"" >> version.toml
 
 # Build dependencies only (this layer is cached until Cargo.toml/Cargo.lock changes)
-RUN cargo build --profile docker --bin kalamdb-server --bin kalam 2>/dev/null || true
+RUN cargo build --profile docker --features jemalloc --bin kalamdb-server --bin kalam 2>/dev/null || true
 # The "|| true" handles expected errors from dummy source files
 # The important thing is that all dependencies are now compiled and cached
 
@@ -161,7 +161,7 @@ RUN if [ ! -f version.toml ]; then \
     fi
 
 # Build final binaries (dependencies are already cached from deps stage)
-RUN cargo build --profile docker --bin kalamdb-server --bin kalam
+RUN cargo build --profile docker --features jemalloc --bin kalamdb-server --bin kalam
 
 # ============================================================================
 # Stage 4: Runtime (optimized for minimal size)

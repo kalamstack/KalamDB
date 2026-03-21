@@ -1,4 +1,4 @@
-use crate::session::TenantContext;
+use crate::session::{RemoteSessionContext, TenantContext};
 use datafusion::logical_expr::Expr;
 use kalam_pg_common::KalamPgError;
 use kalamdb_commons::models::rows::Row;
@@ -28,6 +28,7 @@ pub struct ScanRequest {
     pub table_id: TableId,
     pub table_type: TableType,
     pub tenant_context: TenantContext,
+    pub remote_session: Option<RemoteSessionContext>,
     pub projection: Option<Vec<String>>,
     pub filters: Vec<Expr>,
     pub limit: Option<usize>,
@@ -40,6 +41,7 @@ impl ScanRequest {
             table_id,
             table_type,
             tenant_context,
+            remote_session: None,
             projection: None,
             filters: Vec::new(),
             limit: None,
@@ -49,6 +51,9 @@ impl ScanRequest {
     /// Validate the request before execution.
     pub fn validate(&self) -> Result<(), KalamPgError> {
         self.tenant_context.validate()?;
+        if let Some(remote_session) = &self.remote_session {
+            remote_session.validate()?;
+        }
         if matches!(self.table_type, TableType::User | TableType::Stream)
             && self.tenant_context.effective_user_id().is_none()
         {
@@ -67,6 +72,7 @@ pub struct InsertRequest {
     pub table_id: TableId,
     pub table_type: TableType,
     pub tenant_context: TenantContext,
+    pub remote_session: Option<RemoteSessionContext>,
     pub rows: Vec<Row>,
 }
 
@@ -82,6 +88,7 @@ impl InsertRequest {
             table_id,
             table_type,
             tenant_context,
+            remote_session: None,
             rows,
         }
     }
@@ -89,6 +96,9 @@ impl InsertRequest {
     /// Validate the request before execution.
     pub fn validate(&self) -> Result<(), KalamPgError> {
         validate_write_scope(self.table_type, &self.tenant_context, "inserts")?;
+        if let Some(remote_session) = &self.remote_session {
+            remote_session.validate()?;
+        }
         if self.rows.is_empty() {
             return Err(KalamPgError::Validation(
                 "insert request must include at least one row".to_string(),
@@ -105,6 +115,7 @@ pub struct UpdateRequest {
     pub table_id: TableId,
     pub table_type: TableType,
     pub tenant_context: TenantContext,
+    pub remote_session: Option<RemoteSessionContext>,
     pub pk_value: String,
     pub updates: Row,
 }
@@ -122,6 +133,7 @@ impl UpdateRequest {
             table_id,
             table_type,
             tenant_context,
+            remote_session: None,
             pk_value,
             updates,
         }
@@ -130,6 +142,9 @@ impl UpdateRequest {
     /// Validate the request before execution.
     pub fn validate(&self) -> Result<(), KalamPgError> {
         validate_write_scope(self.table_type, &self.tenant_context, "updates")?;
+        if let Some(remote_session) = &self.remote_session {
+            remote_session.validate()?;
+        }
         if self.pk_value.trim().is_empty() {
             return Err(KalamPgError::Validation(
                 "update request must include a primary-key value".to_string(),
@@ -151,6 +166,7 @@ pub struct DeleteRequest {
     pub table_id: TableId,
     pub table_type: TableType,
     pub tenant_context: TenantContext,
+    pub remote_session: Option<RemoteSessionContext>,
     pub pk_value: String,
 }
 
@@ -166,6 +182,7 @@ impl DeleteRequest {
             table_id,
             table_type,
             tenant_context,
+            remote_session: None,
             pk_value,
         }
     }
@@ -173,6 +190,9 @@ impl DeleteRequest {
     /// Validate the request before execution.
     pub fn validate(&self) -> Result<(), KalamPgError> {
         validate_write_scope(self.table_type, &self.tenant_context, "deletes")?;
+        if let Some(remote_session) = &self.remote_session {
+            remote_session.validate()?;
+        }
         if self.pk_value.trim().is_empty() {
             return Err(KalamPgError::Validation(
                 "delete request must include a primary-key value".to_string(),

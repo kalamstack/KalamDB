@@ -43,6 +43,7 @@ pub mod jobs;
 pub mod live;
 pub mod manifest;
 pub mod metrics;
+pub mod pg_executor;
 pub mod providers;
 pub mod schema_registry;
 pub mod slow_query_logger;

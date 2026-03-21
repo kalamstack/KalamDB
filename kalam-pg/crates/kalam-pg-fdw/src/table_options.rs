@@ -26,7 +26,10 @@ impl TableOptions {
         let table_type = TableType::from_str(table_type).map_err(KalamPgError::Validation)?;
 
         Ok(Self {
-            table_id: TableId::new(NamespaceId::new(namespace.clone()), TableName::new(table.clone())),
+            table_id: TableId::new(
+                NamespaceId::new(namespace.clone()),
+                TableName::new(table.clone()),
+            ),
             table_type,
         })
     }

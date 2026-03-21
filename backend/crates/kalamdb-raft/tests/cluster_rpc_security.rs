@@ -228,7 +228,7 @@ async fn start_grpc_server_with_handler(
     manager.start().await.expect("Failed to start RaftManager");
     manager.initialize_cluster().await.expect("Failed to initialize cluster");
 
-    kalamdb_raft::network::start_rpc_server(manager.clone(), rpc_addr.clone(), handler)
+    kalamdb_raft::network::start_rpc_server(manager.clone(), rpc_addr.clone(), handler, None)
         .await
         .expect("Failed to start RPC server");
 

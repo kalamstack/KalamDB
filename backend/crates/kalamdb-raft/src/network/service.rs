@@ -6,6 +6,7 @@
 //! - Raft consensus RPCs (vote, append_entries, install_snapshot)
 //! - Client proposal forwarding (forward proposals from followers to leader)
 
+use kalamdb_pg::{KalamPgService, PgServiceServer};
 use tokio::sync::oneshot;
 use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 use tonic::{Request, Response, Status};
@@ -387,6 +388,7 @@ pub async fn start_rpc_server(
     manager: Arc<RaftManager>,
     advertise_addr: String,
     cluster_handler: Arc<dyn super::cluster_handler::ClusterMessageHandler>,
+    pg_service: Option<Arc<KalamPgService>>,
 ) -> Result<(), crate::RaftError> {
     // Extract port from advertise_addr (e.g., "kalamdb-node1:9090" -> 9090)
     let port = advertise_addr.rsplit(':').next().ok_or_else(|| {
@@ -501,12 +503,18 @@ pub async fn start_rpc_server(
             }
         }
 
-        if let Err(e) = server_builder
-            .add_service(raft_server)
-            .add_service(cluster_server)
-            .serve_with_incoming(incoming)
-            .await
-        {
+        let server_builder = server_builder.add_service(raft_server).add_service(cluster_server);
+
+        let result = if let Some(pg_service) = pg_service {
+            server_builder
+                .add_service(PgServiceServer::new(pg_service.as_ref().clone()))
+                .serve_with_incoming(incoming)
+                .await
+        } else {
+            server_builder.serve_with_incoming(incoming).await
+        };
+
+        if let Err(e) = result {
             log::error!("Raft RPC server error on {}: {}", bind_addr_clone, e);
         }
     });

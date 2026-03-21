@@ -65,9 +65,9 @@ pub mod leader_guard;
 
 // Phase 9 exports (production API)
 pub use executors::{JobContext, JobDecision, JobExecutor as JobExecutorTrait, JobRegistry};
+pub use flush_scheduler::FlushScheduler;
 pub use health_monitor::HealthMonitor;
 pub use jobs_manager::JobsManager;
-pub use flush_scheduler::FlushScheduler;
 pub use stream_eviction::StreamEvictionScheduler;
 
 // Phase 16 exports (cluster mode)

@@ -1330,3 +1330,14 @@ Target Usecase:
 2) Having a chat app messages which recieves and send messages in real-time using subscriptions websocket
 3) Authenticate using Firebase auth tokens
 
+
+
+Postgres Extension:
+---------------------
+- Remove vendor rocksdb folder
+- Remove all the expirement xcode for the embedded server
+- Add mTLS + short-lived JWT - for Postgres to kalamdb-server connection
+- In KalamDB unify thr mTLS to use in both cluster and pg extension connection and not repeat the same logic twice organize the code in kalamdb-security crate
+- Recheck the gRPC endpoints to have it in one place instead of scattered accross the project and erver cluster/pg/forwarding to leader
+- Add transaction begin/commit to kalamdb then wire it to pg
+- Make sure in the sqlparser we are using Postgres Dialect instead of geenric, i want kalamdb to be so close to postgres in all ways

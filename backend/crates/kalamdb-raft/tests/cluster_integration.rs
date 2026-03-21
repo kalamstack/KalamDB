@@ -82,8 +82,13 @@ impl TestNode {
         let rpc_addr = format!("127.0.0.1:{}", self.rpc_port);
         let cluster_handler: std::sync::Arc<dyn kalamdb_raft::ClusterMessageHandler> =
             std::sync::Arc::new(kalamdb_raft::network::cluster_handler::NoOpClusterHandler);
-        kalamdb_raft::network::start_rpc_server(self.manager.clone(), rpc_addr, cluster_handler)
-            .await?;
+        kalamdb_raft::network::start_rpc_server(
+            self.manager.clone(),
+            rpc_addr,
+            cluster_handler,
+            None,
+        )
+        .await?;
 
         Ok(())
     }

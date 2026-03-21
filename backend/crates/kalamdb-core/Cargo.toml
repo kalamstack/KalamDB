@@ -14,6 +14,7 @@ kalamdb-commons = { path = "../kalamdb-commons", features = ["full"] }
 kalamdb-configs = { path = "../kalamdb-configs" }
 kalamdb-filestore = { path = "../kalamdb-filestore" }
 kalamdb-observability = { path = "../kalamdb-observability" }
+kalamdb-pg = { path = "../kalamdb-pg" }
 kalamdb-raft = { path = "../kalamdb-raft" }
 kalamdb-session = { path = "../kalamdb-session" }
 kalamdb-sharding = { path = "../kalamdb-sharding" }
@@ -28,6 +29,7 @@ kalamdb-vector = { path = "../kalamdb-vector" }
 
 # Apache Arrow ecosystem
 arrow = { workspace = true }
+arrow-ipc = { workspace = true }
 datafusion = { workspace = true }
 datafusion-common = { workspace = true }
 
@@ -60,6 +62,9 @@ chrono = { workspace = true }
 
 # Logging
 log = { workspace = true }
+
+# gRPC (for PgQueryExecutor trait)
+tonic = { workspace = true }
 
 # Tracing / observability
 tracing = { workspace = true }

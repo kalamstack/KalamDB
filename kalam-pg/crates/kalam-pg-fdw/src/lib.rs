@@ -2,9 +2,9 @@
 
 mod delete_input;
 mod delete_plan;
+mod import_foreign_schema;
 mod insert_input;
 mod insert_plan;
-mod import_foreign_schema;
 mod request_planner;
 mod scan_input;
 mod scan_plan;
@@ -16,9 +16,9 @@ mod virtual_column;
 
 pub use delete_input::DeleteInput;
 pub use delete_plan::DeletePlan;
+pub use import_foreign_schema::create_foreign_table_sql;
 pub use insert_input::InsertInput;
 pub use insert_plan::InsertPlan;
-pub use import_foreign_schema::create_foreign_table_sql;
 pub use request_planner::RequestPlanner;
 pub use scan_input::ScanInput;
 pub use scan_plan::ScanPlan;

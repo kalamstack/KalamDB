@@ -56,11 +56,7 @@ impl FlushScheduler {
                     continue;
                 },
                 Err(e) => {
-                    log::warn!(
-                        "FlushScheduler: failed to look up table {}: {}",
-                        table_id,
-                        e
-                    );
+                    log::warn!("FlushScheduler: failed to look up table {}: {}", table_id, e);
                     continue;
                 },
             };
@@ -74,10 +70,7 @@ impl FlushScheduler {
             // Respect flush_policy: skip tables with no policy (hot-only)
             let flush_policy = table_def.table_options.flush_policy();
             if flush_policy.is_none() {
-                log::trace!(
-                    "FlushScheduler: skipping {} (no flush_policy, hot-only)",
-                    table_id
-                );
+                log::trace!("FlushScheduler: skipping {} (no flush_policy, hot-only)", table_id);
                 continue;
             }
 
@@ -114,9 +107,7 @@ impl FlushScheduler {
                 },
                 Err(e) => {
                     let err_msg = e.to_string();
-                    if err_msg.contains("already running")
-                        || err_msg.contains("already exists")
-                    {
+                    if err_msg.contains("already running") || err_msg.contains("already exists") {
                         log::trace!(
                             "FlushScheduler: flush job for {} already exists (idempotent)",
                             table_id

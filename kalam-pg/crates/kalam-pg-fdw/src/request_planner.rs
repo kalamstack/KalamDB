@@ -28,6 +28,7 @@ impl RequestPlanner {
             table_id: input.table_id,
             table_type: input.table_type,
             tenant_context,
+            remote_session: None,
             projection: physical_projection,
             filters: physical_filters,
             limit: input.limit,
@@ -95,7 +96,7 @@ fn collect_virtual_columns(projected_columns: &[String]) -> Vec<VirtualColumn> {
             USER_ID_COLUMN => virtual_columns.push(VirtualColumn::UserId),
             SEQ_COLUMN => virtual_columns.push(VirtualColumn::Seq),
             DELETED_COLUMN => virtual_columns.push(VirtualColumn::Deleted),
-            _ => {}
+            _ => {},
         }
     }
 
@@ -105,12 +106,7 @@ fn collect_virtual_columns(projected_columns: &[String]) -> Vec<VirtualColumn> {
 fn collect_physical_projection(projected_columns: &[String]) -> Option<Vec<String>> {
     let columns: Vec<String> = projected_columns
         .iter()
-        .filter(|column_name| {
-            !matches!(
-                column_name.as_str(),
-                USER_ID_COLUMN | SEQ_COLUMN | DELETED_COLUMN
-            )
-        })
+        .filter(|column_name| column_name.as_str() != USER_ID_COLUMN)
         .cloned()
         .collect();
 
@@ -121,7 +117,9 @@ fn collect_physical_projection(projected_columns: &[String]) -> Option<Vec<Strin
     }
 }
 
-fn extract_user_id_from_filters(filters: Vec<Expr>) -> Result<(Option<UserId>, Vec<Expr>), KalamPgError> {
+fn extract_user_id_from_filters(
+    filters: Vec<Expr>,
+) -> Result<(Option<UserId>, Vec<Expr>), KalamPgError> {
     let mut explicit_user_id = None;
     let mut physical_filters = Vec::new();
 
@@ -153,10 +151,7 @@ fn extract_user_id_from_rows(rows: Vec<Row>) -> Result<(Option<UserId>, Vec<Row>
 
 fn extract_user_id_from_row(row: Row) -> Result<(Option<UserId>, Row), KalamPgError> {
     let mut values = row.values;
-    let user_id = values
-        .remove(USER_ID_COLUMN)
-        .map(extract_user_id_from_scalar)
-        .transpose()?;
+    let user_id = values.remove(USER_ID_COLUMN).map(extract_user_id_from_scalar).transpose()?;
 
     Ok((user_id, Row::new(values)))
 }
@@ -204,7 +199,7 @@ fn extract_user_id_literal(expr: &Expr) -> Result<Option<UserId>, KalamPgError> 
     match value {
         ScalarValue::Utf8(Some(value)) | ScalarValue::LargeUtf8(Some(value)) => {
             Ok(Some(UserId::new(value.clone())))
-        }
+        },
         ScalarValue::Utf8(None) | ScalarValue::LargeUtf8(None) | ScalarValue::Null => Ok(None),
         _ => Err(KalamPgError::Validation(format!(
             "_userid filters must compare against string literals, got {}",
@@ -217,7 +212,7 @@ fn extract_user_id_from_scalar(value: ScalarValue) -> Result<UserId, KalamPgErro
     match value {
         ScalarValue::Utf8(Some(value)) | ScalarValue::LargeUtf8(Some(value)) => {
             Ok(UserId::new(value))
-        }
+        },
         other => Err(KalamPgError::Validation(format!(
             "_userid values must be strings, got {}",
             other
@@ -241,6 +236,6 @@ fn merge_user_id(
         None => {
             *current = Some(next);
             Ok(())
-        }
+        },
     }
 }

@@ -103,3 +103,4 @@ ui/package-lock.json
 /target_cli_smoke_run
 /link/sdks/dart/build
 /link/sdks/dart/.dart_tool
+/vendor

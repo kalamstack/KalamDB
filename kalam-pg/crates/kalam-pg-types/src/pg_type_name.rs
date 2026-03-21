@@ -20,7 +20,7 @@ pub fn pg_type_name_for(data_type: &KalamDataType) -> Result<String, KalamPgErro
         KalamDataType::Json | KalamDataType::File => "JSONB".to_string(),
         KalamDataType::Decimal { precision, scale } => {
             format!("NUMERIC({}, {})", precision, scale)
-        }
+        },
         KalamDataType::Embedding(dimension) => format!("VECTOR({})", dimension),
     };
 

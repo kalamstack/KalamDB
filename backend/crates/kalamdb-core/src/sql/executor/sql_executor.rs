@@ -19,6 +19,44 @@ enum DmlKind {
 }
 
 impl SqlExecutor {
+    fn logical_plan_has_limit(plan: &datafusion::logical_expr::LogicalPlan) -> bool {
+        matches!(plan, datafusion::logical_expr::LogicalPlan::Limit(_))
+            || plan.inputs().iter().any(|input| Self::logical_plan_has_limit(input))
+    }
+
+    fn apply_select_limits(
+        &self,
+        df: datafusion::dataframe::DataFrame,
+    ) -> Result<datafusion::dataframe::DataFrame, KalamDbError> {
+        let max_query_limit = self.app_context.config().limits.max_query_limit;
+        let default_query_limit = self.app_context.config().limits.default_query_limit;
+        let has_explicit_limit = Self::logical_plan_has_limit(df.logical_plan());
+
+        if !has_explicit_limit && default_query_limit > 0 {
+            let effective_default_limit = if max_query_limit > 0 {
+                default_query_limit.min(max_query_limit)
+            } else {
+                default_query_limit
+            };
+
+            log::debug!(
+                target: "sql::exec",
+                "Applying default query limit {} to unbounded SELECT",
+                effective_default_limit
+            );
+
+            return df
+                .limit(0, Some(effective_default_limit))
+                .map_err(Self::datafusion_to_execution_error);
+        }
+
+        if max_query_limit > 0 {
+            return df.limit(0, Some(max_query_limit)).map_err(Self::datafusion_to_execution_error);
+        }
+
+        Ok(df)
+    }
+
     fn dml_operation_name(dml_kind: DmlKind) -> &'static str {
         match dml_kind {
             DmlKind::Insert => "INSERT",
@@ -679,6 +717,8 @@ impl SqlExecutor {
         // Check permissions on the logical plan
         //FIXME: Check do we still need this?? now we have a permission check in each tableprovider
         //self.check_select_permissions(df.logical_plan(), exec_ctx)?;
+
+        let df = self.apply_select_limits(df)?;
 
         // Capture schema before collecting (needed for 0 row results)
         // DFSchema -> Arrow Schema via inner() method

@@ -10,12 +10,20 @@ repository = { workspace = true }
 async-trait = { workspace = true }
 datafusion = { workspace = true }
 serde = { workspace = true }
+log = { workspace = true }
 kalam-pg-api = { path = "../kalam-pg-api" }
 kalam-pg-common = { path = "../kalam-pg-common" }
 kalamdb-commons = { workspace = true }
+kalamdb-configs = { path = "../../../backend/crates/kalamdb-configs" }
+kalamdb-server = { path = "../../../backend", default-features = false }
+kalamdb-store = { path = "../../../backend/crates/kalamdb-store" }
+kalamdb-system = { path = "../../../backend/crates/kalamdb-system" }
 kalamdb-tables = { workspace = true }
 kalamdb-core = { path = "../../../backend/crates/kalamdb-core" }
 tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-log = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 chrono = { workspace = true }

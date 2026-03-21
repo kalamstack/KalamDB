@@ -1,0 +1,23 @@
+# KalamDB standalone HTTP sidecar for docker/pg compose.
+#
+# This service is intentionally isolated from the PostgreSQL embedded extension
+# storage. The embedded runtime keeps its RocksDB files under the Postgres data
+# directory, and a second process must not open the same RocksDB path.
+
+[server]
+host = "0.0.0.0"
+port = 8080
+
+[storage]
+data_path = "/data"
+
+[rate_limit]
+max_queries_per_sec = 1000000
+max_messages_per_sec = 10000000
+max_subscriptions_per_user = 100000
+max_auth_requests_per_ip_per_sec = 20000000
+max_connections_per_ip = 100000
+max_requests_per_ip_per_sec = 20000000
+request_body_limit_bytes = 104857600
+ban_duration_seconds = 300
+enable_connection_protection = true

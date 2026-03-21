@@ -1030,6 +1030,17 @@ impl SchemaRegistry {
         Ok(all_entries)
     }
 
+    /// Return a snapshot of the currently cached table definitions.
+    ///
+    /// This is useful for extension or runtime glue that needs visibility into
+    /// newly registered tables before a persistence-backed rescan occurs.
+    pub fn cached_table_definitions(&self) -> Vec<TableDefinition> {
+        self.table_cache
+            .iter()
+            .map(|entry| entry.value().table.as_ref().clone())
+            .collect()
+    }
+
     /// Get table definition if it exists (optimized single-call pattern)
     ///
     /// Combines table existence check + definition fetch in one operation.

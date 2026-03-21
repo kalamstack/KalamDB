@@ -27,6 +27,7 @@ use kalamdb_commons::models::{NamespaceId, UserId};
 use kalamdb_commons::{constants::ColumnFamilyNames, NodeId};
 use kalamdb_configs::ServerConfig;
 use kalamdb_filestore::StorageRegistry;
+use kalamdb_pg::KalamPgService;
 use kalamdb_raft::CommandExecutor;
 use kalamdb_sharding::{GroupId, ShardRouter};
 use kalamdb_store::StorageBackend;
@@ -497,6 +498,17 @@ impl AppContext {
                     Arc::clone(&notification_service),
                 ));
                 raft_executor.set_cluster_handler(cluster_handler);
+                let pg_executor = Arc::new(crate::pg_executor::CorePgQueryExecutor::new(
+                    Arc::clone(&app_ctx),
+                ));
+                let pg_service = Arc::new(
+                    KalamPgService::new(Some(format!(
+                        "Bearer {}",
+                        app_ctx.config().auth.jwt_secret
+                    )))
+                    .with_query_executor(pg_executor),
+                );
+                raft_executor.set_pg_service(pg_service);
                 log::info!("Wired gRPC ClusterClient and CoreClusterHandler for cluster RPC");
             }
 

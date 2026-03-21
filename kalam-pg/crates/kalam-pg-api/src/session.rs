@@ -1,5 +1,98 @@
+use kalam_pg_common::KalamPgError;
 use kalamdb_commons::models::UserId;
 use serde::{Deserialize, Serialize};
+
+/// Remote session state shared between the PostgreSQL backend connection and KalamDB.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RemoteSessionContext {
+    session_id: String,
+    current_schema: Option<String>,
+    transaction_id: Option<String>,
+}
+
+impl RemoteSessionContext {
+    /// Create a validated remote session context.
+    pub fn new(
+        session_id: impl Into<String>,
+        current_schema: Option<impl Into<String>>,
+        transaction_id: Option<impl Into<String>>,
+    ) -> Result<Self, KalamPgError> {
+        let session_id = session_id.into().trim().to_string();
+        if session_id.is_empty() {
+            return Err(KalamPgError::Validation(
+                "remote session_id must not be empty".to_string(),
+            ));
+        }
+
+        let current_schema = match current_schema.map(Into::into) {
+            Some(value) => {
+                let trimmed = value.trim().to_string();
+                if trimmed.is_empty() {
+                    return Err(KalamPgError::Validation(
+                        "remote current_schema must not be empty".to_string(),
+                    ));
+                }
+                Some(trimmed)
+            },
+            None => None,
+        };
+
+        let transaction_id = match transaction_id.map(Into::into) {
+            Some(value) => {
+                let trimmed = value.trim().to_string();
+                if trimmed.is_empty() {
+                    return Err(KalamPgError::Validation(
+                        "remote transaction_id must not be empty".to_string(),
+                    ));
+                }
+                Some(trimmed)
+            },
+            None => None,
+        };
+
+        Ok(Self {
+            session_id,
+            current_schema,
+            transaction_id,
+        })
+    }
+
+    /// Validate a remote session context.
+    pub fn validate(&self) -> Result<(), KalamPgError> {
+        if self.session_id.trim().is_empty() {
+            return Err(KalamPgError::Validation(
+                "remote session_id must not be empty".to_string(),
+            ));
+        }
+        if let Some(current_schema) = &self.current_schema {
+            if current_schema.trim().is_empty() {
+                return Err(KalamPgError::Validation(
+                    "remote current_schema must not be empty".to_string(),
+                ));
+            }
+        }
+        if let Some(transaction_id) = &self.transaction_id {
+            if transaction_id.trim().is_empty() {
+                return Err(KalamPgError::Validation(
+                    "remote transaction_id must not be empty".to_string(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn session_id(&self) -> &str {
+        self.session_id.as_str()
+    }
+
+    pub fn current_schema(&self) -> Option<&str> {
+        self.current_schema.as_deref()
+    }
+
+    pub fn transaction_id(&self) -> Option<&str> {
+        self.transaction_id.as_deref()
+    }
+}
 
 /// Session and tenant context extracted by the FDW before execution.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -46,10 +139,10 @@ impl TenantContext {
     }
 
     /// Validate that the explicit and session identities do not conflict.
-    pub fn validate(&self) -> Result<(), kalam_pg_common::KalamPgError> {
+    pub fn validate(&self) -> Result<(), KalamPgError> {
         if let (Some(explicit), Some(session)) = (&self.explicit_user_id, &self.session_user_id) {
             if explicit != session {
-                return Err(kalam_pg_common::KalamPgError::Validation(format!(
+                return Err(KalamPgError::Validation(format!(
                     "explicit user_id '{}' does not match session user_id '{}'",
                     explicit.as_str(),
                     session.as_str()

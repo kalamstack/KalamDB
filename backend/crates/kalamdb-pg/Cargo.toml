@@ -1,0 +1,19 @@
+[package]
+name = "kalamdb-pg"
+version = { workspace = true }
+edition = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[dependencies]
+async-trait = { workspace = true }
+bytes = { workspace = true }
+dashmap = { workspace = true }
+log = { workspace = true }
+prost = { workspace = true }
+serde_json = { workspace = true }
+tonic = { workspace = true }
+tonic-prost = { workspace = true }
+
+[dev-dependencies]

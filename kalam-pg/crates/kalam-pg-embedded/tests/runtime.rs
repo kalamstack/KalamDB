@@ -1,6 +1,7 @@
 use chrono::Utc;
-use kalam_pg_embedded::EmbeddedKalamRuntime;
+use datafusion::scalar::ScalarValue;
 use kalam_pg_api::{InsertRequest, KalamBackendExecutor, ScanRequest, TenantContext};
+use kalam_pg_embedded::EmbeddedKalamRuntime;
 use kalamdb_commons::models::datatypes::KalamDataType;
 use kalamdb_commons::models::rows::Row;
 use kalamdb_commons::models::schemas::{
@@ -14,7 +15,6 @@ use kalamdb_store::test_utils::TestDb;
 use kalamdb_store::StorageBackend;
 use kalamdb_system::providers::storages::models::StorageType;
 use kalamdb_system::{Storage, StoragePartition, SystemTable};
-use datafusion::scalar::ScalarValue;
 use std::sync::Arc;
 
 fn test_app_context_simple() -> Arc<AppContext> {
@@ -77,10 +77,7 @@ async fn runtime_wraps_existing_app_context() {
 }
 
 fn register_table(app_context: &Arc<AppContext>, table_def: TableDefinition) {
-    app_context
-        .schema_registry()
-        .put(table_def)
-        .expect("register table definition");
+    app_context.schema_registry().put(table_def).expect("register table definition");
 }
 
 #[tokio::test]
@@ -168,11 +165,7 @@ async fn embedded_runtime_poc_round_trips_shared_rows() {
         .expect("insert shared row");
 
     let response = runtime
-        .scan(ScanRequest::new(
-            table_id,
-            TableType::Shared,
-            TenantContext::anonymous(),
-        ))
+        .scan(ScanRequest::new(table_id, TableType::Shared, TenantContext::anonymous()))
         .await
         .expect("scan shared table");
 
@@ -209,14 +202,8 @@ async fn embedded_runtime_poc_round_trips_stream_rows() {
             TableType::Stream,
             tenant.clone(),
             vec![Row::from_vec(vec![
-                (
-                    "event_id".to_string(),
-                    ScalarValue::Utf8(Some("evt-1".to_string())),
-                ),
-                (
-                    "payload".to_string(),
-                    ScalarValue::Utf8(Some("typing".to_string())),
-                ),
+                ("event_id".to_string(), ScalarValue::Utf8(Some("evt-1".to_string()))),
+                ("payload".to_string(), ScalarValue::Utf8(Some("typing".to_string()))),
             ])],
         ))
         .await

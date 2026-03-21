@@ -1,0 +1,109 @@
+# KalamDB PostgreSQL Extension - Docker Build
+#
+# Multi-stage Dockerfile that:
+#   1. Builds the pg_kalam embedded extension from source
+#   2. Installs it into PostgreSQL 16
+#   3. Produces a ready-to-run image
+#
+# Build from repo root:
+#   docker build -f docker/pg/Dockerfile -t kalamdb-pg:latest .
+
+# ---------------------------------------------------------------------------
+# Stage 1: Builder — Rust toolchain + PostgreSQL 16 dev headers
+# ---------------------------------------------------------------------------
+FROM rust:1.92-bookworm AS builder
+
+ENV CARGO_BUILD_JOBS=1
+ENV CARGO_INCREMENTAL=0
+ENV RUSTFLAGS=-Cdebuginfo=0
+
+# Install PostgreSQL 16 server + dev headers (needed for pgrx)
+# Add PGDG apt repository for PostgreSQL packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl ca-certificates gnupg lsb-release \
+    && echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+       > /etc/apt/sources.list.d/pgdg.list \
+    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+       | gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        postgresql-16 \
+        postgresql-server-dev-16 \
+        libclang-dev \
+        clang \
+        pkg-config \
+        libssl-dev \
+        cmake \
+        make \
+        git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install cargo-pgrx matching the pinned version
+RUN cargo install cargo-pgrx --version "=0.16.1" --locked
+
+# Initialise pgrx for PG 16 using the system-installed pg_config
+RUN cargo pgrx init --pg16=/usr/bin/pg_config
+
+WORKDIR /build
+
+# --- Dependency cache layer ---
+# Copy workspace Cargo files first to cache dependency downloads
+COPY Cargo.toml Cargo.lock ./
+COPY backend/Cargo.toml backend/Cargo.toml
+COPY backend/build.rs backend/build.rs
+COPY cli/Cargo.toml cli/Cargo.toml
+COPY cli/build.rs cli/build.rs
+COPY link/Cargo.toml link/Cargo.toml
+COPY benchv2/Cargo.toml benchv2/Cargo.toml
+
+# Copy all crate Cargo.toml files for the workspace resolver
+COPY backend/crates/kalamdb-commons/Cargo.toml backend/crates/kalamdb-commons/Cargo.toml
+COPY backend/crates/kalamdb-configs/Cargo.toml backend/crates/kalamdb-configs/Cargo.toml
+COPY backend/crates/kalamdb-store/Cargo.toml backend/crates/kalamdb-store/Cargo.toml
+COPY backend/crates/kalamdb-system/Cargo.toml backend/crates/kalamdb-system/Cargo.toml
+COPY backend/crates/kalamdb-filestore/Cargo.toml backend/crates/kalamdb-filestore/Cargo.toml
+COPY backend/crates/kalamdb-core/Cargo.toml backend/crates/kalamdb-core/Cargo.toml
+COPY backend/crates/kalamdb-sql/Cargo.toml backend/crates/kalamdb-sql/Cargo.toml
+COPY backend/crates/kalamdb-tables/Cargo.toml backend/crates/kalamdb-tables/Cargo.toml
+COPY backend/crates/kalamdb-streams/Cargo.toml backend/crates/kalamdb-streams/Cargo.toml
+COPY backend/crates/kalamdb-auth/Cargo.toml backend/crates/kalamdb-auth/Cargo.toml
+COPY backend/crates/kalamdb-api/Cargo.toml backend/crates/kalamdb-api/Cargo.toml
+COPY backend/crates/kalamdb-session/Cargo.toml backend/crates/kalamdb-session/Cargo.toml
+COPY backend/crates/kalamdb-observability/Cargo.toml backend/crates/kalamdb-observability/Cargo.toml
+COPY backend/crates/kalamdb-publisher/Cargo.toml backend/crates/kalamdb-publisher/Cargo.toml
+COPY backend/crates/kalamdb-raft/Cargo.toml backend/crates/kalamdb-raft/Cargo.toml
+COPY backend/crates/kalamdb-sharding/Cargo.toml backend/crates/kalamdb-sharding/Cargo.toml
+COPY backend/crates/kalamdb-views/Cargo.toml backend/crates/kalamdb-views/Cargo.toml
+COPY backend/crates/kalamdb-vector/Cargo.toml backend/crates/kalamdb-vector/Cargo.toml
+COPY backend/crates/kalamdb-macros/Cargo.toml backend/crates/kalamdb-macros/Cargo.toml
+COPY backend/crates/kalamdb-dba/Cargo.toml backend/crates/kalamdb-dba/Cargo.toml
+COPY backend/crates/kalamdb-oidc/Cargo.toml backend/crates/kalamdb-oidc/Cargo.toml
+
+COPY kalam-pg/crates/kalam-pg-common/Cargo.toml kalam-pg/crates/kalam-pg-common/Cargo.toml
+COPY kalam-pg/crates/kalam-pg-api/Cargo.toml kalam-pg/crates/kalam-pg-api/Cargo.toml
+COPY kalam-pg/crates/kalam-pg-types/Cargo.toml kalam-pg/crates/kalam-pg-types/Cargo.toml
+COPY kalam-pg/crates/kalam-pg-fdw/Cargo.toml kalam-pg/crates/kalam-pg-fdw/Cargo.toml
+COPY kalam-pg/crates/kalam-pg-client/Cargo.toml kalam-pg/crates/kalam-pg-client/Cargo.toml
+COPY kalam-pg/crates/kalam-pg-embedded/Cargo.toml kalam-pg/crates/kalam-pg-embedded/Cargo.toml
+COPY kalam-pg/crates/kalam-pg-extension/Cargo.toml kalam-pg/crates/kalam-pg-extension/Cargo.toml
+
+COPY link/src/lib.rs link/src/lib.rs
+COPY link/kalam-link-dart/Cargo.toml link/kalam-link-dart/Cargo.toml
+
+# Vendored deps
+COPY vendor/ vendor/
+
+# --- Full source copy ---
+COPY backend/ backend/
+COPY kalam-pg/ kalam-pg/
+COPY cli/ cli/
+COPY link/ link/
+COPY benchv2/ benchv2/
+COPY version.toml version.toml
+
+# Build only the Linux shared library. The SQL/control files are already
+# generated by the local macOS `cargo pgrx install` and are platform-agnostic.
+RUN cargo build \
+    -p kalam-pg-extension \
+    --no-default-features \
+    -F 'pg16 embedded'
+

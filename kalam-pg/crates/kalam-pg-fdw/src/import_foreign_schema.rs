@@ -1,4 +1,4 @@
-use kalam_pg_common::{DELETED_COLUMN, KalamPgError, SEQ_COLUMN, USER_ID_COLUMN};
+use kalam_pg_common::{KalamPgError, DELETED_COLUMN, SEQ_COLUMN, USER_ID_COLUMN};
 use kalam_pg_types::foreign_column_definition;
 use kalamdb_commons::models::schemas::TableDefinition;
 use kalamdb_commons::TableType;
@@ -9,9 +9,13 @@ pub fn create_foreign_table_sql(
     foreign_schema: &str,
     table_definition: &TableDefinition,
 ) -> Result<String, KalamPgError> {
+    // Filter out virtual/system columns that we append ourselves below.
+    let virtual_names: &[&str] = &[USER_ID_COLUMN, SEQ_COLUMN, DELETED_COLUMN];
+
     let mut columns: Vec<String> = table_definition
         .columns
         .iter()
+        .filter(|col| !virtual_names.contains(&col.column_name.as_str()))
         .map(foreign_column_definition)
         .collect::<Result<Vec<_>, _>>()?;
 

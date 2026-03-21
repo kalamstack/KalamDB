@@ -73,14 +73,21 @@ async fn try_fast_update_from_ast(
     prepared_table_id: Option<&TableId>,
     prepared_table_type: Option<TableType>,
 ) -> Result<Option<ExecutionResult>, KalamDbError> {
-    if update.from.is_some() || update.returning.is_some() || update.or.is_some() || update.limit.is_some() {
+    if update.from.is_some()
+        || update.returning.is_some()
+        || update.or.is_some()
+        || update.limit.is_some()
+    {
         log_fast_path_skip("update", "unsupported_update_clauses");
         return Ok(None);
     }
 
     let table_id = match prepared_table_id {
         Some(id) => id.clone(),
-        None => match extract_table_id_from_table_with_joins(&update.table, exec_ctx.default_namespace().as_str()) {
+        None => match extract_table_id_from_table_with_joins(
+            &update.table,
+            exec_ctx.default_namespace().as_str(),
+        ) {
             Some(id) => id,
             None => {
                 log_fast_path_skip("update", "unsupported_table_reference");
@@ -95,12 +102,19 @@ async fn try_fast_update_from_ast(
     };
 
     let table_type = prepared_table_type.unwrap_or(table_def.table_type);
-    if !matches!(table_type, TableType::User | TableType::Shared) || table_id.namespace_id().is_system_namespace() {
+    if !matches!(table_type, TableType::User | TableType::Shared)
+        || table_id.namespace_id().is_system_namespace()
+    {
         log_fast_path_skip("update", "unsupported_table_type");
         return Ok(None);
     }
 
-    check_fast_path_write_access(exec_ctx, &table_id, table_type, shared_table_access_level(&table_def))?;
+    check_fast_path_write_access(
+        exec_ctx,
+        &table_id,
+        table_type,
+        shared_table_access_level(&table_def),
+    )?;
 
     let pk_columns = table_def.get_primary_key_columns();
     if pk_columns.len() != 1 {
@@ -123,7 +137,8 @@ async fn try_fast_update_from_ast(
         },
     };
 
-    let provider: Arc<dyn KalamTableProvider> = match schema_registry.get_kalam_provider(&table_id) {
+    let provider: Arc<dyn KalamTableProvider> = match schema_registry.get_kalam_provider(&table_id)
+    {
         Some(provider) => provider,
         None => {
             log_fast_path_skip("update", "provider_not_cached");
@@ -138,9 +153,7 @@ async fn try_fast_update_from_ast(
         "sql.fast_update"
     );
 
-    let updated = provider
-        .update_row_by_pk(exec_ctx.user_id(), &pk_value, updates)
-        .await?;
+    let updated = provider.update_row_by_pk(exec_ctx.user_id(), &pk_value, updates).await?;
 
     Ok(Some(ExecutionResult::Updated {
         rows_affected: usize::from(updated),
@@ -154,19 +167,26 @@ async fn try_fast_delete_from_ast(
     prepared_table_id: Option<&TableId>,
     prepared_table_type: Option<TableType>,
 ) -> Result<Option<ExecutionResult>, KalamDbError> {
-    if delete.using.is_some() || delete.returning.is_some() || !delete.order_by.is_empty() || delete.limit.is_some() || !delete.tables.is_empty() {
+    if delete.using.is_some()
+        || delete.returning.is_some()
+        || !delete.order_by.is_empty()
+        || delete.limit.is_some()
+        || !delete.tables.is_empty()
+    {
         log_fast_path_skip("delete", "unsupported_delete_clauses");
         return Ok(None);
     }
 
     let table_id = match prepared_table_id {
         Some(id) => id.clone(),
-        None => match extract_table_id_from_delete(&delete, exec_ctx.default_namespace().as_str()) {
-            Some(id) => id,
-            None => {
-                log_fast_path_skip("delete", "unsupported_table_reference");
-                return Ok(None);
-            },
+        None => {
+            match extract_table_id_from_delete(&delete, exec_ctx.default_namespace().as_str()) {
+                Some(id) => id,
+                None => {
+                    log_fast_path_skip("delete", "unsupported_table_reference");
+                    return Ok(None);
+                },
+            }
         },
     };
 
@@ -176,12 +196,19 @@ async fn try_fast_delete_from_ast(
     };
 
     let table_type = prepared_table_type.unwrap_or(table_def.table_type);
-    if !matches!(table_type, TableType::User | TableType::Shared) || table_id.namespace_id().is_system_namespace() {
+    if !matches!(table_type, TableType::User | TableType::Shared)
+        || table_id.namespace_id().is_system_namespace()
+    {
         log_fast_path_skip("delete", "unsupported_table_type");
         return Ok(None);
     }
 
-    check_fast_path_write_access(exec_ctx, &table_id, table_type, shared_table_access_level(&table_def))?;
+    check_fast_path_write_access(
+        exec_ctx,
+        &table_id,
+        table_type,
+        shared_table_access_level(&table_def),
+    )?;
 
     let pk_columns = table_def.get_primary_key_columns();
     if pk_columns.len() != 1 {
@@ -197,7 +224,8 @@ async fn try_fast_delete_from_ast(
         },
     };
 
-    let provider: Arc<dyn KalamTableProvider> = match schema_registry.get_kalam_provider(&table_id) {
+    let provider: Arc<dyn KalamTableProvider> = match schema_registry.get_kalam_provider(&table_id)
+    {
         Some(provider) => provider,
         None => {
             log_fast_path_skip("delete", "provider_not_cached");

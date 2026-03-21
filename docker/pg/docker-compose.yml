@@ -1,0 +1,48 @@
+# KalamDB PostgreSQL Extension — Docker Compose
+#
+# Runs the official PostgreSQL 16 image and copies the Kalam extension artifacts
+# into the container at startup.
+#
+# Usage:
+#   # Generate Linux extension artifacts when the extension changes:
+#   ./docker/pg/build.sh --artifacts
+#
+#   # Start PostgreSQL with the mounted extension artifacts:
+#   cd docker/pg && docker compose up -d
+#
+#   # Connect:
+#   psql -h localhost -p 5433 -U kalamdb -d kalamdb
+#
+#   # Run tests:
+#   ./test.sh
+
+services:
+  kalamdb-pg:
+    image: postgres:16-bookworm
+    container_name: kalamdb-pg
+    entrypoint: ["/usr/local/bin/kalam-pg-entrypoint.sh"]
+    ports:
+      - "${KALAMDB_PG_PORT:-5433}:5432"
+      - "${KALAM_PG_HTTP_PORT:-8080}:${KALAM_PG_HTTP_PORT:-8080}"
+    environment:
+      POSTGRES_USER: kalamdb
+      POSTGRES_PASSWORD: kalamdb123
+      POSTGRES_DB: kalamdb
+      KALAM_PG_HTTP_ENABLED: "${KALAM_PG_HTTP_ENABLED:-true}"
+      KALAM_PG_HTTP_HOST: "${KALAM_PG_HTTP_HOST:-0.0.0.0}"
+      KALAM_PG_HTTP_PORT: "${KALAM_PG_HTTP_PORT:-8080}"
+    volumes:
+      - ./entrypoint.sh:/usr/local/bin/kalam-pg-entrypoint.sh:ro
+      - ./keep-http-runtime.sh:/usr/local/bin/kalam-pg-keep-http-runtime.sh:ro
+      - ./artifacts:/kalam-ext:ro
+      - ./init.sql:/docker-entrypoint-initdb.d/01-kalam-init.sql:ro
+      - kalamdb_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kalamdb -d kalamdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  kalamdb_pg_data:
+    driver: local

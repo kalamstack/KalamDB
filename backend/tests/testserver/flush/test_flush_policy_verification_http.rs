@@ -75,11 +75,7 @@ async fn query_count_with_auth(
             auth_header,
         )
         .await?;
-    anyhow::ensure!(
-        resp.status == ResponseStatus::Success,
-        "count query failed: {:?}",
-        resp.error
-    );
+    anyhow::ensure!(resp.status == ResponseStatus::Success, "count query failed: {:?}", resp.error);
 
     let row = resp
         .results

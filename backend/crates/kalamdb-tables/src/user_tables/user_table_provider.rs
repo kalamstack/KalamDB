@@ -607,84 +607,89 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
                 "UserTableProvider",
             )?;
 
-        // Validate PRIMARY KEY uniqueness if user provided PK value
-        base::ensure_unique_pk_value(self, Some(user_id), &row_data).await?;
+            // Validate PRIMARY KEY uniqueness if user provided PK value
+            base::ensure_unique_pk_value(self, Some(user_id), &row_data).await?;
 
-        // Generate new SeqId via SystemColumnsService
-        let sys_cols = self.core.services.system_columns.clone();
-        let seq_id = sys_cols.generate_seq_id().map_err(|e| {
-            KalamDbError::InvalidOperation(format!("SeqId generation failed: {}", e))
-        })?;
+            // Generate new SeqId via SystemColumnsService
+            let sys_cols = self.core.services.system_columns.clone();
+            let seq_id = sys_cols.generate_seq_id().map_err(|e| {
+                KalamDbError::InvalidOperation(format!("SeqId generation failed: {}", e))
+            })?;
 
-        // Create UserTableRow directly
-        let entity = UserTableRow {
-            user_id: user_id.clone(),
-            _seq: seq_id,
-            _deleted: false,
-            fields: row_data,
-        };
+            // Create UserTableRow directly
+            let entity = UserTableRow {
+                user_id: user_id.clone(),
+                _seq: seq_id,
+                _deleted: false,
+                fields: row_data,
+            };
 
-        // Create composite key
-        let row_key = UserTableRowId::new(user_id.clone(), seq_id);
+            // Create composite key
+            let row_key = UserTableRowId::new(user_id.clone(), seq_id);
 
-        // log::info!("🔍 [AS_USER_DEBUG] Inserting row for user_id='{}' _seq={}",
-        //            user_id.as_str(), seq_id);
+            // log::info!("🔍 [AS_USER_DEBUG] Inserting row for user_id='{}' _seq={}",
+            //            user_id.as_str(), seq_id);
 
-        // Store the entity in RocksDB (hot storage) with PK index maintenance
-        self.store.insert_async(row_key.clone(), entity.clone()).await.map_err(|e| {
-            KalamDbError::InvalidOperation(format!("Failed to insert user table row: {}", e))
-        })?;
+            // Store the entity in RocksDB (hot storage) with PK index maintenance
+            self.store.insert_async(row_key.clone(), entity.clone()).await.map_err(|e| {
+                KalamDbError::InvalidOperation(format!("Failed to insert user table row: {}", e))
+            })?;
 
-        log::debug!("Inserted user table row for user {} with _seq {}", user_id.as_str(), seq_id);
-
-        if let Err(e) = self.stage_vector_upsert(user_id, seq_id, &entity.fields).await {
-            log::warn!(
-                "Failed to stage vector upsert for table={}, user={}, seq={}: {}",
-                self.core.table_id(),
+            log::debug!(
+                "Inserted user table row for user {} with _seq {}",
                 user_id.as_str(),
-                seq_id.as_i64(),
-                e
+                seq_id
             );
-        }
 
-        // Mark manifest as having pending writes (hot data needs to be flushed)
-        let manifest_service = self.core.services.manifest_service.clone();
-        if let Err(e) = manifest_service.mark_pending_write(self.core.table_id(), Some(user_id)) {
-            log::warn!(
-                "Failed to mark manifest as pending_write for {}: {}",
-                self.core.table_id(),
-                e
-            );
-        }
-
-        // Fire live query + topic notification (INSERT)
-        let notification_service = self.core.services.notification_service.clone();
-        let table_id = self.core.table_id().clone();
-
-        let has_topics = self.core.has_topic_routes(&table_id);
-        let has_live_subs = notification_service.has_subscribers(Some(&user_id), &table_id);
-        if has_topics || has_live_subs {
-            // Build complete row including system columns (_seq, _deleted)
-            let row = Self::build_notification_row(&entity);
-            if has_topics {
-                self.core
-                    .publish_to_topics(
-                        &table_id,
-                        kalamdb_commons::models::TopicOp::Insert,
-                        &row,
-                        Some(&user_id),
-                    )
-                    .await;
-            }
-            if has_live_subs {
-                let notification = ChangeNotification::insert(table_id.clone(), row);
-                notification_service.notify_table_change(
-                    Some(user_id.clone()),
-                    table_id,
-                    notification,
+            if let Err(e) = self.stage_vector_upsert(user_id, seq_id, &entity.fields).await {
+                log::warn!(
+                    "Failed to stage vector upsert for table={}, user={}, seq={}: {}",
+                    self.core.table_id(),
+                    user_id.as_str(),
+                    seq_id.as_i64(),
+                    e
                 );
             }
-        }
+
+            // Mark manifest as having pending writes (hot data needs to be flushed)
+            let manifest_service = self.core.services.manifest_service.clone();
+            if let Err(e) = manifest_service.mark_pending_write(self.core.table_id(), Some(user_id))
+            {
+                log::warn!(
+                    "Failed to mark manifest as pending_write for {}: {}",
+                    self.core.table_id(),
+                    e
+                );
+            }
+
+            // Fire live query + topic notification (INSERT)
+            let notification_service = self.core.services.notification_service.clone();
+            let table_id = self.core.table_id().clone();
+
+            let has_topics = self.core.has_topic_routes(&table_id);
+            let has_live_subs = notification_service.has_subscribers(Some(&user_id), &table_id);
+            if has_topics || has_live_subs {
+                // Build complete row including system columns (_seq, _deleted)
+                let row = Self::build_notification_row(&entity);
+                if has_topics {
+                    self.core
+                        .publish_to_topics(
+                            &table_id,
+                            kalamdb_commons::models::TopicOp::Insert,
+                            &row,
+                            Some(&user_id),
+                        )
+                        .await;
+                }
+                if has_live_subs {
+                    let notification = ChangeNotification::insert(table_id.clone(), row);
+                    notification_service.notify_table_change(
+                        Some(user_id.clone()),
+                        table_id,
+                        notification,
+                    );
+                }
+            }
 
             Ok(row_key)
         }
@@ -994,128 +999,133 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         async move {
             let pk_name = self.primary_key_field_name().to_string();
 
-        // Get PK column data type from schema for proper type coercion
-        let schema = self.schema();
-        let pk_field = schema.field_with_name(&pk_name).map_err(|e| {
-            KalamDbError::InvalidOperation(format!(
-                "PK column '{}' not found in schema: {}",
-                pk_name, e
-            ))
-        })?;
-        let pk_column_type = pk_field.data_type();
+            // Get PK column data type from schema for proper type coercion
+            let schema = self.schema();
+            let pk_field = schema.field_with_name(&pk_name).map_err(|e| {
+                KalamDbError::InvalidOperation(format!(
+                    "PK column '{}' not found in schema: {}",
+                    pk_name, e
+                ))
+            })?;
+            let pk_column_type = pk_field.data_type();
 
-        // Convert string PK value to proper ScalarValue based on column type
-        use kalamdb_commons::conversions::parse_string_as_scalar;
-        let pk_value_scalar = parse_string_as_scalar(pk_value, pk_column_type)
-            .map_err(|e| KalamDbError::InvalidOperation(e))?;
+            // Convert string PK value to proper ScalarValue based on column type
+            use kalamdb_commons::conversions::parse_string_as_scalar;
+            let pk_value_scalar = parse_string_as_scalar(pk_value, pk_column_type)
+                .map_err(|e| KalamDbError::InvalidOperation(e))?;
 
-        // Find latest resolved row for this PK under same user
-        // First try hot storage (O(1) via PK index), then fall back to cold storage (Parquet scan)
-        let (_latest_key, latest_row) =
-            if let Some(result) = self.find_by_pk(user_id, &pk_value_scalar).await? {
-                result
-            } else if self.pk_tombstoned_in_hot(user_id, &pk_value_scalar).await? {
-                return Err(KalamDbError::NotFound(format!(
-                    "Row with {}={} was deleted",
-                    pk_name, pk_value
-                )));
-            } else {
-                // Not in hot storage, check cold storage
-                log::debug!(
+            // Find latest resolved row for this PK under same user
+            // First try hot storage (O(1) via PK index), then fall back to cold storage (Parquet scan)
+            let (_latest_key, latest_row) =
+                if let Some(result) = self.find_by_pk(user_id, &pk_value_scalar).await? {
+                    result
+                } else if self.pk_tombstoned_in_hot(user_id, &pk_value_scalar).await? {
+                    return Err(KalamDbError::NotFound(format!(
+                        "Row with {}={} was deleted",
+                        pk_name, pk_value
+                    )));
+                } else {
+                    // Not in hot storage, check cold storage
+                    log::debug!(
                 "[UPDATE] PK {} not found in hot storage, querying cold storage for user={}, pk={}",
                 pk_name,
                 user_id.as_str(),
                 pk_value
             );
-                base::find_row_by_pk(self, Some(user_id), pk_value).await?.ok_or_else(|| {
-                    KalamDbError::NotFound(format!(
-                        "Row with {}={} not found (checked both hot and cold storage)",
-                        pk_name, pk_value
-                    ))
-                })?
-            };
+                    base::find_row_by_pk(self, Some(user_id), pk_value).await?.ok_or_else(|| {
+                        KalamDbError::NotFound(format!(
+                            "Row with {}={} not found (checked both hot and cold storage)",
+                            pk_name, pk_value
+                        ))
+                    })?
+                };
 
-        // Merge updates onto latest
-        let mut merged = latest_row.fields.values.clone();
-        for (k, v) in &updates.values {
-            merged.insert(k.clone(), v.clone());
-        }
-
-        let new_fields = Row::new(merged);
-
-        // VALIDATE NOT NULL CONSTRAINTS on the merged row (per ADR-016)
-        crate::utils::datafusion_dml::validate_not_null_with_set(
-            self.core.non_null_columns(),
-            &[new_fields.clone()],
-        )
-        .map_err(|e| KalamDbError::ConstraintViolation(e.to_string()))?;
-
-        let sys_cols = self.core.services.system_columns.clone();
-        let seq_id = sys_cols.generate_seq_id().map_err(|e| {
-            KalamDbError::InvalidOperation(format!("SeqId generation failed: {}", e))
-        })?;
-        let entity = UserTableRow {
-            user_id: user_id.clone(),
-            _seq: seq_id,
-            _deleted: false,
-            fields: new_fields,
-        };
-        let row_key = UserTableRowId::new(user_id.clone(), seq_id);
-        // Insert new version (MVCC - all writes are inserts with new SeqId)
-        self.store.insert_async(row_key.clone(), entity.clone()).await.map_err(|e| {
-            KalamDbError::InvalidOperation(format!("Failed to update user table row: {}", e))
-        })?;
-
-        if let Err(e) = self.stage_vector_upsert(user_id, seq_id, &entity.fields).await {
-            log::warn!(
-                "Failed to stage vector upsert for table={}, user={}, seq={}: {}",
-                self.core.table_id(),
-                user_id.as_str(),
-                seq_id.as_i64(),
-                e
-            );
-        }
-
-        // Mark manifest as having pending writes (hot data needs to be flushed)
-        let manifest_service = self.core.services.manifest_service.clone();
-        if let Err(e) = manifest_service.mark_pending_write(self.core.table_id(), Some(user_id)) {
-            log::warn!(
-                "Failed to mark manifest as pending_write for {}: {}",
-                self.core.table_id(),
-                e
-            );
-        }
-
-        // Fire live query + topic notification (UPDATE)
-        let notification_service = self.core.services.notification_service.clone();
-        let table_id = self.core.table_id().clone();
-
-        let has_topics = self.core.has_topic_routes(&table_id);
-        let has_live_subs = notification_service.has_subscribers(Some(&user_id), &table_id);
-        if has_topics || has_live_subs {
-            let new_row = Self::build_notification_row(&entity);
-            if has_topics {
-                self.core
-                    .publish_to_topics(
-                        &table_id,
-                        kalamdb_commons::models::TopicOp::Update,
-                        &new_row,
-                        Some(&user_id),
-                    )
-                    .await;
+            // Merge updates onto latest
+            let mut merged = latest_row.fields.values.clone();
+            for (k, v) in &updates.values {
+                merged.insert(k.clone(), v.clone());
             }
-            if has_live_subs {
-                let old_row = Self::build_notification_row(&latest_row);
-                let pk_col = self.primary_key_field_name().to_string();
-                let notification =
-                    ChangeNotification::update(table_id.clone(), old_row, new_row, vec![pk_col]);
-                notification_service.notify_table_change(
-                    Some(user_id.clone()),
-                    table_id,
-                    notification,
+
+            let new_fields = Row::new(merged);
+
+            // VALIDATE NOT NULL CONSTRAINTS on the merged row (per ADR-016)
+            crate::utils::datafusion_dml::validate_not_null_with_set(
+                self.core.non_null_columns(),
+                &[new_fields.clone()],
+            )
+            .map_err(|e| KalamDbError::ConstraintViolation(e.to_string()))?;
+
+            let sys_cols = self.core.services.system_columns.clone();
+            let seq_id = sys_cols.generate_seq_id().map_err(|e| {
+                KalamDbError::InvalidOperation(format!("SeqId generation failed: {}", e))
+            })?;
+            let entity = UserTableRow {
+                user_id: user_id.clone(),
+                _seq: seq_id,
+                _deleted: false,
+                fields: new_fields,
+            };
+            let row_key = UserTableRowId::new(user_id.clone(), seq_id);
+            // Insert new version (MVCC - all writes are inserts with new SeqId)
+            self.store.insert_async(row_key.clone(), entity.clone()).await.map_err(|e| {
+                KalamDbError::InvalidOperation(format!("Failed to update user table row: {}", e))
+            })?;
+
+            if let Err(e) = self.stage_vector_upsert(user_id, seq_id, &entity.fields).await {
+                log::warn!(
+                    "Failed to stage vector upsert for table={}, user={}, seq={}: {}",
+                    self.core.table_id(),
+                    user_id.as_str(),
+                    seq_id.as_i64(),
+                    e
                 );
             }
-        }
+
+            // Mark manifest as having pending writes (hot data needs to be flushed)
+            let manifest_service = self.core.services.manifest_service.clone();
+            if let Err(e) = manifest_service.mark_pending_write(self.core.table_id(), Some(user_id))
+            {
+                log::warn!(
+                    "Failed to mark manifest as pending_write for {}: {}",
+                    self.core.table_id(),
+                    e
+                );
+            }
+
+            // Fire live query + topic notification (UPDATE)
+            let notification_service = self.core.services.notification_service.clone();
+            let table_id = self.core.table_id().clone();
+
+            let has_topics = self.core.has_topic_routes(&table_id);
+            let has_live_subs = notification_service.has_subscribers(Some(&user_id), &table_id);
+            if has_topics || has_live_subs {
+                let new_row = Self::build_notification_row(&entity);
+                if has_topics {
+                    self.core
+                        .publish_to_topics(
+                            &table_id,
+                            kalamdb_commons::models::TopicOp::Update,
+                            &new_row,
+                            Some(&user_id),
+                        )
+                        .await;
+                }
+                if has_live_subs {
+                    let old_row = Self::build_notification_row(&latest_row);
+                    let pk_col = self.primary_key_field_name().to_string();
+                    let notification = ChangeNotification::update(
+                        table_id.clone(),
+                        old_row,
+                        new_row,
+                        vec![pk_col],
+                    );
+                    notification_service.notify_table_change(
+                        Some(user_id.clone()),
+                        table_id,
+                        notification,
+                    );
+                }
+            }
             Ok(row_key)
         }
         .instrument(span)
@@ -1169,116 +1179,117 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         );
         async move {
             let pk_name = self.primary_key_field_name().to_string();
-        let schema = self.schema();
-        let pk_field = schema.field_with_name(&pk_name).map_err(|e| {
-            KalamDbError::InvalidOperation(format!(
-                "PK column '{}' not found in schema: {}",
-                pk_name, e
-            ))
-        })?;
-        let pk_column_type = pk_field.data_type();
-        let pk_value_scalar =
-            kalamdb_commons::conversions::parse_string_as_scalar(pk_value, pk_column_type)
-                .map_err(KalamDbError::InvalidOperation)?;
+            let schema = self.schema();
+            let pk_field = schema.field_with_name(&pk_name).map_err(|e| {
+                KalamDbError::InvalidOperation(format!(
+                    "PK column '{}' not found in schema: {}",
+                    pk_name, e
+                ))
+            })?;
+            let pk_column_type = pk_field.data_type();
+            let pk_value_scalar =
+                kalamdb_commons::conversions::parse_string_as_scalar(pk_value, pk_column_type)
+                    .map_err(KalamDbError::InvalidOperation)?;
 
-        // Find latest resolved row for this PK under same user
-        // First try hot storage (O(1) via PK index), then fall back to cold storage (Parquet scan)
-        let latest_row =
-            if let Some((_key, row)) = self.find_by_pk(user_id, &pk_value_scalar).await? {
-                row
-            } else if self.pk_tombstoned_in_hot(user_id, &pk_value_scalar).await? {
-                return Ok(false);
-            } else {
-                // Not in hot storage, check cold storage
-                match base::find_row_by_pk(self, Some(user_id), pk_value).await? {
-                    Some((_key, row)) => row,
-                    None => {
-                        log::trace!(
-                            "[UserProvider DELETE_BY_PK] Row with {}={} not found",
-                            pk_name,
-                            pk_value
-                        );
-                        return Ok(false);
-                    },
-                }
+            // Find latest resolved row for this PK under same user
+            // First try hot storage (O(1) via PK index), then fall back to cold storage (Parquet scan)
+            let latest_row =
+                if let Some((_key, row)) = self.find_by_pk(user_id, &pk_value_scalar).await? {
+                    row
+                } else if self.pk_tombstoned_in_hot(user_id, &pk_value_scalar).await? {
+                    return Ok(false);
+                } else {
+                    // Not in hot storage, check cold storage
+                    match base::find_row_by_pk(self, Some(user_id), pk_value).await? {
+                        Some((_key, row)) => row,
+                        None => {
+                            log::trace!(
+                                "[UserProvider DELETE_BY_PK] Row with {}={} not found",
+                                pk_name,
+                                pk_value
+                            );
+                            return Ok(false);
+                        },
+                    }
+                };
+
+            let sys_cols = self.core.services.system_columns.clone();
+            let seq_id = sys_cols.generate_seq_id().map_err(|e| {
+                KalamDbError::InvalidOperation(format!("SeqId generation failed: {}", e))
+            })?;
+
+            // Preserve ALL fields in the tombstone so they can be queried if _deleted=true
+            // This allows "undo" functionality and auditing of deleted records
+            let values = latest_row.fields.values.clone();
+
+            let entity = UserTableRow {
+                user_id: user_id.clone(),
+                _seq: seq_id,
+                _deleted: true,
+                fields: Row::new(values),
             };
-
-        let sys_cols = self.core.services.system_columns.clone();
-        let seq_id = sys_cols.generate_seq_id().map_err(|e| {
-            KalamDbError::InvalidOperation(format!("SeqId generation failed: {}", e))
-        })?;
-
-        // Preserve ALL fields in the tombstone so they can be queried if _deleted=true
-        // This allows "undo" functionality and auditing of deleted records
-        let values = latest_row.fields.values.clone();
-
-        let entity = UserTableRow {
-            user_id: user_id.clone(),
-            _seq: seq_id,
-            _deleted: true,
-            fields: Row::new(values),
-        };
-        let row_key = UserTableRowId::new(user_id.clone(), seq_id);
-        log::debug!(
-            "[UserProvider DELETE_BY_PK] Writing tombstone: user={}, pk={}, _seq={}",
-            user_id.as_str(),
-            pk_value,
-            seq_id.as_i64()
-        );
-        // Insert tombstone version (MVCC - all writes are inserts with new SeqId)
-        self.store.insert_async(row_key.clone(), entity.clone()).await.map_err(|e| {
-            KalamDbError::InvalidOperation(format!("Failed to delete user table row: {}", e))
-        })?;
-
-        if let Err(e) = self.stage_vector_delete(user_id, seq_id, pk_value).await {
-            log::warn!(
-                "Failed to stage vector delete for table={}, user={}, seq={}, pk={}: {}",
-                self.core.table_id(),
+            let row_key = UserTableRowId::new(user_id.clone(), seq_id);
+            log::debug!(
+                "[UserProvider DELETE_BY_PK] Writing tombstone: user={}, pk={}, _seq={}",
                 user_id.as_str(),
-                seq_id.as_i64(),
                 pk_value,
-                e
+                seq_id.as_i64()
             );
-        }
+            // Insert tombstone version (MVCC - all writes are inserts with new SeqId)
+            self.store.insert_async(row_key.clone(), entity.clone()).await.map_err(|e| {
+                KalamDbError::InvalidOperation(format!("Failed to delete user table row: {}", e))
+            })?;
 
-        // Mark manifest as having pending writes (hot data needs to be flushed)
-        let manifest_service = self.core.services.manifest_service.clone();
-        if let Err(e) = manifest_service.mark_pending_write(self.core.table_id(), Some(user_id)) {
-            log::warn!(
-                "Failed to mark manifest as pending_write for {}: {}",
-                self.core.table_id(),
-                e
-            );
-        }
-
-        // Fire live query + topic notification (DELETE soft)
-        let notification_service = self.core.services.notification_service.clone();
-        let table_id = self.core.table_id().clone();
-
-        let has_topics = self.core.has_topic_routes(&table_id);
-        let has_live_subs = notification_service.has_subscribers(Some(&user_id), &table_id);
-        if has_topics || has_live_subs {
-            // Provide tombstone entity with system columns for filter matching
-            let row = Self::build_notification_row(&entity);
-            if has_topics {
-                self.core
-                    .publish_to_topics(
-                        &table_id,
-                        kalamdb_commons::models::TopicOp::Delete,
-                        &row,
-                        Some(&user_id),
-                    )
-                    .await;
-            }
-            if has_live_subs {
-                let notification = ChangeNotification::delete_soft(table_id.clone(), row);
-                notification_service.notify_table_change(
-                    Some(user_id.clone()),
-                    table_id,
-                    notification,
+            if let Err(e) = self.stage_vector_delete(user_id, seq_id, pk_value).await {
+                log::warn!(
+                    "Failed to stage vector delete for table={}, user={}, seq={}, pk={}: {}",
+                    self.core.table_id(),
+                    user_id.as_str(),
+                    seq_id.as_i64(),
+                    pk_value,
+                    e
                 );
             }
-        }
+
+            // Mark manifest as having pending writes (hot data needs to be flushed)
+            let manifest_service = self.core.services.manifest_service.clone();
+            if let Err(e) = manifest_service.mark_pending_write(self.core.table_id(), Some(user_id))
+            {
+                log::warn!(
+                    "Failed to mark manifest as pending_write for {}: {}",
+                    self.core.table_id(),
+                    e
+                );
+            }
+
+            // Fire live query + topic notification (DELETE soft)
+            let notification_service = self.core.services.notification_service.clone();
+            let table_id = self.core.table_id().clone();
+
+            let has_topics = self.core.has_topic_routes(&table_id);
+            let has_live_subs = notification_service.has_subscribers(Some(&user_id), &table_id);
+            if has_topics || has_live_subs {
+                // Provide tombstone entity with system columns for filter matching
+                let row = Self::build_notification_row(&entity);
+                if has_topics {
+                    self.core
+                        .publish_to_topics(
+                            &table_id,
+                            kalamdb_commons::models::TopicOp::Delete,
+                            &row,
+                            Some(&user_id),
+                        )
+                        .await;
+                }
+                if has_live_subs {
+                    let notification = ChangeNotification::delete_soft(table_id.clone(), row);
+                    notification_service.notify_table_change(
+                        Some(user_id.clone()),
+                        table_id,
+                        notification,
+                    );
+                }
+            }
             Ok(true)
         }
         .instrument(span)
@@ -1460,18 +1471,17 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         let scan_limit = base::calculate_scan_limit(limit) * 10; // Buffer for filtering
 
         // Run hot storage (RocksDB) and cold storage (Parquet) scans concurrently
-        let hot_future = self
-            .store
-            .scan_with_raw_prefix_async(&user_prefix, start_key_bytes.as_deref(), scan_limit);
+        let hot_future = self.store.scan_with_raw_prefix_async(
+            &user_prefix,
+            start_key_bytes.as_deref(),
+            scan_limit,
+        );
         let cold_future = self.scan_parquet_files_as_batch_async(user_id, filter);
 
         let (hot_result, cold_result) = tokio::join!(hot_future, cold_future);
 
         let hot_rows = hot_result.map_err(|e| {
-            KalamDbError::InvalidOperation(format!(
-                "Failed to scan user table hot storage: {}",
-                e
-            ))
+            KalamDbError::InvalidOperation(format!("Failed to scan user table hot storage: {}", e))
         })?;
 
         log::trace!(

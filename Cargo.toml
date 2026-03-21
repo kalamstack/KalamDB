@@ -29,6 +29,7 @@ members = [
     "backend/crates/kalamdb-oidc",
     "backend/crates/kalamdb-raft",
     "backend/crates/kalamdb-views",
+    "backend/crates/kalamdb-pg",
     "backend",
     "link",
     "link/kalam-link-dart",
@@ -81,6 +82,7 @@ rocksdb = { version = "0.24.0", default-features = false, features = ["snappy", 
 # arrow_array crate into the graph and causes FixedSizeListArray type mismatches.
 # Upgrade DataFusion first before bumping Arrow/Parquet beyond this family.
 arrow = { version = "57.3.0", default-features = false, features = ["prettyprint", "json"] }
+arrow-ipc = { version = "57.3.0" }
 arrow-schema = { version = "57.3.0" }
 datafusion = { version = "52.3.0", default-features = false, features = ["sql", "parquet", "recursive_protection", "nested_expressions"] }
 datafusion-common = { version = "52.3.0" }
@@ -203,6 +205,8 @@ rust-embed = { version = "8.11.0", features = ["compression"] }
 mime_guess = "2.0"
 kalamdb-configs = { path = "backend/crates/kalamdb-configs" }
 kalamdb-server = { path = "backend" }
+pgrx = "=0.16.1"
+pgrx-tests = "=0.16.1"
 
 # Tracing / observability
 tracing = "0.1"
@@ -252,3 +256,6 @@ codegen-units = 256
 opt-level = 0
 debug = 0
 codegen-units = 256
+
+[patch.crates-io]
+librocksdb-sys = { path = "vendor/librocksdb-sys" }

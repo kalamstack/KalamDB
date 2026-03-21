@@ -7,5 +7,5 @@ pub mod traits;
 
 pub use request::{DeleteRequest, InsertRequest, ScanRequest, UpdateRequest};
 pub use response::{MutationResponse, ScanResponse};
-pub use session::TenantContext;
+pub use session::{RemoteSessionContext, TenantContext};
 pub use traits::KalamBackendExecutor;

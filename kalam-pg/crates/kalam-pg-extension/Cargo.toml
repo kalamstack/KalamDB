@@ -5,16 +5,51 @@ edition = { workspace = true }
 authors = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
+build = "build.rs"
+
+[lib]
+name = "pg_kalam"
+crate-type = ["cdylib", "lib"]
+doctest = false
+
+[[bin]]
+name = "pgrx_embed_pg_kalam"
+path = "./src/bin/pgrx_embed.rs"
 
 [features]
-default = ["embedded"]
-embedded = ["dep:kalam-pg-embedded", "dep:kalamdb-core"]
-remote = ["dep:kalam-pg-client"]
+default = ["pg16"]
+pg13 = ["pgrx/pg13", "pgrx-tests/pg13"]
+pg14 = ["pgrx/pg14", "pgrx-tests/pg14"]
+pg15 = ["pgrx/pg15", "pgrx-tests/pg15"]
+pg16 = ["pgrx/pg16", "pgrx-tests/pg16"]
+pg17 = ["pgrx/pg17", "pgrx-tests/pg17"]
+pg18 = ["pgrx/pg18", "pgrx-tests/pg18"]
+pg_test = ["embedded"]
+embedded = ["dep:kalam-pg-embedded", "dep:kalamdb-core", "dep:kalamdb-sql", "dep:kalamdb-system"]
+remote = ["dep:kalam-pg-client", "dep:tokio", "dep:async-trait"]
 
 [dependencies]
+async-trait = { workspace = true, optional = true }
+datafusion = { workspace = true }
 kalam-pg-api = { path = "../kalam-pg-api" }
 kalam-pg-client = { path = "../kalam-pg-client", optional = true }
 kalam-pg-common = { path = "../kalam-pg-common" }
 kalam-pg-embedded = { path = "../kalam-pg-embedded", optional = true }
 kalam-pg-fdw = { path = "../kalam-pg-fdw" }
+kalamdb-commons = { workspace = true }
 kalamdb-core = { path = "../../../backend/crates/kalamdb-core", optional = true }
+kalamdb-sql = { path = "../../../backend/crates/kalamdb-sql", optional = true }
+kalamdb-system = { path = "../../../backend/crates/kalamdb-system", optional = true }
+once_cell = { workspace = true }
+pgrx = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, optional = true }
+
+[dev-dependencies]
+chrono = { workspace = true }
+kalamdb-configs = { workspace = true }
+kalamdb-store = { path = "../../../backend/crates/kalamdb-store" }
+kalamdb-system = { path = "../../../backend/crates/kalamdb-system" }
+ntest = { workspace = true }
+pgrx-tests = { workspace = true }
+tokio = { workspace = true }

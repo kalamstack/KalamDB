@@ -1,0 +1,49 @@
+# KalamDB PostgreSQL Extension — Remote Mode Docker Compose
+#
+# Runs PostgreSQL with the remote-mode pg_kalam extension, connecting
+# to a KalamDB server running on the host machine.
+#
+# Usage:
+#   # 1. Start KalamDB server on the host:
+#   cd backend && cargo run
+#
+#   # 2. Build the remote-mode extension artifacts:
+#   KALAM_PG_BUILD_MODE=remote ./docker/pg/build.sh
+#
+#   # 3. Start PostgreSQL container:
+#   cd docker/pg && docker compose -f docker-compose.remote.yml up -d
+#
+#   # 4. Run remote-mode tests:
+#   ./test-remote.sh
+
+services:
+  kalamdb-pg-remote:
+    image: postgres:16-bookworm
+    container_name: kalamdb-pg-remote
+    entrypoint: ["/usr/local/bin/kalam-pg-entrypoint.sh"]
+    ports:
+      - "${KALAMDB_PG_PORT:-5434}:5432"
+    environment:
+      POSTGRES_USER: kalamdb
+      POSTGRES_PASSWORD: kalamdb123
+      POSTGRES_DB: kalamdb
+      # Disable embedded HTTP runtime (not needed for remote mode)
+      KALAM_PG_HTTP_ENABLED: "false"
+    volumes:
+      - ./entrypoint.sh:/usr/local/bin/kalam-pg-entrypoint.sh:ro
+      - ./keep-http-runtime.sh:/usr/local/bin/kalam-pg-keep-http-runtime.sh:ro
+      - ./artifacts:/kalam-ext:ro
+      - ./init-remote.sql:/docker-entrypoint-initdb.d/01-kalam-init.sql:ro
+      - kalamdb_pg_remote_data:/var/lib/postgresql/data
+    # Use host network on Linux; on macOS Docker Desktop, host.docker.internal resolves to host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kalamdb -d kalamdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  kalamdb_pg_remote_data:
+    driver: local

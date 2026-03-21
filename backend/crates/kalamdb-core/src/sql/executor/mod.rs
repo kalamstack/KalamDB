@@ -6,8 +6,8 @@
 //! handler implementations are in place.
 
 pub mod default_ordering;
-mod fast_point_dml;
 mod fast_insert;
+mod fast_point_dml;
 pub mod handler_adapter;
 pub mod handler_registry;
 pub mod handlers;

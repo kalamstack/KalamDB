@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use dashmap::DashMap;
+use kalamdb_pg::KalamPgService;
 use openraft::ServerState;
 
 use kalamdb_commons::models::{NodeId, UserId};
@@ -34,6 +35,8 @@ pub struct RaftExecutor {
     manager: Arc<RaftManager>,
     /// Cluster message handler (set before `start()`)
     cluster_handler: tokio::sync::OnceCell<Arc<dyn ClusterMessageHandler>>,
+    /// PostgreSQL remote gRPC service hosted on the shared RPC port.
+    pg_service: tokio::sync::OnceCell<Arc<KalamPgService>>,
     /// Per-peer live statistics cache, refreshed on `\cluster list` / `system.cluster` queries.
     ///
     /// Keyed by `NodeId`. Only populated in cluster mode when the node has peers.
@@ -55,6 +58,7 @@ impl RaftExecutor {
         Self {
             manager,
             cluster_handler: tokio::sync::OnceCell::new(),
+            pg_service: tokio::sync::OnceCell::new(),
             peer_stats_cache: Arc::new(DashMap::new()),
         }
     }
@@ -66,6 +70,13 @@ impl RaftExecutor {
     pub fn set_cluster_handler(&self, handler: Arc<dyn ClusterMessageHandler>) {
         if self.cluster_handler.set(handler).is_err() {
             log::warn!("ClusterMessageHandler already set in RaftExecutor");
+        }
+    }
+
+    /// Set the PostgreSQL remote gRPC service.
+    pub fn set_pg_service(&self, service: Arc<KalamPgService>) {
+        if self.pg_service.set(service).is_err() {
+            log::warn!("KalamPgService already set in RaftExecutor");
         }
     }
 
@@ -429,7 +440,9 @@ impl CommandExecutor for RaftExecutor {
         // First start the RPC server so we can receive incoming Raft RPCs
         // and cluster messages (both services share the same port)
         let rpc_addr = self.manager.config().rpc_addr.clone();
-        crate::network::start_rpc_server(self.manager.clone(), rpc_addr, handler).await?;
+        let pg_service = self.pg_service.get().map(Arc::clone);
+        crate::network::start_rpc_server(self.manager.clone(), rpc_addr, handler, pg_service)
+            .await?;
 
         // Then start the Raft groups
         self.manager.start().await

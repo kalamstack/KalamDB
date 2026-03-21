@@ -648,7 +648,13 @@ impl JobsManager {
             match &local_decision {
                 JobDecision::Completed { message } => {
                     self.update_job_node_status(&job_id, JobStatus::Completed, None).await?;
-                    log_job!(self, &job_id, Level::Trace, "Local phase completed: {}", message.as_deref().unwrap_or("ok"));
+                    log_job!(
+                        self,
+                        &job_id,
+                        Level::Trace,
+                        "Local phase completed: {}",
+                        message.as_deref().unwrap_or("ok")
+                    );
                 },
                 JobDecision::Failed { message, .. } => {
                     self.update_job_node_status(&job_id, JobStatus::Failed, Some(message.clone()))
@@ -729,7 +735,14 @@ impl JobsManager {
                         );
                     },
                     JobNodeQuorumResult::QuorumReached { completed, total } => {
-                        log_job!(self, &job_id, Level::Trace, "Quorum reached (completed {}/{})", completed, total);
+                        log_job!(
+                            self,
+                            &job_id,
+                            Level::Trace,
+                            "Quorum reached (completed {}/{})",
+                            completed,
+                            total
+                        );
                     },
                 }
 
@@ -773,7 +786,13 @@ impl JobsManager {
                                     e
                                 )));
                             }
-                            log_job!(self, &job_id, Level::Trace, "Job completed (leader phase): {}", message.unwrap_or_default());
+                            log_job!(
+                                self,
+                                &job_id,
+                                Level::Trace,
+                                "Job completed (leader phase): {}",
+                                message.unwrap_or_default()
+                            );
                         },
                         JobDecision::Skipped { message } => {
                             if let Err(e) = self.mark_job_skipped(&job_id, message.clone()).await {

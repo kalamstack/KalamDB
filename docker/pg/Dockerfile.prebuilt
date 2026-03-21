@@ -1,0 +1,27 @@
+# Lightweight Docker image for KalamDB PostgreSQL Extension using pre-built
+# Linux artifacts.
+#
+# Fast path:
+#   cd docker/pg && docker compose up -d --build
+#
+# Artifact generation (one-time or when the extension changes):
+#   ./docker/pg/build.sh --artifacts
+#
+# Note:
+#   Host-built macOS artifacts cannot be copied into this image. The container
+#   needs Linux ELF `.so` artifacts plus the extension SQL/control files.
+
+FROM postgres:16-bookworm
+
+# Copy pre-built extension artifacts
+COPY docker/pg/artifacts/pg_kalam.so /usr/lib/postgresql/16/lib/pg_kalam.so
+COPY docker/pg/artifacts/pg_kalam.control /usr/share/postgresql/16/extension/pg_kalam.control
+COPY docker/pg/artifacts/pg_kalam--*.sql /usr/share/postgresql/16/extension/
+
+# Preload the extension so GUCs are available before CREATE EXTENSION
+RUN echo "shared_preload_libraries = 'pg_kalam'" >> /usr/share/postgresql/postgresql.conf.sample
+
+# Copy the init SQL script that runs on first container start
+COPY docker/pg/init.sql /docker-entrypoint-initdb.d/01-kalam-init.sql
+
+EXPOSE 5432

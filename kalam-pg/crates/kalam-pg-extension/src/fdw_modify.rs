@@ -1,0 +1,512 @@
+//! FDW modify callbacks: IsForeignRelUpdatable, AddForeignUpdateTargets,
+//! PlanForeignModify, BeginForeignModify, ExecForeignInsert/Update/Delete,
+//! EndForeignModify.
+
+use crate::fdw_options::parse_options;
+use crate::fdw_state::KalamModifyState;
+use crate::pg_to_kalam::datum_to_scalar;
+use kalam_pg_api::{DeleteRequest, InsertRequest, TenantContext, UpdateRequest};
+use kalam_pg_common::{KalamPgError, USER_ID_COLUMN};
+use kalam_pg_fdw::TableOptions;
+use kalamdb_commons::models::rows::Row;
+use kalamdb_commons::models::UserId;
+use pgrx::pg_guard;
+use pgrx::pg_sys;
+use std::collections::BTreeMap;
+use std::ffi::CStr;
+
+/// `IsForeignRelUpdatable` callback: report supported DML operations.
+#[pg_guard]
+pub unsafe extern "C-unwind" fn is_foreign_rel_updatable(
+    _rel: pg_sys::Relation,
+) -> std::ffi::c_int {
+    // Support INSERT, UPDATE, DELETE
+    (1 << pg_sys::CmdType::CMD_INSERT as i32)
+        | (1 << pg_sys::CmdType::CMD_UPDATE as i32)
+        | (1 << pg_sys::CmdType::CMD_DELETE as i32)
+}
+
+/// `AddForeignUpdateTargets` callback: add PK column as row identifier for UPDATE/DELETE.
+#[pg_guard]
+pub unsafe extern "C-unwind" fn add_foreign_update_targets(
+    root: *mut pg_sys::PlannerInfo,
+    rtindex: pg_sys::Index,
+    _target_rte: *mut pg_sys::RangeTblEntry,
+    target_relation: pg_sys::Relation,
+) {
+    // Use the first non-virtual, non-dropped column as the row identifier (PK)
+    let tupdesc = (*target_relation).rd_att;
+    let natts = (*tupdesc).natts as usize;
+
+    for i in 0..natts {
+        let att = (*tupdesc).attrs.as_ptr().add(i);
+        if (*att).attisdropped {
+            continue;
+        }
+        let col_name = CStr::from_ptr((*att).attname.data.as_ptr()).to_string_lossy();
+        if col_name == USER_ID_COLUMN || col_name == "_seq" || col_name == "_deleted" {
+            continue;
+        }
+        // Use this column as the row identity
+        let var = pg_sys::makeVar(
+            rtindex as std::ffi::c_int,
+            (*att).attnum,
+            (*att).atttypid,
+            (*att).atttypmod,
+            (*att).attcollation,
+            0, // sublevelsup
+        );
+        pg_sys::add_row_identity_var(root, var, rtindex, (*att).attname.data.as_ptr());
+        return;
+    }
+}
+
+/// `PlanForeignModify` callback: return an empty list (no additional planning data needed).
+#[pg_guard]
+pub unsafe extern "C-unwind" fn plan_foreign_modify(
+    _root: *mut pg_sys::PlannerInfo,
+    _plan: *mut pg_sys::ModifyTable,
+    _result_relation: pg_sys::Index,
+    _subplan_index: std::ffi::c_int,
+) -> *mut pg_sys::List {
+    std::ptr::null_mut()
+}
+
+/// `BeginForeignModify` callback: initialize modify state.
+#[pg_guard]
+pub unsafe extern "C-unwind" fn begin_foreign_modify(
+    _mtstate: *mut pg_sys::ModifyTableState,
+    rinfo: *mut pg_sys::ResultRelInfo,
+    _fdw_private: *mut pg_sys::List,
+    _subplan_index: std::ffi::c_int,
+    _eflags: std::ffi::c_int,
+) {
+    let result = begin_foreign_modify_impl(rinfo);
+    if let Err(e) = result {
+        pgrx::error!("pg_kalam modify: {}", e);
+    }
+}
+
+/// `ExecForeignInsert` callback: insert a single row.
+#[pg_guard]
+pub unsafe extern "C-unwind" fn exec_foreign_insert(
+    _estate: *mut pg_sys::EState,
+    rinfo: *mut pg_sys::ResultRelInfo,
+    slot: *mut pg_sys::TupleTableSlot,
+    _plan_slot: *mut pg_sys::TupleTableSlot,
+) -> *mut pg_sys::TupleTableSlot {
+    let result = exec_foreign_insert_impl(rinfo, slot);
+    match result {
+        Ok(()) => slot,
+        Err(e) => pgrx::error!("pg_kalam insert: {}", e),
+    }
+}
+
+/// `ExecForeignUpdate` callback: update a single row.
+#[pg_guard]
+pub unsafe extern "C-unwind" fn exec_foreign_update(
+    _estate: *mut pg_sys::EState,
+    rinfo: *mut pg_sys::ResultRelInfo,
+    slot: *mut pg_sys::TupleTableSlot,
+    plan_slot: *mut pg_sys::TupleTableSlot,
+) -> *mut pg_sys::TupleTableSlot {
+    let result = exec_foreign_update_impl(rinfo, slot, plan_slot);
+    match result {
+        Ok(()) => slot,
+        Err(e) => pgrx::error!("pg_kalam update: {}", e),
+    }
+}
+
+/// `ExecForeignDelete` callback: delete a single row.
+#[pg_guard]
+pub unsafe extern "C-unwind" fn exec_foreign_delete(
+    _estate: *mut pg_sys::EState,
+    rinfo: *mut pg_sys::ResultRelInfo,
+    slot: *mut pg_sys::TupleTableSlot,
+    plan_slot: *mut pg_sys::TupleTableSlot,
+) -> *mut pg_sys::TupleTableSlot {
+    let result = exec_foreign_delete_impl(rinfo, plan_slot);
+    match result {
+        Ok(()) => slot,
+        Err(e) => pgrx::error!("pg_kalam delete: {}", e),
+    }
+}
+
+/// `EndForeignModify` callback: release modify resources.
+#[pg_guard]
+pub unsafe extern "C-unwind" fn end_foreign_modify(
+    _estate: *mut pg_sys::EState,
+    rinfo: *mut pg_sys::ResultRelInfo,
+) {
+    let state_ptr = (*rinfo).ri_FdwState;
+    if !state_ptr.is_null() {
+        let _ = Box::from_raw(state_ptr as *mut KalamModifyState);
+        (*rinfo).ri_FdwState = std::ptr::null_mut();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Internal implementations
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "embedded")]
+unsafe fn begin_foreign_modify_impl(rinfo: *mut pg_sys::ResultRelInfo) -> Result<(), KalamPgError> {
+    let relation = (*rinfo).ri_RelationDesc;
+    let relid = (*relation).rd_id;
+    let ft = pg_sys::GetForeignTable(relid);
+    let options = parse_options((*ft).options);
+    let table_options = TableOptions::parse(&options)?;
+
+    let tupdesc = (*relation).rd_att;
+    let natts = (*tupdesc).natts as usize;
+
+    // Collect column names and find PK (first non-virtual, non-dropped column)
+    let mut column_names = Vec::with_capacity(natts);
+    let mut pk_column = String::new();
+    for i in 0..natts {
+        let att = (*tupdesc).attrs.as_ptr().add(i);
+        if (*att).attisdropped {
+            column_names.push(String::new());
+            continue;
+        }
+        let col_name = CStr::from_ptr((*att).attname.data.as_ptr()).to_string_lossy().into_owned();
+        if pk_column.is_empty()
+            && col_name != USER_ID_COLUMN
+            && col_name != "_seq"
+            && col_name != "_deleted"
+        {
+            pk_column = col_name.clone();
+        }
+        column_names.push(col_name);
+    }
+
+    let embedded_state = crate::ensure_embedded_extension_state(None)
+        .map_err(|e| KalamPgError::Execution(e.to_string()))?;
+    let executor = embedded_state.executor()?;
+    let runtime = std::sync::Arc::clone(embedded_state.runtime());
+
+    let modify_state = Box::new(KalamModifyState {
+        table_options,
+        executor,
+        runtime,
+        column_names,
+        pk_column,
+    });
+
+    (*rinfo).ri_FdwState = Box::into_raw(modify_state) as *mut std::ffi::c_void;
+    Ok(())
+}
+
+#[cfg(all(not(feature = "embedded"), feature = "remote"))]
+unsafe fn begin_foreign_modify_impl(rinfo: *mut pg_sys::ResultRelInfo) -> Result<(), KalamPgError> {
+    use kalam_pg_fdw::ServerOptions;
+
+    let relation = (*rinfo).ri_RelationDesc;
+    let relid = (*relation).rd_id;
+    let ft = pg_sys::GetForeignTable(relid);
+    let options = parse_options((*ft).options);
+    let table_options = TableOptions::parse(&options)?;
+
+    let tupdesc = (*relation).rd_att;
+    let natts = (*tupdesc).natts as usize;
+
+    // Collect column names and find PK (first non-virtual, non-dropped column)
+    let mut column_names = Vec::with_capacity(natts);
+    let mut pk_column = String::new();
+    for i in 0..natts {
+        let att = (*tupdesc).attrs.as_ptr().add(i);
+        if (*att).attisdropped {
+            column_names.push(String::new());
+            continue;
+        }
+        let col_name = CStr::from_ptr((*att).attname.data.as_ptr()).to_string_lossy().into_owned();
+        if pk_column.is_empty()
+            && col_name != USER_ID_COLUMN
+            && col_name != "_seq"
+            && col_name != "_deleted"
+        {
+            pk_column = col_name.clone();
+        }
+        column_names.push(col_name);
+    }
+
+    // Get server options (host/port) from the foreign server
+    let server = pg_sys::GetForeignServer((*ft).serverid);
+    let server_options = parse_options((*server).options);
+    let parsed_server = ServerOptions::parse(&server_options)?;
+    let remote_config = parsed_server.remote.ok_or_else(|| {
+        KalamPgError::Validation(
+            "foreign server must have host and port options for remote mode".to_string(),
+        )
+    })?;
+    let auth_header = server_options.get("auth_header").cloned();
+
+    let remote_state =
+        crate::remote_state::ensure_remote_extension_state(remote_config, auth_header)
+            .map_err(|e| KalamPgError::Execution(e.to_string()))?;
+    let executor = remote_state.executor()?;
+    let runtime = std::sync::Arc::clone(remote_state.runtime());
+
+    let modify_state = Box::new(KalamModifyState {
+        table_options,
+        executor,
+        runtime,
+        column_names,
+        pk_column,
+    });
+
+    (*rinfo).ri_FdwState = Box::into_raw(modify_state) as *mut std::ffi::c_void;
+    Ok(())
+}
+
+#[cfg(not(any(feature = "embedded", feature = "remote")))]
+unsafe fn begin_foreign_modify_impl(
+    _rinfo: *mut pg_sys::ResultRelInfo,
+) -> Result<(), KalamPgError> {
+    Err(KalamPgError::Unsupported(
+        "modify requires embedded or remote feature".to_string(),
+    ))
+}
+
+#[cfg(feature = "embedded")]
+unsafe fn exec_foreign_insert_impl(
+    rinfo: *mut pg_sys::ResultRelInfo,
+    slot: *mut pg_sys::TupleTableSlot,
+) -> Result<(), KalamPgError> {
+    let state = &*((*rinfo).ri_FdwState as *mut KalamModifyState);
+    let row = slot_to_row(slot, &state.column_names)?;
+
+    let user_id_str = crate::current_kalam_user_id();
+    let user_id = user_id_str.map(UserId::new);
+
+    let request = InsertRequest::new(
+        state.table_options.table_id.clone(),
+        state.table_options.table_type,
+        TenantContext::new(None, user_id),
+        vec![row],
+    );
+
+    state.runtime.block_on(async { state.executor.insert(request).await })?;
+    Ok(())
+}
+
+#[cfg(all(not(feature = "embedded"), feature = "remote"))]
+unsafe fn exec_foreign_insert_impl(
+    rinfo: *mut pg_sys::ResultRelInfo,
+    slot: *mut pg_sys::TupleTableSlot,
+) -> Result<(), KalamPgError> {
+    let state = &*((*rinfo).ri_FdwState as *mut KalamModifyState);
+    let row = slot_to_row(slot, &state.column_names)?;
+
+    let user_id_str = crate::current_kalam_user_id();
+    let user_id = user_id_str.map(UserId::new);
+
+    let request = InsertRequest::new(
+        state.table_options.table_id.clone(),
+        state.table_options.table_type,
+        TenantContext::new(None, user_id),
+        vec![row],
+    );
+
+    state
+        .runtime
+        .block_on(async { state.executor.insert(request).await })?;
+    Ok(())
+}
+
+#[cfg(not(any(feature = "embedded", feature = "remote")))]
+unsafe fn exec_foreign_insert_impl(
+    _rinfo: *mut pg_sys::ResultRelInfo,
+    _slot: *mut pg_sys::TupleTableSlot,
+) -> Result<(), KalamPgError> {
+    Err(KalamPgError::Unsupported("insert requires embedded or remote feature".into()))
+}
+
+#[cfg(feature = "embedded")]
+unsafe fn exec_foreign_update_impl(
+    rinfo: *mut pg_sys::ResultRelInfo,
+    slot: *mut pg_sys::TupleTableSlot,
+    plan_slot: *mut pg_sys::TupleTableSlot,
+) -> Result<(), KalamPgError> {
+    let state = &*((*rinfo).ri_FdwState as *mut KalamModifyState);
+    let pk_value = extract_pk_value(plan_slot, &state.pk_column, &state.column_names)?;
+    let updates = slot_to_row(slot, &state.column_names)?;
+
+    let user_id_str = crate::current_kalam_user_id();
+    let user_id = user_id_str.map(UserId::new);
+
+    let request = UpdateRequest::new(
+        state.table_options.table_id.clone(),
+        state.table_options.table_type,
+        TenantContext::new(None, user_id),
+        pk_value,
+        updates,
+    );
+
+    state.runtime.block_on(async { state.executor.update(request).await })?;
+    Ok(())
+}
+
+#[cfg(all(not(feature = "embedded"), feature = "remote"))]
+unsafe fn exec_foreign_update_impl(
+    rinfo: *mut pg_sys::ResultRelInfo,
+    slot: *mut pg_sys::TupleTableSlot,
+    plan_slot: *mut pg_sys::TupleTableSlot,
+) -> Result<(), KalamPgError> {
+    let state = &*((*rinfo).ri_FdwState as *mut KalamModifyState);
+    let pk_value = extract_pk_value(plan_slot, &state.pk_column, &state.column_names)?;
+    let updates = slot_to_row(slot, &state.column_names)?;
+
+    let user_id_str = crate::current_kalam_user_id();
+    let user_id = user_id_str.map(UserId::new);
+
+    let request = UpdateRequest::new(
+        state.table_options.table_id.clone(),
+        state.table_options.table_type,
+        TenantContext::new(None, user_id),
+        pk_value,
+        updates,
+    );
+
+    state
+        .runtime
+        .block_on(async { state.executor.update(request).await })?;
+    Ok(())
+}
+
+#[cfg(not(any(feature = "embedded", feature = "remote")))]
+unsafe fn exec_foreign_update_impl(
+    _rinfo: *mut pg_sys::ResultRelInfo,
+    _slot: *mut pg_sys::TupleTableSlot,
+    _plan_slot: *mut pg_sys::TupleTableSlot,
+) -> Result<(), KalamPgError> {
+    Err(KalamPgError::Unsupported("update requires embedded or remote feature".into()))
+}
+
+#[cfg(feature = "embedded")]
+unsafe fn exec_foreign_delete_impl(
+    rinfo: *mut pg_sys::ResultRelInfo,
+    plan_slot: *mut pg_sys::TupleTableSlot,
+) -> Result<(), KalamPgError> {
+    let state = &*((*rinfo).ri_FdwState as *mut KalamModifyState);
+    let pk_value = extract_pk_value(plan_slot, &state.pk_column, &state.column_names)?;
+
+    let user_id_str = crate::current_kalam_user_id();
+    let user_id = user_id_str.map(UserId::new);
+
+    let request = DeleteRequest::new(
+        state.table_options.table_id.clone(),
+        state.table_options.table_type,
+        TenantContext::new(None, user_id),
+        pk_value,
+    );
+
+    state.runtime.block_on(async { state.executor.delete(request).await })?;
+    Ok(())
+}
+
+#[cfg(all(not(feature = "embedded"), feature = "remote"))]
+unsafe fn exec_foreign_delete_impl(
+    rinfo: *mut pg_sys::ResultRelInfo,
+    plan_slot: *mut pg_sys::TupleTableSlot,
+) -> Result<(), KalamPgError> {
+    let state = &*((*rinfo).ri_FdwState as *mut KalamModifyState);
+    let pk_value = extract_pk_value(plan_slot, &state.pk_column, &state.column_names)?;
+
+    let user_id_str = crate::current_kalam_user_id();
+    let user_id = user_id_str.map(UserId::new);
+
+    let request = DeleteRequest::new(
+        state.table_options.table_id.clone(),
+        state.table_options.table_type,
+        TenantContext::new(None, user_id),
+        pk_value,
+    );
+
+    state
+        .runtime
+        .block_on(async { state.executor.delete(request).await })?;
+    Ok(())
+}
+
+#[cfg(not(any(feature = "embedded", feature = "remote")))]
+unsafe fn exec_foreign_delete_impl(
+    _rinfo: *mut pg_sys::ResultRelInfo,
+    _plan_slot: *mut pg_sys::TupleTableSlot,
+) -> Result<(), KalamPgError> {
+    Err(KalamPgError::Unsupported("delete requires embedded or remote feature".into()))
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Extract column values from a TupleTableSlot into a Kalam Row.
+unsafe fn slot_to_row(
+    slot: *mut pg_sys::TupleTableSlot,
+    column_names: &[String],
+) -> Result<Row, KalamPgError> {
+    pg_sys::slot_getallattrs(slot);
+    let tupdesc = (*slot).tts_tupleDescriptor;
+    let natts = (*tupdesc).natts as usize;
+    let mut values = BTreeMap::new();
+
+    for i in 0..natts {
+        let att = (*tupdesc).attrs.as_ptr().add(i);
+        if (*att).attisdropped {
+            continue;
+        }
+        let col_name = column_names.get(i).cloned().unwrap_or_default();
+        if col_name.is_empty()
+            || col_name == USER_ID_COLUMN
+            || col_name == "_seq"
+            || col_name == "_deleted"
+        {
+            continue;
+        }
+
+        let is_null = *(*slot).tts_isnull.add(i);
+        let datum = *(*slot).tts_values.add(i);
+        let scalar = datum_to_scalar(datum, (*att).atttypid, is_null);
+        values.insert(col_name, scalar);
+    }
+
+    Ok(Row::new(values))
+}
+
+/// Extract the primary key value from the plan slot (junk attribute).
+unsafe fn extract_pk_value(
+    plan_slot: *mut pg_sys::TupleTableSlot,
+    pk_column: &str,
+    _column_names: &[String],
+) -> Result<String, KalamPgError> {
+    pg_sys::slot_getallattrs(plan_slot);
+    let tupdesc = (*plan_slot).tts_tupleDescriptor;
+    let natts = (*tupdesc).natts as usize;
+
+    for i in 0..natts {
+        let att = (*tupdesc).attrs.as_ptr().add(i);
+        if (*att).attisdropped {
+            continue;
+        }
+        let col_name = CStr::from_ptr((*att).attname.data.as_ptr()).to_string_lossy();
+        if col_name != pk_column {
+            continue;
+        }
+
+        let is_null = *(*plan_slot).tts_isnull.add(i);
+        if is_null {
+            return Err(KalamPgError::Validation(
+                "primary key column is NULL in plan slot".to_string(),
+            ));
+        }
+        let datum = *(*plan_slot).tts_values.add(i);
+        let scalar = datum_to_scalar(datum, (*att).atttypid, false);
+        return Ok(scalar.to_string());
+    }
+
+    Err(KalamPgError::Validation(format!(
+        "primary key column '{}' not found in plan slot",
+        pk_column
+    )))
+}
