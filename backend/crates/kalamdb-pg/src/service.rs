@@ -6,7 +6,9 @@ use tonic::metadata::MetadataValue;
 use tonic::{Request, Response, Status};
 use tonic_prost::ProstCodec;
 
-use crate::query_executor::PgQueryExecutor;
+use crate::query_executor::{
+    self, OperationExecutor,
+};
 use crate::{RemotePgSession, SessionRegistry};
 
 const AUTHORIZATION_HEADER: &str = "authorization";
@@ -478,14 +480,14 @@ pub use pg_service_server::{PgService, PgServiceServer};
 pub struct KalamPgService {
     expected_auth_header: Option<String>,
     session_registry: Arc<SessionRegistry>,
-    query_executor: Option<Arc<dyn PgQueryExecutor>>,
+    operation_executor: Option<Arc<dyn OperationExecutor>>,
 }
 
 impl std::fmt::Debug for KalamPgService {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("KalamPgService")
             .field("has_auth", &self.expected_auth_header.is_some())
-            .field("has_query_executor", &self.query_executor.is_some())
+            .field("has_operation_executor", &self.operation_executor.is_some())
             .finish()
     }
 }
@@ -495,7 +497,7 @@ impl Default for KalamPgService {
         Self {
             expected_auth_header: None,
             session_registry: Arc::new(SessionRegistry::default()),
-            query_executor: None,
+            operation_executor: None,
         }
     }
 }
@@ -507,23 +509,23 @@ impl KalamPgService {
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty()),
             session_registry: Arc::new(SessionRegistry::default()),
-            query_executor: None,
+            operation_executor: None,
         }
     }
 
-    pub fn with_query_executor(mut self, executor: Arc<dyn PgQueryExecutor>) -> Self {
-        self.query_executor = Some(executor);
+    pub fn with_operation_executor(mut self, executor: Arc<dyn OperationExecutor>) -> Self {
+        self.operation_executor = Some(executor);
         self
     }
 
-    pub fn set_query_executor(&mut self, executor: Arc<dyn PgQueryExecutor>) {
-        self.query_executor = Some(executor);
+    pub fn set_operation_executor(&mut self, executor: Arc<dyn OperationExecutor>) {
+        self.operation_executor = Some(executor);
     }
 
-    fn query_executor(&self) -> Result<&dyn PgQueryExecutor, Status> {
-        self.query_executor
+    fn operation_executor(&self) -> Result<&dyn OperationExecutor, Status> {
+        self.operation_executor
             .as_deref()
-            .ok_or_else(|| Status::unavailable("Query executor not configured"))
+            .ok_or_else(|| Status::unavailable("Operation executor not configured"))
     }
 
     fn authorize<T>(&self, request: &Request<T>) -> Result<(), Status> {
@@ -608,7 +610,9 @@ impl PgService for KalamPgService {
             inner.table_name,
             inner.table_type
         );
-        let response = self.query_executor()?.execute_scan(inner).await?;
+        let domain_req = query_executor::scan_request_from_rpc(&inner)?;
+        let domain_result = self.operation_executor()?.execute_scan(domain_req).await?;
+        let response = query_executor::scan_result_to_rpc(domain_result)?;
         Ok(Response::new(response))
     }
 
@@ -624,8 +628,11 @@ impl PgService for KalamPgService {
             inner.table_name,
             inner.rows_json.len()
         );
-        let response = self.query_executor()?.execute_insert(inner).await?;
-        Ok(Response::new(response))
+        let domain_req = query_executor::insert_request_from_rpc(&inner)?;
+        let result = self.operation_executor()?.execute_insert(domain_req).await?;
+        Ok(Response::new(InsertRpcResponse {
+            affected_rows: result.affected_rows,
+        }))
     }
 
     async fn update(
@@ -640,8 +647,11 @@ impl PgService for KalamPgService {
             inner.table_name,
             inner.pk_value
         );
-        let response = self.query_executor()?.execute_update(inner).await?;
-        Ok(Response::new(response))
+        let domain_req = query_executor::update_request_from_rpc(&inner)?;
+        let result = self.operation_executor()?.execute_update(domain_req).await?;
+        Ok(Response::new(UpdateRpcResponse {
+            affected_rows: result.affected_rows,
+        }))
     }
 
     async fn delete(
@@ -656,7 +666,10 @@ impl PgService for KalamPgService {
             inner.table_name,
             inner.pk_value
         );
-        let response = self.query_executor()?.execute_delete(inner).await?;
-        Ok(Response::new(response))
+        let domain_req = query_executor::delete_request_from_rpc(&inner)?;
+        let result = self.operation_executor()?.execute_delete(domain_req).await?;
+        Ok(Response::new(DeleteRpcResponse {
+            affected_rows: result.affected_rows,
+        }))
     }
 }

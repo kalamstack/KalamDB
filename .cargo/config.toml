@@ -1,23 +1,21 @@
 # Hint bindgen towards Command Line Tools libclang on macOS hosts
 [target.aarch64-apple-darwin]
 rustflags = [
-    "-C", "link-arg=-Wl,-rpath,/opt/homebrew/opt/llvm/lib",
+    "-C", "link-arg=-Wl,-rpath,/Library/Developer/CommandLineTools/usr/lib",
 ]
 
 [target.aarch64-apple-darwin.env]
-LIBCLANG_PATH = "/opt/homebrew/opt/llvm/lib"
-LLVM_CONFIG_PATH = "/opt/homebrew/opt/llvm/bin/llvm-config"
-DYLD_FALLBACK_LIBRARY_PATH = "/opt/homebrew/opt/llvm/lib"
-DYLD_LIBRARY_PATH = "/opt/homebrew/opt/llvm/lib"
+LIBCLANG_PATH = "/Library/Developer/CommandLineTools/usr/lib"
+DYLD_FALLBACK_LIBRARY_PATH = "/Library/Developer/CommandLineTools/usr/lib"
+DYLD_LIBRARY_PATH = "/Library/Developer/CommandLineTools/usr/lib"
 
 [target.x86_64-apple-darwin]
-rustflags = ["-C", "link-arg=-Wl,-rpath,/usr/local/opt/llvm/lib"]
+rustflags = ["-C", "link-arg=-Wl,-rpath,/Library/Developer/CommandLineTools/usr/lib"]
 
 [target.x86_64-apple-darwin.env]
-LIBCLANG_PATH = "/usr/local/opt/llvm/lib"
-LLVM_CONFIG_PATH = "/usr/local/opt/llvm/bin/llvm-config"
-DYLD_FALLBACK_LIBRARY_PATH = "/usr/local/opt/llvm/lib"
-DYLD_LIBRARY_PATH = "/usr/local/opt/llvm/lib"
+LIBCLANG_PATH = "/Library/Developer/CommandLineTools/usr/lib"
+DYLD_FALLBACK_LIBRARY_PATH = "/Library/Developer/CommandLineTools/usr/lib"
+DYLD_LIBRARY_PATH = "/Library/Developer/CommandLineTools/usr/lib"
 
 # --- WASM target - no special flags (avoid macOS linker flags) ---
 [target.wasm32-unknown-unknown]

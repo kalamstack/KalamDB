@@ -31,7 +31,7 @@ const TEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// Helper to create a test client
 fn create_test_client() -> Result<KalamLinkClient, kalam_link::KalamLinkError> {
     let token = common::root_access_token_blocking()
-        .map_err(|e| kalam_link::KalamLinkError::InternalError(e.to_string()))?;
+        .map_err(|e| kalam_link::KalamLinkError::ConfigurationError(e.to_string()))?;
     KalamLinkClient::builder()
         .base_url(common::server_url())
         .timeout(Duration::from_secs(30))

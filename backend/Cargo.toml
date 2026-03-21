@@ -56,10 +56,10 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-actix-web = { workspace = true }
 tracing-log = { workspace = true }
-tracing-opentelemetry = { workspace = true }
-opentelemetry = { workspace = true }
-opentelemetry_sdk = { workspace = true }
-opentelemetry-otlp = { workspace = true }
+tracing-opentelemetry = { workspace = true, optional = true }
+opentelemetry = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true }
 
 # Time handling
 chrono = { workspace = true }
@@ -84,6 +84,7 @@ libc = { workspace = true }
 default = ["embedded-ui"]
 jemalloc = ["tikv-jemallocator"]
 embedded-ui = ["kalamdb-api/embedded-ui"]
+otel = ["dep:tracing-opentelemetry", "dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp"]
 # End-to-end tests that require a full test server instance
 e2e-tests = []
 

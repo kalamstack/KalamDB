@@ -266,22 +266,6 @@ impl fmt::Display for TimestampFormat {
     }
 }
 
-/// Configuration for timestamp formatting.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TimestampFormatterConfig {
-    /// Format to use for timestamps
-    #[serde(default)]
-    pub format: TimestampFormat,
-}
-
-impl Default for TimestampFormatterConfig {
-    fn default() -> Self {
-        Self {
-            format: TimestampFormat::Iso8601,
-        }
-    }
-}
-
 /// Timestamp formatter for converting millisecond timestamps to strings.
 ///
 /// # Examples
@@ -302,11 +286,6 @@ impl TimestampFormatter {
     /// Create a new timestamp formatter with the specified format.
     pub fn new(format: TimestampFormat) -> Self {
         Self { format }
-    }
-
-    /// Create a formatter from configuration.
-    pub fn from_config(config: TimestampFormatterConfig) -> Self {
-        Self::new(config.format)
     }
 
     /// Format a millisecond timestamp according to the configured format.
@@ -420,20 +399,6 @@ impl TimestampFormatter {
         }
     }
 
-    /// Format multiple timestamps.
-    pub fn format_many(&self, timestamps: &[Option<i64>]) -> Vec<String> {
-        timestamps.iter().map(|ts| self.format(*ts)).collect()
-    }
-
-    /// Change the format.
-    pub fn set_format(&mut self, format: TimestampFormat) {
-        self.format = format;
-    }
-
-    /// Get current format.
-    pub fn get_format(&self) -> TimestampFormat {
-        self.format
-    }
 }
 
 impl Default for TimestampFormatter {

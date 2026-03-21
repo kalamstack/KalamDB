@@ -73,14 +73,14 @@ tokio-tungstenite = { version = "0.29.0", features = ["rustls-tls-webpki-roots"]
 chrono = { version = "0.4.44", features = ["serde"] }
 
 # Storage
-rocksdb = { version = "0.24.0", default-features = false, features = ["snappy", "multi-threaded-cf"] }
+ rocksdb = { version = "0.24.0", default-features = false, features = ["snappy", "multi-threaded-cf", "bindgen-runtime"] }
 
 # Apache Arrow ecosystem
 # IMPORTANT: arrow, arrow-schema and parquet MUST match the version used by DataFusion.
 # DataFusion 52.3.0 resolves to Arrow 57.3.0; mixing in Arrow 58 pulls a second
 # arrow_array crate into the graph and causes FixedSizeListArray type mismatches.
 # Upgrade DataFusion first before bumping Arrow/Parquet beyond this family.
-arrow = { version = "57.3.0", default-features = false, features = ["prettyprint", "json"] }
+arrow = { version = "57.3.0", default-features = false }
 arrow-ipc = { version = "57.3.0" }
 arrow-schema = { version = "57.3.0" }
 datafusion = { version = "52.3.0", default-features = false, features = ["sql", "parquet", "recursive_protection", "nested_expressions"] }
@@ -174,7 +174,7 @@ syn = { version = "2.0.117", features = ["full", "extra-traits"] }
 # Object storage abstraction (S3/GCS/Azure/local)
 # Kept as a workspace dependency so only kalamdb-filestore needs to opt-in.
 # Using 0.12.4 to match DataFusion 51.0.0 dependency
-object_store = { version = "0.13.1", features = ["aws", "gcp", "azure"] }
+object_store = { version = "0.13.1" }
  
 # Vector ANN engines
 usearch = "2.24.0"
@@ -200,7 +200,7 @@ tar = "0.4"
 zip = { version = "8.2.0", default-features = false, features = ["deflate"] }
 miniz_oxide = "0.9.1"
 flutter_rust_bridge = "=2.11.1"
-rust-embed = { version = "8.11.0", features = ["compression"] }
+rust-embed = { version = "8.11.0", features = ["compression", "include-exclude"] }
 mime_guess = "2.0"
 kalamdb-configs = { path = "backend/crates/kalamdb-configs" }
 kalamdb-server = { path = "backend" }
@@ -217,15 +217,20 @@ opentelemetry = "0.31.0"
 opentelemetry_sdk = { version = "0.31.0", features = ["trace", "rt-tokio"] }
 opentelemetry-otlp = { version = "0.31.0", default-features = false, features = ["trace", "grpc-tonic", "http-proto"] }
 
-# Custom profile for distribution builds (smaller, optimized binaries)
+# Release profile: balanced for production use (good performance + reasonable size)
+[profile.release]
+opt-level = 3         # Full speed optimizations
+lto = "thin"          # Thin LTO: removes cross-crate dead code without huge link times
+codegen-units = 1     # Single codegen unit for better optimization
+panic = "abort"       # Removes stack unwinding code (~5-10% savings)
+strip = true          # Strip symbols from the binary
+
+# Custom profile for distribution builds (smallest possible binary)
 # Use with: cargo build --profile release-dist
 [profile.release-dist]
 inherits = "release"
-opt-level = "z"       # Optimize for size
-lto = true            # Enable Link Time Optimization (removes unused code across crates)
-codegen-units = 1     # Slower build, but better optimization
-panic = "abort"       # Removes stack unwinding code
-strip = true          # Automatically strip symbols from the binary
+opt-level = "z"       # Optimize for size (most aggressive)
+lto = true            # Full LTO (slower link, best dead-code elimination)
 
 # Custom profile for Docker builds (less memory-intensive for cross-compilation)
 # Uses thin LTO instead of full LTO to reduce memory usage during linking
@@ -233,10 +238,6 @@ strip = true          # Automatically strip symbols from the binary
 [profile.docker]
 inherits = "release"
 opt-level = "z"       # Optimize for size (most aggressive)
-lto = "thin"          # Thin LTO - uses less memory than full LTO during linking
-codegen-units = 1     # Better optimization (single unit)
-panic = "abort"       # Removes stack unwinding code
-strip = true          # Automatically strip symbols from the binary
 
 [profile.dev]
 opt-level = 0        # no optimizations = faster compile
@@ -255,6 +256,3 @@ codegen-units = 256
 opt-level = 0
 debug = 0
 codegen-units = 256
-
-[patch.crates-io]
-librocksdb-sys = { path = "vendor/librocksdb-sys" }

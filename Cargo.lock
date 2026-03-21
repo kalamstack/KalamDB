@@ -3070,6 +3070,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
+name = "globset"
+version = "0.4.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52dfc19153a48bde0cbd630453615c8151bce3a5adfac7a0aebfbf0a1e1f57e3"
+dependencies = [
+ "aho-corasick",
+ "bstr",
+ "log",
+ "regex-automata",
+ "regex-syntax",
+]
+
+[[package]]
 name = "h2"
 version = "0.3.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3741,8 +3754,6 @@ dependencies = [
 name = "kalam-link"
 version = "0.4.2-dev"
 dependencies = [
- "anyhow",
- "async-trait",
  "base64",
  "bytes",
  "futures-util",
@@ -3758,7 +3769,6 @@ dependencies = [
  "serde-wasm-bindgen",
  "serde_json",
  "tempfile",
- "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite",
  "tsify-next",
@@ -3891,7 +3901,6 @@ dependencies = [
  "mime_guess",
  "moka",
  "parking_lot",
- "reqwest 0.13.2",
  "rust-embed",
  "serde",
  "serde_json",
@@ -4127,9 +4136,12 @@ dependencies = [
 name = "kalamdb-pg"
 version = "0.4.2-dev"
 dependencies = [
+ "arrow",
+ "arrow-ipc",
  "async-trait",
  "bytes",
  "dashmap 6.1.0",
+ "kalamdb-commons",
  "log",
  "prost",
  "serde_json",
@@ -4567,11 +4579,12 @@ dependencies = [
 [[package]]
 name = "librocksdb-sys"
 version = "0.17.3+10.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cef2a00ee60fe526157c9023edab23943fae1ce2ab6f4abb2a807c1746835de9"
 dependencies = [
  "bindgen 0.72.1",
  "bzip2-sys",
  "cc",
- "clang-sys",
  "libc",
  "libz-sys",
 ]
@@ -6201,6 +6214,7 @@ version = "8.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5bcdef0be6fe7f6fa333b1073c949729274b05f123a0ad7efcb8efd878e5c3b1"
 dependencies = [
+ "globset",
  "sha2",
  "walkdir",
 ]

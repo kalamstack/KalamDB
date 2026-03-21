@@ -7,6 +7,9 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
+kalamdb-commons = { path = "../kalamdb-commons", features = ["full"] }
+arrow = { workspace = true }
+arrow-ipc = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 dashmap = { workspace = true }

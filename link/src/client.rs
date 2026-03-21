@@ -12,7 +12,7 @@ use crate::{
     models::{
         ConnectionOptions, HealthCheckResponse, HttpVersion, QueryResponse, SubscriptionConfig,
     },
-    query::{QueryExecutor, UploadProgressCallback},
+    query::{AuthRefreshCallback, QueryExecutor, UploadProgressCallback},
     subscription::{LiveRowsConfig, LiveRowsSubscription, SubscriptionManager},
     timeouts::KalamLinkTimeouts,
 };
@@ -860,6 +860,8 @@ impl KalamLinkClientBuilder {
     /// ```rust,no_run
     /// use kalam_link::{AuthProvider, DynamicAuthProvider, KalamLinkClient, Result};
     /// use std::sync::Arc;
+    /// use std::pin::Pin;
+    /// use std::future::Future;
     /// use tokio::sync::Mutex;
     ///
     /// struct TokenStore {
@@ -867,14 +869,15 @@ impl KalamLinkClientBuilder {
     ///     base_url: String,
     /// }
     ///
-    /// #[async_trait::async_trait]
     /// impl DynamicAuthProvider for TokenStore {
-    ///     async fn get_auth(&self) -> Result<AuthProvider> {
-    ///         let client = KalamLinkClient::builder()
-    ///             .base_url(&self.base_url)
-    ///             .build()?;
-    ///         let resp = client.refresh_access_token(&self.refresh_token).await?;
-    ///         Ok(AuthProvider::jwt_token(resp.access_token))
+    ///     fn get_auth(&self) -> Pin<Box<dyn Future<Output = Result<AuthProvider>> + Send + '_>> {
+    ///         Box::pin(async {
+    ///             let client = KalamLinkClient::builder()
+    ///                 .base_url(&self.base_url)
+    ///                 .build()?;
+    ///             let resp = client.refresh_access_token(&self.refresh_token).await?;
+    ///             Ok(AuthProvider::jwt_token(resp.access_token))
+    ///         })
     ///     }
     /// }
     ///
@@ -1060,26 +1063,77 @@ impl KalamLinkClientBuilder {
             .build()
             .map_err(|e| KalamLinkError::ConfigurationError(e.to_string()))?;
 
-        let query_executor = QueryExecutor::new(
+        let mut query_executor = QueryExecutor::new(
             base_url.clone(),
             http_client.clone(),
             static_auth.clone(),
             self.max_retries,
         );
 
-        Ok(KalamLinkClient {
-            base_url,
-            http_client,
-            resolved_auth: self.resolved_auth.clone(),
-            auth: static_auth,
-            query_executor,
-            health_cache: Arc::new(Mutex::new(HealthCheckCache::default())),
-            timeouts: self.timeouts,
-            connection_options: self.connection_options,
-            event_handlers: self.event_handlers,
-            shared_resolved_auth: Arc::new(RwLock::new(self.resolved_auth)),
-            connection: Arc::new(Mutex::new(None)),
-        })
+        // Set up auto-refresh callback so the executor can recover from
+        // TOKEN_EXPIRED errors transparently.  The callback resolves fresh
+        // credentials from the shared auth source (dynamic or static) and,
+        // when basic-auth is returned, exchanges it for a JWT via login.
+        {
+            let shared_auth = Arc::new(RwLock::new(self.resolved_auth.clone()));
+            let login_url = format!("{}/v1/api/auth/login", &base_url);
+            let login_client = http_client.clone();
+
+            let refresher: AuthRefreshCallback = Arc::new(move || {
+                let shared = Arc::clone(&shared_auth);
+                let url = login_url.clone();
+                let client = login_client.clone();
+                Box::pin(async move {
+                    let resolved = { shared.read().unwrap().clone() };
+                    let auth = resolved.resolve().await?;
+                    match auth {
+                        AuthProvider::BasicAuth(username, password) => {
+                            // Exchange basic credentials for a JWT.
+                            let body = serde_json::json!({
+                                "username": username,
+                                "password": password,
+                            });
+                            let resp = client
+                                .post(&url)
+                                .json(&body)
+                                .send()
+                                .await
+                                .map_err(|e: reqwest::Error| KalamLinkError::NetworkError(e.to_string()))?;
+                            if !resp.status().is_success() {
+                                let msg = resp.text().await.unwrap_or_default();
+                                return Err(KalamLinkError::AuthenticationError(format!(
+                                    "Login failed during token refresh: {}", msg
+                                )));
+                            }
+                            let login_resp = resp
+                                .json::<crate::models::LoginResponse>()
+                                .await
+                                .map_err(|e: reqwest::Error| KalamLinkError::NetworkError(e.to_string()))?;
+                            log::debug!("[LINK_HTTP] Reauthenticated via basic login");
+                            Ok(AuthProvider::jwt_token(login_resp.access_token))
+                        },
+                        other => Ok(other),
+                    }
+                })
+            });
+            query_executor.set_auth_refresher(refresher);
+
+            // Use the same shared_resolved_auth for both the executor callback
+            // and the client field so credential updates propagate everywhere.
+            Ok(KalamLinkClient {
+                base_url,
+                http_client,
+                resolved_auth: self.resolved_auth.clone(),
+                auth: static_auth,
+                query_executor,
+                health_cache: Arc::new(Mutex::new(HealthCheckCache::default())),
+                timeouts: self.timeouts,
+                connection_options: self.connection_options,
+                event_handlers: self.event_handlers,
+                shared_resolved_auth: Arc::new(RwLock::new(self.resolved_auth)),
+                connection: Arc::new(Mutex::new(None)),
+            })
+        }
     }
 }
 

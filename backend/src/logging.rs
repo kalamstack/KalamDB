@@ -8,26 +8,36 @@
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::path::Path;
+#[cfg(feature = "otel")]
 use std::sync::{Mutex, OnceLock};
+#[cfg(feature = "otel")]
 use std::time::Duration;
 
 use kalamdb_configs::config::types::OtlpSettings;
+#[cfg(feature = "otel")]
 use opentelemetry::trace::TracerProvider as _;
+#[cfg(feature = "otel")]
 use opentelemetry_otlp::WithExportConfig;
+#[cfg(feature = "otel")]
 use opentelemetry_sdk::trace::SdkTracerProvider;
+#[cfg(feature = "otel")]
 use opentelemetry_sdk::Resource;
+#[cfg(feature = "otel")]
 use tracing_subscriber::filter::filter_fn;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
 
+#[cfg(feature = "otel")]
 static OTEL_TRACER_PROVIDER: OnceLock<Mutex<Option<SdkTracerProvider>>> = OnceLock::new();
 
+#[cfg(feature = "otel")]
 fn tracer_provider_slot() -> &'static Mutex<Option<SdkTracerProvider>> {
     OTEL_TRACER_PROVIDER.get_or_init(|| Mutex::new(None))
 }
 
+#[cfg(feature = "otel")]
 fn is_otlp_noisy_target(target: &str) -> bool {
     // Drop exporter/system transport chatter while keeping application spans/events.
     let noisy_prefixes = [
@@ -184,6 +194,7 @@ pub fn init_logging(
     // Compose and install as global subscriber.
     // Use try_init() to handle cases where subscriber is already initialized
     // (e.g., in testing or when running multiple times).
+    #[cfg(feature = "otel")]
     let init_result = if otlp.enabled {
         let tracer_provider = build_otlp_provider(otlp)?;
         let tracer = tracer_provider.tracer("kalamdb-server");
@@ -224,12 +235,20 @@ pub fn init_logging(
         (result, None)
     };
 
+    #[cfg(not(feature = "otel"))]
+    let init_result = {
+        let _ = &otlp; // suppress unused warning
+        let result = tracing_subscriber::registry().with(console_layer).with(file_layer).try_init();
+        (result, None::<()>)
+    };
+
     match init_result.0 {
         Ok(_) => {
             // Bridge `log` crate → tracing (for all existing log::info!() etc. calls)
             // Only initialize after subscriber is set up
             tracing_log::LogTracer::init().ok(); // ok() in case already initialized
 
+            #[cfg(feature = "otel")]
             if let Some(provider) = init_result.1 {
                 if let Ok(mut guard) = tracer_provider_slot().lock() {
                     *guard = Some(provider);
@@ -244,6 +263,7 @@ pub fn init_logging(
             );
         },
         Err(e) => {
+            #[cfg(feature = "otel")]
             if let Some(provider) = init_result.1 {
                 let _ = provider.shutdown();
             }
@@ -275,6 +295,7 @@ pub fn init_simple_logging() -> anyhow::Result<()> {
 
 /// Flush and shutdown OTLP tracer provider, if installed.
 pub fn shutdown_telemetry() {
+    #[cfg(feature = "otel")]
     if let Ok(mut guard) = tracer_provider_slot().lock() {
         if let Some(provider) = guard.take() {
             let _ = provider.shutdown();
@@ -282,6 +303,7 @@ pub fn shutdown_telemetry() {
     }
 }
 
+#[cfg(feature = "otel")]
 fn build_otlp_provider(otlp: &OtlpSettings) -> anyhow::Result<SdkTracerProvider> {
     let protocol = otlp.protocol.to_ascii_lowercase();
     let timeout = Duration::from_millis(otlp.timeout_ms.max(1));
@@ -317,6 +339,7 @@ fn build_otlp_provider(otlp: &OtlpSettings) -> anyhow::Result<SdkTracerProvider>
     Ok(tracer_provider)
 }
 
+#[cfg(feature = "otel")]
 fn normalize_http_endpoint(endpoint: &str) -> String {
     if endpoint.ends_with("/v1/traces") {
         endpoint.to_string()

@@ -76,6 +76,12 @@ parking_lot = { workspace = true }
 # Store abstraction (for tests)
 kalamdb-store = { path = "../kalamdb-store" }
 
+[features]
+default = ["cloud-aws"]
+cloud-aws = ["object_store/aws"]
+cloud-gcp = ["object_store/gcp"]
+cloud-azure = ["object_store/azure"]
+
 [dev-dependencies]
 once_cell = { workspace = true }
 tempfile = { workspace = true }

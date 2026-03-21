@@ -1341,3 +1341,4 @@ Postgres Extension:
 - Recheck the gRPC endpoints to have it in one place instead of scattered accross the project and erver cluster/pg/forwarding to leader
 - Add transaction begin/commit to kalamdb then wire it to pg
 - Make sure in the sqlparser we are using Postgres Dialect instead of geenric, i want kalamdb to be so close to postgres in all ways
+- Lock on the create table statement maybe we can create regular or any table and then we can alter it to be a kalam table with options and also migrate the data which is currently there

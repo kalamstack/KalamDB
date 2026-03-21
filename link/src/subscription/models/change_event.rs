@@ -1,9 +1,27 @@
+use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 
-use super::batch_control::BatchControl;
+use super::batch::BatchControl;
+use crate::connection::models::ServerMessage;
 use crate::models::KalamCellValue;
 use crate::models::SchemaField;
+
+/// Type of change that occurred in the database
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "wasm", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+#[serde(rename_all = "lowercase")]
+pub enum ChangeTypeRaw {
+    /// New row(s) inserted
+    Insert,
+
+    /// Existing row(s) updated
+    Update,
+
+    /// Row(s) deleted
+    Delete,
+}
 
 /// Change event received via WebSocket subscription.
 #[derive(Debug, Clone)]
@@ -103,6 +121,133 @@ impl ChangeEvent {
                 subscription_id, ..
             } => Some(subscription_id.as_str()),
             Self::Unknown { .. } => None,
+        }
+    }
+
+    /// Convert a [`ServerMessage`] into a `ChangeEvent`.
+    ///
+    /// Returns `None` for auth-only messages (`AuthSuccess`, `AuthError`) that
+    /// are not subscription events.
+    pub fn from_server_message(msg: ServerMessage) -> Option<Self> {
+        match msg {
+            ServerMessage::AuthSuccess { .. } | ServerMessage::AuthError { .. } => None,
+            ServerMessage::SubscriptionAck {
+                subscription_id,
+                total_rows,
+                batch_control,
+                schema,
+            } => Some(Self::Ack {
+                subscription_id,
+                total_rows,
+                batch_control,
+                schema,
+            }),
+            ServerMessage::InitialDataBatch {
+                subscription_id,
+                rows,
+                batch_control,
+            } => Some(Self::InitialDataBatch {
+                subscription_id,
+                rows,
+                batch_control,
+            }),
+            ServerMessage::Change {
+                subscription_id,
+                change_type,
+                rows,
+                old_values,
+            } => Some(match change_type {
+                ChangeTypeRaw::Insert => Self::Insert {
+                    subscription_id,
+                    rows: rows.unwrap_or_default(),
+                },
+                ChangeTypeRaw::Update => Self::Update {
+                    subscription_id,
+                    rows: rows.unwrap_or_default(),
+                    old_rows: old_values.unwrap_or_default(),
+                },
+                ChangeTypeRaw::Delete => Self::Delete {
+                    subscription_id,
+                    old_rows: old_values.unwrap_or_default(),
+                },
+            }),
+            ServerMessage::Error {
+                subscription_id,
+                code,
+                message,
+            } => Some(Self::Error {
+                subscription_id,
+                code,
+                message,
+            }),
+        }
+    }
+
+    /// Convert this event back to a [`ServerMessage`].
+    pub fn to_server_message(&self) -> ServerMessage {
+        match self {
+            Self::Ack {
+                subscription_id,
+                total_rows,
+                batch_control,
+                schema,
+            } => ServerMessage::SubscriptionAck {
+                subscription_id: subscription_id.clone(),
+                total_rows: *total_rows,
+                batch_control: batch_control.clone(),
+                schema: schema.clone(),
+            },
+            Self::InitialDataBatch {
+                subscription_id,
+                rows,
+                batch_control,
+            } => ServerMessage::InitialDataBatch {
+                subscription_id: subscription_id.clone(),
+                rows: rows.clone(),
+                batch_control: batch_control.clone(),
+            },
+            Self::Insert {
+                subscription_id,
+                rows,
+            } => ServerMessage::Change {
+                subscription_id: subscription_id.clone(),
+                change_type: ChangeTypeRaw::Insert,
+                rows: Some(rows.clone()),
+                old_values: None,
+            },
+            Self::Update {
+                subscription_id,
+                rows,
+                old_rows,
+            } => ServerMessage::Change {
+                subscription_id: subscription_id.clone(),
+                change_type: ChangeTypeRaw::Update,
+                rows: Some(rows.clone()),
+                old_values: Some(old_rows.clone()),
+            },
+            Self::Delete {
+                subscription_id,
+                old_rows,
+            } => ServerMessage::Change {
+                subscription_id: subscription_id.clone(),
+                change_type: ChangeTypeRaw::Delete,
+                rows: None,
+                old_values: Some(old_rows.clone()),
+            },
+            Self::Error {
+                subscription_id,
+                code,
+                message,
+            } => ServerMessage::Error {
+                subscription_id: subscription_id.clone(),
+                code: code.clone(),
+                message: message.clone(),
+            },
+            Self::Unknown { .. } => ServerMessage::Error {
+                subscription_id: String::new(),
+                code: "unknown".to_string(),
+                message: "Unknown subscription event".to_string(),
+            },
         }
     }
 }

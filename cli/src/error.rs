@@ -59,10 +59,8 @@ impl CLIError {
             KalamLinkError::SetupRequired(msg) => msg.clone(),
             KalamLinkError::ConfigurationError(msg) => msg.clone(),
             KalamLinkError::TimeoutError(msg) => msg.clone(),
-            KalamLinkError::QueryError(msg) => msg.clone(),
             KalamLinkError::SerializationError(msg) => msg.clone(),
             KalamLinkError::WebSocketError(msg) => msg.clone(),
-            KalamLinkError::InternalError(msg) => msg.clone(),
             KalamLinkError::ServerError {
                 status_code,
                 message,

@@ -43,7 +43,7 @@ pub fn create_test_client_for_base_url(
     base_url: &str,
 ) -> Result<KalamLinkClient, kalam_link::KalamLinkError> {
     let token = common::root_access_token_blocking()
-        .map_err(|e| kalam_link::KalamLinkError::InternalError(e.to_string()))?;
+        .map_err(|e| kalam_link::KalamLinkError::ConfigurationError(e.to_string()))?;
     KalamLinkClient::builder()
         .base_url(base_url)
         .timeout(Duration::from_secs(10))
@@ -57,7 +57,7 @@ pub fn create_test_client_with_events_for_base_url(
     base_url: &str,
 ) -> Result<(KalamLinkClient, Arc<AtomicU32>, Arc<AtomicU32>), kalam_link::KalamLinkError> {
     let token = common::root_access_token_blocking()
-        .map_err(|e| kalam_link::KalamLinkError::InternalError(e.to_string()))?;
+        .map_err(|e| kalam_link::KalamLinkError::ConfigurationError(e.to_string()))?;
 
     let connect_count = Arc::new(AtomicU32::new(0));
     let disconnect_count = Arc::new(AtomicU32::new(0));

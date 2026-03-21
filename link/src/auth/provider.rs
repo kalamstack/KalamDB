@@ -13,14 +13,17 @@
 //! ```rust,no_run
 //! use kalam_link::{AuthProvider, DynamicAuthProvider};
 //! use std::sync::Arc;
+//! use std::pin::Pin;
+//! use std::future::Future;
 //!
 //! struct MyTokenStore { /* ... */ }
 //!
-//! #[async_trait::async_trait]
 //! impl DynamicAuthProvider for MyTokenStore {
-//!     async fn get_auth(&self) -> kalam_link::Result<AuthProvider> {
-//!         // fetch / refresh token here
-//!         Ok(AuthProvider::jwt_token("fresh-token".into()))
+//!     fn get_auth(&self) -> Pin<Box<dyn Future<Output = kalam_link::Result<AuthProvider>> + Send + '_>> {
+//!         Box::pin(async {
+//!             // fetch / refresh token here
+//!             Ok(AuthProvider::jwt_token("fresh-token".into()))
+//!         })
 //!     }
 //! }
 //!
@@ -30,6 +33,8 @@
 
 use crate::error::Result;
 use base64::{engine::general_purpose, Engine as _};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 /// Authentication credentials for KalamDB server.
@@ -122,10 +127,9 @@ impl AuthProvider {
 ///
 /// Implement this trait to supply credentials lazily from any source:
 /// OAuth token refresh, secure storage, interactive login, etc.
-#[async_trait::async_trait]
 pub trait DynamicAuthProvider: Send + Sync + 'static {
     /// Return the current (or freshly refreshed) credentials.
-    async fn get_auth(&self) -> Result<AuthProvider>;
+    fn get_auth(&self) -> Pin<Box<dyn Future<Output = Result<AuthProvider>> + Send + '_>>;
 }
 
 /// A boxed, reference-counted [`DynamicAuthProvider`].

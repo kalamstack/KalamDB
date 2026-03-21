@@ -848,9 +848,7 @@ pub async fn create_session(
 
     fn build_connectivity_diagnostics(server_url: &str, err: &KalamLinkError) -> String {
         let error_details = match err {
-            KalamLinkError::NetworkError(msg)
-            | KalamLinkError::TimeoutError(msg)
-            | KalamLinkError::InternalError(msg) => msg.as_str(),
+            KalamLinkError::NetworkError(msg) | KalamLinkError::TimeoutError(msg) => msg.as_str(),
             _ => &err.to_string(),
         };
 
@@ -904,9 +902,7 @@ pub async fn create_session(
             // If the server is unreachable, return detailed diagnostics.
             if matches!(
                 e,
-                KalamLinkError::NetworkError(_)
-                    | KalamLinkError::TimeoutError(_)
-                    | KalamLinkError::InternalError(_)
+                KalamLinkError::NetworkError(_) | KalamLinkError::TimeoutError(_)
             ) {
                 Err(CLIError::LinkError(KalamLinkError::NetworkError(
                     build_connectivity_diagnostics(&server_url, &e),

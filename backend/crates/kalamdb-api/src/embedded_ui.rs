@@ -16,6 +16,8 @@ use rust_embed::Embed;
 #[derive(Embed)]
 #[folder = "../../../ui/dist"]
 #[prefix = ""]
+#[exclude = "*.map"]
+#[exclude = "kalam_link_bg.wasm"]
 struct UiAssets;
 
 /// Serve embedded UI assets

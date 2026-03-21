@@ -59,17 +59,12 @@ pub enum KalamLinkError {
     /// WebSocket connection or protocol errors
     WebSocketError(String),
 
-    /// Query validation errors (invalid SQL, parameter mismatch)
-    QueryError(String),
-
     /// Connection timeout
     TimeoutError(String),
 
     /// The operation was cancelled
     Cancelled,
 
-    /// Generic internal error
-    InternalError(String),
 }
 
 impl fmt::Display for KalamLinkError {
@@ -85,10 +80,8 @@ impl fmt::Display for KalamLinkError {
             Self::ConfigurationError(msg) => write!(f, "Configuration error: {}", msg),
             Self::SerializationError(msg) => write!(f, "Serialization error: {}", msg),
             Self::WebSocketError(msg) => write!(f, "WebSocket error: {}", msg),
-            Self::QueryError(msg) => write!(f, "Query error: {}", msg),
             Self::TimeoutError(msg) => write!(f, "Timeout: {}", msg),
             Self::Cancelled => write!(f, "Operation cancelled"),
-            Self::InternalError(msg) => write!(f, "Internal error: {}", msg),
         }
     }
 }

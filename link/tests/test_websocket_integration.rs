@@ -52,7 +52,7 @@ fn is_table_not_found_event(event: &ChangeEvent) -> bool {
 /// Helper to create a test client
 fn create_test_client() -> Result<KalamLinkClient, kalam_link::KalamLinkError> {
     let token = common::root_access_token_blocking()
-        .map_err(|e| kalam_link::KalamLinkError::InternalError(e.to_string()))?;
+        .map_err(|e| kalam_link::KalamLinkError::ConfigurationError(e.to_string()))?;
     KalamLinkClient::builder()
         .base_url(common::server_url())
         .timeout(Duration::from_secs(30))
@@ -92,7 +92,7 @@ async fn execute_query_with_retry(
     }
 
     Err(last_err
-        .unwrap_or_else(|| kalam_link::KalamLinkError::InternalError("query failed".into())))
+        .unwrap_or_else(|| kalam_link::KalamLinkError::ConfigurationError("query failed".into())))
 }
 
 /// Wait until a newly created table is visible for queries

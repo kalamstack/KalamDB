@@ -498,7 +498,7 @@ impl AppContext {
                     Arc::clone(&notification_service),
                 ));
                 raft_executor.set_cluster_handler(cluster_handler);
-                let pg_executor = Arc::new(crate::pg_executor::CorePgQueryExecutor::new(
+                let pg_executor = Arc::new(crate::operations::OperationService::new(
                     Arc::clone(&app_ctx),
                 ));
                 let pg_service = Arc::new(
@@ -506,7 +506,7 @@ impl AppContext {
                         "Bearer {}",
                         app_ctx.config().auth.jwt_secret
                     )))
-                    .with_query_executor(pg_executor),
+                    .with_operation_executor(pg_executor),
                 );
                 raft_executor.set_pg_service(pg_service);
                 log::info!("Wired gRPC ClusterClient and CoreClusterHandler for cluster RPC");

@@ -6,12 +6,8 @@ use serde::Serialize;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{
-    CloseEvent, ErrorEvent, Headers, MessageEvent, Request, RequestInit, RequestMode, Response,
-    WebSocket,
-};
+use web_sys::{CloseEvent, ErrorEvent, MessageEvent, WebSocket};
 
-use crate::compression;
 use crate::models::{
     ClientMessage, ConnectionOptions, QueryRequest, ServerMessage, SubscriptionOptions,
     SubscriptionRequest,
@@ -20,7 +16,7 @@ use base64::Engine;
 
 use super::auth::WasmAuthProvider;
 use super::console_log;
-use super::helpers::{create_promise, subscription_hash};
+use super::helpers::{create_promise, decode_ws_message, subscription_hash};
 use super::reconnect::{self, reconnect_internal_with_auth, resubscribe_all};
 use super::state::{
     callback_payload, filter_subscription_event, track_subscription_checkpoint,
@@ -470,58 +466,9 @@ fn install_runtime_message_handler(
     on_receive_cb: Rc<RefCell<Option<js_sys::Function>>>,
 ) {
     let onmessage_callback = Closure::wrap(Box::new(move |e: MessageEvent| {
-        let message = if let Ok(txt) = e.data().dyn_into::<js_sys::JsString>() {
-            String::from(txt)
-        } else if let Ok(array_buffer) = e.data().dyn_into::<js_sys::ArrayBuffer>() {
-            let uint8_array = js_sys::Uint8Array::new(&array_buffer);
-            let data = uint8_array.to_vec();
-
-            match compression::decompress_gzip(&data) {
-                Ok(decompressed) => match String::from_utf8(decompressed) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        console_log(&format!(
-                            "KalamClient: Invalid UTF-8 in decompressed message: {}",
-                            e
-                        ));
-                        return;
-                    },
-                },
-                Err(e) => {
-                    console_log(&format!("KalamClient: Failed to decompress message: {}", e));
-                    return;
-                },
-            }
-        } else if e.data().is_instance_of::<web_sys::Blob>() {
-            console_log(
-                "KalamClient: Received Blob message - binary mode may be misconfigured. Attempting to read as text.",
-            );
-            if let Some(s) = e.data().as_string() {
-                s
-            } else {
-                console_log("KalamClient: Could not convert Blob to string");
-                return;
-            }
-        } else {
-            let data = e.data();
-            let type_name = js_sys::Reflect::get(&data, &"constructor".into())
-                .ok()
-                .and_then(|c| js_sys::Reflect::get(&c, &"name".into()).ok())
-                .and_then(|n| n.as_string())
-                .unwrap_or_else(|| "unknown".to_string());
-            let typeof_str = data.js_typeof().as_string().unwrap_or_else(|| "?".to_string());
-            let data_preview = js_sys::JSON::stringify(&data)
-                .ok()
-                .and_then(|s| s.as_string())
-                .unwrap_or_else(|| format!("{:?}", data));
-
-            console_log(&format!(
-                "KalamClient: Received unknown message type: constructor={}, typeof={}, preview={}",
-                type_name,
-                typeof_str,
-                &data_preview[..data_preview.len().min(200)]
-            ));
-            return;
+        let message = match decode_ws_message(&e) {
+            Some(m) => m,
+            None => return,
         };
 
         if message.len() > 200 {
@@ -1036,66 +983,9 @@ impl KalamClient {
         let on_error_for_msg = Rc::clone(&self.on_error_cb);
 
         let onmessage_callback = Closure::wrap(Box::new(move |e: MessageEvent| {
-            // Handle Text, ArrayBuffer, and Blob messages
-            let message = if let Ok(txt) = e.data().dyn_into::<js_sys::JsString>() {
-                // Plain text message
-                String::from(txt)
-            } else if let Ok(array_buffer) = e.data().dyn_into::<js_sys::ArrayBuffer>() {
-                // Binary message (ArrayBuffer) - likely gzip compressed
-                let uint8_array = js_sys::Uint8Array::new(&array_buffer);
-                let data = uint8_array.to_vec();
-
-                // Decompress gzip data
-                match compression::decompress_gzip(&data) {
-                    Ok(decompressed) => match String::from_utf8(decompressed) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            console_log(&format!(
-                                "KalamClient: Invalid UTF-8 in decompressed message: {}",
-                                e
-                            ));
-                            return;
-                        },
-                    },
-                    Err(e) => {
-                        console_log(&format!("KalamClient: Failed to decompress message: {}", e));
-                        return;
-                    },
-                }
-            } else if e.data().is_instance_of::<web_sys::Blob>() {
-                // Blob message - browser may send binary as Blob instead of ArrayBuffer
-                // For now, log and skip - we need async handling for Blob
-                console_log("KalamClient: Received Blob message - binary mode may be misconfigured. Attempting to read as text.");
-                // Try to get it as a string anyway via toString()
-                if let Some(s) = e.data().as_string() {
-                    s
-                } else {
-                    console_log("KalamClient: Could not convert Blob to string");
-                    return;
-                }
-            } else {
-                // Unknown message type - log extensive debugging info
-                let data = e.data();
-                let type_name = js_sys::Reflect::get(&data, &"constructor".into())
-                    .ok()
-                    .and_then(|c| js_sys::Reflect::get(&c, &"name".into()).ok())
-                    .and_then(|n| n.as_string())
-                    .unwrap_or_else(|| "unknown".to_string());
-
-                // Try to get typeof
-                let typeof_str = data.js_typeof().as_string().unwrap_or_else(|| "?".to_string());
-
-                // Try to stringify for debugging
-                let data_preview = js_sys::JSON::stringify(&data)
-                    .ok()
-                    .and_then(|s| s.as_string())
-                    .unwrap_or_else(|| format!("{:?}", data));
-
-                console_log(&format!(
-                    "KalamClient: Received unknown message type: constructor={}, typeof={}, preview={}",
-                    type_name, typeof_str, &data_preview[..data_preview.len().min(200)]
-                ));
-                return;
+            let message = match decode_ws_message(&e) {
+                Some(m) => m,
+                None => return,
             };
 
             // SECURITY: Do not log full message content — it may contain
@@ -1651,30 +1541,16 @@ impl KalamClient {
     /// console.log(refreshResp.access_token);
     /// ```
     pub async fn refresh_access_token(&mut self, refresh_token: &str) -> Result<JsValue, JsValue> {
-        let opts = RequestInit::new();
-        opts.set_method("POST");
-        opts.set_mode(RequestMode::Cors);
-
-        let headers = Headers::new()?;
-        headers.set("Authorization", &format!("Bearer {}", refresh_token))?;
-        opts.set_headers(&headers);
-
         let url = format!("{}/v1/api/auth/refresh", self.url);
-        let request = Request::new_with_str_and_init(&url, &opts)?;
-
-        let resp_value = JsFuture::from(super::helpers::fetch_request(&request)).await?;
-        let resp: Response = resp_value.dyn_into()?;
-
-        if !resp.ok() {
-            let text = JsFuture::from(resp.text()?).await?;
-            let error_msg = text
-                .as_string()
-                .unwrap_or_else(|| format!("Token refresh failed: HTTP {}", resp.status()));
-            return Err(JsValue::from_str(&error_msg));
-        }
-
-        let json = JsFuture::from(resp.text()?).await?;
-        let json_str = json.as_string().unwrap_or_default();
+        let auth_header = format!("Bearer {}", refresh_token);
+        let json_str = super::helpers::wasm_fetch(
+            &url,
+            "POST",
+            None,
+            &[("Authorization", &auth_header)],
+            "Token refresh failed",
+        )
+        .await?;
 
         let login_response: crate::models::LoginResponse = serde_json::from_str(&json_str)
             .map_err(|e| JsValue::from_str(&format!("Failed to parse refresh response: {}", e)))?;
@@ -1715,17 +1591,6 @@ impl KalamClient {
         let req: crate::models::ConsumeRequest = serde_wasm_bindgen::from_value(options)
             .map_err(|e| JsValue::from_str(&format!("Invalid consume options: {}", e)))?;
 
-        let opts = RequestInit::new();
-        opts.set_method("POST");
-        opts.set_mode(RequestMode::Cors);
-
-        let headers = Headers::new()?;
-        headers.set("Content-Type", "application/json")?;
-        if let Some(auth_header) = self.auth.borrow().to_http_header() {
-            headers.set("Authorization", &auth_header)?;
-        }
-        opts.set_headers(&headers);
-
         let mut body = serde_json::json!({
             "topic_id": req.topic,
             "group_id": req.group_id,
@@ -1736,24 +1601,22 @@ impl KalamClient {
         if let Some(timeout) = req.timeout_seconds {
             body["timeout_seconds"] = serde_json::json!(timeout);
         }
-        opts.set_body(&JsValue::from_str(&body.to_string()));
+        let body_str = body.to_string();
 
         let url = format!("{}/v1/api/topics/consume", self.url);
-        let request = Request::new_with_str_and_init(&url, &opts)?;
-
-        let resp_value = JsFuture::from(super::helpers::fetch_request(&request)).await?;
-        let resp: Response = resp_value.dyn_into()?;
-
-        if !resp.ok() {
-            let status = resp.status();
-            let text = JsFuture::from(resp.text()?).await?;
-            let error_msg =
-                text.as_string().unwrap_or_else(|| format!("Consume failed: HTTP {}", status));
-            return Err(JsValue::from_str(&error_msg));
+        let auth_header = self.auth.borrow().to_http_header();
+        let mut hdrs: Vec<(&str, &str)> = vec![("Content-Type", "application/json")];
+        if let Some(ref ah) = auth_header {
+            hdrs.push(("Authorization", ah));
         }
-
-        let json = JsFuture::from(resp.text()?).await?;
-        let json_str = json.as_string().unwrap_or_default();
+        let json_str = super::helpers::wasm_fetch(
+            &url,
+            "POST",
+            Some(&body_str),
+            &hdrs,
+            "Consume failed",
+        )
+        .await?;
 
         // Parse the raw server response and convert to type-safe ConsumeResponse
         let raw: serde_json::Value = serde_json::from_str(&json_str)
@@ -1842,41 +1705,23 @@ impl KalamClient {
         partition_id: u32,
         upto_offset: u64,
     ) -> Result<JsValue, JsValue> {
-        let opts = RequestInit::new();
-        opts.set_method("POST");
-        opts.set_mode(RequestMode::Cors);
-
-        let headers = Headers::new()?;
-        headers.set("Content-Type", "application/json")?;
-        if let Some(auth_header) = self.auth.borrow().to_http_header() {
-            headers.set("Authorization", &auth_header)?;
-        }
-        opts.set_headers(&headers);
-
         let body = serde_json::json!({
             "topic_id": topic,
             "group_id": group_id,
             "partition_id": partition_id,
             "upto_offset": upto_offset,
         });
-        opts.set_body(&JsValue::from_str(&body.to_string()));
+        let body_str = body.to_string();
 
         let url = format!("{}/v1/api/topics/ack", self.url);
-        let request = Request::new_with_str_and_init(&url, &opts)?;
-
-        let resp_value = JsFuture::from(super::helpers::fetch_request(&request)).await?;
-        let resp: Response = resp_value.dyn_into()?;
-
-        if !resp.ok() {
-            let status = resp.status();
-            let text = JsFuture::from(resp.text()?).await?;
-            let error_msg =
-                text.as_string().unwrap_or_else(|| format!("Ack failed: HTTP {}", status));
-            return Err(JsValue::from_str(&error_msg));
+        let auth_header = self.auth.borrow().to_http_header();
+        let mut hdrs: Vec<(&str, &str)> = vec![("Content-Type", "application/json")];
+        if let Some(ref ah) = auth_header {
+            hdrs.push(("Authorization", ah));
         }
-
-        let json = JsFuture::from(resp.text()?).await?;
-        let json_str = json.as_string().unwrap_or_default();
+        let json_str =
+            super::helpers::wasm_fetch(&url, "POST", Some(&body_str), &hdrs, "Ack failed")
+                .await?;
 
         let raw: serde_json::Value = serde_json::from_str(&json_str)
             .map_err(|e| JsValue::from_str(&format!("Failed to parse ack response: {}", e)))?;
@@ -1925,21 +1770,6 @@ impl KalamClient {
         sql: &str,
         params: &Option<Vec<serde_json::Value>>,
     ) -> Result<String, JsValue> {
-        let opts = RequestInit::new();
-        opts.set_method("POST");
-        opts.set_mode(RequestMode::Cors);
-
-        // Set headers with authentication
-        let headers = Headers::new()?;
-        headers.set("Content-Type", "application/json")?;
-
-        // Add Authorization header if we have authentication
-        if let Some(auth_header) = self.auth.borrow().to_http_header() {
-            headers.set("Authorization", &auth_header)?;
-        }
-        opts.set_headers(&headers);
-
-        // Set body
         let body = QueryRequest {
             sql: sql.to_string(),
             params: params.clone(),
@@ -1947,26 +1777,15 @@ impl KalamClient {
         };
         let body_str = serde_json::to_string(&body)
             .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?;
-        opts.set_body(&JsValue::from_str(&body_str));
 
         let url = format!("{}/v1/api/sql", self.url);
-        let request = Request::new_with_str_and_init(&url, &opts)?;
-
-        // Execute fetch (cross-platform: works in both browser and Node.js)
-        let resp_value = JsFuture::from(super::helpers::fetch_request(&request)).await?;
-        let resp: Response = resp_value.dyn_into()?;
-
-        // Check status
-        if !resp.ok() {
-            let status = resp.status();
-            let text = JsFuture::from(resp.text()?).await?;
-            let error_msg = text.as_string().unwrap_or_else(|| format!("HTTP error {}", status));
-            return Err(JsValue::from_str(&error_msg));
+        let auth_header = self.auth.borrow().to_http_header();
+        let mut hdrs: Vec<(&str, &str)> = vec![("Content-Type", "application/json")];
+        if let Some(ref ah) = auth_header {
+            hdrs.push(("Authorization", ah));
         }
-
-        // Parse response and enrich with named_rows
-        let json = JsFuture::from(resp.text()?).await?;
-        let raw = json.as_string().unwrap_or_else(|| "{}".to_string());
+        let raw = super::helpers::wasm_fetch(&url, "POST", Some(&body_str), &hdrs, "HTTP error")
+            .await?;
 
         // Deserialize, populate named_rows (schema → map), re-serialize.
         // This moves the transformation into Rust so every SDK gets it for free.
@@ -2052,36 +1871,21 @@ impl KalamClient {
         username: &str,
         password: &str,
     ) -> Result<crate::models::LoginResponse, JsValue> {
-        let opts = RequestInit::new();
-        opts.set_method("POST");
-        opts.set_mode(RequestMode::Cors);
-
-        let headers = Headers::new()?;
-        headers.set("Content-Type", "application/json")?;
-        opts.set_headers(&headers);
-
         let body = serde_json::json!({
             "username": username,
             "password": password,
         });
-        opts.set_body(&JsValue::from_str(&body.to_string()));
+        let body_str = body.to_string();
 
         let url = format!("{}/v1/api/auth/login", self.url);
-        let request = Request::new_with_str_and_init(&url, &opts)?;
-
-        let resp_value = JsFuture::from(super::helpers::fetch_request(&request)).await?;
-        let resp: Response = resp_value.dyn_into()?;
-
-        if !resp.ok() {
-            let text = JsFuture::from(resp.text()?).await?;
-            let error_msg = text
-                .as_string()
-                .unwrap_or_else(|| format!("Login failed: HTTP {}", resp.status()));
-            return Err(JsValue::from_str(&error_msg));
-        }
-
-        let json = JsFuture::from(resp.text()?).await?;
-        let json_str = json.as_string().unwrap_or_default();
+        let json_str = super::helpers::wasm_fetch(
+            &url,
+            "POST",
+            Some(&body_str),
+            &[("Content-Type", "application/json")],
+            "Login failed",
+        )
+        .await?;
 
         serde_json::from_str(&json_str)
             .map_err(|e| JsValue::from_str(&format!("Failed to parse login response: {}", e)))
