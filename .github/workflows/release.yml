@@ -62,6 +62,8 @@ env:
   CARGO_TERM_COLOR: always
   RUST_VERSION: "1.92.0"
   WASM_PACK_VERSION: "0.14.0"
+  PG_EXTENSION_MAJOR: "16"
+  PG_EXTENSION_FLAVOR: "pg16"
   DEFAULT_PLATFORMS: "linux-x86_64,macos-aarch64,linux-aarch64"
   RUSTC_WRAPPER: ""
   CARGO_BUILD_RUSTC_WRAPPER: ""
@@ -978,10 +980,10 @@ jobs:
                 -c /usr/bin/pg_config \
                 --no-default-features \
                 --profile release-pg \
-                -F pg16 && \
-              cp /usr/lib/postgresql/16/lib/pg_kalam.so          /artifacts/ && \
-              cp /usr/share/postgresql/16/extension/pg_kalam.control /artifacts/ && \
-              cp /usr/share/postgresql/16/extension/pg_kalam--*.sql  /artifacts/
+                -F ${PG_EXTENSION_FLAVOR} && \
+              cp /usr/lib/postgresql/${PG_EXTENSION_MAJOR}/lib/pg_kalam.so /artifacts/ && \
+              cp /usr/share/postgresql/${PG_EXTENSION_MAJOR}/extension/pg_kalam.control /artifacts/ && \
+              cp /usr/share/postgresql/${PG_EXTENSION_MAJOR}/extension/pg_kalam--*.sql /artifacts/
             '
 
       - name: Package extension artifacts
@@ -989,7 +991,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ needs.read_version.outputs.version }}"
-          PKG="pg_kalam-${VERSION}-pg16-linux-x86_64"
+          PKG="pg_kalam-${VERSION}-${PG_EXTENSION_FLAVOR}-linux-x86_64"
           mkdir -p "dist/${VERSION}/${PKG}"
 
           cp artifacts/pg_kalam.so           "dist/${VERSION}/${PKG}/"
@@ -1020,99 +1022,6 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: dist-pg-extension-linux-x86_64
-          path: dist/${{ needs.read_version.outputs.version }}/*
-          if-no-files-found: error
-
-  build_pg_extension_aarch64:
-    name: Build PG Extension Linux ARM64
-    runs-on: ubuntu-latest
-    needs: read_version
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Setup Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build extension in Docker (ARM64)
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="${{ needs.read_version.outputs.version }}"
-
-          # Build the builder image for ARM64 using QEMU emulation
-          docker buildx build \
-            --platform linux/arm64 \
-            --load \
-            -f pg/docker/Dockerfile.builder-base \
-            -t pg-kalam-builder-arm64 \
-            .
-
-          # Compile extension inside the ARM64 container
-          mkdir -p artifacts .cargo/pg-extension-arm64/registry .cargo/pg-extension-arm64/git .cargo/pg-extension-arm64/target
-          docker run --rm --platform linux/arm64 \
-            -v "$PWD:/src:ro" \
-            -v "$PWD/artifacts:/artifacts" \
-            -v "$PWD/.cargo/pg-extension-arm64/registry:/usr/local/cargo/registry" \
-            -v "$PWD/.cargo/pg-extension-arm64/git:/usr/local/cargo/git" \
-            -v "$PWD/.cargo/pg-extension-arm64/target:/target-cache" \
-            -e CARGO_INCREMENTAL=0 \
-            -e CARGO_TARGET_DIR=/target-cache \
-            -e RUSTFLAGS="-Cdebuginfo=0" \
-            pg-kalam-builder-arm64 \
-            bash -c '
-              cd /src && \
-              cargo pgrx install \
-                -p kalam-pg-extension \
-                -c /usr/bin/pg_config \
-                --no-default-features \
-                --profile release-pg \
-                -F pg16 && \
-              cp /usr/lib/postgresql/16/lib/pg_kalam.so          /artifacts/ && \
-              cp /usr/share/postgresql/16/extension/pg_kalam.control /artifacts/ && \
-              cp /usr/share/postgresql/16/extension/pg_kalam--*.sql  /artifacts/
-            '
-
-      - name: Package extension artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="${{ needs.read_version.outputs.version }}"
-          PKG="pg_kalam-${VERSION}-pg16-linux-aarch64"
-          mkdir -p "dist/${VERSION}/${PKG}"
-
-          cp artifacts/pg_kalam.so           "dist/${VERSION}/${PKG}/"
-          cp artifacts/pg_kalam.control      "dist/${VERSION}/${PKG}/"
-          cp artifacts/pg_kalam--*.sql       "dist/${VERSION}/${PKG}/"
-
-          cat > "dist/${VERSION}/${PKG}/install.sh" << 'INSTALL_EOF'
-          #!/usr/bin/env bash
-          set -euo pipefail
-          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-          PG_CONFIG="${1:-pg_config}"
-          LIBDIR="$("$PG_CONFIG" --pkglibdir)"
-          SHAREDIR="$("$PG_CONFIG" --sharedir)/extension"
-          echo "Installing pg_kalam to $LIBDIR and $SHAREDIR ..."
-          install -m 755 "$SCRIPT_DIR/pg_kalam.so" "$LIBDIR/"
-          install -m 644 "$SCRIPT_DIR/pg_kalam.control" "$SHAREDIR/"
-          install -m 644 "$SCRIPT_DIR"/pg_kalam--*.sql "$SHAREDIR/"
-          echo "Done. Run: CREATE EXTENSION pg_kalam;"
-          INSTALL_EOF
-          chmod +x "dist/${VERSION}/${PKG}/install.sh"
-
-          (cd "dist/${VERSION}" && tar -czf "${PKG}.tar.gz" "${PKG}")
-          rm -rf "dist/${VERSION}/${PKG}"
-
-          ls -lh "dist/${VERSION}/"
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v6
-        with:
-          name: dist-pg-extension-linux-aarch64
           path: dist/${{ needs.read_version.outputs.version }}/*
           if-no-files-found: error
 
@@ -1272,7 +1181,6 @@ jobs:
       - build_windows_x86_64
       - build_macos_arm
       - build_pg_extension_x86_64
-      - build_pg_extension_aarch64
       - read_version
       - smoke_tests
       - sdk_tests_typescript
@@ -1587,7 +1495,6 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build_pg_extension_x86_64
-      - build_pg_extension_aarch64
       - read_version
 
     if: ${{ github.event_name == 'push' || github.event.inputs.docker_push == 'true' }}
@@ -1602,12 +1509,6 @@ jobs:
           name: dist-pg-extension-linux-x86_64
           path: pg-artifacts-amd64/
 
-      - name: Download PG extension artifact (aarch64)
-        uses: actions/download-artifact@v4
-        with:
-          name: dist-pg-extension-linux-aarch64
-          path: pg-artifacts-arm64/
-
       - name: Prepare extension files
         shell: bash
         run: |
@@ -1616,19 +1517,10 @@ jobs:
 
           # Extract x86_64 tarball
           mkdir -p pg-ext-amd64
-          tar -xzf "pg-artifacts-amd64/pg_kalam-${VERSION}-pg16-linux-x86_64.tar.gz" -C pg-ext-amd64 --strip-components=1
-
-          # Extract aarch64 tarball
-          mkdir -p pg-ext-arm64
-          tar -xzf "pg-artifacts-arm64/pg_kalam-${VERSION}-pg16-linux-aarch64.tar.gz" -C pg-ext-arm64 --strip-components=1
+          tar -xzf "pg-artifacts-amd64/pg_kalam-${VERSION}-${PG_EXTENSION_FLAVOR}-linux-x86_64.tar.gz" -C pg-ext-amd64 --strip-components=1
 
           echo "=== x86_64 ==="
           ls -lh pg-ext-amd64/
-          echo "=== aarch64 ==="
-          ls -lh pg-ext-arm64/
-
-      - name: Setup QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Setup Buildx
         uses: docker/setup-buildx-action@v3
@@ -1647,34 +1539,55 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: |
-            jamals86/kalamdb-pg:${{ needs.read_version.outputs.version }}-amd64
+            jamals86/kalamdb-pg:${{ needs.read_version.outputs.version }}-${{ env.PG_EXTENSION_FLAVOR }}
+            jamals86/kalamdb-pg:latest-${{ env.PG_EXTENSION_FLAVOR }}
 
-      - name: Build and push PG image (arm64)
-        uses: docker/build-push-action@v6
-        with:
-          context: pg-ext-arm64
-          file: pg/docker/Dockerfile.release-pg
-          push: true
-          platforms: linux/arm64
-          tags: |
-            jamals86/kalamdb-pg:${{ needs.read_version.outputs.version }}-arm64
-
-      - name: Create and push multi-arch PG manifest
+      - name: Smoke test PG image
         shell: bash
         run: |
           set -euo pipefail
           REPO="jamals86/kalamdb-pg"
           VERSION="${{ needs.read_version.outputs.version }}"
+          IMAGE="${REPO}:${VERSION}-${PG_EXTENSION_FLAVOR}"
 
-          docker buildx imagetools create -t "${REPO}:${VERSION}" \
-            "${REPO}:${VERSION}-amd64" \
-            "${REPO}:${VERSION}-arm64"
+          docker pull "$IMAGE"
+          docker rm -f kalamdb-pg-smoke >/dev/null 2>&1 || true
+          docker run -d \
+            --name kalamdb-pg-smoke \
+            -e POSTGRES_PASSWORD=postgres \
+            -p 55432:5432 \
+            "$IMAGE"
 
-          docker buildx imagetools create -t "${REPO}:latest" \
-            "${REPO}:${VERSION}-amd64" \
-            "${REPO}:${VERSION}-arm64"
+          cleanup() {
+            status=$?
+            if [[ $status -ne 0 ]]; then
+              docker logs kalamdb-pg-smoke || true
+            fi
+            docker rm -f kalamdb-pg-smoke >/dev/null 2>&1 || true
+            exit $status
+          }
+          trap cleanup EXIT
 
-          echo "✅ Multi-arch pg_kalam image: ${REPO}:${VERSION} and ${REPO}:latest"
+          ready=false
+          for i in {1..30}; do
+            if docker exec kalamdb-pg-smoke pg_isready -U postgres -d postgres >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+
+          if [[ "$ready" != "true" ]]; then
+            echo "PostgreSQL in ${IMAGE} did not become ready in time" >&2
+            exit 1
+          fi
+
+          docker exec -e PGPASSWORD=postgres kalamdb-pg-smoke \
+            psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -c "CREATE EXTENSION IF NOT EXISTS pg_kalam;" \
+            -c "SELECT extname FROM pg_extension WHERE extname = 'pg_kalam';"
+
+          echo "✅ PG Docker image verified: ${IMAGE}"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # INTEGRATION TESTS - Smoke + TypeScript SDK + Dart SDK against Docker image
