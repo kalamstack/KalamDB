@@ -993,18 +993,18 @@ jobs:
           cp artifacts/pg_kalam--*.sql       "dist/${VERSION}/${PKG}/"
 
           cat > "dist/${VERSION}/${PKG}/install.sh" << 'INSTALL_EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PG_CONFIG="${1:-pg_config}"
-LIBDIR="$("$PG_CONFIG" --pkglibdir)"
-SHAREDIR="$("$PG_CONFIG" --sharedir)/extension"
-echo "Installing pg_kalam to $LIBDIR and $SHAREDIR ..."
-install -m 755 "$SCRIPT_DIR/pg_kalam.so" "$LIBDIR/"
-install -m 644 "$SCRIPT_DIR/pg_kalam.control" "$SHAREDIR/"
-install -m 644 "$SCRIPT_DIR"/pg_kalam--*.sql "$SHAREDIR/"
-echo "Done. Run: CREATE EXTENSION pg_kalam;"
-INSTALL_EOF
+          #!/usr/bin/env bash
+          set -euo pipefail
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          PG_CONFIG="${1:-pg_config}"
+          LIBDIR="$("$PG_CONFIG" --pkglibdir)"
+          SHAREDIR="$("$PG_CONFIG" --sharedir)/extension"
+          echo "Installing pg_kalam to $LIBDIR and $SHAREDIR ..."
+          install -m 755 "$SCRIPT_DIR/pg_kalam.so" "$LIBDIR/"
+          install -m 644 "$SCRIPT_DIR/pg_kalam.control" "$SHAREDIR/"
+          install -m 644 "$SCRIPT_DIR"/pg_kalam--*.sql "$SHAREDIR/"
+          echo "Done. Run: CREATE EXTENSION pg_kalam;"
+          INSTALL_EOF
           chmod +x "dist/${VERSION}/${PKG}/install.sh"
 
           (cd "dist/${VERSION}" && tar -czf "${PKG}.tar.gz" "${PKG}")
@@ -1082,18 +1082,18 @@ INSTALL_EOF
           cp artifacts/pg_kalam--*.sql       "dist/${VERSION}/${PKG}/"
 
           cat > "dist/${VERSION}/${PKG}/install.sh" << 'INSTALL_EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PG_CONFIG="${1:-pg_config}"
-LIBDIR="$("$PG_CONFIG" --pkglibdir)"
-SHAREDIR="$("$PG_CONFIG" --sharedir)/extension"
-echo "Installing pg_kalam to $LIBDIR and $SHAREDIR ..."
-install -m 755 "$SCRIPT_DIR/pg_kalam.so" "$LIBDIR/"
-install -m 644 "$SCRIPT_DIR/pg_kalam.control" "$SHAREDIR/"
-install -m 644 "$SCRIPT_DIR"/pg_kalam--*.sql "$SHAREDIR/"
-echo "Done. Run: CREATE EXTENSION pg_kalam;"
-INSTALL_EOF
+          #!/usr/bin/env bash
+          set -euo pipefail
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          PG_CONFIG="${1:-pg_config}"
+          LIBDIR="$("$PG_CONFIG" --pkglibdir)"
+          SHAREDIR="$("$PG_CONFIG" --sharedir)/extension"
+          echo "Installing pg_kalam to $LIBDIR and $SHAREDIR ..."
+          install -m 755 "$SCRIPT_DIR/pg_kalam.so" "$LIBDIR/"
+          install -m 644 "$SCRIPT_DIR/pg_kalam.control" "$SHAREDIR/"
+          install -m 644 "$SCRIPT_DIR"/pg_kalam--*.sql "$SHAREDIR/"
+          echo "Done. Run: CREATE EXTENSION pg_kalam;"
+          INSTALL_EOF
           chmod +x "dist/${VERSION}/${PKG}/install.sh"
 
           (cd "dist/${VERSION}" && tar -czf "${PKG}.tar.gz" "${PKG}")
