@@ -408,16 +408,51 @@ fn emit_runtime_ws_error(
     }
 }
 
+fn clear_active_socket(
+    ws_ref: &Rc<RefCell<Option<WebSocket>>>,
+    source_ws: &WebSocket,
+    ping_interval_id: &Rc<RefCell<i32>>,
+) {
+    let should_clear = ws_ref.borrow().as_ref().is_some_and(|current_ws| {
+        js_sys::Object::is(current_ws.as_ref(), source_ws.as_ref())
+    });
+    if !should_clear {
+        return;
+    }
+
+    if let Some(current_ws) = ws_ref.borrow_mut().take() {
+        current_ws.set_onclose(None);
+        current_ws.set_onerror(None);
+        current_ws.set_onmessage(None);
+    }
+
+    let id = *ping_interval_id.borrow();
+    if id >= 0 {
+        super::helpers::global_clear_interval(id);
+        *ping_interval_id.borrow_mut() = -1;
+    }
+}
+
 fn install_runtime_disconnect_handlers(
     ws: &WebSocket,
     subscriptions: Rc<RefCell<HashMap<String, SubscriptionState>>>,
+    ws_ref: Rc<RefCell<Option<WebSocket>>>,
+    ping_interval_id: Rc<RefCell<i32>>,
     on_disconnect_cb: Rc<RefCell<Option<js_sys::Function>>>,
     on_error_cb: Rc<RefCell<Option<js_sys::Function>>>,
 ) {
     let subscriptions_for_error = Rc::clone(&subscriptions);
     let on_error_for_err = Rc::clone(&on_error_cb);
+    let ws_ref_for_error = Rc::clone(&ws_ref);
+    let ping_interval_id_for_error = Rc::clone(&ping_interval_id);
+    let source_ws_for_error = ws.clone();
     let onerror_callback = Closure::wrap(Box::new(move |e: ErrorEvent| {
         console_log(&format!("KalamClient: WebSocket error: {:?}", e));
+        clear_active_socket(
+            &ws_ref_for_error,
+            &source_ws_for_error,
+            &ping_interval_id_for_error,
+        );
         emit_runtime_ws_error(&on_error_for_err, "WebSocket connection failed", true);
         reject_pending_subscriptions(
             &subscriptions_for_error,
@@ -429,12 +464,20 @@ fn install_runtime_disconnect_handlers(
 
     let subscriptions_for_close = Rc::clone(&subscriptions);
     let on_disconnect_for_close = Rc::clone(&on_disconnect_cb);
+    let ws_ref_for_close = Rc::clone(&ws_ref);
+    let ping_interval_id_for_close = Rc::clone(&ping_interval_id);
+    let source_ws_for_close = ws.clone();
     let onclose_callback = Closure::wrap(Box::new(move |e: CloseEvent| {
         console_log(&format!(
             "KalamClient: WebSocket closed: code={}, reason={}",
             e.code(),
             e.reason()
         ));
+        clear_active_socket(
+            &ws_ref_for_close,
+            &source_ws_for_close,
+            &ping_interval_id_for_close,
+        );
         if let Some(cb) = on_disconnect_for_close.borrow().as_ref() {
             let reason_obj = js_sys::Object::new();
             let _ = js_sys::Reflect::set(
@@ -908,8 +951,16 @@ impl KalamClient {
         let auth_reject_clone = auth_reject.clone();
         let on_error_for_err = Rc::clone(&self.on_error_cb);
         let subscriptions_for_error = Rc::clone(&self.subscription_state);
+        let ws_ref_for_error = Rc::clone(&self.ws);
+        let ping_interval_id_for_error = Rc::clone(&self.ping_interval_id);
+        let source_ws_for_error = ws.clone();
         let onerror_callback = Closure::wrap(Box::new(move |e: ErrorEvent| {
             console_log(&format!("KalamClient: WebSocket error: {:?}", e));
+            clear_active_socket(
+                &ws_ref_for_error,
+                &source_ws_for_error,
+                &ping_interval_id_for_error,
+            );
             // Emit on_error callback
             if let Some(cb) = on_error_for_err.borrow().as_ref() {
                 let err_obj = js_sys::Object::new();
@@ -934,12 +985,20 @@ impl KalamClient {
 
         let on_disconnect_for_close = Rc::clone(&self.on_disconnect_cb);
         let subscriptions_for_close = Rc::clone(&self.subscription_state);
+        let ws_ref_for_close = Rc::clone(&self.ws);
+        let ping_interval_id_for_close = Rc::clone(&self.ping_interval_id);
+        let source_ws_for_close = ws.clone();
         let onclose_callback = Closure::wrap(Box::new(move |e: CloseEvent| {
             console_log(&format!(
                 "KalamClient: WebSocket closed: code={}, reason={}",
                 e.code(),
                 e.reason()
             ));
+            clear_active_socket(
+                &ws_ref_for_close,
+                &source_ws_for_close,
+                &ping_interval_id_for_close,
+            );
             // Emit on_disconnect callback
             if let Some(cb) = on_disconnect_for_close.borrow().as_ref() {
                 let reason_obj = js_sys::Object::new();
@@ -2024,6 +2083,8 @@ fn install_auto_reconnect_listener(
                         install_runtime_disconnect_handlers(
                             &ws,
                             Rc::clone(&subscription_state),
+                            Rc::clone(&ws_ref),
+                            Rc::clone(&ping_id),
                             Rc::clone(&on_disconnect),
                             Rc::clone(&on_error),
                         );

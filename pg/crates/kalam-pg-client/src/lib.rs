@@ -7,6 +7,7 @@ use kalam_pg_api::{MutationResponse, ScanResponse};
 use kalam_pg_common::{KalamPgError, RemoteServerConfig};
 use kalamdb_pg::{
     BeginTransactionRequest, CloseSessionRequest, CommitTransactionRequest, DeleteRpcRequest,
+    ExecuteSqlRpcRequest,
     InsertRpcRequest, OpenSessionRequest, PgServiceClient, PingRequest,
     RollbackTransactionRequest, ScanRpcRequest, UpdateRpcRequest,
 };
@@ -418,6 +419,25 @@ impl RemoteKalamClient {
             .map_err(|e| Self::grpc_err(e, &self.server_addr))?
             .into_inner();
         Ok(response.transaction_id)
+    }
+
+    /// Execute a DDL SQL statement on the KalamDB backend.
+    pub async fn execute_sql(
+        &self,
+        sql: &str,
+        session_id: &str,
+    ) -> Result<String, KalamPgError> {
+        let mut client = PgServiceClient::new(self.channel.clone());
+        let request = self.authorized_request(ExecuteSqlRpcRequest {
+            sql: sql.to_string(),
+            session_id: session_id.to_string(),
+        });
+        let response = client
+            .execute_sql(request)
+            .await
+            .map_err(|e| Self::grpc_err(e, &self.server_addr))?
+            .into_inner();
+        Ok(response.message)
     }
 
     fn authorized_request<T>(&self, payload: T) -> Request<T> {

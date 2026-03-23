@@ -1303,6 +1303,7 @@ pub(crate) fn compose_provider_username(issuer: &str, subject: &str) -> UserName
 
 198) when subscribing if the query has an orderby or group by then return an error its not supported only a select and where is supported, also the _seq and _deleted cant be included in the subscription at all
 
+199) if we run select * from dba.stats limit 100 - the results each time come in different order they should always come by the order of the primary key of the table
 
 
 Main Epics:

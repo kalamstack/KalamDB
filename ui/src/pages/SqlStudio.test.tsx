@@ -16,11 +16,15 @@ const mockSchemaTreeQuery = vi.fn();
 const mockExecuteSqlStudioQuery = vi.fn();
 const mockSubscribe = vi.fn();
 const mockSetClientLogListener = vi.fn();
+const mockSetClientDisconnectListener = vi.fn();
+const mockSetClientErrorListener = vi.fn();
 const mockSetClientReceiveListener = vi.fn();
 const mockSetClientSendListener = vi.fn();
 const mockUnsubscribe = vi.fn();
 
 let liveCallback: ((message: Record<string, unknown>) => void) | null = null;
+let clientDisconnectCallback: ((reason: Record<string, unknown>) => void) | null = null;
+let clientErrorCallback: ((error: Record<string, unknown>) => void) | null = null;
 let clientReceiveCallback: ((message: string) => void) | null = null;
 let clientSendCallback: ((message: string) => void) | null = null;
 
@@ -42,6 +46,8 @@ vi.mock("@/services/sqlStudioService", async () => {
 
 vi.mock("@/lib/kalam-client", () => ({
   subscribe: (...args: unknown[]) => mockSubscribe(...args),
+  setClientDisconnectListener: (...args: unknown[]) => mockSetClientDisconnectListener(...args),
+  setClientErrorListener: (...args: unknown[]) => mockSetClientErrorListener(...args),
   setClientLogListener: (...args: unknown[]) => mockSetClientLogListener(...args),
   setClientReceiveListener: (...args: unknown[]) => mockSetClientReceiveListener(...args),
   setClientSendListener: (...args: unknown[]) => mockSetClientSendListener(...args),
@@ -154,12 +160,16 @@ describe("SqlStudio page", () => {
       },
     );
     liveCallback = null;
+    clientDisconnectCallback = null;
+    clientErrorCallback = null;
     clientReceiveCallback = null;
     clientSendCallback = null;
     mockUseAuth.mockReset();
     mockSchemaTreeQuery.mockReset();
     mockExecuteSqlStudioQuery.mockReset();
     mockSubscribe.mockReset();
+    mockSetClientDisconnectListener.mockReset();
+    mockSetClientErrorListener.mockReset();
     mockSetClientLogListener.mockReset();
     mockSetClientReceiveListener.mockReset();
     mockSetClientSendListener.mockReset();
@@ -194,6 +204,12 @@ describe("SqlStudio page", () => {
     mockSubscribe.mockImplementation(async (_sql: string, callback: (message: Record<string, unknown>) => void) => {
       liveCallback = callback;
       return mockUnsubscribe;
+    });
+    mockSetClientDisconnectListener.mockImplementation((callback?: (reason: Record<string, unknown>) => void) => {
+      clientDisconnectCallback = callback ?? null;
+    });
+    mockSetClientErrorListener.mockImplementation((callback?: (error: Record<string, unknown>) => void) => {
+      clientErrorCallback = callback ?? null;
     });
     mockSetClientReceiveListener.mockImplementation((callback?: (message: string) => void) => {
       clientReceiveCallback = callback ?? null;
@@ -362,6 +378,42 @@ describe("SqlStudio page", () => {
       const messages = activeResult?.logs.map((entry) => entry.message) ?? [];
       expect(messages).toContain("WS SEND · subscribe");
       expect(messages).toContain("WS RECEIVE · subscription_ack");
+    });
+  });
+
+  it("marks the live query as errored when the websocket disconnects", async () => {
+    const { store } = renderSqlStudio();
+
+    fireEvent.change(getSqlEditor(), {
+      target: { value: "SELECT id, name FROM default.events" },
+    });
+
+    fireEvent.click(screen.getByRole("switch"));
+    fireEvent.click(screen.getByRole("button", { name: /subscribe/i }));
+
+    await waitFor(() => {
+      expect(mockSetClientDisconnectListener).toHaveBeenCalled();
+    });
+
+    await act(async () => {
+      liveCallback?.({
+        type: "subscription_ack",
+        schema: [
+          { name: "id", data_type: "Int64", index: 0, flags: ["pk"] },
+          { name: "name", data_type: "Utf8", index: 1 },
+        ],
+      });
+      clientDisconnectCallback?.({
+        message: "Heartbeat timeout",
+        code: 1000,
+      });
+    });
+
+    await waitFor(() => {
+      const state = store.getState().sqlStudioWorkspace;
+      const activeTabId = state.activeTabId;
+      expect(activeTabId).toBeTruthy();
+      expect(state.tabs.find((tab) => tab.id === activeTabId)?.liveStatus).toBe("error");
     });
   });
 });

@@ -6,6 +6,7 @@ mod session_settings;
 
 // FDW callback layer
 mod arrow_to_pg;
+mod fdw_ddl;
 mod fdw_handler;
 mod fdw_import;
 mod fdw_modify;

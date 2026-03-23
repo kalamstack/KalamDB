@@ -20,6 +20,9 @@ pub extern "C-unwind" fn _PG_init() {
         GucContext::Userset,
         GucFlags::default(),
     );
+
+    // Register ProcessUtility hook for DDL propagation.
+    crate::fdw_ddl::register_hook();
 }
 
 /// Return the extension crate version exposed through PostgreSQL.

@@ -12,6 +12,8 @@ import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { useAuth } from "@/lib/auth";
 import {
   subscribe,
+  setClientDisconnectListener,
+  setClientErrorListener,
   setClientLogListener,
   setClientReceiveListener,
   setClientSendListener,
@@ -401,6 +403,8 @@ export default function SqlStudio() {
     setClientLogListener(undefined);
     setClientReceiveListener(undefined);
     setClientSendListener(undefined);
+    setClientDisconnectListener(undefined);
+    setClientErrorListener(undefined);
     updateTab(tabId, { liveStatus: "idle" });
   }, [updateTab]);
 
@@ -449,6 +453,32 @@ export default function SqlStudio() {
         tabId: tab.id,
         entry: createWireLogEntry("receive", message, user?.username),
       }));
+    });
+    setClientDisconnectListener((reason) => {
+      dispatch(appendWorkspaceResultLog({
+        tabId: tab.id,
+        entry: createLogEntry(
+          `Live connection closed${reason.message ? `: ${reason.message}` : "."}`,
+          "error",
+          user?.username,
+          reason,
+        ),
+        statusOverride: "error",
+      }));
+      updateTab(tab.id, { liveStatus: "error" });
+    });
+    setClientErrorListener((error) => {
+      dispatch(appendWorkspaceResultLog({
+        tabId: tab.id,
+        entry: createLogEntry(
+          `Live connection error: ${error.message}`,
+          "error",
+          user?.username,
+          error,
+        ),
+        statusOverride: "error",
+      }));
+      updateTab(tab.id, { liveStatus: "error" });
     });
 
     try {

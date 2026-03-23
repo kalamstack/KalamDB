@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::copy_bidirectional;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex as TokioMutex;
 use tokio::task::JoinHandle;
@@ -25,8 +25,47 @@ use tokio::time::sleep;
 pub struct TcpDisconnectProxy {
     base_url: String,
     paused: Arc<AtomicBool>,
+    impairments: Arc<ProxyImpairments>,
     active_connections: Arc<TokioMutex<HashMap<u64, JoinHandle<()>>>>,
     accept_task: JoinHandle<()>,
+}
+
+struct ProxyImpairments {
+    blackholed: AtomicBool,
+    latency_ms: AtomicU64,
+    stall_every_n_chunks: AtomicU64,
+    stall_duration_ms: AtomicU64,
+}
+
+impl ProxyImpairments {
+    fn new() -> Self {
+        Self {
+            blackholed: AtomicBool::new(false),
+            latency_ms: AtomicU64::new(0),
+            stall_every_n_chunks: AtomicU64::new(0),
+            stall_duration_ms: AtomicU64::new(0),
+        }
+    }
+
+    async fn wait_before_forwarding(&self, chunk_index: u64) {
+        while self.blackholed.load(Ordering::SeqCst) {
+            sleep(Duration::from_millis(25)).await;
+        }
+
+        let latency_ms = self.latency_ms.load(Ordering::SeqCst);
+        if latency_ms > 0 {
+            sleep(Duration::from_millis(latency_ms)).await;
+        }
+
+        let stall_every_n_chunks = self.stall_every_n_chunks.load(Ordering::SeqCst);
+        let stall_duration_ms = self.stall_duration_ms.load(Ordering::SeqCst);
+        if stall_every_n_chunks > 0
+            && stall_duration_ms > 0
+            && chunk_index % stall_every_n_chunks == 0
+        {
+            sleep(Duration::from_millis(stall_duration_ms)).await;
+        }
+    }
 }
 
 impl TcpDisconnectProxy {
@@ -39,10 +78,12 @@ impl TcpDisconnectProxy {
             .expect("proxy should bind to an ephemeral port");
         let bind_addr = listener.local_addr().expect("proxy should have a local addr");
         let paused = Arc::new(AtomicBool::new(false));
+        let impairments = Arc::new(ProxyImpairments::new());
         let active_connections = Arc::new(TokioMutex::new(HashMap::new()));
         let next_id = Arc::new(AtomicU64::new(1));
 
         let paused_clone = paused.clone();
+        let impairments_clone = impairments.clone();
         let active_clone = active_connections.clone();
         let next_id_clone = next_id.clone();
         let accept_task = tokio::spawn(async move {
@@ -55,9 +96,23 @@ impl TcpDisconnectProxy {
                 let id = next_id_clone.fetch_add(1, Ordering::SeqCst);
                 let target_addr = target_addr.clone();
                 let active_for_task = active_clone.clone();
+                let impairments_for_task = impairments_clone.clone();
                 let task = tokio::spawn(async move {
                     if let Ok(mut outbound) = TcpStream::connect(&target_addr).await {
-                        let _ = copy_bidirectional(&mut inbound, &mut outbound).await;
+                        let (inbound_reader, inbound_writer) = inbound.split();
+                        let (outbound_reader, outbound_writer) = outbound.split();
+                        let _ = tokio::try_join!(
+                            relay_with_impairments(
+                                inbound_reader,
+                                outbound_writer,
+                                impairments_for_task.clone(),
+                            ),
+                            relay_with_impairments(
+                                outbound_reader,
+                                inbound_writer,
+                                impairments_for_task,
+                            ),
+                        );
                     }
                     active_for_task.lock().await.remove(&id);
                 });
@@ -69,6 +124,7 @@ impl TcpDisconnectProxy {
         Self {
             base_url: format!("http://{}", bind_addr),
             paused,
+            impairments,
             active_connections,
             accept_task,
         }
@@ -87,6 +143,47 @@ impl TcpDisconnectProxy {
     /// Allow new connections again.
     pub fn resume(&self) {
         self.paused.store(false, Ordering::SeqCst);
+    }
+
+    /// Stall all traffic while keeping accepted TCP sockets open.
+    pub fn blackhole(&self) {
+        self.impairments.blackholed.store(true, Ordering::SeqCst);
+    }
+
+    /// Resume forwarding traffic after a `blackhole()` call.
+    pub fn restore_traffic(&self) {
+        self.impairments.blackholed.store(false, Ordering::SeqCst);
+    }
+
+    /// Add a fixed per-chunk forwarding delay in both directions.
+    pub fn set_latency(&self, latency: Duration) {
+        self.impairments
+            .latency_ms
+            .store(latency.as_millis() as u64, Ordering::SeqCst);
+    }
+
+    /// Clear any fixed forwarding latency.
+    pub fn clear_latency(&self) {
+        self.impairments.latency_ms.store(0, Ordering::SeqCst);
+    }
+
+    /// Stall every `every_n_chunks` forwarded chunks for `stall_duration`.
+    ///
+    /// This approximates packet loss and retransmission delays without dropping
+    /// raw TCP bytes, which would corrupt WebSocket frames.
+    pub fn set_chunk_stall_pattern(&self, every_n_chunks: u64, stall_duration: Duration) {
+        self.impairments
+            .stall_every_n_chunks
+            .store(every_n_chunks, Ordering::SeqCst);
+        self.impairments
+            .stall_duration_ms
+            .store(stall_duration.as_millis() as u64, Ordering::SeqCst);
+    }
+
+    /// Clear any intermittent stall pattern.
+    pub fn clear_chunk_stall_pattern(&self) {
+        self.impairments.stall_every_n_chunks.store(0, Ordering::SeqCst);
+        self.impairments.stall_duration_ms.store(0, Ordering::SeqCst);
     }
 
     /// Abort all in-flight proxy tasks, forcibly closing both sides of every
@@ -137,6 +234,28 @@ impl TcpDisconnectProxy {
     pub async fn shutdown(self) {
         self.accept_task.abort();
         self.drop_active_connections().await;
+    }
+}
+
+async fn relay_with_impairments(
+    mut reader: tokio::net::tcp::ReadHalf<'_>,
+    mut writer: tokio::net::tcp::WriteHalf<'_>,
+    impairments: Arc<ProxyImpairments>,
+) -> std::io::Result<()> {
+    let mut buffer = [0_u8; 16 * 1024];
+    let mut chunk_index = 0_u64;
+
+    loop {
+        let read = reader.read(&mut buffer).await?;
+        if read == 0 {
+            writer.shutdown().await?;
+            return Ok(());
+        }
+
+        chunk_index = chunk_index.saturating_add(1);
+        impairments.wait_before_forwarding(chunk_index).await;
+        writer.write_all(&buffer[..read]).await?;
+        writer.flush().await?;
     }
 }
 

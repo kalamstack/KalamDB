@@ -98,7 +98,7 @@ pub struct ConnectionOptions {
     /// interval to prevent the server-side heartbeat timeout from firing
     /// on idle connections.
     ///
-    /// Set to `0` to disable.  Default: `30_000` (30 seconds).
+    /// Set to `0` to disable.  Default: `5_000` (5 seconds).
     #[serde(default = "default_ping_interval_ms")]
     pub ping_interval_ms: u64,
 
@@ -154,7 +154,7 @@ fn default_max_reconnect_delay_ms() -> u64 {
 }
 
 fn default_ping_interval_ms() -> u64 {
-    30000
+    5000
 }
 
 fn default_ws_lazy_connect() -> bool {
@@ -170,7 +170,7 @@ impl Default for ConnectionOptions {
             max_reconnect_delay_ms: 30000,
             max_reconnect_attempts: None,
             timestamp_format: TimestampFormat::Iso8601,
-            ping_interval_ms: 30000,
+            ping_interval_ms: 5000,
             ws_local_bind_addresses: Vec::new(),
             disable_compression: false,
             ws_lazy_connect: true,

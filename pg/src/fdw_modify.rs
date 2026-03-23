@@ -169,6 +169,18 @@ pub unsafe extern "C-unwind" fn end_foreign_modify(
     _estate: *mut pg_sys::EState,
     rinfo: *mut pg_sys::ResultRelInfo,
 ) {
+    // Implicit autocommit statements need their buffered writes flushed here so
+    // statement errors surface to the client instead of being deferred to the
+    // transaction callback. Explicit BEGIN/COMMIT blocks keep batching until
+    // PRE_COMMIT for better throughput.
+    if let Some(table_id) = current_modify_table_id(rinfo) {
+        if !pg_sys::IsTransactionBlock() {
+            if let Err(e) = crate::write_buffer::flush_table(&table_id) {
+                pgrx::error!("pg_kalam modify flush: {}", e);
+            }
+        }
+    }
+
     let state_ptr = (*rinfo).ri_FdwState;
     if !state_ptr.is_null() {
         let _ = Box::from_raw(state_ptr as *mut KalamModifyState);
@@ -241,6 +253,16 @@ unsafe fn begin_foreign_modify_impl(rinfo: *mut pg_sys::ResultRelInfo) -> Result
 
     (*rinfo).ri_FdwState = Box::into_raw(modify_state) as *mut std::ffi::c_void;
     Ok(())
+}
+
+unsafe fn current_modify_table_id(rinfo: *mut pg_sys::ResultRelInfo) -> Option<kalamdb_commons::TableId> {
+    let state_ptr = (*rinfo).ri_FdwState;
+    if state_ptr.is_null() {
+        return None;
+    }
+
+    let state = &*(state_ptr as *mut KalamModifyState);
+    Some(state.table_options.table_id.clone())
 }
 
 unsafe fn exec_foreign_insert_impl(

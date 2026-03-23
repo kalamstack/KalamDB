@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 use crate::error::{CLIError, Result};
+use crate::history::get_cli_home_dir;
 
 /// CLI configuration loaded from TOML file
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -179,9 +180,7 @@ impl Default for CLIConfiguration {
 pub fn expand_config_path(path: &Path) -> PathBuf {
     let path_str = path.to_str().unwrap_or("~/.kalam/config.toml");
     if let Some(rest) = path_str.strip_prefix("~/") {
-        if let Some(home_dir) = dirs::home_dir() {
-            return home_dir.join(rest);
-        }
+        return get_cli_home_dir().join(rest);
     }
     path.to_path_buf()
 }

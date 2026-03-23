@@ -156,6 +156,26 @@ pub struct DeleteRpcResponse {
 }
 
 // ---------------------------------------------------------------------------
+// DDL (execute_sql) RPC messages
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct ExecuteSqlRpcRequest {
+    #[prost(string, tag = "1")]
+    pub sql: String,
+    #[prost(string, tag = "2")]
+    pub session_id: String,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct ExecuteSqlRpcResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: String,
+}
+
+// ---------------------------------------------------------------------------
 // Transaction RPC messages
 // ---------------------------------------------------------------------------
 
@@ -369,6 +389,20 @@ pub mod pg_service_client {
             request.extensions_mut().insert(GrpcMethod::new(PG_SERVICE_NAME, "RollbackTransaction"));
             self.inner.unary(request, path, codec).await
         }
+
+        pub async fn execute_sql(
+            &mut self,
+            request: impl tonic::IntoRequest<ExecuteSqlRpcRequest>,
+        ) -> Result<Response<ExecuteSqlRpcResponse>, Status> {
+            self.inner.ready().await.map_err(|error| {
+                Status::new(tonic::Code::Unknown, format!("Service not ready: {:?}", error))
+            })?;
+            let codec = ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/kalamdb.pg.PgService/ExecuteSql");
+            let mut request = request.into_request();
+            request.extensions_mut().insert(GrpcMethod::new(PG_SERVICE_NAME, "ExecuteSql"));
+            self.inner.unary(request, path, codec).await
+        }
     }
 }
 
@@ -427,6 +461,11 @@ pub mod pg_service_server {
             &self,
             request: Request<RollbackTransactionRequest>,
         ) -> Result<Response<RollbackTransactionResponse>, Status>;
+
+        async fn execute_sql(
+            &self,
+            request: Request<ExecuteSqlRpcRequest>,
+        ) -> Result<Response<ExecuteSqlRpcResponse>, Status>;
     }
 
     #[derive(Debug, Clone)]
@@ -552,6 +591,15 @@ pub mod pg_service_server {
                     let fut = async move {
                         let mut grpc = tonic::server::Grpc::new(ProstCodec::default());
                         let method = RollbackTransactionSvc(inner);
+                        let response = grpc.unary(method, req).await;
+                        Ok(response)
+                    };
+                    Box::pin(fut)
+                },
+                "/kalamdb.pg.PgService/ExecuteSql" => {
+                    let fut = async move {
+                        let mut grpc = tonic::server::Grpc::new(ProstCodec::default());
+                        let method = ExecuteSqlSvc(inner);
                         let response = grpc.unary(method, req).await;
                         Ok(response)
                     };
@@ -692,6 +740,19 @@ pub mod pg_service_server {
         fn call(&mut self, request: Request<RollbackTransactionRequest>) -> Self::Future {
             let inner = Arc::clone(&self.0);
             let fut = async move { inner.rollback_transaction(request).await };
+            Box::pin(fut)
+        }
+    }
+
+    struct ExecuteSqlSvc<T: PgService>(Arc<T>);
+
+    impl<T: PgService> tonic::server::UnaryService<ExecuteSqlRpcRequest> for ExecuteSqlSvc<T> {
+        type Response = ExecuteSqlRpcResponse;
+        type Future = BoxFuture<Response<Self::Response>, Status>;
+
+        fn call(&mut self, request: Request<ExecuteSqlRpcRequest>) -> Self::Future {
+            let inner = Arc::clone(&self.0);
+            let fut = async move { inner.execute_sql(request).await };
             Box::pin(fut)
         }
     }
@@ -992,6 +1053,25 @@ impl PgService for KalamPgService {
 
         Ok(Response::new(RollbackTransactionResponse {
             transaction_id: rolled_back_id,
+        }))
+    }
+
+    async fn execute_sql(
+        &self,
+        request: Request<ExecuteSqlRpcRequest>,
+    ) -> Result<Response<ExecuteSqlRpcResponse>, Status> {
+        self.authorize(&request)?;
+        let inner = request.into_inner();
+        let sql = inner.sql.trim();
+        if sql.is_empty() {
+            return Err(Status::invalid_argument("sql must not be empty"));
+        }
+
+        log::debug!("PG execute_sql: {}", sql);
+        let result = self.operation_executor()?.execute_sql(sql).await?;
+        Ok(Response::new(ExecuteSqlRpcResponse {
+            success: true,
+            message: result,
         }))
     }
 }

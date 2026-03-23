@@ -27,6 +27,7 @@ pub trait OperationExecutor: Send + Sync + 'static {
     async fn execute_insert(&self, request: InsertRequest) -> Result<MutationResult, Status>;
     async fn execute_update(&self, request: UpdateRequest) -> Result<MutationResult, Status>;
     async fn execute_delete(&self, request: DeleteRequest) -> Result<MutationResult, Status>;
+    async fn execute_sql(&self, sql: &str) -> Result<String, Status>;
 }
 
 // ── Helpers for gRPC ↔ domain translation ──────────────────────────────────

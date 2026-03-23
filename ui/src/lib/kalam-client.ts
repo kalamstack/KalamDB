@@ -14,9 +14,13 @@ import {
   Auth,
   LogLevel,
   type KalamCellValue,
+  type ConnectionError,
+  type DisconnectReason,
   type LiveRowsOptions,
   type LogEntry,
   type LogListener,
+  type OnDisconnectCallback,
+  type OnErrorCallback,
   type OnReceiveCallback,
   type OnSendCallback,
   type QueryResponse,
@@ -29,9 +33,12 @@ import {
 let client: KalamDBClient | null = null;
 let currentToken: string | null = null;
 let isInitialized = false;
+let currentDisconnectListener: OnDisconnectCallback | undefined;
+let currentErrorListener: OnErrorCallback | undefined;
 let currentReceiveListener: OnReceiveCallback | undefined;
 let currentSendListener: OnSendCallback | undefined;
 const isDebugLoggingEnabled = import.meta.env.DEV;
+const ADMIN_UI_PING_INTERVAL_MS = 5_000;
 
 function debugLog(...args: unknown[]): void {
   if (isDebugLoggingEnabled) {
@@ -115,6 +122,7 @@ export async function initializeClient(jwtToken: string): Promise<KalamDBClient>
     const nextClient = new KalamDBClient({
       url: getBackendUrl(),
       authProvider: async () => Auth.jwt(jwtToken),
+      pingIntervalMs: ADMIN_UI_PING_INTERVAL_MS,
     });
 
     debugLog('[kalam-client] Initializing WASM...');
@@ -128,6 +136,12 @@ export async function initializeClient(jwtToken: string): Promise<KalamDBClient>
     }
     if (currentSendListener) {
       nextClient.onSend(currentSendListener);
+    }
+    if (currentDisconnectListener) {
+      nextClient.onDisconnect(currentDisconnectListener);
+    }
+    if (currentErrorListener) {
+      nextClient.onError(currentErrorListener);
     }
     debugLog('[kalam-client] WASM initialized successfully');
     return nextClient;
@@ -484,11 +498,34 @@ export function setClientSendListener(listener: OnSendCallback | undefined): voi
   }
 }
 
+export function setClientDisconnectListener(listener: OnDisconnectCallback | undefined): void {
+  currentDisconnectListener = listener;
+  if (client) {
+    client.onDisconnect(listener ?? (() => {}));
+  }
+}
+
+export function setClientErrorListener(listener: OnErrorCallback | undefined): void {
+  currentErrorListener = listener;
+  if (client) {
+    client.onError(listener ?? (() => {}));
+  }
+}
+
 /**
  * Get the SDK LogLevel enum for external use.
  */
 export { LogLevel };
-export type { LogEntry, LogListener, OnReceiveCallback, OnSendCallback };
+export type {
+  ConnectionError,
+  DisconnectReason,
+  LogEntry,
+  LogListener,
+  OnDisconnectCallback,
+  OnErrorCallback,
+  OnReceiveCallback,
+  OnSendCallback,
+};
 
 // Re-export types for convenience
 export type { LiveRowsOptions, QueryResponse, RowData, ServerMessage, SubscriptionOptions, Unsubscribe };

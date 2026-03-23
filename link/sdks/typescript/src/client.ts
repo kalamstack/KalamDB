@@ -211,7 +211,7 @@ export class KalamDBClient {
     this.disableCompression = options.disableCompression ?? false;
     this.wasmUrl = options.wasmUrl;
     this.wsLazyConnect = options.wsLazyConnect ?? true;
-    this.pingIntervalMs = options.pingIntervalMs ?? 30_000;
+    this.pingIntervalMs = options.pingIntervalMs ?? 5_000;
     this._logLevel = options.logLevel ?? LogLevel.Warn;
     this._logListener = options.logListener;
     this._onConnect = options.onConnect;
@@ -390,11 +390,10 @@ export class KalamDBClient {
           this.log(LogLevel.Debug, 'auth', 'Auto-login successful');
         }
 
-        // Forward ping interval to the WASM client before connecting
-        if (this.pingIntervalMs !== 30_000) {
-          this.log(LogLevel.Debug, 'connection', `Setting ping interval to ${this.pingIntervalMs}ms`);
-          this.wasmClient.setPingInterval(this.pingIntervalMs);
-        }
+        // Always forward the effective ping interval so the TS and WASM
+        // defaults cannot silently drift apart.
+        this.log(LogLevel.Debug, 'connection', `Setting ping interval to ${this.pingIntervalMs}ms`);
+        this.wasmClient.setPingInterval(this.pingIntervalMs);
 
         await this.wasmClient.connect();
         this.log(LogLevel.Info, 'connection', `Connected to ${this.url} successfully`);

@@ -4,19 +4,61 @@
 //!
 //! Maintains command history across sessions for better user experience.
 
+use std::env;
 use std::path::{Path, PathBuf};
 
 use crate::error::{CLIError, Result};
 
-/// Get the KalamDB CLI configuration directory path
+fn is_usable_home_dir(path: &Path) -> bool {
+    !path.as_os_str().is_empty() && path != Path::new("/")
+}
+
+fn resolve_cli_home_dir_with<F>(
+    mut env_var: F,
+    detected_home: Option<PathBuf>,
+    current_dir: Option<PathBuf>,
+) -> PathBuf
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    for key in ["HOME", "USERPROFILE"] {
+        if let Some(value) = env_var(key) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                let candidate = PathBuf::from(trimmed);
+                if is_usable_home_dir(&candidate) {
+                    return candidate;
+                }
+            }
+        }
+    }
+
+    if let Some(home_dir) = detected_home.filter(|path| is_usable_home_dir(path)) {
+        return home_dir;
+    }
+
+    current_dir.unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Resolve the CLI home directory.
+///
+/// In containerized runtimes a numeric user can have no passwd entry or a broken
+/// home lookup that resolves to `/`. In that case, fall back to the current
+/// working directory so config, credentials, and history still land in a
+/// writable `.kalam` directory.
+pub fn get_cli_home_dir() -> PathBuf {
+    resolve_cli_home_dir_with(
+        |key| env::var(key).ok(),
+        dirs::home_dir(),
+        env::current_dir().ok(),
+    )
+}
+
+/// Get the KalamDB CLI configuration directory path.
 /// - Windows: `~/.kalam`
 /// - Linux/macOS: `~/.kalam`
 pub fn get_kalam_config_dir() -> PathBuf {
-    if let Some(home_dir) = dirs::home_dir() {
-        home_dir.join(".kalam")
-    } else {
-        PathBuf::from(".kalam")
-    }
+    get_cli_home_dir().join(".kalam")
 }
 
 /// Command history manager
@@ -70,6 +112,47 @@ pub fn should_persist_command(command: &str) -> bool {
         "client_secret",
     ];
     !sensitive_markers.iter().any(|marker| lower.contains(marker))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefers_home_env_when_available() {
+        let resolved = resolve_cli_home_dir_with(
+            |key| match key {
+                "HOME" => Some("/tmp/kalam-home".to_string()),
+                _ => None,
+            },
+            Some(PathBuf::from("/ignored")),
+            Some(PathBuf::from("/cwd")),
+        );
+
+        assert_eq!(resolved, PathBuf::from("/tmp/kalam-home"));
+    }
+
+    #[test]
+    fn falls_back_to_current_dir_when_home_is_root() {
+        let resolved = resolve_cli_home_dir_with(
+            |_key| Some("/".to_string()),
+            Some(PathBuf::from("/")),
+            Some(PathBuf::from("/data")),
+        );
+
+        assert_eq!(resolved, PathBuf::from("/data"));
+    }
+
+    #[test]
+    fn uses_detected_home_when_env_is_missing() {
+        let resolved = resolve_cli_home_dir_with(
+            |_key| None,
+            Some(PathBuf::from("/Users/tester")),
+            Some(PathBuf::from("/cwd")),
+        );
+
+        assert_eq!(resolved, PathBuf::from("/Users/tester"));
+    }
 }
 
 impl CommandHistory {

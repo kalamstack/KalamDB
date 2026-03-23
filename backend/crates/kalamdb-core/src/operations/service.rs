@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use datafusion::prelude::SessionContext;
 use kalamdb_commons::models::{ReadContext, Role, UserId};
-use kalamdb_commons::TableType;
+use kalamdb_commons::{NamespaceId, TableType};
 use kalamdb_pg::OperationExecutor;
 use kalamdb_session::SessionUserContext;
 use tonic::Status;
@@ -11,6 +11,7 @@ use tonic::Status;
 use super::scan;
 use super::types::{DeleteRequest, InsertRequest, MutationResult, ScanRequest, ScanResult, UpdateRequest};
 use crate::app_context::AppContext;
+use crate::sql::ExecutionContext;
 
 /// Domain-typed operation executor for Tier-2 (typed) callers.
 ///
@@ -176,6 +177,31 @@ impl OperationExecutor for OperationService {
         Ok(MutationResult {
             affected_rows: affected as u64,
         })
+    }
+
+    async fn execute_sql(&self, sql: &str) -> Result<String, Status> {
+        let base = self.app_context.base_session_context();
+        let exec_ctx = ExecutionContext::with_namespace(
+            UserId::new("pg-extension"),
+            Role::Dba,
+            NamespaceId::new("default"),
+            base,
+        );
+
+        let sql_executor = crate::sql::executor::SqlExecutor::new(
+            Arc::clone(&self.app_context),
+            false, // no password-complexity enforcement for DDL
+        );
+        let result = sql_executor
+            .execute(sql, &exec_ctx, Vec::new())
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let message = match result {
+            crate::sql::ExecutionResult::Success { message } => message,
+            other => format!("OK (affected: {})", other.affected_rows()),
+        };
+        Ok(message)
     }
 }
 

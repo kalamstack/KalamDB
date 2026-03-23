@@ -20,6 +20,7 @@ impl RemoteBackendExecutor {
 #[async_trait]
 impl KalamBackendExecutor for RemoteBackendExecutor {
     async fn scan(&self, request: ScanRequest) -> Result<ScanResponse, KalamPgError> {
+        request.validate()?;
         let user_id = request
             .tenant_context
             .effective_user_id()
@@ -42,6 +43,7 @@ impl KalamBackendExecutor for RemoteBackendExecutor {
     }
 
     async fn insert(&self, request: InsertRequest) -> Result<MutationResponse, KalamPgError> {
+        request.validate()?;
         let user_id = request
             .tenant_context
             .effective_user_id()
@@ -66,6 +68,7 @@ impl KalamBackendExecutor for RemoteBackendExecutor {
     }
 
     async fn update(&self, request: UpdateRequest) -> Result<MutationResponse, KalamPgError> {
+        request.validate()?;
         let user_id = request
             .tenant_context
             .effective_user_id()
@@ -88,6 +91,7 @@ impl KalamBackendExecutor for RemoteBackendExecutor {
     }
 
     async fn delete(&self, request: DeleteRequest) -> Result<MutationResponse, KalamPgError> {
+        request.validate()?;
         let user_id = request
             .tenant_context
             .effective_user_id()

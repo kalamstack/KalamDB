@@ -20,7 +20,9 @@ pub use operation_executor::{
 pub use service::{
     BeginTransactionRequest, BeginTransactionResponse, CloseSessionRequest, CloseSessionResponse,
     CommitTransactionRequest,
-    CommitTransactionResponse, DeleteRpcRequest, DeleteRpcResponse, InsertRpcRequest,
+    CommitTransactionResponse, DeleteRpcRequest, DeleteRpcResponse,
+    ExecuteSqlRpcRequest, ExecuteSqlRpcResponse,
+    InsertRpcRequest,
     InsertRpcResponse, OpenSessionRequest, OpenSessionResponse, PgServiceClient, PingRequest,
     PingResponse,
     RollbackTransactionRequest, RollbackTransactionResponse, ScanRpcRequest, ScanRpcResponse,
