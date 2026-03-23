@@ -29,6 +29,7 @@ members = [
     "backend/crates/kalamdb-raft",
     "backend/crates/kalamdb-views",
     "backend/crates/kalamdb-pg",
+    "backend/crates/kalamdb-server-auth",
     "backend",
     "link",
     "link/kalam-link-dart",
@@ -81,10 +82,11 @@ chrono = { version = "0.4.44", features = ["serde"] }
 # arrow_array crate into the graph and causes FixedSizeListArray type mismatches.
 # Upgrade DataFusion first before bumping Arrow/Parquet beyond this family.
 arrow = { version = "57.3.0", default-features = false }
-arrow-ipc = { version = "57.3.0" }
+arrow-ipc = { version = "57.3.0", default-features = false }
 arrow-schema = { version = "57.3.0" }
 datafusion = { version = "52.3.0", default-features = false, features = ["sql", "parquet", "recursive_protection", "nested_expressions"] }
 datafusion-common = { version = "52.3.0" }
+datafusion-expr = { version = "52.3.0" }
 sqlparser = { version = "0.61.0" }
 parquet = { version = "57.3.0", default-features = false, features = ["snap", "zstd", "arrow"] }
 
@@ -142,6 +144,8 @@ prost-types = "0.14.3"
 # Additional dependencies
 bcrypt = "0.19.0"
 rand = "0.10.0"
+rcgen = "0.14.1"
+x509-parser = "0.17.0"
 kalamdb-commons = { path = "backend/crates/kalamdb-commons" }
 kalamdb-tables = { path = "backend/crates/kalamdb-tables" }
 kalamdb-views = { path = "backend/crates/kalamdb-views" }
@@ -206,6 +210,7 @@ kalamdb-configs = { path = "backend/crates/kalamdb-configs" }
 kalamdb-server = { path = "backend" }
 pgrx = "=0.16.1"
 pgrx-tests = "=0.16.1"
+tokio-postgres = "0.7"
 
 # Tracing / observability
 tracing = "0.1"
@@ -238,6 +243,15 @@ lto = true            # Full LTO (slower link, best dead-code elimination)
 [profile.docker]
 inherits = "release"
 opt-level = "z"       # Optimize for size (most aggressive)
+
+# Custom profile for PostgreSQL extension builds (smallest possible .so)
+# Uses size optimization + full LTO + panic=unwind (required by pgrx)
+# Use with: cargo pgrx install --profile release-pg
+[profile.release-pg]
+inherits = "release"
+opt-level = "z"       # Optimize for size
+lto = true            # Full LTO for maximum dead-code elimination
+panic = "unwind"      # Required by pgrx (PostgreSQL longjmp unwinding)
 
 [profile.dev]
 opt-level = 0        # no optimizations = faster compile

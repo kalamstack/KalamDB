@@ -212,6 +212,9 @@ unsafe fn begin_foreign_scan_impl(node: *mut pg_sys::ForeignScanState) -> Result
     let options = parse_options((*ft).options);
     let table_options = TableOptions::parse(&options)?;
 
+    // Flush any pending writes for this table before scanning (read-your-writes)
+    crate::write_buffer::flush_table(&table_options.table_id)?;
+
     // Get server options (host/port) from the foreign server
     let server = pg_sys::GetForeignServer((*ft).serverid);
     let server_options = parse_options((*server).options);
@@ -224,14 +227,14 @@ unsafe fn begin_foreign_scan_impl(node: *mut pg_sys::ForeignScanState) -> Result
     let user_id_str = crate::current_kalam_user_id();
     let user_id = user_id_str.map(kalamdb_commons::models::UserId::new);
 
-    // Get auth header from server options or GUC
-    let auth_header = server_options.get("auth_header").cloned();
-
     // Ensure remote connection
-    let remote_state = crate::remote_state::ensure_remote_extension_state(remote_config, auth_header)
+    let remote_state = crate::remote_state::ensure_remote_extension_state(remote_config)
         .map_err(|e| KalamPgError::Execution(e.to_string()))?;
     let executor = remote_state.executor()?;
     let runtime = remote_state.runtime();
+
+    // Lazily begin a KalamDB transaction for this PostgreSQL transaction
+    let _ = crate::fdw_xact::ensure_transaction(remote_state.session_id())?;
 
     // Build column mapping from PG TupleDesc to Arrow schema
     let tupdesc = (*(*node).ss.ss_ScanTupleSlot).tts_tupleDescriptor;

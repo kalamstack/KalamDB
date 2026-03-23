@@ -88,9 +88,12 @@ pub mod column_default;
 pub mod column_definition;
 pub mod field_flag;
 pub mod policy;
+#[cfg(feature = "schema-metadata")]
 pub mod schema_field;
+#[cfg(feature = "table-definition")]
 pub mod schema_version;
 pub mod table_access;
+#[cfg(feature = "table-definition")]
 pub mod table_definition;
 pub mod table_name;
 pub mod table_options;
@@ -99,9 +102,12 @@ pub mod table_type;
 pub use column_default::ColumnDefault;
 pub use column_definition::ColumnDefinition;
 pub use field_flag::{FieldFlag, FieldFlags};
+#[cfg(feature = "schema-metadata")]
 pub use schema_field::SchemaField;
+#[cfg(feature = "table-definition")]
 pub use schema_version::SchemaVersion;
 pub use table_access::TableAccess;
+#[cfg(feature = "table-definition")]
 pub use table_definition::TableDefinition;
 pub use table_name::TableName;
 pub use table_options::{

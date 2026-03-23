@@ -2,10 +2,9 @@
 
 use crate::app_context::AppContext;
 use crate::error::KalamDbError;
-use crate::error_extensions::KalamDbResultExt;
 use crate::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
 use crate::sql::executor::handlers::typed::TypedStatementHandler;
-use kalamdb_auth::security::password::{validate_password_with_policy, PasswordPolicy};
+use kalamdb_auth::security::password::{hash_password, validate_password_with_policy, PasswordPolicy};
 use kalamdb_sql::ddl::{AlterUserStatement, UserModification};
 use std::sync::Arc;
 
@@ -56,9 +55,9 @@ impl TypedStatementHandler<AlterUserStatement> for AlterUserHandler {
                     validate_password_with_policy(new_pw, &policy)
                         .map_err(|e| KalamDbError::InvalidOperation(e.to_string()))?;
                 }
-                updated.password_hash =
-                    bcrypt::hash(new_pw, self.app_context.config().auth.bcrypt_cost)
-                        .into_kalamdb_error("Password hash error")?;
+                updated.password_hash = hash_password(new_pw, Some(self.app_context.config().auth.bcrypt_cost))
+                    .await
+                    .map_err(|e| KalamDbError::InvalidOperation(format!("Password hash error: {}", e)))?;
             },
             UserModification::SetRole(new_role) => {
                 if !context.is_admin() {

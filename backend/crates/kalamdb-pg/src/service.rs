@@ -1,17 +1,21 @@
+#[cfg(feature = "server")]
 use std::sync::Arc;
 
+#[cfg(feature = "server")]
 use async_trait::async_trait;
 use tonic::codegen::*;
-use tonic::metadata::MetadataValue;
-use tonic::{Request, Response, Status};
+#[cfg(feature = "server")]
+use tonic::Request;
+use tonic::{Response, Status};
 use tonic_prost::ProstCodec;
 
-use crate::query_executor::{
+#[cfg(feature = "server")]
+use crate::operation_executor::{
     self, OperationExecutor,
 };
+#[cfg(feature = "server")]
 use crate::{RemotePgSession, SessionRegistry};
 
-const AUTHORIZATION_HEADER: &str = "authorization";
 const PG_SERVICE_NAME: &str = "kalamdb.pg.PgService";
 
 #[derive(Clone, PartialEq, prost::Message)]
@@ -38,6 +42,15 @@ pub struct OpenSessionResponse {
     #[prost(string, optional, tag = "2")]
     pub current_schema: Option<String>,
 }
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct CloseSessionRequest {
+    #[prost(string, tag = "1")]
+    pub session_id: String,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct CloseSessionResponse {}
 
 // ---------------------------------------------------------------------------
 // Scan / Mutation RPC messages
@@ -142,6 +155,51 @@ pub struct DeleteRpcResponse {
     pub affected_rows: u64,
 }
 
+// ---------------------------------------------------------------------------
+// Transaction RPC messages
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct BeginTransactionRequest {
+    #[prost(string, tag = "1")]
+    pub session_id: String,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct BeginTransactionResponse {
+    #[prost(string, tag = "1")]
+    pub transaction_id: String,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct CommitTransactionRequest {
+    #[prost(string, tag = "1")]
+    pub session_id: String,
+    #[prost(string, tag = "2")]
+    pub transaction_id: String,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct CommitTransactionResponse {
+    #[prost(string, tag = "1")]
+    pub transaction_id: String,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct RollbackTransactionRequest {
+    #[prost(string, tag = "1")]
+    pub session_id: String,
+    #[prost(string, tag = "2")]
+    pub transaction_id: String,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct RollbackTransactionResponse {
+    #[prost(string, tag = "1")]
+    pub transaction_id: String,
+}
+
+#[cfg(feature = "server")]
 pub fn open_session_response_to_session(response: OpenSessionResponse) -> RemotePgSession {
     RemotePgSession::new(response.session_id)
         .with_current_schema(response.current_schema.as_deref())
@@ -196,6 +254,21 @@ pub mod pg_service_client {
             let path = http::uri::PathAndQuery::from_static("/kalamdb.pg.PgService/OpenSession");
             let mut request = request.into_request();
             request.extensions_mut().insert(GrpcMethod::new(PG_SERVICE_NAME, "OpenSession"));
+            self.inner.unary(request, path, codec).await
+        }
+
+        pub async fn close_session(
+            &mut self,
+            request: impl tonic::IntoRequest<CloseSessionRequest>,
+        ) -> Result<Response<CloseSessionResponse>, Status> {
+            self.inner.ready().await.map_err(|error| {
+                Status::new(tonic::Code::Unknown, format!("Service not ready: {:?}", error))
+            })?;
+
+            let codec = ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/kalamdb.pg.PgService/CloseSession");
+            let mut request = request.into_request();
+            request.extensions_mut().insert(GrpcMethod::new(PG_SERVICE_NAME, "CloseSession"));
             self.inner.unary(request, path, codec).await
         }
 
@@ -254,9 +327,52 @@ pub mod pg_service_client {
             request.extensions_mut().insert(GrpcMethod::new(PG_SERVICE_NAME, "Delete"));
             self.inner.unary(request, path, codec).await
         }
+
+        pub async fn begin_transaction(
+            &mut self,
+            request: impl tonic::IntoRequest<BeginTransactionRequest>,
+        ) -> Result<Response<BeginTransactionResponse>, Status> {
+            self.inner.ready().await.map_err(|error| {
+                Status::new(tonic::Code::Unknown, format!("Service not ready: {:?}", error))
+            })?;
+            let codec = ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/kalamdb.pg.PgService/BeginTransaction");
+            let mut request = request.into_request();
+            request.extensions_mut().insert(GrpcMethod::new(PG_SERVICE_NAME, "BeginTransaction"));
+            self.inner.unary(request, path, codec).await
+        }
+
+        pub async fn commit_transaction(
+            &mut self,
+            request: impl tonic::IntoRequest<CommitTransactionRequest>,
+        ) -> Result<Response<CommitTransactionResponse>, Status> {
+            self.inner.ready().await.map_err(|error| {
+                Status::new(tonic::Code::Unknown, format!("Service not ready: {:?}", error))
+            })?;
+            let codec = ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/kalamdb.pg.PgService/CommitTransaction");
+            let mut request = request.into_request();
+            request.extensions_mut().insert(GrpcMethod::new(PG_SERVICE_NAME, "CommitTransaction"));
+            self.inner.unary(request, path, codec).await
+        }
+
+        pub async fn rollback_transaction(
+            &mut self,
+            request: impl tonic::IntoRequest<RollbackTransactionRequest>,
+        ) -> Result<Response<RollbackTransactionResponse>, Status> {
+            self.inner.ready().await.map_err(|error| {
+                Status::new(tonic::Code::Unknown, format!("Service not ready: {:?}", error))
+            })?;
+            let codec = ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/kalamdb.pg.PgService/RollbackTransaction");
+            let mut request = request.into_request();
+            request.extensions_mut().insert(GrpcMethod::new(PG_SERVICE_NAME, "RollbackTransaction"));
+            self.inner.unary(request, path, codec).await
+        }
     }
 }
 
+#[cfg(feature = "server")]
 pub mod pg_service_server {
     use super::*;
 
@@ -271,6 +387,11 @@ pub mod pg_service_server {
             &self,
             request: Request<OpenSessionRequest>,
         ) -> Result<Response<OpenSessionResponse>, Status>;
+
+        async fn close_session(
+            &self,
+            request: Request<CloseSessionRequest>,
+        ) -> Result<Response<CloseSessionResponse>, Status>;
 
         async fn scan(
             &self,
@@ -291,6 +412,21 @@ pub mod pg_service_server {
             &self,
             request: Request<DeleteRpcRequest>,
         ) -> Result<Response<DeleteRpcResponse>, Status>;
+
+        async fn begin_transaction(
+            &self,
+            request: Request<BeginTransactionRequest>,
+        ) -> Result<Response<BeginTransactionResponse>, Status>;
+
+        async fn commit_transaction(
+            &self,
+            request: Request<CommitTransactionRequest>,
+        ) -> Result<Response<CommitTransactionResponse>, Status>;
+
+        async fn rollback_transaction(
+            &self,
+            request: Request<RollbackTransactionRequest>,
+        ) -> Result<Response<RollbackTransactionResponse>, Status>;
     }
 
     #[derive(Debug, Clone)]
@@ -349,6 +485,15 @@ pub mod pg_service_server {
                     };
                     Box::pin(fut)
                 },
+                "/kalamdb.pg.PgService/CloseSession" => {
+                    let fut = async move {
+                        let mut grpc = tonic::server::Grpc::new(ProstCodec::default());
+                        let method = CloseSessionSvc(inner);
+                        let response = grpc.unary(method, req).await;
+                        Ok(response)
+                    };
+                    Box::pin(fut)
+                },
                 "/kalamdb.pg.PgService/Scan" => {
                     let fut = async move {
                         let mut grpc = tonic::server::Grpc::new(ProstCodec::default());
@@ -385,6 +530,33 @@ pub mod pg_service_server {
                     };
                     Box::pin(fut)
                 },
+                "/kalamdb.pg.PgService/BeginTransaction" => {
+                    let fut = async move {
+                        let mut grpc = tonic::server::Grpc::new(ProstCodec::default());
+                        let method = BeginTransactionSvc(inner);
+                        let response = grpc.unary(method, req).await;
+                        Ok(response)
+                    };
+                    Box::pin(fut)
+                },
+                "/kalamdb.pg.PgService/CommitTransaction" => {
+                    let fut = async move {
+                        let mut grpc = tonic::server::Grpc::new(ProstCodec::default());
+                        let method = CommitTransactionSvc(inner);
+                        let response = grpc.unary(method, req).await;
+                        Ok(response)
+                    };
+                    Box::pin(fut)
+                },
+                "/kalamdb.pg.PgService/RollbackTransaction" => {
+                    let fut = async move {
+                        let mut grpc = tonic::server::Grpc::new(ProstCodec::default());
+                        let method = RollbackTransactionSvc(inner);
+                        let response = grpc.unary(method, req).await;
+                        Ok(response)
+                    };
+                    Box::pin(fut)
+                },
                 _ => Box::pin(async move {
                     let mut builder = http::Response::builder();
                     builder = builder.status(200).header("grpc-status", "12");
@@ -416,6 +588,19 @@ pub mod pg_service_server {
         fn call(&mut self, request: Request<OpenSessionRequest>) -> Self::Future {
             let inner = Arc::clone(&self.0);
             let fut = async move { inner.open_session(request).await };
+            Box::pin(fut)
+        }
+    }
+
+    struct CloseSessionSvc<T: PgService>(Arc<T>);
+
+    impl<T: PgService> tonic::server::UnaryService<CloseSessionRequest> for CloseSessionSvc<T> {
+        type Response = CloseSessionResponse;
+        type Future = BoxFuture<Response<Self::Response>, Status>;
+
+        fn call(&mut self, request: Request<CloseSessionRequest>) -> Self::Future {
+            let inner = Arc::clone(&self.0);
+            let fut = async move { inner.close_session(request).await };
             Box::pin(fut)
         }
     }
@@ -471,30 +656,78 @@ pub mod pg_service_server {
             Box::pin(fut)
         }
     }
+
+    struct BeginTransactionSvc<T: PgService>(Arc<T>);
+
+    impl<T: PgService> tonic::server::UnaryService<BeginTransactionRequest> for BeginTransactionSvc<T> {
+        type Response = BeginTransactionResponse;
+        type Future = BoxFuture<Response<Self::Response>, Status>;
+
+        fn call(&mut self, request: Request<BeginTransactionRequest>) -> Self::Future {
+            let inner = Arc::clone(&self.0);
+            let fut = async move { inner.begin_transaction(request).await };
+            Box::pin(fut)
+        }
+    }
+
+    struct CommitTransactionSvc<T: PgService>(Arc<T>);
+
+    impl<T: PgService> tonic::server::UnaryService<CommitTransactionRequest> for CommitTransactionSvc<T> {
+        type Response = CommitTransactionResponse;
+        type Future = BoxFuture<Response<Self::Response>, Status>;
+
+        fn call(&mut self, request: Request<CommitTransactionRequest>) -> Self::Future {
+            let inner = Arc::clone(&self.0);
+            let fut = async move { inner.commit_transaction(request).await };
+            Box::pin(fut)
+        }
+    }
+
+    struct RollbackTransactionSvc<T: PgService>(Arc<T>);
+
+    impl<T: PgService> tonic::server::UnaryService<RollbackTransactionRequest> for RollbackTransactionSvc<T> {
+        type Response = RollbackTransactionResponse;
+        type Future = BoxFuture<Response<Self::Response>, Status>;
+
+        fn call(&mut self, request: Request<RollbackTransactionRequest>) -> Self::Future {
+            let inner = Arc::clone(&self.0);
+            let fut = async move { inner.rollback_transaction(request).await };
+            Box::pin(fut)
+        }
+    }
 }
 
 pub use pg_service_client::PgServiceClient;
+#[cfg(feature = "server")]
 pub use pg_service_server::{PgService, PgServiceServer};
 
+#[cfg(feature = "server")]
 #[derive(Clone)]
 pub struct KalamPgService {
+    /// When true, authorize via client certificate CN (mTLS) using kalamdb-server-auth.
+    mtls_enabled: bool,
+    /// Pre-shared token for non-mTLS authentication (e.g. `Bearer <token>`).
+    /// When set, the `authorization` gRPC metadata must match this value.
     expected_auth_header: Option<String>,
     session_registry: Arc<SessionRegistry>,
     operation_executor: Option<Arc<dyn OperationExecutor>>,
 }
 
+#[cfg(feature = "server")]
 impl std::fmt::Debug for KalamPgService {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("KalamPgService")
-            .field("has_auth", &self.expected_auth_header.is_some())
+            .field("mtls_enabled", &self.mtls_enabled)
             .field("has_operation_executor", &self.operation_executor.is_some())
             .finish()
     }
 }
 
+#[cfg(feature = "server")]
 impl Default for KalamPgService {
     fn default() -> Self {
         Self {
+            mtls_enabled: false,
             expected_auth_header: None,
             session_registry: Arc::new(SessionRegistry::default()),
             operation_executor: None,
@@ -502,12 +735,12 @@ impl Default for KalamPgService {
     }
 }
 
+#[cfg(feature = "server")]
 impl KalamPgService {
-    pub fn new(expected_auth_header: Option<String>) -> Self {
+    pub fn new(mtls_enabled: bool, expected_auth_header: Option<String>) -> Self {
         Self {
-            expected_auth_header: expected_auth_header
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty()),
+            mtls_enabled,
+            expected_auth_header,
             session_registry: Arc::new(SessionRegistry::default()),
             operation_executor: None,
         }
@@ -529,36 +762,30 @@ impl KalamPgService {
     }
 
     fn authorize<T>(&self, request: &Request<T>) -> Result<(), Status> {
-        let Some(expected_auth_header) = self.expected_auth_header.as_deref() else {
+        if self.mtls_enabled {
+            kalamdb_server_auth::RpcCaller::require_pg_extension(request)?;
             return Ok(());
-        };
-
-        let received_auth_header = request
-            .metadata()
-            .get(AUTHORIZATION_HEADER)
-            .ok_or_else(|| Status::unauthenticated("Missing authorization metadata"))?
-            .to_str()
-            .map_err(|_| Status::unauthenticated("Invalid authorization metadata"))?;
-
-        if received_auth_header != expected_auth_header {
-            return Err(Status::permission_denied("Invalid authorization metadata"));
         }
-
+        // Non-mTLS: validate pre-shared token if configured.
+        if let Some(expected) = &self.expected_auth_header {
+            let provided = request
+                .metadata()
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("");
+            if provided != expected.as_str() {
+                return Err(Status::unauthenticated("invalid or missing pg auth token"));
+            }
+        }
         Ok(())
     }
 
     pub fn session_registry(&self) -> Arc<SessionRegistry> {
         Arc::clone(&self.session_registry)
     }
-
-    pub fn authorization_metadata_value(
-        auth_header: &str,
-    ) -> Result<MetadataValue<tonic::metadata::Ascii>, Status> {
-        MetadataValue::try_from(auth_header.trim())
-            .map_err(|_| Status::invalid_argument("Invalid authorization metadata"))
-    }
 }
 
+#[cfg(feature = "server")]
 #[async_trait]
 impl PgService for KalamPgService {
     async fn ping(&self, request: Request<PingRequest>) -> Result<Response<PingResponse>, Status> {
@@ -598,6 +825,24 @@ impl PgService for KalamPgService {
         }))
     }
 
+    async fn close_session(
+        &self,
+        request: Request<CloseSessionRequest>,
+    ) -> Result<Response<CloseSessionResponse>, Status> {
+        self.authorize(&request)?;
+
+        let request = request.into_inner();
+        let session_id = request.session_id.trim();
+        if session_id.is_empty() {
+            return Err(Status::invalid_argument("session_id must not be empty"));
+        }
+
+        self.session_registry.remove(session_id);
+        log::debug!("PG session closed: {}", session_id);
+
+        Ok(Response::new(CloseSessionResponse {}))
+    }
+
     async fn scan(
         &self,
         request: Request<ScanRpcRequest>,
@@ -610,9 +855,9 @@ impl PgService for KalamPgService {
             inner.table_name,
             inner.table_type
         );
-        let domain_req = query_executor::scan_request_from_rpc(&inner)?;
+        let domain_req = operation_executor::scan_request_from_rpc(&inner)?;
         let domain_result = self.operation_executor()?.execute_scan(domain_req).await?;
-        let response = query_executor::scan_result_to_rpc(domain_result)?;
+        let response = operation_executor::scan_result_to_rpc(domain_result)?;
         Ok(Response::new(response))
     }
 
@@ -628,7 +873,7 @@ impl PgService for KalamPgService {
             inner.table_name,
             inner.rows_json.len()
         );
-        let domain_req = query_executor::insert_request_from_rpc(&inner)?;
+        let domain_req = operation_executor::insert_request_from_rpc(&inner)?;
         let result = self.operation_executor()?.execute_insert(domain_req).await?;
         Ok(Response::new(InsertRpcResponse {
             affected_rows: result.affected_rows,
@@ -647,7 +892,7 @@ impl PgService for KalamPgService {
             inner.table_name,
             inner.pk_value
         );
-        let domain_req = query_executor::update_request_from_rpc(&inner)?;
+        let domain_req = operation_executor::update_request_from_rpc(&inner)?;
         let result = self.operation_executor()?.execute_update(domain_req).await?;
         Ok(Response::new(UpdateRpcResponse {
             affected_rows: result.affected_rows,
@@ -666,10 +911,87 @@ impl PgService for KalamPgService {
             inner.table_name,
             inner.pk_value
         );
-        let domain_req = query_executor::delete_request_from_rpc(&inner)?;
+        let domain_req = operation_executor::delete_request_from_rpc(&inner)?;
         let result = self.operation_executor()?.execute_delete(domain_req).await?;
         Ok(Response::new(DeleteRpcResponse {
             affected_rows: result.affected_rows,
+        }))
+    }
+
+    async fn begin_transaction(
+        &self,
+        request: Request<BeginTransactionRequest>,
+    ) -> Result<Response<BeginTransactionResponse>, Status> {
+        self.authorize(&request)?;
+        let inner = request.into_inner();
+        let session_id = inner.session_id.trim();
+        if session_id.is_empty() {
+            return Err(Status::invalid_argument("session_id must not be empty"));
+        }
+
+        // Ensure session exists
+        self.session_registry.open_or_get(session_id);
+
+        let transaction_id = self
+            .session_registry
+            .begin_transaction(session_id)
+            .map_err(|e| Status::failed_precondition(e))?;
+
+        log::debug!("PG begin_transaction: session={} tx={}", session_id, transaction_id);
+
+        Ok(Response::new(BeginTransactionResponse { transaction_id }))
+    }
+
+    async fn commit_transaction(
+        &self,
+        request: Request<CommitTransactionRequest>,
+    ) -> Result<Response<CommitTransactionResponse>, Status> {
+        self.authorize(&request)?;
+        let inner = request.into_inner();
+        let session_id = inner.session_id.trim();
+        let transaction_id = inner.transaction_id.trim();
+        if session_id.is_empty() {
+            return Err(Status::invalid_argument("session_id must not be empty"));
+        }
+        if transaction_id.is_empty() {
+            return Err(Status::invalid_argument(
+                "transaction_id must not be empty",
+            ));
+        }
+
+        let committed_id = self
+            .session_registry
+            .commit_transaction(session_id, transaction_id)
+            .map_err(|e| Status::failed_precondition(e))?;
+
+        log::debug!("PG commit_transaction: session={} tx={}", session_id, committed_id);
+
+        Ok(Response::new(CommitTransactionResponse {
+            transaction_id: committed_id,
+        }))
+    }
+
+    async fn rollback_transaction(
+        &self,
+        request: Request<RollbackTransactionRequest>,
+    ) -> Result<Response<RollbackTransactionResponse>, Status> {
+        self.authorize(&request)?;
+        let inner = request.into_inner();
+        let session_id = inner.session_id.trim();
+        let transaction_id = inner.transaction_id.trim();
+        if session_id.is_empty() {
+            return Err(Status::invalid_argument("session_id must not be empty"));
+        }
+
+        let rolled_back_id = self
+            .session_registry
+            .rollback_transaction(session_id, transaction_id)
+            .map_err(|e| Status::failed_precondition(e))?;
+
+        log::debug!("PG rollback_transaction: session={} tx={}", session_id, rolled_back_id);
+
+        Ok(Response::new(RollbackTransactionResponse {
+            transaction_id: rolled_back_id,
         }))
     }
 }

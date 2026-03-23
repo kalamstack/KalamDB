@@ -627,36 +627,14 @@ impl RaftManager {
                 .timeout(Duration::from_secs(10));
 
             if rpc_tls.enabled {
-                let ca_cert_path = rpc_tls.ca_cert_path.as_deref().ok_or_else(|| {
-                    RaftError::Config(
-                        "rpc_tls.enabled=true but ca_cert_path is not configured".to_string(),
-                    )
+                let ca_pem = rpc_tls.load_ca_cert().map_err(|e| {
+                    RaftError::Config(format!("Failed loading cluster CA cert: {}", e))
                 })?;
-                let node_cert_path = rpc_tls.node_cert_path.as_deref().ok_or_else(|| {
-                    RaftError::Config(
-                        "rpc_tls.enabled=true but node_cert_path is not configured".to_string(),
-                    )
+                let cert_pem = rpc_tls.load_server_cert().map_err(|e| {
+                    RaftError::Config(format!("Failed loading node cert: {}", e))
                 })?;
-                let node_key_path = rpc_tls.node_key_path.as_deref().ok_or_else(|| {
-                    RaftError::Config(
-                        "rpc_tls.enabled=true but node_key_path is not configured".to_string(),
-                    )
-                })?;
-
-                let ca_pem = std::fs::read(ca_cert_path).map_err(|e| {
-                    RaftError::Config(format!(
-                        "Failed reading cluster CA cert '{}': {}",
-                        ca_cert_path, e
-                    ))
-                })?;
-                let cert_pem = std::fs::read(node_cert_path).map_err(|e| {
-                    RaftError::Config(format!(
-                        "Failed reading node cert '{}': {}",
-                        node_cert_path, e
-                    ))
-                })?;
-                let key_pem = std::fs::read(node_key_path).map_err(|e| {
-                    RaftError::Config(format!("Failed reading node key '{}': {}", node_key_path, e))
+                let key_pem = rpc_tls.load_server_key().map_err(|e| {
+                    RaftError::Config(format!("Failed loading node key: {}", e))
                 })?;
 
                 let server_name = if let Some(name) = peer.rpc_server_name.as_ref() {

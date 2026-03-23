@@ -1,6 +1,6 @@
 //! Scan and modify state structs stored as `fdw_state` in FDW callbacks.
 
-use datafusion::arrow::record_batch::RecordBatch;
+use arrow::record_batch::RecordBatch;
 use kalam_pg_api::KalamBackendExecutor;
 use kalam_pg_fdw::TableOptions;
 use std::sync::Arc;

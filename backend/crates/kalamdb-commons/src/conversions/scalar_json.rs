@@ -1,4 +1,4 @@
-use datafusion::scalar::ScalarValue;
+use datafusion_common::ScalarValue;
 use serde_json::{Number, Value};
 
 use crate::models::datatypes::KalamDataType;
@@ -258,7 +258,7 @@ fn extract_string(scalar: &ScalarValue) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{json_value_to_scalar_for_column, scalar_to_json_for_column};
-    use datafusion::scalar::ScalarValue;
+    use datafusion_common::ScalarValue;
     use serde_json::json;
 
     use crate::models::datatypes::KalamDataType;

@@ -24,24 +24,31 @@ pg15 = ["pgrx/pg15"]
 pg16 = ["pgrx/pg16"]
 pg17 = ["pgrx/pg17"]
 pg18 = ["pgrx/pg18"]
+pg_test = []
+e2e = []
 
 [dependencies]
 async-trait = { workspace = true }
-datafusion = { workspace = true }
+arrow = { workspace = true }
+datafusion-common = { workspace = true }
 kalam-pg-api = { path = "crates/kalam-pg-api" }
-kalam-pg-client = { path = "crates/kalam-pg-client" }
-kalam-pg-common = { path = "crates/kalam-pg-common" }
+kalam-pg-client = { path = "crates/kalam-pg-client", default-features = false }
+kalam-pg-common = { path = "crates/kalam-pg-common", default-features = false }
 kalam-pg-fdw = { path = "crates/kalam-pg-fdw" }
-kalamdb-commons = { workspace = true }
-once_cell = { workspace = true }
+kalamdb-commons = { path = "../backend/crates/kalamdb-commons", default-features = false, features = ["rows"] }
 pgrx = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true }
+tokio = { version = "1", default-features = false, features = ["rt"] }
 
 [dev-dependencies]
-kalamdb-commons = { workspace = true }
+kalamdb-commons = { path = "../backend/crates/kalamdb-commons", default-features = false, features = ["rows"] }
 ntest = { workspace = true }
 kalam-pg-api = { path = "crates/kalam-pg-api" }
 kalam-pg-client = { path = "crates/kalam-pg-client" }
 kalam-pg-common = { path = "crates/kalam-pg-common" }
 kalam-pg-fdw = { path = "crates/kalam-pg-fdw" }
+tokio = { workspace = true }
+tokio-postgres = { workspace = true }
+futures-util = { workspace = true }
+reqwest = { workspace = true }
+serde_json = { workspace = true }

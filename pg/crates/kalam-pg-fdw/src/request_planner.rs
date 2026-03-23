@@ -7,9 +7,8 @@ use crate::scan_plan::ScanPlan;
 use crate::update_input::UpdateInput;
 use crate::update_plan::UpdatePlan;
 use crate::virtual_column::VirtualColumn;
-use datafusion::common::ScalarValue;
-use datafusion::logical_expr::{BinaryExpr, Expr, Operator};
-use kalam_pg_api::{DeleteRequest, InsertRequest, ScanRequest, TenantContext, UpdateRequest};
+use datafusion_common::ScalarValue;
+use kalam_pg_api::{DeleteRequest, InsertRequest, ScanFilter, ScanRequest, TenantContext, UpdateRequest};
 use kalam_pg_common::{KalamPgError, DELETED_COLUMN, SEQ_COLUMN, USER_ID_COLUMN};
 use kalamdb_commons::models::rows::Row;
 use kalamdb_commons::models::UserId;
@@ -118,8 +117,8 @@ fn collect_physical_projection(projected_columns: &[String]) -> Option<Vec<Strin
 }
 
 fn extract_user_id_from_filters(
-    filters: Vec<Expr>,
-) -> Result<(Option<UserId>, Vec<Expr>), KalamPgError> {
+    filters: Vec<ScanFilter>,
+) -> Result<(Option<UserId>, Vec<ScanFilter>), KalamPgError> {
     let mut explicit_user_id = None;
     let mut physical_filters = Vec::new();
 
@@ -156,54 +155,19 @@ fn extract_user_id_from_row(row: Row) -> Result<(Option<UserId>, Row), KalamPgEr
     Ok((user_id, Row::new(values)))
 }
 
-fn try_extract_user_id_filter(filter: &Expr) -> Result<Option<UserId>, KalamPgError> {
-    let Expr::BinaryExpr(BinaryExpr { left, op, right }) = filter else {
-        return Ok(None);
-    };
-
-    if *op != Operator::Eq {
+fn try_extract_user_id_filter(filter: &ScanFilter) -> Result<Option<UserId>, KalamPgError> {
+    if filter.column_name() != USER_ID_COLUMN {
         return Ok(None);
     }
 
-    if let (Some(column_name), Some(user_id)) =
-        (extract_column_name(left), extract_user_id_literal(right)?)
-    {
-        if column_name == USER_ID_COLUMN {
-            return Ok(Some(user_id));
-        }
-    }
-
-    if let (Some(column_name), Some(user_id)) =
-        (extract_column_name(right), extract_user_id_literal(left)?)
-    {
-        if column_name == USER_ID_COLUMN {
-            return Ok(Some(user_id));
-        }
-    }
-
-    Ok(None)
-}
-
-fn extract_column_name(expr: &Expr) -> Option<&str> {
-    match expr {
-        Expr::Column(column) => Some(column.name.as_str()),
-        _ => None,
-    }
-}
-
-fn extract_user_id_literal(expr: &Expr) -> Result<Option<UserId>, KalamPgError> {
-    let Expr::Literal(value, _) = expr else {
-        return Ok(None);
-    };
-
-    match value {
+    match filter.value() {
         ScalarValue::Utf8(Some(value)) | ScalarValue::LargeUtf8(Some(value)) => {
             Ok(Some(UserId::new(value.clone())))
         },
         ScalarValue::Utf8(None) | ScalarValue::LargeUtf8(None) | ScalarValue::Null => Ok(None),
         _ => Err(KalamPgError::Validation(format!(
             "_userid filters must compare against string literals, got {}",
-            value
+            filter.value()
         ))),
     }
 }

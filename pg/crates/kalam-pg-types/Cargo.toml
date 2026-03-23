@@ -7,8 +7,6 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
-arrow = { workspace = true }
-datafusion = { workspace = true }
 kalam-pg-common = { path = "../kalam-pg-common" }
-kalamdb-commons = { workspace = true }
+kalamdb-commons = { path = "../../../backend/crates/kalamdb-commons", default-features = false, features = ["serde"] }
 

@@ -103,7 +103,7 @@ pub use crate::websocket_auth::WsAuthCredentials;
 #[cfg(feature = "wasm")]
 pub type Row = serde_json::Map<String, serde_json::Value>;
 
-use datafusion::scalar::ScalarValue;
+use datafusion_common::ScalarValue;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
@@ -667,7 +667,7 @@ impl Notification {
 mod tests {
     use super::*;
     use crate::models::rows::Row;
-    use datafusion::scalar::ScalarValue;
+    use datafusion_common::ScalarValue;
     use std::collections::BTreeMap;
 
     fn create_test_row(id: i64, message: &str) -> Row {

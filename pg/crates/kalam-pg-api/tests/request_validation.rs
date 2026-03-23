@@ -1,4 +1,4 @@
-use datafusion::scalar::ScalarValue;
+use datafusion_common::ScalarValue;
 use kalam_pg_api::{InsertRequest, RemoteSessionContext, ScanRequest, TenantContext};
 use kalamdb_commons::models::rows::Row;
 use kalamdb_commons::models::{NamespaceId, TableName, UserId};

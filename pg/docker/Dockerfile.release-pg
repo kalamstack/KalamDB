@@ -1,0 +1,11 @@
+# pg_kalam release runtime — stock PostgreSQL 16 + pre-built extension.
+#
+# Context directory must contain: pg_kalam.so, pg_kalam.control, pg_kalam--*.sql
+#
+# Usage (from CI or manually):
+#   docker build -f pg/docker/Dockerfile.release-pg -t kalamdb-pg:latest <artifacts-dir>
+FROM postgres:16-bookworm
+
+COPY pg_kalam.so           /usr/lib/postgresql/16/lib/
+COPY pg_kalam.control      /usr/share/postgresql/16/extension/
+COPY pg_kalam--*.sql       /usr/share/postgresql/16/extension/

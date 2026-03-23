@@ -17,7 +17,9 @@ FROM rust:1.92-bookworm AS builder
 
 ENV CARGO_BUILD_JOBS=1
 ENV CARGO_INCREMENTAL=0
-ENV RUSTFLAGS=-Cdebuginfo=0
+# -Cpanic=unwind is required for pgrx #[pg_guard] to catch panics at FFI boundaries.
+# Without it, any panic in async/gRPC code causes SIGABRT (process abort).
+ENV RUSTFLAGS="-Cdebuginfo=0 -Cpanic=unwind"
 
 # Install PG 16 server + dev headers (needed by pgrx)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -49,9 +51,10 @@ COPY pg/crates/kalam-pg-fdw/Cargo.toml    pg/crates/kalam-pg-fdw/Cargo.toml
 COPY pg/crates/kalam-pg-client/Cargo.toml pg/crates/kalam-pg-client/Cargo.toml
 
 # Backend crates that the extension actually compiles against
-COPY backend/crates/kalamdb-commons/Cargo.toml backend/crates/kalamdb-commons/Cargo.toml
-COPY backend/crates/kalamdb-macros/Cargo.toml  backend/crates/kalamdb-macros/Cargo.toml
-COPY backend/crates/kalamdb-pg/Cargo.toml      backend/crates/kalamdb-pg/Cargo.toml
+COPY backend/crates/kalamdb-commons/Cargo.toml     backend/crates/kalamdb-commons/Cargo.toml
+COPY backend/crates/kalamdb-macros/Cargo.toml      backend/crates/kalamdb-macros/Cargo.toml
+COPY backend/crates/kalamdb-pg/Cargo.toml          backend/crates/kalamdb-pg/Cargo.toml
+COPY backend/crates/kalamdb-server-auth/Cargo.toml backend/crates/kalamdb-server-auth/Cargo.toml
 
 # Remaining workspace members — resolver needs the manifest, not the source
 COPY backend/Cargo.toml backend/Cargo.toml
@@ -98,7 +101,8 @@ RUN set -e \
 COPY pg/ pg/
 COPY backend/crates/kalamdb-commons/ backend/crates/kalamdb-commons/
 COPY backend/crates/kalamdb-macros/  backend/crates/kalamdb-macros/
-COPY backend/crates/kalamdb-pg/      backend/crates/kalamdb-pg/
+COPY backend/crates/kalamdb-pg/          backend/crates/kalamdb-pg/
+COPY backend/crates/kalamdb-server-auth/ backend/crates/kalamdb-server-auth/
 
 # Build + install the extension into the system PG 16 paths
 RUN cargo pgrx install \

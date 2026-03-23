@@ -374,7 +374,7 @@ impl AppContext {
             // ALWAYS use RaftExecutor - same code path for standalone and cluster
             // In standalone mode: single-node Raft cluster (no peers, instant leader election)
             // In cluster mode: multi-node Raft cluster with peers
-            let raft_config = if let Some(cluster_config) = &config.cluster {
+            let mut raft_config = if let Some(cluster_config) = &config.cluster {
                 // Multi-node cluster mode
                 kalamdb_raft::manager::RaftManagerConfig::from(cluster_config.clone())
             } else {
@@ -387,6 +387,9 @@ impl AppContext {
                 let api_addr = format!("{}:{}", config.server.host, config.server.port);
                 kalamdb_raft::manager::RaftManagerConfig::for_single_node(cluster_id, api_addr)
             };
+
+            // Merge top-level [rpc_tls] into the raft config.
+            raft_config.rpc_tls = config.rpc_tls.clone();
 
             log::debug!("Creating RaftManager...");
             let snapshots_dir = config.storage.resolved_snapshots_dir();
@@ -501,12 +504,12 @@ impl AppContext {
                 let pg_executor = Arc::new(crate::operations::OperationService::new(
                     Arc::clone(&app_ctx),
                 ));
+                let mtls = app_ctx.config().rpc_tls.enabled
+                    && app_ctx.config().rpc_tls.require_client_cert;
+                let pg_auth_token = app_ctx.config().auth.pg_auth_token.clone();
                 let pg_service = Arc::new(
-                    KalamPgService::new(Some(format!(
-                        "Bearer {}",
-                        app_ctx.config().auth.jwt_secret
-                    )))
-                    .with_operation_executor(pg_executor),
+                    KalamPgService::new(mtls, pg_auth_token)
+                        .with_operation_executor(pg_executor),
                 );
                 raft_executor.set_pg_service(pg_service);
                 log::info!("Wired gRPC ClusterClient and CoreClusterHandler for cluster RPC");

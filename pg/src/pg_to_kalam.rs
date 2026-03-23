@@ -1,6 +1,6 @@
 //! PostgreSQL Datum → KalamDB ScalarValue conversion for INSERT/UPDATE.
 
-use datafusion::common::ScalarValue;
+use datafusion_common::ScalarValue;
 use pgrx::pg_sys;
 use std::ffi::CStr;
 

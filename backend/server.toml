@@ -160,7 +160,7 @@ default_query_limit = 50
 
 [logging]
 # Log level: error, warn, info, debug, trace (default: info)
-level = "info"
+level = "debug"
 
 # Directory for all log files (default: "./logs")
 # Server will create app.log, slow.log, and other log files in this directory
@@ -454,12 +454,12 @@ max_parameter_size_bytes = 524288
 # # This node's unique ID (must be >= 1)
 # # Node with node_id=1 is the designated bootstrap node
 node_id = 1
-# 
-# # RPC address for Raft inter-node communication
-# rpc_addr = "127.0.0.1:9188"
-# 
-# # API address advertised to peers/clients (should be reachable, not 0.0.0.0)
-# api_addr = "127.0.0.1:8080"
+
+# RPC address for Raft inter-node communication
+rpc_addr = "0.0.0.0:9188"
+
+# API address advertised to peers/clients
+api_addr = "0.0.0.0:8080"
 # #
 # # Optional mTLS for inter-node gRPC (Raft + cluster RPC)
 # # [cluster.rpc_tls]

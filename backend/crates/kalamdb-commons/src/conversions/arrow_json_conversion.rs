@@ -34,10 +34,10 @@ use crate::errors::CommonError;
 // Chrono no longer needed - DataFusion handles timestamp serialization natively
 use crate::models::rows::Row;
 use crate::models::KalamCellValue;
-use datafusion::arrow::array::*;
-use datafusion::arrow::datatypes::{DataType, Field, SchemaRef, TimeUnit};
-use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::scalar::ScalarValue;
+use arrow::array::*;
+use arrow::datatypes::{DataType, Field, SchemaRef, TimeUnit};
+use arrow::record_batch::RecordBatch;
+use datafusion_common::{DataFusionError, ScalarValue};
 use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
@@ -45,7 +45,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 /// Type alias for Arc<dyn Array> to improve readability
-type ArrayRef = Arc<dyn datafusion::arrow::array::Array>;
+type ArrayRef = Arc<dyn Array>;
 
 /// Coerce a list of rows to match the schema types and fill defaults.
 ///
@@ -333,7 +333,7 @@ fn coerce_uuid_scalar(value: ScalarValue, field: &Field) -> Result<Option<Scalar
 #[cfg(test)]
 mod tests {
     use super::*;
-    use datafusion::arrow::datatypes::{DataType, Field, Schema};
+    use arrow::datatypes::{DataType, Field, Schema};
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
@@ -424,11 +424,11 @@ mod tests {
 
 /// Convert Arrow array value at given index to DataFusion ScalarValue
 pub fn arrow_value_to_scalar(
-    array: &dyn datafusion::arrow::array::Array,
+    array: &dyn Array,
     row_idx: usize,
-) -> Result<ScalarValue, datafusion::error::DataFusionError> {
-    use datafusion::arrow::array::*;
-    use datafusion::arrow::datatypes::*;
+) -> Result<ScalarValue, DataFusionError> {
+    use arrow::array::*;
+    use arrow::datatypes::*;
 
     if array.is_null(row_idx) {
         return Ok(ScalarValue::try_from(array.data_type()).unwrap_or(ScalarValue::Null));

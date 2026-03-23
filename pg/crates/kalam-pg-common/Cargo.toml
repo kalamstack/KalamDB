@@ -6,11 +6,11 @@ authors = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[features]
+default = ["datafusion"]
+datafusion = ["dep:datafusion-common"]
+
 [dependencies]
 thiserror = { workspace = true }
 serde = { workspace = true }
-kalamdb-commons = { workspace = true }
-datafusion = { workspace = true }
-
-[features]
-default = []
+datafusion-common = { workspace = true, optional = true }

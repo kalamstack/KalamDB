@@ -1,5 +1,5 @@
 use crate::session::{RemoteSessionContext, TenantContext};
-use datafusion::logical_expr::Expr;
+use crate::filter::ScanFilter;
 use kalam_pg_common::KalamPgError;
 use kalamdb_commons::models::rows::Row;
 use kalamdb_commons::{TableId, TableType};
@@ -30,7 +30,7 @@ pub struct ScanRequest {
     pub tenant_context: TenantContext,
     pub remote_session: Option<RemoteSessionContext>,
     pub projection: Option<Vec<String>>,
-    pub filters: Vec<Expr>,
+    pub filters: Vec<ScanFilter>,
     pub limit: Option<usize>,
 }
 

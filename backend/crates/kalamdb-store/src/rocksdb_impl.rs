@@ -411,6 +411,32 @@ impl StorageBackend for RocksDBBackend {
         Ok(())
     }
 
+    fn flush_all_memtables(&self) -> Result<()> {
+        let names = self
+            .known_cf_names
+            .read()
+            .map_err(|e| StorageError::Other(format!("lock poisoned: {}", e)))?;
+
+        let mut flush_opts = rocksdb::FlushOptions::default();
+        flush_opts.set_wait(true);
+
+        for cf_name in names.iter() {
+            if let Some(cf) = self.db.cf_handle(cf_name) {
+                // Errors are non-fatal: a flush failure on one CF shouldn't
+                // prevent others from flushing.
+                if let Err(e) = self.db.flush_cf_opt(&cf, &flush_opts) {
+                    log::warn!("flush_all_memtables: failed to flush CF '{}': {}", cf_name, e);
+                }
+            }
+        }
+        // Flush the default CF as well
+        if let Err(e) = self.db.flush_opt(&flush_opts) {
+            log::warn!("flush_all_memtables: failed to flush default CF: {}", e);
+        }
+
+        Ok(())
+    }
+
     fn backup_to(&self, backup_dir: &std::path::Path) -> crate::storage_trait::Result<()> {
         use rocksdb::backup::{BackupEngine, BackupEngineOptions};
         use rocksdb::Env;

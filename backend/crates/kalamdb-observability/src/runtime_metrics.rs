@@ -1,5 +1,12 @@
+use std::sync::Mutex;
 use std::time::Instant;
-use sysinfo::System;
+use sysinfo::{MemoryRefreshKind, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System};
+
+/// Reusable System instance to avoid repeated allocation/deallocation.
+/// sysinfo docs explicitly recommend reusing the same System instance.
+/// Creating System::new_all() every 30s causes severe heap fragmentation
+/// that jemalloc retains across arenas (~600MB+ over hours).
+pub static SHARED_SYSTEM: Mutex<Option<System>> = Mutex::new(None);
 
 /// Snapshot of runtime/system metrics gathered from sysinfo.
 #[derive(Debug, Clone)]
@@ -66,6 +73,9 @@ impl RuntimeMetrics {
 }
 
 /// Collect runtime metrics from sysinfo using the server start time for uptime.
+///
+/// Reuses a shared System instance to avoid heap fragmentation from repeated
+/// System::new_all() calls. Only refreshes the current process and memory info.
 pub fn collect_runtime_metrics(start_time: Instant) -> RuntimeMetrics {
     let uptime_seconds = start_time.elapsed().as_secs();
     let days = uptime_seconds / 86400;
@@ -79,8 +89,23 @@ pub fn collect_runtime_metrics(start_time: Instant) -> RuntimeMetrics {
         format!("{}m", minutes)
     };
 
-    let mut sys = System::new_all();
-    sys.refresh_all();
+    let mut guard = SHARED_SYSTEM.lock().unwrap_or_else(|e| e.into_inner());
+    let sys = guard.get_or_insert_with(|| {
+        System::new_with_specifics(RefreshKind::nothing().with_memory(MemoryRefreshKind::everything()))
+    });
+
+    // Only refresh what we need: current process memory/cpu + system memory
+    let process_refresh = ProcessRefreshKind::nothing()
+        .with_memory()
+        .with_cpu();
+    if let Ok(pid) = sysinfo::get_current_pid() {
+        sys.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[pid]),
+            false,
+            process_refresh,
+        );
+    }
+    sys.refresh_memory_specifics(MemoryRefreshKind::everything());
 
     let mut memory_bytes = None;
     let mut memory_mb = None;

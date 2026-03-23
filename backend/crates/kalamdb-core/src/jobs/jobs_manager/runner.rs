@@ -251,6 +251,14 @@ impl JobsManager {
         };
         let flush_check_enabled = flush_check_interval.is_some();
 
+        // WAL cleanup: flush all RocksDB memtables every 5 minutes so idle
+        // column families advance their log numbers and stale WAL files are deleted.
+        let mut wal_cleanup_interval = tokio::time::interval_at(
+            Instant::now() + Duration::from_secs(300),
+            Duration::from_secs(300),
+        );
+        wal_cleanup_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
         // Leadership check interval (for cluster mode)
         let mut leadership_interval = tokio::time::interval_at(
             Instant::now() + Duration::from_secs(1),
@@ -312,6 +320,18 @@ impl JobsManager {
                     let app_ctx = self.get_attached_app_context();
                     if let Err(e) = HealthMonitor::log_metrics(app_ctx).await {
                         log::warn!("Failed to log health metrics: {}", e);
+                    }
+                    continue;
+                }
+                // Periodic WAL cleanup: flush all RocksDB memtables so idle CFs
+                // don't pin WAL files forever (prevents WAL file accumulation)
+                _ = wal_cleanup_interval.tick() => {
+                    let app_ctx = self.get_attached_app_context();
+                    let backend = app_ctx.storage_backend();
+                    if let Err(e) = backend.flush_all_memtables() {
+                        log::warn!("WAL cleanup flush_all_memtables failed: {}", e);
+                    } else {
+                        log::debug!("WAL cleanup: flushed all memtables");
                     }
                     continue;
                 }

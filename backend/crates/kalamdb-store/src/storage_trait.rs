@@ -182,6 +182,17 @@ pub trait StorageBackend: Send + Sync {
     /// compaction (no-op for backends without compaction).
     fn compact_partition(&self, partition: &Partition) -> Result<()>;
 
+    /// Flush all memtables across all partitions (column families) to SST files.
+    ///
+    /// This allows RocksDB to reclaim WAL files that are pinned by unflushed
+    /// memtables in idle column families. Without periodic flushing, WAL files
+    /// accumulate indefinitely when only a subset of CFs receive writes.
+    ///
+    /// Default implementation is a no-op for backends without WAL.
+    fn flush_all_memtables(&self) -> Result<()> {
+        Ok(())
+    }
+
     /// Creates a native backup of the storage engine to the specified backup directory.
     ///
     /// For RocksDB this uses [`BackupEngine`](rocksdb::backup::BackupEngine) for an efficient

@@ -6,7 +6,7 @@
 //! The goal is to eliminate duplication of similar conversion logic scattered across multiple files
 //! and provide a single source of truth for all datatype conversions.
 
-use datafusion::scalar::ScalarValue;
+use datafusion_common::ScalarValue;
 
 /// Encode a scalar value to bytes for use in index keys or storage
 ///

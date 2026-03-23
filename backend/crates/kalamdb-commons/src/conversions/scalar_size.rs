@@ -3,7 +3,7 @@
 //! Provides functions to estimate the memory footprint of scalar values.
 //! Used for query planning, memory limits, and resource management.
 
-use datafusion::scalar::ScalarValue;
+use datafusion_common::ScalarValue;
 
 /// Estimate memory size in bytes for a ScalarValue
 ///

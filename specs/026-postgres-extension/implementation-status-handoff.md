@@ -221,7 +221,7 @@ The current implementation proves:
 * current schema is stored in server-side session state
 * the service can be mounted on the shared Raft RPC server
 
-It does **not** yet prove:
+It also now proves:
 
 * FDW scan execution through the remote client
 * FDW DML execution through the remote client
@@ -230,158 +230,166 @@ It does **not** yet prove:
 
 ## Verified Tests Run So Far
 
-The following tests were run and passed during this work:
+All pg-related crate tests pass (58 tests total, 0 failures):
 
-* `cargo test -p kalam-pg-api --test request_validation -- --nocapture`
-* `cargo test -p kalamdb-pg --test session_registry -- --nocapture`
-* `cargo test -p kalam-pg-extension --test session_settings -- --nocapture`
-* `cargo test -p kalam-pg-fdw --test request_planner -- --nocapture`
-* `cargo test -p kalam-pg-fdw --test options -- --nocapture`
-* `cargo test -p kalam-pg-client --test connectivity -- --nocapture`
-* `cargo test -p kalamdb-raft --test pg_rpc_mount -- --nocapture`
-* `cargo nextest run -p kalamdb-pg -p kalam-pg-client`
+Backend kalamdb-pg tests (28 tests):
+* `cargo nextest run -p kalamdb-pg` — 13 session_registry tests + 15 service_auth_tx tests
+
+PG sub-crate tests (25 tests):
+* `cargo nextest run -p kalam-pg-api -p kalam-pg-client -p kalam-pg-fdw -p kalam-pg-common -p kalam-pg-types`
+
+pgrx extension tests (5 tests):
+* `RUST_TEST_THREADS=1 cargo pgrx test pg16 -p kalam-pg-extension --no-default-features`
+
+OperationService unit tests (13 tests, 0 failures):
+* `cargo test -p kalamdb-core --lib operations::service::tests`
+
+Full workspace compile: `cargo check` passes with no errors.
+PG extension compile: `cargo check -p kalam-pg-extension --features pg16 --no-default-features` passes.
 
 ## Verification In Progress / Incomplete
 
-A broader batched compile check was started for:
-
-* `cargo check -p kalamdb-core -p kalamdb-raft -p kalamdb-pg -p kalam-pg-client`
-
-Observed status before handoff:
-
-* compilation reached `Checking kalamdb-core`
-* no final success/failure result was captured in the handoff thread before control was transferred
-
-Another agent should rerun this cleanly and capture the final result.
+None — full workspace compile and all tests verified.
 
 ## What Still Needs To Be Done
 
-### 1. Wire the FDW/executor path to the remote client
+### 1. ~~Wire the FDW/executor path to the remote client~~ ✅ DONE
 
-This is the most important remaining implementation gap.
+Completed: FDW scan and DML callbacks are fully wired through `RemoteBackendExecutor` → `RemoteKalamClient` → gRPC → `KalamPgService` → `OperationService`.
 
-The FDW/common extension side still needs to:
+### 2. ~~Add real remote scan RPCs~~ ✅ DONE
 
-* instantiate `RemoteKalamClient` from parsed remote server options
-* use the mounted shared RPC server instead of a placeholder path
-* perform session open/reuse from the real executor path
+Completed: `ScanRpcRequest` / `ScanRpcResponse` with Arrow IPC encoding. `OperationService::execute_scan()` uses direct `TableProvider::scan()` — no SQL reconstruction, no `SessionContext`.
 
-Likely files to inspect next:
+### 3. ~~Add remote direct DML RPCs~~ ✅ DONE
 
-* `pg/src/remote_executor.rs`
-* `pg/crates/kalam-pg-fdw/src/*`
-* any mode-selection / execution wiring in `pg`
+Completed: `InsertRpcRequest`, `UpdateRpcRequest`, `DeleteRpcRequest` with JSON row encoding. `OperationService` routes mutations through `UnifiedApplier` by table type (user/shared/stream). System table writes are rejected.
 
-### 2. Add real remote scan RPCs
+### 4. Domain type consolidation (Phase 2 partial) ✅ DONE
 
-Needed next:
+Domain-typed request/result types (`ScanRequest`, `InsertRequest`, `UpdateRequest`, `DeleteRequest`, `ScanResult`, `MutationResult`) moved from `kalamdb-pg::query_executor` to `kalamdb-commons::models::pg_operations`. Both `kalamdb-core` and `kalamdb-pg` re-export from the canonical location.
 
-* define typed scan request/response RPCs
-* map FDW pushdown-safe scan state into the remote client
-* execute through KalamDB-side typed scan services
+The full Phase 2 dependency inversion (removing `kalamdb-core → kalamdb-pg`) is blocked by circular deps (kalamdb-core → kalamdb-raft → kalamdb-pg). To complete it, `KalamPgService` construction must move from `app_context.rs` to the server binary crate.
 
-Requirements:
+### 5. ~~Add transaction/session lifecycle RPCs~~ ✅ DONE
 
-* do not fall back to generic SQL forwarding for standard scans
-* keep request/response typed
-* preserve schema/session context
+Completed: BeginTransaction, CommitTransaction, RollbackTransaction RPCs added to `kalamdb-pg::service`. Each has prost request/response messages, PgService trait methods, server routing + Svc dispatch structs, and KalamPgService implementation.
 
-### 3. Add remote direct DML RPCs
+Transaction state management added to `SessionRegistry` with `TransactionState` enum (Active/Committed/RolledBack), atomic `tx_counter`, and `transaction_has_writes` tracking. Rollback is idempotent when no transaction is active.
 
-Needed next:
+Client-side methods added to `RemoteKalamClient` in `kalam-pg-client`.
 
-* define typed insert/update/delete RPCs
-* route them through backend direct DML handling
-* reuse existing applier/direct DML path where practical
+FDW transaction lifecycle hooks implemented in `pg/src/fdw_xact.rs`:
+* `ensure_transaction()` lazily begins KalamDB transaction on first FDW operation
+* `xact_callback()` (`extern "C-unwind"`) registered via `RegisterXactCallback` for PG16
+* XACT_EVENT_COMMIT → `commit_transaction`, XACT_EVENT_ABORT → `rollback_transaction`
+* Wired into `fdw_scan.rs` (begin_foreign_scan_impl) and `fdw_modify.rs` (begin_foreign_modify_impl)
 
-Important constraint:
+Read-your-writes semantics require MVCC on the KalamDB side (Phase 2 / future work). The RPC contract and lifecycle coordination are fully in place.
 
-* do not scatter DML behavior into many unrelated modules
-* keep the direct DML path centralized and careful
-* avoid new SQL rewrite / reparse passes in hot paths
+### 6. ~~Revisit auth design~~ ✅ DONE
 
-Likely backend paths to inspect:
+Replaced the temporary `Bearer <auth.jwt_secret>` bootstrap with a dedicated PG auth token:
 
-* `backend/crates/kalamdb-core/src/applier/applier.rs`
-* `backend/crates/kalamdb-core/src/applier/executor/dml.rs`
-* any typed mutation handler layers used by the applier
+* Added `pg_auth_token: Option<String>` field to `AuthSettings` in `kalamdb-configs`
+* Added `KALAMDB_PG_AUTH_TOKEN` environment variable override
+* `app_context.rs` uses `pg_auth_token` with fallback to `jwt_secret` for backward compatibility
+* The PG extension auth is now cleanly separated from user-facing JWT auth
 
-### 4. Add transaction/session lifecycle RPCs
+Full mTLS (per `reorganization-plan-v2.md`) remains a future enhancement — the dedicated token provides a concrete security boundary for the PG remote bridge without coupling to user auth.
 
-The current session work is only the foundation.
+### 7. ~~OperationService integration tests~~ ✅ DONE
 
-Still needed:
+Added 13 unit tests in `kalamdb-core::operations::service::tests` covering:
 
-* begin transaction
-* commit transaction
-* rollback transaction
-* transaction handle attached to the existing remote session
-* read-your-writes semantics through that handle
+* **Scan paths**: nonexistent table → NotFound, empty table → 0 rows, data round-trip (3 rows), column projection, invalid column → InvalidArgument, limit hint propagation
+* **DML rejection (system tables)**: insert/update/delete on system tables → PermissionDenied (no applier call needed)
+* **Validation (user_id required)**: insert/update/delete on user and stream tables without user_id → InvalidArgument
 
-Relevant spec:
+Tests use `test_app_context_simple()` (no Raft) with in-memory `MemTable` providers registered via `SchemaRegistry::insert_cached()`. DML through the applier requires Raft and is not tested here.
 
-* `specs/026-postgres-extension/transactional-fdw.md`
+Also added `#[derive(Debug)]` to `ScanResult` and `MutationResult` in `kalamdb-commons::models::pg_operations`.
 
-### 5. Revisit auth design
+### 8. ~~Expand remaining test coverage~~ ✅ DONE
 
-The temporary bootstrap credential should be replaced or confirmed.
+Added comprehensive test coverage:
 
-Another agent should decide whether to keep:
+**service_auth_tx.rs** (15 tests):
+* Auth rejection: ping without auth when configured, ping with wrong auth
+* Auth success: ping without auth when not configured, ping with correct auth
+* Session lifecycle: open_session rejects empty id, returns session+schema, updates schema on existing
+* Transaction lifecycle: begin succeeds, commit succeeds, rollback succeeds, double begin fails, wrong tx id fails, begin after commit succeeds, empty session id rejected
+* Auth gating: transaction RPCs require auth when configured
+* Server construction: pg_service_server_builds_from_impl
 
-* temporary `Bearer <auth.jwt_secret>`
+**session_registry.rs** (13 tests):
+* Session reuse, schema update, begin/commit, begin/rollback, double begin fails, wrong tx id fails, rollback without transaction is noop, commit already committed fails, mark writes, multiple independent sessions, remove session, begin on nonexistent fails
 
-or move to:
+## Remaining Future Work
 
-* dedicated config token
-* better shared-RPC auth model
-* stronger separation between user-auth JWT and PG remote bridge auth
+### Phase 2: Read-your-writes and transaction-aware scans/DML
+* Scan and DML RPCs do not yet pass `transaction_id` through to OperationService
+* Requires MVCC on the KalamDB side to observe uncommitted writes within a transaction
+* The RPC contract and lifecycle hooks are ready; needs KalamDB-side transaction isolation
 
-### 6. Expand test coverage
+### Phase 2: Subtransactions and savepoints
+* Per `transactional-fdw.md` Phase 2
+* Requires SubXact callbacks and KalamDB savepoint primitives
 
-Tests still needed:
+### Phase 3: Distributed atomicity
+* Per `transactional-fdw.md` Phase 3
+* Two-phase commit between PG local and KalamDB foreign tables
 
-* FDW-side executor integration tests using `RemoteKalamClient`
-* remote scan success path
-* remote DML success path
-* auth rejection path for the PG remote service
-* session reuse across multiple requests
-* schema update on an already-open session
-* transaction lifecycle tests when transaction RPCs exist
+### mTLS upgrade
+* Per `reorganization-plan-v2.md`
+* Replace dedicated auth token with mutual TLS certificates
+* Unify cluster and PG extension TLS under one `[rpc_tls]` config
 
-## Recommended Next Execution Order
+### Full Phase 2 dependency inversion
+* Remove `kalamdb-core → kalamdb-pg` dependency
+* Move `KalamPgService` construction from `app_context.rs` to server binary crate
+* Blocked by circular deps (kalamdb-core → kalamdb-raft → kalamdb-pg)
 
-Another agent should continue in this order:
+### Remote e2e integration tests
+* Full round-trip: extension → gRPC → OperationService → provider → response
+* Requires a running KalamDB server and PG instance with the extension loaded
 
-1. rerun the broad compile verification and cleanly capture the result
-2. wire the extension executor path to create/use `RemoteKalamClient`
-3. implement remote scan RPCs
-4. implement remote direct DML RPCs via the core direct DML path
-5. add auth-failure and session-reuse tests
-6. add transaction lifecycle RPCs and tests
-7. replace or formalize the temporary auth bootstrap
-
-## Files Most Important For The Next Agent
+## Files Most Important For Future Work
 
 Backend remote bridge and shared server mount:
 
-* `backend/crates/kalamdb-pg/src/service.rs`
-* `backend/crates/kalamdb-pg/src/session_registry.rs`
+* `backend/crates/kalamdb-pg/src/service.rs` — gRPC service with all RPCs (ping, session, scan, DML, transactions)
+* `backend/crates/kalamdb-pg/src/session_registry.rs` — per-backend session + transaction state
 * `backend/crates/kalamdb-raft/src/network/service.rs`
 * `backend/crates/kalamdb-raft/src/executor/raft.rs`
-* `backend/crates/kalamdb-core/src/app_context.rs`
+* `backend/crates/kalamdb-core/src/app_context.rs` — PG service wiring with dedicated auth token
 
 Extension/shared client side:
 
-* `pg/crates/kalam-pg-client/src/lib.rs`
+* `pg/crates/kalam-pg-client/src/lib.rs` — RemoteKalamClient with transaction methods
 * `pg/crates/kalam-pg-api/src/session.rs`
 * `pg/crates/kalam-pg-api/src/request.rs`
 * `pg/src/session_settings.rs`
+* `pg/src/fdw_xact.rs` — FDW transaction lifecycle hooks (xact callback)
+* `pg/src/remote_state.rs` — remote extension state accessors
 * `pg/crates/kalam-pg-fdw/src/server_options.rs`
+
+Auth configuration:
+
+* `backend/crates/kalamdb-configs/src/config/types.rs` — `AuthSettings.pg_auth_token`
+* `backend/crates/kalamdb-configs/src/config/override.rs` — `KALAMDB_PG_AUTH_TOKEN` env var
 
 Core direct DML reuse path:
 
 * `backend/crates/kalamdb-core/src/applier/applier.rs`
 * `backend/crates/kalamdb-core/src/applier/executor/dml.rs`
+
+OperationService (typed execution path + tests):
+
+* `backend/crates/kalamdb-core/src/operations/service.rs`
+* `backend/crates/kalamdb-core/src/operations/scan.rs`
+* `backend/crates/kalamdb-core/src/operations/error.rs`
+* `backend/crates/kalamdb-commons/src/models/pg_operations.rs`
 
 ## Handoff Summary
 

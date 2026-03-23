@@ -18,7 +18,7 @@ use crate::shared_tables::{SharedTableIndexedStore, SharedTablePkIndex, SharedTa
 use crate::utils::base::{self, BaseTableProvider, TableProviderCore};
 use crate::utils::row_utils::extract_full_user_context;
 use async_trait::async_trait;
-use datafusion::arrow::array::{Array, Float32Array};
+
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::catalog::Session;
@@ -28,7 +28,7 @@ use datafusion::logical_expr::dml::InsertOp;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::scalar::ScalarValue;
-use kalamdb_commons::constants::SystemColumnNames;
+
 use kalamdb_commons::conversions::arrow_json_conversion::coerce_rows;
 use kalamdb_commons::ids::SharedTableRowId;
 use kalamdb_commons::models::datatypes::KalamDataType;
@@ -36,6 +36,7 @@ use kalamdb_commons::models::rows::Row;
 use kalamdb_commons::models::UserId;
 use kalamdb_commons::websocket::ChangeNotification;
 use kalamdb_commons::NotLeaderError;
+use kalamdb_commons::StorageKey;
 use kalamdb_session::{check_shared_table_access, check_shared_table_write_access};
 use kalamdb_store::EntityStore;
 use kalamdb_system::VectorMetric;
@@ -187,16 +188,7 @@ impl SharedTableProvider {
     ///
     /// This ensures notifications include all columns, not just user-defined fields.
     fn build_notification_row(entity: &SharedTableRow) -> Row {
-        let mut values = entity.fields.values.clone();
-        values.insert(
-            SystemColumnNames::SEQ.to_string(),
-            ScalarValue::Int64(Some(entity._seq.as_i64())),
-        );
-        values.insert(
-            SystemColumnNames::DELETED.to_string(),
-            ScalarValue::Boolean(Some(entity._deleted)),
-        );
-        Row::new(values)
+        base::build_notification_row(&entity.fields, entity._seq, entity._deleted)
     }
 
     /// Access the underlying indexed store (used by flush jobs)
@@ -205,52 +197,7 @@ impl SharedTableProvider {
     }
 
     fn extract_embedding_vector(value: &ScalarValue, expected_dimensions: u32) -> Option<Vec<f32>> {
-        let parse_inner = |array: &dyn Array| -> Option<Vec<f32>> {
-            let float_array = array.as_any().downcast_ref::<Float32Array>()?;
-            if float_array.len() != expected_dimensions as usize {
-                return None;
-            }
-            Some(
-                (0..float_array.len())
-                    .map(|idx| {
-                        if float_array.is_null(idx) {
-                            0.0
-                        } else {
-                            float_array.value(idx)
-                        }
-                    })
-                    .collect(),
-            )
-        };
-
-        match value {
-            ScalarValue::FixedSizeList(list) => {
-                if list.is_empty() || list.is_null(0) {
-                    return None;
-                }
-                parse_inner(list.value(0).as_ref())
-            },
-            ScalarValue::List(list) => {
-                if list.is_empty() || list.is_null(0) {
-                    return None;
-                }
-                parse_inner(list.value(0).as_ref())
-            },
-            ScalarValue::LargeList(list) => {
-                if list.is_empty() || list.is_null(0) {
-                    return None;
-                }
-                parse_inner(list.value(0).as_ref())
-            },
-            ScalarValue::Utf8(Some(json)) | ScalarValue::LargeUtf8(Some(json)) => {
-                let parsed = serde_json::from_str::<Vec<f32>>(json).ok()?;
-                if parsed.len() != expected_dimensions as usize {
-                    return None;
-                }
-                Some(parsed)
-            },
-            _ => None,
-        }
+        base::extract_embedding_vector(value, expected_dimensions)
     }
 
     async fn stage_vector_upsert(
@@ -1477,6 +1424,16 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
             }
         }
 
+        // ── Count-only fast-path ─────────────────────────────────────────────
+        // When projection is empty (e.g., COUNT(*)), avoid loading full row data.
+        // Only decode metadata (seq, deleted, pk) for version resolution.
+        if let Some(proj) = projection {
+            if proj.is_empty() && filter.is_none() {
+                let count = self.count_resolved_rows_async().await?;
+                return base::build_count_only_batch(count);
+            }
+        }
+
         // ── Full scan path (no PK equality filter) ──────────────────────────
         // Extract sequence bounds from filter to optimize RocksDB scan
         let (since_seq, _until_seq) = if let Some(expr) = filter {
@@ -1578,6 +1535,75 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
 
     fn extract_row(row: &SharedTableRow) -> &Row {
         &row.fields
+    }
+}
+
+impl SharedTableProvider {
+    /// Count resolved rows without materializing full row data.
+    ///
+    /// Used for COUNT(*) queries where projection is empty. Instead of deserializing
+    /// all row fields (which can consume ~600-800 bytes per row in HashMap allocations),
+    /// this only decodes seq, deleted, and the PK field for version resolution.
+    ///
+    /// For 100K rows, this saves ~80MB of memory compared to the full scan path.
+    async fn count_resolved_rows_async(&self) -> Result<usize, KalamDbError> {
+        use kalamdb_commons::serialization::row_codec::decode_shared_table_row_metadata;
+
+        let pk_name = self.primary_key_field_name().to_string();
+        let store = Arc::clone(&self.store);
+        let pk_name_clone = pk_name.clone();
+
+        // Hot storage: scan raw bytes and decode metadata only (skip full field deserialization)
+        let hot_future = tokio::task::spawn_blocking(move || {
+            let partition = store.partition();
+            let iter = store
+                .backend()
+                .scan(&partition, None, None, Some(1_000_000))
+                .map_err(|e| {
+                    KalamDbError::InvalidOperation(format!(
+                        "Failed to scan shared table hot storage for count: {}",
+                        e
+                    ))
+                })?;
+
+            let mut hot_metadata = Vec::new();
+            for (key_bytes, value_bytes) in iter {
+                let key =
+                    kalamdb_commons::ids::SharedTableRowId::from_storage_key(&key_bytes).map_err(
+                        |e| {
+                            KalamDbError::InvalidOperation(format!(
+                                "Failed to decode row key: {}",
+                                e
+                            ))
+                        },
+                    )?;
+                match decode_shared_table_row_metadata(&value_bytes, &pk_name_clone) {
+                    Ok(metadata) => hot_metadata.push((key, metadata)),
+                    Err(e) => {
+                        log::warn!("Skipping row with malformed metadata: {}", e);
+                        continue;
+                    },
+                }
+            }
+            Ok::<_, KalamDbError>(hot_metadata)
+        });
+
+        // Cold storage: scan Parquet files (get full batch, but extract only metadata)
+        let cold_future = self.scan_parquet_files_as_batch_async(None);
+
+        let (hot_result, cold_result): (_, _) = tokio::join!(hot_future, cold_future);
+
+        let hot_metadata: Vec<(kalamdb_commons::ids::SharedTableRowId, kalamdb_commons::serialization::row_codec::RowMetadata)> = hot_result
+            .map_err(|e| KalamDbError::InvalidOperation(format!("spawn_blocking join error: {}", e)))?
+            ?;
+
+        let parquet_batch = cold_result?;
+        let count = crate::utils::version_resolution::count_resolved_from_metadata(
+            &pk_name,
+            hot_metadata.into_iter().map(|(_, m)| m).collect(),
+            &parquet_batch,
+        )?;
+        Ok(count)
     }
 }
 

@@ -27,6 +27,8 @@ unsafe fn create_fdw_routine() -> *mut pg_sys::FdwRoutine {
     (*routine_ptr).PlanForeignModify = Some(crate::fdw_modify::plan_foreign_modify);
     (*routine_ptr).BeginForeignModify = Some(crate::fdw_modify::begin_foreign_modify);
     (*routine_ptr).ExecForeignInsert = Some(crate::fdw_modify::exec_foreign_insert);
+    (*routine_ptr).ExecForeignBatchInsert = Some(crate::fdw_modify::exec_foreign_batch_insert);
+    (*routine_ptr).GetForeignModifyBatchSize = Some(crate::fdw_modify::get_foreign_modify_batch_size);
     (*routine_ptr).ExecForeignUpdate = Some(crate::fdw_modify::exec_foreign_update);
     (*routine_ptr).ExecForeignDelete = Some(crate::fdw_modify::exec_foreign_delete);
     (*routine_ptr).EndForeignModify = Some(crate::fdw_modify::end_foreign_modify);

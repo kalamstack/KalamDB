@@ -12,7 +12,9 @@ mod fdw_modify;
 mod fdw_options;
 mod fdw_scan;
 mod fdw_state;
+mod fdw_xact;
 mod pg_to_kalam;
+mod write_buffer;
 
 pub use session_settings::SessionSettings;
 

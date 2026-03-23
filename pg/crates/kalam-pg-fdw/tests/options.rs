@@ -63,3 +63,63 @@ fn table_options_require_namespace() {
     let err = TableOptions::parse(&options).expect_err("missing namespace should fail");
     assert!(err.to_string().contains("namespace"));
 }
+
+#[test]
+fn parses_tls_server_options() {
+    let options = BTreeMap::from([
+        ("host".to_string(), "kalam.example.com".to_string()),
+        ("port".to_string(), "9188".to_string()),
+        ("ca_cert".to_string(), "-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----".to_string()),
+        ("client_cert".to_string(), "-----BEGIN CERTIFICATE-----\nclient\n-----END CERTIFICATE-----".to_string()),
+        ("client_key".to_string(), "-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----".to_string()),
+    ]);
+
+    let parsed = ServerOptions::parse(&options).expect("parse TLS server options");
+    let remote = parsed.remote.as_ref().expect("remote config");
+    assert_eq!(remote.host, "kalam.example.com");
+    assert_eq!(remote.port, 9188);
+    assert!(remote.tls_enabled());
+    assert!(remote.ca_cert.is_some());
+    assert!(remote.client_cert.is_some());
+    assert!(remote.client_key.is_some());
+    assert!(remote.endpoint_uri().starts_with("https://"));
+}
+
+#[test]
+fn rejects_client_cert_without_key() {
+    let options = BTreeMap::from([
+        ("host".to_string(), "127.0.0.1".to_string()),
+        ("port".to_string(), "50051".to_string()),
+        ("client_cert".to_string(), "-----BEGIN CERTIFICATE-----\ncert\n-----END CERTIFICATE-----".to_string()),
+    ]);
+
+    let err = ServerOptions::parse(&options).expect_err("client_cert without key should fail");
+    assert!(err.to_string().contains("client_cert"));
+    assert!(err.to_string().contains("client_key"));
+}
+
+#[test]
+fn rejects_client_key_without_cert() {
+    let options = BTreeMap::from([
+        ("host".to_string(), "127.0.0.1".to_string()),
+        ("port".to_string(), "50051".to_string()),
+        ("client_key".to_string(), "-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----".to_string()),
+    ]);
+
+    let err = ServerOptions::parse(&options).expect_err("client_key without cert should fail");
+    assert!(err.to_string().contains("client_cert"));
+    assert!(err.to_string().contains("client_key"));
+}
+
+#[test]
+fn non_tls_uses_http_scheme() {
+    let options = BTreeMap::from([
+        ("host".to_string(), "127.0.0.1".to_string()),
+        ("port".to_string(), "50051".to_string()),
+    ]);
+
+    let parsed = ServerOptions::parse(&options).expect("parse non-TLS options");
+    let remote = parsed.remote.as_ref().expect("remote config");
+    assert!(!remote.tls_enabled());
+    assert_eq!(remote.endpoint_uri(), "http://127.0.0.1:50051");
+}

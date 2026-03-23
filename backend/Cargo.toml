@@ -81,7 +81,7 @@ num_cpus = { workspace = true }
 libc = { workspace = true }
 
 [features]
-default = ["embedded-ui"]
+default = ["embedded-ui", "jemalloc"]
 jemalloc = ["tikv-jemallocator"]
 embedded-ui = ["kalamdb-api/embedded-ui"]
 otel = ["dep:tracing-opentelemetry", "dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp"]

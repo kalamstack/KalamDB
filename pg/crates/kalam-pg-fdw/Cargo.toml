@@ -6,9 +6,13 @@ authors = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[features]
+default = []
+import-foreign-schema = ["dep:kalam-pg-types", "kalamdb-commons/table-definition"]
+
 [dependencies]
-datafusion = { workspace = true }
+datafusion-common = { workspace = true }
 kalam-pg-api = { path = "../kalam-pg-api" }
 kalam-pg-common = { path = "../kalam-pg-common" }
-kalam-pg-types = { path = "../kalam-pg-types" }
-kalamdb-commons = { workspace = true }
+kalam-pg-types = { path = "../kalam-pg-types", optional = true }
+kalamdb-commons = { path = "../../../backend/crates/kalamdb-commons", default-features = false, features = ["rows"] }

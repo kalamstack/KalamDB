@@ -8,9 +8,11 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-default = ["websocket"]
+default = ["websocket", "http"]
 # Enable WebSocket authentication support (From<WsAuthCredentials> impl)
 websocket = ["kalamdb-commons/websocket-auth"]
+# Enable HTTP framework (actix-web) integration: extractors, cookies, IP helpers
+http = ["dep:actix-web", "dep:cookie"]
 
 [dependencies]
 # Password hashing
@@ -22,11 +24,11 @@ base64 = { workspace = true }
 # JWT validation
 jsonwebtoken = { workspace = true }
 
-# Web framework
-actix-web = { workspace = true }
+# Web framework (optional — gated behind "http" feature)
+actix-web = { workspace = true, optional = true }
 
-# Cookie handling
-cookie = { workspace = true }
+# Cookie handling (optional — gated behind "http" feature)
+cookie = { workspace = true, optional = true }
 
 # Internal dependencies
 kalamdb-commons = { path = "../kalamdb-commons", default-features = false, features = ["serde"] }

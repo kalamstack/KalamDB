@@ -56,11 +56,20 @@ FROM base AS deps
 # Copy only the files needed to determine dependencies
 COPY Cargo.toml Cargo.lock ./
 
+# Remove only the main pg extension crate from workspace members (pgrx requires PostgreSQL headers).
+# The pg sub-crates (kalam-pg-client, etc.) are kept because backend crates depend on them.
+RUN sed -i '/^    "pg",$/d' Cargo.toml
+
 # Copy all Cargo.toml files to establish workspace structure
 COPY backend/Cargo.toml ./backend/
 COPY cli/Cargo.toml ./cli/
 COPY link/Cargo.toml ./link/
-COPY benchmark/Cargo.toml ./benchmark/
+COPY link/kalam-link-dart/Cargo.toml ./link/kalam-link-dart/
+COPY pg/crates/kalam-pg-common/Cargo.toml ./pg/crates/kalam-pg-common/
+COPY pg/crates/kalam-pg-api/Cargo.toml ./pg/crates/kalam-pg-api/
+COPY pg/crates/kalam-pg-fdw/Cargo.toml ./pg/crates/kalam-pg-fdw/
+COPY pg/crates/kalam-pg-types/Cargo.toml ./pg/crates/kalam-pg-types/
+COPY pg/crates/kalam-pg-client/Cargo.toml ./pg/crates/kalam-pg-client/
 
 # Create minimal dummy source files for dependency resolution
 # These allow cargo to build/cache all dependencies without actual source
@@ -75,32 +84,71 @@ RUN mkdir -p backend/crates/kalamdb-api/src && \
     echo "pub fn lib() {}" > backend/crates/kalamdb-auth/src/lib.rs && \
     mkdir -p backend/crates/kalamdb-commons/src && \
     echo "pub fn lib() {}" > backend/crates/kalamdb-commons/src/lib.rs && \
+    mkdir -p backend/crates/kalamdb-configs/src && \
+    echo "pub fn lib() {}" > backend/crates/kalamdb-configs/src/lib.rs && \
     mkdir -p backend/crates/kalamdb-core/src && \
     echo "pub fn lib() {}" > backend/crates/kalamdb-core/src/lib.rs && \
+    mkdir -p backend/crates/kalamdb-dba/src && \
+    echo "pub fn lib() {}" > backend/crates/kalamdb-dba/src/lib.rs && \
     mkdir -p backend/crates/kalamdb-filestore/src && \
     echo "pub fn lib() {}" > backend/crates/kalamdb-filestore/src/lib.rs && \
+    mkdir -p backend/crates/kalamdb-macros/src && \
+    echo "pub fn lib() {}" > backend/crates/kalamdb-macros/src/lib.rs && \
+    mkdir -p backend/crates/kalamdb-observability/src && \
+    echo "pub fn lib() {}" > backend/crates/kalamdb-observability/src/lib.rs && \
+    mkdir -p backend/crates/kalamdb-oidc/src && \
+    echo "pub fn lib() {}" > backend/crates/kalamdb-oidc/src/lib.rs && \
+    mkdir -p backend/crates/kalamdb-pg/src && \
+    echo "pub fn lib() {}" > backend/crates/kalamdb-pg/src/lib.rs && \
+    mkdir -p backend/crates/kalamdb-publisher/src && \
+    echo "pub fn lib() {}" > backend/crates/kalamdb-publisher/src/lib.rs && \
     mkdir -p backend/crates/kalamdb-raft/src && \
     echo "pub fn lib() {}" > backend/crates/kalamdb-raft/src/lib.rs && \
+    mkdir -p backend/crates/kalamdb-server-auth/src && \
+    echo "pub fn lib() {}" > backend/crates/kalamdb-server-auth/src/lib.rs && \
+    mkdir -p backend/crates/kalamdb-session/src && \
+    echo "pub fn lib() {}" > backend/crates/kalamdb-session/src/lib.rs && \
+    mkdir -p backend/crates/kalamdb-sharding/src && \
+    echo "pub fn lib() {}" > backend/crates/kalamdb-sharding/src/lib.rs && \
     mkdir -p backend/crates/kalamdb-sql/src && \
     echo "pub fn lib() {}" > backend/crates/kalamdb-sql/src/lib.rs && \
     mkdir -p backend/crates/kalamdb-store/src && \
     echo "pub fn lib() {}" > backend/crates/kalamdb-store/src/lib.rs && \
+    mkdir -p backend/crates/kalamdb-streams/src && \
+    echo "pub fn lib() {}" > backend/crates/kalamdb-streams/src/lib.rs && \
     mkdir -p backend/crates/kalamdb-system/src && \
     echo "pub fn lib() {}" > backend/crates/kalamdb-system/src/lib.rs && \
     mkdir -p backend/crates/kalamdb-tables/src && \
-    echo "pub fn lib() {}" > backend/crates/kalamdb-tables/src/lib.rs
+    echo "pub fn lib() {}" > backend/crates/kalamdb-tables/src/lib.rs && \
+    mkdir -p backend/crates/kalamdb-vector/src && \
+    echo "pub fn lib() {}" > backend/crates/kalamdb-vector/src/lib.rs && \
+    mkdir -p backend/crates/kalamdb-views/src && \
+    echo "pub fn lib() {}" > backend/crates/kalamdb-views/src/lib.rs
 
 # Copy crate Cargo.toml files for proper dependency resolution
 COPY backend/crates/kalamdb-api/Cargo.toml ./backend/crates/kalamdb-api/
 COPY backend/crates/kalamdb-auth/Cargo.toml ./backend/crates/kalamdb-auth/
 COPY backend/crates/kalamdb-commons/Cargo.toml ./backend/crates/kalamdb-commons/
+COPY backend/crates/kalamdb-configs/Cargo.toml ./backend/crates/kalamdb-configs/
 COPY backend/crates/kalamdb-core/Cargo.toml ./backend/crates/kalamdb-core/
+COPY backend/crates/kalamdb-dba/Cargo.toml ./backend/crates/kalamdb-dba/
 COPY backend/crates/kalamdb-filestore/Cargo.toml ./backend/crates/kalamdb-filestore/
+COPY backend/crates/kalamdb-macros/Cargo.toml ./backend/crates/kalamdb-macros/
+COPY backend/crates/kalamdb-observability/Cargo.toml ./backend/crates/kalamdb-observability/
+COPY backend/crates/kalamdb-oidc/Cargo.toml ./backend/crates/kalamdb-oidc/
+COPY backend/crates/kalamdb-pg/Cargo.toml ./backend/crates/kalamdb-pg/
+COPY backend/crates/kalamdb-publisher/Cargo.toml ./backend/crates/kalamdb-publisher/
 COPY backend/crates/kalamdb-raft/Cargo.toml ./backend/crates/kalamdb-raft/
+COPY backend/crates/kalamdb-server-auth/Cargo.toml ./backend/crates/kalamdb-server-auth/
+COPY backend/crates/kalamdb-session/Cargo.toml ./backend/crates/kalamdb-session/
+COPY backend/crates/kalamdb-sharding/Cargo.toml ./backend/crates/kalamdb-sharding/
 COPY backend/crates/kalamdb-sql/Cargo.toml ./backend/crates/kalamdb-sql/
 COPY backend/crates/kalamdb-store/Cargo.toml ./backend/crates/kalamdb-store/
+COPY backend/crates/kalamdb-streams/Cargo.toml ./backend/crates/kalamdb-streams/
 COPY backend/crates/kalamdb-system/Cargo.toml ./backend/crates/kalamdb-system/
 COPY backend/crates/kalamdb-tables/Cargo.toml ./backend/crates/kalamdb-tables/
+COPY backend/crates/kalamdb-vector/Cargo.toml ./backend/crates/kalamdb-vector/
+COPY backend/crates/kalamdb-views/Cargo.toml ./backend/crates/kalamdb-views/
 
 # Create dummy CLI
 RUN mkdir -p cli/src && \
@@ -109,11 +157,21 @@ RUN mkdir -p cli/src && \
 
 # Create dummy link library
 RUN mkdir -p link/src && \
-    echo "pub fn lib() {}" > link/src/lib.rs
+    echo "pub fn lib() {}" > link/src/lib.rs && \
+    mkdir -p link/kalam-link-dart/src && \
+    echo "pub fn lib() {}" > link/kalam-link-dart/src/lib.rs
 
-# Create dummy benchmark
-RUN mkdir -p benchmark/src && \
-    echo "fn main() {}" > benchmark/src/main.rs
+# Create dummy pg sub-crates (not the main extension — that needs pgrx)
+RUN mkdir -p pg/crates/kalam-pg-common/src && \
+    echo "pub fn lib() {}" > pg/crates/kalam-pg-common/src/lib.rs && \
+    mkdir -p pg/crates/kalam-pg-api/src && \
+    echo "pub fn lib() {}" > pg/crates/kalam-pg-api/src/lib.rs && \
+    mkdir -p pg/crates/kalam-pg-fdw/src && \
+    echo "pub fn lib() {}" > pg/crates/kalam-pg-fdw/src/lib.rs && \
+    mkdir -p pg/crates/kalam-pg-types/src && \
+    echo "pub fn lib() {}" > pg/crates/kalam-pg-types/src/lib.rs && \
+    mkdir -p pg/crates/kalam-pg-client/src && \
+    echo "pub fn lib() {}" > pg/crates/kalam-pg-client/src/lib.rs
 
 # Create minimal version.toml
 RUN echo '# Auto-generated for Docker build' > version.toml && \
@@ -133,22 +191,22 @@ RUN cargo build --profile docker --features jemalloc --bin kalamdb-server --bin 
 FROM deps AS builder
 
 # Remove dummy source files
-RUN rm -rf backend/src backend/crates cli/src link/src link/sdks benchmark/src
+RUN rm -rf backend/src backend/crates cli/src link/src link/sdks link/kalam-link-dart/src pg/crates
 
 # Copy actual source code
 COPY backend/src ./backend/src
 COPY backend/crates ./backend/crates
 COPY backend/build.rs ./backend/
+COPY backend/build ./backend/build
 COPY cli/src ./cli/src
 COPY cli/build.rs ./cli/
 COPY link/src ./link/src
 COPY link/sdks ./link/sdks
+COPY link/kalam-link-dart/src ./link/kalam-link-dart/src
+COPY pg/crates ./pg/crates
 
 # Copy UI source for embedded admin UI
 COPY ui ./ui
-
-# Create dummy benchmark (we don't need to build it)
-RUN mkdir -p benchmark/src && echo "fn main() {}" > benchmark/src/main.rs
 
 # Copy or generate version.toml for compile-time version info
 COPY version.tom[l] ./
@@ -161,7 +219,8 @@ RUN if [ ! -f version.toml ]; then \
     fi
 
 # Build final binaries (dependencies are already cached from deps stage)
-RUN cargo build --profile docker --features jemalloc --bin kalamdb-server --bin kalam
+# SKIP_UI_BUILD: the UI dist/ was already built on the host and COPY'd above.
+RUN SKIP_UI_BUILD=1 cargo build --profile docker --features jemalloc --bin kalamdb-server --bin kalam
 
 # ============================================================================
 # Stage 4: Runtime (optimized for minimal size)
@@ -192,6 +251,13 @@ RUN sed -i 's|data_path = "\./data"|data_path = "/data"|g' /config/server.toml
 
 # Switch to non-root user
 USER kalamdb
+
+# jemalloc tuning: return freed memory to OS aggressively.
+# - background_thread: async arena purging without blocking app threads
+# - dirty_decay_ms=1000: purge dirty pages after 1s (default 10s)
+# - muzzy_decay_ms=1000: release muzzy pages after 1s (default 10s)
+# - narenas=2: fewer arenas = less fragmentation for moderate concurrency
+ENV MALLOC_CONF="background_thread:true,dirty_decay_ms:1000,muzzy_decay_ms:1000,narenas:2"
 
 # Set working directory
 WORKDIR /data

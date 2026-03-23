@@ -1,8 +1,7 @@
-use datafusion::logical_expr::Expr;
-use datafusion::prelude::{col, lit};
-use datafusion::scalar::ScalarValue;
+use datafusion_common::ScalarValue;
+use kalam_pg_api::ScanFilter;
 use kalam_pg_common::{DELETED_COLUMN, SEQ_COLUMN, USER_ID_COLUMN};
-use kalam_pg_fdw::{InsertInput, RequestPlanner, ScanInput, VirtualColumn};
+use kalam_pg_fdw::{DeleteInput, InsertInput, RequestPlanner, ScanInput, UpdateInput, VirtualColumn};
 use kalamdb_commons::models::rows::Row;
 use kalamdb_commons::models::{NamespaceId, TableName, UserId};
 use kalamdb_commons::{TableId, TableType};
@@ -23,8 +22,8 @@ fn plan_scan_extracts_user_id_filters_and_virtual_columns() {
             DELETED_COLUMN.to_string(),
         ],
         filters: vec![
-            col(USER_ID_COLUMN).eq(lit("u_fdw")),
-            col("body").eq(lit("hello")),
+            ScanFilter::eq(USER_ID_COLUMN, ScalarValue::Utf8(Some("u_fdw".to_string()))),
+            ScanFilter::eq("body", ScalarValue::Utf8(Some("hello".to_string()))),
         ],
         limit: Some(5),
         session_user_id: None,
@@ -39,7 +38,10 @@ fn plan_scan_extracts_user_id_filters_and_virtual_columns() {
             DELETED_COLUMN.to_string(),
         ])
     );
-    assert_eq!(plan.request.filters, vec![Expr::from(col("body").eq(lit("hello"))).unalias()]);
+    assert_eq!(
+        plan.request.filters,
+        vec![ScanFilter::eq("body", ScalarValue::Utf8(Some("hello".to_string())))]
+    );
     assert_eq!(plan.request.tenant_context.effective_user_id(), Some(&UserId::new("u_fdw")));
     assert_eq!(
         plan.virtual_columns,
@@ -57,7 +59,10 @@ fn plan_scan_rejects_conflicting_session_and_filter_user_ids() {
         table_id: table_id(),
         table_type: TableType::User,
         projected_columns: vec!["id".to_string()],
-        filters: vec![col(USER_ID_COLUMN).eq(lit("u_filter"))],
+        filters: vec![ScanFilter::eq(
+            USER_ID_COLUMN,
+            ScalarValue::Utf8(Some("u_filter".to_string())),
+        )],
         limit: None,
         session_user_id: Some(UserId::new("u_session")),
     })
@@ -104,4 +109,143 @@ fn plan_insert_rejects_conflicting_row_user_ids() {
     .expect_err("conflicting row user ids should fail");
 
     assert!(err.to_string().contains("conflicting _userid"));
+}
+
+// ── UPDATE planner tests ───────────────────────────────────────────────────
+
+#[test]
+fn plan_update_strips_user_id_from_updates() {
+    let plan = RequestPlanner::plan_update(UpdateInput {
+        table_id: table_id(),
+        table_type: TableType::User,
+        pk_value: "pk_42".to_string(),
+        updates: Row::from_vec(vec![
+            (USER_ID_COLUMN.to_string(), ScalarValue::Utf8(Some("u_update".to_string()))),
+            ("body".to_string(), ScalarValue::Utf8(Some("new content".to_string()))),
+        ]),
+        session_user_id: None,
+    })
+    .expect("plan update");
+
+    assert_eq!(plan.request.tenant_context.effective_user_id(), Some(&UserId::new("u_update")));
+    assert_eq!(plan.request.pk_value, "pk_42");
+    assert_eq!(plan.request.updates.get(USER_ID_COLUMN), None);
+    assert_eq!(
+        plan.request.updates.get("body"),
+        Some(&ScalarValue::Utf8(Some("new content".to_string())))
+    );
+}
+
+#[test]
+fn plan_update_uses_session_user_id_when_no_explicit() {
+    let plan = RequestPlanner::plan_update(UpdateInput {
+        table_id: table_id(),
+        table_type: TableType::User,
+        pk_value: "pk_1".to_string(),
+        updates: Row::from_vec(vec![
+            ("body".to_string(), ScalarValue::Utf8(Some("edited".to_string()))),
+        ]),
+        session_user_id: Some(UserId::new("session_user")),
+    })
+    .expect("plan update with session user");
+
+    assert_eq!(
+        plan.request.tenant_context.effective_user_id(),
+        Some(&UserId::new("session_user"))
+    );
+}
+
+#[test]
+fn plan_update_shared_table_allows_no_user_id() {
+    let plan = RequestPlanner::plan_update(UpdateInput {
+        table_id: table_id(),
+        table_type: TableType::Shared,
+        pk_value: "pk_shared".to_string(),
+        updates: Row::from_vec(vec![
+            ("status".to_string(), ScalarValue::Utf8(Some("active".to_string()))),
+        ]),
+        session_user_id: None,
+    })
+    .expect("plan update on shared table");
+
+    assert_eq!(plan.request.tenant_context.effective_user_id(), None);
+}
+
+// ── DELETE planner tests ───────────────────────────────────────────────────
+
+#[test]
+fn plan_delete_with_explicit_user_id() {
+    let plan = RequestPlanner::plan_delete(DeleteInput {
+        table_id: table_id(),
+        table_type: TableType::User,
+        pk_value: "pk_99".to_string(),
+        explicit_user_id: Some(UserId::new("u_delete")),
+        session_user_id: None,
+    })
+    .expect("plan delete");
+
+    assert_eq!(plan.request.tenant_context.effective_user_id(), Some(&UserId::new("u_delete")));
+    assert_eq!(plan.request.pk_value, "pk_99");
+}
+
+#[test]
+fn plan_delete_uses_session_user_id() {
+    let plan = RequestPlanner::plan_delete(DeleteInput {
+        table_id: table_id(),
+        table_type: TableType::User,
+        pk_value: "pk_7".to_string(),
+        explicit_user_id: None,
+        session_user_id: Some(UserId::new("session_del")),
+    })
+    .expect("plan delete with session user");
+
+    assert_eq!(
+        plan.request.tenant_context.effective_user_id(),
+        Some(&UserId::new("session_del"))
+    );
+}
+
+#[test]
+fn plan_delete_shared_table_allows_no_user_id() {
+    let plan = RequestPlanner::plan_delete(DeleteInput {
+        table_id: table_id(),
+        table_type: TableType::Shared,
+        pk_value: "pk_shared_del".to_string(),
+        explicit_user_id: None,
+        session_user_id: None,
+    })
+    .expect("plan delete on shared table");
+
+    assert_eq!(plan.request.tenant_context.effective_user_id(), None);
+    assert_eq!(plan.request.pk_value, "pk_shared_del");
+}
+
+#[test]
+fn plan_delete_rejects_user_table_without_user_id() {
+    let err = RequestPlanner::plan_delete(DeleteInput {
+        table_id: table_id(),
+        table_type: TableType::User,
+        pk_value: "pk_no_user".to_string(),
+        explicit_user_id: None,
+        session_user_id: None,
+    })
+    .expect_err("user table delete without user_id should fail");
+
+    assert!(err.to_string().to_lowercase().contains("user"));
+}
+
+#[test]
+fn plan_update_rejects_user_table_without_user_id() {
+    let err = RequestPlanner::plan_update(UpdateInput {
+        table_id: table_id(),
+        table_type: TableType::User,
+        pk_value: "pk_no_user".to_string(),
+        updates: Row::from_vec(vec![
+            ("body".to_string(), ScalarValue::Utf8(Some("x".to_string()))),
+        ]),
+        session_user_id: None,
+    })
+    .expect_err("user table update without user_id should fail");
+
+    assert!(err.to_string().to_lowercase().contains("user"));
 }

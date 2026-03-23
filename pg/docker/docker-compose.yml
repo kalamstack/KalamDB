@@ -29,9 +29,10 @@ services:
       KALAMDB_JWT_SECRET: "${KALAMDB_JWT_SECRET:-kalamdb-docker-dev-secret-please-change-32chars}"
       KALAMDB_ALLOW_REMOTE_SETUP: "true"
       KALAMDB_SECURITY_TRUSTED_PROXY_RANGES: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
-      # Enable cluster mode so the gRPC/PG service starts on 9188
+      # Enable cluster mode so the gRPC/PG service starts on 9188.
+      # Use hostname not 0.0.0.0 so validation passes; server binds 0.0.0.0:9188.
       KALAMDB_NODE_ID: "1"
-      KALAMDB_CLUSTER_RPC_ADDR: "0.0.0.0:9188"
+      KALAMDB_CLUSTER_RPC_ADDR: "kalamdb:9188"
       KALAMDB_CLUSTER_API_ADDR: "http://kalamdb:8080"
     volumes:
       - kalamdb_data:/data

@@ -10,6 +10,7 @@ pub struct SystemTableRow {
     pub fields: Row,
 }
 
+#[cfg(feature = "serialization")]
 impl crate::serialization::KSerializable for SystemTableRow {
     fn encode(&self) -> Result<Vec<u8>, crate::storage::StorageError> {
         crate::serialization::row_codec::encode_system_table_row(&self.fields)

@@ -108,6 +108,13 @@ curl -s "$KALAMDB_API_URL/v1/api/sql" \
     -H "Content-Type: application/json" \
     -d '{"sql": "CREATE USER TABLE IF NOT EXISTS rmtest.profiles (id TEXT PRIMARY KEY, name TEXT, age INTEGER)"}' > /dev/null
 
+curl -s "$KALAMDB_API_URL/v1/api/sql" \
+    -H "Authorization: Bearer $BEARER_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"sql": "CREATE SHARED TABLE IF NOT EXISTS rmtest.shared_items (id TEXT PRIMARY KEY, title TEXT, value INTEGER)"}' > /dev/null
+
+echo "KalamDB tables bootstrapped (rmtest.profiles, rmtest.shared_items)."
+
 echo "Waiting for PostgreSQL to be ready..."
 for i in $(seq 1 30); do
     if "$PG_ISREADY_BIN" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" > /dev/null 2>&1; then
@@ -130,6 +137,82 @@ PAGER=cat "$PSQL_BIN" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" \
     -v ON_ERROR_STOP=1 \
     -P pager=off \
     -f "$SCRIPT_DIR/test.sql"
+
+# ── Cross-Verification: verify FDW writes are visible via KalamDB REST API ──
+echo ""
+echo "Cross-verifying FDW writes via KalamDB REST API ..."
+
+# Insert a verification row via PG FDW
+PAGER=cat "$PSQL_BIN" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" \
+    -v ON_ERROR_STOP=1 \
+    -P pager=off \
+    -c "SET kalam.user_id = 'cross-verify-user'; INSERT INTO rmtest.profiles (id, name, age) VALUES ('xv1', 'CrossVerify', 99);"
+
+# Query the same row via KalamDB HTTP API
+API_RESULT=$(curl -s "$KALAMDB_API_URL/v1/api/sql" \
+    -H "Authorization: Bearer $BEARER_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"sql": "SELECT id, name, age FROM rmtest.profiles WHERE id = '\''xv1'\''"}')
+
+if echo "$API_RESULT" | grep -q '"xv1"'; then
+    echo "  PASS: FDW-inserted row 'xv1' is visible via KalamDB REST API."
+else
+    echo "  FAIL: FDW-inserted row 'xv1' NOT found via KalamDB REST API!"
+    echo "  API response: $API_RESULT"
+    exit 1
+fi
+
+# Clean up the cross-verification row
+PAGER=cat "$PSQL_BIN" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" \
+    -v ON_ERROR_STOP=1 \
+    -P pager=off \
+    -c "SET kalam.user_id = 'cross-verify-user'; DELETE FROM rmtest.profiles WHERE id = 'xv1';"
+
+# ── Concurrent Clients Test ──
+echo ""
+echo "Testing concurrent PostgreSQL clients ..."
+
+# Launch 5 concurrent psql sessions, each doing INSERT + SELECT
+for i in $(seq 1 5); do
+    (
+        PAGER=cat "$PSQL_BIN" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" \
+            -v ON_ERROR_STOP=1 \
+            -P pager=off \
+            -c "SET kalam.user_id = 'concurrent-user-$i'; INSERT INTO rmtest.profiles (id, name, age) VALUES ('cc$i', 'Concurrent$i', $((20 + i))); SELECT COUNT(*) FROM rmtest.profiles;" \
+            > /dev/null 2>&1
+    ) &
+done
+
+# Wait for all background jobs to finish
+FAIL=0
+for job in $(jobs -p); do
+    wait "$job" || FAIL=1
+done
+
+if [ "$FAIL" -eq 0 ]; then
+    echo "  PASS: 5 concurrent clients completed successfully."
+else
+    echo "  FAIL: One or more concurrent clients failed!"
+    exit 1
+fi
+
+# Verify all concurrent rows exist
+CC_COUNT=$( PAGER=cat "$PSQL_BIN" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" \
+    -t -A -c "SET kalam.user_id = 'concurrent-user-1'; SELECT COUNT(*) FROM rmtest.profiles WHERE id IN ('cc1','cc2','cc3','cc4','cc5');" )
+
+if [ "$CC_COUNT" -ge 5 ]; then
+    echo "  PASS: All 5 concurrent rows visible ($CC_COUNT)."
+else
+    echo "  FAIL: Expected 5 concurrent rows, got $CC_COUNT"
+    exit 1
+fi
+
+# Cleanup concurrent rows
+PAGER=cat "$PSQL_BIN" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" \
+    -v ON_ERROR_STOP=1 \
+    -P pager=off \
+    -c "SET kalam.user_id = 'concurrent-user-1'; DELETE FROM rmtest.profiles WHERE id IN ('cc1','cc2','cc3','cc4','cc5');" \
+    > /dev/null 2>&1
 
 echo ""
 echo "========================================"

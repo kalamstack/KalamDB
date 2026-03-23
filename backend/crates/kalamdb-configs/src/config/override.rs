@@ -1,4 +1,4 @@
-use super::cluster::{ClusterConfig, ClusterRpcTlsConfig, PeerConfig};
+use super::cluster::{ClusterConfig, PeerConfig};
 use super::types::ServerConfig;
 use std::env;
 use std::path::Path;
@@ -33,6 +33,7 @@ impl ServerConfig {
     /// - KALAMDB_CLUSTER_RPC_TLS_NODE_CERT_PATH: Override cluster.rpc_tls.node_cert_path
     /// - KALAMDB_CLUSTER_RPC_TLS_NODE_KEY_PATH: Override cluster.rpc_tls.node_key_path
     /// - KALAMDB_JWT_SECRET: Override auth.jwt_secret
+    /// - KALAMDB_PG_AUTH_TOKEN: Override auth.pg_auth_token
     /// - KALAMDB_JWT_TRUSTED_ISSUERS: Override auth.jwt_trusted_issuers
     /// - KALAMDB_JWT_EXPIRY_HOURS: Override auth.jwt_expiry_hours
     /// - KALAMDB_COOKIE_SECURE: Override auth.cookie_secure
@@ -43,6 +44,11 @@ impl ServerConfig {
     /// - KALAMDB_WEBSOCKET_CLIENT_TIMEOUT_SECS: Override websocket.client_timeout_secs
     /// - KALAMDB_WEBSOCKET_AUTH_TIMEOUT_SECS: Override websocket.auth_timeout_secs
     /// - KALAMDB_WEBSOCKET_HEARTBEAT_INTERVAL_SECS: Override websocket.heartbeat_interval_secs
+    /// - KALAMDB_RPC_TLS_ENABLED: Override rpc_tls.enabled
+    /// - KALAMDB_RPC_TLS_CA_CERT: Override rpc_tls.ca_cert (file path or inline PEM)
+    /// - KALAMDB_RPC_TLS_SERVER_CERT: Override rpc_tls.server_cert (file path or inline PEM)
+    /// - KALAMDB_RPC_TLS_SERVER_KEY: Override rpc_tls.server_key (file path or inline PEM)
+    /// - KALAMDB_RPC_TLS_REQUIRE_CLIENT_CERT: Override rpc_tls.require_client_cert
     ///
     /// Environment variables take precedence over server.toml values (T031)
     pub fn apply_env_overrides(&mut self) -> anyhow::Result<()> {
@@ -147,6 +153,11 @@ impl ServerConfig {
                 val.to_lowercase() == "true" || val == "1" || val.to_lowercase() == "yes";
         }
 
+        // Pre-shared token for pg_kalam FDW gRPC authentication
+        if let Ok(val) = env::var("KALAMDB_PG_AUTH_TOKEN") {
+            self.auth.pg_auth_token = Some(val);
+        }
+
         // Trusted proxy ranges used for X-Forwarded-For / X-Real-IP trust.
         if let Ok(val) = env::var("KALAMDB_SECURITY_TRUSTED_PROXY_RANGES")
             .or_else(|_| env::var("KALAMDB_TRUSTED_PROXY_RANGES"))
@@ -203,20 +214,12 @@ impl ServerConfig {
         let rpc_addr = env::var("KALAMDB_CLUSTER_RPC_ADDR").ok();
         let api_addr = env::var("KALAMDB_CLUSTER_API_ADDR").ok();
         let peers_env = env::var("KALAMDB_CLUSTER_PEERS").ok();
-        let rpc_tls_enabled = env::var("KALAMDB_CLUSTER_RPC_TLS_ENABLED").ok();
-        let rpc_tls_ca_cert_path = env::var("KALAMDB_CLUSTER_RPC_TLS_CA_CERT_PATH").ok();
-        let rpc_tls_node_cert_path = env::var("KALAMDB_CLUSTER_RPC_TLS_NODE_CERT_PATH").ok();
-        let rpc_tls_node_key_path = env::var("KALAMDB_CLUSTER_RPC_TLS_NODE_KEY_PATH").ok();
 
         let has_cluster_env = cluster_id.is_some()
             || node_id.is_some()
             || rpc_addr.is_some()
             || api_addr.is_some()
-            || peers_env.is_some()
-            || rpc_tls_enabled.is_some()
-            || rpc_tls_ca_cert_path.is_some()
-            || rpc_tls_node_cert_path.is_some()
-            || rpc_tls_node_key_path.is_some();
+            || peers_env.is_some();
 
         if has_cluster_env {
             let parsed_node_id = match node_id {
@@ -234,7 +237,6 @@ impl ServerConfig {
                 rpc_addr: rpc_addr.clone().unwrap_or_else(|| "127.0.0.1:9188".to_string()),
                 api_addr: api_addr.clone().unwrap_or_else(|| "127.0.0.1:8080".to_string()),
                 peers: Vec::new(),
-                rpc_tls: ClusterRpcTlsConfig::default(),
                 user_shards: 12,
                 shared_shards: 1,
                 heartbeat_interval_ms: 250,
@@ -265,21 +267,27 @@ impl ServerConfig {
             if let Some(val) = peers_env {
                 cluster.peers = parse_cluster_peers(&val)?;
             }
+        }
 
-            if let Some(val) = rpc_tls_enabled {
-                cluster.rpc_tls.enabled = val.eq_ignore_ascii_case("true")
-                    || val == "1"
-                    || val.eq_ignore_ascii_case("yes");
-            }
-            if let Some(val) = rpc_tls_ca_cert_path {
-                cluster.rpc_tls.ca_cert_path = Some(val);
-            }
-            if let Some(val) = rpc_tls_node_cert_path {
-                cluster.rpc_tls.node_cert_path = Some(val);
-            }
-            if let Some(val) = rpc_tls_node_key_path {
-                cluster.rpc_tls.node_key_path = Some(val);
-            }
+        // Top-level RPC TLS overrides (unified mTLS config)
+        if let Ok(val) = env::var("KALAMDB_RPC_TLS_ENABLED") {
+            self.rpc_tls.enabled = val.eq_ignore_ascii_case("true")
+                || val == "1"
+                || val.eq_ignore_ascii_case("yes");
+        }
+        if let Ok(val) = env::var("KALAMDB_RPC_TLS_CA_CERT") {
+            self.rpc_tls.ca_cert = Some(val);
+        }
+        if let Ok(val) = env::var("KALAMDB_RPC_TLS_SERVER_CERT") {
+            self.rpc_tls.server_cert = Some(val);
+        }
+        if let Ok(val) = env::var("KALAMDB_RPC_TLS_SERVER_KEY") {
+            self.rpc_tls.server_key = Some(val);
+        }
+        if let Ok(val) = env::var("KALAMDB_RPC_TLS_REQUIRE_CLIENT_CERT") {
+            self.rpc_tls.require_client_cert = val.eq_ignore_ascii_case("true")
+                || val == "1"
+                || val.eq_ignore_ascii_case("yes");
         }
 
         Ok(())

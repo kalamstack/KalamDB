@@ -18,7 +18,7 @@ use crate::user_tables::{UserTableIndexedStore, UserTablePkIndex, UserTableRow};
 use crate::utils::base::{self, BaseTableProvider, TableProviderCore};
 use crate::utils::row_utils::{extract_full_user_context, extract_user_context};
 use async_trait::async_trait;
-use datafusion::arrow::array::{Array, Float32Array};
+
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::catalog::Session;
@@ -28,7 +28,7 @@ use datafusion::logical_expr::dml::InsertOp;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
 use datafusion::physical_plan::{ExecutionPlan, Statistics};
 use datafusion::scalar::ScalarValue;
-use kalamdb_commons::constants::SystemColumnNames;
+
 use kalamdb_commons::conversions::arrow_json_conversion::coerce_rows;
 use kalamdb_commons::ids::{SeqId, UserTableRowId};
 use kalamdb_commons::models::datatypes::KalamDataType;
@@ -50,6 +50,7 @@ use tracing::Instrument;
 // Arrow <-> JSON helpers
 use crate::utils::version_resolution::{merge_versioned_rows, parquet_batch_to_rows};
 use kalamdb_commons::models::rows::Row;
+
 use kalamdb_commons::websocket::ChangeNotification;
 
 /// User table provider with RLS
@@ -160,52 +161,7 @@ impl UserTableProvider {
     }
 
     fn extract_embedding_vector(value: &ScalarValue, expected_dimensions: u32) -> Option<Vec<f32>> {
-        let parse_inner = |array: &dyn Array| -> Option<Vec<f32>> {
-            let float_array = array.as_any().downcast_ref::<Float32Array>()?;
-            if float_array.len() != expected_dimensions as usize {
-                return None;
-            }
-            Some(
-                (0..float_array.len())
-                    .map(|idx| {
-                        if float_array.is_null(idx) {
-                            0.0
-                        } else {
-                            float_array.value(idx)
-                        }
-                    })
-                    .collect(),
-            )
-        };
-
-        match value {
-            ScalarValue::FixedSizeList(list) => {
-                if list.is_empty() || list.is_null(0) {
-                    return None;
-                }
-                parse_inner(list.value(0).as_ref())
-            },
-            ScalarValue::List(list) => {
-                if list.is_empty() || list.is_null(0) {
-                    return None;
-                }
-                parse_inner(list.value(0).as_ref())
-            },
-            ScalarValue::LargeList(list) => {
-                if list.is_empty() || list.is_null(0) {
-                    return None;
-                }
-                parse_inner(list.value(0).as_ref())
-            },
-            ScalarValue::Utf8(Some(json)) | ScalarValue::LargeUtf8(Some(json)) => {
-                let parsed = serde_json::from_str::<Vec<f32>>(json).ok()?;
-                if parsed.len() != expected_dimensions as usize {
-                    return None;
-                }
-                Some(parsed)
-            },
-            _ => None,
-        }
+        base::extract_embedding_vector(value, expected_dimensions)
     }
 
     async fn stage_vector_upsert(
@@ -353,16 +309,7 @@ impl UserTableProvider {
     ///
     /// This ensures live query notifications include all columns, not just user-defined fields.
     fn build_notification_row(entity: &UserTableRow) -> Row {
-        let mut values = entity.fields.values.clone();
-        values.insert(
-            SystemColumnNames::SEQ.to_string(),
-            ScalarValue::Int64(Some(entity._seq.as_i64())),
-        );
-        values.insert(
-            SystemColumnNames::DELETED.to_string(),
-            ScalarValue::Boolean(Some(entity._deleted)),
-        );
-        Row::new(values)
+        base::build_notification_row(&entity.fields, entity._seq, entity._deleted)
     }
 
     /// Find a row by primary key value using the PK index
@@ -1394,6 +1341,19 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
             }
         }
 
+        // ── Count-only fast-path ─────────────────────────────────────────────
+        // When projection is empty (e.g., COUNT(*)), avoid loading full row data.
+        // Only decode metadata (seq, deleted, pk) for version resolution.
+        // Only for single-user scope (admin cross-user COUNT would be complex).
+        if !allow_all_users {
+            if let Some(proj) = projection {
+                if proj.is_empty() && filter.is_none() {
+                    let count = self.count_resolved_rows_async(user_id).await?;
+                    return base::build_count_only_batch(count);
+                }
+            }
+        }
+
         // ── Full scan path (no PK equality filter or admin cross-user) ──────
         // Extract sequence bounds from filter to optimize RocksDB scan
         let (since_seq, _until_seq) = if let Some(expr) = filter {
@@ -1538,6 +1498,69 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
 
     fn extract_row(row: &UserTableRow) -> &Row {
         &row.fields
+    }
+}
+
+impl UserTableProvider {
+    /// Count resolved rows without materializing full row data (single user).
+    ///
+    /// Used for COUNT(*) queries where projection is empty. Only decodes
+    /// metadata (seq, deleted, pk) to perform version resolution.
+    async fn count_resolved_rows_async(&self, user_id: &UserId) -> Result<usize, KalamDbError> {
+        use kalamdb_commons::serialization::row_codec::decode_user_table_row_metadata;
+
+        let pk_name = self.primary_key_field_name().to_string();
+        let store = Arc::clone(&self.store);
+        let user_prefix = UserTableRowId::user_prefix(user_id);
+        let pk_name_clone = pk_name.clone();
+
+        // Hot storage: scan raw bytes with user prefix, decode metadata only
+        let hot_future = tokio::task::spawn_blocking(move || {
+            let partition = store.partition();
+            let iter = store
+                .backend()
+                .scan(&partition, Some(&user_prefix), None, Some(1_000_000))
+                .map_err(|e| {
+                    KalamDbError::InvalidOperation(format!(
+                        "Failed to scan user table hot storage for count: {}",
+                        e
+                    ))
+                })?;
+
+            let mut hot_metadata = Vec::new();
+            for (key_bytes, value_bytes) in iter {
+                let key = UserTableRowId::from_storage_key(&key_bytes).map_err(|e| {
+                    KalamDbError::InvalidOperation(format!("Failed to decode row key: {}", e))
+                })?;
+                match decode_user_table_row_metadata(&value_bytes, &pk_name_clone) {
+                    Ok((_uid, metadata)) => hot_metadata.push((key, metadata)),
+                    Err(e) => {
+                        log::warn!("Skipping row with malformed metadata: {}", e);
+                        continue;
+                    },
+                }
+            }
+            Ok::<_, KalamDbError>(hot_metadata)
+        });
+
+        // Cold storage: scan Parquet files, extract metadata only
+        let cold_future = self.scan_parquet_files_as_batch_async(user_id, None);
+
+        let (hot_result, cold_result) = tokio::join!(hot_future, cold_future);
+
+        let hot_metadata = hot_result
+            .map_err(|e| {
+                KalamDbError::InvalidOperation(format!("spawn_blocking join error: {}", e))
+            })?
+            ?;
+
+        let parquet_batch = cold_result?;
+        let count = crate::utils::version_resolution::count_resolved_from_metadata(
+            &pk_name,
+            hot_metadata.into_iter().map(|(_, m)| m).collect(),
+            &parquet_batch,
+        )?;
+        Ok(count)
     }
 }
 

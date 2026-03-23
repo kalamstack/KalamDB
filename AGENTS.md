@@ -36,6 +36,8 @@ use kalamdb_commons::models::UserId;
 14. **Tracing Table Field Convention**: In spans/events, log `table_id` (format `namespace.table`) instead of separate `table_namespace` and `table_name` fields.
 15. **No SQL Rewrite in Hot Paths**: Do not add SQL/DML/SELECT rewrite passes in execution hot paths. Prefer type-safe coercion at typed boundaries (parameter binding, scalar coercion, provider write path, DataFusion-native casts/UDFs explicitly invoked by query authors) to avoid extra parse/transform overhead.
 16. **SDK Changes Must Update Docs**: Any change under `link/sdks/**` or SDK bridge crates (for example `link/kalam-link-dart/**`) must also update the corresponding SDK docs in the `KalamSite` repo (typically `../KalamSite/content/sdk/**`) and include appropriate test coverage.
+17. **Performance-First Execution**: Prefer approaches that reduce runtime, allocations, binary size, and compile time; avoid adding abstractions or dependencies that materially slow hot paths or build/test feedback loops without a clear benefit.
+18. **Performance Test Timing**: Whenever you run performance tests, benchmarks, or perf-focused e2e cases, record and report how long each relevant test took in seconds.
 
 > **⚠️ IMPORTANT**: Smoke tests require a running KalamDB server! Start the server first with `cargo run` in the `backend` directory before running smoke tests. The tests will fail if no server is running.
 
@@ -43,6 +45,7 @@ use kalamdb_commons::models::UserId;
 1. Add it to `Cargo.toml` (root) under `[workspace.dependencies]` with version
 2. Reference it in individual crates using `{ workspace = true }`
 3. Add crate-specific features if needed: `{ workspace = true, features = ["..."] }`
+4. Enable only the features that are actually required; prefer `default-features = false` when defaults pull in unused code or slow compilation.
 
 **To update a dependency version:**
 - Only edit the version in root `Cargo.toml`
@@ -71,6 +74,22 @@ use kalamdb_commons::models::UserId;
 - **RBAC (Role-Based Access Control)**: Four roles (user, service, dba, system)
 - **Actix-Web Middleware**: Custom authentication extractors and guards
 - **StorageBackend Abstraction**: `Arc<dyn StorageBackend>` isolates RocksDB dependencies
+
+## Project Navigation
+
+- `backend/`: Main Rust server workspace; most database engine work starts here.
+- `backend/crates/`: Core server crates grouped by responsibility; prefer editing the owning crate instead of cross-cutting changes.
+- `cli/`: Kalam CLI, smoke tests, and CLI-facing integration flows.
+- `link/`: SDK bridge workspace and shared link infrastructure.
+- `link/sdks/typescript/`: TypeScript SDK.
+- `link/sdks/dart/`: Dart/Flutter SDK. `link/sdks/dart/lib/src/generated` is generated; regenerate with `link/sdks/dart/build_native_libs.sh`.
+- `link/kalam-link-dart/`: Rust bridge/native layer used by the Dart SDK.
+- `pg/`: PostgreSQL extension workspace for `pg_kalam`; see `pg/pg_kalam.control`, `pg/src/`, `pg/crates/`, and `pg/tests/`.
+- `benchv2/`: Benchmark harness, scenarios, templates, and results for performance work.
+- `ui/`: Frontend/admin UI.
+- `docs/`: Architecture, API, security, and operational documentation.
+- `specs/`: Historical and active design specs by feature/phase.
+- `docker/`: Container builds and local deployment layouts.
 
 ## Project Structure
 backend/crates/
@@ -106,6 +125,7 @@ backend/crates/
 - When iterating on multi-file changes, run a single workspace-wide check and capture output to a file, fix all issues, then re-check:
   - Example: `cargo check > batch_compile_output.txt 2>&1`
   - Parse and address all errors/warnings in one pass; avoid running `cargo check` repeatedly after each tiny edit.
+- If a task requires multiple related code changes, finish the full edit batch first and only then run `cargo check` or `cargo build` when validation is actually needed.
 - Re-run `cargo check` only after a meaningful batch of fixes. This keeps feedback fast and focused, and prevents thrashing CI and local builds.
 
 ## Testing (MUST)
@@ -113,6 +133,7 @@ backend/crates/
 - Use `cargo nextest run` for all test executions unless explicitly told otherwise.
 - For CLI e2e tests: run `cargo nextest run --features e2e-tests` **without** `--no-fail-fast`, capture output to a file, then fix failures one-by-one by running only the failing test(s). Re-run the full suite after fixes.
 - For e2e test runs, do NOT pass `--no-fail-fast`. Run normally, fix the first failure, re-run until it passes, then move to the next failing issue.
+- For performance-focused tests, benchmarks, and perf e2e cases, capture and report the runtime for each relevant test in seconds in the final update.
 - Always add `#[ntest::timeout(time)]` to every async test where `time` is the **actual observed runtime** × 1.5 (to cover slower machines).
    - Example: if a test took 40s, set `#[ntest::timeout(60000)]`.
    - Recalculate and update timeouts after significant changes to test behavior or data size.

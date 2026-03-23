@@ -5,14 +5,21 @@ use thiserror::Error;
 pub enum KalamPgError {
     #[error("validation error: {0}")]
     Validation(String),
-    #[error("execution error: {0}")]
+    #[error("{0}")]
     Execution(String),
     #[error("unsupported operation: {0}")]
     Unsupported(String),
+    /// The KalamDB server could not be reached at the given address.
+    #[error(
+        "KalamDB server is not running or unreachable at {0} – \
+         start the server and verify the host/port in CREATE SERVER OPTIONS"
+    )]
+    ServerUnreachable(String),
 }
 
-impl From<datafusion::error::DataFusionError> for KalamPgError {
-    fn from(value: datafusion::error::DataFusionError) -> Self {
+#[cfg(feature = "datafusion")]
+impl From<datafusion_common::DataFusionError> for KalamPgError {
+    fn from(value: datafusion_common::DataFusionError) -> Self {
         Self::Execution(value.to_string())
     }
 }

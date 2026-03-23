@@ -1,11 +1,12 @@
 //! Arrow record batch value → PostgreSQL Datum conversion.
 
-use datafusion::arrow::array::{
+use arrow::array::{
     Array, BinaryArray, BooleanArray, Date32Array, Float32Array, Float64Array, Int16Array,
     Int32Array, Int64Array, LargeStringArray, StringArray, TimestampMicrosecondArray,
     TimestampMillisecondArray,
 };
-use datafusion::arrow::datatypes::{DataType, TimeUnit};
+use arrow::datatypes::{DataType, TimeUnit};
+use datafusion_common::ScalarValue;
 use pgrx::pg_sys;
 use pgrx::IntoDatum;
 use std::ffi::CString;
@@ -100,7 +101,7 @@ pub unsafe fn arrow_value_to_datum(array: &dyn Array, row: usize) -> (pg_sys::Da
         },
         _ => {
             // Fallback: render as text via Arrow's display formatting
-            let scalar = datafusion::common::ScalarValue::try_from_array(array, row);
+            let scalar = ScalarValue::try_from_array(array, row);
             match scalar {
                 Ok(s) => {
                     let text = s.to_string();

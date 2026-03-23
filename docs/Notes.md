@@ -1334,7 +1334,6 @@ Target Usecase:
 
 Postgres Extension:
 ---------------------
-- Remove vendor rocksdb folder
 - Remove all the expirement xcode for the embedded server
 - Add mTLS + short-lived JWT - for Postgres to kalamdb-server connection
 - In KalamDB unify thr mTLS to use in both cluster and pg extension connection and not repeat the same logic twice organize the code in kalamdb-security crate
@@ -1342,3 +1341,12 @@ Postgres Extension:
 - Add transaction begin/commit to kalamdb then wire it to pg
 - Make sure in the sqlparser we are using Postgres Dialect instead of geenric, i want kalamdb to be so close to postgres in all ways
 - Lock on the create table statement maybe we can create regular or any table and then we can alter it to be a kalam table with options and also migrate the data which is currently there
+- Remove the usage of datafusion from the pg_kalam and also the kalamdb-commons since it contains un-needed things there, we should create another crate called commons which is shared among the link/server/pg
+- since these ar eused in both pg_kalam and cluster rename:  KALAMDB_CLUSTER_RPC_ADDR,KALAMDB_CLUSTER_API_ADDR
+- KALAMDB_PG_AUTH_TOKEN is only temporary for now come up with a new auth which we can generate 
+- Check ability to use this syntax: CREATE TABLE compression_test
+(
+...
+)  USING kalamdb
+   WITH (type = 'user', migrate = true, compress = 5, ...);
+- Can we support migrating a current table from postgres to kalamdb using something like: SELECT set_kalam_table('schema.table1', migrate => true, compress => 5, ...); this will convert the current table to a kalamdb table and move the data as well without needing to create a new table and move the data there

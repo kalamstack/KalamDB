@@ -102,6 +102,35 @@ pub unsafe extern "C-unwind" fn exec_foreign_insert(
     }
 }
 
+/// Maximum batch size for `ExecForeignBatchInsert`.
+/// PostgreSQL will accumulate up to this many slots before calling the batch callback.
+const BATCH_INSERT_SIZE: i32 = 1000;
+
+/// `GetForeignModifyBatchSize` callback: return maximum batch size for inserts.
+#[pg_guard]
+pub unsafe extern "C-unwind" fn get_foreign_modify_batch_size(
+    _rinfo: *mut pg_sys::ResultRelInfo,
+) -> std::ffi::c_int {
+    BATCH_INSERT_SIZE
+}
+
+/// `ExecForeignBatchInsert` callback: insert multiple rows in a single gRPC call.
+#[pg_guard]
+pub unsafe extern "C-unwind" fn exec_foreign_batch_insert(
+    _estate: *mut pg_sys::EState,
+    rinfo: *mut pg_sys::ResultRelInfo,
+    slots: *mut *mut pg_sys::TupleTableSlot,
+    _plan_slots: *mut *mut pg_sys::TupleTableSlot,
+    num_slots: *mut std::ffi::c_int,
+) -> *mut *mut pg_sys::TupleTableSlot {
+    let n = *num_slots as usize;
+    let result = exec_foreign_batch_insert_impl(rinfo, slots, n);
+    match result {
+        Ok(()) => slots,
+        Err(e) => pgrx::error!("pg_kalam batch insert: {}", e),
+    }
+}
+
 /// `ExecForeignUpdate` callback: update a single row.
 #[pg_guard]
 pub unsafe extern "C-unwind" fn exec_foreign_update(
@@ -133,6 +162,8 @@ pub unsafe extern "C-unwind" fn exec_foreign_delete(
 }
 
 /// `EndForeignModify` callback: release modify resources.
+/// Buffered writes are NOT flushed here — they accumulate across statements
+/// within a transaction and are flushed at PRE_COMMIT or before scans.
 #[pg_guard]
 pub unsafe extern "C-unwind" fn end_foreign_modify(
     _estate: *mut pg_sys::EState,
@@ -190,13 +221,15 @@ unsafe fn begin_foreign_modify_impl(rinfo: *mut pg_sys::ResultRelInfo) -> Result
             "foreign server must have host and port options for remote mode".to_string(),
         )
     })?;
-    let auth_header = server_options.get("auth_header").cloned();
 
     let remote_state =
-        crate::remote_state::ensure_remote_extension_state(remote_config, auth_header)
+        crate::remote_state::ensure_remote_extension_state(remote_config)
             .map_err(|e| KalamPgError::Execution(e.to_string()))?;
     let executor = remote_state.executor()?;
     let runtime = std::sync::Arc::clone(remote_state.runtime());
+
+    // Lazily begin a KalamDB transaction for this PostgreSQL transaction
+    let _ = crate::fdw_xact::ensure_transaction(remote_state.session_id())?;
 
     let modify_state = Box::new(KalamModifyState {
         table_options,
@@ -220,11 +253,56 @@ unsafe fn exec_foreign_insert_impl(
     let user_id_str = crate::current_kalam_user_id();
     let user_id = user_id_str.map(UserId::new);
 
+    crate::write_buffer::buffer_insert(
+        &state.table_options.table_id,
+        state.table_options.table_type,
+        user_id,
+        row,
+        &state.executor,
+        &state.runtime,
+    )?;
+    Ok(())
+}
+
+unsafe fn exec_foreign_batch_insert_impl(
+    rinfo: *mut pg_sys::ResultRelInfo,
+    slots: *mut *mut pg_sys::TupleTableSlot,
+    num_slots: usize,
+) -> Result<(), KalamPgError> {
+    let state = &*((*rinfo).ri_FdwState as *mut KalamModifyState);
+
+    let user_id_str = crate::current_kalam_user_id();
+    let user_id = user_id_str.map(UserId::new);
+
+    // Single-row case: buffer for cross-statement batching within transactions
+    if num_slots == 1 {
+        let slot = *slots.add(0);
+        let row = slot_to_row(slot, &state.column_names)?;
+        crate::write_buffer::buffer_insert(
+            &state.table_options.table_id,
+            state.table_options.table_type,
+            user_id,
+            row,
+            &state.executor,
+            &state.runtime,
+        )?;
+        return Ok(());
+    }
+
+    // Multi-row case: flush any pending buffer first, then send this batch directly
+    crate::write_buffer::flush_table(&state.table_options.table_id)?;
+
+    let mut rows = Vec::with_capacity(num_slots);
+    for i in 0..num_slots {
+        let slot = *slots.add(i);
+        rows.push(slot_to_row(slot, &state.column_names)?);
+    }
+
     let request = InsertRequest::new(
         state.table_options.table_id.clone(),
         state.table_options.table_type,
         TenantContext::new(None, user_id),
-        vec![row],
+        rows,
     );
 
     state
@@ -239,6 +317,8 @@ unsafe fn exec_foreign_update_impl(
     plan_slot: *mut pg_sys::TupleTableSlot,
 ) -> Result<(), KalamPgError> {
     let state = &*((*rinfo).ri_FdwState as *mut KalamModifyState);
+    // Flush pending inserts so the update sees all rows
+    crate::write_buffer::flush_table(&state.table_options.table_id)?;
     let pk_value = extract_pk_value(plan_slot, &state.pk_column, &state.column_names)?;
     let updates = slot_to_row(slot, &state.column_names)?;
 
@@ -264,6 +344,8 @@ unsafe fn exec_foreign_delete_impl(
     plan_slot: *mut pg_sys::TupleTableSlot,
 ) -> Result<(), KalamPgError> {
     let state = &*((*rinfo).ri_FdwState as *mut KalamModifyState);
+    // Flush pending inserts so the delete sees all rows
+    crate::write_buffer::flush_table(&state.table_options.table_id)?;
     let pk_value = extract_pk_value(plan_slot, &state.pk_column, &state.column_names)?;
 
     let user_id_str = crate::current_kalam_user_id();

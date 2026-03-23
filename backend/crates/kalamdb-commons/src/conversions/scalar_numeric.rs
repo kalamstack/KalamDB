@@ -3,7 +3,7 @@
 //! Provides conversion functions between ScalarValue and numeric types (f64, i64, etc.)
 //! Used for arithmetic operations, comparisons, and statistical calculations.
 
-use datafusion::scalar::ScalarValue;
+use datafusion_common::ScalarValue;
 
 /// Convert ScalarValue to f64 for numeric operations
 ///

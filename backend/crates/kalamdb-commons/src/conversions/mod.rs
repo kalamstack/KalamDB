@@ -36,22 +36,37 @@
 //! let size = estimate_scalar_value_size(&value);
 //! ```
 
+#[cfg(feature = "arrow-conversion")]
 pub mod arrow_conversion;
+#[cfg(feature = "conversions")]
 pub mod arrow_json_conversion;
+#[cfg(feature = "conversions")]
 pub mod scalar_bytes;
+#[cfg(feature = "conversions")]
 pub mod scalar_json;
+#[cfg(feature = "conversions")]
 pub mod scalar_numeric;
+#[cfg(feature = "conversions")]
 pub mod scalar_size;
+#[cfg(feature = "conversions")]
 pub mod scalar_string;
+#[cfg(feature = "schema-metadata")]
 pub mod schema_metadata;
 
 // Re-export commonly used functions at the module root for convenience
+#[cfg(feature = "conversions")]
 pub use arrow_json_conversion::*;
+#[cfg(feature = "conversions")]
 pub use scalar_bytes::{encode_pk_value, scalar_value_to_bytes};
+#[cfg(feature = "conversions")]
 pub use scalar_json::{json_value_to_scalar_for_column, scalar_to_json_for_column};
+#[cfg(feature = "conversions")]
 pub use scalar_numeric::{as_f64, scalar_to_f64, scalar_to_i64};
+#[cfg(feature = "conversions")]
 pub use scalar_size::estimate_scalar_value_size;
+#[cfg(feature = "conversions")]
 pub use scalar_string::{parse_string_as_scalar, scalar_to_pk_string};
+#[cfg(feature = "schema-metadata")]
 pub use schema_metadata::{
     read_kalam_column_flags_metadata, read_kalam_data_type_metadata,
     with_kalam_column_flags_metadata, with_kalam_data_type_metadata,

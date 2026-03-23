@@ -12,52 +12,12 @@ use kalamdb_commons::{TableId, TableType};
 use crate::service::{ScanRpcRequest, ScanRpcResponse};
 use crate::{InsertRpcRequest, UpdateRpcRequest, DeleteRpcRequest};
 
-// ── Domain request/result types used by the trait ──────────────────────────
+// Re-export domain types from kalamdb-commons (canonical location).
+pub use kalamdb_commons::models::pg_operations::{
+    DeleteRequest, InsertRequest, MutationResult, ScanRequest, ScanResult, UpdateRequest,
+};
 
-/// Domain-typed scan request.
-pub struct ScanRequest {
-    pub table_id: TableId,
-    pub columns: Vec<String>,
-    pub limit: Option<usize>,
-    pub user_id: Option<UserId>,
-}
-
-/// Domain-typed insert request.
-pub struct InsertRequest {
-    pub table_id: TableId,
-    pub table_type: TableType,
-    pub user_id: Option<UserId>,
-    pub rows: Vec<Row>,
-}
-
-/// Domain-typed update request.
-pub struct UpdateRequest {
-    pub table_id: TableId,
-    pub table_type: TableType,
-    pub user_id: Option<UserId>,
-    pub updates: Vec<Row>,
-    pub pk_value: String,
-}
-
-/// Domain-typed delete request.
-pub struct DeleteRequest {
-    pub table_id: TableId,
-    pub table_type: TableType,
-    pub user_id: Option<UserId>,
-    pub pk_value: String,
-}
-
-/// Domain-typed scan result.
-pub struct ScanResult {
-    pub batches: Vec<RecordBatch>,
-}
-
-/// Domain-typed mutation result.
-pub struct MutationResult {
-    pub affected_rows: u64,
-}
-
-/// Domain-typed query executor backed by `OperationService` in kalamdb-core.
+/// Domain-typed query executor.
 ///
 /// `KalamPgService` translates gRPC wire types into domain types, calls this
 /// trait, then encodes domain results back to gRPC responses.
@@ -134,10 +94,10 @@ pub fn encode_batches(
 /// Convert a `ScanRpcRequest` into a domain `ScanRequest`.
 pub fn scan_request_from_rpc(rpc: &ScanRpcRequest) -> Result<ScanRequest, Status> {
     let table_id = parse_table_id(&rpc.namespace, &rpc.table_name)?;
-    // table_type is validated but not needed for scans (provider is resolved by table_id)
-    let _table_type = parse_table_type(&rpc.table_type)?;
+    let table_type = parse_table_type(&rpc.table_type)?;
     Ok(ScanRequest {
         table_id,
+        table_type,
         columns: rpc.columns.clone(),
         limit: rpc.limit.map(|l| l as usize),
         user_id: parse_user_id(rpc.user_id.as_deref()),

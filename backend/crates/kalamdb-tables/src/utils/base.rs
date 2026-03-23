@@ -59,7 +59,7 @@ use crate::error_extensions::KalamDbResultExt;
 use crate::manifest::ManifestAccessPlanner;
 use crate::utils::unified_dml;
 use async_trait::async_trait;
-use datafusion::arrow::array::{Array, BooleanArray, Int64Array, UInt64Array};
+use datafusion::arrow::array::{Array, BooleanArray, Float32Array, Int64Array, UInt64Array};
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::catalog::Session;
@@ -1473,4 +1473,95 @@ pub fn apply_limit<T>(result: &mut Vec<T>, limit: Option<usize>) {
 /// Default is 100,000 if no limit is provided.
 pub fn calculate_scan_limit(limit: Option<usize>) -> usize {
     limit.map(|l| std::cmp::max(l * 2, 1000)).unwrap_or(100_000)
+}
+
+/// Extract an embedding vector from a ScalarValue, validating dimensions.
+///
+/// Shared between SharedTableProvider and UserTableProvider for vector
+/// column upsert operations.
+pub fn extract_embedding_vector(
+    value: &ScalarValue,
+    expected_dimensions: u32,
+) -> Option<Vec<f32>> {
+    let parse_inner = |array: &dyn Array| -> Option<Vec<f32>> {
+        let float_array = array.as_any().downcast_ref::<Float32Array>()?;
+        if float_array.len() != expected_dimensions as usize {
+            return None;
+        }
+        Some(
+            (0..float_array.len())
+                .map(|idx| {
+                    if float_array.is_null(idx) {
+                        0.0
+                    } else {
+                        float_array.value(idx)
+                    }
+                })
+                .collect(),
+        )
+    };
+
+    match value {
+        ScalarValue::FixedSizeList(list) => {
+            if list.is_empty() || list.is_null(0) {
+                return None;
+            }
+            parse_inner(list.value(0).as_ref())
+        },
+        ScalarValue::List(list) => {
+            if list.is_empty() || list.is_null(0) {
+                return None;
+            }
+            parse_inner(list.value(0).as_ref())
+        },
+        ScalarValue::LargeList(list) => {
+            if list.is_empty() || list.is_null(0) {
+                return None;
+            }
+            parse_inner(list.value(0).as_ref())
+        },
+        ScalarValue::Utf8(Some(json)) | ScalarValue::LargeUtf8(Some(json)) => {
+            let parsed = serde_json::from_str::<Vec<f32>>(json).ok()?;
+            if parsed.len() != expected_dimensions as usize {
+                return None;
+            }
+            Some(parsed)
+        },
+        _ => None,
+    }
+}
+
+/// Build a notification row from any entity that has common MVCC fields.
+///
+/// Both SharedTableRow and UserTableRow have `_seq`, `_deleted`, and `fields`.
+/// This function avoids duplicating the notification row building logic.
+pub fn build_notification_row(fields: &Row, seq: SeqId, deleted: bool) -> Row {
+    let mut values = fields.values.clone();
+    values.insert(
+        SystemColumnNames::SEQ.to_string(),
+        ScalarValue::Int64(Some(seq.as_i64())),
+    );
+    values.insert(
+        SystemColumnNames::DELETED.to_string(),
+        ScalarValue::Boolean(Some(deleted)),
+    );
+    Row::new(values)
+}
+
+/// Build a count-only RecordBatch with no columns but the given row count.
+///
+/// Used by the COUNT(*) fast-path in both SharedTableProvider and UserTableProvider
+/// when projection is empty.
+pub fn build_count_only_batch(count: usize) -> Result<RecordBatch, KalamDbError> {
+    let empty_schema = Arc::new(datafusion::arrow::datatypes::Schema::new(
+        Vec::<datafusion::arrow::datatypes::Field>::new(),
+    ));
+    if count == 0 {
+        return Ok(RecordBatch::new_empty(empty_schema));
+    }
+    let options = datafusion::arrow::record_batch::RecordBatchOptions::new()
+        .with_row_count(Some(count));
+    RecordBatch::try_new_with_options(empty_schema, vec![], &options).map_err(|e| {
+        KalamDbError::InvalidOperation(format!("Failed to build count-only batch: {}", e))
+    })
 }

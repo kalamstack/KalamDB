@@ -42,6 +42,11 @@ pub struct ServerConfig {
     pub files: FileUploadSettings,
     #[serde(default)]
     pub cluster: Option<super::cluster::ClusterConfig>,
+    /// Unified TLS/mTLS configuration for the gRPC listener.
+    /// Serves both cluster inter-node traffic and PG extension connections.
+    /// When absent, falls back to `cluster.rpc_tls` for backward compatibility.
+    #[serde(default)]
+    pub rpc_tls: super::rpc_tls::RpcTlsConfig,
 }
 
 /// CORS configuration that maps directly to actix-cors options
@@ -801,6 +806,12 @@ pub struct AuthSettings {
     /// Auto-create local users from trusted external auth provider subject when missing.
     #[serde(default = "default_auth_auto_create_users_from_provider")]
     pub auto_create_users_from_provider: bool,
+
+    /// Pre-shared token for authenticating pg_kalam FDW gRPC calls.
+    /// When set, the PG extension must send this value in the `authorization` gRPC metadata.
+    /// Override via `KALAMDB_PG_AUTH_TOKEN` env var.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pg_auth_token: Option<String>,
 }
 
 /// OAuth settings (Phase 10, User Story 8)
@@ -903,6 +914,7 @@ impl Default for AuthSettings {
             enforce_password_complexity: default_auth_enforce_password_complexity(),
             allow_remote_setup: default_auth_allow_remote_setup(),
             auto_create_users_from_provider: default_auth_auto_create_users_from_provider(),
+            pg_auth_token: None,
         }
     }
 }
@@ -1066,6 +1078,7 @@ impl Default for ServerConfig {
             security: SecuritySettings::default(),
             files: FileUploadSettings::default(),
             cluster: None, // Standalone mode by default
+            rpc_tls: super::rpc_tls::RpcTlsConfig::default(),
         }
     }
 }

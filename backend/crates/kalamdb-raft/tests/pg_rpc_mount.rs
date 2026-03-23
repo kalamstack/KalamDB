@@ -25,7 +25,7 @@ async fn shared_rpc_server_hosts_pg_service() {
     let manager = Arc::new(RaftManager::new(config));
     let cluster_handler: Arc<dyn kalamdb_raft::ClusterMessageHandler> =
         Arc::new(NoOpClusterHandler);
-    let pg_service = Arc::new(KalamPgService::new(Some("Bearer test-token".to_string())));
+    let pg_service = Arc::new(KalamPgService::new(false, None));
 
     start_rpc_server(manager, rpc_addr, cluster_handler, Some(pg_service))
         .await
@@ -37,8 +37,8 @@ async fn shared_rpc_server_hosts_pg_service() {
         RemoteServerConfig {
             host: "127.0.0.1".to_string(),
             port: 19741,
+            ..Default::default()
         },
-        Some("Bearer test-token".to_string()),
     )
     .await
     .expect("connect remote client");

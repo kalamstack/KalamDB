@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use arrow::array::{Array, FixedSizeListArray, Float32Array};
 use arrow::datatypes::Float32Type;
-use datafusion::scalar::ScalarValue;
+use datafusion_common::ScalarValue;
 
 use crate::ids::SeqId;
 use crate::models::rows::{Row, UserTableRow};
@@ -134,6 +134,83 @@ pub fn decode_shared_table_row(bytes: &[u8]) -> Result<(SeqId, bool, Row)> {
     })?;
 
     Ok((SeqId::new(payload.seq()), payload.deleted(), decode_row_payload(fields)?))
+}
+
+/// Lightweight metadata extracted from a shared/user table row without full field deserialization.
+///
+/// Used for count-only scan paths (COUNT(*) queries) where we need version resolution
+/// (PK dedup + tombstone filtering) but don't need the full row data.
+/// Saves ~600-800 bytes per row by skipping the full `Row` HashMap allocation.
+#[derive(Debug, Clone)]
+pub struct RowMetadata {
+    pub seq: SeqId,
+    pub deleted: bool,
+    pub pk_value: Option<String>,
+}
+
+/// Decode only metadata (seq, deleted, pk_value) from a shared table row's serialized bytes.
+///
+/// This avoids deserializing the full `fields` HashMap, saving significant memory
+/// for count-only queries (COUNT(*)) that only need version resolution data.
+pub fn decode_shared_table_row_metadata(bytes: &[u8], pk_name: &str) -> Result<RowMetadata> {
+    let envelope = decode_enveloped(bytes, ROW_SCHEMA_VERSION)?;
+    let payload =
+        flatbuffers::root::<fb_row::SharedTableRowPayload>(&envelope.payload).map_err(|e| {
+            StorageError::SerializationError(format!("shared table row metadata decode failed: {e}"))
+        })?;
+
+    let pk_value = extract_pk_from_payload(payload.fields(), pk_name);
+
+    Ok(RowMetadata {
+        seq: SeqId::new(payload.seq()),
+        deleted: payload.deleted(),
+        pk_value,
+    })
+}
+
+/// Decode only metadata (seq, deleted, pk_value) from a user table row's serialized bytes.
+pub fn decode_user_table_row_metadata(bytes: &[u8], pk_name: &str) -> Result<(UserId, RowMetadata)> {
+    let envelope = decode_enveloped(bytes, ROW_SCHEMA_VERSION)?;
+    let payload =
+        flatbuffers::root::<fb_row::UserTableRowPayload>(&envelope.payload).map_err(|e| {
+            StorageError::SerializationError(format!("user table row metadata decode failed: {e}"))
+        })?;
+
+    let user_id = payload.user_id().ok_or_else(|| {
+        StorageError::SerializationError(
+            "user table row metadata decode failed: missing user_id".to_string(),
+        )
+    })?;
+
+    let pk_value = extract_pk_from_payload(payload.fields(), pk_name);
+
+    Ok((UserId::from(user_id), RowMetadata {
+        seq: SeqId::new(payload.seq()),
+        deleted: payload.deleted(),
+        pk_value,
+    }))
+}
+
+/// Extract a single named field value from a FlatBuffers RowPayload without full deserialization.
+fn extract_pk_from_payload(
+    fields: Option<fb_row::RowPayload<'_>>,
+    pk_name: &str,
+) -> Option<String> {
+    let fields = fields?;
+    let columns = fields.columns()?;
+    for col in columns.iter() {
+        if let Some(name) = col.name() {
+            if name == pk_name {
+                return col.value().and_then(|scalar| {
+                    decode_scalar_payload(scalar).ok().map(|sv| match &sv {
+                        ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)) => s.clone(),
+                        _ => sv.to_string(),
+                    })
+                });
+            }
+        }
+    }
+    None
 }
 
 pub fn encode_system_table_row(row: &Row) -> Result<Vec<u8>> {
