@@ -19,7 +19,7 @@ impl HealthMonitor {
     ///
     /// Logs a curated summary rendered from the same key/value rows exposed by system.stats.
     pub async fn log_metrics(app_context: Arc<AppContext>) -> Result<(), KalamDbError> {
-        let metrics = app_context.compute_metrics();
+        let metrics = app_context.compute_metrics_async().await?;
         kalamdb_observability::HealthMonitor::log_system_stats(&metrics);
         Ok(())
     }

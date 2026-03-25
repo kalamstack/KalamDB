@@ -2,7 +2,6 @@
 
 use crate::app_context::AppContext;
 use crate::error::KalamDbError;
-use crate::error_extensions::KalamDbResultExt;
 use crate::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
 use crate::sql::executor::handlers::typed::TypedStatementHandler;
 use crate::sql::executor::helpers::guards::require_admin;
@@ -28,15 +27,35 @@ impl TypedStatementHandler<DropStorageStatement> for DropStorageHandler {
         _params: Vec<ScalarValue>,
         _context: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
-        let storages_provider = self.app_context.system_tables().storages();
-        let tables_provider = self.app_context.system_tables().tables();
-
         let storage_id = statement.storage_id.clone();
 
-        // Check if storage exists
-        let storage = storages_provider
-            .get_storage_by_id(&storage_id)
-            .into_kalamdb_error("Failed to get storage")?;
+        // Check if storage exists and if any tables use it (offload sync RocksDB reads)
+        let app_ctx = self.app_context.clone();
+        let sid = storage_id.clone();
+        let (storage, tables_using_storage_count) = tokio::task::spawn_blocking(move || {
+            let storages_provider = app_ctx.system_tables().storages();
+            let tables_provider = app_ctx.system_tables().tables();
+
+            let storage = storages_provider.get_storage_by_id(&sid)
+                .map_err(|e| KalamDbError::ExecutionError(format!("Failed to get storage: {}", e)))?;
+
+            let count = if storage.is_some() {
+                let all_tables = tables_provider.list_tables()
+                    .map_err(|e| KalamDbError::ExecutionError(format!("Failed to check tables: {}", e)))?;
+                all_tables.iter().filter(|t| {
+                    match &t.table_options {
+                        kalamdb_commons::schemas::TableOptions::User(opts) => opts.storage_id == sid,
+                        kalamdb_commons::schemas::TableOptions::Shared(opts) => opts.storage_id == sid,
+                        _ => false,
+                    }
+                }).count()
+            } else {
+                0
+            };
+            Ok::<_, KalamDbError>((storage, count))
+        })
+        .await
+        .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))??;
 
         if storage.is_none() {
             if statement.if_exists {
@@ -54,31 +73,11 @@ impl TypedStatementHandler<DropStorageStatement> for DropStorageHandler {
             )));
         }
 
-        // Check if any tables are using this storage
-        let all_tables =
-            tables_provider.list_tables().into_kalamdb_error("Failed to check tables")?;
-
-        let tables_using_storage: Vec<_> = all_tables
-            .iter()
-            .filter(|t| {
-                // Check if table uses this storage (compare storage_id from table options)
-                match &t.table_options {
-                    kalamdb_commons::schemas::TableOptions::User(opts) => {
-                        opts.storage_id == storage_id
-                    },
-                    kalamdb_commons::schemas::TableOptions::Shared(opts) => {
-                        opts.storage_id == storage_id
-                    },
-                    _ => false, // STREAM and SYSTEM tables don't have storage_id
-                }
-            })
-            .collect();
-
-        if !tables_using_storage.is_empty() {
+        if tables_using_storage_count > 0 {
             return Err(KalamDbError::InvalidOperation(format!(
                 "Cannot drop storage '{}': {} table(s) still using it",
                 statement.storage_id,
-                tables_using_storage.len()
+                tables_using_storage_count
             )));
         }
 

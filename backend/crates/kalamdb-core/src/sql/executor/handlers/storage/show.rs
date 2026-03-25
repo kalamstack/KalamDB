@@ -26,10 +26,13 @@ impl TypedStatementHandler<ShowStoragesStatement> for ShowStoragesHandler {
         _params: Vec<ScalarValue>,
         _context: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
-        let storages_provider = self.app_context.system_tables().storages();
-
-        // Query all storages via the table provider (returns RecordBatch)
-        let batches = storages_provider.scan_all_storages()?;
+        // Query all storages (offload sync RocksDB read)
+        let app_ctx = self.app_context.clone();
+        let batches = tokio::task::spawn_blocking(move || {
+            app_ctx.system_tables().storages().scan_all_storages()
+        })
+        .await
+        .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))??;
 
         // Return as query result
         let row_count = batches.num_rows();

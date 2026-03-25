@@ -470,6 +470,7 @@ async fn e2e_perf_user_table_insert_scan() {
     )
     .await;
     set_user_id(&pg, "perf-user-1").await;
+    wait_for_table_queryable(&pg, "e2e.perf_user").await;
 
     // Clean up
     bulk_delete_all(&pg, "e2e.perf_user", "id").await;

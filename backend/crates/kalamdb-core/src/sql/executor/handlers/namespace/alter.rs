@@ -2,7 +2,6 @@
 
 use crate::app_context::AppContext;
 use crate::error::KalamDbError;
-use crate::error_extensions::KalamDbResultExt;
 use crate::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
 use crate::sql::executor::handlers::typed::TypedStatementHandler;
 use crate::sql::executor::helpers::guards::require_admin;
@@ -29,37 +28,46 @@ impl TypedStatementHandler<AlterNamespaceStatement> for AlterNamespaceHandler {
         _params: Vec<ScalarValue>,
         _context: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
-        let namespaces_provider = self.app_context.system_tables().namespaces();
         let name = statement.name.as_str();
         let namespace_id = NamespaceId::new(name);
 
-        // Check if namespace exists
-        let mut namespace = namespaces_provider
-            .get_namespace(&namespace_id)?
-            .ok_or_else(|| KalamDbError::NotFound(format!("Namespace '{}' not found", name)))?;
+        // Check if namespace exists and update (offload sync RocksDB read/write)
+        let app_ctx = self.app_context.clone();
+        let ns_id = namespace_id.clone();
+        let options = statement.options.clone();
+        let name_owned = name.to_string();
+        tokio::task::spawn_blocking(move || {
+            let namespaces_provider = app_ctx.system_tables().namespaces();
+            let mut namespace = namespaces_provider
+                .get_namespace(&ns_id)?
+                .ok_or_else(|| KalamDbError::NotFound(format!("Namespace '{}' not found", name_owned)))?;
 
-        // Update namespace options (merge with existing options)
-        let mut current_options: serde_json::Value = if let Some(ref opts) = namespace.options {
-            serde_json::from_str(opts).unwrap_or(serde_json::json!({}))
-        } else {
-            serde_json::json!({})
-        };
+            // Update namespace options (merge with existing options)
+            let mut current_options: serde_json::Value = if let Some(ref opts) = namespace.options {
+                serde_json::from_str(opts).unwrap_or(serde_json::json!({}))
+            } else {
+                serde_json::json!({})
+            };
 
-        // Merge new options
-        if let Some(obj) = current_options.as_object_mut() {
-            for (key, value) in &statement.options {
-                obj.insert(key.clone(), value.clone());
+            // Merge new options
+            if let Some(obj) = current_options.as_object_mut() {
+                for (key, value) in &options {
+                    obj.insert(key.clone(), value.clone());
+                }
             }
-        }
 
-        // Serialize back to string
-        namespace.options = Some(
-            serde_json::to_string(&current_options)
-                .into_invalid_operation("Failed to serialize options")?,
-        );
+            // Serialize back to string
+            namespace.options = Some(
+                serde_json::to_string(&current_options)
+                    .map_err(|e| KalamDbError::InvalidOperation(format!("Failed to serialize options: {}", e)))?,
+            );
 
-        // Save updated namespace
-        namespaces_provider.update_namespace(namespace)?;
+            // Save updated namespace
+            namespaces_provider.update_namespace(namespace)?;
+            Ok::<_, KalamDbError>(())
+        })
+        .await
+        .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))??;
 
         // Log DDL operation
         use crate::sql::executor::helpers::audit;

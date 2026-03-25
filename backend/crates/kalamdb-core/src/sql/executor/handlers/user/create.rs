@@ -34,10 +34,15 @@ impl TypedStatementHandler<CreateUserStatement> for CreateUserHandler {
         _params: Vec<ScalarValue>,
         context: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
-        let users = self.app_context.system_tables().users();
-
         // Duplicate check (provider enforces via username index but we do early check for clearer error)
-        if users.get_user_by_username(&statement.username)?.is_some() {
+        let app_ctx = self.app_context.clone();
+        let username = statement.username.clone();
+        let existing = tokio::task::spawn_blocking(move || {
+            app_ctx.system_tables().users().get_user_by_username(&username)
+        })
+        .await
+        .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))??;
+        if existing.is_some() {
             return Err(KalamDbError::AlreadyExists(format!(
                 "User '{}' already exists",
                 statement.username

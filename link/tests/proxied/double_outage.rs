@@ -122,6 +122,31 @@ async fn test_proxy_server_down_while_reconnecting() {
     }
     assert!(client.is_connected().await, "client should recover after double outage");
 
+    let mut resumed_ids = Vec::<String>::new();
+    let mut resumed_seq = Some(resume_from);
+    for _ in 0..40 {
+        if resumed_ids.iter().any(|id| id == "gap-double") {
+            break;
+        }
+        match timeout(Duration::from_millis(2000), sub.next()).await {
+            Ok(Some(Ok(ev))) => {
+                collect_ids_and_track_seq(
+                    &ev,
+                    &mut resumed_ids,
+                    &mut resumed_seq,
+                    Some(resume_from),
+                    "reconn-drop gap",
+                );
+            },
+            _ => {},
+        }
+    }
+
+    assert!(
+        resumed_ids.iter().any(|id| id == "gap-double"),
+        "should receive gap-double row after double outage"
+    );
+
     // Insert a live row.
     writer
         .execute_query(
@@ -133,15 +158,13 @@ async fn test_proxy_server_down_while_reconnecting() {
         .await
         .expect("insert live-after-double");
 
-    let mut resumed_ids = Vec::<String>::new();
-    let mut resumed_seq = Some(resume_from);
-    for _ in 0..20 {
+    for _ in 0..40 {
         if resumed_ids.iter().any(|id| id == "gap-double")
             && resumed_ids.iter().any(|id| id == "live-after-double")
         {
             break;
         }
-        match timeout(Duration::from_millis(1200), sub.next()).await {
+        match timeout(Duration::from_millis(2000), sub.next()).await {
             Ok(Some(Ok(ev))) => {
                 collect_ids_and_track_seq(
                     &ev,

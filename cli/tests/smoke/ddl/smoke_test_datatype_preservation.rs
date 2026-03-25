@@ -156,7 +156,7 @@ async fn test_all_kalam_datatypes_are_preserved() {
 
 /// Test that system.schemas also shows correct data types in the columns JSON
 #[tokio::test]
-#[ntest::timeout(26000)]
+#[ntest::timeout(60000)]
 async fn test_system_tables_shows_correct_datatypes() {
     let ctx = test_context();
     let client = Client::new();

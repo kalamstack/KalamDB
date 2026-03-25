@@ -179,7 +179,7 @@ impl CLISession {
             },
             Command::Stats => {
                 self.execute(
-                    "SELECT metric_name, metric_value FROM system.stats ORDER BY metric_name",
+                    "SELECT metric_name, metric_value FROM system.stats ORDER BY metric_name LIMIT 5000",
                 )
                 .await?;
             },

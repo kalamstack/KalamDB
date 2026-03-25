@@ -51,18 +51,21 @@ impl TypedStatementHandler<CheckStorageStatement> for CheckStorageHandler {
         _params: Vec<ScalarValue>,
         _context: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
-        let storages_provider = self.app_context.system_tables().storages();
-
-        // Get the storage by ID
-        let storage = storages_provider
-            .get_storage_by_id(&statement.storage_id)
-            .into_kalamdb_error("Failed to get storage")?
-            .ok_or_else(|| {
-                KalamDbError::NotFound(format!(
-                    "Storage '{}' not found",
-                    statement.storage_id.as_str()
-                ))
-            })?;
+        // Get the storage by ID (offload sync RocksDB read)
+        let app_ctx = self.app_context.clone();
+        let sid = statement.storage_id.clone();
+        let storage = tokio::task::spawn_blocking(move || {
+            app_ctx.system_tables().storages().get_storage_by_id(&sid)
+        })
+        .await
+        .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))?
+        .into_kalamdb_error("Failed to get storage")?
+        .ok_or_else(|| {
+            KalamDbError::NotFound(format!(
+                "Storage '{}' not found",
+                statement.storage_id.as_str()
+            ))
+        })?;
 
         // Run the health check
         let mut health_result = StorageHealthService::run_full_health_check(&storage)

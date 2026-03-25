@@ -63,7 +63,6 @@ async fn e2e_bulk_insert_delete_shared_table() {
         "id TEXT, title TEXT, value INTEGER",
     )
     .await;
-    delete_all(&pg, &qualified_table, "id").await;
 
     // --- insert 5 000 rows in batches of 500 ---
     const TOTAL: i64 = 5_000;
@@ -86,7 +85,7 @@ async fn e2e_bulk_insert_delete_shared_table() {
     assert_eq!(count, TOTAL, "expected {TOTAL} rows after bulk insert");
 
     // --- delete all rows ---
-    delete_all(&pg, &qualified_table, "id").await;
+    bulk_delete_all(&pg, &qualified_table, "id").await;
 
     // --- verify empty ---
     let count_after = count_rows(&pg, &qualified_table, None).await;

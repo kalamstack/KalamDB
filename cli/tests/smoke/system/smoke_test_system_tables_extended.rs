@@ -239,8 +239,10 @@ fn smoke_test_system_stats_meta_command() {
 
     println!("🧪 Testing \\stats meta-command");
 
-    // Query system.stats table directly
-    let query_sql = "SELECT metric_name, metric_value FROM system.stats ORDER BY metric_name";
+    // Query system.stats table directly with an explicit LIMIT so the meta-command
+    // is not clipped by the server's default limit for unbounded SELECTs.
+    let query_sql =
+        "SELECT metric_name, metric_value FROM system.stats ORDER BY metric_name LIMIT 5000";
     let output = execute_sql_as_root_via_client(query_sql).expect("Failed to query system.stats");
 
     println!("system.stats output:\n{}", output);
@@ -252,6 +254,8 @@ fn smoke_test_system_stats_meta_command() {
         "total_users",
         "total_tables",
         "server_version",
+        "server_workers_effective",
+        "max_connections",
     ];
 
     for key in expected_keys {

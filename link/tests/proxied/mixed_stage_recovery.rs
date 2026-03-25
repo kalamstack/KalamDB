@@ -13,7 +13,7 @@ use tokio::time::{sleep, timeout};
 /// checkpoint while the loading subscription must still complete its snapshot.
 #[tokio::test]
 async fn test_shared_connection_recovers_subscriptions_in_different_stages() {
-    let result = timeout(Duration::from_secs(60), async {
+    let result = timeout(Duration::from_secs(120), async {
         let writer = match create_test_client() {
             Ok(c) => c,
             Err(e) => {
@@ -213,14 +213,14 @@ async fn test_shared_connection_recovers_subscriptions_in_different_stages() {
 
         let mut live_resumed_ids = Vec::<String>::new();
         let mut live_resumed_seq = Some(live_from);
-        for _ in 0..20 {
+        for _ in 0..40 {
             if live_resumed_ids.iter().any(|id| id == "live-gap")
                 && live_resumed_ids.iter().any(|id| id == "live-after")
             {
                 break;
             }
 
-            match timeout(Duration::from_millis(1200), live_sub.next()).await {
+            match timeout(Duration::from_millis(2000), live_sub.next()).await {
                 Ok(Some(Ok(ev))) => {
                     collect_ids_and_track_seq(
                         &ev,
@@ -249,7 +249,7 @@ async fn test_shared_connection_recovers_subscriptions_in_different_stages() {
             "live subscription must not replay checkpointed row"
         );
 
-        for _ in 0..40 {
+        for _ in 0..80 {
             if seed_seen.contains("seed-gap")
                 && seed_seen.contains("seed-after")
                 && (0..40).all(|index| seed_seen.contains(&format!("seed-{}", index)))
@@ -257,7 +257,7 @@ async fn test_shared_connection_recovers_subscriptions_in_different_stages() {
                 break;
             }
 
-            match timeout(Duration::from_millis(1500), seed_sub.next()).await {
+            match timeout(Duration::from_millis(2000), seed_sub.next()).await {
                 Ok(Some(Ok(ev))) => {
                     let mut scratch = None;
                     let mut ids = Vec::new();

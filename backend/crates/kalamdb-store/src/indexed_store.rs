@@ -776,7 +776,14 @@ where
             .get(index_idx)
             .ok_or_else(|| StorageError::Other(format!("Index {} not found", index_idx)))?
             .clone();
-        let mut iter = self.backend.scan_reverse(&index_partition, Some(prefix), None, Some(1))?;
+        let mut iter = match self
+            .backend
+            .scan_reverse(&index_partition, Some(prefix), None, Some(1))
+        {
+            Ok(iter) => iter,
+            Err(StorageError::PartitionNotFound(_)) => return Ok(None),
+            Err(error) => return Err(error),
+        };
 
         while let Some((_index_key, primary_key_bytes)) = iter.next() {
             let primary_key = K::from_storage_key(&primary_key_bytes)
@@ -1326,6 +1333,20 @@ mod tests {
         let running_jobs = store.scan_by_index(0, Some(&[2]), None).unwrap();
         assert_eq!(running_jobs.len(), 1);
         assert_eq!(running_jobs[0].0, job.job_id);
+    }
+
+    #[test]
+    fn test_get_latest_by_index_prefix_returns_none_when_index_partition_is_missing() {
+        let backend: Arc<dyn StorageBackend> = Arc::new(InMemoryBackend::new());
+        let store =
+            IndexedEntityStore::new(backend.clone(), "test_jobs", vec![Arc::new(TestStatusIndex)]);
+
+        backend
+            .drop_partition(&Partition::new("test_jobs_status_idx"))
+            .unwrap();
+
+        let result = store.get_latest_by_index_prefix(0, &[2]).unwrap();
+        assert!(result.is_none());
     }
 
     #[test]

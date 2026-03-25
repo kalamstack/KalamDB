@@ -231,6 +231,34 @@ async fn test_update_and_delete_events_resume_without_replay() {
             "client should reconnect for update/delete scenario"
         );
 
+        let mut resumed_ids = Vec::<String>::new();
+        let mut resumed_seq = Some(resume_from);
+        for _ in 0..16 {
+            if resumed_ids.iter().any(|id| id == "update-gap") {
+                break;
+            }
+
+            match timeout(Duration::from_millis(1200), sub.next()).await {
+                Ok(Some(Ok(ev))) => {
+                    collect_ids_and_track_seq(
+                        &ev,
+                        &mut resumed_ids,
+                        &mut resumed_seq,
+                        Some(resume_from),
+                        "update-delete reconnect gap",
+                    );
+                },
+                Ok(Some(Err(e))) => panic!("subscription errored while waiting for gap update: {}", e),
+                Ok(None) => panic!("subscription ended unexpectedly while waiting for gap update"),
+                Err(_) => {},
+            }
+        }
+
+        assert!(
+            resumed_ids.iter().any(|id| id == "update-gap"),
+            "gap update should be delivered after reconnect resumes"
+        );
+
         writer
             .execute_query(
                 &format!("DELETE FROM {} WHERE id = 'delete-gap'", table),
@@ -259,8 +287,6 @@ async fn test_update_and_delete_events_resume_without_replay() {
             .await
             .expect("post-reconnect delete should succeed");
 
-        let mut resumed_ids = Vec::<String>::new();
-        let mut resumed_seq = Some(resume_from);
         for _ in 0..24 {
             if resumed_ids.iter().any(|id| id == "update-gap")
                 && resumed_ids.iter().any(|id| id == "delete-gap")

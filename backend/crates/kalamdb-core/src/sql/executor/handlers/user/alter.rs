@@ -31,8 +31,15 @@ impl TypedStatementHandler<AlterUserStatement> for AlterUserHandler {
         _params: Vec<ScalarValue>,
         context: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
-        let users = self.app_context.system_tables().users();
-        let existing = users.get_user_by_username(&statement.username)?.ok_or_else(|| {
+        let app_ctx = self.app_context.clone();
+        let username = statement.username.clone();
+        let existing = tokio::task::spawn_blocking(move || {
+            app_ctx.system_tables().users().get_user_by_username(&username)
+        })
+        .await
+        .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))?
+        ?
+        .ok_or_else(|| {
             KalamDbError::NotFound(format!("User '{}' not found", statement.username))
         })?;
 

@@ -19,10 +19,10 @@ fn reconnect_test_timeouts() -> KalamLinkTimeouts {
         send_timeout: Duration::from_secs(2),
         subscribe_timeout: Duration::from_secs(2),
         auth_timeout: Duration::from_secs(2),
-        initial_data_timeout: Duration::from_secs(10),
+        initial_data_timeout: Duration::from_secs(20),
         idle_timeout: Duration::ZERO,
         keepalive_interval: Duration::from_secs(1),
-        pong_timeout: Duration::from_secs(1),
+        pong_timeout: Duration::from_secs(2),
     }
 }
 

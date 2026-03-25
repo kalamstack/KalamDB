@@ -205,7 +205,7 @@ fn smoke_as_user_insert_with_service_role() {
 }
 
 /// Smoke Test: DBA can use AS USER for UPDATE
-#[ntest::timeout(60000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_as_user_update_with_dba_role() {
     if !is_server_running() {

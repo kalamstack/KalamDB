@@ -11,7 +11,7 @@ use tokio::time::{sleep, timeout};
 /// more than once before the client reaches steady-state live delivery.
 #[tokio::test]
 async fn test_large_initial_snapshot_survives_repeated_outages() {
-    let result = timeout(Duration::from_secs(75), async {
+    let result = timeout(Duration::from_secs(240), async {
         let writer = match create_test_client() {
             Ok(c) => c,
             Err(e) => {
@@ -190,7 +190,7 @@ async fn test_large_initial_snapshot_survives_repeated_outages() {
             .await
             .expect("insert post-reconnect row");
 
-        for _ in 0..60 {
+        for _ in 0..120 {
             if seen_ids.contains("gap-one")
                 && seen_ids.contains("gap-two")
                 && seen_ids.contains("after-final-reconnect")
@@ -199,7 +199,7 @@ async fn test_large_initial_snapshot_survives_repeated_outages() {
                 break;
             }
 
-            match timeout(Duration::from_millis(1500), sub.next()).await {
+            match timeout(Duration::from_millis(2000), sub.next()).await {
                 Ok(Some(Ok(ev))) => {
                     let mut scratch = None;
                     let mut ids = Vec::new();

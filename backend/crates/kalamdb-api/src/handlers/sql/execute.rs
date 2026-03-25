@@ -96,7 +96,7 @@ fn resolve_result_username(
     execute_as_username.cloned().unwrap_or_else(|| authorized_username.clone())
 }
 
-fn resolve_execute_as_user(
+async fn resolve_execute_as_user(
     statement: &PreparedApiExecutionStatement,
     impersonation_service: &SqlImpersonationService,
     exec_ctx: &ExecutionContext,
@@ -108,6 +108,7 @@ fn resolve_execute_as_user(
                 exec_ctx.user_role(),
                 target_username.as_str(),
             )
+            .await
             .map(Some)
             .map_err(|err| err.to_string()),
         None => Ok(None),
@@ -388,7 +389,7 @@ async fn execute_file_upload_path(
     }
 
     let stmt = &prepared_statements[0];
-    let execute_as_user = match resolve_execute_as_user(stmt, impersonation_service, exec_ctx) {
+    let execute_as_user = match resolve_execute_as_user(stmt, impersonation_service, exec_ctx).await {
         Ok(uid) => uid,
         Err(err) => {
             return HttpResponse::BadRequest().json(SqlResponse::error(
@@ -599,7 +600,7 @@ async fn execute_batch_path(
     for (idx, stmt) in prepared_statements.iter().enumerate() {
         let is_last = idx + 1 == stmt_count;
 
-        let execute_as_user = match resolve_execute_as_user(stmt, impersonation_service, exec_ctx) {
+        let execute_as_user = match resolve_execute_as_user(stmt, impersonation_service, exec_ctx).await {
             Ok(uid) => uid,
             Err(err) => {
                 return HttpResponse::BadRequest().json(SqlResponse::error(

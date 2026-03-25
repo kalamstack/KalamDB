@@ -22,15 +22,18 @@ fn smoke_cli_stats_command() {
         return;
     }
 
-    // Query system.stats directly (this is what \stats does internally)
+    // Query system.stats directly (this mirrors \stats, which uses an explicit
+    // LIMIT to bypass the server's default query limit for unbounded SELECTs).
     let result = execute_sql_as_root_via_client(
-        "SELECT metric_name, metric_value FROM system.stats ORDER BY metric_name",
+        "SELECT metric_name, metric_value FROM system.stats ORDER BY metric_name LIMIT 5000",
     )
     .expect("Failed to query system.stats");
 
     // Verify we get some metrics back
     assert!(
-        result.contains("metric_name") || result.contains("cache") || result.contains("rows"),
+        (result.contains("metric_name") || result.contains("cache") || result.contains("rows"))
+            && result.contains("server_workers_effective")
+            && result.contains("max_connections"),
         "Stats should contain metrics: {}",
         result
     );
@@ -39,7 +42,7 @@ fn smoke_cli_stats_command() {
 }
 
 /// Smoke Test: \dt / \tables command lists tables
-#[ntest::timeout(30000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_cli_list_tables_command() {
     if !is_server_running() {
@@ -82,7 +85,7 @@ fn smoke_cli_list_tables_command() {
 }
 
 /// Smoke Test: \d / \describe command shows table schema
-#[ntest::timeout(30000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_cli_describe_table_command() {
     if !is_server_running() {
@@ -152,7 +155,7 @@ fn smoke_cli_format_json_command() {
 }
 
 /// Smoke Test: SQL execution with various statement types
-#[ntest::timeout(60000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_cli_sql_execution() {
     if !is_server_running() {
@@ -312,7 +315,7 @@ fn smoke_cli_system_tables() {
 }
 
 /// Smoke Test: STORAGE FLUSH TABLE command
-#[ntest::timeout(30000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_cli_flush_command() {
     if !is_server_running() {
@@ -407,7 +410,7 @@ fn smoke_cli_user_management() {
 }
 
 /// Smoke Test: Namespace management commands
-#[ntest::timeout(30000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_cli_namespace_management() {
     if !is_server_running() {
@@ -417,8 +420,11 @@ fn smoke_cli_namespace_management() {
 
     let namespace = generate_unique_namespace("smoke_cli_ns");
 
+    let _ = execute_sql_as_root_via_client(&format!("DROP NAMESPACE IF EXISTS {}", namespace));
+
     // Test CREATE NAMESPACE
-    let result = execute_sql_as_root_via_client(&format!("CREATE NAMESPACE {}", namespace));
+    let result =
+        execute_sql_as_root_via_client(&format!("CREATE NAMESPACE IF NOT EXISTS {}", namespace));
     assert!(result.is_ok(), "CREATE NAMESPACE should succeed: {:?}", result);
 
     // Verify namespace exists

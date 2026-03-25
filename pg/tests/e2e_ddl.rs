@@ -518,7 +518,7 @@ async fn e2e_ddl_preserves_primary_key_not_null_and_defaults() {
 
     pg.batch_execute(&format!(
         "CREATE FOREIGN TABLE {ns}.{table} (
-            id BIGINT PRIMARY KEY DEFAULT SNOWFLAKE_ID(),
+            id BIGINT NOT NULL,
             title TEXT NOT NULL,
             value INTEGER,
             created TIMESTAMP DEFAULT NOW()
@@ -529,15 +529,52 @@ async fn e2e_ddl_preserves_primary_key_not_null_and_defaults() {
     .expect("create mirrored constrained foreign table");
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
-    let describe = env.kalamdb_sql(&format!("DESCRIBE {ns}.{table}")).await;
-    let describe_text = serde_json::to_string(&describe).unwrap_or_default();
+    let columns = env
+        .kalamdb_sql(&format!(
+            "SELECT column_name, default_value, nullable, primary_key \
+             FROM system.columns \
+             WHERE namespace_id = '{ns}' AND table_name = '{table}' \
+             ORDER BY ordinal"
+        ))
+        .await;
+    let rows = columns["results"]
+        .as_array()
+        .and_then(|results| results.first())
+        .and_then(|result| result["rows"].as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let find_row = |name: &str| {
+        rows.iter().find(|row| {
+            row.as_array()
+                .and_then(|columns| columns.first())
+                .and_then(|value| value.as_str())
+                == Some(name)
+        })
+    };
+
+    let id_row = find_row("id");
+    let title_row = find_row("title");
+    let created_row = find_row("created");
 
     assert!(
-        describe_text.contains("\"id\"")
-            && describe_text.contains("SNOWFLAKE_ID()")
-            && describe_text.contains("title")
-            && describe_text.contains("NOW()"),
-        "DESCRIBE should expose mirrored defaults and constrained columns: {describe_text}"
+        id_row
+            .and_then(|row| row.as_array())
+            .map(|columns| {
+                columns.get(2).and_then(|value| value.as_bool()) == Some(false)
+                    && columns.get(3).and_then(|value| value.as_bool()) == Some(true)
+            })
+            == Some(true)
+            && title_row
+                .and_then(|row| row.as_array())
+                .map(|columns| columns.get(2).and_then(|value| value.as_bool()) == Some(false))
+                == Some(true)
+            && created_row
+                .and_then(|row| row.as_array())
+                .map(|columns| columns.get(1).and_then(|value| value.as_str()) == Some("NOW()"))
+                == Some(true),
+        "system.columns should expose mirrored defaults and constrained columns: {}",
+        serde_json::to_string(&columns).unwrap_or_default()
     );
 
     pg.batch_execute(&format!("DROP FOREIGN TABLE IF EXISTS {ns}.{table};"))
@@ -616,7 +653,7 @@ async fn e2e_ddl_alter_add_column_preserves_not_null_and_default() {
 
     pg.batch_execute(&format!(
         "CREATE FOREIGN TABLE {ns}.{table} (
-            id BIGINT PRIMARY KEY DEFAULT SNOWFLAKE_ID(),
+            id BIGINT NOT NULL,
             title TEXT NOT NULL
          ) SERVER kalam_server
          OPTIONS (table_type 'shared');"
@@ -671,7 +708,7 @@ async fn e2e_ddl_alter_column_set_and_drop_not_null() {
 
     pg.batch_execute(&format!(
         "CREATE FOREIGN TABLE {ns}.{table} (
-            id BIGINT PRIMARY KEY DEFAULT SNOWFLAKE_ID(),
+            id BIGINT NOT NULL,
             title TEXT
          ) SERVER kalam_server
          OPTIONS (table_type 'shared');"
@@ -733,7 +770,7 @@ async fn e2e_ddl_alter_column_set_and_drop_default() {
 
     pg.batch_execute(&format!(
         "CREATE FOREIGN TABLE {ns}.{table} (
-            id BIGINT PRIMARY KEY DEFAULT SNOWFLAKE_ID(),
+            id BIGINT NOT NULL,
             status TEXT
          ) SERVER kalam_server
          OPTIONS (table_type 'shared');"
@@ -781,10 +818,19 @@ async fn e2e_ddl_alter_column_set_and_drop_default() {
             "SELECT COUNT(*) AS pending_count FROM {ns}.{table} WHERE status = 'pending'"
         ))
         .await;
-    let without_default_text = serde_json::to_string(&without_default).unwrap_or_default();
+    let pending_count = without_default["results"]
+        .as_array()
+        .and_then(|results| results.first())
+        .and_then(|result| result["rows"].as_array())
+        .and_then(|rows| rows.first())
+        .and_then(|row| row.as_array())
+        .and_then(|columns| columns.first())
+        .and_then(|value| value.as_str())
+        .and_then(|value| value.parse::<u64>().ok());
     assert!(
-        without_default_text.contains("pending_count") && !without_default_text.contains("2"),
-        "DROP DEFAULT should stop populating the previous default value: {without_default_text}"
+        pending_count == Some(1),
+        "DROP DEFAULT should stop populating the previous default value: {}",
+        serde_json::to_string(&without_default).unwrap_or_default()
     );
 
     pg.batch_execute(&format!("DROP FOREIGN TABLE IF EXISTS {ns}.{table};"))

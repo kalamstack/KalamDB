@@ -3920,6 +3920,9 @@ impl SubscriptionListener {
                         }
                     }
                 }
+
+                let _ = subscription.close().await;
+                client.disconnect().await;
             });
         });
 

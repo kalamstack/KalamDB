@@ -27,10 +27,14 @@ impl TypedStatementHandler<ShowNamespacesStatement> for ShowNamespacesHandler {
         context: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
         let start_time = std::time::Instant::now();
-        let namespaces_provider = self.app_context.system_tables().namespaces();
 
-        // Query all namespaces via the table provider (returns RecordBatch)
-        let batches = namespaces_provider.scan_all_namespaces()?;
+        // Query all namespaces via the table provider (offload sync RocksDB read)
+        let app_ctx = self.app_context.clone();
+        let batches = tokio::task::spawn_blocking(move || {
+            app_ctx.system_tables().namespaces().scan_all_namespaces()
+        })
+        .await
+        .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))??;
 
         // Log query operation
         let duration = start_time.elapsed().as_secs_f64() * 1000.0;

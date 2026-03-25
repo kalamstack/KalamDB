@@ -316,8 +316,14 @@ impl TypedStatementHandler<DropTableStatement> for DropTableHandler {
         }
 
         // Check existence via system.tables provider (for IF EXISTS behavior)
-        let tables = self.app_context.system_tables().tables();
-        let table_metadata = tables.get_table_by_id(&table_id)?;
+        // Offload sync RocksDB read to blocking thread
+        let app_ctx = self.app_context.clone();
+        let tid = table_id.clone();
+        let table_metadata = tokio::task::spawn_blocking(move || {
+            app_ctx.system_tables().tables().get_table_by_id(&tid)
+        })
+        .await
+        .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))??;
         let exists = table_metadata.is_some() || registry_def.is_some();
 
         if !exists {
@@ -358,7 +364,17 @@ impl TypedStatementHandler<DropTableStatement> for DropTableHandler {
             );
         }
 
-        let storage_details = self.capture_storage_cleanup_details(&table_id, actual_type)?;
+        let app_ctx = self.app_context.clone();
+        let tid = table_id.clone();
+        let at = actual_type;
+        let storage_details = tokio::task::spawn_blocking(move || {
+            // capture_storage_cleanup_details uses SchemaRegistry + StorageRegistry caches
+            // which can fall through to sync RocksDB on cache miss
+            let handler = DropTableHandler::new(app_ctx);
+            handler.capture_storage_cleanup_details(&tid, at)
+        })
+        .await
+        .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))??;
 
         // Cancel any active flush jobs for this table before dropping
         let job_manager = self.app_context.job_manager();

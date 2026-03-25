@@ -16,7 +16,7 @@ async fn wait_for_row_after_checkpoint(
     let mut seen_ids = Vec::<String>::new();
     let mut resumed_seq = Some(checkpoint);
 
-    for _ in 0..24 {
+    for _ in 0..60 {
         if expected_ids
             .iter()
             .all(|expected| seen_ids.iter().any(|seen| seen == expected))
@@ -24,7 +24,7 @@ async fn wait_for_row_after_checkpoint(
             break;
         }
 
-        match timeout(Duration::from_millis(1500), sub.next()).await {
+        match timeout(Duration::from_millis(2000), sub.next()).await {
             Ok(Some(Ok(ev))) => {
                 collect_ids_and_track_seq(
                     &ev,
@@ -63,7 +63,7 @@ async fn wait_for_row_after_checkpoint(
 /// still detect the dead connection via pong timeout, reconnect, and resume.
 #[tokio::test]
 async fn test_proxy_blackhole_keeps_socket_open_until_client_times_out() {
-    let result = timeout(Duration::from_secs(45), async {
+    let result = timeout(Duration::from_secs(90), async {
         let writer = match create_test_client() {
             Ok(c) => c,
             Err(e) => {

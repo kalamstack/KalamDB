@@ -15,6 +15,7 @@
 
 use std::sync::OnceLock;
 use std::time::Duration;
+use std::{env, fmt};
 
 use reqwest::Client;
 use serde_json::Value;
@@ -28,13 +29,68 @@ use tokio_postgres::{Config, NoTls};
 const PG_PORT: u16 = 28816;
 const PG_HOST: &str = "127.0.0.1";
 
-/// KalamDB HTTP API (local server).
-const KALAMDB_HTTP_PORT: u16 = 8080;
-
-const KALAMDB_ADMIN_USER: &str = "admin";
-const KALAMDB_ADMIN_PASSWORD: &str = "kalamdb123";
+/// KalamDB HTTP API (local server by default, overridable via KALAMDB_SERVER_URL).
+const DEFAULT_KALAMDB_SERVER_URL: &str = "http://127.0.0.1:8080";
+const DEFAULT_KALAMDB_USER: &str = "root";
+const DEFAULT_KALAMDB_PASSWORD: &str = "kalamdb123";
+const DEFAULT_SETUP_USER: &str = "admin";
 
 const TEST_DB: &str = "kalamdb_test";
+
+struct KalamDbAuthConfig {
+    base_url: String,
+    login_username: String,
+    login_password: String,
+    setup_username: String,
+    setup_password: String,
+    root_password: String,
+}
+
+impl fmt::Display for KalamDbAuthConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "server={}, login_user={}, setup_user={}",
+            self.base_url, self.login_username, self.setup_username
+        )
+    }
+}
+
+fn kalamdb_auth_config() -> KalamDbAuthConfig {
+    let base_url = env::var("KALAMDB_SERVER_URL")
+        .unwrap_or_else(|_| DEFAULT_KALAMDB_SERVER_URL.to_string())
+        .trim_end_matches('/')
+        .to_string();
+    let root_password = env::var("KALAMDB_ROOT_PASSWORD")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_KALAMDB_PASSWORD.to_string());
+    let login_username = env::var("KALAMDB_USER")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_KALAMDB_USER.to_string());
+    let login_password = env::var("KALAMDB_PASSWORD")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| root_password.clone());
+    let setup_username = env::var("KALAMDB_SETUP_USER")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_SETUP_USER.to_string());
+    let setup_password = env::var("KALAMDB_SETUP_PASSWORD")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| login_password.clone());
+
+    KalamDbAuthConfig {
+        base_url,
+        login_username,
+        login_password,
+        setup_username,
+        setup_password,
+        root_password,
+    }
+}
 
 // ---------------------------------------------------------------------------
 // DdlTestEnv — lightweight test environment (no Docker)
@@ -85,7 +141,8 @@ impl DdlTestEnv {
     }
 
     pub async fn kalamdb_sql_maybe(&self, sql: &str) -> Result<Value, String> {
-        let url = format!("http://127.0.0.1:{KALAMDB_HTTP_PORT}/v1/api/sql");
+        let base_url = kalamdb_auth_config().base_url;
+        let url = format!("{base_url}/v1/api/sql");
         let body = serde_json::json!({ "sql": sql });
         let resp = self
             .http_client
@@ -106,7 +163,8 @@ impl DdlTestEnv {
     /// Check if a table exists in KalamDB by querying it.
     /// Returns true if the query succeeds, false if it errors.
     pub async fn kalamdb_table_exists(&self, namespace: &str, table: &str) -> bool {
-        let url = format!("http://127.0.0.1:{KALAMDB_HTTP_PORT}/v1/api/sql");
+        let base_url = kalamdb_auth_config().base_url;
+        let url = format!("{base_url}/v1/api/sql");
         let sql = format!("SELECT * FROM {namespace}.{table} LIMIT 0");
         let body = serde_json::json!({ "sql": sql });
         let resp = self
@@ -122,7 +180,8 @@ impl DdlTestEnv {
 
     /// Get column names for a KalamDB table (returns empty vec on error).
     pub async fn kalamdb_columns(&self, namespace: &str, table: &str) -> Vec<String> {
-        let url = format!("http://127.0.0.1:{KALAMDB_HTTP_PORT}/v1/api/sql");
+        let base_url = kalamdb_auth_config().base_url;
+        let url = format!("{base_url}/v1/api/sql");
         let sql = format!("SELECT * FROM {namespace}.{table} LIMIT 0");
         let body = serde_json::json!({ "sql": sql });
         let resp = self
@@ -179,50 +238,97 @@ impl DdlTestEnv {
     }
 
     async fn wait_for_kalamdb(client: &Client) {
-        let url = format!("http://127.0.0.1:{KALAMDB_HTTP_PORT}/health");
+        let config = kalamdb_auth_config();
+        let url = format!("{}/health", config.base_url);
         for i in 0..10 {
-            if client.get(&url).send().await.is_ok() {
+            if client
+                .get(&url)
+                .send()
+                .await
+                .map(|response| response.status().is_success())
+                .unwrap_or(false)
+            {
                 return;
             }
             if i == 0 {
-                eprintln!("  waiting for KalamDB on port {KALAMDB_HTTP_PORT}...");
+                eprintln!("  waiting for KalamDB at {}...", config.base_url);
             }
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
         panic!(
-            "KalamDB not reachable at http://127.0.0.1:{KALAMDB_HTTP_PORT}\n\
+            "KalamDB not reachable at {}\n\
              Start with: cd backend && cargo run"
+            , config.base_url
         );
     }
 
     async fn authenticate(client: &Client) -> String {
-        let base = format!("http://127.0.0.1:{KALAMDB_HTTP_PORT}");
+        let config = kalamdb_auth_config();
 
-        // Try setup first (idempotent).
+        if let Some(token) = try_login(
+            client,
+            &config.base_url,
+            &config.login_username,
+            &config.login_password,
+        )
+        .await
+        {
+            return token;
+        }
+
         let _ = client
-            .post(format!("{base}/v1/api/auth/setup"))
+            .post(format!("{}/v1/api/auth/setup", config.base_url))
             .json(&serde_json::json!({
-                "username": KALAMDB_ADMIN_USER,
-                "password": KALAMDB_ADMIN_PASSWORD,
-                "root_password": KALAMDB_ADMIN_PASSWORD,
+                "username": config.setup_username,
+                "password": config.setup_password,
+                "root_password": config.root_password,
             }))
             .send()
             .await;
 
-        // Login
-        let resp = client
-            .post(format!("{base}/v1/api/auth/login"))
-            .json(&serde_json::json!({
-                "username": KALAMDB_ADMIN_USER,
-                "password": KALAMDB_ADMIN_PASSWORD,
-            }))
-            .send()
+        if let Some(token) = try_login(
+            client,
+            &config.base_url,
+            &config.login_username,
+            &config.login_password,
+        )
+        .await
+        {
+            return token;
+        }
+
+        if config.setup_username != config.login_username {
+            if let Some(token) = try_login(
+                client,
+                &config.base_url,
+                &config.setup_username,
+                &config.setup_password,
+            )
             .await
-            .expect("KalamDB login request");
-        let body: Value = resp.json().await.expect("parse login response");
-        body["access_token"]
-            .as_str()
-            .expect("access_token in login response")
-            .to_string()
+            {
+                return token;
+            }
+        }
+
+        panic!(
+            "Failed to authenticate KalamDB test environment ({config}). Set KALAMDB_USER/KALAMDB_PASSWORD or KALAMDB_ROOT_PASSWORD to match the running server."
+        );
     }
+}
+
+async fn try_login(client: &Client, base_url: &str, username: &str, password: &str) -> Option<String> {
+    let resp = client
+        .post(format!("{base_url}/v1/api/auth/login"))
+        .json(&serde_json::json!({
+            "username": username,
+            "password": password,
+        }))
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: Value = resp.json().await.ok()?;
+    body["access_token"].as_str().map(ToString::to_string)
 }

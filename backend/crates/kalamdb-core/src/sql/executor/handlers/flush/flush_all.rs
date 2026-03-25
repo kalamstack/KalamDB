@@ -57,8 +57,16 @@ impl TypedStatementHandler<FlushAllTablesStatement> for FlushAllTablesHandler {
             let table_id = manifest_id.table_id().clone();
 
             join_set.spawn(async move {
-                let tables_provider = app_context.system_tables().tables();
-                let table_def = match tables_provider.get_table_by_id(&table_id)? {
+                // Offload sync RocksDB read to blocking thread
+                let app_ctx_inner = app_context.clone();
+                let tid = table_id.clone();
+                let table_def = tokio::task::spawn_blocking(move || {
+                    app_ctx_inner.system_tables().tables().get_table_by_id(&tid)
+                })
+                .await
+                .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))??;
+
+                let table_def = match table_def {
                     Some(def) => def,
                     None => return Ok::<Option<JobId>, KalamDbError>(None),
                 };

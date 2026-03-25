@@ -12,6 +12,7 @@
 
 use std::sync::Arc;
 
+use kalamdb_commons::ids::{StreamTableRowId, UserTableRowId};
 use kalamdb_commons::models::rows::Row;
 use kalamdb_commons::models::UserId;
 use kalamdb_commons::schemas::TableType;
@@ -24,6 +25,7 @@ use crate::applier::executor::utils::fileref_util::{
 };
 use crate::providers::base::{find_row_by_pk, BaseTableProvider};
 use crate::providers::{SharedTableProvider, StreamTableProvider, UserTableProvider};
+use kalamdb_tables::{StreamTableRow, UserTableRow};
 
 /// Executor for DML operations (Data Plane)
 ///
@@ -38,6 +40,32 @@ impl DmlExecutor {
     /// Create a new DmlExecutor
     pub fn new(app_context: Arc<AppContext>) -> Self {
         Self { app_context }
+    }
+
+    async fn load_provider(
+        &self,
+        table_id: &TableId,
+        provider_label: &'static str,
+    ) -> Result<Arc<dyn datafusion::datasource::TableProvider + Send + Sync>, ApplierError> {
+        let schema_registry = self.app_context.schema_registry();
+
+        if let Some(provider) = schema_registry.get_provider(table_id) {
+            return Ok(provider);
+        }
+
+        schema_registry
+            .get_table_if_exists_async(table_id)
+            .await
+            .map_err(|e| {
+                ApplierError::Execution(format!(
+                    "Failed to reload {} metadata for {}: {}",
+                    provider_label, table_id, e
+                ))
+            })?;
+
+        schema_registry
+            .get_provider(table_id)
+            .ok_or_else(|| ApplierError::not_found(provider_label, table_id))
     }
 
     // =========================================================================
@@ -55,10 +83,7 @@ impl DmlExecutor {
             return Ok(0);
         }
 
-        let schema_registry = self.app_context.schema_registry();
-        let provider_arc = schema_registry
-            .get_provider(table_id)
-            .ok_or_else(|| ApplierError::not_found("Table provider", table_id))?;
+        let provider_arc = self.load_provider(table_id, "Table provider").await?;
 
         // Try UserTableProvider first, then StreamTableProvider
         if let Some(provider) = provider_arc.as_any().downcast_ref::<UserTableProvider>() {
@@ -98,10 +123,7 @@ impl DmlExecutor {
             ApplierError::Validation("Update requires at least one update row".to_string())
         })?;
 
-        let schema_registry = self.app_context.schema_registry();
-        let provider_arc = schema_registry
-            .get_provider(table_id)
-            .ok_or_else(|| ApplierError::not_found("Table provider", table_id))?;
+        let provider_arc = self.load_provider(table_id, "Table provider").await?;
 
         if let Some(provider) = provider_arc.as_any().downcast_ref::<UserTableProvider>() {
             let prior_row =
@@ -156,10 +178,7 @@ impl DmlExecutor {
             return Ok(0);
         }
 
-        let schema_registry = self.app_context.schema_registry();
-        let provider_arc = schema_registry
-            .get_provider(table_id)
-            .ok_or_else(|| ApplierError::not_found("Table provider", table_id))?;
+        let provider_arc = self.load_provider(table_id, "Table provider").await?;
 
         if let Some(provider) = provider_arc.as_any().downcast_ref::<UserTableProvider>() {
             let mut deleted_count = 0;
@@ -224,10 +243,7 @@ impl DmlExecutor {
             return Ok(0);
         }
 
-        let schema_registry = self.app_context.schema_registry();
-        let provider_arc = schema_registry
-            .get_provider(table_id)
-            .ok_or_else(|| ApplierError::not_found("Shared table provider", table_id))?;
+        let provider_arc = self.load_provider(table_id, "Shared table provider").await?;
 
         if let Some(provider) = provider_arc.as_any().downcast_ref::<SharedTableProvider>() {
             let system_user = UserId::system();
@@ -260,10 +276,7 @@ impl DmlExecutor {
             ApplierError::Validation("Update requires filter with PK value".to_string())
         })?;
 
-        let schema_registry = self.app_context.schema_registry();
-        let provider_arc = schema_registry
-            .get_provider(table_id)
-            .ok_or_else(|| ApplierError::not_found("Shared table provider", table_id))?;
+        let provider_arc = self.load_provider(table_id, "Shared table provider").await?;
 
         if let Some(provider) = provider_arc.as_any().downcast_ref::<SharedTableProvider>() {
             let system_user = UserId::system();
@@ -318,10 +331,7 @@ impl DmlExecutor {
             return Ok(0);
         }
 
-        let schema_registry = self.app_context.schema_registry();
-        let provider_arc = schema_registry
-            .get_provider(table_id)
-            .ok_or_else(|| ApplierError::not_found("Shared table provider", table_id))?;
+        let provider_arc = self.load_provider(table_id, "Shared table provider").await?;
 
         if let Some(provider) = provider_arc.as_any().downcast_ref::<SharedTableProvider>() {
             let system_user = UserId::system();
@@ -511,7 +521,11 @@ impl DmlExecutor {
                         ApplierError::Execution(format!("Failed to find row key: {}", e))
                     })?
                 {
-                    provider.update(user_id, &key, updates).await.map_err(|e| {
+                    <UserTableProvider as BaseTableProvider<UserTableRowId, UserTableRow>>::update(
+                        provider, user_id, &key, updates,
+                    )
+                        .await
+                        .map_err(|e| {
                         ApplierError::Execution(format!("Failed to update row: {}", e))
                     })?;
                     Ok(1)
@@ -539,7 +553,11 @@ impl DmlExecutor {
                         ApplierError::Execution(format!("Failed to find row key: {}", e))
                     })?
                 {
-                    provider.update(user_id, &key, updates).await.map_err(|e| {
+                    <StreamTableProvider as BaseTableProvider<StreamTableRowId, StreamTableRow>>::update(
+                        provider, user_id, &key, updates,
+                    )
+                        .await
+                        .map_err(|e| {
                         ApplierError::Execution(format!("Failed to update row: {}", e))
                     })?;
                     Ok(1)

@@ -535,13 +535,17 @@ async fn test_three_subscriptions_resume_without_old_rows() {
         },
     };
 
-    let table_a = "default.resume3_a";
-    let table_b = "default.resume3_b";
-    let table_c = "default.resume3_c";
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let table_a = format!("default.resume3_a_{}", suffix);
+    let table_b = format!("default.resume3_b_{}", suffix);
+    let table_c = format!("default.resume3_c_{}", suffix);
 
-    ensure_table(&client, table_a).await;
-    ensure_table(&client, table_b).await;
-    ensure_table(&client, table_c).await;
+    ensure_table(&client, &table_a).await;
+    ensure_table(&client, &table_b).await;
+    ensure_table(&client, &table_c).await;
 
     client.connect().await.expect("connect should succeed");
 
@@ -671,9 +675,9 @@ async fn test_three_subscriptions_resume_without_old_rows() {
     assert!(got_pre_a, "pre A row should be received");
     assert!(got_pre_b, "pre B row should be received");
     assert!(got_pre_c, "pre C row should be received");
-    let from_a = query_max_seq(&writer, table_a).await;
-    let from_b = query_max_seq(&writer, table_b).await;
-    let from_c = query_max_seq(&writer, table_c).await;
+    let from_a = query_max_seq(&writer, &table_a).await;
+    let from_b = query_max_seq(&writer, &table_b).await;
+    let from_c = query_max_seq(&writer, &table_c).await;
 
     sub_a.close().await.ok();
     sub_b.close().await.ok();

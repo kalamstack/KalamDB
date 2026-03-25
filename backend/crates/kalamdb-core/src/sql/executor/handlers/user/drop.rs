@@ -27,8 +27,13 @@ impl TypedStatementHandler<DropUserStatement> for DropUserHandler {
         _params: Vec<ScalarValue>,
         context: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
-        let users = self.app_context.system_tables().users();
-        let existing = users.get_user_by_username(&statement.username)?;
+        let app_ctx = self.app_context.clone();
+        let username = statement.username.clone();
+        let existing = tokio::task::spawn_blocking(move || {
+            app_ctx.system_tables().users().get_user_by_username(&username)
+        })
+        .await
+        .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))??;
         if existing.is_none() {
             if statement.if_exists {
                 return Ok(ExecutionResult::Success {

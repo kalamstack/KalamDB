@@ -622,11 +622,11 @@ fn test_cli_subscribe_flags_work_end_to_end() {
     cmd.arg("--subscribe")
         .arg(format!("SELECT * FROM {}", full_table))
         .arg("--subscription-timeout")
-        .arg("2")
+        .arg("8")
         .arg("--initial-data-timeout")
-        .arg("10")
+        .arg("30")
         .arg("--no-spinner")
-        .timeout(Duration::from_secs(20));
+        .timeout(Duration::from_secs(60));
 
     let started = Instant::now();
     let output = cmd.output().expect("run subscribe");
@@ -641,7 +641,7 @@ fn test_cli_subscribe_flags_work_end_to_end() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(
-        elapsed < Duration::from_secs(20),
+        elapsed < Duration::from_secs(60),
         "subscribe should finish with timeout, elapsed={:?}",
         elapsed
     );

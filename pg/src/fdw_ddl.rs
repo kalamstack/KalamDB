@@ -63,9 +63,10 @@ unsafe extern "C-unwind" fn pg_kalam_process_utility(
             let alter_stmt = utility_stmt as *mut pg_sys::AlterTableStmt;
             if (*alter_stmt).objtype == pg_sys::ObjectType::OBJECT_FOREIGN_TABLE {
                 let statement_sql = extract_statement_sql(pstmt, query_string);
+                let mirrored_clause = extract_alter_operation_clause(&statement_sql);
                 // Let PostgreSQL alter the foreign table first.
                 call_prev(pstmt, query_string, read_only_tree, context, params, query_env, dest, qc);
-                handle_alter_foreign_table(alter_stmt, &statement_sql);
+                handle_alter_foreign_table(alter_stmt, mirrored_clause);
             } else {
                 call_prev(pstmt, query_string, read_only_tree, context, params, query_env, dest, qc);
             }
@@ -156,6 +157,8 @@ unsafe fn handle_create_foreign_table(
         }
     };
 
+    let column_defs = infer_primary_key_column(column_defs, table_type);
+
     if column_defs.is_empty() {
         pgrx::warning!("pg_kalam DDL: no columns found in CREATE FOREIGN TABLE");
         return;
@@ -189,7 +192,10 @@ unsafe fn handle_create_foreign_table(
 // ALTER FOREIGN TABLE → ALTER TABLE ADD/DROP COLUMN
 // ---------------------------------------------------------------------------
 
-unsafe fn handle_alter_foreign_table(stmt: *mut pg_sys::AlterTableStmt, statement_sql: &str) {
+unsafe fn handle_alter_foreign_table(
+    stmt: *mut pg_sys::AlterTableStmt,
+    mirrored_clause: Result<String, KalamPgError>,
+) {
     // Resolve the table OID from the RangeVar
     let rel = (*stmt).relation;
     if rel.is_null() {
@@ -238,14 +244,6 @@ unsafe fn handle_alter_foreign_table(stmt: *mut pg_sys::AlterTableStmt, statemen
         return;
     }
 
-    let clause = match extract_alter_operation_clause(statement_sql) {
-        Ok(clause) => clause,
-        Err(error) => {
-            pgrx::warning!("pg_kalam DDL: failed to parse ALTER FOREIGN TABLE clause: {}", error);
-            return;
-        }
-    };
-
     let cell = (*cmds).elements.add(0);
     let cmd = (*cell).ptr_value as *mut pg_sys::AlterTableCmd;
     if cmd.is_null() {
@@ -257,25 +255,34 @@ unsafe fn handle_alter_foreign_table(stmt: *mut pg_sys::AlterTableStmt, statemen
         | pg_sys::AlterTableType::AT_DropColumn
         | pg_sys::AlterTableType::AT_SetNotNull
         | pg_sys::AlterTableType::AT_DropNotNull
-        | pg_sys::AlterTableType::AT_ColumnDefault => {
-            let sql = format!(
-                "ALTER TABLE {}.{} {}",
-                quote_ident(&namespace),
-                quote_ident(&table_name),
-                clause
+        | pg_sys::AlterTableType::AT_ColumnDefault => {}
+        _ => return,
+    }
+
+    let clause = match mirrored_clause {
+        Ok(clause) => clause,
+        Err(error) => {
+            pgrx::warning!(
+                "pg_kalam DDL: failed to reconstruct ALTER FOREIGN TABLE clause: {}",
+                error
             );
-            if let Err(error) = execute_remote_sql(&sql, &server_name) {
-                pgrx::error!(
-                    "pg_kalam DDL: failed to mirror ALTER TABLE for {}.{}: {}",
-                    namespace,
-                    table_name,
-                    error
-                );
-            }
+            return;
         }
-        _ => {
-            // Other ALTER operations are not propagated to KalamDB.
-        }
+    };
+
+    let sql = format!(
+        "ALTER TABLE {}.{} {}",
+        quote_ident(&namespace),
+        quote_ident(&table_name),
+        clause
+    );
+    if let Err(error) = execute_remote_sql(&sql, &server_name) {
+        pgrx::error!(
+            "pg_kalam DDL: failed to mirror ALTER TABLE for {}.{}: {}",
+            namespace,
+            table_name,
+            error
+        );
     }
 }
 
@@ -459,6 +466,35 @@ fn extract_remote_column_definitions(statement_sql: &str) -> Result<Vec<String>,
         .filter(|entry| !entry.trim().is_empty())
         .filter(|entry| !is_internal_column_entry(entry))
         .collect())
+}
+
+fn infer_primary_key_column(mut column_defs: Vec<String>, table_type: TableType) -> Vec<String> {
+    if !matches!(table_type, TableType::User | TableType::Shared) {
+        return column_defs;
+    }
+
+    let has_primary_key = column_defs.iter().any(|entry| {
+        entry
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .windows(2)
+            .any(|window| {
+                window[0].eq_ignore_ascii_case("PRIMARY")
+                    && window[1].eq_ignore_ascii_case("KEY")
+            })
+    });
+    if has_primary_key {
+        return column_defs;
+    }
+
+    if let Some(index) = column_defs
+        .iter()
+        .position(|entry| first_sql_identifier(entry).as_deref() == Some("id"))
+    {
+        column_defs[index].push_str(" PRIMARY KEY");
+    }
+
+    column_defs
 }
 
 fn extract_alter_operation_clause(statement_sql: &str) -> Result<String, KalamPgError> {

@@ -37,9 +37,14 @@ impl TypedStatementHandler<UseNamespaceStatement> for UseNamespaceHandler {
     ) -> Result<ExecutionResult, KalamDbError> {
         let namespace_name = statement.namespace.as_str();
 
-        // Verify namespace exists
-        let namespaces_provider = self.app_context.system_tables().namespaces();
-        let exists = namespaces_provider.get_namespace(&statement.namespace)?;
+        // Verify namespace exists (offload sync RocksDB read)
+        let app_ctx = self.app_context.clone();
+        let ns = statement.namespace.clone();
+        let exists = tokio::task::spawn_blocking(move || {
+            app_ctx.system_tables().namespaces().get_namespace(&ns)
+        })
+        .await
+        .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))??;
 
         if exists.is_none() {
             return Err(KalamDbError::NotFound(format!(

@@ -49,7 +49,8 @@ impl FlushScheduler {
             let table_id = manifest_id.table_id().clone();
 
             // Look up the table definition to determine its type
-            let table_def = match schema_registry.get_table_if_exists(&table_id) {
+            // Use async variant to avoid blocking tokio worker on RocksDB cache miss
+            let table_def = match schema_registry.get_table_if_exists_async(&table_id).await {
                 Ok(Some(def)) => def,
                 Ok(None) => {
                     // Table dropped after pending write was recorded — skip

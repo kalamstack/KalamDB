@@ -67,12 +67,16 @@ impl TypedStatementHandler<CreateTableStatement> for CreateTableHandler {
         let table_id = TableId::new(namespace_id.clone(), table_name.clone());
 
         // Build TableDefinition (validate + build, no execution yet)
-        let table_def = table_creation::build_table_definition(
-            self.app_context.clone(),
-            &statement,
-            context.user_id(),
-            context.user_role(),
-        )?;
+        // Offload sync RocksDB reads (namespace existence, storage lookup) to blocking thread
+        let app_ctx = self.app_context.clone();
+        let stmt_clone = statement.clone();
+        let user_id = context.user_id().clone();
+        let user_role = context.user_role();
+        let table_def = tokio::task::spawn_blocking(move || {
+            table_creation::build_table_definition(app_ctx, &stmt_clone, &user_id, user_role)
+        })
+        .await
+        .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))??;
 
         // Delegate to unified applier - pass raw parameters
         let message = self

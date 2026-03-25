@@ -1,8 +1,25 @@
 //! Atomic offset allocation for topic partitions.
 
 use dashmap::DashMap;
+use kalamdb_commons::models::TopicId;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct TopicPartitionKey {
+    topic_id: TopicId,
+    partition_id: u32,
+}
+
+impl TopicPartitionKey {
+    #[inline]
+    fn new(topic_id: &TopicId, partition_id: u32) -> Self {
+        Self {
+            topic_id: topic_id.clone(),
+            partition_id,
+        }
+    }
+}
 
 /// Manages per-topic-partition offset counters using atomic operations.
 ///
@@ -10,8 +27,8 @@ use std::sync::Arc;
 /// on different tokio tasks can increment without holding a DashMap shard lock
 /// during the actual increment.
 pub(crate) struct OffsetAllocator {
-    /// Key: "topic_id:partition_id" → atomic counter
-    counters: DashMap<String, Arc<AtomicU64>>,
+    /// Key: (topic_id, partition_id) → atomic counter
+    counters: DashMap<TopicPartitionKey, Arc<AtomicU64>>,
 }
 
 impl OffsetAllocator {
@@ -22,15 +39,15 @@ impl OffsetAllocator {
     }
 
     /// Get the next offset for a topic-partition and atomically increment.
-    pub fn next_offset(&self, topic_id: &str, partition_id: u32) -> u64 {
-        let key = format!("{}:{}", topic_id, partition_id);
+    pub fn next_offset(&self, topic_id: &TopicId, partition_id: u32) -> u64 {
+        let key = TopicPartitionKey::new(topic_id, partition_id);
 
         // Get or insert an AtomicU64 counter.
         // The DashMap shard lock is held only for the lookup/insert, not the increment.
         let counter =
             self.counters.entry(key).or_insert_with(|| Arc::new(AtomicU64::new(0))).clone();
 
-        counter.fetch_add(1, Ordering::SeqCst)
+        counter.fetch_add(1, Ordering::Relaxed)
     }
 
     /// Atomically allocate a contiguous range of `count` offsets.
@@ -38,25 +55,25 @@ impl OffsetAllocator {
     /// Returns the start of the range. The allocated range is `[start, start + count)`.
     /// This is more efficient than calling `next_offset()` in a loop because it
     /// requires only a single atomic operation.
-    pub fn next_n_offsets(&self, topic_id: &str, partition_id: u32, count: u64) -> u64 {
-        let key = format!("{}:{}", topic_id, partition_id);
+    pub fn next_n_offsets(&self, topic_id: &TopicId, partition_id: u32, count: u64) -> u64 {
+        let key = TopicPartitionKey::new(topic_id, partition_id);
         let counter =
             self.counters.entry(key).or_insert_with(|| Arc::new(AtomicU64::new(0))).clone();
-        counter.fetch_add(count, Ordering::SeqCst)
+        counter.fetch_add(count, Ordering::Relaxed)
     }
 
     /// Seed a counter to a specific value (used during restore from persisted messages).
-    pub fn seed(&self, topic_id: &str, partition_id: u32, next_offset: u64) {
-        let key = format!("{}:{}", topic_id, partition_id);
+    pub fn seed(&self, topic_id: &TopicId, partition_id: u32, next_offset: u64) {
+        let key = TopicPartitionKey::new(topic_id, partition_id);
         self.counters.insert(key, Arc::new(AtomicU64::new(next_offset)));
     }
 
     /// Peek the current next offset without incrementing.
     ///
     /// Returns `None` when the topic-partition counter is not initialized.
-    pub fn peek_next_offset(&self, topic_id: &str, partition_id: u32) -> Option<u64> {
-        let key = format!("{}:{}", topic_id, partition_id);
-        self.counters.get(&key).map(|counter| counter.load(Ordering::SeqCst))
+    pub fn peek_next_offset(&self, topic_id: &TopicId, partition_id: u32) -> Option<u64> {
+        let key = TopicPartitionKey::new(topic_id, partition_id);
+        self.counters.get(&key).map(|counter| counter.load(Ordering::Relaxed))
     }
 
     /// Clear all counters.
@@ -72,38 +89,42 @@ mod tests {
     #[test]
     fn test_monotonic_offsets() {
         let alloc = OffsetAllocator::new();
-        assert_eq!(alloc.next_offset("topic1", 0), 0);
-        assert_eq!(alloc.next_offset("topic1", 0), 1);
-        assert_eq!(alloc.next_offset("topic1", 0), 2);
+        let topic = TopicId::new("topic1");
+        assert_eq!(alloc.next_offset(&topic, 0), 0);
+        assert_eq!(alloc.next_offset(&topic, 0), 1);
+        assert_eq!(alloc.next_offset(&topic, 0), 2);
     }
 
     #[test]
     fn test_independent_partitions() {
         let alloc = OffsetAllocator::new();
-        assert_eq!(alloc.next_offset("topic1", 0), 0);
-        assert_eq!(alloc.next_offset("topic1", 1), 0);
-        assert_eq!(alloc.next_offset("topic1", 0), 1);
-        assert_eq!(alloc.next_offset("topic1", 1), 1);
+        let topic = TopicId::new("topic1");
+        assert_eq!(alloc.next_offset(&topic, 0), 0);
+        assert_eq!(alloc.next_offset(&topic, 1), 0);
+        assert_eq!(alloc.next_offset(&topic, 0), 1);
+        assert_eq!(alloc.next_offset(&topic, 1), 1);
     }
 
     #[test]
     fn test_seed() {
         let alloc = OffsetAllocator::new();
-        alloc.seed("topic1", 0, 100);
-        assert_eq!(alloc.next_offset("topic1", 0), 100);
-        assert_eq!(alloc.next_offset("topic1", 0), 101);
+        let topic = TopicId::new("topic1");
+        alloc.seed(&topic, 0, 100);
+        assert_eq!(alloc.next_offset(&topic, 0), 100);
+        assert_eq!(alloc.next_offset(&topic, 0), 101);
     }
 
     #[test]
     fn test_peek_next_offset() {
         let alloc = OffsetAllocator::new();
-        assert_eq!(alloc.peek_next_offset("topic1", 0), None);
+        let topic = TopicId::new("topic1");
+        assert_eq!(alloc.peek_next_offset(&topic, 0), None);
 
-        alloc.seed("topic1", 0, 7);
-        assert_eq!(alloc.peek_next_offset("topic1", 0), Some(7));
+        alloc.seed(&topic, 0, 7);
+        assert_eq!(alloc.peek_next_offset(&topic, 0), Some(7));
 
-        assert_eq!(alloc.next_offset("topic1", 0), 7);
-        assert_eq!(alloc.peek_next_offset("topic1", 0), Some(8));
+        assert_eq!(alloc.next_offset(&topic, 0), 7);
+        assert_eq!(alloc.peek_next_offset(&topic, 0), Some(8));
     }
 
     #[test]
@@ -117,8 +138,9 @@ mod tests {
             let alloc = Arc::clone(&alloc);
             handles.push(thread::spawn(move || {
                 let mut offsets = vec![];
+                let topic = TopicId::new("topic1");
                 for _ in 0..100 {
-                    offsets.push(alloc.next_offset("topic1", 0));
+                    offsets.push(alloc.next_offset(&topic, 0));
                 }
                 offsets
             }));

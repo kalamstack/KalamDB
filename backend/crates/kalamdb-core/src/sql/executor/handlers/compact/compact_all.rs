@@ -31,8 +31,13 @@ impl TypedStatementHandler<CompactAllTablesStatement> for CompactAllTablesHandle
         _params: Vec<ScalarValue>,
         _context: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
-        let tables_provider = self.app_context.system_tables().tables();
-        let all_defs = tables_provider.list_tables()?;
+        // Offload sync RocksDB full table scan to blocking thread
+        let app_ctx = self.app_context.clone();
+        let all_defs = tokio::task::spawn_blocking(move || {
+            app_ctx.system_tables().tables().list_tables()
+        })
+        .await
+        .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))??;
         let ns = statement.namespace.clone();
         let target_tables: Vec<(TableName, TableType)> = all_defs
             .into_iter()

@@ -18,37 +18,46 @@ impl SqlImpersonationService {
     /// Resolve a target username and authorize actor -> target impersonation.
     ///
     /// Returns the canonical target user_id on success.
-    pub fn resolve_execute_as_user(
+    /// Offloads sync RocksDB user lookups to a blocking thread.
+    pub async fn resolve_execute_as_user(
         &self,
         actor_user_id: &UserId,
         actor_role: Role,
         target_username: &str,
     ) -> Result<UserId, KalamDbError> {
-        let users_provider = self.app_context.system_tables().users();
-        let target_user = if let Some(user) =
-            users_provider.get_user_by_username(target_username).map_err(|e| {
-                KalamDbError::InvalidOperation(format!(
-                    "Failed to resolve EXECUTE AS USER target '{}' by username: {}",
-                    target_username, e
-                ))
-            })? {
-            user
-        } else {
-            users_provider
-                .get_user_by_id(&UserId::from(target_username.to_string()))
-                .map_err(|e| {
+        let app_ctx = self.app_context.clone();
+        let target_name = target_username.to_string();
+
+        let target_user = tokio::task::spawn_blocking(move || {
+            let users_provider = app_ctx.system_tables().users();
+            let user = if let Some(user) =
+                users_provider.get_user_by_username(&target_name).map_err(|e| {
                     KalamDbError::InvalidOperation(format!(
-                        "Failed to resolve EXECUTE AS USER target '{}' by user_id: {}",
-                        target_username, e
+                        "Failed to resolve EXECUTE AS USER target '{}' by username: {}",
+                        target_name, e
                     ))
-                })?
-                .ok_or_else(|| {
-                    KalamDbError::NotFound(format!(
-                        "EXECUTE AS USER target '{}' was not found by username or user_id",
-                        target_username
-                    ))
-                })?
-        };
+                })? {
+                user
+            } else {
+                users_provider
+                    .get_user_by_id(&UserId::from(target_name.clone()))
+                    .map_err(|e| {
+                        KalamDbError::InvalidOperation(format!(
+                            "Failed to resolve EXECUTE AS USER target '{}' by user_id: {}",
+                            target_name, e
+                        ))
+                    })?
+                    .ok_or_else(|| {
+                        KalamDbError::NotFound(format!(
+                            "EXECUTE AS USER target '{}' was not found by username or user_id",
+                            target_name
+                        ))
+                    })?
+            };
+            Ok::<_, KalamDbError>(user)
+        })
+        .await
+        .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))??;
 
         // No-op impersonation is always allowed.
         if &target_user.user_id == actor_user_id {

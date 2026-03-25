@@ -1130,12 +1130,25 @@ impl AppContext {
         self.server_start_time
     }
 
-    /// Compute current system metrics snapshot
+    /// Compute current system metrics snapshot (sync — for StatsTableProvider callback).
     ///
     /// Returns a vector of (metric_name, metric_value) tuples for display
     /// in system.stats virtual view.
     pub fn compute_metrics(&self) -> Vec<(String, String)> {
         crate::metrics::runtime::compute_metrics(self)
+    }
+
+    /// Async variant of [`compute_metrics`] that offloads the sync RocksDB
+    /// scans to a blocking thread so the tokio worker pool is not starved.
+    pub async fn compute_metrics_async(
+        self: &Arc<Self>,
+    ) -> Result<Vec<(String, String)>, crate::error::KalamDbError> {
+        let ctx = Arc::clone(self);
+        tokio::task::spawn_blocking(move || ctx.compute_metrics())
+            .await
+            .map_err(|e| {
+                crate::error::KalamDbError::ExecutionError(format!("Task join error: {}", e))
+            })
     }
 
     /// Log a concise snapshot of runtime metrics to the console.
