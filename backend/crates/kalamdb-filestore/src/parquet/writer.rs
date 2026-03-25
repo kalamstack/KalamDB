@@ -49,7 +49,7 @@ pub(crate) fn serialize_to_parquet(
     // Build writer properties
     let mut props_builder = WriterProperties::builder()
         .set_compression(Compression::ZSTD(zstd_level()))
-        .set_max_row_group_size(128 * 1024); // 128K rows per group
+        .set_max_row_group_row_count(Some(128 * 1024)); // 128K rows per group
 
     // Add bloom filters for specified columns
     if let Some(cols) = bloom_filter_columns {

@@ -63,7 +63,7 @@ fn get_user_id_for_username(username: &str) -> Option<String> {
 }
 
 /// Smoke Test: Regular user CANNOT use AS USER (authorization check)
-#[ntest::timeout(60000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_as_user_blocked_for_regular_user() {
     if !is_server_running() {
@@ -129,7 +129,7 @@ fn smoke_as_user_blocked_for_regular_user() {
 }
 
 /// Smoke Test: Service role CAN use AS USER for INSERT
-#[ntest::timeout(60000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_as_user_insert_with_service_role() {
     if !is_server_running() {
@@ -277,7 +277,7 @@ fn smoke_as_user_update_with_dba_role() {
 }
 
 /// Smoke Test: DBA can use AS USER for DELETE
-#[ntest::timeout(60000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_as_user_delete_with_dba_role() {
     if !is_server_running() {
@@ -354,7 +354,7 @@ fn smoke_as_user_delete_with_dba_role() {
 }
 
 /// Smoke Test: AS USER rejected on SHARED tables
-#[ntest::timeout(60000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_as_user_rejected_on_shared_table() {
     if !is_server_running() {

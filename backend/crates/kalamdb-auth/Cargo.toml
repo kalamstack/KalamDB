@@ -58,12 +58,9 @@ ipnet = { workspace = true }
 # Time handling
 chrono = { workspace = true }
 
-# Caching
-moka = { workspace = true }
 async-trait = { workspace = true }
 once_cell = { workspace = true }
 
-# HMAC for password cache fingerprinting (avoids storing plaintext passwords)
-hmac = { workspace = true }
+# SHA-256 helpers used by bearer token services
 sha2 = { workspace = true }
 hex = { workspace = true }

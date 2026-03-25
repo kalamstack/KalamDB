@@ -2,24 +2,29 @@
 # E2E tests hit a shared, stateful KalamDB server and are not safe to run in parallel.
 # Serializing kalam-cli tests avoids timeouts, flaky websocket sessions, and shared state races.
 retries = 3
-# Limit test execution to prevent too many concurrent tests hitting the shared server
+# Keep libtest parallelism available by default for non-stateful packages.
 test-threads = 15
 
 [[profile.default.overrides]]
 filter = 'package(kalam-cli)'
-# Force complete serialization by marking all tests as needing the single shared resource
+# Force complete serialization for CLI e2e binaries.
+# threads-required limits nextest process concurrency across binaries.
+# test-threads=1 disables libtest parallelism inside each binary.
 threads-required = 15
+test-threads = 1
 retries = 3
 
 [[profile.default.overrides]]
 filter = 'package(kalam-link)'
 threads-required = 15
+test-threads = 1
 retries = 3
 
 [[profile.default.overrides]]
 filter = 'package(kalam-pg-extension)'
 # pgrx-backed tests reuse a shared Postgres data directory and must not run in parallel.
 threads-required = 15
+test-threads = 1
 retries = 3
 
 [[profile.default.overrides]]

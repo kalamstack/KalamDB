@@ -303,7 +303,7 @@ async fn test_proxy_latency_does_not_false_positive_disconnect() {
 /// The client should reconnect and resume once the stalls are removed.
 #[tokio::test]
 async fn test_proxy_packet_loss_style_stalls_resume_without_replay() {
-    let result = timeout(Duration::from_secs(45), async {
+    let result = timeout(Duration::from_secs(60), async {
         let writer = match create_test_client() {
             Ok(c) => c,
             Err(e) => {
@@ -372,7 +372,9 @@ async fn test_proxy_packet_loss_style_stalls_resume_without_replay() {
 
         let disconnects_before = disconnect_count.load(Ordering::SeqCst);
         let expected_connects = connect_count.load(Ordering::SeqCst) + 1;
-        proxy.set_chunk_stall_pattern(1, Duration::from_millis(1200));
+        // This needs to exceed the 2s pong timeout used by reconnect_test_timeouts()
+        // or the transport impairment will look like mere latency instead of a dead link.
+        proxy.set_chunk_stall_pattern(1, Duration::from_millis(2500));
 
         writer
             .execute_query(
@@ -384,7 +386,7 @@ async fn test_proxy_packet_loss_style_stalls_resume_without_replay() {
             .await
             .expect("insert gap row during stall pattern");
 
-        for _ in 0..40 {
+        for _ in 0..80 {
             if disconnect_count.load(Ordering::SeqCst) > disconnects_before {
                 break;
             }
@@ -398,7 +400,7 @@ async fn test_proxy_packet_loss_style_stalls_resume_without_replay() {
 
         proxy.clear_chunk_stall_pattern();
 
-        for _ in 0..80 {
+        for _ in 0..120 {
             if connect_count.load(Ordering::SeqCst) >= expected_connects && client.is_connected().await {
                 break;
             }

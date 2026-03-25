@@ -356,6 +356,7 @@ impl SharedTableProvider {
     async fn scan_parquet_files_as_batch_async(
         &self,
         filter: Option<&Expr>,
+        columns: Option<&[String]>,
     ) -> Result<RecordBatch, KalamDbError> {
         base::scan_parquet_files_as_batch_async(
             &self.core,
@@ -364,6 +365,7 @@ impl SharedTableProvider {
             None,
             self.schema_ref(),
             filter,
+            columns,
         )
         .await
     }
@@ -1444,6 +1446,10 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
 
         let keep_deleted = filter.map(base::filter_uses_deleted_column).unwrap_or(false);
 
+        // Compute cold-path column projection: when DataFusion provides a projection,
+        // we only need to decode the projected columns + system columns + PK from Parquet.
+        let cold_columns = base::compute_cold_columns(projection, &schema, pk_name);
+
         // NO user_id extraction - shared tables scan ALL rows
         let kvs = self
             .scan_with_version_resolution_to_kvs_async(
@@ -1452,6 +1458,7 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
                 since_seq,
                 limit,
                 keep_deleted,
+                cold_columns.as_deref(),
             )
             .await?;
 
@@ -1466,6 +1473,7 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
         since_seq: Option<kalamdb_commons::ids::SeqId>,
         limit: Option<usize>,
         keep_deleted: bool,
+        cold_columns: Option<&[String]>,
     ) -> Result<Vec<(SharedTableRowId, SharedTableRow)>, KalamDbError> {
         use kalamdb_store::EntityStoreAsync;
 
@@ -1489,7 +1497,7 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
         let hot_future =
             self.store
                 .scan_typed_with_prefix_and_start_async(None, start_key.as_ref(), scan_limit);
-        let cold_future = self.scan_parquet_files_as_batch_async(filter);
+        let cold_future = self.scan_parquet_files_as_batch_async(filter, cold_columns);
 
         let (hot_result, cold_result) = tokio::join!(hot_future, cold_future);
 
@@ -1589,7 +1597,7 @@ impl SharedTableProvider {
         });
 
         // Cold storage: scan Parquet files (get full batch, but extract only metadata)
-        let cold_future = self.scan_parquet_files_as_batch_async(None);
+        let cold_future = self.scan_parquet_files_as_batch_async(None, None);
 
         let (hot_result, cold_result): (_, _) = tokio::join!(hot_future, cold_future);
 

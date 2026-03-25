@@ -117,7 +117,7 @@ pub fn default_max_header_size() -> usize {
 
 // DataFusion defaults
 pub fn default_datafusion_memory_limit() -> usize {
-    64 * 1024 * 1024 // 64MB — sufficient for mobile/OLTP queries; rejects runaway analytics
+    32 * 1024 * 1024 // 32MB — sufficient for mobile/OLTP queries; keeps peak RSS low
 }
 
 pub fn default_datafusion_parallelism() -> usize {

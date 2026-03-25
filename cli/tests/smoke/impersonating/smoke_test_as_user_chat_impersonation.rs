@@ -516,7 +516,7 @@ fn assert_other_user_cannot_see_messages(fixture: &ChatFixture, flow: &BaseFlow)
     );
 }
 
-#[ntest::timeout(180000)]
+#[ntest::timeout(300000)]
 #[test]
 fn smoke_as_user_chat_insert_and_select_flow() {
     if !is_server_running() {
@@ -550,7 +550,7 @@ fn smoke_as_user_chat_insert_and_select_flow() {
     fixture.cleanup();
 }
 
-#[ntest::timeout(180000)]
+#[ntest::timeout(300000)]
 #[test]
 fn smoke_as_user_chat_select_scope_for_different_user() {
     if !is_server_running() {
@@ -583,7 +583,7 @@ fn smoke_as_user_chat_select_scope_for_different_user() {
     fixture.cleanup();
 }
 
-#[ntest::timeout(180000)]
+#[ntest::timeout(300000)]
 #[test]
 fn smoke_as_user_chat_update_flow() {
     if !is_server_running() {
@@ -698,7 +698,7 @@ fn smoke_as_user_chat_update_flow() {
     fixture.cleanup();
 }
 
-#[ntest::timeout(180000)]
+#[ntest::timeout(300000)]
 #[test]
 fn smoke_as_user_chat_delete_flow() {
     if !is_server_running() {

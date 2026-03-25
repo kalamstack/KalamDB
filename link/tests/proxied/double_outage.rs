@@ -92,11 +92,23 @@ async fn test_proxy_server_down_while_reconnecting() {
     // Briefly resume the proxy so the client starts its reconnect attempt,
     // then kill it again immediately.
     proxy.simulate_server_up();
-    sleep(Duration::from_millis(300)).await;
+    for _ in 0..20 {
+        if connect_count.load(Ordering::SeqCst) >= 2 || proxy.active_count().await >= 1 {
+            break;
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
 
     // ── Second outage while reconnecting ────────────────────────────────
     let dc2 = disconnect_count.load(Ordering::SeqCst);
     proxy.simulate_server_down().await;
+
+    for _ in 0..40 {
+        if disconnect_count.load(Ordering::SeqCst) > dc2 {
+            break;
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
 
     // Insert data while doubly-disconnected.
     writer
@@ -109,13 +121,14 @@ async fn test_proxy_server_down_while_reconnecting() {
         .await
         .expect("insert gap-double");
 
-    sleep(Duration::from_millis(500)).await;
+    sleep(Duration::from_millis(900)).await;
 
     // ── Final recovery ──────────────────────────────────────────────────
+    let expected_connects = connect_count.load(Ordering::SeqCst) + 1;
     proxy.simulate_server_up();
 
     for _ in 0..100 {
-        if connect_count.load(Ordering::SeqCst) >= 2 && client.is_connected().await {
+        if connect_count.load(Ordering::SeqCst) >= expected_connects && client.is_connected().await {
             break;
         }
         sleep(Duration::from_millis(100)).await;

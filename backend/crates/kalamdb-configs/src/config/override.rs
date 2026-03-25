@@ -49,9 +49,17 @@ impl ServerConfig {
     /// - KALAMDB_RPC_TLS_SERVER_CERT: Override rpc_tls.server_cert (file path or inline PEM)
     /// - KALAMDB_RPC_TLS_SERVER_KEY: Override rpc_tls.server_key (file path or inline PEM)
     /// - KALAMDB_RPC_TLS_REQUIRE_CLIENT_CERT: Override rpc_tls.require_client_cert
+    /// - KALAMDB_SERVER_WORKERS: Override server.workers (actix-web worker threads)
     ///
     /// Environment variables take precedence over server.toml values (T031)
     pub fn apply_env_overrides(&mut self) -> anyhow::Result<()> {
+        // Server workers (actix-web worker thread count)
+        if let Ok(val) = env::var("KALAMDB_SERVER_WORKERS") {
+            self.server.workers = val.parse().map_err(|_| {
+                anyhow::anyhow!("Invalid KALAMDB_SERVER_WORKERS value: {}", val)
+            })?;
+        }
+
         // Server host (new naming convention)
         if let Ok(host) = env::var("KALAMDB_SERVER_HOST") {
             self.server.host = host;

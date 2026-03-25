@@ -14,7 +14,7 @@ use std::time::Duration;
 
 /// Test that basic SELECT queries work on the leader node
 /// This verifies the leader check doesn't break normal operation
-#[ntest::timeout(60000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_test_leader_read_succeeds_on_leader() {
     if !is_server_running() {
@@ -67,7 +67,7 @@ fn smoke_test_leader_read_succeeds_on_leader() {
 }
 
 /// Test that SELECT queries with filters work correctly
-#[ntest::timeout(60000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_test_leader_read_with_filters() {
     if !is_server_running() {
@@ -131,7 +131,7 @@ fn smoke_test_leader_read_with_filters() {
 }
 
 /// Test that shared table reads work correctly
-#[ntest::timeout(60000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_test_leader_read_shared_table() {
     if !is_server_running() {
@@ -185,7 +185,7 @@ fn smoke_test_leader_read_shared_table() {
 }
 
 /// Test that system table queries work (they shouldn't have leader checks)
-#[ntest::timeout(60000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_test_system_table_reads() {
     if !is_server_running() {

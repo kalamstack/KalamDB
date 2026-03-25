@@ -83,6 +83,7 @@ where
         user_id,
         schema.clone(),
         Some(&filter),
+        None,
     )
     .await?;
     let rows = parquet_batch_to_rows(&batch)?;

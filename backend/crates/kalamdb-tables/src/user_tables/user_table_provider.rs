@@ -379,6 +379,7 @@ impl UserTableProvider {
         &self,
         user_id: &UserId,
         filter: Option<&Expr>,
+        columns: Option<&[String]>,
     ) -> Result<RecordBatch, KalamDbError> {
         base::scan_parquet_files_as_batch_async(
             &self.core,
@@ -387,6 +388,7 @@ impl UserTableProvider {
             Some(user_id),
             self.schema_ref(),
             filter,
+            columns,
         )
         .await
     }
@@ -433,7 +435,7 @@ impl UserTableProvider {
         let mut cold_rows = Vec::new();
         for user_id in user_ids {
             // Use async version to avoid blocking the runtime
-            let parquet_batch = self.scan_parquet_files_as_batch_async(&user_id, filter).await?;
+            let parquet_batch = self.scan_parquet_files_as_batch_async(&user_id, filter, None).await?;
             for row_data in parquet_batch_to_rows(&parquet_batch)? {
                 let seq_id = row_data.seq_id;
                 let row = UserTableRow {
@@ -1366,6 +1368,10 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         // their own user_id for RLS.
         let keep_deleted = filter.map(base::filter_uses_deleted_column).unwrap_or(false);
 
+        // Compute cold-path column projection: when DataFusion provides a projection,
+        // we only need to decode the projected columns + system columns + PK from Parquet.
+        let cold_columns = base::compute_cold_columns(projection, &schema, pk_name);
+
         let kvs = if allow_all_users {
             self.scan_all_users_with_version_resolution_async(
                 filter,
@@ -1381,6 +1387,7 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
                 since_seq,
                 limit,
                 keep_deleted,
+                cold_columns.as_deref(),
             )
             .await?
         };
@@ -1405,6 +1412,7 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         since_seq: Option<kalamdb_commons::ids::SeqId>,
         limit: Option<usize>,
         keep_deleted: bool,
+        cold_columns: Option<&[String]>,
     ) -> Result<Vec<(UserTableRowId, UserTableRow)>, KalamDbError> {
         use kalamdb_store::EntityStoreAsync;
 
@@ -1436,7 +1444,7 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
             start_key_bytes.as_deref(),
             scan_limit,
         );
-        let cold_future = self.scan_parquet_files_as_batch_async(user_id, filter);
+        let cold_future = self.scan_parquet_files_as_batch_async(user_id, filter, cold_columns);
 
         let (hot_result, cold_result) = tokio::join!(hot_future, cold_future);
 
@@ -1544,7 +1552,7 @@ impl UserTableProvider {
         });
 
         // Cold storage: scan Parquet files, extract metadata only
-        let cold_future = self.scan_parquet_files_as_batch_async(user_id, None);
+        let cold_future = self.scan_parquet_files_as_batch_async(user_id, None, None);
 
         let (hot_result, cold_result) = tokio::join!(hot_future, cold_future);
 

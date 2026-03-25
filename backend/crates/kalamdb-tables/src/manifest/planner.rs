@@ -9,6 +9,7 @@ use datafusion::arrow::compute::cast;
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
 use futures_util::future::try_join_all;
+use futures_util::TryStreamExt;
 use kalamdb_commons::ids::SeqId;
 use kalamdb_commons::models::UserId;
 use kalamdb_commons::schemas::TableType;
@@ -112,7 +113,25 @@ impl ManifestAccessPlanner {
         use_degraded_mode: bool,
         schema: SchemaRef,
         schema_registry: &dyn SchemaRegistryTrait<Error = KalamDbError>,
+        columns: Option<&[String]>,
     ) -> Result<(RecordBatch, (usize, usize, usize)), KalamDbError> {
+        // Compute a projected schema when column projection is requested.
+        // This is used for schema evolution and batch concatenation.
+        let effective_schema = if let Some(cols) = columns {
+            let fields: Vec<_> = schema
+                .fields()
+                .iter()
+                .filter(|f| cols.iter().any(|c| c == f.name()))
+                .cloned()
+                .collect();
+            if fields.is_empty() {
+                schema.clone()
+            } else {
+                Arc::new(datafusion::arrow::datatypes::Schema::new(fields))
+            }
+        } else {
+            schema.clone()
+        };
         let mut parquet_files: Vec<String> = Vec::new();
         let mut file_schema_versions: std::collections::HashMap<String, u32> =
             std::collections::HashMap::new();
@@ -157,27 +176,40 @@ impl ManifestAccessPlanner {
 
         // Return empty batch if no files found
         if parquet_files.is_empty() {
-            return Ok((RecordBatch::new_empty(schema), (total_batches, skipped, scanned)));
+            return Ok((RecordBatch::new_empty(effective_schema), (total_batches, skipped, scanned)));
         }
 
         let mut all_batches = Vec::new();
 
-        // Read all parquet files concurrently instead of sequentially.
-        // Each file is independent so we can issue all reads in parallel.
-        let read_futures: Vec<_> = parquet_files
+        // Clone column names for use inside async closures
+        let col_names: Option<Vec<String>> = columns.map(|c| c.to_vec());
+
+        // Open all file streams concurrently — only metadata footers are read here.
+        // Actual column data is fetched on demand as each stream is polled.
+        let stream_futures: Vec<_> = parquet_files
             .iter()
             .map(|parquet_file| {
                 let sc = storage_cached.clone();
                 let file = parquet_file.clone();
+                let cols = col_names.clone();
                 async move {
-                    sc.read_parquet_files(table_type, table_id, user_id, &[file])
-                        .await
-                        .into_kalamdb_error("Failed to read Parquet file")
+                    let col_refs: Vec<&str> = cols
+                        .as_ref()
+                        .map(|c| c.iter().map(|s| s.as_str()).collect())
+                        .unwrap_or_default();
+                    sc.read_parquet_file_stream(
+                        table_type,
+                        table_id,
+                        user_id,
+                        &file,
+                        &col_refs,
+                    )
+                    .await
+                    .into_kalamdb_error("Failed to open Parquet stream")
                 }
             })
             .collect();
-
-        let results = try_join_all(read_futures).await?;
+        let streams = try_join_all(stream_futures).await?;
 
         // Look up current schema version once for all files
         let current_version = schema_registry
@@ -185,15 +217,23 @@ impl ManifestAccessPlanner {
             .map(|table_def| table_def.schema_version)
             .unwrap_or(1);
 
-        for (parquet_file, batches) in parquet_files.iter().zip(results) {
+        // Consume each stream batch-by-batch — peak memory per file is one row group.
+        for (parquet_file, mut stream) in parquet_files.iter().zip(streams) {
             let file_schema_version = file_schema_versions.get(parquet_file).copied().unwrap_or(1);
 
-            for batch in batches {
-                let projected_batch = if file_schema_version != current_version {
+            while let Some(batch) =
+                stream.try_next().await.into_kalamdb_error("Failed to read Parquet batch")?
+            {
+                // When column projection is active or schema version differs,
+                // run schema evolution to normalize all batches to the effective schema.
+                let needs_evolution = file_schema_version != current_version
+                    || (columns.is_some() && batch.schema().fields() != effective_schema.fields());
+
+                let projected_batch = if needs_evolution {
                     self.project_batch_to_current_schema(
                         batch,
                         file_schema_version,
-                        &schema,
+                        &effective_schema,
                         table_id,
                         schema_registry,
                     )?
@@ -207,11 +247,11 @@ impl ManifestAccessPlanner {
 
         // Return empty batch if all files were empty
         if all_batches.is_empty() {
-            return Ok((RecordBatch::new_empty(schema), (total_batches, skipped, scanned)));
+            return Ok((RecordBatch::new_empty(effective_schema), (total_batches, skipped, scanned)));
         }
 
         // Concatenate all batches
-        let combined = datafusion::arrow::compute::concat_batches(&schema, &all_batches)
+        let combined = datafusion::arrow::compute::concat_batches(&effective_schema, &all_batches)
             .into_arrow_error_ctx("Failed to concatenate Parquet batches")?;
 
         Ok((combined, (total_batches, skipped, scanned)))

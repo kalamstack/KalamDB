@@ -185,6 +185,9 @@ fi
 step "Ensuring admin test user"
 ensure_admin_user
 
+step "Clearing shared test token cache"
+rm -f "$TMP_DIR/kalamdb_test_tokens.json" "$TMP_DIR/kalamdb_test_tokens.lock"
+
 cd "$ROOT_DIR"
 
 step "Running Rust workspace tests with CLI e2e coverage"

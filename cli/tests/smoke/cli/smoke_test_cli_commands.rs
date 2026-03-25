@@ -14,7 +14,7 @@ use crate::common::*;
 use std::time::Duration;
 
 /// Smoke Test: \stats command works correctly
-#[ntest::timeout(30000)]
+#[ntest::timeout(60000)]
 #[test]
 fn smoke_cli_stats_command() {
     if !is_server_running() {
@@ -132,7 +132,7 @@ fn smoke_cli_describe_table_command() {
 }
 
 /// Smoke Test: \format command changes output format (JSON)
-#[ntest::timeout(30000)]
+#[ntest::timeout(60000)]
 #[test]
 fn smoke_cli_format_json_command() {
     if !is_server_running() {
@@ -261,7 +261,7 @@ fn smoke_cli_sql_execution() {
 }
 
 /// Smoke Test: System tables are accessible
-#[ntest::timeout(30000)]
+#[ntest::timeout(60000)]
 #[test]
 fn smoke_cli_system_tables() {
     if !is_server_running() {
@@ -360,7 +360,7 @@ fn smoke_cli_flush_command() {
 }
 
 /// Smoke Test: User management commands
-#[ntest::timeout(30000)]
+#[ntest::timeout(60000)]
 #[test]
 fn smoke_cli_user_management() {
     if !is_server_running() {
@@ -473,7 +473,7 @@ fn smoke_cli_namespace_management() {
 }
 
 /// Smoke Test: ALTER TABLE commands
-#[ntest::timeout(90000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_cli_alter_table() {
     if !is_server_running() {

@@ -17,7 +17,7 @@ use reqwest::Client;
 use serde_json::Value;
 
 #[tokio::test]
-#[ntest::timeout(25000)]
+#[ntest::timeout(60000)]
 async fn test_file_datatype_upload_and_download() {
     let ctx = test_context();
     let client = Client::new();

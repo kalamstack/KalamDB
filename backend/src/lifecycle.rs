@@ -25,12 +25,21 @@ use tracing_actix_web::{RootSpanBuilder, TracingLogger};
 
 /// Resolve the effective number of actix-web worker threads.
 ///
-/// When `configured == 0` (auto), uses `num_cpus` but caps at 8 to avoid
-/// excessive idle RSS on high-core-count dev machines (~2 MB per worker).
-/// For production with >8 cores, set `workers` explicitly in server.toml.
+/// Precedence: `KALAMDB_SERVER_WORKERS` env var > server.toml `workers` > auto.
+/// When auto (`configured == 0`), uses `num_cpus` but caps at 4 to keep
+/// idle RSS low (~2 MB per worker). For high-throughput production
+/// deployments, set `workers` explicitly in server.toml or the env var.
 fn effective_workers(configured: usize) -> usize {
+    // Environment variable takes highest priority
+    if let Ok(val) = std::env::var("KALAMDB_SERVER_WORKERS") {
+        if let Ok(n) = val.parse::<usize>() {
+            if n > 0 {
+                return n;
+            }
+        }
+    }
     if configured == 0 {
-        num_cpus::get().min(8)
+        num_cpus::get().min(4)
     } else {
         configured
     }

@@ -1,26 +1,19 @@
 //! # kalamdb-filestore
 //!
-//! Object store operations for KalamDB cold storage.
+//! Async-first object-store operations for KalamDB cold storage.
 //!
-//! This crate handles all storage operations through StorageCached:
-//! - Parquet file reading/writing (local filesystem, S3, GCS, Azure)
-//! - Manifest file management
+//! All file I/O goes through [`StorageCached`] which wraps a `Storage` config
+//! with a lazy `ObjectStore` instance. Supports local filesystem, S3, GCS, and
+//! Azure backends transparently.
 //!
-//! ## Architecture
-//!
-//! - **storage_cached**: Unified file operations (read/write/list/delete)
-//! - **parquet_storage_writer**: Write RecordBatches to Parquet with bloom filters
-//! - **parquet_reader_ops**: Read Parquet files into RecordBatches
-//! - **manifest_ops**: Manifest JSON read/write
-//!
-//! ## Example Usage
+//! ## Example
 //!
 //! ```rust,ignore
 //! use kalamdb_filestore::StorageCached;
 //!
-//! // Write/read files using StorageCached
 //! let cached = StorageCached::with_default_timeouts(storage);
-//! let _ = cached.put_sync(table_type, &table_id, user_id, "file.parquet", data)?;
+//! let result = cached.put(table_type, &table_id, None, "batch-0.parquet", data).await?;
+//! let files  = cached.list_parquet_files(table_type, &table_id, None).await?;
 //! ```
 
 mod core;
@@ -44,15 +37,7 @@ mod tests;
 pub use error::{FilestoreError, Result};
 pub use files::{FileStorageService, StagedFile, StagingManager};
 pub use manifest_ops::{manifest_exists, read_manifest_json, write_manifest_json};
-pub use parquet_reader_ops::{
-    bloom_filter_check_absent, parse_parquet_from_bytes, parse_parquet_projected,
-    parse_parquet_schema_from_bytes, parse_parquet_with_bloom_filter, read_parquet_batches,
-    read_parquet_batches_sync, read_parquet_schema, read_parquet_schema_sync,
-};
+pub use parquet_reader_ops::{parse_parquet_stream, RecordBatchFileStream};
 pub use parquet_storage_writer::ParquetWriteResult;
-
-// Storage registry re-exports
 pub use registry::{StorageCached, StorageRegistry};
-
-// Health check re-exports
 pub use health::{ConnectivityTestResult, HealthStatus, StorageHealthResult, StorageHealthService};

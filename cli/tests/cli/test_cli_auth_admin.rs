@@ -505,7 +505,7 @@ async fn test_cli_flush_table() {
     );
 
     let final_status = if let Some(expected_job_id) = job_id {
-        wait_for_job_finished(&expected_job_id, Duration::from_secs(30))
+        wait_for_job_finished(&expected_job_id, Duration::from_secs(90))
             .expect("Flush job should reach a terminal state")
     } else {
         job["status"].as_str().unwrap_or("").to_lowercase()

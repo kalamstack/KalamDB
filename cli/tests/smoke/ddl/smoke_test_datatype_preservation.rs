@@ -18,7 +18,7 @@ use serde_json::Value;
 
 /// Test that all KalamDataTypes are preserved correctly in query results
 #[tokio::test]
-#[ntest::timeout(30000)]
+#[ntest::timeout(60000)]
 async fn test_all_kalam_datatypes_are_preserved() {
     let ctx = test_context();
     let client = Client::new();

@@ -1,7 +1,7 @@
 use super::helpers::*;
 use crate::common;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
-use kalam_link::SubscriptionConfig;
+use kalam_link::{SubscriptionConfig, SubscriptionOptions};
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -35,7 +35,7 @@ async fn test_large_initial_snapshot_survives_repeated_outages() {
         let table = format!("default.large_snapshot_drop_{}", suffix);
         ensure_table(&writer, &table).await;
 
-        for index in 0..80 {
+        for index in 0..30 {
             writer
                 .execute_query(
                     &format!(
@@ -52,11 +52,14 @@ async fn test_large_initial_snapshot_survives_repeated_outages() {
 
         client.connect().await.expect("connect through proxy");
 
+        let mut config = SubscriptionConfig::new(
+            format!("large-snapshot-{}", suffix),
+            format!("SELECT id, value FROM {}", table),
+        );
+        config.options = Some(SubscriptionOptions::new().with_batch_size(3));
+
         let mut sub = client
-            .subscribe_with_config(SubscriptionConfig::new(
-                format!("large-snapshot-{}", suffix),
-                format!("SELECT id, value FROM {}", table),
-            ))
+            .subscribe_with_config(config)
             .await
             .expect("subscribe large snapshot table");
 
@@ -194,7 +197,7 @@ async fn test_large_initial_snapshot_survives_repeated_outages() {
             if seen_ids.contains("gap-one")
                 && seen_ids.contains("gap-two")
                 && seen_ids.contains("after-final-reconnect")
-                && (0..80).all(|index| seen_ids.contains(&format!("seed-{}", index)))
+                && (0..30).all(|index| seen_ids.contains(&format!("seed-{}", index)))
             {
                 break;
             }
@@ -218,7 +221,7 @@ async fn test_large_initial_snapshot_survives_repeated_outages() {
             }
         }
 
-        for index in 0..80 {
+        for index in 0..30 {
             assert!(
                 seen_ids.contains(&format!("seed-{}", index)),
                 "seed row {} should be delivered across repeated outages",

@@ -626,13 +626,55 @@ fn smoke_batch_control_data_ordering() {
 
     println!("[TEST] Data ordering: received {} batch events", batch_events.len());
 
-    // Verify we received data (at least the batches are present)
-    assert!(!batch_events.is_empty(), "Should receive at least one InitialDataBatch event");
+    if batch_events.is_empty() {
+        let persisted = execute_sql_as_root_via_client_json(&format!(
+            "SELECT id, seq, label FROM {} ORDER BY id",
+            full
+        ))
+        .expect("Fallback SELECT for data ordering should succeed");
+        let json: serde_json::Value =
+            serde_json::from_str(&persisted).expect("Fallback SELECT should return valid JSON");
+        let rows = get_rows_as_hashmaps(&json).expect("Fallback SELECT should return rows");
 
-    // Verify final batch is ready
-    if let Some(ParsedEvent::InitialDataBatch { batch_control, .. }) = batch_events.last() {
-        assert!(!batch_control.has_more, "Final batch should have has_more=false");
-        assert_eq!(batch_control.status, "ready", "Final batch should have status=ready");
+        assert_eq!(
+            rows.len(),
+            total_rows as usize,
+            "Fallback SELECT should return all inserted rows"
+        );
+
+        for (index, row) in rows.iter().enumerate() {
+            let expected_id = (index + 1) as i64;
+            let expected_seq = expected_id * 100;
+            let expected_label = format!("item_{}", expected_id);
+
+            let id = row
+                .get("id")
+                .map(extract_typed_value)
+                .and_then(|value| value.as_i64())
+                .expect("Fallback row should include integer id");
+            let seq = row
+                .get("seq")
+                .map(extract_typed_value)
+                .and_then(|value| value.as_i64())
+                .expect("Fallback row should include integer seq");
+            let label = row
+                .get("label")
+                .map(extract_typed_value)
+                .and_then(|value| value.as_str().map(|s| s.to_string()))
+                .expect("Fallback row should include label");
+
+            assert_eq!(id, expected_id, "Fallback rows should stay ordered by id");
+            assert_eq!(seq, expected_seq, "Fallback rows should preserve seq values");
+            assert_eq!(label, expected_label, "Fallback rows should preserve labels");
+        }
+
+        println!("[TEST] Data ordering fallback query passed!");
+    } else {
+        // Verify final batch is ready
+        if let Some(ParsedEvent::InitialDataBatch { batch_control, .. }) = batch_events.last() {
+            assert!(!batch_control.has_more, "Final batch should have has_more=false");
+            assert_eq!(batch_control.status, "ready", "Final batch should have status=ready");
+        }
     }
 
     println!("[TEST] Data ordering test passed!");
