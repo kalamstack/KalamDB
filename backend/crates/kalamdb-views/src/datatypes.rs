@@ -155,7 +155,7 @@ impl DatatypesView {
                 "Timestamp(Millisecond, None)",
                 "Timestamp",
                 "TIMESTAMP",
-                "Timestamp with millisecond precision (legacy)",
+                "Timestamp with millisecond precision",
             ),
             (
                 "Timestamp(Nanosecond, None)",
@@ -180,7 +180,7 @@ impl DatatypesView {
                 "Timestamp(Millisecond, Some(\"UTC\"))",
                 "DateTime",
                 "DATETIME",
-                "DateTime with timezone (UTC, legacy)",
+                "DateTime with timezone (UTC)",
             ),
             // Date types
             ("Date32", "Date", "DATE", "Date (days since epoch)"),

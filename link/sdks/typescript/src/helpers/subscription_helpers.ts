@@ -8,9 +8,29 @@ import type {
   SubscriptionOptions,
 } from '../types.js';
 
-export type LegacySubscriptionOptions = SubscriptionOptions & {
-  from_seq_id?: SeqId | number | string;
-};
+export function normalizeSubscriptionOptions(
+  options?: SubscriptionOptions,
+): { batch_size?: number; last_rows?: number; from?: string } | undefined {
+  if (!options) {
+    return undefined;
+  }
+
+  const normalized: { batch_size?: number; last_rows?: number; from?: string } = {};
+
+  if (options.batch_size !== undefined) {
+    normalized.batch_size = options.batch_size;
+  }
+
+  if (options.last_rows !== undefined) {
+    normalized.last_rows = options.last_rows;
+  }
+
+  if (options.from !== undefined) {
+    normalized.from = options.from instanceof SeqId ? options.from.toString() : SeqId.from(options.from).toString();
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
 
 export type NormalizedSubscriptionEvent = ServerMessage & {
   rows?: RowData[];
@@ -53,31 +73,6 @@ export function trackSubscriptionMetadata(
   });
 }
 
-export function normalizeSubscriptionOptions(
-  options?: LegacySubscriptionOptions,
-): { batch_size?: number; last_rows?: number; from?: string } | undefined {
-  if (!options) {
-    return undefined;
-  }
-
-  const from = options.from ?? options.from_seq_id;
-  const normalized: { batch_size?: number; last_rows?: number; from?: string } = {};
-
-  if (options.batch_size !== undefined) {
-    normalized.batch_size = options.batch_size;
-  }
-
-  if (options.last_rows !== undefined) {
-    normalized.last_rows = options.last_rows;
-  }
-
-  if (from !== undefined) {
-    normalized.from = from instanceof SeqId ? from.toString() : SeqId.from(from).toString();
-  }
-
-  return Object.keys(normalized).length > 0 ? normalized : undefined;
-}
-
 export function normalizeSubscriptionEvent(event: ServerMessage): NormalizedSubscriptionEvent {
   const normalized = { ...event } as NormalizedSubscriptionEvent;
 
@@ -107,7 +102,7 @@ export function normalizeLiveRowsWasmEvent(event: {
 export function normalizeLiveRowsKeyColumns<T>(
   options: LiveRowsOptions<T>,
 ): string[] | undefined {
-  const declaredColumns = options.keyColumns ?? options.keyColumn;
+  const declaredColumns = options.keyColumns;
   if (declaredColumns === undefined) {
     return undefined;
   }

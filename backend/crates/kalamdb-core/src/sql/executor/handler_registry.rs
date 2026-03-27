@@ -17,7 +17,7 @@ use crate::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
 use crate::sql::executor::handler_adapter::{DynamicHandlerAdapter, TypedHandlerAdapter};
 use dashmap::DashMap;
 use kalamdb_commons::models::TableId;
-use kalamdb_sql::statement_classifier::SqlStatement;
+use kalamdb_sql::classifier::SqlStatement;
 use std::sync::Arc;
 use tracing::Instrument;
 
@@ -86,7 +86,7 @@ pub trait SqlStatementHandler: Send + Sync {
 ///
 /// Uses statement discriminant (enum variant identifier) for O(1) lookup.
 /// This is more efficient than matching on the full statement structure.
-type HandlerKey = std::mem::Discriminant<kalamdb_sql::statement_classifier::SqlStatementKind>;
+type HandlerKey = std::mem::Discriminant<kalamdb_sql::classifier::SqlStatementKind>;
 
 /// Centralized handler registry for SQL statement routing
 ///
@@ -122,7 +122,7 @@ impl HandlerRegistry {
     pub fn new(app_context: Arc<AppContext>, enforce_password_complexity: bool) -> Self {
         use kalamdb_commons::models::{NamespaceId, StorageId};
         use kalamdb_commons::TableType;
-        use kalamdb_sql::statement_classifier::SqlStatementKind; // Role not needed here
+        use kalamdb_sql::classifier::SqlStatementKind; // Role not needed here
 
         let registry = Self {
             handlers: DashMap::new(),
@@ -724,7 +724,7 @@ impl HandlerRegistry {
     /// - `extractor`: Function to extract T from SqlStatement
     fn register_typed<H, T, F>(
         &self,
-        placeholder: kalamdb_sql::statement_classifier::SqlStatementKind,
+        placeholder: kalamdb_sql::classifier::SqlStatementKind,
         handler: H,
         extractor: F,
     ) where
@@ -758,7 +758,7 @@ impl HandlerRegistry {
     /// ```
     fn register_dynamic<H>(
         &self,
-        placeholder: kalamdb_sql::statement_classifier::SqlStatementKind,
+        placeholder: kalamdb_sql::classifier::SqlStatementKind,
         handler: H,
     ) where
         H: crate::sql::executor::handlers::StatementHandler + Send + Sync + 'static,
@@ -842,7 +842,7 @@ mod tests {
     #[ignore = "Requires Raft for CREATE NAMESPACE"]
     #[tokio::test]
     async fn test_registry_create_namespace() {
-        use kalamdb_sql::statement_classifier::SqlStatementKind;
+        use kalamdb_sql::classifier::SqlStatementKind;
 
         let app_ctx = test_app_context_simple();
         let registry = HandlerRegistry::new(app_ctx, false);
@@ -873,7 +873,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_registry_unregistered_handler() {
-        use kalamdb_sql::statement_classifier::SqlStatementKind;
+        use kalamdb_sql::classifier::SqlStatementKind;
 
         let app_ctx = test_app_context_simple();
         let registry = HandlerRegistry::new(app_ctx, false);
@@ -903,7 +903,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_registry_authorization_check() {
-        use kalamdb_sql::statement_classifier::SqlStatementKind;
+        use kalamdb_sql::classifier::SqlStatementKind;
 
         let app_ctx = test_app_context_simple();
         let registry = HandlerRegistry::new(app_ctx, false);

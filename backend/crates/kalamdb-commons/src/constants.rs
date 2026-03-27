@@ -114,13 +114,3 @@ pub const RESERVED_NAMESPACE_NAMES: &[&str] = &[
     "pg_catalog",
     "datafusion",
 ];
-
-/// Legacy system schema version constants.
-///
-/// System schema lifecycle now reconciles through `system.schemas` at startup
-/// (`SchemaRegistry::initialize_tables()`), so this key/version pair is kept
-/// only for backward compatibility during transition.
-pub const SYSTEM_SCHEMA_VERSION: u32 = 1;
-
-/// Legacy RocksDB key for system schema version in default column family.
-pub const SYSTEM_SCHEMA_VERSION_KEY: &str = "system:schema_version";

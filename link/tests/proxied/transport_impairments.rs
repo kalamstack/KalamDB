@@ -1,5 +1,4 @@
 use super::helpers::*;
-use crate::common;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
 use kalam_link::SubscriptionConfig;
 use std::sync::atomic::Ordering;
@@ -72,7 +71,7 @@ async fn test_proxy_blackhole_keeps_socket_open_until_client_times_out() {
             },
         };
 
-        let proxy = TcpDisconnectProxy::start(common::server_url()).await;
+        let proxy = TcpDisconnectProxy::start(upstream_server_url()).await;
         let (client, connect_count, disconnect_count) =
             match create_test_client_with_events_for_base_url(proxy.base_url()) {
                 Ok(v) => v,
@@ -223,7 +222,7 @@ async fn test_proxy_latency_does_not_false_positive_disconnect() {
             },
         };
 
-        let proxy = TcpDisconnectProxy::start(common::server_url()).await;
+        let proxy = TcpDisconnectProxy::start(upstream_server_url()).await;
         let (client, _connect_count, disconnect_count) =
             match create_test_client_with_events_for_base_url(proxy.base_url()) {
                 Ok(v) => v,
@@ -312,7 +311,7 @@ async fn test_proxy_packet_loss_style_stalls_resume_without_replay() {
             },
         };
 
-        let proxy = TcpDisconnectProxy::start(common::server_url()).await;
+        let proxy = TcpDisconnectProxy::start(upstream_server_url()).await;
         let (client, connect_count, disconnect_count) =
             match create_test_client_with_events_for_base_url(proxy.base_url()) {
                 Ok(v) => v,

@@ -64,15 +64,7 @@ impl UserRowId {
             });
         }
 
-        // Legacy delimiter-based format fallback
-        let pos = key.iter().position(|&b| b == b':')?;
-        let user_id_str = std::str::from_utf8(&key[..pos]).ok()?;
-        let row_id = key[pos + 1..].to_vec();
-
-        Some(Self {
-            user_id: UserId::new(user_id_str),
-            row_id,
-        })
+        None
     }
 }
 

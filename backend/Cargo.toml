@@ -10,7 +10,7 @@ build = "build.rs"
 
 [dependencies]
 # Memory optimization
-tikv-jemallocator = { version = "0.6.1", optional = true }
+mimalloc = { version = "0.1", default-features = false, optional = true }
 
 # Core library
 kalamdb-core = { path = "crates/kalamdb-core" }
@@ -81,8 +81,8 @@ num_cpus = { workspace = true }
 libc = { workspace = true }
 
 [features]
-default = ["embedded-ui", "jemalloc"]
-jemalloc = ["tikv-jemallocator"]
+default = ["embedded-ui", "mimalloc"]
+mimalloc = ["dep:mimalloc"]
 embedded-ui = ["kalamdb-api/embedded-ui"]
 otel = ["dep:tracing-opentelemetry", "dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp"]
 # End-to-end tests that require a full test server instance

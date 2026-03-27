@@ -239,8 +239,8 @@ fn classify_sql(
     default_namespace: &NamespaceId,
     exec_ctx: &ExecutionContext,
     start_time: Instant,
-) -> Result<kalamdb_sql::statement_classifier::SqlStatement, HttpResponse> {
-    kalamdb_sql::statement_classifier::SqlStatement::classify_and_parse(
+) -> Result<kalamdb_sql::classifier::SqlStatement, HttpResponse> {
+    kalamdb_sql::classifier::SqlStatement::classify_and_parse(
         sql,
         default_namespace,
         exec_ctx.user_role(),

@@ -34,7 +34,7 @@ use kalamdb_commons::models::UserId;
 use kalamdb_commons::NotLeaderError;
 use kalamdb_session::check_user_table_write_access;
 use std::any::Any;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -79,17 +79,6 @@ impl StreamTableProvider {
             store,
             ttl_seconds,
         }
-    }
-
-    /// Backward-compatible constructor that accepts pk_field/column_defaults as separate args.
-    pub fn new_with_defaults(
-        core: Arc<TableProviderCore>,
-        store: Arc<StreamTableStore>,
-        ttl_seconds: Option<u64>,
-        _primary_key_field_name: String,
-        _column_defaults: HashMap<String, Expr>,
-    ) -> Self {
-        Self::new(core, store, ttl_seconds)
     }
 
     /// Build a complete Row from StreamTableRow including system column (_seq)

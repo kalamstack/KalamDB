@@ -134,10 +134,7 @@ impl StorageKey for ManifestId {
             return Ok(Self { table_id, user_id });
         }
 
-        // Legacy delimiter-based format fallback
-        String::from_utf8(bytes.to_vec())
-            .map(|s| ManifestId::from(s))
-            .map_err(|e| e.to_string())
+        Err("Invalid manifest ID storage key".to_string())
     }
 }
 

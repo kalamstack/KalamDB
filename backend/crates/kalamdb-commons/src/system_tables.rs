@@ -319,10 +319,6 @@ impl SystemTable {
 pub enum StoragePartition {
     /// Unified information_schema.tables storage
     InformationSchemaTables,
-    /// Legacy system columns metadata (kept for compatibility) TODO: Remove
-    SystemColumns,
-    /// User table flush counters
-    UserTableCounters, //TODO: Remove it not needed anymore
     /// Username index for system.users (unique index)
     SystemUsersUsernameIdx,
     /// Role index for system.users (non-unique index)
@@ -346,8 +342,6 @@ impl StoragePartition {
     pub fn name(&self) -> &'static str {
         match self {
             StoragePartition::InformationSchemaTables => "information_schema_tables",
-            StoragePartition::SystemColumns => "system_columns",
-            StoragePartition::UserTableCounters => "user_table_counters",
             StoragePartition::SystemUsersUsernameIdx => "system_users_username_idx",
             StoragePartition::SystemUsersRoleIdx => "system_users_role_idx",
             StoragePartition::SystemUsersDeletedAtIdx => "system_users_deleted_at_idx",
@@ -370,8 +364,6 @@ impl StoragePartition {
             | StoragePartition::SystemJobsIdempotencyIdx
             | StoragePartition::SystemLiveQueriesTableIdx => ColumnFamilyProfile::SystemIndex,
             StoragePartition::InformationSchemaTables
-            | StoragePartition::SystemColumns
-            | StoragePartition::UserTableCounters
             | StoragePartition::ManifestCache => ColumnFamilyProfile::SystemMeta,
         }
     }
@@ -380,8 +372,6 @@ impl StoragePartition {
     pub fn from_partition_name(name: &str) -> Option<Self> {
         match name {
             "information_schema_tables" => Some(StoragePartition::InformationSchemaTables),
-            "system_columns" => Some(StoragePartition::SystemColumns),
-            "user_table_counters" => Some(StoragePartition::UserTableCounters),
             "system_users_username_idx" => Some(StoragePartition::SystemUsersUsernameIdx),
             "system_users_role_idx" => Some(StoragePartition::SystemUsersRoleIdx),
             "system_users_deleted_at_idx" => Some(StoragePartition::SystemUsersDeletedAtIdx),
@@ -401,10 +391,6 @@ impl StoragePartition {
 
         static INFO: Lazy<Partition> =
             Lazy::new(|| Partition::new(StoragePartition::InformationSchemaTables.name()));
-        static COLUMNS: Lazy<Partition> =
-            Lazy::new(|| Partition::new(StoragePartition::SystemColumns.name()));
-        static COUNTERS: Lazy<Partition> =
-            Lazy::new(|| Partition::new(StoragePartition::UserTableCounters.name()));
         static USERNAME_IDX: Lazy<Partition> =
             Lazy::new(|| Partition::new(StoragePartition::SystemUsersUsernameIdx.name()));
         static ROLE_IDX: Lazy<Partition> =
@@ -424,8 +410,6 @@ impl StoragePartition {
 
         match self {
             StoragePartition::InformationSchemaTables => &INFO,
-            StoragePartition::SystemColumns => &COLUMNS,
-            StoragePartition::UserTableCounters => &COUNTERS,
             StoragePartition::SystemUsersUsernameIdx => &USERNAME_IDX,
             StoragePartition::SystemUsersRoleIdx => &ROLE_IDX,
             StoragePartition::SystemUsersDeletedAtIdx => &DELETED_AT_IDX,

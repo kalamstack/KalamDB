@@ -182,21 +182,17 @@ impl AlterTableHandler {
         let prefix = listed.prefix.trim_end_matches('/');
         let normalized_column = normalize_vector_column_name(column_name);
         let vector_snapshot_prefix = format!("vec-{}-snapshot-", normalized_column);
-        let legacy_vector_column_prefix = format!("vector/{}/", normalized_column);
 
         for listed_path in listed.paths {
             let relative_path = if listed_path.starts_with(prefix) {
                 listed_path[prefix.len()..].trim_start_matches('/').to_string()
-            } else if let Some((_, tail)) = listed_path.split_once("/vector/") {
-                format!("vector/{}", tail)
             } else {
                 listed_path
             };
 
             let is_current_snapshot = relative_path.starts_with(&vector_snapshot_prefix)
                 && relative_path.ends_with(".vix");
-            let is_legacy_snapshot = relative_path.starts_with(&legacy_vector_column_prefix);
-            if !is_current_snapshot && !is_legacy_snapshot {
+            if !is_current_snapshot {
                 continue;
             }
 

@@ -4,7 +4,7 @@
 //! Used by both the SQL executor (plan-level checks) and SecuredSystemTableProvider (scan-level checks).
 
 use crate::error::SessionError;
-use crate::session_context::SessionUserContext;
+use crate::user_context::UserContext as SessionUserContext;
 use datafusion::catalog::Session;
 use datafusion::execution::context::SessionState;
 use kalamdb_commons::models::{NamespaceId, ReadContext, Role, TableId, TableName, UserId};

@@ -248,17 +248,9 @@ impl KalamLinkClient {
             }
         }
 
-        // ── Legacy per-subscription path ─────────────────────────────────
-        let auth = self.resolved_auth.resolve().await?;
-        SubscriptionManager::new(
-            &self.base_url,
-            config,
-            &auth,
-            &self.timeouts,
-            &self.connection_options,
-            &self.event_handlers,
-        )
-        .await
+        Err(crate::error::KalamLinkError::WebSocketError(
+            "Not connected. Call connect() before subscribing.".to_string(),
+        ))
     }
 
     /// Subscribe to a SQL query and receive materialized row snapshots.
@@ -436,18 +428,17 @@ impl KalamLinkClient {
 
     /// Update the shared authentication source without requiring `&mut self`.
     ///
-    /// This updates only `shared_resolved_auth` (the `Arc<RwLock<>>` used by
-    /// the background shared connection for subscribe/connect/reconnect).
-    /// It does NOT update the non-thread-safe `auth` / `resolved_auth` fields,
-    /// which is fine because:
-    /// - HTTP queries use a cloned `AuthProvider` in `QueryExecutor` (fixed at
-    ///   build time).
-    /// - Subscribe/connect paths read exclusively from `shared_resolved_auth`.
+    /// Updates both `shared_resolved_auth` (used by subscribe/connect paths)
+    /// and the `QueryExecutor`'s auth snapshot (used by HTTP queries) so that
+    /// fresh credentials from Dart's `authProvider` take effect immediately for
+    /// all in-flight and future requests.
     ///
     /// Use this from FFI callers (e.g. Dart) where `&mut self` would require
     /// an exclusive write lock on the opaque handle — which deadlocks when the
     /// connection event pump holds a long-lived read lock.
     pub fn update_shared_auth(&self, auth: AuthProvider) {
+        // Update the HTTP query executor so new queries use the fresh token.
+        self.query_executor.set_auth(auth.clone());
         let resolved = ResolvedAuth::Static(auth);
         *self.shared_resolved_auth.write().unwrap() = resolved;
     }
@@ -789,6 +780,7 @@ pub struct KalamLinkClientBuilder {
     timeouts: KalamLinkTimeouts,
     connection_options: ConnectionOptions,
     event_handlers: EventHandlers,
+    custom_auth_refresher: Option<AuthRefreshCallback>,
 }
 
 impl KalamLinkClientBuilder {
@@ -801,6 +793,7 @@ impl KalamLinkClientBuilder {
             timeouts: KalamLinkTimeouts::default(),
             connection_options: ConnectionOptions::default(),
             event_handlers: EventHandlers::default(),
+            custom_auth_refresher: None,
         }
     }
 
@@ -900,6 +893,17 @@ impl KalamLinkClientBuilder {
     /// Set maximum number of retries for failed requests
     pub fn max_retries(mut self, retries: u32) -> Self {
         self.max_retries = retries;
+        self
+    }
+
+    /// Set a custom auth-refresh callback for TOKEN_EXPIRED recovery.
+    ///
+    /// When the server returns `TOKEN_EXPIRED`, the executor calls this
+    /// callback to obtain fresh credentials and retries the request once.
+    /// If not set, the default callback resolves credentials from the
+    /// configured auth source.
+    pub fn auth_refresher(mut self, refresher: AuthRefreshCallback) -> Self {
+        self.custom_auth_refresher = Some(refresher);
         self
     }
 
@@ -1071,51 +1075,57 @@ impl KalamLinkClientBuilder {
         );
 
         // Set up auto-refresh callback so the executor can recover from
-        // TOKEN_EXPIRED errors transparently.  The callback resolves fresh
-        // credentials from the shared auth source (dynamic or static) and,
-        // when basic-auth is returned, exchanges it for a JWT via login.
+        // TOKEN_EXPIRED errors transparently.
         {
-            let shared_auth = Arc::new(RwLock::new(self.resolved_auth.clone()));
-            let login_url = format!("{}/v1/api/auth/login", &base_url);
-            let login_client = http_client.clone();
+            let refresher = if let Some(custom) = self.custom_auth_refresher {
+                custom
+            } else {
+                // Default callback: resolves fresh credentials from the shared
+                // auth source (dynamic or static) and, when basic-auth is
+                // returned, exchanges it for a JWT via login.
+                let shared_auth = Arc::new(RwLock::new(self.resolved_auth.clone()));
+                let login_url = format!("{}/v1/api/auth/login", &base_url);
+                let login_client = http_client.clone();
 
-            let refresher: AuthRefreshCallback = Arc::new(move || {
-                let shared = Arc::clone(&shared_auth);
-                let url = login_url.clone();
-                let client = login_client.clone();
-                Box::pin(async move {
-                    let resolved = { shared.read().unwrap().clone() };
-                    let auth = resolved.resolve().await?;
-                    match auth {
-                        AuthProvider::BasicAuth(username, password) => {
-                            // Exchange basic credentials for a JWT.
-                            let body = serde_json::json!({
-                                "username": username,
-                                "password": password,
-                            });
-                            let resp = client
-                                .post(&url)
-                                .json(&body)
-                                .send()
-                                .await
-                                .map_err(|e: reqwest::Error| KalamLinkError::NetworkError(e.to_string()))?;
-                            if !resp.status().is_success() {
-                                let msg = resp.text().await.unwrap_or_default();
-                                return Err(KalamLinkError::AuthenticationError(format!(
-                                    "Login failed during token refresh: {}", msg
-                                )));
-                            }
-                            let login_resp = resp
-                                .json::<crate::models::LoginResponse>()
-                                .await
-                                .map_err(|e: reqwest::Error| KalamLinkError::NetworkError(e.to_string()))?;
-                            log::debug!("[LINK_HTTP] Reauthenticated via basic login");
-                            Ok(AuthProvider::jwt_token(login_resp.access_token))
-                        },
-                        other => Ok(other),
-                    }
-                })
-            });
+                let default_refresher: AuthRefreshCallback = Arc::new(move || {
+                    let shared = Arc::clone(&shared_auth);
+                    let url = login_url.clone();
+                    let client = login_client.clone();
+                    Box::pin(async move {
+                        let resolved = { shared.read().unwrap().clone() };
+                        let auth = resolved.resolve().await?;
+                        match auth {
+                            AuthProvider::BasicAuth(username, password) => {
+                                // Exchange basic credentials for a JWT.
+                                let body = serde_json::json!({
+                                    "username": username,
+                                    "password": password,
+                                });
+                                let resp = client
+                                    .post(&url)
+                                    .json(&body)
+                                    .send()
+                                    .await
+                                    .map_err(|e: reqwest::Error| KalamLinkError::NetworkError(e.to_string()))?;
+                                if !resp.status().is_success() {
+                                    let msg = resp.text().await.unwrap_or_default();
+                                    return Err(KalamLinkError::AuthenticationError(format!(
+                                        "Login failed during token refresh: {}", msg
+                                    )));
+                                }
+                                let login_resp = resp
+                                    .json::<crate::models::LoginResponse>()
+                                    .await
+                                    .map_err(|e: reqwest::Error| KalamLinkError::NetworkError(e.to_string()))?;
+                                log::debug!("[LINK_HTTP] Reauthenticated via basic login");
+                                Ok(AuthProvider::jwt_token(login_resp.access_token))
+                            },
+                            other => Ok(other),
+                        }
+                    })
+                });
+                default_refresher
+            };
             query_executor.set_auth_refresher(refresher);
 
             // Use the same shared_resolved_auth for both the executor callback

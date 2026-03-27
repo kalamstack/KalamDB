@@ -3,7 +3,7 @@
 //! Session context, permissions, and secured table provider abstraction for KalamDB.
 //!
 //! This crate provides:
-//! - [`SessionUserContext`]: User identity passed through DataFusion sessions
+//! - [`UserContext`]: User identity passed through DataFusion sessions
 //! - [`permissions`]: Centralized permission checking for table access
 //! - [`SecuredSystemTableProvider`]: Wrapper that enforces permissions on system tables
 //!
@@ -37,9 +37,7 @@
 pub mod auth_session;
 pub mod error;
 pub mod permissions;
-pub mod rbac;
 pub mod secured_provider;
-pub mod session_context;
 pub mod user_context;
 
 // Re-export main types
@@ -58,5 +56,7 @@ pub use permissions::{
     is_admin_role, is_system_role, shared_table_access_level, PermissionChecker,
 };
 pub use secured_provider::{secure_provider, SecuredSystemTableProvider};
-pub use session_context::SessionUserContext;
 pub use user_context::UserContext;
+
+/// Type alias for `UserContext` used in session extensions.
+pub type SessionUserContext = UserContext;

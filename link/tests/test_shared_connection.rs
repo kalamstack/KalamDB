@@ -490,9 +490,9 @@ async fn test_subscription_drop_unsubscribes() {
     client.disconnect().await;
 }
 
-/// Without connect(), subscribe() should still work (legacy per-subscription path).
+/// Without connect(), subscribe() should return an error.
 #[tokio::test]
-async fn test_subscribe_without_connect_legacy() {
+async fn test_subscribe_without_connect_returns_error() {
     let client = match create_test_client() {
         Ok(c) => c,
         Err(e) => {
@@ -503,16 +503,12 @@ async fn test_subscribe_without_connect_legacy() {
 
     ensure_table(&client, "default.legacy_sub_test").await;
 
-    // Don't call connect() — should fall back to per-subscription WebSocket
-    let mut sub = timeout(TEST_TIMEOUT, client.subscribe("SELECT * FROM default.legacy_sub_test"))
+    // Don't call connect() — should fail because no shared connection
+    let result = timeout(TEST_TIMEOUT, client.subscribe("SELECT * FROM default.legacy_sub_test"))
         .await
-        .expect("subscribe should not time out")
-        .expect("subscribe should succeed without connect()");
+        .expect("subscribe should not time out");
 
-    let event = timeout(TEST_TIMEOUT, sub.next()).await;
-    assert!(event.is_ok(), "legacy subscription should receive events");
-
-    sub.close().await.ok();
+    assert!(result.is_err(), "subscribe without connect() should fail");
 }
 
 /// Three active subscriptions should reconnect and continue from a resume point

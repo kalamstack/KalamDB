@@ -37,6 +37,7 @@ kalam-pg-common = { path = "crates/kalam-pg-common", default-features = false }
 kalam-pg-fdw = { path = "crates/kalam-pg-fdw" }
 kalamdb-commons = { path = "../backend/crates/kalamdb-commons", default-features = false, features = ["rows"] }
 pgrx = { workspace = true }
+regex = { workspace = true }
 serde_json = { workspace = true }
 tokio = { version = "1", default-features = false, features = ["rt"] }
 

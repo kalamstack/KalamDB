@@ -181,15 +181,15 @@ pub async fn forward_sql_if_follower(
     let has_write = statements.iter().any(|sql| {
         let classify_sql =
             kalamdb_sql::execute_as::extract_inner_sql(sql).unwrap_or_else(|| sql.to_string());
-        let stmt = kalamdb_sql::statement_classifier::SqlStatement::classify_and_parse(
+        let stmt = kalamdb_sql::classifier::SqlStatement::classify_and_parse(
             &classify_sql,
             default_namespace,
             Role::System,
         )
         .unwrap_or_else(|_| {
-            kalamdb_sql::statement_classifier::SqlStatement::new(
+            kalamdb_sql::classifier::SqlStatement::new(
                 classify_sql,
-                kalamdb_sql::statement_classifier::SqlStatementKind::Unknown,
+                kalamdb_sql::classifier::SqlStatementKind::Unknown,
             )
         });
         stmt.is_write_operation()

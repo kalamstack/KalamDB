@@ -69,9 +69,7 @@ pub fn scalar_to_i64(value: &ScalarValue) -> Option<i64> {
     }
 }
 
-/// Alias for scalar_to_f64 for backwards compatibility
-///
-/// Some older code may use this name instead.
+/// Convenience alias for `scalar_to_f64`.
 #[inline]
 pub fn as_f64(value: &ScalarValue) -> Option<f64> {
     scalar_to_f64(value)

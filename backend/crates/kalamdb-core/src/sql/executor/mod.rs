@@ -22,7 +22,7 @@ pub use crate::sql::ExecutionMetadata;
 pub use datafusion::scalar::ScalarValue;
 use kalamdb_commons::models::TableId;
 use kalamdb_commons::schemas::TableType;
-use kalamdb_sql::statement_classifier::SqlStatement;
+use kalamdb_sql::classifier::SqlStatement;
 use sqlparser::ast::Statement as SqlParserStatement;
 use std::sync::Arc;
 

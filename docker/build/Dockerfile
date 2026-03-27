@@ -181,7 +181,7 @@ RUN echo '# Auto-generated for Docker build' > version.toml && \
     echo "build_date = \"$(date -u '+%Y-%m-%d %H:%M:%S UTC')\"" >> version.toml
 
 # Build dependencies only (this layer is cached until Cargo.toml/Cargo.lock changes)
-RUN cargo build --profile docker --features jemalloc --bin kalamdb-server --bin kalam 2>/dev/null || true
+RUN cargo build --profile docker --features mimalloc --bin kalamdb-server --bin kalam 2>/dev/null || true
 # The "|| true" handles expected errors from dummy source files
 # The important thing is that all dependencies are now compiled and cached
 
@@ -220,7 +220,7 @@ RUN if [ ! -f version.toml ]; then \
 
 # Build final binaries (dependencies are already cached from deps stage)
 # SKIP_UI_BUILD: the UI dist/ was already built on the host and COPY'd above.
-RUN SKIP_UI_BUILD=1 cargo build --profile docker --features jemalloc --bin kalamdb-server --bin kalam
+RUN SKIP_UI_BUILD=1 cargo build --profile docker --features mimalloc --bin kalamdb-server --bin kalam
 
 # ============================================================================
 # Stage 4: Runtime (optimized for minimal size)
@@ -252,12 +252,11 @@ RUN sed -i 's|data_path = "\./data"|data_path = "/data"|g' /config/server.toml
 # Switch to non-root user
 USER kalamdb
 
-# jemalloc tuning: return freed memory to OS aggressively.
-# - background_thread: async arena purging without blocking app threads
-# - dirty_decay_ms=1000: purge dirty pages after 1s (default 10s)
-# - muzzy_decay_ms=1000: release muzzy pages after 1s (default 10s)
-# - narenas=2: fewer arenas = less fragmentation for moderate concurrency
-ENV MALLOC_CONF="background_thread:true,dirty_decay_ms:1000,muzzy_decay_ms:1000,narenas:2"
+# mimalloc tuning: eager memory return and reduced arena count.
+# MIMALLOC_PURGE_DELAY=100: purge freed segments after 100ms (default 10s)
+# MIMALLOC_ARENA_EAGER_COMMIT=1: commit arena pages immediately
+ENV MIMALLOC_PURGE_DELAY=100
+ENV MIMALLOC_ARENA_EAGER_COMMIT=1
 
 # Set working directory
 WORKDIR /data

@@ -2,6 +2,7 @@
 //!
 //! Intercepts:
 //! - `CREATE FOREIGN TABLE`  → `CREATE NAMESPACE IF NOT EXISTS` + `CREATE <type> TABLE`
+//! - `CREATE TABLE ... USING kalamdb` → `CREATE FOREIGN TABLE` + propagate to KalamDB
 //! - `ALTER FOREIGN TABLE`   → `ALTER TABLE ADD/DROP COLUMN`
 //! - `DROP FOREIGN TABLE`    → `DROP <type> TABLE IF EXISTS`
 
@@ -13,6 +14,16 @@ use kalamdb_commons::TableType;
 use pgrx::pg_sys;
 use std::ffi::CStr;
 use std::str::FromStr;
+
+/// Default foreign server name used when handling `CREATE TABLE ... USING kalamdb`.
+const DEFAULT_KALAM_SERVER: &str = "kalam_server";
+
+// Thread-local flag: when true, suppress KalamDB propagation in the
+// CREATE FOREIGN TABLE hook because `handle_create_table_using_kalamdb`
+// already sent the DDL to KalamDB itself.
+std::thread_local! {
+    static SKIP_FT_PROPAGATION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 
 /// Previous ProcessUtility hook (may be null).
 static mut PREV_PROCESS_UTILITY: pg_sys::ProcessUtility_hook_type = None;
@@ -50,14 +61,17 @@ unsafe extern "C-unwind" fn pg_kalam_process_utility(
 
     match tag {
         pg_sys::NodeTag::T_CreateForeignTableStmt => {
+            let ft_stmt = utility_stmt as *mut pg_sys::CreateForeignTableStmt;
+            // Skip if this is an internal SPI call from handle_create_table_using_kalamdb
+            // (marked by the absence of a caller-visible server name check).
             let statement_sql = extract_statement_sql(pstmt, query_string);
+            let is_internal = SKIP_FT_PROPAGATION.with(|flag| flag.get());
             // Let PostgreSQL create the foreign table first (so catalog entries exist).
             call_prev(pstmt, query_string, read_only_tree, context, params, query_env, dest, qc);
-            // Then propagate to KalamDB.
-            handle_create_foreign_table(
-                utility_stmt as *mut pg_sys::CreateForeignTableStmt,
-                &statement_sql,
-            );
+            // Then propagate to KalamDB — unless we already did it ourselves.
+            if !is_internal {
+                handle_create_foreign_table(ft_stmt, &statement_sql);
+            }
         }
         pg_sys::NodeTag::T_AlterTableStmt => {
             let alter_stmt = utility_stmt as *mut pg_sys::AlterTableStmt;
@@ -78,6 +92,17 @@ unsafe extern "C-unwind" fn pg_kalam_process_utility(
                 let drop_targets = collect_drop_targets(drop_stmt);
                 call_prev(pstmt, query_string, read_only_tree, context, params, query_env, dest, qc);
                 handle_drop_foreign_tables(&drop_targets);
+            } else {
+                call_prev(pstmt, query_string, read_only_tree, context, params, query_env, dest, qc);
+            }
+        }
+        pg_sys::NodeTag::T_CreateStmt => {
+            // Intercept regular CREATE TABLE ... USING kalamdb
+            let create_stmt = utility_stmt as *mut pg_sys::CreateStmt;
+            let access_method = read_cstr((*create_stmt).accessMethod);
+            if access_method.eq_ignore_ascii_case("kalamdb") {
+                let statement_sql = extract_statement_sql(pstmt, query_string);
+                handle_create_table_using_kalamdb(create_stmt, &statement_sql, pstmt, query_string, read_only_tree, context, params, query_env, dest, qc);
             } else {
                 call_prev(pstmt, query_string, read_only_tree, context, params, query_env, dest, qc);
             }
@@ -157,6 +182,9 @@ unsafe fn handle_create_foreign_table(
         }
     };
 
+    // Transform SERIAL/BIGSERIAL/IDENTITY → integer type + DEFAULT SNOWFLAKE_ID()
+    let column_defs = transform_serial_types(column_defs);
+
     let column_defs = infer_primary_key_column(column_defs, table_type);
 
     if column_defs.is_empty() {
@@ -169,12 +197,28 @@ unsafe fn handle_create_foreign_table(
         "CREATE NAMESPACE IF NOT EXISTS {}",
         quote_ident(&namespace)
     );
+
+    // Collect any extra KalamDB-specific options from the FDW table options
+    // (e.g. storage_id, flush_policy, access_level, etc.)
+    let kalam_options: Vec<String> = ft_options
+        .iter()
+        .filter(|(k, _)| *k != "table_type" && *k != "namespace" && *k != "table")
+        .map(|(k, v)| format!("{} = '{}'", k.to_uppercase(), v))
+        .collect();
+
+    let with_clause = if kalam_options.is_empty() {
+        String::new()
+    } else {
+        format!(" WITH ({})", kalam_options.join(", "))
+    };
+
     let create_table_sql = format!(
-        "CREATE {} TABLE IF NOT EXISTS {}.{} ({})",
+        "CREATE {} TABLE IF NOT EXISTS {}.{} ({}){}",
         table_type_keyword,
         quote_ident(&namespace),
         quote_ident(&table_name),
-        column_defs.join(", ")
+        column_defs.join(", "),
+        with_clause
     );
 
     // Send to KalamDB
@@ -866,6 +910,420 @@ mod tests {
         .expect("extract add-column clause");
         assert_eq!(clause, "ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'");
     }
+
+    #[test]
+    fn transform_serial_types_replaces_serial_with_default() {
+        let defs = vec![
+            "id BIGSERIAL PRIMARY KEY".to_string(),
+            "title TEXT NOT NULL".to_string(),
+        ];
+        let result = super::transform_serial_types(defs);
+        assert_eq!(result[0], "id BIGINT DEFAULT SNOWFLAKE_ID() PRIMARY KEY");
+        assert_eq!(result[1], "title TEXT NOT NULL");
+    }
+
+    #[test]
+    fn transform_serial_types_preserves_explicit_default() {
+        let defs = vec!["id BIGSERIAL PRIMARY KEY DEFAULT 100".to_string()];
+        let result = super::transform_serial_types(defs);
+        assert_eq!(result[0], "id BIGINT PRIMARY KEY DEFAULT 100");
+    }
+
+    #[test]
+    fn transform_serial_variants() {
+        let defs = vec![
+            "a SERIAL".to_string(),
+            "b SMALLSERIAL".to_string(),
+            "c SERIAL4".to_string(),
+            "d SERIAL8".to_string(),
+            "e SERIAL2".to_string(),
+        ];
+        let result = super::transform_serial_types(defs);
+        assert!(result[0].contains("INTEGER"));
+        assert!(result[1].contains("SMALLINT"));
+        assert!(result[2].contains("INTEGER"));
+        assert!(result[3].contains("BIGINT"));
+        assert!(result[4].contains("SMALLINT"));
+    }
+
+    #[test]
+    fn transform_generated_identity() {
+        let defs = vec!["id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY".to_string()];
+        let result = super::transform_serial_types(defs);
+        assert_eq!(result[0], "id INTEGER DEFAULT SNOWFLAKE_ID() PRIMARY KEY");
+    }
+
+    #[test]
+    fn extract_with_options_from_sql_works() {
+        let sql = "CREATE TABLE t (id INT) USING kalamdb WITH (type = 'user', storage_id = 'local');";
+        let opts = super::extract_with_options_from_sql(sql);
+        assert_eq!(opts.len(), 2);
+        assert_eq!(opts.get("type").unwrap(), "user");
+        assert_eq!(opts.get("storage_id").unwrap(), "local");
+    }
+
+    #[test]
+    fn strip_for_foreign_table_removes_pk_and_snowflake() {
+        let defs = vec![
+            "id BIGINT PRIMARY KEY DEFAULT SNOWFLAKE_ID()".to_string(),
+            "name TEXT NOT NULL".to_string(),
+            "age INTEGER".to_string(),
+        ];
+        let result = super::strip_for_foreign_table(&defs);
+        assert_eq!(result[0], "id BIGINT");
+        assert_eq!(result[1], "name TEXT");
+        assert_eq!(result[2], "age INTEGER");
+    }
+
+    #[test]
+    fn strip_for_foreign_table_preserves_non_snowflake_defaults() {
+        let defs = vec![
+            "status TEXT NOT NULL DEFAULT 'pending'".to_string(),
+            "created TIMESTAMP DEFAULT NOW()".to_string(),
+        ];
+        let result = super::strip_for_foreign_table(&defs);
+        assert_eq!(result[0], "status TEXT DEFAULT 'pending'");
+        assert_eq!(result[1], "created TIMESTAMP DEFAULT NOW()");
+    }
+
+    #[test]
+    fn strip_for_foreign_table_removes_table_level_pk() {
+        let defs = vec![
+            "id BIGINT".to_string(),
+            "name TEXT".to_string(),
+            "PRIMARY KEY (id)".to_string(),
+        ];
+        let result = super::strip_for_foreign_table(&defs);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "id BIGINT");
+        assert_eq!(result[1], "name TEXT");
+    }
+
+    #[test]
+    fn passthrough_then_strip_roundtrip() {
+        // Simulates the full USING kalamdb path with KalamDB-native syntax:
+        // 1. User writes: id BIGINT PRIMARY KEY DEFAULT SNOWFLAKE_ID()
+        // 2. Passed through as-is to KalamDB
+        // 3. strip_for_foreign_table → id BIGINT  (for PG foreign table)
+        let input = vec![
+            "id BIGINT PRIMARY KEY DEFAULT SNOWFLAKE_ID()".to_string(),
+            "name TEXT NOT NULL".to_string(),
+            "created TIMESTAMP DEFAULT NOW()".to_string(),
+        ];
+
+        let pg_defs = super::strip_for_foreign_table(&input);
+        assert_eq!(pg_defs[0], "id BIGINT");
+        assert_eq!(pg_defs[1], "name TEXT");
+        assert_eq!(pg_defs[2], "created TIMESTAMP DEFAULT NOW()");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CREATE TABLE ... USING kalamdb → CREATE FOREIGN TABLE + propagate
+// ---------------------------------------------------------------------------
+
+/// Handle `CREATE TABLE ... USING kalamdb [WITH (...)]`.
+///
+/// We intercept this BEFORE PostgreSQL tries to execute it (which would fail
+/// because there is no "kalamdb" access method).  Instead we:
+/// 1. Send the full DDL (with PRIMARY KEY, SNOWFLAKE_ID defaults, WITH options) to KalamDB
+/// 2. Create a PostgreSQL FOREIGN TABLE with PG-compatible column defs
+///    (stripped of PRIMARY KEY and SNOWFLAKE_ID defaults)
+#[allow(clippy::too_many_arguments)]
+unsafe fn handle_create_table_using_kalamdb(
+    stmt: *mut pg_sys::CreateStmt,
+    statement_sql: &str,
+    _pstmt: *mut pg_sys::PlannedStmt,
+    _query_string: *const std::ffi::c_char,
+    _read_only_tree: bool,
+    _context: pg_sys::ProcessUtilityContext::Type,
+    _params: pg_sys::ParamListInfo,
+    _query_env: *mut pg_sys::QueryEnvironment,
+    _dest: *mut pg_sys::DestReceiver,
+    _qc: *mut pg_sys::QueryCompletion,
+) {
+    // 1. Resolve schema.table from the RangeVar
+    let rv = (*stmt).relation;
+    if rv.is_null() {
+        pgrx::error!("pg_kalam: CREATE TABLE USING kalamdb requires a table name");
+    }
+
+    let schema_name = read_cstr((*rv).schemaname);
+    let table_name = read_cstr((*rv).relname);
+    if table_name.is_empty() {
+        pgrx::error!("pg_kalam: could not determine table name");
+    }
+
+    let namespace = if schema_name.is_empty() {
+        "public".to_string()
+    } else {
+        schema_name
+    };
+
+    // 2. Extract column definitions from the original SQL
+    let column_defs = match extract_remote_column_definitions(statement_sql) {
+        Ok(defs) if !defs.is_empty() => defs,
+        Ok(_) => {
+            pgrx::error!("pg_kalam: no columns found in CREATE TABLE USING kalamdb");
+        }
+        Err(e) => {
+            pgrx::error!("pg_kalam: failed to parse CREATE TABLE: {}", e);
+        }
+    };
+
+    // 3. Column defs are passed through to KalamDB as-is.
+    //    The user must use KalamDB-native syntax (e.g. BIGINT PRIMARY KEY DEFAULT SNOWFLAKE_ID()).
+    //    If a type is unsupported, KalamDB will return an error.
+    let kalamdb_column_defs = column_defs;
+
+    // 4. Build PG-compatible column defs (strip PRIMARY KEY + SNOWFLAKE_ID defaults)
+    let pg_column_defs = strip_for_foreign_table(&kalamdb_column_defs);
+
+    // 5. Extract WITH options from the original SQL
+    let with_options = extract_with_options_from_sql(statement_sql);
+
+    // 6. Determine table_type from WITH options
+    let table_type = with_options
+        .get("type")
+        .and_then(|v| TableType::from_str(v).ok())
+        .unwrap_or(TableType::Shared);
+
+    let table_type_keyword = table_type_to_keyword(table_type);
+
+    // 7. Build the full KalamDB DDL with all WITH options passed through
+    let kalam_with_clause = if with_options.is_empty() {
+        String::new()
+    } else {
+        let pairs: Vec<String> = with_options
+            .iter()
+            .map(|(k, v)| format!("{} = '{}'", k.to_uppercase(), v))
+            .collect();
+        format!(" WITH ({})", pairs.join(", "))
+    };
+
+    let create_ns_sql = format!(
+        "CREATE NAMESPACE IF NOT EXISTS {}",
+        quote_ident(&namespace)
+    );
+    let create_kalamdb_table_sql = format!(
+        "CREATE {} TABLE IF NOT EXISTS {}.{} ({}){}",
+        table_type_keyword,
+        quote_ident(&namespace),
+        quote_ident(&table_name),
+        kalamdb_column_defs.join(", "),
+        kalam_with_clause
+    );
+
+    // 8. Send DDL to KalamDB first (so we fail fast before touching PG catalog)
+    if let Err(e) = execute_remote_sql(&create_ns_sql, DEFAULT_KALAM_SERVER) {
+        pgrx::warning!("pg_kalam: failed to create namespace '{}': {}", namespace, e);
+    }
+    if let Err(e) = execute_remote_sql(&create_kalamdb_table_sql, DEFAULT_KALAM_SERVER) {
+        pgrx::error!(
+            "pg_kalam: failed to create KalamDB table {}.{}: {}",
+            namespace, table_name, e
+        );
+    }
+
+    // 9. Create PG schema + foreign table via SPI (with propagation suppressed)
+    let create_schema_sql = format!(
+        "CREATE SCHEMA IF NOT EXISTS {}",
+        quote_ident(&namespace)
+    );
+
+    let ft_options = format!("table_type '{}'", table_type_keyword.to_lowercase());
+    let create_ft_sql = format!(
+        "CREATE FOREIGN TABLE {}.{} ({}) SERVER {} OPTIONS ({})",
+        quote_ident(&namespace),
+        quote_ident(&table_name),
+        pg_column_defs.join(", "),
+        DEFAULT_KALAM_SERVER,
+        ft_options
+    );
+
+    pgrx::Spi::run(&create_schema_sql).unwrap_or_else(|e| {
+        pgrx::warning!("pg_kalam: failed to ensure schema '{}': {}", namespace, e);
+    });
+
+    // Suppress the CREATE FOREIGN TABLE hook from re-propagating to KalamDB
+    SKIP_FT_PROPAGATION.with(|flag| flag.set(true));
+    let spi_result = pgrx::Spi::run(&create_ft_sql);
+    SKIP_FT_PROPAGATION.with(|flag| flag.set(false));
+
+    if let Err(e) = spi_result {
+        pgrx::error!(
+            "pg_kalam: failed to create foreign table {}.{}: {}",
+            namespace, table_name, e
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SERIAL type and GENERATED IDENTITY transformation
+// ---------------------------------------------------------------------------
+
+/// Transform PostgreSQL SERIAL/BIGSERIAL/SMALLSERIAL types and GENERATED AS IDENTITY
+/// into explicit integer types with `DEFAULT SNOWFLAKE_ID()`.
+///
+/// This ensures KalamDB receives proper auto-increment semantics since it doesn't
+/// understand PostgreSQL's implicit sequence creation for serial types.
+fn transform_serial_types(column_defs: Vec<String>) -> Vec<String> {
+    // Regex patterns for serial types (case-insensitive)
+    let serial_re = regex::Regex::new(
+        r"(?i)\b(BIG|SMALL)?SERIAL\d?\b"
+    ).unwrap();
+    let generated_identity_re = regex::Regex::new(
+        r"(?i)GENERATED\s+(ALWAYS|BY\s+DEFAULT)\s+AS\s+IDENTITY(\s*\([^)]*\))?"
+    ).unwrap();
+
+    column_defs
+        .into_iter()
+        .map(|def| {
+            let mut result = def.clone();
+            let upper = def.to_ascii_uppercase();
+
+            // 1. Replace SERIAL type names with base integer types
+            if serial_re.is_match(&result) {
+                // Determine the replacement type based on the serial variant
+                let replacement = if upper.contains("BIGSERIAL") || upper.contains("SERIAL8") {
+                    "BIGINT"
+                } else if upper.contains("SMALLSERIAL") || upper.contains("SERIAL2") {
+                    "SMALLINT"
+                } else {
+                    // SERIAL, SERIAL4
+                    "INTEGER"
+                };
+
+                result = serial_re.replace(&result, replacement).into_owned();
+
+                // Add DEFAULT SNOWFLAKE_ID() if no explicit DEFAULT is present
+                if !upper.contains("DEFAULT") {
+                    // Insert DEFAULT before PRIMARY KEY or at the end
+                    if let Some(pk_pos) = find_keyword_position(&result, "PRIMARY") {
+                        result.insert_str(pk_pos, "DEFAULT SNOWFLAKE_ID() ");
+                    } else {
+                        result.push_str(" DEFAULT SNOWFLAKE_ID()");
+                    }
+                }
+            }
+
+            // 2. Replace GENERATED {ALWAYS|BY DEFAULT} AS IDENTITY with DEFAULT SNOWFLAKE_ID()
+            if generated_identity_re.is_match(&result) {
+                result = generated_identity_re
+                    .replace(&result, "DEFAULT SNOWFLAKE_ID()")
+                    .into_owned();
+            }
+
+            result
+        })
+        .collect()
+}
+
+/// Find the byte position of a keyword in a SQL fragment (case-insensitive).
+fn find_keyword_position(sql: &str, keyword: &str) -> Option<usize> {
+    let upper = sql.to_ascii_uppercase();
+    upper.find(keyword)
+}
+
+/// Strip PostgreSQL-incompatible elements from column definitions so they
+/// can be used in a `CREATE FOREIGN TABLE` statement.
+///
+/// Specifically removes:
+/// - `PRIMARY KEY` constraints (not supported on foreign tables)
+/// - `DEFAULT SNOWFLAKE_ID()` (function doesn't exist in PostgreSQL)
+/// - `NOT NULL` constraints (not enforced on foreign tables anyway)
+/// - Standalone table-level constraint entries like `PRIMARY KEY (col)`
+fn strip_for_foreign_table(column_defs: &[String]) -> Vec<String> {
+    let pk_re = regex::Regex::new(r"(?i)\bPRIMARY\s+KEY\b").unwrap();
+    let snowflake_default_re =
+        regex::Regex::new(r"(?i)\bDEFAULT\s+SNOWFLAKE_ID\(\)").unwrap();
+    let not_null_re = regex::Regex::new(r"(?i)\bNOT\s+NULL\b").unwrap();
+    let table_pk_re =
+        regex::Regex::new(r"(?i)^\s*PRIMARY\s+KEY\s*\(").unwrap();
+
+    column_defs
+        .iter()
+        .filter(|def| !table_pk_re.is_match(def))
+        .map(|def| {
+            let mut result = def.clone();
+            result = pk_re.replace_all(&result, "").into_owned();
+            result = snowflake_default_re.replace_all(&result, "").into_owned();
+            result = not_null_re.replace_all(&result, "").into_owned();
+            // Collapse multiple spaces
+            let collapsed = result.split_whitespace().collect::<Vec<_>>().join(" ");
+            collapsed.trim_end_matches(',').trim().to_string()
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// WITH options extraction
+// ---------------------------------------------------------------------------
+
+/// Extract key-value pairs from a SQL `WITH (key = 'value', ...)` clause.
+///
+/// Returns a map of lowercase keys to unquoted values.
+fn extract_with_options_from_sql(sql: &str) -> std::collections::HashMap<String, String> {
+    let mut options = std::collections::HashMap::new();
+
+    // Find `WITH (` after the column list closing paren, skipping `USING ...`
+    let upper = sql.to_ascii_uppercase();
+    // Look for WITH after the last closing paren of column defs
+    let Some((_col_open, col_close)) = find_column_list_bounds(sql) else {
+        return options;
+    };
+
+    let after_cols = &sql[col_close + 1..];
+    let after_upper = after_cols.to_ascii_uppercase();
+
+    // Find `WITH` keyword (skip past potential `USING <method>`)
+    let Some(with_pos) = after_upper.find("WITH") else {
+        return options;
+    };
+
+    let after_with = &after_cols[with_pos + 4..].trim_start();
+    if !after_with.starts_with('(') {
+        return options;
+    }
+
+    // Find matching closing paren
+    let inner = &after_with[1..];
+    let mut depth = 1usize;
+    let mut end = 0;
+    for (i, ch) in inner.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = i;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let option_str = &inner[..end];
+
+    // Parse key = 'value' pairs
+    for pair in split_top_level_sql_list(option_str) {
+        let pair = pair.trim();
+        if let Some(eq_pos) = pair.find('=') {
+            let key = pair[..eq_pos].trim().to_lowercase();
+            let value = pair[eq_pos + 1..]
+                .trim()
+                .trim_matches('\'')
+                .trim_matches('"')
+                .to_string();
+            if !key.is_empty() {
+                options.insert(key, value);
+            }
+        }
+    }
+
+    let _ = upper; // suppress unused warning
+    options
 }
 
 /// Execute a SQL statement on the remote KalamDB backend.

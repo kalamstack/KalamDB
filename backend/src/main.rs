@@ -94,18 +94,9 @@ fn validate_startup_ports(config: &ServerConfig) -> Result<()> {
     Ok(())
 }
 
-#[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
+#[cfg(feature = "mimalloc")]
 #[global_allocator]
-static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
-
-// Tune jemalloc to return freed memory to the OS quickly.
-// dirty_decay_ms:1000  — purge dirty pages after 1 s (default 10 s)
-// muzzy_decay_ms:1000  — purge muzzy pages after 1 s (default 10 s)
-// background_thread:true — let jemalloc purge asynchronously
-#[cfg(all(feature = "jemalloc", not(target_env = "msvc")))]
-#[allow(non_upper_case_globals)]
-#[unsafe(export_name = "malloc_conf")]
-static malloc_conf: &[u8] = b"background_thread:true,dirty_decay_ms:1000,muzzy_decay_ms:1000\0";
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 /// Raise the process file-descriptor limit to the OS hard maximum.
 /// This is critical for benchmarks and production workloads that open many
@@ -337,4 +328,72 @@ async fn async_main(config: ServerConfig) -> Result<()> {
     let run_result = run(&config, components, app_context, main_start).await;
     logging::shutdown_telemetry();
     run_result
+}
+
+#[cfg(test)]
+mod tests {
+    use std::alloc::Layout;
+
+    /// Verify the global allocator can allocate, write, read, and free memory.
+    /// Under mimalloc this runs through the replaced global allocator; under the
+    /// system allocator it still passes — the key assertion is that alloc/dealloc
+    /// round-trips work and memory is not leaked.
+    #[test]
+    fn allocator_alloc_dealloc_roundtrip() {
+        let layout = Layout::array::<u8>(4096).unwrap();
+
+        unsafe {
+            // Allocate 4 KiB
+            let ptr = std::alloc::alloc(layout);
+            assert!(!ptr.is_null(), "allocation must succeed");
+
+            // Write and read back
+            std::ptr::write_bytes(ptr, 0xAB, 4096);
+            assert_eq!(*ptr, 0xAB);
+            assert_eq!(*ptr.add(4095), 0xAB);
+
+            // Free
+            std::alloc::dealloc(ptr, layout);
+        }
+    }
+
+    /// Stress test: allocate many small blocks (mimalloc's sweet spot),
+    /// touch them, and free in reverse order. Validates the allocator
+    /// handles high-churn small allocations without corruption.
+    #[test]
+    fn allocator_small_alloc_stress() {
+        const COUNT: usize = 10_000;
+        const SIZE: usize = 64;
+        let layout = Layout::from_size_align(SIZE, 8).unwrap();
+
+        let mut ptrs = Vec::with_capacity(COUNT);
+        unsafe {
+            for i in 0..COUNT {
+                let ptr = std::alloc::alloc(layout);
+                assert!(!ptr.is_null(), "allocation {i} must succeed");
+                // Write a sentinel byte
+                std::ptr::write_bytes(ptr, (i & 0xFF) as u8, SIZE);
+                ptrs.push(ptr);
+            }
+
+            // Verify and free in reverse order
+            for (i, ptr) in ptrs.iter().enumerate().rev() {
+                let expected = (i & 0xFF) as u8;
+                assert_eq!(**ptr, expected, "data corruption at allocation {i}");
+                std::alloc::dealloc(*ptr, layout);
+            }
+        }
+    }
+
+    /// Confirm that the mimalloc global allocator is actually installed
+    /// by checking the type name of the ALLOC static.
+    #[cfg(feature = "mimalloc")]
+    #[test]
+    fn mimalloc_is_global_allocator() {
+        let name = std::any::type_name_of_val(&super::ALLOC);
+        assert!(
+            name.contains("MiMalloc"),
+            "expected MiMalloc global allocator, got: {name}"
+        );
+    }
 }

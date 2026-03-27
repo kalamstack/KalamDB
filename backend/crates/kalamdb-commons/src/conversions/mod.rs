@@ -57,7 +57,7 @@ pub mod schema_metadata;
 #[cfg(feature = "conversions")]
 pub use arrow_json_conversion::*;
 #[cfg(feature = "conversions")]
-pub use scalar_bytes::{encode_pk_value, scalar_value_to_bytes};
+pub use scalar_bytes::scalar_value_to_bytes;
 #[cfg(feature = "conversions")]
 pub use scalar_json::{json_value_to_scalar_for_column, scalar_to_json_for_column};
 #[cfg(feature = "conversions")]

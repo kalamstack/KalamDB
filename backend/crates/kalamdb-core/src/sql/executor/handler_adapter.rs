@@ -7,7 +7,7 @@ use crate::error::KalamDbError;
 use crate::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
 use crate::sql::executor::handler_registry::SqlStatementHandler;
 use crate::sql::executor::handlers::typed::TypedStatementHandler;
-use kalamdb_sql::statement_classifier::SqlStatement;
+use kalamdb_sql::classifier::SqlStatement;
 use kalamdb_sql::DdlAst;
 use std::marker::PhantomData;
 
@@ -183,7 +183,7 @@ mod tests {
         let handler = CreateNamespaceHandler::new(app_ctx);
 
         let adapter = TypedHandlerAdapter::new(handler, |stmt| match stmt.kind() {
-            kalamdb_sql::statement_classifier::SqlStatementKind::CreateNamespace(s) => {
+            kalamdb_sql::classifier::SqlStatementKind::CreateNamespace(s) => {
                 Some(s.clone())
             },
             _ => None,
@@ -194,9 +194,9 @@ mod tests {
             create_test_session_simple(),
         );
 
-        let stmt = kalamdb_sql::statement_classifier::SqlStatement::new(
+        let stmt = kalamdb_sql::classifier::SqlStatement::new(
             "CREATE NAMESPACE test_adapter_ns".to_string(),
-            kalamdb_sql::statement_classifier::SqlStatementKind::CreateNamespace(
+            kalamdb_sql::classifier::SqlStatementKind::CreateNamespace(
                 CreateNamespaceStatement {
                     name: NamespaceId::new("test_adapter_ns"),
                     if_not_exists: false,
@@ -215,7 +215,7 @@ mod tests {
         let handler = CreateNamespaceHandler::new(app_ctx);
 
         let adapter = TypedHandlerAdapter::new(handler, |stmt| match stmt.kind() {
-            kalamdb_sql::statement_classifier::SqlStatementKind::CreateNamespace(s) => {
+            kalamdb_sql::classifier::SqlStatementKind::CreateNamespace(s) => {
                 Some(s.clone())
             },
             _ => None,
@@ -227,9 +227,9 @@ mod tests {
         );
 
         // Pass wrong statement type (ShowNamespaces instead of CreateNamespace)
-        let stmt = kalamdb_sql::statement_classifier::SqlStatement::new(
+        let stmt = kalamdb_sql::classifier::SqlStatement::new(
             "SHOW NAMESPACES".to_string(),
-            kalamdb_sql::statement_classifier::SqlStatementKind::ShowNamespaces(
+            kalamdb_sql::classifier::SqlStatementKind::ShowNamespaces(
                 kalamdb_sql::ddl::ShowNamespacesStatement,
             ),
         );

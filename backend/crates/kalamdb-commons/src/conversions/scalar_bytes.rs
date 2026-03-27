@@ -57,13 +57,6 @@ pub fn scalar_value_to_bytes(value: &ScalarValue) -> Vec<u8> {
     }
 }
 
-/// Alias for `scalar_value_to_bytes` for backwards compatibility
-///
-/// Older code may refer to this as "encoding" a value for primary keys.
-pub fn encode_pk_value(value: &ScalarValue) -> Vec<u8> {
-    scalar_value_to_bytes(value)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

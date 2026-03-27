@@ -330,7 +330,21 @@ class KalamClient {
       paramsJson: paramsJson,
       namespace: namespace,
     );
-    return _fromBridgeQueryResponse(resp);
+    final result = _fromBridgeQueryResponse(resp);
+    // On TOKEN_EXPIRED, refresh via authProvider and retry exactly once.
+    if (result.error?.code == 'TOKEN_EXPIRED') {
+      KalamLogger.warn(
+          'auth', 'TOKEN_EXPIRED — refreshing credentials via authProvider');
+      await refreshAuth();
+      final retryResp = await bridge.dartExecuteQuery(
+        client: _handle,
+        sql: sql,
+        paramsJson: paramsJson,
+        namespace: namespace,
+      );
+      return _fromBridgeQueryResponse(retryResp);
+    }
+    return result;
   }
 
   // ---------------------------------------------------------------------------

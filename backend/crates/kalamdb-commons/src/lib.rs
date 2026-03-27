@@ -70,7 +70,7 @@ extern crate self as kalamdb_commons;
 pub use constants::{MAX_SQL_QUERY_LENGTH, RESERVED_NAMESPACE_NAMES};
 #[cfg(feature = "conversions")]
 pub use conversions::{
-    as_f64, encode_pk_value, estimate_scalar_value_size, json_value_to_scalar_for_column,
+    as_f64, estimate_scalar_value_size, json_value_to_scalar_for_column,
     scalar_to_f64, scalar_to_i64, scalar_to_json_for_column, scalar_to_pk_string,
     scalar_value_to_bytes,
 };

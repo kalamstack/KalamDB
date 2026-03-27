@@ -1,5 +1,4 @@
 use super::helpers::*;
-use crate::common;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
 use kalam_link::SubscriptionConfig;
 use std::sync::atomic::Ordering;
@@ -19,7 +18,7 @@ async fn test_shared_connection_auto_reconnects_after_socket_drop_and_resumes() 
         },
     };
 
-    let proxy = TcpDisconnectProxy::start(common::server_url()).await;
+    let proxy = TcpDisconnectProxy::start(upstream_server_url()).await;
     let (client, connect_count, disconnect_count) =
         match create_test_client_with_events_for_base_url(proxy.base_url()) {
             Ok(v) => v,

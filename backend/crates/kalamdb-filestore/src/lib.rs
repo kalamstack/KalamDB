@@ -25,19 +25,14 @@ pub mod parquet;
 pub mod paths;
 pub mod registry;
 
-// Backwards-compatible module aliases
-pub use manifest::json as manifest_ops;
-pub use parquet::reader as parquet_reader_ops;
-pub use parquet::writer as parquet_storage_writer;
-
 #[cfg(test)]
 mod tests;
 
 // Re-export commonly used types
 pub use error::{FilestoreError, Result};
 pub use files::{FileStorageService, StagedFile, StagingManager};
-pub use manifest_ops::{manifest_exists, read_manifest_json, write_manifest_json};
-pub use parquet_reader_ops::{parse_parquet_stream, RecordBatchFileStream};
-pub use parquet_storage_writer::ParquetWriteResult;
+pub use manifest::json::{manifest_exists, read_manifest_json, write_manifest_json};
+pub use parquet::reader::{parse_parquet_stream, RecordBatchFileStream};
+pub use parquet::writer::ParquetWriteResult;
 pub use registry::{StorageCached, StorageRegistry};
 pub use health::{ConnectivityTestResult, HealthStatus, StorageHealthResult, StorageHealthService};

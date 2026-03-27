@@ -26,8 +26,8 @@ prost = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
-serde_json = { workspace = true }
 flexbuffers = { workspace = true }
+rmp-serde = { workspace = true }
 
 # Async
 tokio = { workspace = true }
@@ -54,6 +54,7 @@ kalam-pg-client = { path = "../../../pg/crates/kalam-pg-client" }
 kalam-pg-common = { path = "../../../pg/crates/kalam-pg-common" }
 kalamdb-pg = { path = "../kalamdb-pg" }
 ntest = { workspace = true }
+serde_json = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 serial_test = { workspace = true }

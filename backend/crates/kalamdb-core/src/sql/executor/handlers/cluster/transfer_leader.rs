@@ -9,7 +9,7 @@ use crate::sql::executor::handlers::{
 };
 use kalamdb_commons::models::NodeId;
 use kalamdb_raft::RaftExecutor;
-use kalamdb_sql::statement_classifier::{SqlStatement, SqlStatementKind};
+use kalamdb_sql::classifier::{SqlStatement, SqlStatementKind};
 use std::sync::Arc;
 
 pub struct ClusterTransferLeaderHandler {

@@ -36,7 +36,7 @@ use crate::GroupId;
 #[derive(Debug, Clone)]
 pub struct StoredSnapshot {
     pub meta: SnapshotMeta<u64, KalamNode>,
-    pub data: Vec<u8>,
+    pub data: Arc<Vec<u8>>,
 }
 
 /// Log entry stored in memory
@@ -276,18 +276,6 @@ impl<SM: KalamStateMachine + Send + Sync + 'static> KalamRaftStorage<SM> {
                     });
 
                     let bytes = match snapshot_data {
-                        RaftSnapshotData::Inline(data) => {
-                            // Migrate legacy inline snapshot bytes to a file on disk.
-                            let file_path =
-                                snapshot_file_path(&snapshots_dir, &group_id, &meta.snapshot_id);
-                            write_snapshot_file(&file_path, &data)
-                                .map_err(|e| kalamdb_store::StorageError::IoError(e.to_string()))?;
-
-                            store.save_snapshot_data(&RaftSnapshotData::FilePath(
-                                file_path.to_string_lossy().into_owned(),
-                            ))?;
-                            data
-                        },
                         RaftSnapshotData::FilePath(path) => {
                             let file_path = PathBuf::from(path);
                             read_snapshot_file(&file_path)
@@ -307,7 +295,7 @@ impl<SM: KalamStateMachine + Send + Sync + 'static> KalamRaftStorage<SM> {
                             last_membership: recovered_membership.clone(),
                             snapshot_id: meta.snapshot_id,
                         },
-                        data: bytes,
+                        data: Arc::new(bytes),
                     };
 
                     (Some(snapshot), recovered_last_applied, Some(recovered_membership))
@@ -386,7 +374,7 @@ impl<SM: KalamStateMachine + Send + Sync + 'static> KalamRaftStorage<SM> {
         let start = std::time::Instant::now();
         let snapshot_data = {
             let guard = self.current_snapshot.read();
-            guard.as_ref().map(|s| s.data.clone())
+            guard.as_ref().map(|s| Arc::clone(&s.data))
         };
 
         if let Some(data) = snapshot_data {
@@ -637,17 +625,18 @@ impl<SM: KalamStateMachine + Send + Sync + 'static> RaftSnapshotBuilder<KalamTyp
                 .map_err(|e| StorageIOError::write_snapshot(Some(meta.signature()), &e))?;
         }
 
+        let cursor_data = serialized.clone();
         {
             let mut current = self.storage.current_snapshot.write();
             *current = Some(StoredSnapshot {
                 meta: meta.clone(),
-                data: serialized.clone(),
+                data: Arc::new(serialized),
             });
         }
 
         Ok(Snapshot {
             meta,
-            snapshot: Box::new(Cursor::new(serialized)),
+            snapshot: Box::new(Cursor::new(cursor_data)),
         })
     }
 }
@@ -1050,7 +1039,7 @@ impl<SM: KalamStateMachine + Send + Sync + 'static> RaftStorage<KalamTypeConfig>
             let mut current = self.current_snapshot.write();
             *current = Some(StoredSnapshot {
                 meta: meta.clone(),
-                data,
+                data: Arc::new(data),
             });
         }
 
@@ -1092,7 +1081,7 @@ impl<SM: KalamStateMachine + Send + Sync + 'static> RaftStorage<KalamTypeConfig>
         match current.as_ref() {
             Some(snapshot) => Ok(Some(Snapshot {
                 meta: snapshot.meta.clone(),
-                snapshot: Box::new(Cursor::new(snapshot.data.clone())),
+                snapshot: Box::new(Cursor::new((*snapshot.data).clone())),
             })),
             None => Ok(None),
         }

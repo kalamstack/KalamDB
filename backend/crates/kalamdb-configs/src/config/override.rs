@@ -1,7 +1,6 @@
 use super::cluster::{ClusterConfig, PeerConfig};
 use super::types::ServerConfig;
 use std::env;
-use std::path::Path;
 
 impl ServerConfig {
     /// Apply environment variable overrides for sensitive configuration
@@ -11,7 +10,6 @@ impl ServerConfig {
     /// - KALAMDB_SERVER_PORT: Override server.port
     /// - KALAMDB_LOG_LEVEL: Override logging.level
     /// - KALAMDB_LOGS_DIR: Override logging.logs_path
-    /// - KALAMDB_LOG_FILE: Override logging.file_path (legacy, extracts parent dir)
     /// - KALAMDB_LOG_TO_CONSOLE: Override logging.log_to_console
     /// - KALAMDB_OTLP_ENABLED: Override logging.otlp.enabled
     /// - KALAMDB_OTLP_ENDPOINT: Override logging.otlp.endpoint
@@ -19,10 +17,6 @@ impl ServerConfig {
     /// - KALAMDB_OTLP_SERVICE_NAME: Override logging.otlp.service_name
     /// - KALAMDB_OTLP_TIMEOUT_MS: Override logging.otlp.timeout_ms
     /// - KALAMDB_DATA_DIR: Override storage.data_path (base directory for rocksdb, storage, snapshots)
-    /// - KALAMDB_ROCKSDB_PATH: Override storage.data_path (legacy, extracts parent dir)
-    /// - KALAMDB_LOG_FILE_PATH: Override logging.file_path (legacy, prefer KALAMDB_LOG_FILE)
-    /// - KALAMDB_HOST: Override server.host (legacy, prefer KALAMDB_SERVER_HOST)
-    /// - KALAMDB_PORT: Override server.port (legacy, prefer KALAMDB_SERVER_PORT)
     /// - KALAMDB_CLUSTER_ID: Override cluster.cluster_id
     /// - KALAMDB_NODE_ID: Override cluster.node_id (alias: KALAMDB_CLUSTER_NODE_ID)
     /// - KALAMDB_CLUSTER_RPC_ADDR: Override cluster.rpc_addr
@@ -60,24 +54,16 @@ impl ServerConfig {
             })?;
         }
 
-        // Server host (new naming convention)
+        // Server host
         if let Ok(host) = env::var("KALAMDB_SERVER_HOST") {
-            self.server.host = host;
-        } else if let Ok(host) = env::var("KALAMDB_HOST") {
-            // Legacy fallback
             self.server.host = host;
         }
 
-        // Server port (new naming convention)
+        // Server port
         if let Ok(port_str) = env::var("KALAMDB_SERVER_PORT") {
             self.server.port = port_str
                 .parse()
                 .map_err(|_| anyhow::anyhow!("Invalid KALAMDB_SERVER_PORT value: {}", port_str))?;
-        } else if let Ok(port_str) = env::var("KALAMDB_PORT") {
-            // Legacy fallback
-            self.server.port = port_str
-                .parse()
-                .map_err(|_| anyhow::anyhow!("Invalid KALAMDB_PORT value: {}", port_str))?;
         }
 
         // Log level
@@ -85,19 +71,9 @@ impl ServerConfig {
             self.logging.level = level;
         }
 
-        // Logs directory path (new naming convention)
+        // Logs directory path
         if let Ok(path) = env::var("KALAMDB_LOGS_DIR") {
             self.logging.logs_path = path;
-        } else if let Ok(path) = env::var("KALAMDB_LOG_FILE") {
-            // Legacy fallback - extract directory from file path
-            if let Some(parent) = Path::new(&path).parent() {
-                self.logging.logs_path = parent.to_string_lossy().to_string();
-            }
-        } else if let Ok(path) = env::var("KALAMDB_LOG_FILE_PATH") {
-            // Legacy fallback - extract directory from file path
-            if let Some(parent) = Path::new(&path).parent() {
-                self.logging.logs_path = parent.to_string_lossy().to_string();
-            }
         }
 
         // Log to console
@@ -204,14 +180,9 @@ impl ServerConfig {
             })?);
         }
 
-        // Data directory (new naming convention)
+        // Data directory
         if let Ok(path) = env::var("KALAMDB_DATA_DIR") {
             self.storage.data_path = path;
-        } else if let Ok(path) = env::var("KALAMDB_ROCKSDB_PATH") {
-            // Legacy fallback - KALAMDB_ROCKSDB_PATH now sets the parent data dir
-            if let Some(parent) = Path::new(&path).parent() {
-                self.storage.data_path = parent.to_string_lossy().to_string();
-            }
         }
 
         // Cluster overrides

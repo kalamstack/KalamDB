@@ -120,16 +120,6 @@ impl SharedTableProvider {
         }
     }
 
-    /// Backward-compatible constructor that accepts pk_field/column_defaults as separate args.
-    pub fn new_with_defaults(
-        core: Arc<TableProviderCore>,
-        store: Arc<SharedTableIndexedStore>,
-        _primary_key_field_name: String,
-        _column_defaults: HashMap<String, Expr>,
-    ) -> Self {
-        Self::new(core, store)
-    }
-
     pub async fn collect_live_string_primary_keys_before_async(
         &self,
         cutoff_exclusive: String,

@@ -38,13 +38,17 @@ fn reconnect_test_connection_options() -> ConnectionOptions {
 
 /// Create a test client authenticated with root credentials.
 pub fn create_test_client() -> Result<KalamLinkClient, kalam_link::KalamLinkError> {
-    create_test_client_for_base_url(common::server_url())
+    create_test_client_for_base_url(common::isolated_server_url())
+}
+
+pub fn upstream_server_url() -> &'static str {
+    common::isolated_server_url()
 }
 
 pub fn create_test_client_for_base_url(
     base_url: &str,
 ) -> Result<KalamLinkClient, kalam_link::KalamLinkError> {
-    let token = common::root_access_token_blocking()
+    let token = common::isolated_root_access_token_blocking()
         .map_err(|e| kalam_link::KalamLinkError::ConfigurationError(e.to_string()))?;
     KalamLinkClient::builder()
         .base_url(base_url)
@@ -58,7 +62,7 @@ pub fn create_test_client_for_base_url(
 pub fn create_test_client_with_events_for_base_url(
     base_url: &str,
 ) -> Result<(KalamLinkClient, Arc<AtomicU32>, Arc<AtomicU32>), kalam_link::KalamLinkError> {
-    let token = common::root_access_token_blocking()
+    let token = common::isolated_root_access_token_blocking()
         .map_err(|e| kalam_link::KalamLinkError::ConfigurationError(e.to_string()))?;
 
     let connect_count = Arc::new(AtomicU32::new(0));

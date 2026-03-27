@@ -70,13 +70,6 @@
 //! let arrow_schema = table_def.to_arrow_schema();
 //! ```
 //!
-//! # Migration Path
-//!
-//! - **Legacy Code**: Uses deprecated `schemas::ColumnDefinition` and `models::SchemaVersion`
-//! - **New Code**: Uses `schemas::ColumnDefinition` and `schemas::SchemaVersion`
-//! - **Transition**: kalamdb-sql adapter provides compatibility layer
-//! - **Timeline**: Legacy types marked `#[deprecated]`, will be removed in Phase 8
-//!
 //! # Related Modules
 //!
 //! - `kalamdb_commons::datatypes` - Unified type system (KalamDataType)

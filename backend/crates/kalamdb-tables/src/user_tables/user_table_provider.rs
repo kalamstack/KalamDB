@@ -130,26 +130,6 @@ impl UserTableProvider {
         }
     }
 
-    /// Backward-compatible constructors that accept pk_field/column_defaults as separate args.
-    /// These are used by production code and tests that still pass them separately.
-    /// The values are expected to already be set in the core.
-    pub fn try_new(
-        core: Arc<TableProviderCore>,
-        store: Arc<UserTableIndexedStore>,
-        _primary_key_field_name: String,
-    ) -> Result<Self, KalamDbError> {
-        Ok(Self::new(core, store))
-    }
-
-    pub fn try_new_with_defaults(
-        core: Arc<TableProviderCore>,
-        store: Arc<UserTableIndexedStore>,
-        _primary_key_field_name: String,
-        _column_defaults: HashMap<String, Expr>,
-    ) -> Result<Self, KalamDbError> {
-        Ok(Self::new(core, store))
-    }
-
     /// Get the primary key field name
     pub fn primary_key_field_name(&self) -> &str {
         self.core.primary_key_field_name()

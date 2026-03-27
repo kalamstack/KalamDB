@@ -4,8 +4,6 @@
 //! - ALTER TABLE messages ADD COLUMN age INT
 //! - ALTER TABLE messages DROP COLUMN age
 //! - ALTER TABLE messages MODIFY COLUMN age BIGINT
-//! - ALTER USER TABLE messages ADD COLUMN age INT
-//! - ALTER SHARED TABLE messages ADD COLUMN age INT
 
 use crate::ddl::DdlResult;
 use crate::parser::utils::parse_sql_statements;
@@ -69,20 +67,17 @@ pub enum ColumnOperation {
     DropVectorIndex { column_name: String },
 }
 
-static LEGACY_ALTER_PREFIX_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)^\s*ALTER\s+(USER|SHARED|STREAM)\s+TABLE\s+").unwrap());
-
 static SET_ACCESS_LEVEL_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)SET\s+ACCESS\s+LEVEL\s+(PUBLIC|PRIVATE|RESTRICTED)").unwrap());
 static ALTER_CREATE_VECTOR_INDEX_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
-        r"(?i)^\s*ALTER\s+(?:USER\s+|SHARED\s+|STREAM\s+)?TABLE\s+([a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*)?)\s+CREATE\s+(?:VECTOR\s+)?INDEX\s+([a-zA-Z_][\w]*)\s*(?:USING\s+(COSINE|L2|DOT))?\s*;?\s*$",
+        r"(?i)^\s*ALTER\s+TABLE\s+([a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*)?)\s+CREATE\s+(?:VECTOR\s+)?INDEX\s+([a-zA-Z_][\w]*)\s*(?:USING\s+(COSINE|L2|DOT))?\s*;?\s*$",
     )
     .unwrap()
 });
 static ALTER_DROP_VECTOR_INDEX_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
-        r"(?i)^\s*ALTER\s+(?:USER\s+|SHARED\s+|STREAM\s+)?TABLE\s+([a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*)?)\s+DROP\s+(?:VECTOR\s+)?INDEX\s+([a-zA-Z_][\w]*)\s*;?\s*$",
+        r"(?i)^\s*ALTER\s+TABLE\s+([a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*)?)\s+DROP\s+(?:VECTOR\s+)?INDEX\s+([a-zA-Z_][\w]*)\s*;?\s*$",
     )
     .unwrap()
 });
@@ -212,9 +207,8 @@ fn resolve_table_reference_from_str(
 
 fn normalize_alter_sql(sql: &str) -> String {
     let trimmed = sql.trim().trim_end_matches(';');
-    let without_legacy = LEGACY_ALTER_PREFIX_RE.replace(trimmed, "ALTER TABLE ").into_owned();
     SET_ACCESS_LEVEL_RE
-        .replace(&without_legacy, |caps: &Captures| {
+        .replace(trimmed, |caps: &Captures| {
             format!("SET TBLPROPERTIES (ACCESS_LEVEL = '{}')", caps[1].to_uppercase())
         })
         .into_owned()
@@ -749,9 +743,9 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_alter_user_table() {
+    fn test_parse_alter_table_add_column() {
         let stmt = AlterTableStatement::parse(
-            "ALTER USER TABLE messages ADD COLUMN age INT",
+            "ALTER TABLE messages ADD COLUMN age INT",
             &test_namespace(),
         )
         .unwrap();
@@ -760,9 +754,9 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_alter_shared_table() {
+    fn test_parse_alter_table_drop_column() {
         let stmt = AlterTableStatement::parse(
-            "ALTER SHARED TABLE conversations DROP COLUMN old_field",
+            "ALTER TABLE conversations DROP COLUMN old_field",
             &test_namespace(),
         )
         .unwrap();
@@ -792,7 +786,7 @@ mod tests {
     #[test]
     fn test_parse_set_access_level_public() {
         let stmt = AlterTableStatement::parse(
-            "ALTER SHARED TABLE analytics SET ACCESS LEVEL public",
+            "ALTER TABLE analytics SET ACCESS LEVEL public",
             &test_namespace(),
         )
         .unwrap();

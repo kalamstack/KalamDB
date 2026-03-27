@@ -7,7 +7,7 @@ use arrow::array::RecordBatch;
 use datafusion::scalar::ScalarValue;
 use kalamdb_commons::conversions::arrow_json_conversion::arrow_value_to_scalar;
 use kalamdb_commons::models::TableId;
-use kalamdb_sql::statement_classifier::{SqlStatement, SqlStatementKind};
+use kalamdb_sql::classifier::{SqlStatement, SqlStatementKind};
 use std::time::Duration;
 use tracing::Instrument;
 
