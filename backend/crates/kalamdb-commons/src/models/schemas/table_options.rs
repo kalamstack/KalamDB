@@ -233,6 +233,15 @@ impl TableOptions {
             TableOptions::System(_) => None,
         }
     }
+
+    /// Get the flush policy for this table (User and Shared only)
+    pub fn flush_policy(&self) -> Option<&FlushPolicy> {
+        match self {
+            TableOptions::User(opts) => opts.flush_policy.as_ref(),
+            TableOptions::Shared(opts) => opts.flush_policy.as_ref(),
+            TableOptions::Stream(_) | TableOptions::System(_) => None,
+        }
+    }
 }
 
 // Default value functions for serde

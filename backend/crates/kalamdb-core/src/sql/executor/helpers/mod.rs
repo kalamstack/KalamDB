@@ -1,5 +1,6 @@
 //! Shared helper utilities for SQL execution (moved from handlers/)
 
+pub mod ast_parsing;
 pub mod audit;
 pub mod guards;
 pub mod namespace_helpers;

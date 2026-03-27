@@ -33,16 +33,19 @@ impl TypedStatementHandler<CreateStorageStatement> for CreateStorageHandler {
         _context: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
         // Extract providers from AppContext
-        let storages_provider = self.app_context.system_tables().storages();
         let storage_registry = self.app_context.storage_registry();
 
-        // Check if storage already exists
+        // Check if storage already exists (offload sync RocksDB read)
         let storage_id = StorageId::from(statement.storage_id.as_str());
-        if storages_provider
-            .get_storage_by_id(&storage_id)
-            .into_kalamdb_error("Failed to check storage")?
-            .is_some()
-        {
+        let app_ctx = self.app_context.clone();
+        let sid = storage_id.clone();
+        let existing = tokio::task::spawn_blocking(move || {
+            app_ctx.system_tables().storages().get_storage_by_id(&sid)
+        })
+        .await
+        .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))?
+        .into_kalamdb_error("Failed to check storage")?;
+        if existing.is_some() {
             return Err(KalamDbError::InvalidOperation(format!(
                 "Storage '{}' already exists",
                 statement.storage_id

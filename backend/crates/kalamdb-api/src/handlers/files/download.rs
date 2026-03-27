@@ -47,13 +47,32 @@ pub async fn download_file(
     // Check impersonation permissions
     if let Some(ref requested_user_id) = query.user_id {
         if requested_user_id != session.user_id() {
-            let users_provider = app_context.system_tables().users();
-            let target_user = match users_provider.get_user_by_id(requested_user_id) {
-                Ok(Some(user)) if user.deleted_at.is_none() => user,
-                Ok(_) => {
+            // Offload sync RocksDB read to blocking thread
+            let app_ctx = app_context.get_ref().clone();
+            let req_uid = requested_user_id.clone();
+            let target_user_result = tokio::task::spawn_blocking(move || {
+                app_ctx.system_tables().users().get_user_by_id(&req_uid)
+            })
+            .await;
+
+            let target_user = match target_user_result {
+                Ok(Ok(Some(user))) if user.deleted_at.is_none() => user,
+                Ok(Ok(_)) => {
                     return HttpResponse::NotFound().json(SqlResponse::error(
                         ErrorCode::InvalidInput,
                         "Requested user was not found",
+                        0.0,
+                    ));
+                },
+                Ok(Err(e)) => {
+                    log::warn!(
+                        "Failed to resolve impersonation target for file download: user_id={}, error={}",
+                        requested_user_id,
+                        e
+                    );
+                    return HttpResponse::InternalServerError().json(SqlResponse::error(
+                        ErrorCode::InternalError,
+                        "Failed to validate impersonation target",
                         0.0,
                     ));
                 },

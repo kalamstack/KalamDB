@@ -1,35 +1,8 @@
-//! Unified storage operations via StorageCached.
+//! Unified storage operations.
 //!
-//! This module provides the `StorageCached` struct which is the single entry point
-//! for all storage operations. It encapsulates:
-//! - Storage configuration (from system.storages)
-//! - Lazy ObjectStore initialization
-//! - Path template resolution
-//! - All file operations (list, get, put, delete)
-//!
-//! # Design Principle
-//!
-//! **Nobody except kalamdb-filestore should depend on object_store crate.**
-//! All storage operations go through `StorageCached.operation(...)` methods.
-//!
-//! # Example
-//!
-//! ```ignore
-//! // Get relative path for display
-//! let path = cached.get_relative_path(&table_id, user_id, shard)?;
-//!
-//! // List files for a table
-//! let files = cached.list(&table_id, user_id, shard).await?;
-//!
-//! // Write data to storage
-//! let result = cached.put(&table_id, user_id, shard, "batch-5.parquet", data).await?;
-//!
-//! // Read data from storage
-//! let result = cached.get(&table_id, user_id, shard, "manifest.json").await?;
-//!
-//! // Delete a file
-//! let result = cached.delete(&table_id, user_id, shard, "batch-5.parquet").await?;
-//! ```
+//! `StorageCached` wraps a `Storage` config with a lazy `ObjectStore` and provides
+//! the complete file-operation API for KalamDB cold storage. All operations are
+//! async-first; thin `_sync` wrappers delegate via `run_blocking`.
 
 use super::operations::{
     DeletePrefixResult, DeleteResult, ExistsResult, FileInfo, GetResult, ListResult, PathResult,
@@ -50,38 +23,21 @@ use kalamdb_system::Storage;
 use object_store::{path::Path as ObjectPath, ObjectStore, ObjectStoreExt};
 use parking_lot::RwLock;
 use std::sync::Arc;
-use tracing::Instrument;
 
-/// Unified storage interface with lazy ObjectStore and template resolution.
+/// Unified storage interface with lazy `ObjectStore` and template resolution.
 ///
-/// This is the **single entry point** for all storage operations.
-/// Encapsulates ObjectStore and path resolution so callers don't need
-/// to depend on object_store crate directly.
-///
-/// # Thread Safety
-///
-/// Uses double-check locking for lazy ObjectStore initialization.
-/// All methods are safe to call from multiple threads concurrently.
-///
-/// # Performance
-///
-/// - ObjectStore is built once on first use (~50-200μs for cloud backends)
-/// - Template resolution is O(1) string substitution
-/// - All operations use the same cached ObjectStore instance
+/// Single entry point for all file operations. Thread-safe via double-check
+/// locking for lazy initialization. The `ObjectStore` is built once on first
+/// use and shared across all subsequent calls.
 #[derive(Debug)]
 pub struct StorageCached {
-    /// The storage configuration from system.storages
+    /// Storage configuration from `system.storages`.
     pub storage: Arc<Storage>,
-    /// Remote storage timeout configuration
     timeouts: kalamdb_configs::config::types::RemoteStorageTimeouts,
-    /// Lazily-initialized ObjectStore instance
     object_store: Arc<RwLock<Option<Arc<dyn ObjectStore>>>>,
 }
 
 impl StorageCached {
-    /// Create a new StorageCached with the given storage configuration.
-    ///
-    /// The ObjectStore is not built until first access.
     pub fn new(
         storage: Storage,
         timeouts: kalamdb_configs::config::types::RemoteStorageTimeouts,
@@ -93,16 +49,12 @@ impl StorageCached {
         }
     }
 
-    /// Create a new StorageCached with default timeouts.
-    ///
-    /// Convenience method that uses RemoteStorageTimeouts::default().
     pub fn with_default_timeouts(storage: Storage) -> Self {
         Self::new(storage, kalamdb_configs::config::types::RemoteStorageTimeouts::default())
     }
 
-    // ========== Path Resolution Methods ==========
+    // ── Path Resolution ──────────────────────────────────────────────
 
-    /// Get the appropriate template for a table type.
     fn get_template(&self, table_type: TableType) -> &str {
         match table_type {
             TableType::User => &self.storage.user_tables_template,
@@ -111,45 +63,32 @@ impl StorageCached {
         }
     }
 
-    /// Resolve static placeholders in template (namespace, tableName).
     fn resolve_static(&self, table_type: TableType, table_id: &TableId) -> String {
-        let template = self.get_template(table_type);
-        TemplateResolver::resolve_static_placeholders(template, table_id)
+        TemplateResolver::resolve_static_placeholders(self.get_template(table_type), table_id)
     }
 
-    /// Resolve full template with all placeholders.
     fn resolve_full_template(
         &self,
         table_type: TableType,
         table_id: &TableId,
         user_id: Option<&UserId>,
     ) -> String {
-        let static_resolved = self.resolve_static(table_type, table_id);
-
-        // If user_id is provided, resolve dynamic placeholders
-        // Otherwise, return as-is (shared tables don't have {userId} placeholder)
-        if let Some(uid) = user_id {
-            TemplateResolver::resolve_dynamic_placeholders(&static_resolved, uid).into_owned()
-        } else {
-            static_resolved
+        let resolved = self.resolve_static(table_type, table_id);
+        match user_id {
+            Some(uid) => {
+                TemplateResolver::resolve_dynamic_placeholders(&resolved, uid).into_owned()
+            },
+            None => resolved,
         }
     }
 
-    /// Get the base directory for this storage.
     fn base_directory(&self) -> &str {
         let trimmed = self.storage.base_directory.trim();
-        if trimmed.is_empty() {
-            "."
-        } else {
-            trimmed
-        }
+        if trimmed.is_empty() { "." } else { trimmed }
     }
 
-    /// Join base directory with relative path.
     fn join_paths(&self, relative: &str) -> String {
         let base = self.base_directory();
-
-        // Check for cloud storage schemes
         if base.starts_with("s3://")
             || base.starts_with("gs://")
             || base.starts_with("gcs://")
@@ -162,15 +101,8 @@ impl StorageCached {
         }
     }
 
-    /// Get the relative path for a table (for display or storage-relative references).
-    ///
-    /// # Arguments
-    /// * `table_type` - Type of table (User, Shared, Stream, System)
-    /// * `table_id` - Table identifier (namespace + table name)
-    /// * `user_id` - Optional user ID for user tables
-    ///
-    /// # Returns
-    /// PathResult with full and relative paths
+    // ── Public Path API ──────────────────────────────────────────────
+
     pub fn get_relative_path(
         &self,
         table_type: TableType,
@@ -182,17 +114,6 @@ impl StorageCached {
         PathResult::new(full, relative, self.base_directory().to_string())
     }
 
-    /// Get the path for a specific file within a table's storage.
-    ///
-    /// # Arguments
-    /// * `table_type` - Type of table
-    /// * `table_id` - Table identifier
-    /// * `user_id` - Optional user ID
-    /// * `shard` - Optional shard ID
-    /// * `filename` - Filename (e.g., "manifest.json", "batch-5.parquet")
-    ///
-    /// # Returns
-    /// PathResult with full and relative paths to the file
     pub fn get_file_path(
         &self,
         table_type: TableType,
@@ -200,14 +121,13 @@ impl StorageCached {
         user_id: Option<&UserId>,
         filename: &str,
     ) -> PathResult {
-        let dir_relative = self.resolve_full_template(table_type, table_id, user_id);
+        let dir = self.resolve_full_template(table_type, table_id, user_id);
         let file_relative =
-            format!("{}/{}", dir_relative.trim_end_matches('/'), filename.trim_start_matches('/'));
+            format!("{}/{}", dir.trim_end_matches('/'), filename.trim_start_matches('/'));
         let full = self.join_paths(&file_relative);
         PathResult::new(full, file_relative, self.base_directory().to_string())
     }
 
-    /// Get the manifest.json path for a table.
     pub fn get_manifest_path(
         &self,
         table_type: TableType,
@@ -217,339 +137,65 @@ impl StorageCached {
         self.get_file_path(table_type, table_id, user_id, "manifest.json")
     }
 
-    /// Generate batch filename for a given batch number.
     #[inline]
     pub fn batch_filename(batch_number: u64) -> String {
         format!("batch-{}.parquet", batch_number)
     }
 
-    /// Generate temp batch filename for atomic writes.
     #[inline]
     pub fn temp_batch_filename(batch_number: u64) -> String {
         format!("batch-{}.parquet.tmp", batch_number)
     }
 
-    // ========== ObjectStore Access ==========
+    // ── ObjectStore Access ───────────────────────────────────────────
 
-    /// Get or lazily initialize the ObjectStore.
+    /// Get or lazily initialize the `ObjectStore`.
     ///
-    /// **Internal use only**: This method exposes the underlying ObjectStore for
-    /// kalamdb-filestore internal functions. External crates should use the
-    /// high-level operations (list, get, put, delete) instead.
-    ///
-    /// # Returns
-    /// Arc-wrapped ObjectStore for zero-copy sharing
+    /// Internal: external crates should use the high-level operations instead.
     pub fn object_store_internal(&self) -> Result<Arc<dyn ObjectStore>> {
-        // Fast path: check if already initialized
         {
-            let read_guard = self.object_store.read();
-            if let Some(store) = read_guard.as_ref() {
+            let guard = self.object_store.read();
+            if let Some(store) = guard.as_ref() {
                 return Ok(Arc::clone(store));
             }
         }
-
-        // Slow path: build and cache
-        {
-            let mut write_guard = self.object_store.write();
-
-            // Double-check after acquiring write lock
-            if let Some(store) = write_guard.as_ref() {
-                return Ok(Arc::clone(store));
-            }
-
-            let store = crate::core::factory::build_object_store(&self.storage, &self.timeouts)?;
-            *write_guard = Some(Arc::clone(&store));
-            Ok(store)
+        let mut guard = self.object_store.write();
+        if let Some(store) = guard.as_ref() {
+            return Ok(Arc::clone(store));
         }
+        let store = crate::core::factory::build_object_store(&self.storage, &self.timeouts)?;
+        *guard = Some(Arc::clone(&store));
+        Ok(store)
     }
 
-    /// Convert a relative path to ObjectStore Path.
     fn to_object_path(&self, relative_path: &str) -> Result<ObjectPath> {
         ObjectPath::parse(relative_path)
             .map_err(|e| FilestoreError::Path(format!("Invalid object path: {}", e)))
     }
 
-    // ========== File Operations (Async) ==========
+    // ── Async Operations ─────────────────────────────────────────────
 
     /// List all files under a table's storage path.
-    ///
-    /// # Arguments
-    /// * `table_type` - Type of table
-    /// * `table_id` - Table identifier
-    /// * `user_id` - Optional user ID (for user tables)
-    ///
-    /// # Returns
-    /// ListResult containing all file paths
     pub async fn list(
         &self,
         table_type: TableType,
         table_id: &TableId,
         user_id: Option<&UserId>,
     ) -> Result<ListResult> {
-        let span = tracing::info_span!(
-            "storage.list",
-            storage_id = %self.storage.storage_id,
-            table_type = ?table_type,
-            table_id = %table_id,
-            has_user_id = user_id.is_some()
-        );
-        async move {
-            let store = self.object_store_internal()?;
-            let relative = self.resolve_full_template(table_type, table_id, user_id);
-            let prefix_path = self.to_object_path(&relative)?;
+        let store = self.object_store_internal()?;
+        let relative = self.resolve_full_template(table_type, table_id, user_id);
+        let prefix_path = self.to_object_path(&relative)?;
 
-            let mut stream = store.list(Some(&prefix_path));
-            let mut paths = Vec::new();
-
-            while let Some(result) = stream.next().await {
-                let meta = result.map_err(|e| FilestoreError::ObjectStore(e.to_string()))?;
-                paths.push(meta.location.to_string());
-            }
-            tracing::debug!(count = paths.len(), "Storage list completed");
-
-            Ok(ListResult::new(paths, relative))
+        let mut stream = store.list(Some(&prefix_path));
+        let mut paths = Vec::new();
+        while let Some(result) = stream.next().await {
+            let meta = result.map_err(|e| FilestoreError::ObjectStore(e.to_string()))?;
+            paths.push(meta.location.to_string());
         }
-        .instrument(span)
-        .await
-    }
-
-    /// Read manifest.json directly (Task 102)
-    pub fn read_manifest_sync(
-        &self,
-        table_type: TableType,
-        table_id: &TableId,
-        user_id: Option<&UserId>,
-    ) -> Result<Option<serde_json::Value>> {
-        let file_content = match self.get_sync(table_type, table_id, user_id, "manifest.json") {
-            Ok(res) => res.data,
-            Err(FilestoreError::NotFound(_)) => return Ok(None),
-            Err(e) => return Err(e),
-        };
-
-        let manifest: serde_json::Value = serde_json::from_slice(&file_content)
-            .map_err(|e| FilestoreError::Format(format!("Invalid manifest json: {}", e)))?;
-
-        Ok(Some(manifest))
-    }
-
-    /// Write manifest.json directly (Task 102)
-    pub fn write_manifest_sync(
-        &self,
-        table_type: TableType,
-        table_id: &TableId,
-        user_id: Option<&UserId>,
-        manifest: &serde_json::Value,
-    ) -> Result<()> {
-        let span = tracing::info_span!(
-            "manifest.write",
-            storage_id = %self.storage.storage_id,
-            table_type = ?table_type,
-            table_id = %table_id,
-            has_user_id = user_id.is_some()
-        );
-        let _span_guard = span.entered();
-        let data = serde_json::to_vec_pretty(manifest)
-            .map_err(|e| FilestoreError::Format(format!("Failed to serialize manifest: {}", e)))?;
-
-        // Pass just the filename, not the full path - put_sync will construct the full path
-        self.put_sync(table_type, table_id, user_id, "manifest.json", bytes::Bytes::from(data))?;
-        tracing::debug!("Manifest write completed");
-        Ok(())
-    }
-
-    /// List all files under a table's storage path (sync).
-    pub fn list_sync(
-        &self,
-        table_type: TableType,
-        table_id: &TableId,
-        user_id: Option<&UserId>,
-    ) -> Result<ListResult> {
-        // Clone what we need for the closure
-        let table_type = table_type;
-        let table_id = table_id.clone();
-        let user_id = user_id.cloned();
-
-        run_blocking(|| async { self.list(table_type, &table_id, user_id.as_ref()).await })
-    }
-
-    /// List all Parquet files under a table's storage path (sync).
-    /// Returns duplicate-free list of filenames ending in .parquet.
-    /// TODO: This is problematic for large datasets - consider async version with streaming.
-    pub fn list_parquet_files_sync(
-        &self,
-        table_type: TableType,
-        table_id: &TableId,
-        user_id: Option<&UserId>,
-    ) -> Result<Vec<String>> {
-        let list_result = self.list_sync(table_type, table_id, user_id)?;
-        let prefix = list_result.prefix.trim_end_matches('/');
-
-        let mut files: Vec<String> = list_result
-            .paths
-            .into_iter()
-            .filter_map(|path| {
-                // Extract filename relative to the listed prefix
-                // Note: ObjectStore paths are usually consistent but handling prefix stripping is safer
-                let suffix = if path.starts_with(prefix) {
-                    path[prefix.len()..].trim_start_matches('/')
-                } else {
-                    // Fallback for paths that might be full absolute paths or differently formatted
-                    path.rsplit('/').next().unwrap_or(path.as_str())
-                };
-
-                if suffix.ends_with(".parquet") {
-                    Some(suffix.to_string())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        files.sort();
-        files.dedup();
-        Ok(files)
-    }
-
-    /// List all Parquet files under a table's storage path (async).
-    /// Returns duplicate-free list of filenames ending in .parquet.
-    pub async fn list_parquet_files(
-        &self,
-        table_type: TableType,
-        table_id: &TableId,
-        user_id: Option<&UserId>,
-    ) -> Result<Vec<String>> {
-        let list_result = self.list(table_type, table_id, user_id).await?;
-        let prefix = list_result.prefix.trim_end_matches('/');
-
-        let mut files: Vec<String> = list_result
-            .paths
-            .into_iter()
-            .filter_map(|path| {
-                let suffix = if path.starts_with(prefix) {
-                    path[prefix.len()..].trim_start_matches('/')
-                } else {
-                    path.rsplit('/').next().unwrap_or(path.as_str())
-                };
-
-                if suffix.ends_with(".parquet") {
-                    Some(suffix.to_string())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        files.sort();
-        files.dedup();
-        Ok(files)
-    }
-
-    /// Read one or multiple Parquet files and return RecordBatch(es) (async).
-    pub async fn read_parquet_files(
-        &self,
-        table_type: TableType,
-        table_id: &TableId,
-        user_id: Option<&UserId>,
-        files: &[String],
-    ) -> Result<Vec<arrow::record_batch::RecordBatch>> {
-        let mut batches = Vec::new();
-        for file in files {
-            let data = self.get(table_type, table_id, user_id, file).await?.data;
-            let file_batches = crate::parquet::reader::parse_parquet_from_bytes(data)?;
-            batches.extend(file_batches);
-        }
-        Ok(batches)
-    }
-
-    /// Read Parquet files with column projection (only decode specified columns).
-    ///
-    /// `columns` lists the column names to read. If empty, reads all columns.
-    /// This avoids decoding and allocating memory for unneeded columns.
-    pub async fn read_parquet_files_projected(
-        &self,
-        table_type: TableType,
-        table_id: &TableId,
-        user_id: Option<&UserId>,
-        files: &[String],
-        columns: &[&str],
-    ) -> Result<Vec<arrow::record_batch::RecordBatch>> {
-        let mut batches = Vec::new();
-        for file in files {
-            let data = self.get(table_type, table_id, user_id, file).await?.data;
-            let file_batches = crate::parquet::reader::parse_parquet_projected(data, columns)?;
-            batches.extend(file_batches);
-        }
-        Ok(batches)
-    }
-
-    /// Read Parquet files using bloom-filter-based row-group pruning.
-    ///
-    /// For each file, row groups whose bloom filter proves the `bloom_value` is
-    /// absent are skipped entirely, and only `columns` are decoded from surviving
-    /// row groups.
-    ///
-    /// Returns `None` for files where bloom filter proved absence across all row
-    /// groups, and `Some(batches)` otherwise.
-    ///
-    /// This is ideal for PK existence checks and point-query lookups.
-    pub async fn read_parquet_files_with_bloom_filter<V: parquet::data_type::AsBytes>(
-        &self,
-        table_type: TableType,
-        table_id: &TableId,
-        user_id: Option<&UserId>,
-        files: &[String],
-        bloom_column: &str,
-        bloom_value: &V,
-        columns: &[&str],
-    ) -> Result<Vec<arrow::record_batch::RecordBatch>> {
-        let mut batches = Vec::new();
-        for file in files {
-            let data = self.get(table_type, table_id, user_id, file).await?.data;
-            if let Some(file_batches) = crate::parquet::reader::parse_parquet_with_bloom_filter(
-                data,
-                bloom_column,
-                bloom_value,
-                columns,
-            )? {
-                batches.extend(file_batches);
-            }
-        }
-        Ok(batches)
-    }
-
-    /// Check if a value is definitely absent from Parquet files using only bloom
-    /// filters (no row data decoded).
-    ///
-    /// Returns `true` if the value is provably absent from ALL files.
-    /// Returns `false` if the value *might* be present in any file.
-    pub async fn bloom_filter_check_absent<V: parquet::data_type::AsBytes>(
-        &self,
-        table_type: TableType,
-        table_id: &TableId,
-        user_id: Option<&UserId>,
-        files: &[String],
-        column: &str,
-        value: &V,
-    ) -> Result<bool> {
-        for file in files {
-            let data = self.get(table_type, table_id, user_id, file).await?.data;
-            if !crate::parquet::reader::bloom_filter_check_absent(data, column, value)? {
-                return Ok(false); // Value might be present in this file
-            }
-        }
-        Ok(true) // All files confirmed absence
+        Ok(ListResult::new(paths, relative))
     }
 
     /// Read a file from storage.
-    ///
-    /// # Arguments
-    /// * `table_type` - Type of table
-    /// * `table_id` - Table identifier
-    /// * `user_id` - Optional user ID
-    /// * `filename` - Filename to read
-    ///
-    /// # Returns
-    /// GetResult containing file data
     pub async fn get(
         &self,
         table_type: TableType,
@@ -557,65 +203,19 @@ impl StorageCached {
         user_id: Option<&UserId>,
         filename: &str,
     ) -> Result<GetResult> {
-        let span = tracing::info_span!(
-            "storage.get",
-            storage_id = %self.storage.storage_id,
-            table_type = ?table_type,
-            table_id = %table_id,
-            has_user_id = user_id.is_some(),
-            filename = filename
-        );
-        async move {
-            let store = self.object_store_internal()?;
-            let path_result = self.get_file_path(table_type, table_id, user_id, filename);
-            let object_path = self.to_object_path(&path_result.relative_path)?;
+        let store = self.object_store_internal()?;
+        let pr = self.get_file_path(table_type, table_id, user_id, filename);
+        let object_path = self.to_object_path(&pr.relative_path)?;
 
-            let result = store.get(&object_path).await.map_err(|e| match e {
-                object_store::Error::NotFound { .. } => {
-                    FilestoreError::NotFound(path_result.full_path.clone())
-                },
-                _ => FilestoreError::ObjectStore(e.to_string()),
-            })?;
-
-            let bytes =
-                result.bytes().await.map_err(|e| FilestoreError::ObjectStore(e.to_string()))?;
-            tracing::debug!(bytes = bytes.len(), "Storage get completed");
-
-            Ok(GetResult::new(bytes, path_result.full_path))
-        }
-        .instrument(span)
-        .await
-    }
-
-    /// Read a file from storage (sync).
-    pub fn get_sync(
-        &self,
-        table_type: TableType,
-        table_id: &TableId,
-        user_id: Option<&UserId>,
-        filename: &str,
-    ) -> Result<GetResult> {
-        let table_id = table_id.clone();
-        let user_id = user_id.cloned();
-        let filename = filename.to_string();
-
-        run_blocking(|| async {
-            self.get(table_type, &table_id, user_id.as_ref(), &filename).await
-        })
+        let result = store.get(&object_path).await.map_err(|e| match e {
+            object_store::Error::NotFound { .. } => FilestoreError::NotFound(pr.full_path.clone()),
+            _ => FilestoreError::ObjectStore(e.to_string()),
+        })?;
+        let bytes = result.bytes().await.map_err(|e| FilestoreError::ObjectStore(e.to_string()))?;
+        Ok(GetResult::new(bytes, pr.full_path))
     }
 
     /// Write data to a file in storage.
-    ///
-    /// # Arguments
-    /// * `table_type` - Type of table
-    /// * `table_id` - Table identifier
-    /// * `user_id` - Optional user ID
-    /// * `shard` - Optional shard ID
-    /// * `filename` - Filename to write
-    /// * `data` - Data to write
-    ///
-    /// # Returns
-    /// PutResult with path and size information
     pub async fn put(
         &self,
         table_type: TableType,
@@ -624,130 +224,20 @@ impl StorageCached {
         filename: &str,
         data: Bytes,
     ) -> Result<PutResult> {
-        let bytes_len = data.len();
-        let span = tracing::info_span!(
-            "storage.put",
-            storage_id = %self.storage.storage_id,
-            table_type = ?table_type,
-            table_id = %table_id,
-            has_user_id = user_id.is_some(),
-            filename = filename,
-            bytes = bytes_len
-        );
-        async move {
-            let store = self.object_store_internal()?;
-            let path_result = self.get_file_path(table_type, table_id, user_id, filename);
-            let object_path = self.to_object_path(&path_result.relative_path)?;
+        let size = data.len();
+        let store = self.object_store_internal()?;
+        let pr = self.get_file_path(table_type, table_id, user_id, filename);
+        let object_path = self.to_object_path(&pr.relative_path)?;
 
-            // Check if file exists for is_new flag
-            let existed = store.head(&object_path).await.is_ok();
-
-            store
-                .put(&object_path, data.into())
-                .await
-                .map_err(|e| FilestoreError::ObjectStore(e.to_string()))?;
-            tracing::debug!(is_new = !existed, "Storage put completed");
-
-            Ok(PutResult::new(path_result.full_path, bytes_len, !existed))
-        }
-        .instrument(span)
-        .await
-    }
-
-    /// Write data to a file in storage (sync).
-    pub fn put_sync(
-        &self,
-        table_type: TableType,
-        table_id: &TableId,
-        user_id: Option<&UserId>,
-        filename: &str,
-        data: Bytes,
-    ) -> Result<PutResult> {
-        let table_id = table_id.clone();
-        let user_id = user_id.cloned();
-        let filename = filename.to_string();
-
-        run_blocking(|| async {
-            self.put(table_type, &table_id, user_id.as_ref(), &filename, data).await
-        })
-    }
-
-    /// Write Parquet batches to storage using the cached ObjectStore.
-    pub async fn write_parquet(
-        &self,
-        table_type: TableType,
-        table_id: &TableId,
-        user_id: Option<&UserId>,
-        filename: &str,
-        schema: SchemaRef,
-        batches: Vec<RecordBatch>,
-        bloom_filter_columns: Option<Vec<String>>,
-    ) -> Result<ParquetWriteResult> {
-        let batch_count = batches.len();
-        let row_count: usize = batches.iter().map(RecordBatch::num_rows).sum();
-        let span = tracing::info_span!(
-            "parquet.write",
-            storage_id = %self.storage.storage_id,
-            table_type = ?table_type,
-            table_id = %table_id,
-            has_user_id = user_id.is_some(),
-            filename = filename,
-            batch_count = batch_count,
-            row_count = row_count
-        );
-        async move {
-            let parquet_bytes = serialize_to_parquet(schema, batches, bloom_filter_columns)?;
-            let size_bytes = parquet_bytes.len() as u64;
-
-            self.put(table_type, table_id, user_id, filename, parquet_bytes).await?;
-            tracing::debug!(size_bytes = size_bytes, "Parquet write completed");
-
-            Ok(ParquetWriteResult { size_bytes })
-        }
-        .instrument(span)
-        .await
-    }
-
-    /// Write Parquet batches to storage (sync).
-    pub fn write_parquet_sync(
-        &self,
-        table_type: TableType,
-        table_id: &TableId,
-        user_id: Option<&UserId>,
-        filename: &str,
-        schema: SchemaRef,
-        batches: Vec<RecordBatch>,
-        bloom_filter_columns: Option<Vec<String>>,
-    ) -> Result<ParquetWriteResult> {
-        let table_id = table_id.clone();
-        let user_id = user_id.cloned();
-        let filename = filename.to_string();
-
-        run_blocking(|| async {
-            self.write_parquet(
-                table_type,
-                &table_id,
-                user_id.as_ref(),
-                &filename,
-                schema,
-                batches,
-                bloom_filter_columns,
-            )
+        store
+            .put(&object_path, data.into())
             .await
-        })
+            .map_err(|e| FilestoreError::ObjectStore(e.to_string()))?;
+
+        Ok(PutResult::new(pr.full_path, size))
     }
 
     /// Delete a file from storage.
-    ///
-    /// # Arguments
-    /// * `table_type` - Type of table
-    /// * `table_id` - Table identifier
-    /// * `user_id` - Optional user ID
-    /// * `shard` - Optional shard ID
-    /// * `filename` - Filename to delete
-    ///
-    /// # Returns
-    /// DeleteResult with path and existence information
     pub async fn delete(
         &self,
         table_type: TableType,
@@ -755,63 +245,21 @@ impl StorageCached {
         user_id: Option<&UserId>,
         filename: &str,
     ) -> Result<DeleteResult> {
-        let span = tracing::info_span!(
-            "storage.delete",
-            storage_id = %self.storage.storage_id,
-            table_type = ?table_type,
-            table_id = %table_id,
-            has_user_id = user_id.is_some(),
-            filename = filename
-        );
-        async move {
-            let store = self.object_store_internal()?;
-            let path_result = self.get_file_path(table_type, table_id, user_id, filename);
-            let object_path = self.to_object_path(&path_result.relative_path)?;
+        let store = self.object_store_internal()?;
+        let pr = self.get_file_path(table_type, table_id, user_id, filename);
+        let object_path = self.to_object_path(&pr.relative_path)?;
 
-            // Check if file exists
-            let existed = store.head(&object_path).await.is_ok();
-
-            if existed {
-                store
-                    .delete(&object_path)
-                    .await
-                    .map_err(|e| FilestoreError::ObjectStore(e.to_string()))?;
-            }
-            tracing::debug!(existed = existed, "Storage delete completed");
-
-            Ok(DeleteResult::new(path_result.full_path, existed))
+        let existed = store.head(&object_path).await.is_ok();
+        if existed {
+            store
+                .delete(&object_path)
+                .await
+                .map_err(|e| FilestoreError::ObjectStore(e.to_string()))?;
         }
-        .instrument(span)
-        .await
+        Ok(DeleteResult::new(pr.full_path, existed))
     }
 
-    /// Delete a file from storage (sync).
-    pub fn delete_sync(
-        &self,
-        table_type: TableType,
-        table_id: &TableId,
-        user_id: Option<&UserId>,
-        filename: &str,
-    ) -> Result<DeleteResult> {
-        let table_id = table_id.clone();
-        let user_id = user_id.cloned();
-        let filename = filename.to_string();
-
-        run_blocking(|| async {
-            self.delete(table_type, &table_id, user_id.as_ref(), &filename).await
-        })
-    }
-
-    /// Delete all files under a table's storage path (e.g., for DROP TABLE).
-    ///
-    /// # Arguments
-    /// * `table_type` - Type of table
-    /// * `table_id` - Table identifier
-    /// * `user_id` - Optional user ID (None to delete all users' data)
-    /// * `shard` - Optional shard ID (None to delete all shards)
-    ///
-    /// # Returns
-    /// DeletePrefixResult with count of deleted files
+    /// Delete all files under a table's storage prefix (e.g., DROP TABLE).
     pub async fn delete_prefix(
         &self,
         table_type: TableType,
@@ -820,34 +268,24 @@ impl StorageCached {
     ) -> Result<DeletePrefixResult> {
         let store = self.object_store_internal()?;
 
-        // For user tables without user_id, we want to delete the table prefix
-        // (which will delete all user directories under it)
         let prefix = if user_id.is_none() && table_type == TableType::User {
-            // Just resolve static placeholders for user tables without user_id
             self.resolve_static(table_type, table_id)
         } else {
             self.resolve_full_template(table_type, table_id, user_id)
         };
 
         let cleanup_prefix = PathResolver::resolve_cleanup_prefix(&prefix);
-
         let prefix_path = self.to_object_path(cleanup_prefix.as_ref())?;
 
-        // List all files under prefix
         let mut stream = store.list(Some(&prefix_path));
         let mut deleted_paths = Vec::new();
-
         while let Some(result) = stream.next().await {
             let meta = result.map_err(|e| FilestoreError::ObjectStore(e.to_string()))?;
-            let path = meta.location;
-
-            // Delete each file
             store
-                .delete(&path)
+                .delete(&meta.location)
                 .await
                 .map_err(|e| FilestoreError::ObjectStore(e.to_string()))?;
-
-            deleted_paths.push(path.to_string());
+            deleted_paths.push(meta.location.to_string());
         }
 
         if matches!(self.storage.storage_type, StorageType::Filesystem) {
@@ -862,15 +300,6 @@ impl StorageCached {
     }
 
     /// Check if a file exists.
-    ///
-    /// # Arguments
-    /// * `table_type` - Type of table
-    /// * `table_id` - Table identifier
-    /// * `user_id` - Optional user ID
-    /// * `filename` - Filename to check
-    ///
-    /// # Returns
-    /// ExistsResult with existence and size information
     pub async fn exists(
         &self,
         table_type: TableType,
@@ -879,15 +308,13 @@ impl StorageCached {
         filename: &str,
     ) -> Result<ExistsResult> {
         let store = self.object_store_internal()?;
-        let path_result = self.get_file_path(table_type, table_id, user_id, filename);
-        let object_path = self.to_object_path(&path_result.relative_path)?;
+        let pr = self.get_file_path(table_type, table_id, user_id, filename);
+        let object_path = self.to_object_path(&pr.relative_path)?;
 
         match store.head(&object_path).await {
-            Ok(meta) => {
-                Ok(ExistsResult::new(path_result.full_path, true, Some(meta.size as usize)))
-            },
+            Ok(meta) => Ok(ExistsResult::new(pr.full_path, true, Some(meta.size as usize))),
             Err(object_store::Error::NotFound { .. }) => {
-                Ok(ExistsResult::new(path_result.full_path, false, None))
+                Ok(ExistsResult::new(pr.full_path, false, None))
             },
             Err(e) => Err(FilestoreError::ObjectStore(e.to_string())),
         }
@@ -902,36 +329,18 @@ impl StorageCached {
         filename: &str,
     ) -> Result<FileInfo> {
         let store = self.object_store_internal()?;
-        let path_result = self.get_file_path(table_type, table_id, user_id, filename);
-        let object_path = self.to_object_path(&path_result.relative_path)?;
+        let pr = self.get_file_path(table_type, table_id, user_id, filename);
+        let object_path = self.to_object_path(&pr.relative_path)?;
 
         let meta = store
             .head(&object_path)
             .await
             .map_err(|e| FilestoreError::ObjectStore(e.to_string()))?;
-
         Ok(FileInfo::new(
-            path_result.full_path,
+            pr.full_path,
             meta.size as usize,
             Some(meta.last_modified.timestamp_millis()),
         ))
-    }
-
-    /// Get file metadata (sync).
-    pub fn head_sync(
-        &self,
-        table_type: TableType,
-        table_id: &TableId,
-        user_id: Option<&UserId>,
-        filename: &str,
-    ) -> Result<FileInfo> {
-        let table_id = table_id.clone();
-        let user_id = user_id.cloned();
-        let filename = filename.to_string();
-
-        run_blocking(|| async {
-            self.head(table_type, &table_id, user_id.as_ref(), &filename).await
-        })
     }
 
     /// Rename/move a file within the same table's storage.
@@ -944,50 +353,19 @@ impl StorageCached {
         to_filename: &str,
     ) -> Result<RenameResult> {
         let store = self.object_store_internal()?;
-
-        let from_path_result = self.get_file_path(table_type, table_id, user_id, from_filename);
-        let to_path_result = self.get_file_path(table_type, table_id, user_id, to_filename);
-
-        let from_object_path = self.to_object_path(&from_path_result.relative_path)?;
-        let to_object_path = self.to_object_path(&to_path_result.relative_path)?;
+        let from_pr = self.get_file_path(table_type, table_id, user_id, from_filename);
+        let to_pr = self.get_file_path(table_type, table_id, user_id, to_filename);
+        let from_path = self.to_object_path(&from_pr.relative_path)?;
+        let to_path = self.to_object_path(&to_pr.relative_path)?;
 
         store
-            .rename(&from_object_path, &to_object_path)
+            .rename(&from_path, &to_path)
             .await
             .map_err(|e| FilestoreError::ObjectStore(e.to_string()))?;
-
-        Ok(RenameResult::new(from_path_result.full_path, to_path_result.full_path, true))
+        Ok(RenameResult::new(from_pr.full_path, to_pr.full_path, true))
     }
 
-    /// Rename/move a file (sync).
-    pub fn rename_sync(
-        &self,
-        table_type: TableType,
-        table_id: &TableId,
-        user_id: Option<&UserId>,
-        from_filename: &str,
-        to_filename: &str,
-    ) -> Result<RenameResult> {
-        let table_id = table_id.clone();
-        let user_id = user_id.cloned();
-        let from_filename = from_filename.to_string();
-        let to_filename = to_filename.to_string();
-
-        run_blocking(|| async {
-            self.rename(table_type, &table_id, user_id.as_ref(), &from_filename, &to_filename)
-                .await
-        })
-    }
-
-    /// Check if any files exist under a table's storage path.
-    ///
-    /// # Arguments
-    /// * `table_type` - Type of table
-    /// * `table_id` - Table identifier
-    /// * `user_id` - Optional user ID
-    ///
-    /// # Returns
-    /// true if at least one file exists under the prefix
+    /// Check if any files exist under a table's storage prefix.
     pub async fn prefix_exists(
         &self,
         table_type: TableType,
@@ -997,28 +375,176 @@ impl StorageCached {
         let store = self.object_store_internal()?;
         let relative = self.resolve_full_template(table_type, table_id, user_id);
         let prefix_path = self.to_object_path(&relative)?;
-
-        let mut stream = store.list(Some(&prefix_path));
-
-        // Check if at least one file exists
-        Ok(stream.next().await.is_some())
+        Ok(store.list(Some(&prefix_path)).next().await.is_some())
     }
 
-    // ========== Cache Management ==========
+    // ── Parquet Operations ───────────────────────────────────────────
 
-    /// Invalidate the cached ObjectStore (forces rebuild on next use).
+    /// Stream `RecordBatch`es from a Parquet file without loading it entirely.
     ///
-    /// Call this when storage configuration changes (e.g., ALTER STORAGE).
-    pub fn invalidate_object_store(&self) {
-        let mut write_guard = self.object_store.write();
-        *write_guard = None;
+    /// Uses `ObjectStore`-backed async reader. Only the footer is read eagerly;
+    /// column data is fetched on demand. Pass `&[]` for `columns` to read all.
+    pub async fn read_parquet_file_stream(
+        &self,
+        table_type: TableType,
+        table_id: &TableId,
+        user_id: Option<&UserId>,
+        file: &str,
+        columns: &[&str],
+    ) -> Result<crate::parquet::reader::RecordBatchFileStream> {
+        let store = self.object_store_internal()?;
+        let pr = self.get_file_path(table_type, table_id, user_id, file);
+        let object_path = self.to_object_path(&pr.relative_path)?;
+        crate::parquet::reader::parse_parquet_stream(store, &object_path, columns).await
     }
 
-    /// Check if ObjectStore has been initialized.
-    pub fn is_object_store_initialized(&self) -> bool {
-        let read_guard = self.object_store.read();
-        read_guard.is_some()
+    /// Write `RecordBatch`es as Parquet with bloom filters.
+    pub async fn write_parquet(
+        &self,
+        table_type: TableType,
+        table_id: &TableId,
+        user_id: Option<&UserId>,
+        filename: &str,
+        schema: SchemaRef,
+        batches: Vec<RecordBatch>,
+        bloom_filter_columns: Option<Vec<String>>,
+    ) -> Result<ParquetWriteResult> {
+        let parquet_bytes = serialize_to_parquet(schema, batches, bloom_filter_columns)?;
+        let size_bytes = parquet_bytes.len() as u64;
+        self.put(table_type, table_id, user_id, filename, parquet_bytes).await?;
+        Ok(ParquetWriteResult { size_bytes })
     }
+
+    /// List Parquet filenames under a table's storage path (sorted, deduplicated).
+    pub async fn list_parquet_files(
+        &self,
+        table_type: TableType,
+        table_id: &TableId,
+        user_id: Option<&UserId>,
+    ) -> Result<Vec<String>> {
+        let list_result = self.list(table_type, table_id, user_id).await?;
+        Ok(extract_parquet_filenames(&list_result))
+    }
+
+    // ── Manifest Convenience ─────────────────────────────────────────
+
+    /// Read and parse `manifest.json` (sync). Returns `None` if not found.
+    pub fn read_manifest_sync(
+        &self,
+        table_type: TableType,
+        table_id: &TableId,
+        user_id: Option<&UserId>,
+    ) -> Result<Option<serde_json::Value>> {
+        match self.get_sync(table_type, table_id, user_id, "manifest.json") {
+            Ok(res) => serde_json::from_slice(&res.data)
+                .map(Some)
+                .map_err(|e| FilestoreError::Format(format!("Invalid manifest json: {}", e))),
+            Err(FilestoreError::NotFound(_)) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Serialize and write `manifest.json` (sync).
+    pub fn write_manifest_sync(
+        &self,
+        table_type: TableType,
+        table_id: &TableId,
+        user_id: Option<&UserId>,
+        manifest: &serde_json::Value,
+    ) -> Result<()> {
+        let data = serde_json::to_vec_pretty(manifest)
+            .map_err(|e| FilestoreError::Format(format!("Failed to serialize manifest: {}", e)))?;
+        self.put_sync(table_type, table_id, user_id, "manifest.json", Bytes::from(data))?;
+        Ok(())
+    }
+
+    // ── Sync Wrappers ────────────────────────────────────────────────
+    //
+    // Thin delegates to async methods via `run_blocking`. Used by flush
+    // paths and other sync contexts.
+
+    pub fn list_sync(&self, table_type: TableType, table_id: &TableId, user_id: Option<&UserId>) -> Result<ListResult> {
+        let (tid, uid) = (table_id.clone(), user_id.cloned());
+        run_blocking(|| async { self.list(table_type, &tid, uid.as_ref()).await })
+    }
+
+    pub fn list_parquet_files_sync(&self, table_type: TableType, table_id: &TableId, user_id: Option<&UserId>) -> Result<Vec<String>> {
+        let (tid, uid) = (table_id.clone(), user_id.cloned());
+        run_blocking(|| async { self.list_parquet_files(table_type, &tid, uid.as_ref()).await })
+    }
+
+    pub fn get_sync(&self, table_type: TableType, table_id: &TableId, user_id: Option<&UserId>, filename: &str) -> Result<GetResult> {
+        let (tid, uid, f) = (table_id.clone(), user_id.cloned(), filename.to_string());
+        run_blocking(|| async { self.get(table_type, &tid, uid.as_ref(), &f).await })
+    }
+
+    pub fn put_sync(&self, table_type: TableType, table_id: &TableId, user_id: Option<&UserId>, filename: &str, data: Bytes) -> Result<PutResult> {
+        let (tid, uid, f) = (table_id.clone(), user_id.cloned(), filename.to_string());
+        run_blocking(|| async { self.put(table_type, &tid, uid.as_ref(), &f, data).await })
+    }
+
+    pub fn delete_sync(&self, table_type: TableType, table_id: &TableId, user_id: Option<&UserId>, filename: &str) -> Result<DeleteResult> {
+        let (tid, uid, f) = (table_id.clone(), user_id.cloned(), filename.to_string());
+        run_blocking(|| async { self.delete(table_type, &tid, uid.as_ref(), &f).await })
+    }
+
+    pub fn head_sync(&self, table_type: TableType, table_id: &TableId, user_id: Option<&UserId>, filename: &str) -> Result<FileInfo> {
+        let (tid, uid, f) = (table_id.clone(), user_id.cloned(), filename.to_string());
+        run_blocking(|| async { self.head(table_type, &tid, uid.as_ref(), &f).await })
+    }
+
+    pub fn rename_sync(&self, table_type: TableType, table_id: &TableId, user_id: Option<&UserId>, from: &str, to: &str) -> Result<RenameResult> {
+        let (tid, uid, from, to) = (table_id.clone(), user_id.cloned(), from.to_string(), to.to_string());
+        run_blocking(|| async { self.rename(table_type, &tid, uid.as_ref(), &from, &to).await })
+    }
+
+    pub fn write_parquet_sync(
+        &self,
+        table_type: TableType,
+        table_id: &TableId,
+        user_id: Option<&UserId>,
+        filename: &str,
+        schema: SchemaRef,
+        batches: Vec<RecordBatch>,
+        bloom_filter_columns: Option<Vec<String>>,
+    ) -> Result<ParquetWriteResult> {
+        let (tid, uid, f) = (table_id.clone(), user_id.cloned(), filename.to_string());
+        run_blocking(|| async {
+            self.write_parquet(table_type, &tid, uid.as_ref(), &f, schema, batches, bloom_filter_columns).await
+        })
+    }
+
+    // ── Cache Management ─────────────────────────────────────────────
+
+    /// Invalidate the cached `ObjectStore` (forces rebuild on next use).
+    pub fn invalidate_object_store(&self) {
+        *self.object_store.write() = None;
+    }
+
+    /// Check if `ObjectStore` has been initialized.
+    pub fn is_object_store_initialized(&self) -> bool {
+        self.object_store.read().is_some()
+    }
+}
+
+/// Extract sorted, deduplicated `.parquet` filenames from a list result.
+fn extract_parquet_filenames(list_result: &ListResult) -> Vec<String> {
+    let prefix = list_result.prefix.trim_end_matches('/');
+    let mut files: Vec<String> = list_result
+        .paths
+        .iter()
+        .filter_map(|path| {
+            let suffix = if path.starts_with(prefix) {
+                path[prefix.len()..].trim_start_matches('/')
+            } else {
+                path.rsplit('/').next().unwrap_or(path.as_str())
+            };
+            suffix.ends_with(".parquet").then(|| suffix.to_string())
+        })
+        .collect();
+    files.sort();
+    files.dedup();
+    files
 }
 
 #[cfg(test)]
@@ -1135,7 +661,6 @@ mod tests {
         let put_result = cached
             .put_sync(TableType::Shared, &table_id, None, "data.txt", content.clone())
             .unwrap();
-        assert!(put_result.is_new);
         assert_eq!(put_result.size, content.len());
 
         // Read file back
@@ -1331,19 +856,17 @@ mod tests {
         let table_id = make_table_id("test", "overwrite");
 
         // Write first version
-        let put1 = cached
+        cached
             .put_sync(TableType::Shared, &table_id, None, "overwrite.txt", Bytes::from("version 1"))
             .unwrap();
-        assert!(put1.is_new);
 
         let v1 = cached.get_sync(TableType::Shared, &table_id, None, "overwrite.txt").unwrap();
         assert_eq!(v1.data, Bytes::from("version 1"));
 
         // Overwrite with version 2
-        let put2 = cached
+        cached
             .put_sync(TableType::Shared, &table_id, None, "overwrite.txt", Bytes::from("version 2"))
             .unwrap();
-        assert!(!put2.is_new); // Should be overwrite
 
         let v2 = cached.get_sync(TableType::Shared, &table_id, None, "overwrite.txt").unwrap();
         assert_eq!(v2.data, Bytes::from("version 2"));

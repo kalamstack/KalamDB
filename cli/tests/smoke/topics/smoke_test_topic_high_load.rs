@@ -739,7 +739,16 @@ async fn test_topic_high_load_concurrent_publishers() {
 
         // Check for various datatypes
         if let Some(val) = payload.get("value").or_else(|| payload.get("score")) {
-            assert!(val.is_number(), "Numeric field should be a number");
+            let normalized = common::extract_typed_value(val);
+            let is_numeric_string = normalized
+                .as_str()
+                .and_then(|raw| raw.parse::<f64>().ok())
+                .is_some();
+            assert!(
+                normalized.is_number() || is_numeric_string,
+                "Numeric field should be a number: {:?}",
+                val
+            );
         }
 
         if let Some(val) = payload
@@ -748,7 +757,8 @@ async fn test_topic_high_load_concurrent_publishers() {
             .or_else(|| payload.get("available"))
             .or_else(|| payload.get("success"))
         {
-            assert!(val.is_boolean(), "Boolean field should be boolean");
+            let normalized = common::extract_typed_value(val);
+            assert!(normalized.is_boolean(), "Boolean field should be boolean: {:?}", val);
         }
 
         if let Some(val) = payload
@@ -757,7 +767,8 @@ async fn test_topic_high_load_concurrent_publishers() {
             .or_else(|| payload.get("product_name"))
             .or_else(|| payload.get("event_type"))
         {
-            assert!(val.is_string(), "Text field should be string");
+            let normalized = common::extract_typed_value(val);
+            assert!(normalized.is_string(), "Text field should be string: {:?}", val);
         }
     }
 
@@ -1226,7 +1237,7 @@ async fn test_topic_four_consumers_same_group_no_duplicates() {
 /// 2. After visibility timeout, Consumer B (same group) must recover and process
 ///    the entire stream without offset gaps, even with per-message processing latency.
 #[tokio::test]
-#[ntest::timeout(101000)]
+#[ntest::timeout(180000)]
 async fn test_topic_ack_failure_recovery_no_message_loss_with_latency() {
     let namespace = common::generate_unique_namespace("ack_recovery");
     let table = format!("{}.events", namespace);
@@ -1386,6 +1397,7 @@ async fn test_topic_ack_failure_recovery_no_message_loss_with_latency() {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct EventInfo {
     table: String,
     op: TopicOp,

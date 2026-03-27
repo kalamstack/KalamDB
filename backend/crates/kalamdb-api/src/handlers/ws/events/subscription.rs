@@ -29,7 +29,7 @@ pub async fn handle_subscribe(
     live_query_manager: &Arc<LiveQueryManager>,
     compression_enabled: bool,
 ) -> Result<(), String> {
-    let user_id = connection_state.read().user_id().cloned().ok_or("Not authenticated")?;
+    let user_id = connection_state.user_id().cloned().ok_or("Not authenticated")?;
 
     // Validate subscription ID
     if subscription.id.trim().is_empty() {
@@ -168,7 +168,7 @@ pub async fn handle_subscribe(
                 let _ = send_json(session, &batch_msg, compression_enabled).await;
 
                 if !initial.has_more {
-                    let flushed = connection_state.read().complete_initial_load(&subscription_id);
+                    let flushed = connection_state.complete_initial_load(&subscription_id);
                     if flushed > 0 {
                         debug!(
                             "Flushed {} buffered notifications after initial load for {}",
@@ -179,7 +179,7 @@ pub async fn handle_subscribe(
             } else {
                 // info!("No initial data to send for {}", subscription_id);
                 let flushed =
-                    connection_state.read().complete_initial_load(&subscription_id.clone());
+                    connection_state.complete_initial_load(&subscription_id.clone());
                 if flushed > 0 {
                     debug!(
                         "Flushed {} buffered notifications after initial load for {}",

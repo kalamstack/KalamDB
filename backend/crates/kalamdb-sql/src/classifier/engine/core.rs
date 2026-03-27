@@ -295,14 +295,7 @@ impl SqlStatement {
                     CheckStorageStatement::parse(sql).map(SqlStatementKind::CheckStorage)
                 })
             },
-            ["SHOW", "MANIFEST"] => {
-                // SHOW MANIFEST command for inspecting manifest cache
-                Self::wrap(sql, || {
-                    ShowManifestStatement::parse(sql).map(SqlStatementKind::ShowManifest)
-                })
-            },
-            ["SHOW", "MANIFEST", "CACHE", ..] => {
-                // Legacy alias for SHOW MANIFEST - backwards compatibility
+            ["SHOW", "MANIFEST"] | ["SHOW", "MANIFEST", "CACHE", ..] => {
                 Self::wrap(sql, || {
                     ShowManifestStatement::parse(sql).map(SqlStatementKind::ShowManifest)
                 })

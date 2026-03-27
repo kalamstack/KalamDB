@@ -110,7 +110,7 @@ impl FromArrowType for KalamDataType {
             ArrowDataType::Float32 => KalamDataType::Float,
             ArrowDataType::Utf8 | ArrowDataType::LargeUtf8 => KalamDataType::Text,
             ArrowDataType::Timestamp(TimeUnit::Microsecond, None) => KalamDataType::Timestamp,
-            ArrowDataType::Timestamp(TimeUnit::Millisecond, None) => KalamDataType::Timestamp, // accept legacy millisecond
+            ArrowDataType::Timestamp(TimeUnit::Millisecond, None) => KalamDataType::Timestamp,
             ArrowDataType::Timestamp(TimeUnit::Nanosecond, None) => KalamDataType::Timestamp,
             ArrowDataType::Timestamp(TimeUnit::Microsecond, Some(_)) => KalamDataType::DateTime,
             ArrowDataType::Timestamp(TimeUnit::Millisecond, Some(_)) => KalamDataType::DateTime,

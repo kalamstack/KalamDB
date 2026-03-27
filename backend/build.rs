@@ -15,8 +15,8 @@ fn main() {
     build_isoc23_glibc_shim_if_needed(&repo_root);
 
     // Build UI for release builds FIRST (before rust-embed macro runs).
-    // Run for the top-level server crate (project-level) and kalamdb-api when applicable.
-    if package_name == "kalamdb-api" {
+    // Only when the embedded-ui feature is enabled.
+    if package_name == "kalamdb-api" && std::env::var("CARGO_FEATURE_EMBEDDED_UI").is_ok() {
         build_ui_if_release(&repo_root);
     }
 

@@ -129,14 +129,14 @@ fn smoke_test_shared_table_flush_manifest() {
         ) WITH (
             TYPE = 'SHARED',
             STORAGE_ID = 'local',
-            FLUSH_POLICY = 'rows:10',
+            FLUSH_POLICY = 'rows:100',
             ACCESS_LEVEL = 'PUBLIC'
         )"#,
         full_table
     );
     execute_sql_as_root_via_client(&create_sql).expect("Failed to create shared table");
 
-    println!("✅ Created SHARED table with FLUSH_POLICY='rows:10'");
+    println!("✅ Created SHARED table with FLUSH_POLICY='rows:100'");
 
     // Insert 20 rows
     println!("📝 Inserting 20 rows...");

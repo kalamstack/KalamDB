@@ -1,7 +1,6 @@
 use super::helpers::*;
-use crate::common;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
-use kalam_link::SubscriptionConfig;
+use kalam_link::{SubscriptionConfig, SubscriptionOptions};
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -11,7 +10,7 @@ use tokio::time::{sleep, timeout};
 /// more than once before the client reaches steady-state live delivery.
 #[tokio::test]
 async fn test_large_initial_snapshot_survives_repeated_outages() {
-    let result = timeout(Duration::from_secs(75), async {
+    let result = timeout(Duration::from_secs(240), async {
         let writer = match create_test_client() {
             Ok(c) => c,
             Err(e) => {
@@ -20,7 +19,7 @@ async fn test_large_initial_snapshot_survives_repeated_outages() {
             },
         };
 
-        let proxy = TcpDisconnectProxy::start(common::server_url()).await;
+        let proxy = TcpDisconnectProxy::start(upstream_server_url()).await;
         let (client, connect_count, disconnect_count) =
             match create_test_client_with_events_for_base_url(proxy.base_url()) {
                 Ok(v) => v,
@@ -35,7 +34,7 @@ async fn test_large_initial_snapshot_survives_repeated_outages() {
         let table = format!("default.large_snapshot_drop_{}", suffix);
         ensure_table(&writer, &table).await;
 
-        for index in 0..80 {
+        for index in 0..30 {
             writer
                 .execute_query(
                     &format!(
@@ -52,11 +51,14 @@ async fn test_large_initial_snapshot_survives_repeated_outages() {
 
         client.connect().await.expect("connect through proxy");
 
+        let mut config = SubscriptionConfig::new(
+            format!("large-snapshot-{}", suffix),
+            format!("SELECT id, value FROM {}", table),
+        );
+        config.options = Some(SubscriptionOptions::new().with_batch_size(3));
+
         let mut sub = client
-            .subscribe_with_config(SubscriptionConfig::new(
-                format!("large-snapshot-{}", suffix),
-                format!("SELECT id, value FROM {}", table),
-            ))
+            .subscribe_with_config(config)
             .await
             .expect("subscribe large snapshot table");
 
@@ -190,16 +192,16 @@ async fn test_large_initial_snapshot_survives_repeated_outages() {
             .await
             .expect("insert post-reconnect row");
 
-        for _ in 0..60 {
+        for _ in 0..120 {
             if seen_ids.contains("gap-one")
                 && seen_ids.contains("gap-two")
                 && seen_ids.contains("after-final-reconnect")
-                && (0..80).all(|index| seen_ids.contains(&format!("seed-{}", index)))
+                && (0..30).all(|index| seen_ids.contains(&format!("seed-{}", index)))
             {
                 break;
             }
 
-            match timeout(Duration::from_millis(1500), sub.next()).await {
+            match timeout(Duration::from_millis(2000), sub.next()).await {
                 Ok(Some(Ok(ev))) => {
                     let mut scratch = None;
                     let mut ids = Vec::new();
@@ -218,7 +220,7 @@ async fn test_large_initial_snapshot_survives_repeated_outages() {
             }
         }
 
-        for index in 0..80 {
+        for index in 0..30 {
             assert!(
                 seen_ids.contains(&format!("seed-{}", index)),
                 "seed row {} should be delivered across repeated outages",

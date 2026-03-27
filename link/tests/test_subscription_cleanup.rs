@@ -45,7 +45,7 @@ fn unique_ident(prefix: &str) -> String {
 /// Build a client with `KalamLinkTimeouts::fast()` (≤5s per operation).
 fn fast_client() -> Result<KalamLinkClient, KalamLinkError> {
     let token = common::root_access_token_blocking()
-        .map_err(|e| KalamLinkError::InternalError(e.to_string()))?;
+        .map_err(|e| KalamLinkError::ConfigurationError(e.to_string()))?;
     KalamLinkClient::builder()
         .base_url(common::server_url())
         .auth(AuthProvider::jwt_token(token))

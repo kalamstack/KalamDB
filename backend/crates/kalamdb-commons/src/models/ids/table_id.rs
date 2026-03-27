@@ -90,16 +90,7 @@ impl TableId {
             });
         }
 
-        // Legacy delimiter-based format fallback
-        let key_str = std::str::from_utf8(key).ok()?;
-        let pos = key_str.find(':')?;
-        let namespace_id = &key_str[..pos];
-        let table_name = &key_str[pos + 1..];
-
-        Some(Self {
-            namespace_id: NamespaceId::new(namespace_id),
-            table_name: TableName::new(table_name),
-        })
+        None
     }
 
     /// Consume and return inner components

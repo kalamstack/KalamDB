@@ -20,10 +20,11 @@ pub async fn cleanup_connection(
     live_query_manager: &Arc<LiveQueryManager>,
 ) {
     // Get connection_id, user ID and subscription count before unregistering
-    let (connection_id, user_id, subscription_count) = {
-        let state = connection_state.read();
-        (state.connection_id().clone(), state.user_id.clone(), state.subscriptions.len())
-    };
+    let (connection_id, user_id, subscription_count) = (
+        connection_state.connection_id().clone(),
+        connection_state.user_id().cloned(),
+        connection_state.subscription_count(),
+    );
 
     let removed_live_ids = if let Some(ref uid) = user_id {
         match live_query_manager.unregister_connection(uid, &connection_id).await {

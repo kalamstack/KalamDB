@@ -673,6 +673,7 @@ impl SchemaRegistry {
                         max_rows_per_user: 256, // Default per-user retention limit
                         shard_router: ShardRouter::default_config(),
                         ttl_seconds: Some(ttl_seconds),
+                        storage_mode: kalamdb_tables::StreamTableStorageMode::File,
                     },
                 ));
 
@@ -1027,6 +1028,17 @@ impl SchemaRegistry {
         // Scan all tables from storage
         let all_entries = tables_provider.scan_all().into_kalamdb_error("Failed to scan tables")?;
         Ok(all_entries)
+    }
+
+    /// Return a snapshot of the currently cached table definitions.
+    ///
+    /// This is useful for extension or runtime glue that needs visibility into
+    /// newly registered tables before a persistence-backed rescan occurs.
+    pub fn cached_table_definitions(&self) -> Vec<TableDefinition> {
+        self.table_cache
+            .iter()
+            .map(|entry| entry.value().table.as_ref().clone())
+            .collect()
     }
 
     /// Get table definition if it exists (optimized single-call pattern)

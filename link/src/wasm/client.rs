@@ -6,12 +6,8 @@ use serde::Serialize;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{
-    CloseEvent, ErrorEvent, Headers, MessageEvent, Request, RequestInit, RequestMode, Response,
-    WebSocket,
-};
+use web_sys::{CloseEvent, ErrorEvent, MessageEvent, WebSocket};
 
-use crate::compression;
 use crate::models::{
     ClientMessage, ConnectionOptions, QueryRequest, ServerMessage, SubscriptionOptions,
     SubscriptionRequest,
@@ -20,7 +16,7 @@ use base64::Engine;
 
 use super::auth::WasmAuthProvider;
 use super::console_log;
-use super::helpers::{create_promise, subscription_hash};
+use super::helpers::{create_promise, decode_ws_message, subscription_hash};
 use super::reconnect::{self, reconnect_internal_with_auth, resubscribe_all};
 use super::state::{
     callback_payload, filter_subscription_event, track_subscription_checkpoint,
@@ -84,8 +80,10 @@ use super::validation::{
 #[wasm_bindgen]
 pub struct KalamClient {
     url: String,
-    /// Authentication provider (Basic, JWT, or None)
-    auth: WasmAuthProvider,
+    /// Authentication provider (Basic, JWT, or None).
+    /// Wrapped in Rc<RefCell<>> for interior mutability so that auto-refresh
+    /// on TOKEN_EXPIRED can update credentials from `&self` methods.
+    auth: Rc<RefCell<WasmAuthProvider>>,
     ws: Rc<RefCell<Option<WebSocket>>>,
     /// Subscription state including callbacks and last seq_id for resumption
     subscription_state: Rc<RefCell<HashMap<String, SubscriptionState>>>,
@@ -175,7 +173,7 @@ impl KalamClient {
     fn new_with_auth(url: String, auth: WasmAuthProvider) -> KalamClient {
         KalamClient {
             url,
-            auth,
+            auth: Rc::new(RefCell::new(auth)),
             ws: Rc::new(RefCell::new(None)),
             subscription_state: Rc::new(RefCell::new(HashMap::new())),
             connection_options: Rc::new(RefCell::new(ConnectionOptions::default())),
@@ -410,16 +408,51 @@ fn emit_runtime_ws_error(
     }
 }
 
+fn clear_active_socket(
+    ws_ref: &Rc<RefCell<Option<WebSocket>>>,
+    source_ws: &WebSocket,
+    ping_interval_id: &Rc<RefCell<i32>>,
+) {
+    let should_clear = ws_ref.borrow().as_ref().is_some_and(|current_ws| {
+        js_sys::Object::is(current_ws.as_ref(), source_ws.as_ref())
+    });
+    if !should_clear {
+        return;
+    }
+
+    if let Some(current_ws) = ws_ref.borrow_mut().take() {
+        current_ws.set_onclose(None);
+        current_ws.set_onerror(None);
+        current_ws.set_onmessage(None);
+    }
+
+    let id = *ping_interval_id.borrow();
+    if id >= 0 {
+        super::helpers::global_clear_interval(id);
+        *ping_interval_id.borrow_mut() = -1;
+    }
+}
+
 fn install_runtime_disconnect_handlers(
     ws: &WebSocket,
     subscriptions: Rc<RefCell<HashMap<String, SubscriptionState>>>,
+    ws_ref: Rc<RefCell<Option<WebSocket>>>,
+    ping_interval_id: Rc<RefCell<i32>>,
     on_disconnect_cb: Rc<RefCell<Option<js_sys::Function>>>,
     on_error_cb: Rc<RefCell<Option<js_sys::Function>>>,
 ) {
     let subscriptions_for_error = Rc::clone(&subscriptions);
     let on_error_for_err = Rc::clone(&on_error_cb);
+    let ws_ref_for_error = Rc::clone(&ws_ref);
+    let ping_interval_id_for_error = Rc::clone(&ping_interval_id);
+    let source_ws_for_error = ws.clone();
     let onerror_callback = Closure::wrap(Box::new(move |e: ErrorEvent| {
         console_log(&format!("KalamClient: WebSocket error: {:?}", e));
+        clear_active_socket(
+            &ws_ref_for_error,
+            &source_ws_for_error,
+            &ping_interval_id_for_error,
+        );
         emit_runtime_ws_error(&on_error_for_err, "WebSocket connection failed", true);
         reject_pending_subscriptions(
             &subscriptions_for_error,
@@ -431,12 +464,20 @@ fn install_runtime_disconnect_handlers(
 
     let subscriptions_for_close = Rc::clone(&subscriptions);
     let on_disconnect_for_close = Rc::clone(&on_disconnect_cb);
+    let ws_ref_for_close = Rc::clone(&ws_ref);
+    let ping_interval_id_for_close = Rc::clone(&ping_interval_id);
+    let source_ws_for_close = ws.clone();
     let onclose_callback = Closure::wrap(Box::new(move |e: CloseEvent| {
         console_log(&format!(
             "KalamClient: WebSocket closed: code={}, reason={}",
             e.code(),
             e.reason()
         ));
+        clear_active_socket(
+            &ws_ref_for_close,
+            &source_ws_for_close,
+            &ping_interval_id_for_close,
+        );
         if let Some(cb) = on_disconnect_for_close.borrow().as_ref() {
             let reason_obj = js_sys::Object::new();
             let _ = js_sys::Reflect::set(
@@ -468,58 +509,9 @@ fn install_runtime_message_handler(
     on_receive_cb: Rc<RefCell<Option<js_sys::Function>>>,
 ) {
     let onmessage_callback = Closure::wrap(Box::new(move |e: MessageEvent| {
-        let message = if let Ok(txt) = e.data().dyn_into::<js_sys::JsString>() {
-            String::from(txt)
-        } else if let Ok(array_buffer) = e.data().dyn_into::<js_sys::ArrayBuffer>() {
-            let uint8_array = js_sys::Uint8Array::new(&array_buffer);
-            let data = uint8_array.to_vec();
-
-            match compression::decompress_gzip(&data) {
-                Ok(decompressed) => match String::from_utf8(decompressed) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        console_log(&format!(
-                            "KalamClient: Invalid UTF-8 in decompressed message: {}",
-                            e
-                        ));
-                        return;
-                    },
-                },
-                Err(e) => {
-                    console_log(&format!("KalamClient: Failed to decompress message: {}", e));
-                    return;
-                },
-            }
-        } else if e.data().is_instance_of::<web_sys::Blob>() {
-            console_log(
-                "KalamClient: Received Blob message - binary mode may be misconfigured. Attempting to read as text.",
-            );
-            if let Some(s) = e.data().as_string() {
-                s
-            } else {
-                console_log("KalamClient: Could not convert Blob to string");
-                return;
-            }
-        } else {
-            let data = e.data();
-            let type_name = js_sys::Reflect::get(&data, &"constructor".into())
-                .ok()
-                .and_then(|c| js_sys::Reflect::get(&c, &"name".into()).ok())
-                .and_then(|n| n.as_string())
-                .unwrap_or_else(|| "unknown".to_string());
-            let typeof_str = data.js_typeof().as_string().unwrap_or_else(|| "?".to_string());
-            let data_preview = js_sys::JSON::stringify(&data)
-                .ok()
-                .and_then(|s| s.as_string())
-                .unwrap_or_else(|| format!("{:?}", data));
-
-            console_log(&format!(
-                "KalamClient: Received unknown message type: constructor={}, typeof={}, preview={}",
-                type_name,
-                typeof_str,
-                &data_preview[..data_preview.len().min(200)]
-            ));
-            return;
+        let message = match decode_ws_message(&e) {
+            Some(m) => m,
+            None => return,
         };
 
         if message.len() > 200 {
@@ -641,7 +633,7 @@ impl KalamClient {
     /// Returns one of: "basic", "jwt", or "none"
     #[wasm_bindgen(js_name = getAuthType)]
     pub fn get_auth_type(&self) -> String {
-        match &self.auth {
+        match &*self.auth.borrow() {
             WasmAuthProvider::Basic { .. } => "basic".to_string(),
             WasmAuthProvider::Jwt { .. } => "jwt".to_string(),
             WasmAuthProvider::None => "none".to_string(),
@@ -881,7 +873,7 @@ impl KalamClient {
                 }
             }
         } else {
-            self.auth.clone()
+            self.auth.borrow().clone()
         };
 
         if matches!(resolved_auth, WasmAuthProvider::Basic { .. }) {
@@ -959,8 +951,16 @@ impl KalamClient {
         let auth_reject_clone = auth_reject.clone();
         let on_error_for_err = Rc::clone(&self.on_error_cb);
         let subscriptions_for_error = Rc::clone(&self.subscription_state);
+        let ws_ref_for_error = Rc::clone(&self.ws);
+        let ping_interval_id_for_error = Rc::clone(&self.ping_interval_id);
+        let source_ws_for_error = ws.clone();
         let onerror_callback = Closure::wrap(Box::new(move |e: ErrorEvent| {
             console_log(&format!("KalamClient: WebSocket error: {:?}", e));
+            clear_active_socket(
+                &ws_ref_for_error,
+                &source_ws_for_error,
+                &ping_interval_id_for_error,
+            );
             // Emit on_error callback
             if let Some(cb) = on_error_for_err.borrow().as_ref() {
                 let err_obj = js_sys::Object::new();
@@ -985,12 +985,20 @@ impl KalamClient {
 
         let on_disconnect_for_close = Rc::clone(&self.on_disconnect_cb);
         let subscriptions_for_close = Rc::clone(&self.subscription_state);
+        let ws_ref_for_close = Rc::clone(&self.ws);
+        let ping_interval_id_for_close = Rc::clone(&self.ping_interval_id);
+        let source_ws_for_close = ws.clone();
         let onclose_callback = Closure::wrap(Box::new(move |e: CloseEvent| {
             console_log(&format!(
                 "KalamClient: WebSocket closed: code={}, reason={}",
                 e.code(),
                 e.reason()
             ));
+            clear_active_socket(
+                &ws_ref_for_close,
+                &source_ws_for_close,
+                &ping_interval_id_for_close,
+            );
             // Emit on_disconnect callback
             if let Some(cb) = on_disconnect_for_close.borrow().as_ref() {
                 let reason_obj = js_sys::Object::new();
@@ -1034,66 +1042,9 @@ impl KalamClient {
         let on_error_for_msg = Rc::clone(&self.on_error_cb);
 
         let onmessage_callback = Closure::wrap(Box::new(move |e: MessageEvent| {
-            // Handle Text, ArrayBuffer, and Blob messages
-            let message = if let Ok(txt) = e.data().dyn_into::<js_sys::JsString>() {
-                // Plain text message
-                String::from(txt)
-            } else if let Ok(array_buffer) = e.data().dyn_into::<js_sys::ArrayBuffer>() {
-                // Binary message (ArrayBuffer) - likely gzip compressed
-                let uint8_array = js_sys::Uint8Array::new(&array_buffer);
-                let data = uint8_array.to_vec();
-
-                // Decompress gzip data
-                match compression::decompress_gzip(&data) {
-                    Ok(decompressed) => match String::from_utf8(decompressed) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            console_log(&format!(
-                                "KalamClient: Invalid UTF-8 in decompressed message: {}",
-                                e
-                            ));
-                            return;
-                        },
-                    },
-                    Err(e) => {
-                        console_log(&format!("KalamClient: Failed to decompress message: {}", e));
-                        return;
-                    },
-                }
-            } else if e.data().is_instance_of::<web_sys::Blob>() {
-                // Blob message - browser may send binary as Blob instead of ArrayBuffer
-                // For now, log and skip - we need async handling for Blob
-                console_log("KalamClient: Received Blob message - binary mode may be misconfigured. Attempting to read as text.");
-                // Try to get it as a string anyway via toString()
-                if let Some(s) = e.data().as_string() {
-                    s
-                } else {
-                    console_log("KalamClient: Could not convert Blob to string");
-                    return;
-                }
-            } else {
-                // Unknown message type - log extensive debugging info
-                let data = e.data();
-                let type_name = js_sys::Reflect::get(&data, &"constructor".into())
-                    .ok()
-                    .and_then(|c| js_sys::Reflect::get(&c, &"name".into()).ok())
-                    .and_then(|n| n.as_string())
-                    .unwrap_or_else(|| "unknown".to_string());
-
-                // Try to get typeof
-                let typeof_str = data.js_typeof().as_string().unwrap_or_else(|| "?".to_string());
-
-                // Try to stringify for debugging
-                let data_preview = js_sys::JSON::stringify(&data)
-                    .ok()
-                    .and_then(|s| s.as_string())
-                    .unwrap_or_else(|| format!("{:?}", data));
-
-                console_log(&format!(
-                    "KalamClient: Received unknown message type: constructor={}, typeof={}, preview={}",
-                    type_name, typeof_str, &data_preview[..data_preview.len().min(200)]
-                ));
-                return;
+            let message = match decode_ws_message(&e) {
+                Some(m) => m,
+                None => return,
             };
 
             // SECURITY: Do not log full message content — it may contain
@@ -1602,7 +1553,7 @@ impl KalamClient {
     /// await client.connect(); // Now uses JWT for WebSocket
     /// ```
     pub async fn login(&mut self) -> Result<JsValue, JsValue> {
-        let (username, password) = match &self.auth {
+        let (username, password) = match &*self.auth.borrow() {
             WasmAuthProvider::Basic { username, password } => (username.clone(), password.clone()),
             _ => {
                 return Err(JsValue::from_str(
@@ -1611,42 +1562,10 @@ impl KalamClient {
             },
         };
 
-        let opts = RequestInit::new();
-        opts.set_method("POST");
-        opts.set_mode(RequestMode::Cors);
-
-        let headers = Headers::new()?;
-        headers.set("Content-Type", "application/json")?;
-        opts.set_headers(&headers);
-
-        let body = serde_json::json!({
-            "username": username,
-            "password": password,
-        });
-        opts.set_body(&JsValue::from_str(&body.to_string()));
-
-        let url = format!("{}/v1/api/auth/login", self.url);
-        let request = Request::new_with_str_and_init(&url, &opts)?;
-
-        let resp_value = JsFuture::from(super::helpers::fetch_request(&request)).await?;
-        let resp: Response = resp_value.dyn_into()?;
-
-        if !resp.ok() {
-            let text = JsFuture::from(resp.text()?).await?;
-            let error_msg = text
-                .as_string()
-                .unwrap_or_else(|| format!("Login failed: HTTP {}", resp.status()));
-            return Err(JsValue::from_str(&error_msg));
-        }
-
-        let json = JsFuture::from(resp.text()?).await?;
-        let json_str = json.as_string().unwrap_or_default();
-
-        let login_response: crate::models::LoginResponse = serde_json::from_str(&json_str)
-            .map_err(|e| JsValue::from_str(&format!("Failed to parse login response: {}", e)))?;
+        let login_response = self.perform_basic_login(&username, &password).await?;
 
         // Switch to JWT auth
-        self.auth = WasmAuthProvider::Jwt {
+        *self.auth.borrow_mut() = WasmAuthProvider::Jwt {
             token: login_response.access_token.clone(),
         };
 
@@ -1681,36 +1600,22 @@ impl KalamClient {
     /// console.log(refreshResp.access_token);
     /// ```
     pub async fn refresh_access_token(&mut self, refresh_token: &str) -> Result<JsValue, JsValue> {
-        let opts = RequestInit::new();
-        opts.set_method("POST");
-        opts.set_mode(RequestMode::Cors);
-
-        let headers = Headers::new()?;
-        headers.set("Authorization", &format!("Bearer {}", refresh_token))?;
-        opts.set_headers(&headers);
-
         let url = format!("{}/v1/api/auth/refresh", self.url);
-        let request = Request::new_with_str_and_init(&url, &opts)?;
-
-        let resp_value = JsFuture::from(super::helpers::fetch_request(&request)).await?;
-        let resp: Response = resp_value.dyn_into()?;
-
-        if !resp.ok() {
-            let text = JsFuture::from(resp.text()?).await?;
-            let error_msg = text
-                .as_string()
-                .unwrap_or_else(|| format!("Token refresh failed: HTTP {}", resp.status()));
-            return Err(JsValue::from_str(&error_msg));
-        }
-
-        let json = JsFuture::from(resp.text()?).await?;
-        let json_str = json.as_string().unwrap_or_default();
+        let auth_header = format!("Bearer {}", refresh_token);
+        let json_str = super::helpers::wasm_fetch(
+            &url,
+            "POST",
+            None,
+            &[("Authorization", &auth_header)],
+            "Token refresh failed",
+        )
+        .await?;
 
         let login_response: crate::models::LoginResponse = serde_json::from_str(&json_str)
             .map_err(|e| JsValue::from_str(&format!("Failed to parse refresh response: {}", e)))?;
 
         // Update to new JWT
-        self.auth = WasmAuthProvider::Jwt {
+        *self.auth.borrow_mut() = WasmAuthProvider::Jwt {
             token: login_response.access_token.clone(),
         };
 
@@ -1745,17 +1650,6 @@ impl KalamClient {
         let req: crate::models::ConsumeRequest = serde_wasm_bindgen::from_value(options)
             .map_err(|e| JsValue::from_str(&format!("Invalid consume options: {}", e)))?;
 
-        let opts = RequestInit::new();
-        opts.set_method("POST");
-        opts.set_mode(RequestMode::Cors);
-
-        let headers = Headers::new()?;
-        headers.set("Content-Type", "application/json")?;
-        if let Some(auth_header) = self.auth.to_http_header() {
-            headers.set("Authorization", &auth_header)?;
-        }
-        opts.set_headers(&headers);
-
         let mut body = serde_json::json!({
             "topic_id": req.topic,
             "group_id": req.group_id,
@@ -1766,24 +1660,22 @@ impl KalamClient {
         if let Some(timeout) = req.timeout_seconds {
             body["timeout_seconds"] = serde_json::json!(timeout);
         }
-        opts.set_body(&JsValue::from_str(&body.to_string()));
+        let body_str = body.to_string();
 
         let url = format!("{}/v1/api/topics/consume", self.url);
-        let request = Request::new_with_str_and_init(&url, &opts)?;
-
-        let resp_value = JsFuture::from(super::helpers::fetch_request(&request)).await?;
-        let resp: Response = resp_value.dyn_into()?;
-
-        if !resp.ok() {
-            let status = resp.status();
-            let text = JsFuture::from(resp.text()?).await?;
-            let error_msg =
-                text.as_string().unwrap_or_else(|| format!("Consume failed: HTTP {}", status));
-            return Err(JsValue::from_str(&error_msg));
+        let auth_header = self.auth.borrow().to_http_header();
+        let mut hdrs: Vec<(&str, &str)> = vec![("Content-Type", "application/json")];
+        if let Some(ref ah) = auth_header {
+            hdrs.push(("Authorization", ah));
         }
-
-        let json = JsFuture::from(resp.text()?).await?;
-        let json_str = json.as_string().unwrap_or_default();
+        let json_str = super::helpers::wasm_fetch(
+            &url,
+            "POST",
+            Some(&body_str),
+            &hdrs,
+            "Consume failed",
+        )
+        .await?;
 
         // Parse the raw server response and convert to type-safe ConsumeResponse
         let raw: serde_json::Value = serde_json::from_str(&json_str)
@@ -1872,41 +1764,23 @@ impl KalamClient {
         partition_id: u32,
         upto_offset: u64,
     ) -> Result<JsValue, JsValue> {
-        let opts = RequestInit::new();
-        opts.set_method("POST");
-        opts.set_mode(RequestMode::Cors);
-
-        let headers = Headers::new()?;
-        headers.set("Content-Type", "application/json")?;
-        if let Some(auth_header) = self.auth.to_http_header() {
-            headers.set("Authorization", &auth_header)?;
-        }
-        opts.set_headers(&headers);
-
         let body = serde_json::json!({
             "topic_id": topic,
             "group_id": group_id,
             "partition_id": partition_id,
             "upto_offset": upto_offset,
         });
-        opts.set_body(&JsValue::from_str(&body.to_string()));
+        let body_str = body.to_string();
 
         let url = format!("{}/v1/api/topics/ack", self.url);
-        let request = Request::new_with_str_and_init(&url, &opts)?;
-
-        let resp_value = JsFuture::from(super::helpers::fetch_request(&request)).await?;
-        let resp: Response = resp_value.dyn_into()?;
-
-        if !resp.ok() {
-            let status = resp.status();
-            let text = JsFuture::from(resp.text()?).await?;
-            let error_msg =
-                text.as_string().unwrap_or_else(|| format!("Ack failed: HTTP {}", status));
-            return Err(JsValue::from_str(&error_msg));
+        let auth_header = self.auth.borrow().to_http_header();
+        let mut hdrs: Vec<(&str, &str)> = vec![("Content-Type", "application/json")];
+        if let Some(ref ah) = auth_header {
+            hdrs.push(("Authorization", ah));
         }
-
-        let json = JsFuture::from(resp.text()?).await?;
-        let json_str = json.as_string().unwrap_or_default();
+        let json_str =
+            super::helpers::wasm_fetch(&url, "POST", Some(&body_str), &hdrs, "Ack failed")
+                .await?;
 
         let raw: serde_json::Value = serde_json::from_str(&json_str)
             .map_err(|e| JsValue::from_str(&format!("Failed to parse ack response: {}", e)))?;
@@ -1921,54 +1795,80 @@ impl KalamClient {
     }
 
     /// Internal: Execute SQL via HTTP POST to /v1/api/sql (T063F)
+    ///
+    /// On TOKEN_EXPIRED, the method resolves fresh credentials from the
+    /// auth_provider_cb (if set) or re-uses stored basic-auth to login,
+    /// then retries the request exactly once.
+    ///
+    /// TOKEN_EXPIRED may arrive as either:
+    ///   (a) HTTP 200 with `{"status":"error","error":{"code":"TOKEN_EXPIRED",...}}`
+    ///   (b) HTTP 401 with the same JSON body (wasm_fetch returns Err)
     async fn execute_sql_internal(
         &self,
         sql: &str,
         params: Option<Vec<serde_json::Value>>,
     ) -> Result<String, JsValue> {
-        // T063F: Implement HTTP fetch for SQL queries with authentication
-        let opts = RequestInit::new();
-        opts.set_method("POST");
-        opts.set_mode(RequestMode::Cors);
+        let result = self.execute_sql_http(sql, &params).await;
 
-        // Set headers with authentication
-        let headers = Headers::new()?;
-        headers.set("Content-Type", "application/json")?;
-
-        // Add Authorization header if we have authentication
-        if let Some(auth_header) = self.auth.to_http_header() {
-            headers.set("Authorization", &auth_header)?;
+        match result {
+            Ok(result_str) => {
+                // Case (a): HTTP 200 with TOKEN_EXPIRED in the JSON body.
+                if let Ok(query_resp) =
+                    serde_json::from_str::<crate::query::models::QueryResponse>(&result_str)
+                {
+                    if query_resp.is_token_expired() {
+                        console_log(
+                            "KalamClient: TOKEN_EXPIRED detected — reauthenticating and retrying query",
+                        );
+                        self.reauthenticate_for_http().await?;
+                        return self.execute_sql_http(sql, &params).await;
+                    }
+                }
+                Ok(result_str)
+            },
+            Err(err) => {
+                // Case (b): HTTP 401 — wasm_fetch returned the JSON body as an Err string.
+                if let Some(err_str) = err.as_string() {
+                    if let Ok(query_resp) =
+                        serde_json::from_str::<crate::query::models::QueryResponse>(&err_str)
+                    {
+                        if query_resp.is_token_expired() {
+                            console_log(
+                                "KalamClient: TOKEN_EXPIRED detected in HTTP error — reauthenticating and retrying query",
+                            );
+                            self.reauthenticate_for_http().await?;
+                            return self.execute_sql_http(sql, &params).await;
+                        }
+                    }
+                }
+                Err(err)
+            },
         }
-        opts.set_headers(&headers);
+    }
 
-        // Set body
+    /// Low-level HTTP POST to /v1/api/sql.  Returns the raw JSON response
+    /// string with `named_rows` populated.
+    async fn execute_sql_http(
+        &self,
+        sql: &str,
+        params: &Option<Vec<serde_json::Value>>,
+    ) -> Result<String, JsValue> {
         let body = QueryRequest {
             sql: sql.to_string(),
-            params,
+            params: params.clone(),
             namespace_id: None,
         };
         let body_str = serde_json::to_string(&body)
             .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?;
-        opts.set_body(&JsValue::from_str(&body_str));
 
         let url = format!("{}/v1/api/sql", self.url);
-        let request = Request::new_with_str_and_init(&url, &opts)?;
-
-        // Execute fetch (cross-platform: works in both browser and Node.js)
-        let resp_value = JsFuture::from(super::helpers::fetch_request(&request)).await?;
-        let resp: Response = resp_value.dyn_into()?;
-
-        // Check status
-        if !resp.ok() {
-            let status = resp.status();
-            let text = JsFuture::from(resp.text()?).await?;
-            let error_msg = text.as_string().unwrap_or_else(|| format!("HTTP error {}", status));
-            return Err(JsValue::from_str(&error_msg));
+        let auth_header = self.auth.borrow().to_http_header();
+        let mut hdrs: Vec<(&str, &str)> = vec![("Content-Type", "application/json")];
+        if let Some(ref ah) = auth_header {
+            hdrs.push(("Authorization", ah));
         }
-
-        // Parse response and enrich with named_rows
-        let json = JsFuture::from(resp.text()?).await?;
-        let raw = json.as_string().unwrap_or_else(|| "{}".to_string());
+        let raw = super::helpers::wasm_fetch(&url, "POST", Some(&body_str), &hdrs, "HTTP error")
+            .await?;
 
         // Deserialize, populate named_rows (schema → map), re-serialize.
         // This moves the transformation into Rust so every SDK gets it for free.
@@ -1985,6 +1885,95 @@ impl KalamClient {
         }
     }
 
+    /// Resolve fresh credentials from authProvider callback or stored basic
+    /// credentials, obtain a JWT, and update `self.auth`.
+    async fn reauthenticate_for_http(&self) -> Result<(), JsValue> {
+        // Try the dynamic auth provider callback first (set by TS/Dart SDK).
+        if let Some(cb) = self.auth_provider_cb.borrow().as_ref() {
+            let result = JsFuture::from(js_sys::Promise::resolve(
+                &cb.call0(&JsValue::NULL)
+                    .map_err(|e| JsValue::from_str(&format!("authProvider threw: {:?}", e)))?,
+            ))
+            .await?;
+
+            if result.is_null() || result.is_undefined() {
+                *self.auth.borrow_mut() = WasmAuthProvider::None;
+                console_log("KalamClient: authProvider returned no credentials");
+                return Ok(());
+            }
+
+            let jwt_obj = js_sys::Reflect::get(&result, &"jwt".into()).ok();
+            if let Some(jwt) = jwt_obj.filter(|v| !v.is_undefined() && !v.is_null()) {
+                let token = js_sys::Reflect::get(&jwt, &"token".into())
+                    .ok()
+                    .and_then(|v| v.as_string())
+                    .ok_or_else(|| {
+                        JsValue::from_str(
+                            "authProvider result must have shape { jwt: { token: string } }",
+                        )
+                    })?;
+                *self.auth.borrow_mut() = WasmAuthProvider::Jwt { token };
+                console_log("KalamClient: Reauthenticated via authProvider (JWT)");
+                return Ok(());
+            }
+
+            // authProvider returned an object without jwt — clear auth
+            *self.auth.borrow_mut() = WasmAuthProvider::None;
+            console_log("KalamClient: authProvider returned no JWT credentials");
+            return Ok(());
+        }
+
+        // Fallback: if we have stored basic credentials, perform a login.
+        let basic = {
+            let auth = self.auth.borrow();
+            match &*auth {
+                WasmAuthProvider::Basic { username, password } => {
+                    Some((username.clone(), password.clone()))
+                },
+                _ => None,
+            }
+        };
+
+        if let Some((username, password)) = basic {
+            let login_resp = self.perform_basic_login(&username, &password).await?;
+            *self.auth.borrow_mut() = WasmAuthProvider::Jwt {
+                token: login_resp.access_token,
+            };
+            console_log("KalamClient: Reauthenticated via basic login");
+            return Ok(());
+        }
+
+        Err(JsValue::from_str(
+            "Cannot reauthenticate: no authProvider callback or basic credentials available",
+        ))
+    }
+
+    /// Perform HTTP POST to /v1/api/auth/login and return the parsed response.
+    async fn perform_basic_login(
+        &self,
+        username: &str,
+        password: &str,
+    ) -> Result<crate::models::LoginResponse, JsValue> {
+        let body = serde_json::json!({
+            "username": username,
+            "password": password,
+        });
+        let body_str = body.to_string();
+
+        let url = format!("{}/v1/api/auth/login", self.url);
+        let json_str = super::helpers::wasm_fetch(
+            &url,
+            "POST",
+            Some(&body_str),
+            &[("Content-Type", "application/json")],
+            "Login failed",
+        )
+        .await?;
+
+        serde_json::from_str(&json_str)
+            .map_err(|e| JsValue::from_str(&format!("Failed to parse login response: {}", e)))
+    }
+
     /// Set up auto-reconnection handler for the WebSocket
     fn setup_auto_reconnect(&self, ws: &WebSocket) {
         install_auto_reconnect_listener(
@@ -1996,7 +1985,7 @@ impl KalamClient {
             Rc::clone(&self.ws),
             Rc::clone(&self.ping_interval_id),
             self.url.clone(),
-            self.auth.clone(),
+            self.auth.borrow().clone(),
             Rc::clone(&self.auth_provider_cb),
             Rc::clone(&self.on_connect_cb),
             Rc::clone(&self.on_disconnect_cb),
@@ -2118,6 +2107,8 @@ fn install_auto_reconnect_listener(
                         install_runtime_disconnect_handlers(
                             &ws,
                             Rc::clone(&subscription_state),
+                            Rc::clone(&ws_ref),
+                            Rc::clone(&ping_id),
                             Rc::clone(&on_disconnect),
                             Rc::clone(&on_error),
                         );

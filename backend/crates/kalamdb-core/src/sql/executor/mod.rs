@@ -7,6 +7,7 @@
 
 pub mod default_ordering;
 mod fast_insert;
+mod fast_point_dml;
 pub mod handler_adapter;
 pub mod handler_registry;
 pub mod handlers;
@@ -21,7 +22,7 @@ pub use crate::sql::ExecutionMetadata;
 pub use datafusion::scalar::ScalarValue;
 use kalamdb_commons::models::TableId;
 use kalamdb_commons::schemas::TableType;
-use kalamdb_sql::statement_classifier::SqlStatement;
+use kalamdb_sql::classifier::SqlStatement;
 use sqlparser::ast::Statement as SqlParserStatement;
 use std::sync::Arc;
 

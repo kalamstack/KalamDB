@@ -30,7 +30,7 @@ async fn test_live_query_auth_expiry() {
     {
         let connection_state =
             registry.get_connection(&connection_id).expect("Connection should exist");
-        connection_state.write().mark_authenticated(user_id.clone(), Role::User);
+        connection_state.mark_authenticated(user_id.clone(), Role::User);
         registry.on_authenticated(&connection_id, user_id.clone());
     }
 

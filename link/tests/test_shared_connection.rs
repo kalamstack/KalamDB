@@ -34,7 +34,7 @@ fn create_test_client_for_base_url(
     base_url: &str,
 ) -> Result<KalamLinkClient, kalam_link::KalamLinkError> {
     let token = common::root_access_token_blocking()
-        .map_err(|e| kalam_link::KalamLinkError::InternalError(e.to_string()))?;
+        .map_err(|e| kalam_link::KalamLinkError::ConfigurationError(e.to_string()))?;
     KalamLinkClient::builder()
         .base_url(base_url)
         .timeout(Duration::from_secs(30))
@@ -53,7 +53,7 @@ fn create_test_client_with_events_for_base_url(
     base_url: &str,
 ) -> Result<(KalamLinkClient, Arc<AtomicU32>, Arc<AtomicU32>), kalam_link::KalamLinkError> {
     let token = common::root_access_token_blocking()
-        .map_err(|e| kalam_link::KalamLinkError::InternalError(e.to_string()))?;
+        .map_err(|e| kalam_link::KalamLinkError::ConfigurationError(e.to_string()))?;
 
     let connect_count = Arc::new(AtomicU32::new(0));
     let disconnect_count = Arc::new(AtomicU32::new(0));
@@ -348,14 +348,20 @@ async fn test_shared_live_rows_subscription_materializes_snapshots() {
         },
     };
 
-    let table = "default.shared_live_rows_test";
-    ensure_table(&client, table).await;
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let table = format!("default.shared_live_rows_test_{}", suffix);
+    ensure_table(&client, &table).await;
     let _ = client.execute_query(&format!("DELETE FROM {}", table), None, None, None).await;
 
     client.connect().await.expect("connect");
 
-    let config =
-        SubscriptionConfig::new("shared-live-rows-test", &format!("SELECT * FROM {}", table));
+    let config = SubscriptionConfig::new(
+        format!("shared-live-rows-test-{}", suffix),
+        format!("SELECT * FROM {}", table),
+    );
     let mut sub = client
         .live_query_rows_with_config(
             config,
@@ -484,29 +490,35 @@ async fn test_subscription_drop_unsubscribes() {
     client.disconnect().await;
 }
 
-/// Without connect(), subscribe() should still work (legacy per-subscription path).
+/// Without connect(), subscribe() should return an error.
 #[tokio::test]
-async fn test_subscribe_without_connect_legacy() {
-    let client = match create_test_client() {
-        Ok(c) => c,
+async fn test_subscribe_without_connect_returns_error() {
+    let token = match common::root_access_token_blocking() {
+        Ok(t) => t,
         Err(e) => {
             eprintln!("Skipping test (server not available): {}", e);
             return;
         },
     };
 
+    // Build a client with lazy-connect disabled so that subscribe() without
+    // an explicit connect() returns an error instead of auto-connecting.
+    let client = KalamLinkClient::builder()
+        .base_url(common::server_url())
+        .timeout(Duration::from_secs(30))
+        .auth(AuthProvider::jwt_token(token))
+        .connection_options(ConnectionOptions::new().with_ws_lazy_connect(false))
+        .build()
+        .expect("build client");
+
     ensure_table(&client, "default.legacy_sub_test").await;
 
-    // Don't call connect() — should fall back to per-subscription WebSocket
-    let mut sub = timeout(TEST_TIMEOUT, client.subscribe("SELECT * FROM default.legacy_sub_test"))
+    // Don't call connect() — should fail because no shared connection and lazy-connect is off
+    let result = timeout(TEST_TIMEOUT, client.subscribe("SELECT * FROM default.legacy_sub_test"))
         .await
-        .expect("subscribe should not time out")
-        .expect("subscribe should succeed without connect()");
+        .expect("subscribe should not time out");
 
-    let event = timeout(TEST_TIMEOUT, sub.next()).await;
-    assert!(event.is_ok(), "legacy subscription should receive events");
-
-    sub.close().await.ok();
+    assert!(result.is_err(), "subscribe without connect() should fail");
 }
 
 /// Three active subscriptions should reconnect and continue from a resume point
@@ -529,13 +541,17 @@ async fn test_three_subscriptions_resume_without_old_rows() {
         },
     };
 
-    let table_a = "default.resume3_a";
-    let table_b = "default.resume3_b";
-    let table_c = "default.resume3_c";
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let table_a = format!("default.resume3_a_{}", suffix);
+    let table_b = format!("default.resume3_b_{}", suffix);
+    let table_c = format!("default.resume3_c_{}", suffix);
 
-    ensure_table(&client, table_a).await;
-    ensure_table(&client, table_b).await;
-    ensure_table(&client, table_c).await;
+    ensure_table(&client, &table_a).await;
+    ensure_table(&client, &table_b).await;
+    ensure_table(&client, &table_c).await;
 
     client.connect().await.expect("connect should succeed");
 
@@ -665,9 +681,9 @@ async fn test_three_subscriptions_resume_without_old_rows() {
     assert!(got_pre_a, "pre A row should be received");
     assert!(got_pre_b, "pre B row should be received");
     assert!(got_pre_c, "pre C row should be received");
-    let from_a = query_max_seq(&writer, table_a).await;
-    let from_b = query_max_seq(&writer, table_b).await;
-    let from_c = query_max_seq(&writer, table_c).await;
+    let from_a = query_max_seq(&writer, &table_a).await;
+    let from_b = query_max_seq(&writer, &table_b).await;
+    let from_c = query_max_seq(&writer, &table_c).await;
 
     sub_a.close().await.ok();
     sub_b.close().await.ok();

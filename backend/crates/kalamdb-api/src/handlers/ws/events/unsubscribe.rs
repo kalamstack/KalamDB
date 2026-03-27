@@ -18,10 +18,10 @@ pub async fn handle_unsubscribe(
     rate_limiter: &Arc<RateLimiter>,
     live_query_manager: &Arc<LiveQueryManager>,
 ) -> Result<(), String> {
-    let (user_id, connection_id) = {
-        let state = connection_state.read();
-        (state.user_id.clone(), state.connection_id().clone())
-    };
+    let (user_id, connection_id) = (
+        connection_state.user_id().cloned(),
+        connection_state.connection_id().clone(),
+    );
 
     let user_id = match user_id {
         Some(uid) => uid,

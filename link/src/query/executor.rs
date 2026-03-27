@@ -10,15 +10,30 @@ use http_body::Frame;
 use http_body_util::StreamBody;
 use log::{debug, warn};
 use reqwest::multipart::{Form, Part};
-use std::{sync::Arc, time::Instant};
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::{Arc, Mutex},
+    time::Instant,
+};
+
+/// Async callback that resolves fresh [`AuthProvider`] credentials.
+///
+/// Called by the executor when a query returns `TOKEN_EXPIRED`.
+/// Implementations should obtain a fresh JWT (e.g. via login or dynamic
+/// auth provider) and return it.
+pub type AuthRefreshCallback = Arc<
+    dyn Fn() -> Pin<Box<dyn Future<Output = Result<AuthProvider>> + Send>> + Send + Sync,
+>;
 
 /// Handles SQL query execution via HTTP.
 #[derive(Clone)]
 pub struct QueryExecutor {
     sql_url: String,
     http_client: reqwest::Client,
-    auth: AuthProvider,
+    auth: Arc<Mutex<AuthProvider>>,
     max_retries: u32,
+    auth_refresher: Option<AuthRefreshCallback>,
 }
 
 /// Progress callback for multipart file uploads.
@@ -76,13 +91,18 @@ impl QueryExecutor {
         Self {
             sql_url: format!("{}/v1/api/sql", base_url),
             http_client,
-            auth,
+            auth: Arc::new(Mutex::new(auth)),
             max_retries,
+            auth_refresher: None,
         }
     }
 
-    pub(crate) fn set_auth(&mut self, auth: AuthProvider) {
-        self.auth = auth;
+    pub(crate) fn set_auth(&self, auth: AuthProvider) {
+        *self.auth.lock().unwrap() = auth;
+    }
+
+    pub(crate) fn set_auth_refresher(&mut self, refresher: AuthRefreshCallback) {
+        self.auth_refresher = Some(refresher);
     }
 
     fn is_retry_safe_sql(sql: &str) -> bool {
@@ -211,8 +231,9 @@ impl QueryExecutor {
                 }
             }
 
+            let auth_snapshot = self.auth.lock().unwrap().clone();
             let mut req_builder = self.http_client.post(&self.sql_url).multipart(form);
-            req_builder = self.auth.apply_to_request(req_builder)?;
+            req_builder = auth_snapshot.apply_to_request(req_builder)?;
 
             let attempt_start = Instant::now();
             debug!("[LINK_HTTP] Sending multipart POST to {}", self.sql_url);
@@ -225,7 +246,21 @@ impl QueryExecutor {
                 http_duration_ms
             );
 
-            return Self::handle_response(response, sql).await;
+            let result = Self::handle_response(response, sql).await?;
+
+            // Auto-refresh on TOKEN_EXPIRED (multipart — no retry, just report).
+            // Multipart uploads consume the body so we cannot replay them, but
+            // we still refresh the token so the *next* request succeeds.
+            if result.is_token_expired() {
+                if let Some(refresher) = &self.auth_refresher {
+                    warn!("[LINK_HTTP] TOKEN_EXPIRED on multipart request — refreshing auth for subsequent requests");
+                    if let Ok(new_auth) = refresher().await {
+                        *self.auth.lock().unwrap() = new_auth;
+                    }
+                }
+            }
+
+            return Ok(result);
         }
 
         let request = QueryRequest {
@@ -252,8 +287,9 @@ impl QueryExecutor {
         let overall_start = Instant::now();
 
         loop {
+            let auth_snapshot = self.auth.lock().unwrap().clone();
             let mut req_builder = self.http_client.post(&self.sql_url).json(&request);
-            req_builder = self.auth.apply_to_request(req_builder)?;
+            req_builder = auth_snapshot.apply_to_request(req_builder)?;
 
             let attempt_start = Instant::now();
             debug!(
@@ -273,6 +309,31 @@ impl QueryExecutor {
                     );
 
                     let result = Self::handle_response(response, sql).await;
+
+                    // Auto-refresh on TOKEN_EXPIRED: get fresh auth and retry once.
+                    if let Ok(ref resp) = result {
+                        if resp.is_token_expired() {
+                            if let Some(refresher) = &self.auth_refresher {
+                                warn!("[LINK_HTTP] TOKEN_EXPIRED — reauthenticating and retrying");
+                                match refresher().await {
+                                    Ok(new_auth) => {
+                                        *self.auth.lock().unwrap() = new_auth.clone();
+                                        // Retry exactly once with fresh credentials.
+                                        let mut retry_builder = self.http_client.post(&self.sql_url).json(&request);
+                                        retry_builder = new_auth.apply_to_request(retry_builder)?;
+                                        match retry_builder.send().await {
+                                            Ok(retry_resp) => return Self::handle_response(retry_resp, sql).await,
+                                            Err(e) => return Err(e.into()),
+                                        }
+                                    },
+                                    Err(e) => {
+                                        warn!("[LINK_HTTP] Auth refresh failed: {}", e);
+                                        // Return the original TOKEN_EXPIRED response.
+                                    },
+                                }
+                            }
+                        }
+                    }
 
                     if result.is_ok() {
                         let total_duration_ms = overall_start.elapsed().as_millis();
@@ -331,6 +392,16 @@ impl QueryExecutor {
 
         if status.is_client_error() {
             let status_code = status.as_u16();
+
+            // If the body is a valid QueryResponse with TOKEN_EXPIRED, return
+            // it as Ok so the caller's auto-refresh retry logic can handle it.
+            if let Ok(query_response) = serde_json::from_str::<QueryResponse>(&error_text) {
+                if query_response.is_token_expired() {
+                    debug!("[LINK_HTTP] TOKEN_EXPIRED returned with HTTP {}", status_code);
+                    return Ok(query_response);
+                }
+            }
+
             warn!(
                 "[LINK_HTTP] Authentication/client error: status={} message=\"{}\"",
                 status, error_text

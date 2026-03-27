@@ -33,7 +33,7 @@ main() {
     log_info "Step 1/4: Building release binaries..."
     if [ ! -f "target/release/kalamdb-server" ] || [ ! -f "target/release/kalam" ]; then
         log_info "Building with cargo (this may take a while)..."
-        cargo build --release -p kalamdb-server -p kalam-cli --bin kalamdb-server --bin kalam
+        cargo build --release --features mimalloc -p kalamdb-server -p kalam-cli --bin kalamdb-server --bin kalam
     else
         log_warn "Using existing release binaries (run 'cargo clean' to rebuild)"
     fi

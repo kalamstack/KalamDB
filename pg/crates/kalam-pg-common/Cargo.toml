@@ -1,0 +1,16 @@
+[package]
+name = "kalam-pg-common"
+version = { workspace = true }
+edition = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[features]
+default = ["datafusion"]
+datafusion = ["dep:datafusion-common"]
+
+[dependencies]
+thiserror = { workspace = true }
+serde = { workspace = true }
+datafusion-common = { workspace = true, optional = true }

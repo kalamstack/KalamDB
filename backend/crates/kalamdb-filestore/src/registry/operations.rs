@@ -69,14 +69,12 @@ pub struct PutResult {
     pub path: String,
     /// Size in bytes written
     pub size: usize,
-    /// Whether this was a new file or an overwrite
-    pub is_new: bool,
 }
 
 impl PutResult {
     /// Create a new PutResult
-    pub fn new(path: String, size: usize, is_new: bool) -> Self {
-        Self { path, size, is_new }
+    pub fn new(path: String, size: usize) -> Self {
+        Self { path, size }
     }
 }
 

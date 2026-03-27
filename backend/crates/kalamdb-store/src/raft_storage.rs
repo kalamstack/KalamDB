@@ -105,11 +105,9 @@ pub struct RaftSnapshotMeta {
 
 impl KSerializable for RaftSnapshotMeta {}
 
-/// Reference to snapshot data (path or inline bytes).
+/// Reference to snapshot data (file path).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RaftSnapshotData {
-    /// Snapshot data stored inline (for small snapshots)
-    Inline(Vec<u8>),
     /// Snapshot data stored in external file (path)
     FilePath(String),
 }
@@ -716,24 +714,13 @@ mod tests {
         assert_eq!(read_meta.snapshot_id, "snap-001");
         assert_eq!(read_meta.size_bytes, 1024);
 
-        // Save inline snapshot data
-        let data = RaftSnapshotData::Inline(b"state data".to_vec());
-        store.save_snapshot_data(&data).unwrap();
-
-        let read_data = store.read_snapshot_data().unwrap().unwrap();
-        match read_data {
-            RaftSnapshotData::Inline(bytes) => assert_eq!(bytes, b"state data"),
-            _ => panic!("Expected inline data"),
-        }
-
         // Save file path snapshot data
         let data_path = RaftSnapshotData::FilePath("/var/data/snap-001.bin".to_string());
         store.save_snapshot_data(&data_path).unwrap();
 
-        let read_data2 = store.read_snapshot_data().unwrap().unwrap();
-        match read_data2 {
+        let read_data = store.read_snapshot_data().unwrap().unwrap();
+        match read_data {
             RaftSnapshotData::FilePath(path) => assert_eq!(path, "/var/data/snap-001.bin"),
-            _ => panic!("Expected file path"),
         }
 
         // Clear snapshot

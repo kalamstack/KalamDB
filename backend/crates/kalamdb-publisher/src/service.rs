@@ -56,6 +56,40 @@ struct PendingClaim {
     claimed_at: Instant,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct TopicPartitionKey {
+    topic_id: TopicId,
+    partition_id: u32,
+}
+
+impl TopicPartitionKey {
+    #[inline]
+    fn new(topic_id: &TopicId, partition_id: u32) -> Self {
+        Self {
+            topic_id: topic_id.clone(),
+            partition_id,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct GroupPartitionKey {
+    topic_id: TopicId,
+    group_id: ConsumerGroupId,
+    partition_id: u32,
+}
+
+impl GroupPartitionKey {
+    #[inline]
+    fn new(topic_id: &TopicId, group_id: &ConsumerGroupId, partition_id: u32) -> Self {
+        Self {
+            topic_id: topic_id.clone(),
+            group_id: group_id.clone(),
+            partition_id,
+        }
+    }
+}
+
 impl ClaimState {
     fn new(cursor: u64) -> Self {
         Self {
@@ -116,20 +150,20 @@ pub struct TopicPublisherService {
     offset_allocator: OffsetAllocator,
     /// In-memory per-(topic, group, partition) claim state used to avoid
     /// duplicate delivery and to expire stale claims from crashed consumers.
-    group_claim_state: DashMap<String, ClaimState>,
+    group_claim_state: DashMap<GroupPartitionKey, ClaimState>,
     /// Per-(topic, partition) write locks that serialize offset allocation +
     /// RocksDB write to guarantee messages are stored in offset order.
-    partition_write_locks: DashMap<String, Arc<Mutex<()>>>,
+    partition_write_locks: DashMap<TopicPartitionKey, Arc<Mutex<()>>>,
 }
 
 impl TopicPublisherService {
     /// Create a new TopicPublisherService with stores backed by the given storage.
     pub fn new(storage_backend: Arc<dyn StorageBackend>) -> Self {
-        // Ensure global partitions for topic messages and offsets exist.
+        // Ensure the topic message partition exists.
+        // Consumer offsets live in system.topic_offsets (system_topic_offsets CF),
+        // so creating a separate topic_offsets CF here only adds permanent idle overhead.
         let messages_partition = Partition::new("topic_messages");
-        let offsets_partition = Partition::new("topic_offsets");
         let _ = storage_backend.create_partition(&messages_partition);
-        let _ = storage_backend.create_partition(&offsets_partition);
 
         let message_store =
             Arc::new(TopicMessageStore::new(storage_backend.clone(), messages_partition));
@@ -265,7 +299,7 @@ impl TopicPublisherService {
             // Allocate offset and write message under a per-partition lock.
             // This ensures messages are stored in offset order even with
             // concurrent publishers, so consumers never skip gaps.
-            let partition_lock_key = format!("{}:{}", entry.topic_id.as_str(), partition_id);
+            let partition_lock_key = TopicPartitionKey::new(&entry.topic_id, partition_id);
             let lock = self
                 .partition_write_locks
                 .entry(partition_lock_key)
@@ -275,7 +309,7 @@ impl TopicPublisherService {
             // holding two locks simultaneously.
             let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
 
-            let offset = self.offset_allocator.next_offset(entry.topic_id.as_str(), partition_id);
+            let offset = self.offset_allocator.next_offset(&entry.topic_id, partition_id);
 
             // Create and persist message.
             let timestamp_ms = chrono::Utc::now().timestamp_millis();
@@ -383,8 +417,6 @@ impl TopicPublisherService {
             }
 
             // Borrow topic_id once for the entire entry loop.
-            let topic_id_str = entry.topic_id.as_str();
-
             // Write each partition group with a single lock + single WriteBatch.
             for (partition_id, row_indices) in &partition_groups {
                 let count = row_indices.len() as u64;
@@ -406,7 +438,7 @@ impl TopicPublisherService {
                 }
 
                 // Acquire partition lock only for offset allocation + RocksDB write.
-                let partition_lock_key = format!("{}:{}", topic_id_str, partition_id);
+                let partition_lock_key = TopicPartitionKey::new(&entry.topic_id, *partition_id);
                 let lock = self
                     .partition_write_locks
                     .entry(partition_lock_key)
@@ -416,7 +448,7 @@ impl TopicPublisherService {
 
                 // Allocate contiguous offset range atomically.
                 let start_offset =
-                    self.offset_allocator.next_n_offsets(topic_id_str, *partition_id, count);
+                    self.offset_allocator.next_n_offsets(&entry.topic_id, *partition_id, count);
 
                 // Now build messages with real offsets and serialize them.
                 let mut raw_entries = Vec::with_capacity(pre_encoded.len());
@@ -496,7 +528,7 @@ impl TopicPublisherService {
         start_offset: u64,
         limit: usize,
     ) -> Result<Vec<TopicMessage>> {
-        let cursor_key = format!("{}:{}:{}", topic_id.as_str(), group_id.as_str(), partition_id);
+        let cursor_key = GroupPartitionKey::new(topic_id, group_id, partition_id);
         let mut state = self
             .group_claim_state
             .entry(cursor_key)
@@ -529,7 +561,7 @@ impl TopicPublisherService {
     ///
     /// Returns `None` when the partition is empty.
     pub fn latest_offset(&self, topic_id: &TopicId, partition_id: u32) -> Result<Option<u64>> {
-        let next_offset = self.offset_allocator.peek_next_offset(topic_id.as_str(), partition_id);
+        let next_offset = self.offset_allocator.peek_next_offset(topic_id, partition_id);
 
         Ok(next_offset.and_then(|next| next.checked_sub(1)))
     }
@@ -551,7 +583,7 @@ impl TopicPublisherService {
             .ack_offset(topic_id, group_id, partition_id, offset)
             .map_err(|e| CommonError::Internal(format!("Failed to ack offset: {}", e)))?;
 
-        let cursor_key = format!("{}:{}:{}", topic_id.as_str(), group_id.as_str(), partition_id);
+        let cursor_key = GroupPartitionKey::new(topic_id, group_id, partition_id);
         if let Some(mut state) = self.group_claim_state.get_mut(&cursor_key) {
             state.ack_up_to(offset);
         } else {
@@ -613,7 +645,7 @@ impl TopicPublisherService {
                     Ok(msgs) => {
                         if let Some(last) = msgs.last() {
                             let next = last.offset + 1;
-                            self.offset_allocator.seed(topic.topic_id.as_str(), partition_id, next);
+                            self.offset_allocator.seed(&topic.topic_id, partition_id, next);
                             log::info!(
                                 "Restored offset counter for topic={} partition={}: next_offset={}",
                                 topic.topic_id.as_str(),
@@ -942,7 +974,7 @@ mod tests {
         let last_offset = batch1.last().unwrap().offset;
 
         // Verify pending claim exists
-        let cursor_key = format!("{}:{}:{}", topic_id.as_str(), group_id.as_str(), 0);
+        let cursor_key = GroupPartitionKey::new(&topic_id, &group_id, 0);
         {
             let state = service.group_claim_state.get(&cursor_key).unwrap();
             assert_eq!(state.pending.len(), 1, "Should have one pending claim before ack");

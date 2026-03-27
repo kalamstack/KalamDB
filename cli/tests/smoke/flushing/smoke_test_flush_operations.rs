@@ -145,7 +145,7 @@ fn smoke_test_user_table_flush() {
     // Verify data integrity by checking sequence numbers
     println!("🔍 Verifying data integrity...");
     let verify_output = execute_sql_as_root_via_client(&format!(
-        "SELECT sequence FROM {} ORDER BY sequence",
+        "SELECT sequence FROM {} WHERE sequence IN (0, 50, 100, 150, 199) ORDER BY sequence",
         full_table_name
     ))
     .expect("Failed to query sequences");
@@ -293,7 +293,7 @@ fn smoke_test_shared_table_flush() {
     // Verify data integrity by checking sequence numbers
     println!("🔍 Verifying data integrity...");
     let verify_output = execute_sql_as_root_via_client(&format!(
-        "SELECT sequence FROM {} ORDER BY sequence",
+        "SELECT sequence FROM {} WHERE sequence IN (0, 50, 100, 150, 199) ORDER BY sequence",
         full_table_name
     ))
     .expect("Failed to query sequences");

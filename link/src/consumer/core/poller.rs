@@ -1,5 +1,6 @@
 use crate::auth::AuthProvider;
 use crate::consumer::models::consumer_record::ConsumerRecordWire;
+use crate::consumer::models::AckResponse;
 use crate::consumer::models::AutoOffsetReset;
 use crate::consumer::models::CommitResult;
 use crate::consumer::utils::backoff::jittered_exponential_backoff;
@@ -177,13 +178,6 @@ pub struct AckRequest {
     pub group_id: String,
     pub partition_id: u32,
     pub upto_offset: u64,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct AckResponse {
-    #[allow(dead_code)] // deserialized from JSON; used for validation
-    pub success: bool,
-    pub acknowledged_offset: u64,
 }
 
 fn is_retriable_error(err: &reqwest::Error) -> bool {

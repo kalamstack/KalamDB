@@ -48,38 +48,45 @@ shared_tables_template = "{namespace}/{tableName}"
 user_tables_template = "{namespace}/{tableName}/{userId}"
 
 [storage.rocksdb]
-# Write buffer size per column family in bytes (default: 512KB)
-# Lower values reduce memory with many column families
-# Formula: memory ~= write_buffer_size × max_write_buffers × num_column_families
-write_buffer_size = 524288
+# Block cache size for reads in bytes (default: 2MB)
+block_cache_size = 2097152
 
-# Maximum number of write buffers (default: 2)
-# Allows writes to continue while buffers are being flushed
-max_write_buffers = 2
-
-# Block cache size for reads in bytes (default: 4MB)
-# Shared LRU cache across all column families
-block_cache_size = 4194304
-
-# Maximum number of background compaction/flush jobs (default: 4)
 max_background_jobs = 4
 
+[storage.rocksdb.cf_profiles.system_meta]
+write_buffer_size = 32768
+max_write_buffers = 2
+
+[storage.rocksdb.cf_profiles.system_index]
+write_buffer_size = 32768
+max_write_buffers = 2
+
+[storage.rocksdb.cf_profiles.hot_data]
+write_buffer_size = 131072
+max_write_buffers = 2
+
+[storage.rocksdb.cf_profiles.hot_index]
+write_buffer_size = 65536
+max_write_buffers = 2
+
+[storage.rocksdb.cf_profiles.raft]
+write_buffer_size = 262144
+max_write_buffers = 2
+
 [datafusion]
-# Memory limit for query execution in bytes (default: 256MB)
-# Queries exceeding this limit will be terminated
-memory_limit = 268435456
+# Memory limit for query execution in bytes (default: 64MB)
+# KalamDB is optimised for mobile/OLTP workloads, not heavy analytics.
+# 64 MB is sufficient for key-based lookups and small aggregates.
+memory_limit = 67108864
 
-# Number of parallel threads for query execution (default: number of CPU cores)
-# Set to 0 to auto-detect CPU count
-query_parallelism = 0
+# Number of parallel threads for query execution (default: 2)
+query_parallelism = 2
 
-# Maximum number of partitions per query (default: 8)
-# Higher values increase parallelism but use more resources
-max_partitions = 8
+# Maximum number of partitions per query (default: 4)
+max_partitions = 4
 
-# Batch size for record processing (default: 2048 rows)
-# Lower batch size reduces memory pressure
-batch_size = 2048
+# Batch size for record processing (default: 1024 rows)
+batch_size = 1024
 
 [manifest_cache]
 # Eviction job interval in seconds (default: 300s = 5 minutes)
@@ -109,6 +116,10 @@ default_time_interval = 300
 # Lower values reduce memory usage but may increase flush duration
 # Set to 0 to load all rows at once (not recommended for large tables)
 flush_batch_size = 10000
+
+# How often the background scheduler checks for tables with pending writes
+# and creates flush jobs (default: 60 seconds). Set to 0 to disable.
+check_interval_seconds = 60
 
 [retention]
 # Default retention hours for soft-deleted rows (default: 168 hours = 7 days)
@@ -319,9 +330,9 @@ max_parameters = 50
 # Prevents memory exhaustion from individual large parameters
 max_parameter_size_bytes = 524288
 
-# Maximum number of cached SQL logical plans (default: 1000)
+# Maximum number of cached SQL logical plans (default: 200)
 # Bound memory used by SQL plan cache
-sql_plan_cache_max_entries = 1000
+sql_plan_cache_max_entries = 200
 
 # Time-to-idle TTL for SQL cached plans in seconds (default: 900 = 15 minutes)
 # Unused plans are evicted automatically after this idle period

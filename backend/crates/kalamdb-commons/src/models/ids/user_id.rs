@@ -91,7 +91,7 @@ impl UserId {
     /// Uses the default NanoID alphabet (`A-Za-z0-9_-`) which is safe for
     /// storage paths, URLs, and database keys.
     #[inline]
-    #[cfg(feature = "serde")]
+    #[cfg(feature = "full")]
     pub fn generate() -> Self {
         Self(nanoid::nanoid!())
     }
@@ -261,4 +261,5 @@ mod tests {
 }
 
 // KSerializable implementation for EntityStore support
+#[cfg(feature = "serialization")]
 impl crate::serialization::KSerializable for UserId {}

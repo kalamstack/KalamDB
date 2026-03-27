@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Editor, { type Monaco } from "@monaco-editor/react";
 import type { IDisposable, Position, editor, languages } from "monaco-editor";
-import { MoreHorizontal, PenLine, Play, Save, Settings2, Square } from "lucide-react";
+import { ChevronDown, MoreHorizontal, PenLine, Play, Save, Settings2, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
@@ -9,9 +9,12 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { LiveSubscriptionOptions, StudioNamespace } from "@/components/sql-studio-v2/types";
+
+type ExecuteMode = "all" | "selected";
 
 interface StudioEditorPanelProps {
   schema: StudioNamespace[];
@@ -23,7 +26,7 @@ interface StudioEditorPanelProps {
   isRunning: boolean;
   subscriptionOptions?: LiveSubscriptionOptions;
   onSqlChange: (value: string) => void;
-  onRun: () => void;
+  onRun: (sql: string, mode: ExecuteMode) => void;
   onToggleLive: (checked: boolean) => void;
   onSubscriptionOptionsChange: (options: LiveSubscriptionOptions | undefined) => void;
   onRename: (title: string) => void;
@@ -53,6 +56,11 @@ export function StudioEditorPanel({
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(tabTitle);
   const [showSubscriptionOptions, setShowSubscriptionOptions] = useState(false);
+  const [selectedSql, setSelectedSql] = useState("");
+  const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const editorListenerRefs = useRef<IDisposable[]>([]);
+  const onRunRef = useRef(onRun);
+  const sqlRef = useRef(sql);
   const completionProviderRef = useRef<IDisposable | null>(null);
   const completionDataRef = useRef<{
     namespaces: string[];
@@ -95,6 +103,14 @@ export function StudioEditorPanel({
   }, [completionData]);
 
   useEffect(() => {
+    onRunRef.current = onRun;
+  }, [onRun]);
+
+  useEffect(() => {
+    sqlRef.current = sql;
+  }, [sql]);
+
+  useEffect(() => {
     if (!isEditingTitle) {
       setDraftTitle(tabTitle);
     }
@@ -103,8 +119,41 @@ export function StudioEditorPanel({
   useEffect(() => {
     return () => {
       completionProviderRef.current?.dispose();
+      editorListenerRefs.current.forEach((listener) => listener.dispose());
     };
   }, []);
+
+  const readSelectedSql = () => {
+    const instance = editorRef.current;
+    const model = instance?.getModel();
+    const selection = instance?.getSelection();
+
+    if (!instance || !model || !selection || selection.isEmpty()) {
+      return "";
+    }
+
+    return model.getValueInRange(selection);
+  };
+
+  const syncSelectedSql = () => {
+    const nextSelectedSql = readSelectedSql();
+    setSelectedSql(nextSelectedSql.trim().length > 0 ? nextSelectedSql : "");
+  };
+
+  const runSql = (mode: ExecuteMode | "auto" = "auto") => {
+    const nextSelectedSql = readSelectedSql();
+    const hasSelection = nextSelectedSql.trim().length > 0;
+    const resolvedMode: ExecuteMode = mode === "auto"
+      ? (hasSelection ? "selected" : "all")
+      : mode;
+    const nextSql = resolvedMode === "selected" ? nextSelectedSql : sqlRef.current;
+
+    if (!nextSql.trim()) {
+      return;
+    }
+
+    onRunRef.current(nextSql, resolvedMode);
+  };
 
   const registerCompletionProvider = (monaco: Monaco) => {
     completionProviderRef.current?.dispose();
@@ -215,9 +264,20 @@ export function StudioEditorPanel({
   };
 
   const handleEditorMount = (instance: editor.IStandaloneCodeEditor, monaco: Monaco) => {
+    editorRef.current = instance;
     instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-      onRun();
+      runSql("auto");
     });
+    editorListenerRefs.current.forEach((listener) => listener.dispose());
+    editorListenerRefs.current = [
+      instance.onDidChangeCursorSelection(() => {
+        syncSelectedSql();
+      }),
+      instance.onDidChangeModelContent(() => {
+        syncSelectedSql();
+      }),
+    ];
+    syncSelectedSql();
     registerCompletionProvider(monaco);
   };
 
@@ -256,6 +316,10 @@ export function StudioEditorPanel({
     }
     setIsEditingTitle(false);
   };
+
+  const hasSelectedSql = selectedSql.trim().length > 0;
+  const executeLabel = hasSelectedSql ? "Execute Selected" : "Execute";
+  const isExecuteDisabled = isRunning || !sql.trim() || liveStatus === "connecting";
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -326,25 +390,65 @@ export function StudioEditorPanel({
             <Save className="mr-1.5 h-3.5 w-3.5" />
             Save
           </Button>
-          <Button
-            size="sm"
-            className="shrink-0"
-            onClick={onRun}
-            disabled={isRunning || !sql.trim() || liveStatus === "connecting"}
-          >
-            {isLive && liveStatus === "connected" ? (
-              <Square className="mr-1.5 h-3.5 w-3.5" />
-            ) : (
-              <Play className="mr-1.5 h-3.5 w-3.5" />
-            )}
-            {isLive && liveStatus === "connected"
-              ? "Stop"
-              : isRunning
-                ? "Running..."
-                : isLive
-                  ? "Subscribe"
-                  : "Run query"}
-          </Button>
+          {isLive ? (
+            <Button
+              size="sm"
+              className="shrink-0"
+              onClick={() => runSql("auto")}
+              disabled={isExecuteDisabled}
+            >
+              {liveStatus === "connected" ? (
+                <Square className="mr-1.5 h-3.5 w-3.5" />
+              ) : (
+                <Play className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              {liveStatus === "connected"
+                ? "Stop"
+                : isRunning
+                  ? "Running..."
+                  : "Subscribe"}
+            </Button>
+          ) : (
+            <div className="flex shrink-0">
+              <Button
+                size="sm"
+                className="rounded-r-none"
+                onClick={() => runSql("auto")}
+                disabled={isExecuteDisabled}
+              >
+                <Play className="mr-1.5 h-3.5 w-3.5" />
+                {isRunning ? "Running..." : executeLabel}
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="sm"
+                    className="rounded-l-none border-l border-primary-foreground/20 px-2"
+                    disabled={isExecuteDisabled}
+                    aria-label="Execute options"
+                  >
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onSelect={() => runSql("all")}
+                    title="Execute all statements in the editor"
+                  >
+                    Execute All
+                    <DropdownMenuShortcut>Cmd/Ctrl+Enter</DropdownMenuShortcut>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => runSql("selected")}
+                    disabled={!hasSelectedSql}
+                    title="Execute only the selected text in the editor"
+                  >
+                    Selected
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button

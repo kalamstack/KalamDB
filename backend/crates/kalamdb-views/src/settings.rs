@@ -226,15 +226,63 @@ impl VirtualView for SettingsView {
                         "storage"
                     ),
                     (
-                        "storage.rocksdb.write_buffer_size",
-                        config.storage.rocksdb.write_buffer_size,
-                        "Write buffer size per column family in bytes",
+                        "storage.rocksdb.cf_profiles.system_meta.write_buffer_size",
+                        config.storage.rocksdb.cf_profiles.system_meta.write_buffer_size,
+                        "Write buffer size for low-write system metadata column families",
                         "storage"
                     ),
                     (
-                        "storage.rocksdb.max_write_buffers",
-                        config.storage.rocksdb.max_write_buffers,
-                        "Maximum number of write buffers",
+                        "storage.rocksdb.cf_profiles.system_meta.max_write_buffers",
+                        config.storage.rocksdb.cf_profiles.system_meta.max_write_buffers,
+                        "Maximum number of write buffers for system metadata column families",
+                        "storage"
+                    ),
+                    (
+                        "storage.rocksdb.cf_profiles.system_index.write_buffer_size",
+                        config.storage.rocksdb.cf_profiles.system_index.write_buffer_size,
+                        "Write buffer size for system secondary index column families",
+                        "storage"
+                    ),
+                    (
+                        "storage.rocksdb.cf_profiles.system_index.max_write_buffers",
+                        config.storage.rocksdb.cf_profiles.system_index.max_write_buffers,
+                        "Maximum number of write buffers for system secondary indexes",
+                        "storage"
+                    ),
+                    (
+                        "storage.rocksdb.cf_profiles.hot_data.write_buffer_size",
+                        config.storage.rocksdb.cf_profiles.hot_data.write_buffer_size,
+                        "Write buffer size for user/shared/stream/topic data column families",
+                        "storage"
+                    ),
+                    (
+                        "storage.rocksdb.cf_profiles.hot_data.max_write_buffers",
+                        config.storage.rocksdb.cf_profiles.hot_data.max_write_buffers,
+                        "Maximum number of write buffers for hot data column families",
+                        "storage"
+                    ),
+                    (
+                        "storage.rocksdb.cf_profiles.hot_index.write_buffer_size",
+                        config.storage.rocksdb.cf_profiles.hot_index.write_buffer_size,
+                        "Write buffer size for PK and vector index column families",
+                        "storage"
+                    ),
+                    (
+                        "storage.rocksdb.cf_profiles.hot_index.max_write_buffers",
+                        config.storage.rocksdb.cf_profiles.hot_index.max_write_buffers,
+                        "Maximum number of write buffers for hot index column families",
+                        "storage"
+                    ),
+                    (
+                        "storage.rocksdb.cf_profiles.raft.write_buffer_size",
+                        config.storage.rocksdb.cf_profiles.raft.write_buffer_size,
+                        "Write buffer size for the raft_data column family",
+                        "storage"
+                    ),
+                    (
+                        "storage.rocksdb.cf_profiles.raft.max_write_buffers",
+                        config.storage.rocksdb.cf_profiles.raft.max_write_buffers,
+                        "Maximum number of write buffers for the raft_data column family",
                         "storage"
                     ),
                     (
@@ -343,6 +391,12 @@ impl VirtualView for SettingsView {
                         "flush.default_time_interval",
                         config.flush.default_time_interval,
                         "Default time interval for flush (seconds)",
+                        "flush"
+                    ),
+                    (
+                        "flush.check_interval_seconds",
+                        config.flush.check_interval_seconds,
+                        "How often the background scheduler checks for pending flushes (seconds, 0 = disabled)",
                         "flush"
                     ),
                 ]

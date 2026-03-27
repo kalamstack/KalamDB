@@ -12,6 +12,8 @@ import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { useAuth } from "@/lib/auth";
 import {
   subscribe,
+  setClientDisconnectListener,
+  setClientErrorListener,
   setClientLogListener,
   setClientReceiveListener,
   setClientSendListener,
@@ -131,10 +133,7 @@ function createWireLogEntry(
     `WS ${direction.toUpperCase()} · ${messageType}`,
     "info",
     asUser,
-    {
-      raw: rawMessage,
-      parsed,
-    },
+    parsed ?? rawMessage,
   );
 }
 
@@ -401,11 +400,15 @@ export default function SqlStudio() {
     setClientLogListener(undefined);
     setClientReceiveListener(undefined);
     setClientSendListener(undefined);
+    setClientDisconnectListener(undefined);
+    setClientErrorListener(undefined);
     updateTab(tabId, { liveStatus: "idle" });
   }, [updateTab]);
 
-  const startLiveQuery = useCallback(async (tab: QueryTab) => {
-    if (!tab.sql.trim()) {
+  const startLiveQuery = useCallback(async (tab: QueryTab, sqlOverride?: string) => {
+    const sqlToRun = sqlOverride ?? tab.sql;
+
+    if (!sqlToRun.trim()) {
       return;
     }
 
@@ -419,7 +422,7 @@ export default function SqlStudio() {
         rowCount: 0,
         logs: [createLogEntry("Starting live subscription.", "info", user?.username, {
           event: "live_start",
-          sql: tab.sql,
+          sql: sqlToRun,
           options: tab.subscriptionOptions,
         })],
       },
@@ -450,9 +453,35 @@ export default function SqlStudio() {
         entry: createWireLogEntry("receive", message, user?.username),
       }));
     });
+    setClientDisconnectListener((reason) => {
+      dispatch(appendWorkspaceResultLog({
+        tabId: tab.id,
+        entry: createLogEntry(
+          `Live connection closed${reason.message ? `: ${reason.message}` : "."}`,
+          "error",
+          user?.username,
+          reason,
+        ),
+        statusOverride: "error",
+      }));
+      updateTab(tab.id, { liveStatus: "error" });
+    });
+    setClientErrorListener((error) => {
+      dispatch(appendWorkspaceResultLog({
+        tabId: tab.id,
+        entry: createLogEntry(
+          `Live connection error: ${error.message}`,
+          "error",
+          user?.username,
+          error,
+        ),
+        statusOverride: "error",
+      }));
+      updateTab(tab.id, { liveStatus: "error" });
+    });
 
     try {
-      const unsubscribe = await subscribe(tab.sql, (msg: ServerMessage) => {
+      const unsubscribe = await subscribe(sqlToRun, (msg: ServerMessage) => {
         switch (msg.type) {
           case "error": {
             dispatch(appendWorkspaceResultLog({
@@ -610,7 +639,7 @@ export default function SqlStudio() {
     }
   }, [dispatch, updateTab, user?.username]);
 
-  const runActiveQuery = async () => {
+  const runActiveQuery = async (sqlToRun: string) => {
     if (!activeTab) {
       return;
     }
@@ -619,12 +648,12 @@ export default function SqlStudio() {
       if (activeTab.liveStatus === "connected") {
         stopLiveQuery(activeTab.id);
       } else {
-        await startLiveQuery(activeTab);
+        await startLiveQuery(activeTab, sqlToRun);
       }
       return;
     }
 
-    await executeQueryForTab(activeTab.id, activeTab.sql, activeTab.title);
+    await executeQueryForTab(activeTab.id, sqlToRun, activeTab.title);
   };
 
   const saveTab = useCallback((tabId: string, openAsCopy: boolean) => {
@@ -940,7 +969,7 @@ export default function SqlStudio() {
                     isRunning={isRunning}
                     subscriptionOptions={activeTab.subscriptionOptions}
                     onSqlChange={(value) => updateActiveTab({ sql: value, isDirty: true })}
-                    onRun={runActiveQuery}
+                    onRun={(runSql) => runActiveQuery(runSql)}
                     onToggleLive={(checked) => {
                       updateActiveTab({ isLive: checked, liveStatus: "idle" });
                       if (!checked && activeTab.liveStatus === "connected") {

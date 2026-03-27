@@ -16,7 +16,9 @@ use kalamdb_commons::TableId;
 use kalamdb_sharding::ShardRouter;
 use kalamdb_store::entity_store::ScanDirection;
 use kalamdb_store::storage_trait::{Result, StorageError};
-use kalamdb_streams::{MemoryStreamLogStore, StreamLogStore};
+use kalamdb_streams::{
+    bucket_for_ttl, FileStreamLogStore, MemoryStreamLogStore, StreamLogConfig, StreamLogStore,
+};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -30,6 +32,113 @@ pub struct StreamTableStoreConfig {
     pub max_rows_per_user: usize,
     pub shard_router: ShardRouter,
     pub ttl_seconds: Option<u64>,
+    pub storage_mode: StreamTableStorageMode,
+}
+
+impl StreamTableStoreConfig {
+    fn bucket(&self) -> kalamdb_streams::StreamTimeBucket {
+        bucket_for_ttl(self.ttl_seconds.unwrap_or(3600))
+    }
+}
+
+/// Backing store mode for stream tables.
+#[derive(Debug, Clone, Copy)]
+pub enum StreamTableStorageMode {
+    Memory,
+    File,
+}
+
+impl Default for StreamTableStorageMode {
+    fn default() -> Self {
+        Self::File
+    }
+}
+
+#[derive(Clone)]
+enum StreamLogStoreBackend {
+    Memory(Arc<MemoryStreamLogStore>),
+    File(Arc<FileStreamLogStore>),
+}
+
+impl StreamLogStoreBackend {
+    fn append_rows(
+        &self,
+        table_id: &TableId,
+        user_id: &UserId,
+        rows: HashMap<StreamTableRowId, StreamTableRow>,
+    ) -> Result<()> {
+        match self {
+            Self::Memory(store) => {
+                store.append_rows(table_id, user_id, rows).map_err(map_stream_error)
+            },
+            Self::File(store) => {
+                store.append_rows(table_id, user_id, rows).map_err(map_stream_error)
+            },
+        }
+    }
+
+    fn read_in_time_range(
+        &self,
+        table_id: &TableId,
+        user_id: &UserId,
+        start_time: u64,
+        end_time: u64,
+        limit: usize,
+    ) -> Result<HashMap<StreamTableRowId, StreamTableRow>> {
+        match self {
+            Self::Memory(store) => store
+                .read_in_time_range(table_id, user_id, start_time, end_time, limit)
+                .map_err(map_stream_error),
+            Self::File(store) => store
+                .read_in_time_range(table_id, user_id, start_time, end_time, limit)
+                .map_err(map_stream_error),
+        }
+    }
+
+    fn delete_old_logs_with_count(&self, before_time: u64) -> Result<usize> {
+        match self {
+            Self::Memory(store) => {
+                store.delete_old_logs_with_count(before_time).map_err(map_stream_error)
+            },
+            Self::File(store) => {
+                store.delete_old_logs_with_count(before_time).map_err(map_stream_error)
+            },
+        }
+    }
+
+    fn append_delete(
+        &self,
+        table_id: &TableId,
+        user_id: &UserId,
+        key: &StreamTableRowId,
+    ) -> Result<()> {
+        match self {
+            Self::Memory(store) => {
+                store.append_delete(table_id, user_id, key).map_err(map_stream_error)
+            },
+            Self::File(store) => {
+                store.append_delete(table_id, user_id, key).map_err(map_stream_error)
+            },
+        }
+    }
+
+    fn has_logs_before(&self, before_time: u64) -> Result<bool> {
+        match self {
+            Self::Memory(store) => store.has_logs_before(before_time).map_err(map_stream_error),
+            Self::File(store) => store.has_logs_before(before_time).map_err(map_stream_error),
+        }
+    }
+
+    fn list_user_ids(&self) -> Result<Vec<UserId>> {
+        match self {
+            Self::Memory(store) => store.list_user_ids().map_err(map_stream_error),
+            Self::File(store) => store.list_user_ids().map_err(map_stream_error),
+        }
+    }
+}
+
+fn map_stream_error(error: kalamdb_streams::StreamLogError) -> StorageError {
+    StorageError::IoError(error.to_string())
 }
 
 /// Store for stream tables (in-memory BTreeMap storage for fast ephemeral access).
@@ -37,7 +146,7 @@ pub struct StreamTableStoreConfig {
 pub struct StreamTableStore {
     table_id: TableId,
     partition: Partition,
-    log_store: Arc<MemoryStreamLogStore>,
+    log_store: StreamLogStoreBackend,
 }
 
 impl StreamTableStore {
@@ -47,10 +156,22 @@ impl StreamTableStore {
         partition: impl Into<Partition>,
         config: StreamTableStoreConfig,
     ) -> Self {
-        let log_store = Arc::new(MemoryStreamLogStore::with_table_id_and_limit(
-            table_id.clone(),
-            config.max_rows_per_user,
-        ));
+        let log_store = match config.storage_mode {
+            StreamTableStorageMode::Memory => StreamLogStoreBackend::Memory(Arc::new(
+                MemoryStreamLogStore::with_table_id_and_limit(
+                    table_id.clone(),
+                    config.max_rows_per_user,
+                ),
+            )),
+            StreamTableStorageMode::File => {
+                StreamLogStoreBackend::File(Arc::new(FileStreamLogStore::new(StreamLogConfig {
+                    base_dir: config.base_dir.clone(),
+                    shard_router: config.shard_router.clone(),
+                    bucket: config.bucket(),
+                    table_id: table_id.clone(),
+                })))
+            },
+        };
 
         Self {
             table_id,
@@ -68,40 +189,35 @@ impl StreamTableStore {
     pub fn put(&self, key: &StreamTableRowId, entity: &StreamTableRow) -> Result<()> {
         let mut rows = HashMap::new();
         rows.insert(key.clone(), entity.clone());
-        self.log_store
-            .append_rows(&self.table_id, key.user_id(), rows)
-            .map_err(|e| StorageError::IoError(e.to_string()))
+        self.log_store.append_rows(&self.table_id, key.user_id(), rows)
     }
 
     /// Retrieve a row by key.
     pub fn get(&self, key: &StreamTableRowId) -> Result<Option<StreamTableRow>> {
         let ts = key.seq().timestamp_millis();
-        let rows = self
-            .log_store
-            .read_in_time_range(&self.table_id, key.user_id(), ts, ts, MAX_SCAN_LIMIT)
-            .map_err(|e| StorageError::IoError(e.to_string()))?;
+        let rows = self.log_store.read_in_time_range(
+            &self.table_id,
+            key.user_id(),
+            ts,
+            ts,
+            MAX_SCAN_LIMIT,
+        )?;
         Ok(rows.get(key).cloned())
     }
 
     /// Delete a row by key (append tombstone).
     pub fn delete(&self, key: &StreamTableRowId) -> Result<()> {
-        self.log_store
-            .append_delete(&self.table_id, key.user_id(), key)
-            .map_err(|e| StorageError::IoError(e.to_string()))
+        self.log_store.append_delete(&self.table_id, key.user_id(), key)
     }
 
     /// Delete old logs for this table before a timestamp.
     pub fn delete_old_logs(&self, before_time: u64) -> Result<usize> {
-        self.log_store
-            .delete_old_logs_with_count(before_time)
-            .map_err(|e| StorageError::IoError(e.to_string()))
+        self.log_store.delete_old_logs_with_count(before_time)
     }
 
     /// Check if any logs exist before a timestamp.
     pub fn has_logs_before(&self, before_time: u64) -> Result<bool> {
-        self.log_store
-            .has_logs_before(before_time)
-            .map_err(|e| StorageError::IoError(e.to_string()))
+        self.log_store.has_logs_before(before_time)
     }
 
     /// Scan all rows with an optional limit.
@@ -114,10 +230,7 @@ impl StreamTableStore {
             return Ok(Vec::new());
         }
 
-        let users = self
-            .log_store
-            .list_user_ids()
-            .map_err(|e| StorageError::IoError(e.to_string()))?;
+        let users = self.log_store.list_user_ids()?;
         let mut results: Vec<(StreamTableRowId, StreamTableRow)> = Vec::new();
 
         for user_id in users {
@@ -125,10 +238,13 @@ impl StreamTableStore {
             if remaining == 0 {
                 break;
             }
-            let rows = self
-                .log_store
-                .read_in_time_range(&self.table_id, &user_id, 0, u64::MAX, remaining)
-                .map_err(|e| StorageError::IoError(e.to_string()))?;
+            let rows = self.log_store.read_in_time_range(
+                &self.table_id,
+                &user_id,
+                0,
+                u64::MAX,
+                remaining,
+            )?;
             results.extend(rows.into_iter());
         }
 
@@ -151,10 +267,13 @@ impl StreamTableStore {
         }
 
         let start_time = start_seq.map(|seq| seq.timestamp_millis()).unwrap_or(0);
-        let rows = self
-            .log_store
-            .read_in_time_range(&self.table_id, user_id, start_time, u64::MAX, limit)
-            .map_err(|e| StorageError::IoError(e.to_string()))?;
+        let rows = self.log_store.read_in_time_range(
+            &self.table_id,
+            user_id,
+            start_time,
+            u64::MAX,
+            limit,
+        )?;
 
         let mut vec: Vec<(StreamTableRowId, StreamTableRow)> = rows
             .into_iter()
@@ -196,10 +315,13 @@ impl StreamTableStore {
         }
 
         let start_time = start_seq.map(|seq| seq.timestamp_millis()).unwrap_or(0);
-        let rows = self
-            .log_store
-            .read_in_time_range(&self.table_id, user_id, start_time, u64::MAX, MAX_SCAN_LIMIT)
-            .map_err(|e| StorageError::IoError(e.to_string()))?;
+        let rows = self.log_store.read_in_time_range(
+            &self.table_id,
+            user_id,
+            start_time,
+            u64::MAX,
+            MAX_SCAN_LIMIT,
+        )?;
 
         // Filter by start_seq, apply TTL, and collect with early termination
         let mut result = Vec::with_capacity(limit.min(1024));
@@ -323,6 +445,7 @@ mod tests {
             max_rows_per_user: MemoryStreamLogStore::DEFAULT_MAX_ROWS_PER_USER,
             shard_router: ShardRouter::default_config(),
             ttl_seconds: Some(3600),
+            storage_mode: StreamTableStorageMode::File,
         };
         new_stream_table_store(&table_id, config)
     }
@@ -412,7 +535,27 @@ mod tests {
         assert!(results.iter().all(|(key, _)| key.seq() >= start_seq));
     }
 
-    // Note: Persistence test removed since we now use in-memory storage.
-    // In the future, when we add persistence mode selection, we'll add
-    // a separate test for file-backed persistence.
+    #[test]
+    fn test_stream_table_store_persists_rows_across_reopen() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let table_id = TableId::new(NamespaceId::new("test_ns"), TableName::new("test_stream"));
+        let config = StreamTableStoreConfig {
+            base_dir: temp_dir.path().join("streams").join("test_ns").join("test_stream"),
+            max_rows_per_user: MemoryStreamLogStore::DEFAULT_MAX_ROWS_PER_USER,
+            shard_router: ShardRouter::default_config(),
+            ttl_seconds: Some(3600),
+            storage_mode: StreamTableStorageMode::File,
+        };
+
+        let key = StreamTableRowId::new(UserId::new("user1"), SeqId::new(100));
+        let row = create_test_row(&UserId::new("user1"), 100);
+
+        let store = new_stream_table_store(&table_id, config.clone());
+        store.put(&key, &row).unwrap();
+        drop(store);
+
+        let reopened = new_stream_table_store(&table_id, config);
+        let retrieved = reopened.get(&key).unwrap();
+        assert_eq!(retrieved, Some(row));
+    }
 }

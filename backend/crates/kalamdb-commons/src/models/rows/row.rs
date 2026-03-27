@@ -1,5 +1,5 @@
 use arrow::array::{Array, FixedSizeListArray, Float32Array};
-use datafusion::scalar::ScalarValue;
+use datafusion_common::ScalarValue;
 use serde::de;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -394,6 +394,7 @@ impl Ord for Row {
 }
 
 // KSerializable implementation for EntityStore support
+#[cfg(feature = "serialization")]
 impl crate::serialization::KSerializable for Row {
     fn encode(&self) -> Result<Vec<u8>, crate::storage::StorageError> {
         crate::serialization::row_codec::encode_row(self)

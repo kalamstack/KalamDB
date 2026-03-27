@@ -27,10 +27,17 @@ use kalamdb_raft::NotifyFollowersRequest;
 use kalamdb_system::NotificationService as NotificationServiceTrait;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use tokio::sync::{mpsc, OnceCell};
 
-const NOTIFY_QUEUE_CAPACITY: usize = 10_000;
+/// Number of sharded notification workers.
+/// Deterministic routing by table_id hash preserves per-table ordering
+/// while achieving parallelism across different tables.
+const NUM_NOTIFY_WORKERS: usize = 4;
+
+/// Per-worker queue capacity. Total capacity = NUM_NOTIFY_WORKERS × this value.
+const NOTIFY_QUEUE_PER_WORKER: usize = 4_096;
 
 /// Number of subscribers per parallel chunk for shared table streaming notification.
 /// Tuned to amortize tokio::spawn overhead while achieving parallelism at scale.
@@ -167,7 +174,9 @@ fn compute_json_update_delta(
 pub struct NotificationService {
     /// Manager uses DashMap internally for lock-free access
     registry: Arc<ConnectionsManager>,
-    notify_tx: mpsc::Sender<NotificationTask>,
+    /// Sharded notification channels — deterministic routing by table_id hash
+    /// preserves per-table ordering while achieving parallelism across tables.
+    worker_txs: Vec<mpsc::Sender<NotificationTask>>,
     /// AppContext for leadership checks (set after initialization to avoid circular dependency)
     /// Required for Raft cluster mode to ensure only leader fires notifications
     app_context: OnceCell<std::sync::Weak<crate::app_context::AppContext>>,
@@ -202,122 +211,146 @@ impl NotificationService {
     }
 
     pub fn new(registry: Arc<ConnectionsManager>) -> Arc<Self> {
-        let (notify_tx, mut notify_rx) = mpsc::channel(NOTIFY_QUEUE_CAPACITY);
+        let mut worker_txs = Vec::with_capacity(NUM_NOTIFY_WORKERS);
+        let mut worker_rxs = Vec::with_capacity(NUM_NOTIFY_WORKERS);
+
+        for _ in 0..NUM_NOTIFY_WORKERS {
+            let (tx, rx) = mpsc::channel(NOTIFY_QUEUE_PER_WORKER);
+            worker_txs.push(tx);
+            worker_rxs.push(rx);
+        }
+
         let service = Arc::new(Self {
             registry,
-            notify_tx,
+            worker_txs,
             app_context: OnceCell::new(),
             cluster_client: OnceCell::new(),
         });
 
-        // Notification worker (single task, no per-notification spawn)
-        let notify_service = Arc::clone(&service);
-        tokio::spawn(async move {
-            while let Some(task) = notify_rx.recv().await {
-                // Step 0: Leadership check (Raft cluster mode)
-                //
-                // Only the leader processes and broadcasts notifications.
-                // Followers silently drop locally-generated notifications because
-                // writes only land on the leader (user/stream tables).
-                if let Some(weak_ctx) = notify_service.app_context.get() {
-                    if let Some(ctx) = weak_ctx.upgrade() {
-                        let is_leader = match task.user_id.as_ref() {
-                            Some(uid) => ctx.is_leader_for_user(uid).await,
-                            None => ctx.is_leader_for_shared().await,
-                        };
+        // Spawn sharded notification workers
+        for (idx, rx) in worker_rxs.into_iter().enumerate() {
+            let notify_service = Arc::clone(&service);
+            tokio::spawn(Self::run_worker(notify_service, rx, idx));
+        }
 
-                        if !is_leader {
-                            log::trace!(
-                                "Skipping notification on follower node for table {}",
-                                task.table_id
-                            );
-                            continue;
-                        }
+        service
+    }
 
-                        // Leader: broadcast to all other cluster nodes via gRPC
-                        // so followers can dispatch to their locally-connected subscribers.
-                        if ctx.is_cluster_mode() {
-                            if let Some(cluster_client) = notify_service.cluster_client.get() {
-                                Self::broadcast_to_followers(
-                                    cluster_client,
-                                    task.user_id.as_ref(),
-                                    &task.table_id,
-                                    &task.notification,
-                                )
-                                .await;
-                            }
-                        }
-                    }
+    /// Route a table_id to a deterministic worker index.
+    #[inline]
+    fn worker_index(&self, table_id: &TableId) -> usize {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        table_id.namespace_id().as_str().hash(&mut hasher);
+        table_id.table_name().as_str().hash(&mut hasher);
+        hasher.finish() as usize % self.worker_txs.len()
+    }
+
+    /// Single notification worker loop.
+    async fn run_worker(
+        service: Arc<Self>,
+        mut rx: mpsc::Receiver<NotificationTask>,
+        worker_idx: usize,
+    ) {
+        while let Some(task) = rx.recv().await {
+            service.process_notification(task, worker_idx).await;
+        }
+        log::debug!("Notification worker {} shutting down", worker_idx);
+    }
+
+    /// Process a single notification task (leadership check + fan-out).
+    async fn process_notification(&self, task: NotificationTask, worker_idx: usize) {
+        // Step 0: Leadership check (Raft cluster mode)
+        if let Some(weak_ctx) = self.app_context.get() {
+            if let Some(ctx) = weak_ctx.upgrade() {
+                let is_leader = match task.user_id.as_ref() {
+                    Some(uid) => ctx.is_leader_for_user(uid).await,
+                    None => ctx.is_leader_for_shared().await,
+                };
+
+                if !is_leader {
+                    log::trace!(
+                        "[worker-{}] Skipping notification on follower node for table {}",
+                        worker_idx,
+                        task.table_id
+                    );
+                    return;
                 }
 
-                // Step 1: Route to live query subscriptions
-                // Topic publishing is now handled synchronously in table providers,
-                // so the notification worker only handles live query fan-out.
-                if let Some(ref user_id) = task.user_id {
-                    // User/stream table: specific user lookup
-                    let handles = notify_service
-                        .registry
-                        .get_subscriptions_for_table(user_id, &task.table_id);
-                    if handles.is_empty() {
-                        log::debug!(
-                            "NotificationWorker: No subscriptions for user={}, table={} (skipping notification)",
-                            user_id, task.table_id
-                        );
-                        continue;
-                    }
-                    log::debug!(
-                        "NotificationWorker: Found {} subscriptions for user={}, table={}",
-                        handles.len(),
-                        user_id,
-                        task.table_id
-                    );
-
-                    if let Err(e) = notify_service
-                        .notify_table_change_with_handles(
+                // Leader: broadcast to all other cluster nodes via gRPC
+                if ctx.is_cluster_mode() {
+                    if let Some(cluster_client) = self.cluster_client.get() {
+                        Self::broadcast_to_followers(
+                            cluster_client,
+                            task.user_id.as_ref(),
                             &task.table_id,
-                            task.notification,
-                            handles,
+                            &task.notification,
                         )
-                        .await
-                    {
-                        log::warn!(
-                            "Failed to notify subscribers for table {}: {}",
-                            task.table_id,
-                            e
-                        );
-                    }
-                } else {
-                    // Shared table: streaming parallel fan-out
-                    let handles =
-                        notify_service.registry.get_shared_subscriptions_for_table(&task.table_id);
-                    if handles.is_empty() {
-                        log::debug!(
-                            "NotificationWorker: No shared subscriptions for table={} (skipping notification)",
-                            task.table_id
-                        );
-                        continue;
-                    }
-                    log::debug!(
-                        "NotificationWorker: Found {} shared subscriptions for table={}",
-                        handles.len(),
-                        task.table_id
-                    );
-
-                    if let Err(e) = notify_service
-                        .notify_shared_table_streaming(&task.table_id, task.notification, handles)
-                        .await
-                    {
-                        log::warn!(
-                            "Failed to notify shared table subscribers for table {}: {}",
-                            task.table_id,
-                            e
-                        );
+                        .await;
                     }
                 }
             }
-        });
+        }
 
-        service
+        // Step 1: Route to live query subscriptions
+        if let Some(ref user_id) = task.user_id {
+            let handles = self.registry.get_subscriptions_for_table(user_id, &task.table_id);
+            if handles.is_empty() {
+                log::debug!(
+                    "[worker-{}] No subscriptions for user={}, table={} (skipping)",
+                    worker_idx,
+                    user_id,
+                    task.table_id
+                );
+                return;
+            }
+            log::debug!(
+                "[worker-{}] Found {} subscriptions for user={}, table={}",
+                worker_idx,
+                handles.len(),
+                user_id,
+                task.table_id
+            );
+
+            if let Err(e) = self
+                .notify_table_change_with_handles(&task.table_id, task.notification, handles)
+                .await
+            {
+                log::warn!(
+                    "[worker-{}] Failed to notify subscribers for table {}: {}",
+                    worker_idx,
+                    task.table_id,
+                    e
+                );
+            }
+        } else {
+            let handles = self.registry.get_shared_subscriptions_for_table(&task.table_id);
+            if handles.is_empty() {
+                log::debug!(
+                    "[worker-{}] No shared subscriptions for table={} (skipping)",
+                    worker_idx,
+                    task.table_id
+                );
+                return;
+            }
+            log::debug!(
+                "[worker-{}] Found {} shared subscriptions for table={}",
+                worker_idx,
+                handles.len(),
+                task.table_id
+            );
+
+            if let Err(e) = self
+                .notify_shared_table_streaming(&task.table_id, task.notification, handles)
+                .await
+            {
+                log::warn!(
+                    "[worker-{}] Failed to notify shared table subscribers for table {}: {}",
+                    worker_idx,
+                    task.table_id,
+                    e
+                );
+            }
+        }
     }
 
     /// Handle a notification forwarded from the leader node.
@@ -421,14 +454,18 @@ impl NotificationService {
         table_id: TableId,
         notification: ChangeNotification,
     ) {
+        let worker_idx = self.worker_index(&table_id);
         let task = NotificationTask {
             user_id,
             table_id,
             notification,
         };
-        if let Err(e) = self.notify_tx.try_send(task) {
+        if let Err(e) = self.worker_txs[worker_idx].try_send(task) {
             if matches!(e, mpsc::error::TrySendError::Full(_)) {
-                log::warn!("Notification queue full, dropping notification");
+                log::warn!(
+                    "Notification worker {} queue full, dropping notification",
+                    worker_idx
+                );
             }
         }
     }

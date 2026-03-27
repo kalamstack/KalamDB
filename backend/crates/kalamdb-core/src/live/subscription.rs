@@ -79,21 +79,20 @@ impl SubscriptionService {
     ) -> Result<LiveQueryId, KalamDbError> {
         // Read connection info from state and check subscription limit
         let (connection_id, user_id, notification_tx) = {
-            let state = connection_state.read();
-            let user_id = state.user_id.clone().ok_or_else(|| {
+            let user_id = connection_state.user_id().cloned().ok_or_else(|| {
                 KalamDbError::InvalidOperation("Connection not authenticated".to_string())
             })?;
 
             // Prevent DoS via excessive subscriptions per connection
             const MAX_SUBSCRIPTIONS_PER_CONNECTION: usize = 100;
-            if state.subscriptions.len() >= MAX_SUBSCRIPTIONS_PER_CONNECTION {
+            if connection_state.subscription_count() >= MAX_SUBSCRIPTIONS_PER_CONNECTION {
                 return Err(KalamDbError::InvalidOperation(format!(
                     "Maximum subscriptions ({}) per connection exceeded",
                     MAX_SUBSCRIPTIONS_PER_CONNECTION
                 )));
             }
 
-            (state.connection_id.clone(), user_id, state.notification_tx.clone())
+            (connection_state.connection_id().clone(), user_id, connection_state.notification_tx.clone())
         };
 
         // Generate LiveQueryId
@@ -140,10 +139,7 @@ impl SubscriptionService {
         // If we index after Raft, INSERT commands might be applied before the subscription
         // is indexed, causing notifications to be missed.
         // Add subscription to connection state
-        {
-            let state = connection_state.read();
-            state.subscriptions.insert(request.id.clone(), subscription_state);
-        }
+        connection_state.insert_subscription(request.id.clone(), subscription_state);
 
         // Add lightweight handle to registry's table index for efficient lookups
         if table_type == TableType::Shared {
@@ -197,10 +193,7 @@ impl SubscriptionService {
             } else {
                 self.registry.unindex_subscription(&user_id, &live_id, &table_id);
             }
-            {
-                let state = connection_state.read();
-                state.subscriptions.remove(&request.id);
-            }
+            connection_state.remove_subscription(&request.id);
             return Err(KalamDbError::Other(format!("Failed to create live query: {}", e)));
         }
 
@@ -219,8 +212,7 @@ impl SubscriptionService {
         subscription_id: &str,
         snapshot_end_seq: SeqId,
     ) {
-        let state = connection_state.read();
-        state.update_snapshot_end_seq(subscription_id, Some(snapshot_end_seq));
+        connection_state.update_snapshot_end_seq(subscription_id, Some(snapshot_end_seq));
     }
 
     /// Unregister a single live query subscription
@@ -236,21 +228,20 @@ impl SubscriptionService {
         // This handles the case where notifications were previously sending the full
         // LiveQueryId as the subscription_id and the client echoes it back.
         let (connection_id, user_id, table_id, is_shared) = {
-            let state = connection_state.read();
-            let user_id = state.user_id.clone().ok_or_else(|| {
+            let user_id = connection_state.user_id().cloned().ok_or_else(|| {
                 KalamDbError::InvalidOperation("Connection not authenticated".to_string())
             })?;
-            let subscription = state.subscriptions.remove(subscription_id).or_else(|| {
-                // Fallback: the client may have sent the full LiveQueryId as
-                // subscription_id (e.g. "u_abc-connid-latency_1").  Try parsing
-                // it and using just the subscription_id suffix.
-                LiveQueryId::from_string(subscription_id)
-                    .ok()
-                    .and_then(|parsed| state.subscriptions.remove(parsed.subscription_id()))
-            });
+            let subscription = connection_state.remove_subscription_with_fallback(
+                subscription_id,
+                || {
+                    LiveQueryId::from_string(subscription_id)
+                        .ok()
+                        .map(|parsed| parsed.subscription_id().to_string())
+                },
+            );
             match subscription {
-                Some((_, sub)) => {
-                    (state.connection_id.clone(), user_id, sub.table_id, sub.is_shared)
+                Some((_key, sub)) => {
+                    (connection_state.connection_id().clone(), user_id, sub.table_id, sub.is_shared)
                 },
                 None => {
                     // This is benign — the subscription may already have been
@@ -320,7 +311,6 @@ impl SubscriptionService {
         connection_state: &SharedConnectionState,
         subscription_id: &str,
     ) -> Option<SubscriptionState> {
-        let state = connection_state.read();
-        state.subscriptions.get(subscription_id).map(|s| s.clone())
+        connection_state.get_subscription(subscription_id)
     }
 }

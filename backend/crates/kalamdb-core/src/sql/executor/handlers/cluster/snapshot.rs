@@ -8,7 +8,7 @@ use crate::sql::executor::handlers::{
     ExecutionContext, ExecutionResult, ScalarValue, StatementHandler,
 };
 use kalamdb_raft::RaftExecutor;
-use kalamdb_sql::statement_classifier::{SqlStatement, SqlStatementKind};
+use kalamdb_sql::classifier::{SqlStatement, SqlStatementKind};
 use std::sync::Arc;
 
 pub struct ClusterSnapshotHandler {

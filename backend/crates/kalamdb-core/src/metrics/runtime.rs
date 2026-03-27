@@ -5,6 +5,14 @@ pub use kalamdb_observability::{
 };
 use kalamdb_system::JobStatus;
 
+fn effective_server_workers(configured: usize) -> usize {
+    if configured == 0 {
+        kalamdb_observability::cpu::get_cpu_count().min(8)
+    } else {
+        configured
+    }
+}
+
 /// Compute all server metrics from the application context.
 ///
 /// Returns a vector of (metric_name, metric_value) pairs covering:
@@ -16,10 +24,53 @@ use kalamdb_system::JobStatus;
 /// - Server metadata (version, node ID, cluster info)
 pub fn compute_metrics(ctx: &crate::app_context::AppContext) -> Vec<(String, String)> {
     let mut metrics = Vec::new();
+    let config = ctx.config();
 
     // Runtime metrics from sysinfo (shared with console logging)
     let runtime = collect_runtime_metrics(ctx.server_start_time());
     metrics.extend(runtime.as_pairs());
+    metrics.push((
+        "cpu_logical_cores".to_string(),
+        kalamdb_observability::cpu::get_cpu_count().to_string(),
+    ));
+    metrics.push((
+        "cpu_physical_cores".to_string(),
+        kalamdb_observability::cpu::get_physical_cpu_count().to_string(),
+    ));
+
+    let configured_workers = config.server.workers;
+    metrics.push((
+        "server_workers_configured".to_string(),
+        configured_workers.to_string(),
+    ));
+    metrics.push((
+        "server_workers_effective".to_string(),
+        effective_server_workers(configured_workers).to_string(),
+    ));
+    metrics.push((
+        "max_connections".to_string(),
+        config.performance.max_connections.to_string(),
+    ));
+    metrics.push((
+        "connection_backlog".to_string(),
+        config.performance.backlog.to_string(),
+    ));
+    metrics.push((
+        "worker_max_blocking_threads".to_string(),
+        config.performance.worker_max_blocking_threads.to_string(),
+    ));
+    metrics.push((
+        "datafusion_query_parallelism".to_string(),
+        config.datafusion.query_parallelism.to_string(),
+    ));
+    metrics.push((
+        "datafusion_max_partitions".to_string(),
+        config.datafusion.max_partitions.to_string(),
+    ));
+    metrics.push((
+        "datafusion_memory_limit_mb".to_string(),
+        (config.datafusion.memory_limit / (1024 * 1024)).to_string(),
+    ));
 
     let (open_files_total, open_file_breakdown) =
         kalamdb_observability::HealthMonitor::collect_open_file_metrics();
@@ -147,12 +198,17 @@ pub fn compute_metrics(ctx: &crate::app_context::AppContext) -> Vec<(String, Str
     metrics.push(("server_git_commit".to_string(), GIT_COMMIT_HASH.to_string()));
 
     // Cluster info
-    let config = ctx.config();
     metrics.push(("cluster_mode".to_string(), config.cluster.is_some().to_string()));
     if let Some(cluster) = &config.cluster {
         metrics.push(("cluster_id".to_string(), cluster.cluster_id.clone()));
         metrics.push(("cluster_rpc_addr".to_string(), cluster.rpc_addr.clone()));
         metrics.push(("cluster_api_addr".to_string(), cluster.api_addr.clone()));
+        metrics.push(("user_shards".to_string(), cluster.user_shards.to_string()));
+        metrics.push(("shared_shards".to_string(), cluster.shared_shards.to_string()));
+        metrics.push((
+            "raft_group_count".to_string(),
+            (1usize + cluster.user_shards as usize + cluster.shared_shards as usize).to_string(),
+        ));
     }
 
     metrics

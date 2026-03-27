@@ -1,0 +1,39 @@
+[package]
+name = "kalamdb-pg"
+version = { workspace = true }
+edition = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[features]
+default = ["server", "tls"]
+server = [
+	"dep:arrow",
+	"dep:arrow-ipc",
+	"dep:async-trait",
+	"dep:dashmap",
+	"dep:kalamdb-commons",
+	"dep:kalamdb-server-auth",
+	"dep:log",
+	"dep:serde_json",
+]
+tls = ["tonic/tls-webpki-roots", "tonic/tls-ring"]
+
+[dependencies]
+kalamdb-commons = { path = "../kalamdb-commons", default-features = false, features = ["rows"], optional = true }
+arrow = { workspace = true, optional = true }
+arrow-ipc = { workspace = true, optional = true }
+async-trait = { workspace = true, optional = true }
+bytes = { workspace = true }
+dashmap = { workspace = true, optional = true }
+log = { workspace = true, optional = true }
+prost = { workspace = true }
+serde_json = { workspace = true, optional = true }
+tonic = { workspace = true }
+tonic-prost = { workspace = true }
+kalamdb-server-auth = { path = "../kalamdb-server-auth", optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+tonic = { workspace = true }

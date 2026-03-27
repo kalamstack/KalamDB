@@ -29,20 +29,24 @@ impl TypedStatementHandler<AlterStorageStatement> for AlterStorageHandler {
         _params: Vec<ScalarValue>,
         _context: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
-        let storages_provider = self.app_context.system_tables().storages();
         let storage_registry = self.app_context.storage_registry();
 
-        // Get existing storage
+        // Get existing storage (offload sync RocksDB read)
         let storage_id = statement.storage_id.clone();
-        let mut storage = storages_provider
-            .get_storage_by_id(&storage_id)
-            .into_kalamdb_error("Failed to get storage")?
-            .ok_or_else(|| {
-                KalamDbError::InvalidOperation(format!(
-                    "Storage '{}' not found",
-                    statement.storage_id.as_str()
-                ))
-            })?;
+        let app_ctx = self.app_context.clone();
+        let sid = storage_id.clone();
+        let mut storage = tokio::task::spawn_blocking(move || {
+            app_ctx.system_tables().storages().get_storage_by_id(&sid)
+        })
+        .await
+        .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))?
+        .into_kalamdb_error("Failed to get storage")?
+        .ok_or_else(|| {
+            KalamDbError::InvalidOperation(format!(
+                "Storage '{}' not found",
+                statement.storage_id.as_str()
+            ))
+        })?;
 
         // Update fields if provided
         if let Some(name) = statement.storage_name {
@@ -121,10 +125,14 @@ impl TypedStatementHandler<AlterStorageStatement> for AlterStorageHandler {
         // Update timestamp
         storage.updated_at = chrono::Utc::now().timestamp_millis();
 
-        // Save updated storage
-        storages_provider
-            .update_storage(storage)
-            .into_kalamdb_error("Failed to update storage")?;
+        // Save updated storage (offload sync RocksDB write)
+        let app_ctx = self.app_context.clone();
+        tokio::task::spawn_blocking(move || {
+            app_ctx.system_tables().storages().update_storage(storage)
+        })
+        .await
+        .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))?
+        .into_kalamdb_error("Failed to update storage")?;
 
         // Invalidate storage cache to ensure fresh data on next access
         storage_registry.invalidate(&storage_id);

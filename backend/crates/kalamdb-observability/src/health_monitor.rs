@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
-use sysinfo::System;
+
+use crate::runtime_metrics::SHARED_SYSTEM;
 
 /// Global counter for active WebSocket sessions
 /// This is updated by kalamdb-api when sessions start/stop
@@ -83,11 +84,19 @@ impl HealthMonitor {
     /// Collect system health metrics
     ///
     /// Returns a structured snapshot of current health metrics.
-    /// This is a low-level collector that doesn't log - consumers can log or report metrics as needed.
+    /// Reuses the shared System instance to avoid heap fragmentation.
     pub fn collect_system_metrics() -> (Option<u64>, Option<f32>, usize, Option<OpenFileBreakdown>)
     {
-        let mut sys = System::new_all();
-        sys.refresh_all();
+        use sysinfo::{
+            MemoryRefreshKind, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System,
+        };
+
+        let mut guard = SHARED_SYSTEM.lock().unwrap_or_else(|e: std::sync::PoisonError<_>| e.into_inner());
+        let sys = guard.get_or_insert_with(|| {
+            System::new_with_specifics(
+                RefreshKind::nothing().with_memory(MemoryRefreshKind::everything()),
+            )
+        });
 
         // Get process info
         let pid = match sysinfo::get_current_pid() {
@@ -97,6 +106,16 @@ impl HealthMonitor {
                 return (None, None, 0, None);
             },
         };
+
+        let process_refresh = ProcessRefreshKind::nothing()
+            .with_memory()
+            .with_cpu();
+        sys.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[pid]),
+            false,
+            process_refresh,
+        );
+        sys.refresh_memory_specifics(MemoryRefreshKind::everything());
 
         let process = sys.process(pid);
 

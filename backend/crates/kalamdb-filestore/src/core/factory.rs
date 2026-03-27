@@ -12,6 +12,7 @@
 //! These values are read from `server.toml` [storage.remote_timeouts] section
 //! and applied to all remote storage backends (S3, GCS, Azure).
 
+#[cfg(any(feature = "cloud-aws", feature = "cloud-gcp", feature = "cloud-azure"))]
 use crate::core::paths::parse_remote_url;
 use crate::error::{FilestoreError, Result};
 use kalamdb_configs::config::types::RemoteStorageTimeouts;
@@ -19,15 +20,21 @@ use kalamdb_system::providers::storages::models::{
     StorageLocationConfig, StorageLocationConfigError,
 };
 use kalamdb_system::Storage;
+#[cfg(feature = "cloud-aws")]
 use object_store::aws::AmazonS3Builder;
+#[cfg(feature = "cloud-azure")]
 use object_store::azure::MicrosoftAzureBuilder;
+#[cfg(feature = "cloud-gcp")]
 use object_store::gcp::GoogleCloudStorageBuilder;
 use object_store::local::LocalFileSystem;
 use object_store::path::Path as ObjectStorePath;
 use object_store::prefix::PrefixStore;
-use object_store::{ClientOptions, ObjectStore};
+#[cfg(any(feature = "cloud-aws", feature = "cloud-gcp", feature = "cloud-azure"))]
+use object_store::ClientOptions;
+use object_store::ObjectStore;
 use std::path::PathBuf;
 use std::sync::Arc;
+#[cfg(any(feature = "cloud-aws", feature = "cloud-gcp", feature = "cloud-azure"))]
 use std::time::Duration;
 
 /// Build an `ObjectStore` instance from a Storage entity.
@@ -42,15 +49,27 @@ pub fn build_object_store(
 ) -> Result<Arc<dyn ObjectStore>> {
     let config = resolve_config(storage)?;
 
+    // Suppress unused warning when no cloud features are enabled
+    #[cfg(not(any(feature = "cloud-aws", feature = "cloud-gcp", feature = "cloud-azure")))]
+    let _ = timeouts;
+
     match config {
         StorageLocationConfig::Local(_) => build_local(storage),
+        #[cfg(feature = "cloud-aws")]
         StorageLocationConfig::S3(cfg) => build_s3(storage, &cfg, timeouts),
+        #[cfg(feature = "cloud-gcp")]
         StorageLocationConfig::Gcs(cfg) => build_gcs(storage, &cfg, timeouts),
+        #[cfg(feature = "cloud-azure")]
         StorageLocationConfig::Azure(cfg) => build_azure(storage, &cfg, timeouts),
+        #[allow(unreachable_patterns)]
+        _ => Err(FilestoreError::Config(
+            "This storage backend was not compiled in. Enable the corresponding cloud-* feature.".into(),
+        )),
     }
 }
 
 /// Build ClientOptions with timeouts from server configuration.
+#[cfg(any(feature = "cloud-aws", feature = "cloud-gcp", feature = "cloud-azure"))]
 fn build_client_options(timeouts: &RemoteStorageTimeouts) -> Option<ClientOptions> {
     let mut client_options = ClientOptions::new();
     client_options =
@@ -116,6 +135,7 @@ fn build_local(storage: &Storage) -> Result<Arc<dyn ObjectStore>> {
         .map_err(|e| FilestoreError::Config(format!("LocalFileSystem: {e}")))
 }
 
+#[cfg(feature = "cloud-aws")]
 fn build_s3(
     storage: &Storage,
     cfg: &kalamdb_system::providers::storages::models::S3StorageConfig,
@@ -165,6 +185,7 @@ fn build_s3(
     wrap_with_prefix(store, &prefix)
 }
 
+#[cfg(feature = "cloud-gcp")]
 fn build_gcs(
     storage: &Storage,
     cfg: &kalamdb_system::providers::storages::models::GcsStorageConfig,
@@ -188,6 +209,7 @@ fn build_gcs(
     wrap_with_prefix(store, &prefix)
 }
 
+#[cfg(feature = "cloud-azure")]
 fn build_azure(
     storage: &Storage,
     cfg: &kalamdb_system::providers::storages::models::AzureStorageConfig,

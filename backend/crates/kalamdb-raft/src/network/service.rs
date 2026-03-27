@@ -6,6 +6,7 @@
 //! - Raft consensus RPCs (vote, append_entries, install_snapshot)
 //! - Client proposal forwarding (forward proposals from followers to leader)
 
+use kalamdb_pg::{KalamPgService, PgServiceServer};
 use tokio::sync::oneshot;
 use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 use tonic::{Request, Response, Status};
@@ -387,6 +388,7 @@ pub async fn start_rpc_server(
     manager: Arc<RaftManager>,
     advertise_addr: String,
     cluster_handler: Arc<dyn super::cluster_handler::ClusterMessageHandler>,
+    pg_service: Option<Arc<KalamPgService>>,
 ) -> Result<(), crate::RaftError> {
     // Extract port from advertise_addr (e.g., "kalamdb-node1:9090" -> 9090)
     let port = advertise_addr.rsplit(':').next().ok_or_else(|| {
@@ -399,10 +401,10 @@ pub async fn start_rpc_server(
     let (addr, bind_addr) = match advertise_addr.parse::<std::net::SocketAddr>() {
         Ok(addr) => {
             if addr.ip().is_unspecified() {
-                return Err(crate::RaftError::Config(format!(
-                    "Invalid advertised RPC address '{}': wildcard addresses are not reachable by peers. Use a concrete hostname or IP",
+                log::info!(
+                    "RPC address '{}' uses a wildcard bind — listening on all interfaces",
                     advertise_addr
-                )));
+                );
             }
             (addr, advertise_addr.clone())
         },
@@ -435,43 +437,24 @@ pub async fn start_rpc_server(
 
     let rpc_tls = manager.config().rpc_tls.clone();
     let server_tls = if rpc_tls.enabled {
-        let ca_cert_path = rpc_tls.ca_cert_path.as_deref().ok_or_else(|| {
-            crate::RaftError::Config(
-                "rpc_tls.enabled=true but ca_cert_path is not configured".to_string(),
-            )
+        let ca_pem = rpc_tls.load_ca_cert().map_err(|e| {
+            crate::RaftError::Config(format!("Failed loading cluster CA cert: {}", e))
         })?;
-        let node_cert_path = rpc_tls.node_cert_path.as_deref().ok_or_else(|| {
-            crate::RaftError::Config(
-                "rpc_tls.enabled=true but node_cert_path is not configured".to_string(),
-            )
+        let cert_pem = rpc_tls.load_server_cert().map_err(|e| {
+            crate::RaftError::Config(format!("Failed loading node cert: {}", e))
         })?;
-        let node_key_path = rpc_tls.node_key_path.as_deref().ok_or_else(|| {
-            crate::RaftError::Config(
-                "rpc_tls.enabled=true but node_key_path is not configured".to_string(),
-            )
+        let key_pem = rpc_tls.load_server_key().map_err(|e| {
+            crate::RaftError::Config(format!("Failed loading node key: {}", e))
         })?;
 
-        let ca_pem = std::fs::read(ca_cert_path).map_err(|e| {
-            crate::RaftError::Config(format!(
-                "Failed reading cluster CA cert '{}': {}",
-                ca_cert_path, e
-            ))
-        })?;
-        let cert_pem = std::fs::read(node_cert_path).map_err(|e| {
-            crate::RaftError::Config(format!(
-                "Failed reading node cert '{}': {}",
-                node_cert_path, e
-            ))
-        })?;
-        let key_pem = std::fs::read(node_key_path).map_err(|e| {
-            crate::RaftError::Config(format!("Failed reading node key '{}': {}", node_key_path, e))
-        })?;
+        let mut tls = ServerTlsConfig::new()
+            .identity(Identity::from_pem(cert_pem, key_pem));
 
-        Some(
-            ServerTlsConfig::new()
-                .identity(Identity::from_pem(cert_pem, key_pem))
-                .client_ca_root(Certificate::from_pem(ca_pem)),
-        )
+        if rpc_tls.require_client_cert {
+            tls = tls.client_ca_root(Certificate::from_pem(ca_pem));
+        }
+
+        Some(tls)
     } else {
         None
     };
@@ -501,12 +484,18 @@ pub async fn start_rpc_server(
             }
         }
 
-        if let Err(e) = server_builder
-            .add_service(raft_server)
-            .add_service(cluster_server)
-            .serve_with_incoming(incoming)
-            .await
-        {
+        let server_builder = server_builder.add_service(raft_server).add_service(cluster_server);
+
+        let result = if let Some(pg_service) = pg_service {
+            server_builder
+                .add_service(PgServiceServer::new(pg_service.as_ref().clone()))
+                .serve_with_incoming(incoming)
+                .await
+        } else {
+            server_builder.serve_with_incoming(incoming).await
+        };
+
+        if let Err(e) = result {
             log::error!("Raft RPC server error on {}: {}", bind_addr_clone, e);
         }
     });

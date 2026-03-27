@@ -49,12 +49,20 @@ impl TypedStatementHandler<DropNamespaceStatement> for DropNamespaceHandler {
         _params: Vec<ScalarValue>,
         context: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
-        // Extract namespace provider from AppContext
-        let namespaces_provider = self.app_context.system_tables().namespaces();
         let namespace_id = statement.name;
 
-        // Check if namespace exists
-        let namespace = match namespaces_provider.get_namespace(&namespace_id)? {
+        // Check if namespace exists (offload sync RocksDB read)
+        let app_ctx = self.app_context.clone();
+        let ns_id = namespace_id.clone();
+        let (namespace_opt, tables_in_namespace) = tokio::task::spawn_blocking(move || {
+            let ns = app_ctx.system_tables().namespaces().get_namespace(&ns_id)?;
+            let tables = app_ctx.system_tables().tables().list_tables_in_namespace(&ns_id)?;
+            Ok::<_, KalamDbError>((ns, tables))
+        })
+        .await
+        .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))??;
+
+        let namespace = match namespace_opt {
             Some(ns) => ns,
             None => {
                 if statement.if_exists {
@@ -68,11 +76,6 @@ impl TypedStatementHandler<DropNamespaceStatement> for DropNamespaceHandler {
                 }
             },
         };
-
-        // Always drop all tables in this namespace first.
-        // This makes DROP NAMESPACE deterministic even when namespace.table_count metadata is stale.
-        let tables_provider = self.app_context.system_tables().tables();
-        let tables_in_namespace = tables_provider.list_tables_in_namespace(&namespace_id)?;
 
         for table in tables_in_namespace {
             let table_id = TableId::new(table.namespace_id.clone(), table.table_name.clone());

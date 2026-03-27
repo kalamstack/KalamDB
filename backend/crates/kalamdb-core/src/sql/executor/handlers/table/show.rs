@@ -34,30 +34,35 @@ impl TypedStatementHandler<ShowTablesStatement> for ShowTablesHandler {
         context: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
         let start_time = std::time::Instant::now();
-        let tables_provider = self.app_context.system_tables().tables();
 
-        // If namespace filter provided, build filtered batch manually
-        let result = if let Some(ns) = statement.namespace_id {
-            let defs = tables_provider.list_tables()?;
-            let filtered: Vec<TableDefinition> =
-                defs.into_iter().filter(|t| t.namespace_id == ns).collect();
-            let batch = build_tables_batch(tables_provider.schema(), filtered)?;
-            let row_count = batch.num_rows();
-            Ok(ExecutionResult::Rows {
-                batches: vec![batch],
-                row_count,
-                schema: None,
-            })
-        } else {
-            // Otherwise, reuse provider's batch for all tables
-            let batch = tables_provider.scan_all_tables()?;
-            let row_count = batch.num_rows();
-            Ok(ExecutionResult::Rows {
-                batches: vec![batch],
-                row_count,
-                schema: None,
-            })
-        };
+        // Offload sync RocksDB reads to blocking pool
+        let app_ctx = self.app_context.clone();
+        let ns_filter = statement.namespace_id;
+        let result = tokio::task::spawn_blocking(move || {
+            let tables_provider = app_ctx.system_tables().tables();
+            if let Some(ns) = ns_filter {
+                let defs = tables_provider.list_tables()?;
+                let filtered: Vec<TableDefinition> =
+                    defs.into_iter().filter(|t| t.namespace_id == ns).collect();
+                let batch = build_tables_batch(tables_provider.schema(), filtered)?;
+                let row_count = batch.num_rows();
+                Ok::<_, KalamDbError>(ExecutionResult::Rows {
+                    batches: vec![batch],
+                    row_count,
+                    schema: None,
+                })
+            } else {
+                let batch = tables_provider.scan_all_tables()?;
+                let row_count = batch.num_rows();
+                Ok(ExecutionResult::Rows {
+                    batches: vec![batch],
+                    row_count,
+                    schema: None,
+                })
+            }
+        })
+        .await
+        .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))?;
 
         // Log query operation
         let duration = start_time.elapsed().as_secs_f64() * 1000.0;

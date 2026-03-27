@@ -1,0 +1,76 @@
+# KalamDB PostgreSQL Extension — Docker Compose
+#
+# Two services:
+#   kalamdb   – KalamDB server (from DockerHub) with cluster mode enabled
+#               so the gRPC port (9188) is active for the PG extension.
+#   postgres  – PostgreSQL 16 with pg_kalam extension pre-installed.
+#
+# Usage:
+#   1. Build the postgres+extension image (from repo root):
+#        docker build -f pg/docker/Dockerfile -t kalamdb-pg:latest .
+#   2. Start both services:
+#        cd pg/docker && docker compose up -d
+#   3. Run tests:
+#        ./test.sh
+#
+# To use a locally-built KalamDB image instead of DockerHub,
+# change the kalamdb image below.
+
+services:
+  kalamdb:
+    image: ${KALAMDB_IMAGE:-jamals86/kalamdb:latest}
+    container_name: kalamdb
+    ports:
+      - "${KALAMDB_HTTP_PORT:-8088}:8080"
+      - "${KALAMDB_RPC_PORT:-9188}:9188"
+    environment:
+      KALAMDB_SERVER_HOST: "0.0.0.0"
+      RUST_LOG: "${RUST_LOG:-info}"
+      KALAMDB_JWT_SECRET: "${KALAMDB_JWT_SECRET:-kalamdb-docker-dev-secret-please-change-32chars}"
+      KALAMDB_ALLOW_REMOTE_SETUP: "true"
+      KALAMDB_SECURITY_TRUSTED_PROXY_RANGES: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+      # Enable cluster mode so the gRPC/PG service starts on 9188.
+      # Use hostname not 0.0.0.0 so validation passes; server binds 0.0.0.0:9188.
+      KALAMDB_NODE_ID: "1"
+      KALAMDB_CLUSTER_RPC_ADDR: "kalamdb:9188"
+      KALAMDB_CLUSTER_API_ADDR: "http://kalamdb:8080"
+    volumes:
+      - kalamdb_data:/data
+    restart: unless-stopped
+    command: ["/usr/local/bin/kalamdb-server", "/config/server.toml"]
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/busybox", "wget", "--spider", "-q", "http://127.0.0.1:8080/v1/api/healthcheck"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+
+  postgres:
+    image: kalamdb-pg:latest
+    build:
+      context: ../..
+      dockerfile: pg/docker/Dockerfile
+    container_name: kalamdb-pg
+    depends_on:
+      kalamdb:
+        condition: service_healthy
+    ports:
+      - "${KALAMDB_PG_PORT:-5433}:5432"
+    environment:
+      POSTGRES_USER: kalamdb
+      POSTGRES_PASSWORD: kalamdb123
+      POSTGRES_DB: kalamdb
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/01-kalam-init.sql:ro
+      - kalamdb_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kalamdb -d kalamdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  kalamdb_data:
+    driver: local
+  kalamdb_pg_data:
+    driver: local

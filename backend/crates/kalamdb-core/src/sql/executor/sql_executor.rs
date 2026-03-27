@@ -7,7 +7,7 @@ use arrow::array::RecordBatch;
 use datafusion::scalar::ScalarValue;
 use kalamdb_commons::conversions::arrow_json_conversion::arrow_value_to_scalar;
 use kalamdb_commons::models::TableId;
-use kalamdb_sql::statement_classifier::{SqlStatement, SqlStatementKind};
+use kalamdb_sql::classifier::{SqlStatement, SqlStatementKind};
 use std::time::Duration;
 use tracing::Instrument;
 
@@ -19,6 +19,44 @@ enum DmlKind {
 }
 
 impl SqlExecutor {
+    fn logical_plan_has_limit(plan: &datafusion::logical_expr::LogicalPlan) -> bool {
+        matches!(plan, datafusion::logical_expr::LogicalPlan::Limit(_))
+            || plan.inputs().iter().any(|input| Self::logical_plan_has_limit(input))
+    }
+
+    fn apply_select_limits(
+        &self,
+        df: datafusion::dataframe::DataFrame,
+    ) -> Result<datafusion::dataframe::DataFrame, KalamDbError> {
+        let max_query_limit = self.app_context.config().limits.max_query_limit;
+        let default_query_limit = self.app_context.config().limits.default_query_limit;
+        let has_explicit_limit = Self::logical_plan_has_limit(df.logical_plan());
+
+        if !has_explicit_limit && default_query_limit > 0 {
+            let effective_default_limit = if max_query_limit > 0 {
+                default_query_limit.min(max_query_limit)
+            } else {
+                default_query_limit
+            };
+
+            log::debug!(
+                target: "sql::exec",
+                "Applying default query limit {} to unbounded SELECT",
+                effective_default_limit
+            );
+
+            return df
+                .limit(0, Some(effective_default_limit))
+                .map_err(Self::datafusion_to_execution_error);
+        }
+
+        if max_query_limit > 0 {
+            return df.limit(0, Some(max_query_limit)).map_err(Self::datafusion_to_execution_error);
+        }
+
+        Ok(df)
+    }
+
     fn dml_operation_name(dml_kind: DmlKind) -> &'static str {
         match dml_kind {
             DmlKind::Insert => "INSERT",
@@ -305,19 +343,43 @@ impl SqlExecutor {
         let parsed_statement = metadata.parsed_statement.as_ref();
         self.block_system_namespace_dml(metadata.table_id.as_ref(), dml_kind)?;
 
-        // Fast-path: bypass DataFusion for simple INSERT INTO ... VALUES (...)
-        // This avoids ~2.6ms of optimizer + physical planner overhead per INSERT.
-        if matches!(dml_kind, DmlKind::Insert) && params.is_empty() {
+        // Fast-path: bypass DataFusion for simple point DML that can route directly
+        // to the Kalam provider without planning a DataFusion query.
+        if params.is_empty() {
             let schema_registry = self.app_context.schema_registry();
             let fast_insert_result = if let Some(statement) = parsed_statement {
-                super::fast_insert::try_fast_insert(
-                    statement,
-                    exec_ctx,
-                    &schema_registry,
-                    metadata.table_id.as_ref(),
-                    metadata.table_type,
-                )
-                .await
+                match dml_kind {
+                    DmlKind::Insert => {
+                        super::fast_insert::try_fast_insert(
+                            statement,
+                            exec_ctx,
+                            &schema_registry,
+                            metadata.table_id.as_ref(),
+                            metadata.table_type,
+                        )
+                        .await
+                    },
+                    DmlKind::Update => {
+                        super::fast_point_dml::try_fast_update(
+                            statement,
+                            exec_ctx,
+                            &schema_registry,
+                            metadata.table_id.as_ref(),
+                            metadata.table_type,
+                        )
+                        .await
+                    },
+                    DmlKind::Delete => {
+                        super::fast_point_dml::try_fast_delete(
+                            statement,
+                            exec_ctx,
+                            &schema_registry,
+                            metadata.table_id.as_ref(),
+                            metadata.table_type,
+                        )
+                        .await
+                    },
+                }
             } else {
                 Ok(None)
             };
@@ -655,6 +717,8 @@ impl SqlExecutor {
         // Check permissions on the logical plan
         //FIXME: Check do we still need this?? now we have a permission check in each tableprovider
         //self.check_select_permissions(df.logical_plan(), exec_ctx)?;
+
+        let df = self.apply_select_limits(df)?;
 
         // Capture schema before collecting (needed for 0 row results)
         // DFSchema -> Arrow Schema via inner() method

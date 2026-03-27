@@ -48,7 +48,10 @@ use super::file_utils::{
     substitute_file_placeholders,
 };
 use super::forward::{forward_sql_if_follower, handle_not_leader_error};
-use super::helpers::{cleanup_files, execute_single_statement, parse_scalar_params};
+use super::helpers::{
+    cleanup_files, execute_single_statement, execute_single_statement_raw,
+    execution_result_to_query_result, parse_scalar_params, stream_sql_rows_response,
+};
 use super::models::{ErrorCode, QueryRequest, QueryResult, SqlResponse};
 use crate::limiter::RateLimiter;
 
@@ -93,7 +96,7 @@ fn resolve_result_username(
     execute_as_username.cloned().unwrap_or_else(|| authorized_username.clone())
 }
 
-fn resolve_execute_as_user(
+async fn resolve_execute_as_user(
     statement: &PreparedApiExecutionStatement,
     impersonation_service: &SqlImpersonationService,
     exec_ctx: &ExecutionContext,
@@ -105,6 +108,7 @@ fn resolve_execute_as_user(
                 exec_ctx.user_role(),
                 target_username.as_str(),
             )
+            .await
             .map(Some)
             .map_err(|err| err.to_string()),
         None => Ok(None),
@@ -235,8 +239,8 @@ fn classify_sql(
     default_namespace: &NamespaceId,
     exec_ctx: &ExecutionContext,
     start_time: Instant,
-) -> Result<kalamdb_sql::statement_classifier::SqlStatement, HttpResponse> {
-    kalamdb_sql::statement_classifier::SqlStatement::classify_and_parse(
+) -> Result<kalamdb_sql::classifier::SqlStatement, HttpResponse> {
+    kalamdb_sql::classifier::SqlStatement::classify_and_parse(
         sql,
         default_namespace,
         exec_ctx.user_role(),
@@ -385,7 +389,7 @@ async fn execute_file_upload_path(
     }
 
     let stmt = &prepared_statements[0];
-    let execute_as_user = match resolve_execute_as_user(stmt, impersonation_service, exec_ctx) {
+    let execute_as_user = match resolve_execute_as_user(stmt, impersonation_service, exec_ctx).await {
         Ok(uid) => uid,
         Err(err) => {
             return HttpResponse::BadRequest().json(SqlResponse::error(
@@ -596,7 +600,7 @@ async fn execute_batch_path(
     for (idx, stmt) in prepared_statements.iter().enumerate() {
         let is_last = idx + 1 == stmt_count;
 
-        let execute_as_user = match resolve_execute_as_user(stmt, impersonation_service, exec_ctx) {
+        let execute_as_user = match resolve_execute_as_user(stmt, impersonation_service, exec_ctx).await {
             Ok(uid) => uid,
             Err(err) => {
                 return HttpResponse::BadRequest().json(SqlResponse::error(
@@ -636,21 +640,19 @@ async fn execute_batch_path(
             params_remaining.as_ref().cloned().unwrap_or_default()
         };
 
-        match execute_single_statement(
+        match execute_single_statement_raw(
             &stmt.prepared_statement,
-            app_context,
             sql_executor,
             exec_ctx,
-            execute_as_user,
+            execute_as_user.clone(),
             stmt_params,
         )
         .await
         {
-            Ok(result) => {
-                let result = result.with_as_user(effective_username);
+            Ok(exec_result) => {
                 let stmt_duration_secs = stmt_start.elapsed().as_secs_f64();
                 let stmt_duration_ms = stmt_duration_secs * 1000.0;
-                let row_count = result.rows.as_ref().map(|r| r.len()).unwrap_or(0);
+                let row_count = exec_result.affected_rows();
 
                 // SECURITY: Redact sensitive data before logging
                 let safe_sql = kalamdb_commons::helpers::security::redact_sensitive_sql(
@@ -676,6 +678,54 @@ async fn execute_batch_path(
                     kalamdb_core::schema_registry::TableType::User,
                     None,
                 );
+
+                if !is_batch {
+                    if let kalamdb_core::sql::ExecutionResult::Rows {
+                        batches,
+                        row_count,
+                        schema,
+                    } = exec_result
+                    {
+                        let effective_role = if execute_as_user.is_some() {
+                            Some(kalamdb_commons::Role::User)
+                        } else {
+                            Some(exec_ctx.user_role())
+                        };
+                        return match stream_sql_rows_response(
+                            batches,
+                            schema,
+                            effective_role,
+                            effective_username,
+                            row_count,
+                            took_ms(start_time),
+                        ) {
+                            Ok(response) => response,
+                            Err(err) => {
+                                HttpResponse::InternalServerError().json(SqlResponse::error(
+                                    ErrorCode::InternalError,
+                                    &format!("Failed to stream SQL response: {}", err),
+                                    took_ms(start_time),
+                                ))
+                            },
+                        };
+                    }
+                }
+
+                let effective_role = if execute_as_user.is_some() {
+                    Some(kalamdb_commons::Role::User)
+                } else {
+                    Some(exec_ctx.user_role())
+                };
+                let result = match execution_result_to_query_result(exec_result, effective_role) {
+                    Ok(result) => result.with_as_user(effective_username),
+                    Err(err) => {
+                        return HttpResponse::InternalServerError().json(SqlResponse::error(
+                            ErrorCode::InternalError,
+                            &format!("Failed to serialize SQL result: {}", err),
+                            took_ms(start_time),
+                        ));
+                    },
+                };
 
                 // Accumulate DML row counts for multi-statement batches
                 if is_batch {

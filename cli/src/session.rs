@@ -14,9 +14,9 @@ use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use kalam_link::{
     credentials::{CredentialStore, Credentials},
-    AuthProvider, ConnectionOptions, KalamLinkClient, KalamLinkError, KalamLinkTimeouts,
-    QueryResponse, SubscriptionConfig, SubscriptionOptions, TimestampFormatter, UploadProgress,
-    UploadProgressCallback,
+    AuthProvider, AuthRefreshCallback, ConnectionOptions, KalamLinkClient, KalamLinkError,
+    KalamLinkTimeouts, SubscriptionConfig, SubscriptionOptions,
+    TimestampFormatter, UploadProgress, UploadProgressCallback,
 };
 use rustyline::completion::Completer;
 use rustyline::error::ReadlineError;
@@ -296,6 +296,14 @@ impl CLISession {
             .auth(auth.clone())
             .timeouts(timeouts.clone());
 
+        if let Some(refresher) = Self::build_auth_refresher(
+            &server_url,
+            instance.as_deref(),
+            credential_store.as_ref(),
+        ) {
+            builder = builder.auth_refresher(refresher);
+        }
+
         if let Some(opts) = connection_options {
             builder = builder.connection_options(opts);
         }
@@ -375,89 +383,76 @@ impl CLISession {
         })
     }
 
-    async fn execute_query_with_auth_retry(
-        &mut self,
-        sql: &str,
-    ) -> std::result::Result<QueryResponse, KalamLinkError> {
-        let result = self.client.execute_query(sql, None, None, None).await;
-        match result {
-            Err(error) if Self::is_expired_token_error(&error) => {
-                if self.try_refresh_session_token().await {
-                    self.client.execute_query(sql, None, None, None).await
-                } else {
-                    Err(error)
+    /// Build the auth-refresh callback for TOKEN_EXPIRED recovery.
+    ///
+    /// Returns an `AuthRefreshCallback` that uses the credential store's
+    /// refresh token to obtain a fresh JWT.  Called by kalam-link's
+    /// `QueryExecutor` when the server responds with TOKEN_EXPIRED.
+    pub fn build_auth_refresher(
+        server_url: &str,
+        instance: Option<&str>,
+        credential_store: Option<&crate::credentials::FileCredentialStore>,
+    ) -> Option<AuthRefreshCallback> {
+        let instance = instance?.to_owned();
+        let store = credential_store.cloned()?;
+        let url = server_url.to_owned();
+        let store = Arc::new(std::sync::Mutex::new(store));
+
+        Some(Arc::new(move || {
+            let instance = instance.clone();
+            let url = url.clone();
+            let store = Arc::clone(&store);
+            Box::pin(async move {
+                let (refresh_token, creds) = {
+                    let s = store.lock().unwrap();
+                    let creds = s.get_credentials(&instance).ok().flatten();
+                    match creds {
+                        Some(c) if c.can_refresh() => {
+                            (c.refresh_token.clone(), Some(c))
+                        },
+                        _ => (None, None),
+                    }
+                };
+
+                let refresh_token = refresh_token.ok_or_else(|| {
+                    KalamLinkError::AuthenticationError(
+                        "No refresh token available".to_string(),
+                    )
+                })?;
+                let creds = creds.unwrap();
+
+                let temp_client = KalamLinkClient::builder()
+                    .base_url(&url)
+                    .timeout(std::time::Duration::from_secs(10))
+                    .build()?;
+
+                let login_response = temp_client
+                    .refresh_access_token(&refresh_token)
+                    .await?;
+
+                // Persist refreshed credentials
+                let new_creds = Credentials::with_refresh_token(
+                    instance.clone(),
+                    login_response.access_token.clone(),
+                    login_response.user.username.clone(),
+                    login_response.expires_at.clone(),
+                    creds.server_url.clone().or_else(|| Some(url.clone())),
+                    login_response
+                        .refresh_token
+                        .clone()
+                        .or_else(|| creds.refresh_token.clone()),
+                    login_response
+                        .refresh_expires_at
+                        .clone()
+                        .or_else(|| creds.refresh_expires_at.clone()),
+                );
+                if let Ok(mut s) = store.lock() {
+                    let _ = s.set_credentials(&new_creds);
                 }
-            },
-            other => other,
-        }
-    }
 
-    fn is_expired_token_error(error: &KalamLinkError) -> bool {
-        fn message_matches(message: &str) -> bool {
-            let lowered = message.to_ascii_lowercase();
-            lowered.contains("token expired") || lowered.contains("expired token")
-        }
-
-        match error {
-            KalamLinkError::ServerError {
-                status_code,
-                message,
-            } => *status_code == 401 && message_matches(message),
-            KalamLinkError::AuthenticationError(message) => message_matches(message),
-            _ => false,
-        }
-    }
-
-    async fn try_refresh_session_token(&mut self) -> bool {
-        let Some(instance) = self.instance.clone() else {
-            return false;
-        };
-
-        let Some(creds) = self
-            .credential_store
-            .as_ref()
-            .and_then(|store| store.get_credentials(&instance).ok().flatten())
-        else {
-            return false;
-        };
-
-        if !creds.can_refresh() {
-            return false;
-        }
-
-        let Some(refresh_token) = creds.refresh_token.as_deref() else {
-            return false;
-        };
-
-        let Ok(login_response) = self.client.refresh_access_token(refresh_token).await else {
-            return false;
-        };
-
-        let username = login_response.user.username.clone();
-        let access_token = login_response.access_token.clone();
-        let refreshed_creds = Credentials::with_refresh_token(
-            instance.clone(),
-            access_token.clone(),
-            username.clone(),
-            login_response.expires_at.clone(),
-            creds.server_url.clone().or_else(|| Some(self.server_url.clone())),
-            login_response.refresh_token.clone().or_else(|| creds.refresh_token.clone()),
-            login_response
-                .refresh_expires_at
-                .clone()
-                .or_else(|| creds.refresh_expires_at.clone()),
-        );
-
-        if let Some(store) = self.credential_store.as_mut() {
-            if let Err(error) = store.set_credentials(&refreshed_creds) {
-                eprintln!("Warning: Could not save refreshed credentials: {}", error);
-            }
-        }
-
-        self.client.set_auth(AuthProvider::jwt_token(access_token));
-        self.username = username;
-        self.credentials_loaded = true;
-        true
+                Ok(AuthProvider::jwt_token(login_response.access_token))
+            })
+        }))
     }
 
     /// Execute a SQL query with loading indicator
@@ -516,7 +511,7 @@ impl CLISession {
 
         // Execute the query
         let result = if upload_parts.is_empty() {
-            self.execute_query_with_auth_retry(&sql_to_send).await
+            self.client.execute_query(&sql_to_send, None, None, None).await
         } else {
             let mut parts_for_send = Vec::with_capacity(upload_parts.len());
             for part in upload_parts.iter_mut() {
@@ -2982,9 +2977,17 @@ mod tests {
                 if let Some(header) = authorization.clone() {
                     state.lock().await.sql_authorization_headers.push(header.clone());
                     match header.as_str() {
-                        "Bearer expired-token" => {
-                            ("HTTP/1.1 401 Unauthorized", "Token expired".to_string())
-                        },
+                        "Bearer expired-token" => (
+                            "HTTP/1.1 401 Unauthorized",
+                            json!({
+                                "status": "error",
+                                "error": {
+                                    "code": "TOKEN_EXPIRED",
+                                    "message": "Token expired"
+                                }
+                            })
+                            .to_string(),
+                        ),
                         "Bearer fresh-token" => (
                             "HTTP/1.1 200 OK",
                             json!({

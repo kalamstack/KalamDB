@@ -48,7 +48,7 @@ async fn is_server_running() -> bool {
 
 fn create_client() -> Result<KalamLinkClient, KalamLinkError> {
     let token = common::root_access_token_blocking()
-        .map_err(|e| KalamLinkError::InternalError(e.to_string()))?;
+        .map_err(|e| KalamLinkError::ConfigurationError(e.to_string()))?;
     KalamLinkClient::builder()
         .base_url(common::server_url())
         .timeout(Duration::from_secs(30))

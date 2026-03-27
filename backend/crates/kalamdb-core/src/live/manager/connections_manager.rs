@@ -27,7 +27,6 @@ use dashmap::DashMap;
 use kalamdb_commons::models::{ConnectionId, ConnectionInfo, LiveQueryId, TableId, UserId};
 use kalamdb_commons::{NodeId, Notification};
 use log::{debug, info, warn};
-use parking_lot::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -88,8 +87,8 @@ pub struct ConnectionsManager {
 }
 
 impl ConnectionsManager {
-    /// Default maximum connections (10,000 concurrent connections)
-    pub const DEFAULT_MAX_CONNECTIONS: usize = 10_000;
+    /// Default maximum connections (100,000 concurrent connections)
+    pub const DEFAULT_MAX_CONNECTIONS: usize = 100_000;
 
     /// Create a new connections manager and start the background heartbeat checker
     pub fn new(
@@ -183,28 +182,15 @@ impl ConnectionsManager {
         // Use bounded channels for backpressure and memory control
         let (event_tx, event_rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
         let (notification_tx, notification_rx) = mpsc::channel(NOTIFICATION_CHANNEL_CAPACITY);
-        let now = Instant::now();
 
-        let state = ConnectionState {
-            connection_id: connection_id.clone(),
-            user_id: None,
-            user_role: None,
+        let state = ConnectionState::new(
+            connection_id.clone(),
             client_ip,
-            is_authenticated: false,
-            auth_started: false,
-            connected_at: now,
-            last_heartbeat_ms: std::sync::atomic::AtomicU64::new(
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis() as u64,
-            ),
-            subscriptions: DashMap::new(),
-            notification_tx: Arc::new(notification_tx),
+            Arc::new(notification_tx),
             event_tx,
-        };
+        );
 
-        let shared_state = Arc::new(RwLock::new(state));
+        let shared_state = Arc::new(state);
         self.connections.insert(connection_id.clone(), Arc::clone(&shared_state));
         let _count = self.total_connections.fetch_add(1, Ordering::AcqRel) + 1;
 
@@ -218,7 +204,7 @@ impl ConnectionsManager {
 
     /// Called after successful authentication to update user index
     ///
-    /// Must be called after `state.write().mark_authenticated(user_id, role)`.
+    /// Must be called after `state.mark_authenticated(user_id, role)`.
     pub fn on_authenticated(&self, _connection_id: &ConnectionId, _user_id: UserId) {
         // User index no longer needed - subscriptions are tracked via user_table_subscriptions
     }
@@ -233,20 +219,14 @@ impl ConnectionsManager {
         {
             self.total_connections.fetch_sub(1, Ordering::AcqRel);
 
-            let state = shared_state.read();
-
             // Remove from user_table_subscriptions and shared_table_subscriptions indices
-            if let Some(user_id) = &state.user_id {
-                for entry in state.subscriptions.iter() {
-                    let sub = entry.value();
+            if let Some(user_id) = shared_state.user_id() {
+                shared_state.for_each_subscription(|_id, sub| {
                     // Try user_table_subscriptions first
                     let key = (user_id.clone(), sub.table_id.clone());
                     if let Some(entries) = self.user_table_subscriptions.get(&key) {
                         entries.remove(&sub.live_id);
                     }
-                    // Atomically remove outer entry only if inner map is now empty.
-                    // This avoids a TOCTOU race where index_subscription adds a
-                    // new handle between is_empty() and remove().
                     self.user_table_subscriptions.remove_if(&key, |_, handles| handles.is_empty());
 
                     // Also try shared_table_subscriptions
@@ -255,16 +235,14 @@ impl ConnectionsManager {
                     }
                     self.shared_table_subscriptions
                         .remove_if(&sub.table_id, |_, handles| handles.is_empty());
-                }
+                });
             }
 
             // Collect and remove all subscriptions
-            let mut removed = Vec::with_capacity(state.subscriptions.len());
-            for entry in state.subscriptions.iter() {
-                let sub = entry.value();
-                removed.push(sub.live_id.clone());
+            let removed = shared_state.collect_subscription_info(|sub| {
                 self.live_id_to_connection.remove(&sub.live_id);
-            }
+                sub.live_id.clone()
+            });
 
             let sub_count = removed.len();
             if sub_count > 0 {
@@ -503,9 +481,8 @@ impl ConnectionsManager {
 
         if let Some(conn_id) = self.live_id_to_connection.get(live_id) {
             if let Some(shared_state) = self.connections.get(conn_id.value()) {
-                let state = shared_state.read();
                 let notification = Arc::new(notification);
-                if let Err(e) = state.notification_tx.try_send(notification) {
+                if let Err(e) = shared_state.notification_tx.try_send(notification) {
                     if matches!(e, mpsc::error::TrySendError::Full(_)) {
                         warn!("Notification channel full for {}, dropping notification", live_id);
                     }
@@ -580,7 +557,7 @@ impl ConnectionsManager {
         let mut force_unregister = Vec::new();
         for entry in self.connections.iter() {
             let conn_id = entry.key().clone();
-            let state = entry.value().read();
+            let state = entry.value();
             match state.event_tx.try_send(ConnectionEvent::Shutdown) {
                 Ok(_) => {},
                 Err(mpsc::error::TrySendError::Full(_))
@@ -670,13 +647,12 @@ impl ConnectionsManager {
 
         for entry in self.connections.iter() {
             let conn_id = entry.key();
-            let shared_state = entry.value();
-            let state = shared_state.read();
+            let state = entry.value();
 
             // Check auth timeout (only if auth hasn't started)
-            if !state.is_authenticated
-                && !state.auth_started
-                && now.duration_since(state.connected_at) > self.auth_timeout
+            if !state.is_authenticated()
+                && !state.auth_started()
+                && now.duration_since(state.connected_at()) > self.auth_timeout
             {
                 debug!("Auth timeout for connection: {}", conn_id);
                 match state.event_tx.try_send(ConnectionEvent::AuthTimeout) {
@@ -762,7 +738,7 @@ mod tests {
         let reg = reg.unwrap();
 
         {
-            let mut state = reg.state.write();
+            let state = &reg.state;
             assert!(!state.is_authenticated());
             state.mark_auth_started();
             state.mark_authenticated(user_id.clone(), kalamdb_commons::Role::User);
@@ -771,7 +747,7 @@ mod tests {
         // Update registry index
         registry.on_authenticated(&conn_id, user_id.clone());
 
-        let state = reg.state.read();
+        let state = &reg.state;
         assert!(state.is_authenticated());
         assert_eq!(state.user_id(), Some(&user_id));
     }
@@ -804,9 +780,8 @@ mod tests {
 
         // Mark authenticated so auth-timeout path is skipped
         {
-            let mut state = reg.state.write();
-            state.mark_auth_started();
-            state.mark_authenticated(UserId::new("u1"), kalamdb_commons::Role::User);
+            reg.state.mark_auth_started();
+            reg.state.mark_authenticated(UserId::new("u1"), kalamdb_commons::Role::User);
         }
 
         // Wait longer than client_timeout
@@ -840,14 +815,13 @@ mod tests {
 
         // Mark authenticated
         {
-            let mut state = reg.state.write();
-            state.mark_auth_started();
-            state.mark_authenticated(UserId::new("u2"), kalamdb_commons::Role::User);
+            reg.state.mark_auth_started();
+            reg.state.mark_authenticated(UserId::new("u2"), kalamdb_commons::Role::User);
         }
 
         // Simulate client activity before the timeout fires
         tokio::time::sleep(Duration::from_millis(60)).await;
-        reg.state.read().update_heartbeat();
+        reg.state.update_heartbeat();
 
         // Wait a bit more (total elapsed > 100ms from registration but < 100ms from refresh)
         tokio::time::sleep(Duration::from_millis(60)).await;
@@ -907,14 +881,13 @@ mod tests {
 
         // Mark authenticated
         {
-            let mut state = reg.state.write();
-            state.mark_auth_started();
-            state.mark_authenticated(UserId::new("u3"), kalamdb_commons::Role::User);
+            reg.state.mark_auth_started();
+            reg.state.mark_authenticated(UserId::new("u3"), kalamdb_commons::Role::User);
         }
 
         // Fill the event channel to capacity
         for _ in 0..EVENT_CHANNEL_CAPACITY {
-            let _ = reg.state.read().event_tx.try_send(ConnectionEvent::Shutdown);
+            let _ = reg.state.event_tx.try_send(ConnectionEvent::Shutdown);
         }
 
         // Wait for heartbeat timeout
@@ -1004,15 +977,13 @@ mod tests {
 
         // Authenticate connection
         {
-            let mut state = reg.state.write();
-            state.mark_auth_started();
-            state.mark_authenticated(user_id.clone(), kalamdb_commons::Role::User);
+            reg.state.mark_auth_started();
+            reg.state.mark_authenticated(user_id.clone(), kalamdb_commons::Role::User);
         }
 
         // Add a shared subscription to ConnectionState.subscriptions
         {
-            let state = reg.state.read();
-            state.subscriptions.insert(
+            reg.state.insert_subscription(
                 "sub1".to_string(),
                 super::super::super::models::SubscriptionState {
                     live_id: live_id.clone(),

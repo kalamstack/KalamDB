@@ -20,7 +20,7 @@ pub(crate) async fn cleanup_empty_shared_scope_if_needed<T: JobParams>(
         })?;
 
     let live_rows = shared_provider
-        .scan_with_version_resolution_to_kvs_async(system_user_id(), None, None, Some(1), false)
+        .scan_with_version_resolution_to_kvs_async(system_user_id(), None, None, Some(1), false, None)
         .await?;
 
     if !live_rows.is_empty() {

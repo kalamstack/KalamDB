@@ -3,6 +3,8 @@
 //! Verifies that the config centralization allows parameter limits to be
 //! read from ServerConfig via AppContext.
 
+#![allow(unused_imports)]
+
 use datafusion::common::ScalarValue;
 use kalamdb_core::sql::executor::parameter_validation::{validate_parameters, ParameterLimits};
 

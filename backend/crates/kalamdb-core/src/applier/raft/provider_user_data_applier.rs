@@ -103,17 +103,22 @@ impl UserDataApplier for ProviderUserDataApplier {
             live_query.user_id
         );
 
-        self.executor
-            .app_context()
-            .system_tables()
-            .live_queries()
-            .create_live_query(live_query.clone())
-            .map_err(|e| RaftError::Internal(format!("Failed to create live query: {}", e)))?;
+        let app_context = self.executor.app_context().clone();
+        let live_query = live_query.clone();
+        tokio::task::spawn_blocking(move || {
+            app_context
+                .system_tables()
+                .live_queries()
+                .create_live_query(live_query.clone())
+                .map_err(|e| RaftError::Internal(format!("Failed to create live query: {}", e)))?;
 
-        Ok(format!(
-            "Live query {} created for table {}.{}",
-            live_query.live_id, live_query.namespace_id, live_query.table_name
-        ))
+            Ok(format!(
+                "Live query {} created for table {}.{}",
+                live_query.live_id, live_query.namespace_id, live_query.table_name
+            ))
+        })
+        .await
+        .map_err(|e| RaftError::Internal(format!("Task join error: {}", e)))?
     }
 
     async fn update_live_query_stats(
@@ -128,26 +133,30 @@ impl UserDataApplier for ProviderUserDataApplier {
             changes
         );
 
-        if let Some(mut lq) = self
-            .executor
-            .app_context()
-            .system_tables()
-            .live_queries()
-            .get_live_query_by_id(live_id)
-            .map_err(|e| RaftError::Internal(format!("Failed to get live query: {}", e)))?
-        {
-            lq.last_update = last_update;
-            lq.changes = changes;
-
-            self.executor
-                .app_context()
+        let app_context = self.executor.app_context().clone();
+        let live_id = live_id.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Some(mut lq) = app_context
                 .system_tables()
                 .live_queries()
-                .update_live_query(lq)
-                .map_err(|e| RaftError::Internal(format!("Failed to update live query: {}", e)))?;
-        }
+                .get_live_query_by_id(&live_id)
+                .map_err(|e| RaftError::Internal(format!("Failed to get live query: {}", e)))?
+            {
+                lq.last_update = last_update;
+                lq.changes = changes;
 
-        Ok(())
+                app_context
+                    .system_tables()
+                    .live_queries()
+                    .update_live_query(lq)
+                    .map_err(|e| {
+                        RaftError::Internal(format!("Failed to update live query: {}", e))
+                    })?;
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|e| RaftError::Internal(format!("Task join error: {}", e)))?
     }
 
     async fn delete_live_query(
@@ -157,14 +166,18 @@ impl UserDataApplier for ProviderUserDataApplier {
     ) -> Result<(), RaftError> {
         log::info!("ProviderUserDataApplier: Deleting live query {}", live_id);
 
-        self.executor
-            .app_context()
-            .system_tables()
-            .live_queries()
-            .delete_live_query(live_id)
-            .map_err(|e| RaftError::Internal(format!("Failed to delete live query: {}", e)))?;
-
-        Ok(())
+        let app_context = self.executor.app_context().clone();
+        let live_id = live_id.clone();
+        tokio::task::spawn_blocking(move || {
+            app_context
+                .system_tables()
+                .live_queries()
+                .delete_live_query(&live_id)
+                .map_err(|e| RaftError::Internal(format!("Failed to delete live query: {}", e)))?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| RaftError::Internal(format!("Task join error: {}", e)))?
     }
 
     async fn delete_live_queries_by_connection(
@@ -177,34 +190,37 @@ impl UserDataApplier for ProviderUserDataApplier {
             connection_id
         );
 
-        // Get all live queries for this connection and delete them
-        let live_queries = self
-            .executor
-            .app_context()
-            .system_tables()
-            .live_queries()
-            .list_live_queries()
-            .map_err(|e| RaftError::Internal(format!("Failed to list live queries: {}", e)))?;
+        let app_context = self.executor.app_context().clone();
+        let connection_id = connection_id.clone();
+        tokio::task::spawn_blocking(move || {
+            // Get all live queries for this connection and delete them
+            let live_queries = app_context
+                .system_tables()
+                .live_queries()
+                .list_live_queries()
+                .map_err(|e| RaftError::Internal(format!("Failed to list live queries: {}", e)))?;
 
-        let mut deleted_count = 0;
-        for lq in live_queries {
-            if lq.connection_id == connection_id.as_str() {
-                self.executor
-                    .app_context()
-                    .system_tables()
-                    .live_queries()
-                    .delete_live_query(&lq.live_id)
-                    .map_err(|e| {
-                        RaftError::Internal(format!(
-                            "Failed to delete live query {}: {}",
-                            lq.live_id, e
-                        ))
-                    })?;
-                deleted_count += 1;
+            let mut deleted_count = 0;
+            for lq in live_queries {
+                if lq.connection_id == connection_id.as_str() {
+                    app_context
+                        .system_tables()
+                        .live_queries()
+                        .delete_live_query(&lq.live_id)
+                        .map_err(|e| {
+                            RaftError::Internal(format!(
+                                "Failed to delete live query {}: {}",
+                                lq.live_id, e
+                            ))
+                        })?;
+                    deleted_count += 1;
+                }
             }
-        }
 
-        Ok(deleted_count)
+            Ok(deleted_count)
+        })
+        .await
+        .map_err(|e| RaftError::Internal(format!("Task join error: {}", e)))?
     }
 
     async fn cleanup_node_subscriptions(&self, failed_node_id: NodeId) -> Result<usize, RaftError> {
@@ -213,33 +229,35 @@ impl UserDataApplier for ProviderUserDataApplier {
             failed_node_id
         );
 
-        // Get all live queries and delete those on the failed node
-        let live_queries = self
-            .executor
-            .app_context()
-            .system_tables()
-            .live_queries()
-            .list_live_queries()
-            .map_err(|e| RaftError::Internal(format!("Failed to list live queries: {}", e)))?;
+        let app_context = self.executor.app_context().clone();
+        tokio::task::spawn_blocking(move || {
+            // Get all live queries and delete those on the failed node
+            let live_queries = app_context
+                .system_tables()
+                .live_queries()
+                .list_live_queries()
+                .map_err(|e| RaftError::Internal(format!("Failed to list live queries: {}", e)))?;
 
-        let mut removed_count = 0;
-        for lq in live_queries {
-            if lq.node_id == failed_node_id {
-                self.executor
-                    .app_context()
-                    .system_tables()
-                    .live_queries()
-                    .delete_live_query(&lq.live_id)
-                    .map_err(|e| {
-                        RaftError::Internal(format!(
-                            "Failed to delete live query {}: {}",
-                            lq.live_id, e
-                        ))
-                    })?;
-                removed_count += 1;
+            let mut removed_count = 0;
+            for lq in live_queries {
+                if lq.node_id == failed_node_id {
+                    app_context
+                        .system_tables()
+                        .live_queries()
+                        .delete_live_query(&lq.live_id)
+                        .map_err(|e| {
+                            RaftError::Internal(format!(
+                                "Failed to delete live query {}: {}",
+                                lq.live_id, e
+                            ))
+                        })?;
+                    removed_count += 1;
+                }
             }
-        }
 
-        Ok(removed_count)
+            Ok(removed_count)
+        })
+        .await
+        .map_err(|e| RaftError::Internal(format!("Task join error: {}", e)))?
     }
 }

@@ -1,0 +1,6 @@
+comment = 'pg_kalam: KalamDB PostgreSQL extension'
+default_version = '@CARGO_VERSION@'
+module_pathname = '$libdir/pg_kalam'
+relocatable = false
+superuser = true
+trusted = false

@@ -30,10 +30,7 @@ pub async fn handle_next_batch(
 ) -> Result<(), String> {
     // Increment batch number and get the new value
     // This is done BEFORE fetching to get the correct batch_num for this request
-    let batch_num = {
-        let state = connection_state.read();
-        state.increment_batch_num(subscription_id).unwrap_or(0)
-    };
+    let batch_num = connection_state.increment_batch_num(subscription_id).unwrap_or(0);
 
     debug!(
         "Processing NextBatch request: subscription_id={}, batch_num={}, last_seq_id={:?}",
@@ -88,7 +85,7 @@ pub async fn handle_next_batch(
             let _ = send_json(session, &msg, compression_enabled).await;
 
             if !result.has_more {
-                let flushed = connection_state.read().complete_initial_load(subscription_id);
+                let flushed = connection_state.complete_initial_load(subscription_id);
                 if flushed > 0 {
                     debug!(
                         "Flushed {} buffered notifications after initial load for {}",

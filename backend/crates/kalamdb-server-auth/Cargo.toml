@@ -1,0 +1,17 @@
+[package]
+name = "kalamdb-server-auth"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Server-to-server authentication for KalamDB gRPC endpoints (mTLS, CN-based caller identification)"
+
+[dependencies]
+kalamdb-configs = { path = "../kalamdb-configs" }
+log = { workspace = true }
+tonic = { workspace = true, features = ["tls-webpki-roots", "tls-ring"] }
+x509-parser = { workspace = true }
+
+[dev-dependencies]
+rcgen = { workspace = true }

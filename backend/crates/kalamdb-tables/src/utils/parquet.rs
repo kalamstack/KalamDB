@@ -19,6 +19,7 @@ pub(crate) async fn scan_parquet_files_as_batch_async(
     user_id: Option<&UserId>,
     schema: SchemaRef,
     filter: Option<&Expr>,
+    columns: Option<&[String]>,
 ) -> Result<RecordBatch, KalamDbError> {
     let scope_label = user_id
         .map(|uid| format!("user={}", uid.as_str()))
@@ -38,7 +39,7 @@ pub(crate) async fn scan_parquet_files_as_batch_async(
     })?;
 
     let manifest_service = core.services.manifest_service.clone();
-    log::debug!(
+    log::trace!(
         "[PARQUET_SCAN_ASYNC] About to get_or_load manifest: table={} {}",
         table_id,
         scope_label
@@ -47,10 +48,23 @@ pub(crate) async fn scan_parquet_files_as_batch_async(
     let mut manifest_opt: Option<Manifest> = None;
     let mut use_degraded_mode = false;
 
+    // Fast path: if manifest loaded successfully and has no segments,
+    // skip the entire cold path (storage registry, planner, file I/O)
+    if let Ok(Some(entry)) = &cache_result {
+        if entry.manifest.segments.is_empty() {
+            log::trace!(
+                "[PARQUET_SCAN_ASYNC] Manifest empty, skipping cold path: table={} {}",
+                table_id,
+                scope_label
+            );
+            return Ok(RecordBatch::new_empty(schema));
+        }
+    }
+
     match &cache_result {
         Ok(Some(entry)) => {
             let manifest = entry.manifest.clone();
-            log::debug!(
+            log::trace!(
                 "[PARQUET_SCAN_ASYNC] Got manifest: table={} {} segments={} sync_state={:?}",
                 table_id,
                 scope_label,
@@ -108,7 +122,7 @@ pub(crate) async fn scan_parquet_files_as_batch_async(
             }
         },
         Ok(None) => {
-            log::debug!(
+            log::trace!(
                 "[PARQUET_SCAN_ASYNC] Manifest cache MISS | table={} | {} | fallback=directory_scan",
                 table_id,
                 scope_label
@@ -146,10 +160,11 @@ pub(crate) async fn scan_parquet_files_as_batch_async(
             use_degraded_mode,
             schema.clone(),
             core.services.schema_registry.as_ref(),
+            columns,
         )
         .await?;
 
-    log::debug!(
+    log::trace!(
         "[PARQUET_SCAN_ASYNC] Scan complete: table={} {} total_batches={} skipped={} scanned={} rows={} use_degraded_mode={}",
         table_id,
         scope_label,
@@ -161,7 +176,7 @@ pub(crate) async fn scan_parquet_files_as_batch_async(
     );
 
     if total_batches > 0 {
-        log::debug!(
+        log::trace!(
             "[Manifest Pruning] table={} {} batches_total={} skipped={} scanned={} rows={}",
             table_id,
             scope_label,

@@ -10,4 +10,4 @@ pub use models::{QueryRequest, QueryResponse, QueryResult};
 #[cfg(feature = "tokio-runtime")]
 mod executor;
 #[cfg(feature = "tokio-runtime")]
-pub use executor::{QueryExecutor, UploadProgressCallback};
+pub use executor::{AuthRefreshCallback, QueryExecutor, UploadProgressCallback};

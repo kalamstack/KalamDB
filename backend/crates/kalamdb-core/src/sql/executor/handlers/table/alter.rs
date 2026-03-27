@@ -182,21 +182,17 @@ impl AlterTableHandler {
         let prefix = listed.prefix.trim_end_matches('/');
         let normalized_column = normalize_vector_column_name(column_name);
         let vector_snapshot_prefix = format!("vec-{}-snapshot-", normalized_column);
-        let legacy_vector_column_prefix = format!("vector/{}/", normalized_column);
 
         for listed_path in listed.paths {
             let relative_path = if listed_path.starts_with(prefix) {
                 listed_path[prefix.len()..].trim_start_matches('/').to_string()
-            } else if let Some((_, tail)) = listed_path.split_once("/vector/") {
-                format!("vector/{}", tail)
             } else {
                 listed_path
             };
 
             let is_current_snapshot = relative_path.starts_with(&vector_snapshot_prefix)
                 && relative_path.ends_with(".vix");
-            let is_legacy_snapshot = relative_path.starts_with(&legacy_vector_column_prefix);
-            if !is_current_snapshot && !is_legacy_snapshot {
+            if !is_current_snapshot {
                 continue;
             }
 
@@ -609,10 +605,7 @@ fn apply_alter_operation(
                 )));
             }
             let kalam_type = data_type.clone();
-            let default = default_value
-                .as_ref()
-                .map(|v| ColumnDefault::literal(serde_json::Value::String(v.clone())))
-                .unwrap_or(ColumnDefault::None);
+            let default = default_value.clone().unwrap_or(ColumnDefault::None);
             let ordinal = (table_def.columns.len() + 1) as u32;
             let column_id = table_def.next_column_id;
             table_def.columns.push(ColumnDefinition::new(
@@ -723,6 +716,92 @@ fn apply_alter_operation(
             }
             Ok((format!("MODIFY COLUMN {} {}", column_name, new_data_type.sql_name()), changed))
         },
+        ColumnOperation::SetNullable {
+            column_name,
+            nullable,
+        } => {
+            if is_system_column(column_name) {
+                log::error!("❌ ALTER TABLE failed: Cannot modify system column '{}'", column_name);
+                return Err(KalamDbError::InvalidOperation(format!(
+                    "Cannot modify column '{}': system column cannot be altered",
+                    column_name
+                )));
+            }
+
+            let col = table_def
+                .columns
+                .iter_mut()
+                .find(|c| c.column_name == *column_name)
+                .ok_or_else(|| {
+                    KalamDbError::InvalidOperation(format!("Column '{}' does not exist", column_name))
+                })?;
+
+            if col.is_primary_key && *nullable {
+                return Err(KalamDbError::InvalidOperation(format!(
+                    "Column '{}' is a PRIMARY KEY and cannot be nullable",
+                    column_name
+                )));
+            }
+
+            let changed = col.is_nullable != *nullable;
+            col.is_nullable = *nullable;
+            Ok((
+                format!(
+                    "ALTER COLUMN {} {}",
+                    column_name,
+                    if *nullable { "DROP NOT NULL" } else { "SET NOT NULL" }
+                ),
+                changed,
+            ))
+        },
+        ColumnOperation::SetDefault {
+            column_name,
+            default_value,
+        } => {
+            if is_system_column(column_name) {
+                log::error!("❌ ALTER TABLE failed: Cannot modify system column '{}'", column_name);
+                return Err(KalamDbError::InvalidOperation(format!(
+                    "Cannot modify column '{}': system column cannot be altered",
+                    column_name
+                )));
+            }
+
+            let col = table_def
+                .columns
+                .iter_mut()
+                .find(|c| c.column_name == *column_name)
+                .ok_or_else(|| {
+                    KalamDbError::InvalidOperation(format!("Column '{}' does not exist", column_name))
+                })?;
+
+            let changed = col.default_value != *default_value;
+            col.default_value = default_value.clone();
+            Ok((
+                format!("ALTER COLUMN {} SET DEFAULT {}", column_name, default_value.to_sql()),
+                changed,
+            ))
+        },
+        ColumnOperation::DropDefault { column_name } => {
+            if is_system_column(column_name) {
+                log::error!("❌ ALTER TABLE failed: Cannot modify system column '{}'", column_name);
+                return Err(KalamDbError::InvalidOperation(format!(
+                    "Cannot modify column '{}': system column cannot be altered",
+                    column_name
+                )));
+            }
+
+            let col = table_def
+                .columns
+                .iter_mut()
+                .find(|c| c.column_name == *column_name)
+                .ok_or_else(|| {
+                    KalamDbError::InvalidOperation(format!("Column '{}' does not exist", column_name))
+                })?;
+
+            let changed = !col.default_value.is_none();
+            col.default_value = ColumnDefault::None;
+            Ok((format!("ALTER COLUMN {} DROP DEFAULT", column_name), changed))
+        },
         ColumnOperation::Rename {
             old_column_name,
             new_column_name,
@@ -825,6 +904,21 @@ fn get_operation_summary(op: &ColumnOperation) -> String {
             new_data_type,
             ..
         } => format!("MODIFY COLUMN {} {}", column_name, new_data_type.sql_name()),
+        ColumnOperation::SetNullable {
+            column_name,
+            nullable,
+        } => format!(
+            "ALTER COLUMN {} {}",
+            column_name,
+            if *nullable { "DROP NOT NULL" } else { "SET NOT NULL" }
+        ),
+        ColumnOperation::SetDefault {
+            column_name,
+            default_value,
+        } => format!("ALTER COLUMN {} SET DEFAULT {}", column_name, default_value.to_sql()),
+        ColumnOperation::DropDefault { column_name } => {
+            format!("ALTER COLUMN {} DROP DEFAULT", column_name)
+        }
         ColumnOperation::Rename {
             old_column_name,
             new_column_name,

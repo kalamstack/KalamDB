@@ -2,13 +2,8 @@
 
 use crate::errors::error::{AuthError, AuthResult};
 use bcrypt::{hash, verify, DEFAULT_COST};
-use moka::sync::Cache;
 use std::collections::HashSet;
 use std::sync::OnceLock;
-use std::time::Duration;
-
-use hmac::{Hmac, Mac};
-use sha2::Sha256;
 
 /// Bcrypt cost factor for password hashing.
 /// Higher values = more secure but slower.
@@ -41,45 +36,6 @@ pub const MAX_PASSWORD_LENGTH: usize = 72;
 /// Common passwords list (loaded once)
 static COMMON_PASSWORDS: OnceLock<HashSet<String>> = OnceLock::new();
 
-/// Cache for verified password hashes.
-/// Key: (password_fingerprint, bcrypt_hash) where password_fingerprint is
-/// HMAC-SHA256(key=bcrypt_hash, msg=password) — NOT the plaintext password.
-/// TTL: 30 seconds, prevents bcrypt on every request for same credentials.
-/// Only caches SUCCESSFUL verifications to avoid caching attack vectors.
-static PASSWORD_VERIFICATION_CACHE: OnceLock<Cache<(String, String), ()>> = OnceLock::new();
-
-fn get_password_cache() -> &'static Cache<(String, String), ()> {
-    PASSWORD_VERIFICATION_CACHE.get_or_init(|| {
-        Cache::builder()
-            .max_capacity(10_000)
-            .time_to_live(Duration::from_secs(30))
-            .build()
-    })
-}
-
-/// Produce a fast fingerprint of a password for use as a cache key.
-/// Uses HMAC-SHA256(key=bcrypt_hash, msg=password) so that:
-/// 1. The plaintext password is never stored in memory as a cache key.
-/// 2. The fingerprint is tied to the specific bcrypt hash (different salts → different keys).
-fn password_cache_fingerprint(password: &str, bcrypt_hash: &str) -> String {
-    type HmacSha256 = Hmac<Sha256>;
-    let mut mac =
-        HmacSha256::new_from_slice(bcrypt_hash.as_bytes()).expect("HMAC accepts any key size");
-    mac.update(password.as_bytes());
-    let result = mac.finalize();
-    hex::encode(result.into_bytes())
-}
-
-/// Invalidate cached password verification for a specific hash.
-/// Call when password is changed.
-pub fn invalidate_password_cache(password_hash: &str) {
-    let cache = get_password_cache();
-    // We need to iterate and remove entries with matching hash
-    // This is O(n) but password changes are rare
-    let hash = password_hash.to_string();
-    let _ = cache.invalidate_entries_if(move |(_fingerprint, h), _| h == &hash);
-}
-
 /// Hash a password using bcrypt.
 ///
 /// Uses a configurable cost factor (default 12) and runs on a blocking thread pool
@@ -108,8 +64,6 @@ pub async fn hash_password(password: &str, cost: Option<u32>) -> AuthResult<Stri
 
 /// Verify a password against a bcrypt hash.
 ///
-/// Uses an in-memory cache to avoid expensive bcrypt verification on every request.
-/// Only successful verifications are cached (for 30 seconds).
 /// Runs on a blocking thread pool to avoid blocking the async runtime.
 ///
 /// # Arguments
@@ -122,16 +76,6 @@ pub async fn hash_password(password: &str, cost: Option<u32>) -> AuthResult<Stri
 /// # Errors
 /// Returns `AuthError::HashingError` if bcrypt verification fails
 pub async fn verify_password(password: &str, hash_str: &str) -> AuthResult<bool> {
-    let cache = get_password_cache();
-    // SECURITY: Use a fingerprint instead of the plaintext password as cache key.
-    let fingerprint = password_cache_fingerprint(password, hash_str);
-    let cache_key = (fingerprint, hash_str.to_string());
-
-    // Check cache first - if present, we know it was previously verified successfully
-    if cache.contains_key(&cache_key) {
-        return Ok(true);
-    }
-
     // Convert once for bcrypt (requires owned String)
     let password = password.to_string();
     let hash = hash_str.to_string();
@@ -142,11 +86,6 @@ pub async fn verify_password(password: &str, hash_str: &str) -> AuthResult<bool>
     })
     .await
     .map_err(|e| AuthError::HashingError(format!("Task join error: {}", e)))??;
-
-    // Only cache successful verifications
-    if result {
-        cache.insert(cache_key, ());
-    }
 
     Ok(result)
 }

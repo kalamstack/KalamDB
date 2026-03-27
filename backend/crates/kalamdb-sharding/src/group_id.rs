@@ -1,16 +1,9 @@
 //! Raft Group ID definitions
 //!
-//! KalamDB uses Multi-Raft with 34 groups (post-018 consolidation):
+//! KalamDB uses Multi-Raft with 34 groups:
 //! - 1 unified metadata group (Meta)
 //! - 32 user data shards (user tables + live_queries)
 //! - 1 shared data shard (shared tables)
-//!
-//! ## Legacy Groups (deprecated, kept for migration)
-//!
-//! Previously there were 3 separate metadata groups:
-//! - MetaSystem, MetaUsers, MetaJobs
-//!
-//! These are now consolidated into a single `Meta` group.
 
 use std::fmt;
 use std::str::FromStr;
@@ -28,7 +21,7 @@ pub const DEFAULT_SHARED_SHARDS: u32 = 1;
 ///
 /// Each group has its own Raft instance with independent leader election.
 ///
-/// ## Post-018 Structure
+/// ## Structure
 ///
 /// - **Meta**: Unified metadata group (namespaces, tables, storages, users, jobs)
 /// - **DataUserShard(0..31)**: User table data shards
@@ -36,14 +29,8 @@ pub const DEFAULT_SHARED_SHARDS: u32 = 1;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum GroupId {
-    // === Unified Metadata Group (1) - Post-018 ===
+    // === Unified Metadata Group (1) ===
     /// Unified metadata: namespaces, tables, storages, users, jobs
-    ///
-    /// This replaces the three separate groups (MetaSystem, MetaUsers, MetaJobs).
-    /// Benefits:
-    /// - Single watermark (`meta_index`) for data group ordering
-    /// - No cross-metadata race conditions
-    /// - Simpler catch-up coordination
     Meta,
 
     // === Data Groups (33) ===

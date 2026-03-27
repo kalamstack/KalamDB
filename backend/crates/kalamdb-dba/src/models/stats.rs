@@ -91,10 +91,13 @@ impl StatsRow {
     }
 
     pub fn configured_definition() -> TableDefinition {
+        use kalamdb_commons::schemas::policy::FlushPolicy;
+
         let mut table_def = Self::definition();
 
         if let TableOptions::Shared(options) = &mut table_def.table_options {
             options.access_level = Some(TableAccess::Dba);
+            options.flush_policy = Some(FlushPolicy::RowLimit { row_limit: 10_000 });
         }
 
         table_def
@@ -115,16 +118,19 @@ mod tests {
     }
 
     #[test]
-    fn configured_definition_keeps_stats_hot_only() {
+    fn configured_definition_has_10k_row_flush_policy() {
+        use kalamdb_commons::schemas::policy::FlushPolicy;
+
         let definition = StatsRow::configured_definition();
         let TableOptions::Shared(options) = definition.table_options else {
             panic!("dba.stats must be a shared table");
         };
 
         assert_eq!(options.access_level, Some(TableAccess::Dba));
-        assert!(
-            options.flush_policy.is_none(),
-            "dba.stats should remain hot-only and avoid cold-storage flush scheduling"
+        assert_eq!(
+            options.flush_policy,
+            Some(FlushPolicy::RowLimit { row_limit: 10_000 }),
+            "dba.stats should flush after accumulating 10k rows"
         );
     }
 }

@@ -1,8 +1,9 @@
 use super::types::JobsManager;
+use super::utils::log_job;
 use crate::error::KalamDbError;
 use crate::error_extensions::KalamDbResultExt;
 use crate::jobs::executors::JobDecision;
-use crate::jobs::{HealthMonitor, StreamEvictionScheduler};
+use crate::jobs::{FlushScheduler, HealthMonitor, StreamEvictionScheduler};
 use kalamdb_commons::{JobId, NodeId};
 use kalamdb_raft::commands::MetaCommand;
 use kalamdb_raft::GroupId;
@@ -236,6 +237,28 @@ impl JobsManager {
         };
         let stream_eviction_enabled = stream_eviction_interval.is_some();
 
+        // Flush scheduler interval (configurable, default 60 seconds)
+        let flush_check_secs = app_context.config().flush.check_interval_seconds;
+        let mut flush_check_interval = if flush_check_secs > 0 {
+            let mut interval = tokio::time::interval_at(
+                Instant::now() + Duration::from_secs(flush_check_secs),
+                Duration::from_secs(flush_check_secs),
+            );
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            Some(interval)
+        } else {
+            None
+        };
+        let flush_check_enabled = flush_check_interval.is_some();
+
+        // WAL cleanup: flush all RocksDB memtables every 5 minutes so idle
+        // column families advance their log numbers and stale WAL files are deleted.
+        let mut wal_cleanup_interval = tokio::time::interval_at(
+            Instant::now() + Duration::from_secs(300),
+            Duration::from_secs(300),
+        );
+        wal_cleanup_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
         // Leadership check interval (for cluster mode)
         let mut leadership_interval = tokio::time::interval_at(
             Instant::now() + Duration::from_secs(1),
@@ -300,6 +323,18 @@ impl JobsManager {
                     }
                     continue;
                 }
+                // Periodic WAL cleanup: flush all RocksDB memtables so idle CFs
+                // don't pin WAL files forever (prevents WAL file accumulation)
+                _ = wal_cleanup_interval.tick() => {
+                    let app_ctx = self.get_attached_app_context();
+                    let backend = app_ctx.storage_backend();
+                    if let Err(e) = backend.flush_all_memtables() {
+                        log::warn!("WAL cleanup flush_all_memtables failed: {}", e);
+                    } else {
+                        log::debug!("WAL cleanup: flushed all memtables");
+                    }
+                    continue;
+                }
                 // Periodic stream eviction job creation (leader-only)
                 _ = async {
                     if stream_eviction_enabled {
@@ -313,6 +348,24 @@ impl JobsManager {
                         let app_ctx = self.get_attached_app_context();
                         if let Err(e) = StreamEvictionScheduler::check_and_schedule(&app_ctx, self).await {
                             log::warn!("Failed to check stream eviction: {}", e);
+                        }
+                    }
+                    continue;
+                }
+                // Periodic flush scheduler (leader-only) — creates flush jobs
+                // for tables with pending writes in RocksDB
+                _ = async {
+                    if flush_check_enabled {
+                        let interval = flush_check_interval
+                            .as_mut()
+                            .expect("flush check interval missing");
+                        interval.tick().await;
+                    }
+                }, if flush_check_enabled => {
+                    if is_leader {
+                        let app_ctx = self.get_attached_app_context();
+                        if let Err(e) = FlushScheduler::check_and_schedule(&app_ctx, self).await {
+                            log::warn!("Failed to check periodic flush: {}", e);
                         }
                     }
                     continue;
@@ -555,7 +608,7 @@ impl JobsManager {
             let job_id = job.job_id.clone();
             let job_type = job.job_type;
 
-            log::info!(
+            log::debug!(
                 "[{}] execute_job started: type={:?}, has_local_work={}, has_leader_actions={}",
                 job_id,
                 job_type,
@@ -569,7 +622,7 @@ impl JobsManager {
                 self.mark_job_running(&job_id).await?;
             }
 
-            self.log_job_event(&job_id, &Level::Debug, "Job started (local phase)");
+            self.log_job_event(&job_id, &Level::Trace, "Job started (local phase)");
 
             let app_ctx = self.get_attached_app_context();
 
@@ -615,10 +668,12 @@ impl JobsManager {
             match &local_decision {
                 JobDecision::Completed { message } => {
                     self.update_job_node_status(&job_id, JobStatus::Completed, None).await?;
-                    self.log_job_event(
+                    log_job!(
+                        self,
                         &job_id,
-                        &Level::Debug,
-                        &format!("Local phase completed: {}", message.as_deref().unwrap_or("ok")),
+                        Level::Trace,
+                        "Local phase completed: {}",
+                        message.as_deref().unwrap_or("ok")
                     );
                 },
                 JobDecision::Failed { message, .. } => {
@@ -642,11 +697,7 @@ impl JobsManager {
                 },
                 JobDecision::Skipped { message } => {
                     self.update_job_node_status(&job_id, JobStatus::Completed, None).await?;
-                    self.log_job_event(
-                        &job_id,
-                        &Level::Debug,
-                        &format!("Local phase skipped: {}", message),
-                    );
+                    log_job!(self, &job_id, Level::Trace, "Local phase skipped: {}", message);
                     // Continue to leader phase if applicable
                 },
                 JobDecision::Retry {
@@ -704,17 +755,19 @@ impl JobsManager {
                         );
                     },
                     JobNodeQuorumResult::QuorumReached { completed, total } => {
-                        self.log_job_event(
+                        log_job!(
+                            self,
                             &job_id,
-                            &Level::Debug,
-                            &format!("Quorum reached (completed {}/{})", completed, total),
+                            Level::Trace,
+                            "Quorum reached (completed {}/{})",
+                            completed,
+                            total
                         );
                     },
                 }
 
                 if job_type.has_leader_actions() {
-                    log::info!("[{}] Starting leader phase execution", job_id);
-                    self.log_job_event(&job_id, &Level::Debug, "Executing leader phase");
+                    log::debug!("[{}] Starting leader phase execution", job_id);
 
                     let leader_decision =
                         match self.job_registry.execute_leader(app_ctx, &job).await {
@@ -753,13 +806,12 @@ impl JobsManager {
                                     e
                                 )));
                             }
-                            self.log_job_event(
+                            log_job!(
+                                self,
                                 &job_id,
-                                &Level::Debug,
-                                &format!(
-                                    "Job completed (leader phase): {}",
-                                    message.unwrap_or_default()
-                                ),
+                                Level::Trace,
+                                "Job completed (leader phase): {}",
+                                message.unwrap_or_default()
                             );
                         },
                         JobDecision::Skipped { message } => {

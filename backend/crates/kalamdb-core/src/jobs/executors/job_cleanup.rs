@@ -16,7 +16,6 @@
 //! ```
 
 use crate::error::KalamDbError;
-use crate::error_extensions::KalamDbResultExt;
 use crate::jobs::executors::{JobContext, JobDecision, JobExecutor, JobParams};
 use async_trait::async_trait;
 use kalamdb_system::JobType;
@@ -72,17 +71,24 @@ impl JobExecutor for JobCleanupExecutor {
 
         ctx.log_info(&format!("Cleaning up jobs older than {} days", retention_days));
 
-        let jobs_provider = ctx.app_ctx.system_tables().jobs();
-        let job_nodes_provider = ctx.app_ctx.system_tables().job_nodes();
+        // Offload sync RocksDB scan+delete operations to blocking thread
+        let app_ctx = ctx.app_ctx.clone();
+        let (deleted_count, deleted_nodes) = tokio::task::spawn_blocking(move || {
+            let jobs_provider = app_ctx.system_tables().jobs();
+            let job_nodes_provider = app_ctx.system_tables().job_nodes();
 
-        // Execute cleanup
-        let deleted_count = jobs_provider
-            .cleanup_old_jobs(retention_days)
-            .into_kalamdb_error("Failed to cleanup old jobs")?;
+            let deleted_count = jobs_provider
+                .cleanup_old_jobs(retention_days)
+                .map_err(|e| KalamDbError::ExecutionError(format!("Failed to cleanup old jobs: {}", e)))?;
 
-        let deleted_nodes = job_nodes_provider
-            .cleanup_old_job_nodes(retention_days)
-            .into_kalamdb_error("Failed to cleanup old job_nodes")?;
+            let deleted_nodes = job_nodes_provider
+                .cleanup_old_job_nodes(retention_days)
+                .map_err(|e| KalamDbError::ExecutionError(format!("Failed to cleanup old job_nodes: {}", e)))?;
+
+            Ok::<_, KalamDbError>((deleted_count, deleted_nodes))
+        })
+        .await
+        .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))??;
 
         let message = format!(
             "Job history cleanup completed - {} jobs and {} job_nodes deleted (retention: {} days)",

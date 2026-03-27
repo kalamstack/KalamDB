@@ -119,6 +119,7 @@ fn register_subscription_entry(
     subs: &mut HashMap<String, SubEntry>,
     seq_id_cache: &mut HashMap<String, SeqId>,
     next_generation: &mut u64,
+    timeouts: &KalamLinkTimeouts,
     id: String,
     sql: String,
     mut options: SubscriptionOptions,
@@ -144,6 +145,8 @@ fn register_subscription_entry(
             created_at_ms: now_ms(),
             last_event_time_ms: None,
             pending_result_tx: Some(result_tx),
+            ready_deadline: startup_deadline(timeouts),
+            reconnect_resubscribe_pending: false,
         },
     );
 
@@ -185,6 +188,37 @@ fn advance_entry_progress(
         seq_tracking::advance_seq(&mut entry.last_seq_id, seq_id);
     }
     entry.last_event_time_ms = Some(now_ms());
+}
+
+fn startup_deadline(timeouts: &KalamLinkTimeouts) -> Option<TokioInstant> {
+    if KalamLinkTimeouts::is_no_timeout(timeouts.initial_data_timeout) {
+        None
+    } else {
+        Some(TokioInstant::now() + timeouts.initial_data_timeout)
+    }
+}
+
+fn reset_startup_deadline(entry: &mut SubEntry, timeouts: &KalamLinkTimeouts, is_resume: bool) {
+    entry.ready_deadline = startup_deadline(timeouts);
+    entry.reconnect_resubscribe_pending = is_resume;
+}
+
+fn refresh_startup_deadline(entry: &mut SubEntry, timeouts: &KalamLinkTimeouts) {
+    if entry.ready_deadline.is_some() {
+        entry.ready_deadline = startup_deadline(timeouts);
+    }
+}
+
+fn clear_startup_deadline(entry: &mut SubEntry) {
+    entry.ready_deadline = None;
+    entry.reconnect_resubscribe_pending = false;
+}
+
+fn next_startup_deadline(subs: &HashMap<String, SubEntry>) -> TokioInstant {
+    subs.values()
+        .filter_map(|entry| entry.ready_deadline)
+        .min()
+        .unwrap_or_else(|| TokioInstant::now() + FAR_FUTURE)
 }
 
 fn resolve_subscription_key(sub_id: &str, subs: &HashMap<String, SubEntry>) -> Option<String> {
@@ -237,6 +271,8 @@ struct SubEntry {
     created_at_ms: u64,
     last_event_time_ms: Option<u64>,
     pending_result_tx: Option<oneshot::Sender<Result<(u64, Option<SeqId>)>>>,
+    ready_deadline: Option<TokioInstant>,
+    reconnect_resubscribe_pending: bool,
 }
 
 // ── SharedConnection (public handle) ────────────────────────────────────────
@@ -543,7 +579,7 @@ async fn route_event(
     ws: &mut WebSocketStream,
     subs: &mut HashMap<String, SubEntry>,
     seq_id_cache: &mut HashMap<String, SeqId>,
-    _event_handlers: &EventHandlers,
+    timeouts: &KalamLinkTimeouts,
 ) {
     let incoming_sub_id = match event.subscription_id() {
         Some(id) => id.to_string(),
@@ -571,6 +607,9 @@ async fn route_event(
                 }
                 entry.is_loading = batch.status != crate::models::BatchStatus::Ready;
                 entry.last_event_time_ms = Some(now_ms());
+                if entry.is_loading {
+                    refresh_startup_deadline(entry, timeouts);
+                }
             }
         }
         if auto_request_next_batch && batch.has_more {
@@ -615,11 +654,13 @@ async fn route_event(
 
             match &event {
                 _ if subscription_start_ready(&event) => {
+                    clear_startup_deadline(entry);
                     if let Some(result_tx) = entry.pending_result_tx.take() {
                         let _ = result_tx.send(Ok((entry.generation, entry.options.from)));
                     }
                 },
                 ChangeEvent::Error { code, message, .. } => {
+                    clear_startup_deadline(entry);
                     if let Some(result_tx) = entry.pending_result_tx.take() {
                         let _ = result_tx.send(Err(KalamLinkError::WebSocketError(format!(
                             "Subscription failed ({}): {}",
@@ -629,6 +670,14 @@ async fn route_event(
                     }
                 },
                 _ => {},
+            }
+
+            if !subscription_start_ready(&event) {
+                if entry.is_loading {
+                    refresh_startup_deadline(entry, timeouts);
+                } else if entry.reconnect_resubscribe_pending {
+                    clear_startup_deadline(entry);
+                }
             }
 
             if !remove_after_send && entry.event_tx.send(Ok(event)).await.is_err() {
@@ -649,6 +698,7 @@ async fn route_event(
 async fn resubscribe_all(
     ws: &mut WebSocketStream,
     subs: &mut HashMap<String, SubEntry>,
+    timeouts: &KalamLinkTimeouts,
     event_handlers: &EventHandlers,
 ) {
     log::info!(
@@ -660,6 +710,7 @@ async fn resubscribe_all(
         let was_loading = entry.is_loading;
         entry.batch_seq_id = None;
         entry.is_loading = true;
+        reset_startup_deadline(entry, timeouts, true);
         if let Some(seq_id) = effective_entry_seq(entry) {
             options.from = Some(seq_id);
             entry.options.from = Some(seq_id);
@@ -685,6 +736,70 @@ async fn resubscribe_all(
             ));
         }
     }
+}
+
+async fn handle_startup_timeouts(
+    subs: &mut HashMap<String, SubEntry>,
+    seq_id_cache: &mut HashMap<String, SeqId>,
+    ws_stream: &mut Option<WebSocketStream>,
+    connected: &Arc<AtomicBool>,
+    timeouts: &KalamLinkTimeouts,
+    event_handlers: &EventHandlers,
+) -> bool {
+    let now = TokioInstant::now();
+    let mut timed_out_initial = Vec::new();
+    let mut timed_out_resumes = Vec::new();
+
+    for (id, entry) in subs.iter_mut() {
+        if entry.ready_deadline.is_some_and(|deadline| deadline <= now) {
+            if entry.reconnect_resubscribe_pending {
+                timed_out_resumes.push(id.clone());
+                clear_startup_deadline(entry);
+            } else {
+                timed_out_initial.push(id.clone());
+            }
+        }
+    }
+
+    for id in timed_out_initial {
+        if let Some(mut entry) = subs.remove(&id) {
+            let message = format!(
+                "Subscription '{}' did not become ready within {:?}",
+                id, timeouts.initial_data_timeout
+            );
+            log::warn!("[kalam-link] {}", message);
+            clear_startup_deadline(&mut entry);
+            cache_entry_seq(seq_id_cache, id, &entry);
+            if let Some(result_tx) = entry.pending_result_tx.take() {
+                let _ = result_tx.send(Err(KalamLinkError::TimeoutError(message)));
+            }
+        }
+    }
+
+    if timed_out_resumes.is_empty() {
+        return false;
+    }
+
+    let message = format!(
+        "Reconnected shared WebSocket but subscription resume stalled for {:?}: {}",
+        timeouts.initial_data_timeout,
+        timed_out_resumes.join(", ")
+    );
+    log::warn!("[kalam-link] {}", message);
+    event_handlers.emit_error(ConnectionError::new(&message, true));
+
+    if let Some(mut ws) = ws_stream.take() {
+        let _ = ws.close(None).await;
+    }
+
+    let was_connected = connected.swap(false, Ordering::SeqCst);
+    if was_connected {
+        event_handlers.emit_disconnect(DisconnectReason::new(
+            "Subscription resume timed out; forcing reconnect",
+        ));
+    }
+
+    true
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -766,8 +881,24 @@ async fn connection_task(
             let pong_sleep = tokio::time::sleep_until(pong_deadline);
             tokio::pin!(pong_sleep);
 
+            let startup_sleep = tokio::time::sleep_until(next_startup_deadline(&subs));
+            tokio::pin!(startup_sleep);
+
             tokio::select! {
                 biased;
+
+                _ = &mut startup_sleep => {
+                    if handle_startup_timeouts(
+                        &mut subs,
+                        &mut seq_id_cache,
+                        &mut ws_stream,
+                        &connected,
+                        &timeouts,
+                        &event_handlers,
+                    ).await {
+                        continue;
+                    }
+                }
 
                 _ = &mut pong_sleep, if has_pong_timeout && awaiting_pong => {
                     log::warn!(
@@ -810,6 +941,7 @@ async fn connection_task(
                                     &mut subs,
                                     &mut seq_id_cache,
                                     &mut next_generation,
+                                    &timeouts,
                                     id.clone(),
                                     sql,
                                     options,
@@ -890,7 +1022,7 @@ async fn connection_task(
                             event_handlers.emit_receive(&text);
                             match parse_message(&text) {
                                 Ok(Some(event)) => {
-                                    route_event(event, ws, &mut subs, &mut seq_id_cache, &event_handlers).await;
+                                    route_event(event, ws, &mut subs, &mut seq_id_cache, &timeouts).await;
                                 },
                                 Ok(None) => {},
                                 Err(e) => log::warn!("Failed to parse WS message: {}", e),
@@ -902,7 +1034,7 @@ async fn connection_task(
                                     event_handlers.emit_receive(&text);
                                     match parse_message(&text) {
                                         Ok(Some(event)) => {
-                                            route_event(event, ws, &mut subs, &mut seq_id_cache, &event_handlers).await;
+                                            route_event(event, ws, &mut subs, &mut seq_id_cache, &timeouts).await;
                                         },
                                         Ok(None) => {},
                                         Err(e) => log::warn!("Failed to parse decompressed WS message: {}", e),
@@ -1076,6 +1208,7 @@ async fn connection_task(
                                     &mut subs,
                                     &mut seq_id_cache,
                                     &mut next_generation,
+                                    &timeouts,
                                     id,
                                     sql,
                                     options,
@@ -1129,7 +1262,7 @@ async fn connection_task(
                     reconnect_attempts.store(0, Ordering::SeqCst);
                     connected.store(true, Ordering::SeqCst);
                     event_handlers.emit_connect();
-                    resubscribe_all(&mut stream, &mut subs, &event_handlers).await;
+                    resubscribe_all(&mut stream, &mut subs, &timeouts, &event_handlers).await;
                     ws_stream = Some(stream);
                     ping_deadline = TokioInstant::now() + keepalive_dur;
                     awaiting_pong = false;
@@ -1140,5 +1273,48 @@ async fn connection_task(
                 },
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::{mpsc, oneshot};
+
+    #[test]
+    fn startup_deadline_disabled_when_initial_timeout_is_zero() {
+        let mut timeouts = KalamLinkTimeouts::default();
+        timeouts.initial_data_timeout = Duration::ZERO;
+        assert_eq!(startup_deadline(&timeouts), None);
+    }
+
+    #[test]
+    fn startup_deadline_helpers_toggle_resume_state() {
+        let (event_tx, _event_rx) = mpsc::channel(1);
+        let (result_tx, _result_rx) = oneshot::channel();
+        let mut entry = SubEntry {
+            sql: "SELECT 1".to_string(),
+            options: SubscriptionOptions::default(),
+            event_tx,
+            last_seq_id: None,
+            consumed_seq_id: None,
+            batch_seq_id: None,
+            snapshot_end_seq: None,
+            is_loading: true,
+            generation: 1,
+            created_at_ms: 0,
+            last_event_time_ms: None,
+            pending_result_tx: Some(result_tx),
+            ready_deadline: None,
+            reconnect_resubscribe_pending: false,
+        };
+
+        reset_startup_deadline(&mut entry, &KalamLinkTimeouts::default(), true);
+        assert!(entry.ready_deadline.is_some());
+        assert!(entry.reconnect_resubscribe_pending);
+
+        clear_startup_deadline(&mut entry);
+        assert!(entry.ready_deadline.is_none());
+        assert!(!entry.reconnect_resubscribe_pending);
     }
 }

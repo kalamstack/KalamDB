@@ -73,7 +73,6 @@ impl TypedStatementHandler<CreateNamespaceStatement> for CreateNamespaceHandler 
         _params: Vec<ScalarValue>,
         context: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
-        let namespaces_provider = self.app_context.system_tables().namespaces();
         let name = statement.name.as_str();
 
         // Validate namespace name
@@ -81,7 +80,13 @@ impl TypedStatementHandler<CreateNamespaceStatement> for CreateNamespaceHandler 
 
         // Check if namespace already exists
         let namespace_id = NamespaceId::new(name);
-        let existing = namespaces_provider.get_namespace(&namespace_id)?;
+        let app_ctx = self.app_context.clone();
+        let ns_id = namespace_id.clone();
+        let existing = tokio::task::spawn_blocking(move || {
+            app_ctx.system_tables().namespaces().get_namespace(&ns_id)
+        })
+        .await
+        .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))??;
 
         if existing.is_some() {
             if statement.if_not_exists {

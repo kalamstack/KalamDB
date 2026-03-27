@@ -4,8 +4,6 @@
 //! - ALTER TABLE messages ADD COLUMN age INT
 //! - ALTER TABLE messages DROP COLUMN age
 //! - ALTER TABLE messages MODIFY COLUMN age BIGINT
-//! - ALTER USER TABLE messages ADD COLUMN age INT
-//! - ALTER SHARED TABLE messages ADD COLUMN age INT
 
 use crate::ddl::DdlResult;
 use crate::parser::utils::parse_sql_statements;
@@ -13,12 +11,13 @@ use crate::parser::utils::parse_sql_statements;
 use crate::compatibility::map_sql_type_to_kalam;
 use kalamdb_commons::models::datatypes::KalamDataType;
 use kalamdb_commons::models::{NamespaceId, TableAccess, TableName};
+use kalamdb_commons::schemas::ColumnDefault;
 use kalamdb_system::VectorMetric;
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use sqlparser::ast::{
-    AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef, DropBehavior, Expr, Ident,
-    ObjectName, SqlOption, Statement, Value,
+    AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
+    DropBehavior, Expr, Ident, ObjectName, SqlOption, Statement, Value,
 };
 use sqlparser::dialect::GenericDialect;
 
@@ -30,7 +29,7 @@ pub enum ColumnOperation {
         column_name: String,
         data_type: KalamDataType,
         nullable: bool,
-        default_value: Option<String>,
+        default_value: Option<ColumnDefault>,
     },
     /// Drop an existing column
     Drop { column_name: String },
@@ -40,6 +39,18 @@ pub enum ColumnOperation {
         new_data_type: KalamDataType,
         nullable: Option<bool>,
     },
+    /// Set or drop nullable state on an existing column.
+    SetNullable {
+        column_name: String,
+        nullable: bool,
+    },
+    /// Set a column default expression.
+    SetDefault {
+        column_name: String,
+        default_value: ColumnDefault,
+    },
+    /// Drop a column default expression.
+    DropDefault { column_name: String },
     /// Rename an existing column (metadata only)
     Rename {
         old_column_name: String,
@@ -56,20 +67,17 @@ pub enum ColumnOperation {
     DropVectorIndex { column_name: String },
 }
 
-static LEGACY_ALTER_PREFIX_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)^\s*ALTER\s+(USER|SHARED|STREAM)\s+TABLE\s+").unwrap());
-
 static SET_ACCESS_LEVEL_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)SET\s+ACCESS\s+LEVEL\s+(PUBLIC|PRIVATE|RESTRICTED)").unwrap());
 static ALTER_CREATE_VECTOR_INDEX_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
-        r"(?i)^\s*ALTER\s+(?:USER\s+|SHARED\s+|STREAM\s+)?TABLE\s+([a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*)?)\s+CREATE\s+(?:VECTOR\s+)?INDEX\s+([a-zA-Z_][\w]*)\s*(?:USING\s+(COSINE|L2|DOT))?\s*;?\s*$",
+        r"(?i)^\s*ALTER\s+TABLE\s+([a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*)?)\s+CREATE\s+(?:VECTOR\s+)?INDEX\s+([a-zA-Z_][\w]*)\s*(?:USING\s+(COSINE|L2|DOT))?\s*;?\s*$",
     )
     .unwrap()
 });
 static ALTER_DROP_VECTOR_INDEX_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
-        r"(?i)^\s*ALTER\s+(?:USER\s+|SHARED\s+|STREAM\s+)?TABLE\s+([a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*)?)\s+DROP\s+(?:VECTOR\s+)?INDEX\s+([a-zA-Z_][\w]*)\s*;?\s*$",
+        r"(?i)^\s*ALTER\s+TABLE\s+([a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*)?)\s+DROP\s+(?:VECTOR\s+)?INDEX\s+([a-zA-Z_][\w]*)\s*;?\s*$",
     )
     .unwrap()
 });
@@ -199,9 +207,8 @@ fn resolve_table_reference_from_str(
 
 fn normalize_alter_sql(sql: &str) -> String {
     let trimmed = sql.trim().trim_end_matches(';');
-    let without_legacy = LEGACY_ALTER_PREFIX_RE.replace(trimmed, "ALTER TABLE ").into_owned();
     SET_ACCESS_LEVEL_RE
-        .replace(&without_legacy, |caps: &Captures| {
+        .replace(trimmed, |caps: &Captures| {
             format!("SET TBLPROPERTIES (ACCESS_LEVEL = '{}')", caps[1].to_uppercase())
         })
         .into_owned()
@@ -262,6 +269,9 @@ fn convert_operation(operation: &AlterTableOperation) -> DdlResult<ColumnOperati
                 return Err("Column position modifiers (FIRST/AFTER) are not supported".to_string());
             }
             build_modify_column_operation(col_name, data_type, options)
+        },
+        AlterTableOperation::AlterColumn { column_name, op } => {
+            build_alter_column_operation(column_name, op)
         },
         AlterTableOperation::RenameColumn {
             old_column_name,
@@ -329,6 +339,33 @@ fn build_modify_column_operation(
     })
 }
 
+fn build_alter_column_operation(
+    column_name: &Ident,
+    operation: &AlterColumnOperation,
+) -> DdlResult<ColumnOperation> {
+    match operation {
+        AlterColumnOperation::SetNotNull => Ok(ColumnOperation::SetNullable {
+            column_name: column_name.value.clone(),
+            nullable: false,
+        }),
+        AlterColumnOperation::DropNotNull => Ok(ColumnOperation::SetNullable {
+            column_name: column_name.value.clone(),
+            nullable: true,
+        }),
+        AlterColumnOperation::SetDefault { value } => Ok(ColumnOperation::SetDefault {
+            column_name: column_name.value.clone(),
+            default_value: expr_to_column_default(value),
+        }),
+        AlterColumnOperation::DropDefault => Ok(ColumnOperation::DropDefault {
+            column_name: column_name.value.clone(),
+        }),
+        AlterColumnOperation::SetDataType { .. }
+        | AlterColumnOperation::AddGenerated { .. } => {
+            Err("Unsupported ALTER COLUMN operation".to_string())
+        }
+    }
+}
+
 fn build_set_access_level_operation(table_properties: &[SqlOption]) -> DdlResult<ColumnOperation> {
     for option in table_properties {
         if let Some(access_level) = extract_access_level(option)? {
@@ -341,7 +378,7 @@ fn build_set_access_level_operation(table_properties: &[SqlOption]) -> DdlResult
 fn extract_column_options(
     options: &[ColumnOptionDef],
     default_nullable: bool,
-) -> (bool, Option<String>) {
+) -> (bool, Option<ColumnDefault>) {
     let mut nullable = default_nullable;
     let mut default_value = None;
 
@@ -350,7 +387,7 @@ fn extract_column_options(
             ColumnOption::NotNull => nullable = false,
             ColumnOption::Null => nullable = true,
             ColumnOption::Default(expr) => {
-                default_value = Some(expr_to_literal(expr));
+                default_value = Some(expr_to_column_default(expr));
             },
             _ => {},
         }
@@ -363,6 +400,82 @@ fn expr_to_literal(expr: &Expr) -> String {
     match expr {
         Expr::Value(value) => value_to_string(&value.value),
         _ => expr.to_string(),
+    }
+}
+
+fn expr_to_column_default(expr: &Expr) -> ColumnDefault {
+    match expr {
+        Expr::Function(func) => {
+            let name = func.name.to_string().to_uppercase();
+            match name.as_str() {
+                "NOW" | "CURRENT_TIMESTAMP" | "SNOWFLAKE_ID" | "UUID_V7" | "ULID"
+                | "CURRENT_USER" => ColumnDefault::function(&name, vec![]),
+                _ => ColumnDefault::literal(serde_json::Value::String(func.to_string())),
+            }
+        }
+        Expr::Value(value) => match &value.value {
+            Value::Number(number, _) => {
+                if let Ok(int_value) = number.parse::<i64>() {
+                    ColumnDefault::literal(serde_json::Value::Number(int_value.into()))
+                } else if let Ok(float_value) = number.parse::<f64>() {
+                    ColumnDefault::literal(serde_json::json!(float_value))
+                } else {
+                    ColumnDefault::literal(serde_json::Value::String(number.clone()))
+                }
+            }
+            Value::SingleQuotedString(string_value)
+            | Value::DoubleQuotedString(string_value)
+            | Value::TripleSingleQuotedString(string_value)
+            | Value::TripleDoubleQuotedString(string_value)
+            | Value::SingleQuotedByteStringLiteral(string_value)
+            | Value::DoubleQuotedByteStringLiteral(string_value)
+            | Value::TripleSingleQuotedByteStringLiteral(string_value)
+            | Value::TripleDoubleQuotedByteStringLiteral(string_value)
+            | Value::SingleQuotedRawStringLiteral(string_value)
+            | Value::DoubleQuotedRawStringLiteral(string_value)
+            | Value::TripleSingleQuotedRawStringLiteral(string_value)
+            | Value::TripleDoubleQuotedRawStringLiteral(string_value)
+            | Value::EscapedStringLiteral(string_value)
+            | Value::UnicodeStringLiteral(string_value)
+            | Value::NationalStringLiteral(string_value)
+            | Value::HexStringLiteral(string_value) => {
+                ColumnDefault::literal(serde_json::Value::String(string_value.clone()))
+            }
+            Value::DollarQuotedString(string_value) => {
+                ColumnDefault::literal(serde_json::Value::String(string_value.value.clone()))
+            }
+            Value::QuoteDelimitedStringLiteral(string_value)
+            | Value::NationalQuoteDelimitedStringLiteral(string_value) => {
+                ColumnDefault::literal(serde_json::Value::String(string_value.value.clone()))
+            }
+            Value::Boolean(boolean_value) => {
+                ColumnDefault::literal(serde_json::Value::Bool(*boolean_value))
+            }
+            Value::Null => ColumnDefault::literal(serde_json::Value::Null),
+            Value::Placeholder(value) => {
+                ColumnDefault::literal(serde_json::Value::String(value.clone()))
+            }
+        },
+        Expr::Identifier(identifier) => {
+            let normalized = identifier.value.to_uppercase();
+            match normalized.as_str() {
+                "CURRENT_TIMESTAMP" => ColumnDefault::function("NOW", vec![]),
+                "CURRENT_USER" => ColumnDefault::function("CURRENT_USER", vec![]),
+                "NULL" => ColumnDefault::literal(serde_json::Value::Null),
+                _ => ColumnDefault::literal(serde_json::Value::String(identifier.value.clone())),
+            }
+        }
+        _ => {
+            let literal = expr.to_string();
+            let normalized = literal.to_uppercase();
+            if normalized == "NULL" {
+                ColumnDefault::literal(serde_json::Value::Null)
+            } else if normalized == "CURRENT_TIMESTAMP" || normalized == "NOW()" {
+                ColumnDefault::function("NOW", vec![])
+            } else {
+                ColumnDefault::literal(serde_json::Value::String(literal.trim_matches('\'').to_string()))
+            }
+        }
     }
 }
 
@@ -482,9 +595,81 @@ mod tests {
                 ..
             } => {
                 assert_eq!(column_name, "age");
-                assert_eq!(default_value, Some("0".to_string()));
+                assert_eq!(default_value, Some(ColumnDefault::literal(serde_json::json!(0))));
             },
             _ => panic!("Expected Add operation"),
+        }
+    }
+
+    #[test]
+    fn test_parse_alter_column_set_not_null() {
+        let stmt = AlterTableStatement::parse(
+            "ALTER TABLE messages ALTER COLUMN age SET NOT NULL",
+            &test_namespace(),
+        )
+        .unwrap();
+
+        match stmt.operation {
+            ColumnOperation::SetNullable {
+                column_name,
+                nullable,
+            } => {
+                assert_eq!(column_name, "age");
+                assert!(!nullable);
+            }
+            _ => panic!("Expected SetNullable operation"),
+        }
+    }
+
+    #[test]
+    fn test_parse_alter_column_drop_not_null() {
+        let stmt = AlterTableStatement::parse(
+            "ALTER TABLE messages ALTER COLUMN age DROP NOT NULL",
+            &test_namespace(),
+        )
+        .unwrap();
+
+        match stmt.operation {
+            ColumnOperation::SetNullable { nullable, .. } => {
+                assert!(nullable);
+            }
+            _ => panic!("Expected SetNullable operation"),
+        }
+    }
+
+    #[test]
+    fn test_parse_alter_column_set_default() {
+        let stmt = AlterTableStatement::parse(
+            "ALTER TABLE messages ALTER COLUMN created_at SET DEFAULT NOW()",
+            &test_namespace(),
+        )
+        .unwrap();
+
+        match stmt.operation {
+            ColumnOperation::SetDefault {
+                column_name,
+                default_value,
+            } => {
+                assert_eq!(column_name, "created_at");
+                assert_eq!(default_value, ColumnDefault::function("NOW", vec![]));
+            }
+            _ => panic!("Expected SetDefault operation"),
+        }
+    }
+
+    #[test]
+    fn test_parse_alter_column_drop_default() {
+        let stmt = AlterTableStatement::parse(
+            "ALTER TABLE messages ALTER COLUMN created_at DROP DEFAULT",
+            &test_namespace(),
+        )
+        .unwrap();
+
+        match stmt.operation {
+            ColumnOperation::DropDefault { column_name } => {
+                assert_eq!(column_name, "created_at");
+            }
+            _ => panic!("Expected DropDefault operation"),
         }
     }
 
@@ -558,9 +743,9 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_alter_user_table() {
+    fn test_parse_alter_table_add_column() {
         let stmt = AlterTableStatement::parse(
-            "ALTER USER TABLE messages ADD COLUMN age INT",
+            "ALTER TABLE messages ADD COLUMN age INT",
             &test_namespace(),
         )
         .unwrap();
@@ -569,9 +754,9 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_alter_shared_table() {
+    fn test_parse_alter_table_drop_column() {
         let stmt = AlterTableStatement::parse(
-            "ALTER SHARED TABLE conversations DROP COLUMN old_field",
+            "ALTER TABLE conversations DROP COLUMN old_field",
             &test_namespace(),
         )
         .unwrap();
@@ -601,7 +786,7 @@ mod tests {
     #[test]
     fn test_parse_set_access_level_public() {
         let stmt = AlterTableStatement::parse(
-            "ALTER SHARED TABLE analytics SET ACCESS LEVEL public",
+            "ALTER TABLE analytics SET ACCESS LEVEL public",
             &test_namespace(),
         )
         .unwrap();

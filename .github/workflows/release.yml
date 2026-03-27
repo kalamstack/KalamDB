@@ -61,6 +61,9 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUST_VERSION: "1.92.0"
+  WASM_PACK_VERSION: "0.14.0"
+  PG_EXTENSION_MAJOR: "16"
+  PG_EXTENSION_FLAVOR: "pg16"
   DEFAULT_PLATFORMS: "linux-x86_64,macos-aarch64,linux-aarch64"
   RUSTC_WRAPPER: ""
   CARGO_BUILD_RUSTC_WRAPPER: ""
@@ -218,8 +221,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL --retry 5 --retry-delay 2 --retry-connrefused \
-            https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
+          cargo install wasm-pack --version "$WASM_PACK_VERSION" --locked
           wasm-pack --version
 
       - name: Build SDK (kalam-link)
@@ -937,6 +939,96 @@ jobs:
           if-no-files-found: error
 
   # ═══════════════════════════════════════════════════════════════════════════
+  # PG EXTENSION - Build pg_kalam PostgreSQL extension for Linux
+  # ═══════════════════════════════════════════════════════════════════════════
+  build_pg_extension_x86_64:
+    name: Build PG Extension Linux x86_64
+    runs-on: ubuntu-latest
+    needs: read_version
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Build extension in Docker (x86_64 Bookworm)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Build the builder image (Debian Bookworm — matches postgres:16-bookworm)
+          docker build \
+            -f pg/docker/Dockerfile.builder-base \
+            -t pg-kalam-builder-x86 \
+            .
+
+          # Compile extension inside the Bookworm container
+          mkdir -p artifacts .cargo/pg-extension-x86/registry .cargo/pg-extension-x86/git .cargo/pg-extension-x86/target
+          docker run --rm \
+            -v "$PWD:/src:ro" \
+            -v "$PWD/artifacts:/artifacts" \
+            -v "$PWD/.cargo/pg-extension-x86/registry:/usr/local/cargo/registry" \
+            -v "$PWD/.cargo/pg-extension-x86/git:/usr/local/cargo/git" \
+            -v "$PWD/.cargo/pg-extension-x86/target:/target-cache" \
+            -e CARGO_INCREMENTAL=0 \
+            -e CARGO_TARGET_DIR=/target-cache \
+            -e RUSTFLAGS="-Cdebuginfo=0" \
+            -e PG_EXTENSION_FLAVOR \
+            pg-kalam-builder-x86 \
+            bash -c '
+              cd /src && \
+              cargo pgrx install \
+                -p kalam-pg-extension \
+                -c /usr/bin/pg_config \
+                --no-default-features \
+                --profile release-pg \
+                -F ${PG_EXTENSION_FLAVOR} && \
+                LIBDIR="$(/usr/bin/pg_config --pkglibdir)" && \
+                SQLDIR="$(/usr/bin/pg_config --sharedir)/extension" && \
+                cp "$LIBDIR/pg_kalam.so" /artifacts/ && \
+                cp "$SQLDIR/pg_kalam.control" /artifacts/ && \
+                cp "$SQLDIR"/pg_kalam--*.sql /artifacts/
+            '
+
+      - name: Package extension artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.read_version.outputs.version }}"
+          PKG="pg_kalam-${VERSION}-${PG_EXTENSION_FLAVOR}-linux-x86_64"
+          mkdir -p "dist/${VERSION}/${PKG}"
+
+          cp artifacts/pg_kalam.so           "dist/${VERSION}/${PKG}/"
+          cp artifacts/pg_kalam.control      "dist/${VERSION}/${PKG}/"
+          cp artifacts/pg_kalam--*.sql       "dist/${VERSION}/${PKG}/"
+
+          cat > "dist/${VERSION}/${PKG}/install.sh" << 'INSTALL_EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+          PG_CONFIG="${1:-pg_config}"
+          LIBDIR="$("$PG_CONFIG" --pkglibdir)"
+          SHAREDIR="$("$PG_CONFIG" --sharedir)/extension"
+          echo "Installing pg_kalam to $LIBDIR and $SHAREDIR ..."
+          install -m 755 "$SCRIPT_DIR/pg_kalam.so" "$LIBDIR/"
+          install -m 644 "$SCRIPT_DIR/pg_kalam.control" "$SHAREDIR/"
+          install -m 644 "$SCRIPT_DIR"/pg_kalam--*.sql "$SHAREDIR/"
+          echo "Done. Run: CREATE EXTENSION pg_kalam;"
+          INSTALL_EOF
+          chmod +x "dist/${VERSION}/${PKG}/install.sh"
+
+          (cd "dist/${VERSION}" && tar -czf "${PKG}.tar.gz" "${PKG}")
+          rm -rf "dist/${VERSION}/${PKG}"
+
+          ls -lh "dist/${VERSION}/"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: dist-pg-extension-linux-x86_64
+          path: dist/${{ needs.read_version.outputs.version }}/*
+          if-no-files-found: error
+
+  # ═══════════════════════════════════════════════════════════════════════════
   # SMOKE TESTS - Run against the pre-built Linux x86_64 binary
   # ═══════════════════════════════════════════════════════════════════════════
   smoke_tests:
@@ -1091,11 +1183,13 @@ jobs:
       - build_linux_aarch64
       - build_windows_x86_64
       - build_macos_arm
+      - build_pg_extension_x86_64
       - read_version
       - smoke_tests
       - sdk_tests_typescript
       - sdk_tests_dart
       - docker
+      - docker_pg
 
     if: ${{ github.event_name == 'push' || github.event.inputs.github_release == 'true' }}
 
@@ -1397,6 +1491,108 @@ jobs:
           echo "::warning::Docker image publish succeeded, but Docker Hub README update failed. Ensure DOCKERHUB_USERNAME is a repo admin and DOCKERHUB_TOKEN has read/write/delete scope."
 
   # ═══════════════════════════════════════════════════════════════════════════
+  # DOCKER PG - Push PostgreSQL + pg_kalam extension image to Docker Hub
+  # ═══════════════════════════════════════════════════════════════════════════
+  docker_pg:
+    name: Push PG Extension Docker image
+    runs-on: ubuntu-latest
+    needs:
+      - build_pg_extension_x86_64
+      - read_version
+
+    if: ${{ github.event_name == 'push' || github.event.inputs.docker_push == 'true' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download PG extension artifact (x86_64)
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-pg-extension-linux-x86_64
+          path: pg-artifacts-amd64/
+
+      - name: Prepare extension files
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.read_version.outputs.version }}"
+
+          # Extract x86_64 tarball
+          mkdir -p pg-ext-amd64
+          tar -xzf "pg-artifacts-amd64/pg_kalam-${VERSION}-${PG_EXTENSION_FLAVOR}-linux-x86_64.tar.gz" -C pg-ext-amd64 --strip-components=1
+
+          echo "=== x86_64 ==="
+          ls -lh pg-ext-amd64/
+
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push PG image (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: pg-ext-amd64
+          file: pg/docker/Dockerfile.release-pg
+          push: true
+          platforms: linux/amd64
+          tags: |
+            jamals86/kalamdb-pg:${{ needs.read_version.outputs.version }}-${{ env.PG_EXTENSION_FLAVOR }}
+            jamals86/kalamdb-pg:latest-${{ env.PG_EXTENSION_FLAVOR }}
+
+      - name: Smoke test PG image
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPO="jamals86/kalamdb-pg"
+          VERSION="${{ needs.read_version.outputs.version }}"
+          IMAGE="${REPO}:${VERSION}-${PG_EXTENSION_FLAVOR}"
+
+          docker pull "$IMAGE"
+          docker rm -f kalamdb-pg-smoke >/dev/null 2>&1 || true
+          docker run -d \
+            --name kalamdb-pg-smoke \
+            -e POSTGRES_PASSWORD=postgres \
+            -p 55432:5432 \
+            "$IMAGE"
+
+          cleanup() {
+            status=$?
+            if [[ $status -ne 0 ]]; then
+              docker logs kalamdb-pg-smoke || true
+            fi
+            docker rm -f kalamdb-pg-smoke >/dev/null 2>&1 || true
+            exit $status
+          }
+          trap cleanup EXIT
+
+          ready=false
+          for i in {1..30}; do
+            if docker exec kalamdb-pg-smoke pg_isready -U postgres -d postgres >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+
+          if [[ "$ready" != "true" ]]; then
+            echo "PostgreSQL in ${IMAGE} did not become ready in time" >&2
+            exit 1
+          fi
+
+          docker exec -e PGPASSWORD=postgres kalamdb-pg-smoke \
+            psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+            -c "CREATE EXTENSION IF NOT EXISTS pg_kalam;" \
+            -c "SELECT extname FROM pg_extension WHERE extname = 'pg_kalam';"
+
+          echo "✅ PG Docker image verified: ${IMAGE}"
+
+  # ═══════════════════════════════════════════════════════════════════════════
   # INTEGRATION TESTS - Smoke + TypeScript SDK + Dart SDK against Docker image
   # ═══════════════════════════════════════════════════════════════════════════
   # ═══════════════════════════════════════════════════════════════════════════
@@ -1454,8 +1650,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsSL --retry 5 --retry-delay 2 --retry-connrefused \
-            https://rustwasm.github.io/wasm-pack/installer/init.sh | sh
+          cargo install wasm-pack --version "$WASM_PACK_VERSION" --locked
+          wasm-pack --version
 
       - name: Prepare server binary
         shell: bash
@@ -1682,7 +1878,7 @@ jobs:
                       continue
 
                   try:
-                  parsed = json.loads(line)
+                      parsed = json.loads(line)
                   except json.JSONDecodeError:
                       continue
 
@@ -1770,7 +1966,9 @@ jobs:
       - name: Install wasm-pack
         shell: bash
         run: |
-          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+          set -euo pipefail
+          cargo install wasm-pack --version "$WASM_PACK_VERSION" --locked
+          wasm-pack --version
 
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2

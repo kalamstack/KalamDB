@@ -42,6 +42,11 @@ pub struct ServerConfig {
     pub files: FileUploadSettings,
     #[serde(default)]
     pub cluster: Option<super::cluster::ClusterConfig>,
+    /// Unified TLS/mTLS configuration for the gRPC listener.
+    /// Serves both cluster inter-node traffic and PG extension connections.
+    /// When absent, falls back to `cluster.rpc_tls` for backward compatibility.
+    #[serde(default)]
+    pub rpc_tls: super::rpc_tls::RpcTlsConfig,
 }
 
 /// CORS configuration that maps directly to actix-cors options
@@ -286,18 +291,62 @@ impl StorageSettings {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RocksDbCfProfileSettings {
+    /// Write buffer size per column family in bytes.
+    pub write_buffer_size: usize,
+
+    /// Maximum number of memtables RocksDB may keep per CF before stalling.
+    pub max_write_buffers: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RocksDbCfProfilesSettings {
+    /// System metadata tables and compatibility partitions.
+    #[serde(default = "default_rocksdb_system_meta_profile")]
+    pub system_meta: RocksDbCfProfileSettings,
+
+    /// Secondary indexes for system tables.
+    #[serde(default = "default_rocksdb_system_index_profile")]
+    pub system_index: RocksDbCfProfileSettings,
+
+    /// User/shared/stream data partitions and topic message payloads.
+    #[serde(default = "default_rocksdb_hot_data_profile")]
+    pub hot_data: RocksDbCfProfileSettings,
+
+    /// PK and vector indexes on user-facing tables.
+    #[serde(default = "default_rocksdb_hot_index_profile")]
+    pub hot_index: RocksDbCfProfileSettings,
+
+    /// Raft log/state partition.
+    #[serde(default = "default_rocksdb_raft_profile")]
+    pub raft: RocksDbCfProfileSettings,
+}
+
+impl Default for RocksDbCfProfileSettings {
+    fn default() -> Self {
+        default_rocksdb_hot_index_profile()
+    }
+}
+
+impl Default for RocksDbCfProfilesSettings {
+    fn default() -> Self {
+        Self {
+            system_meta: default_rocksdb_system_meta_profile(),
+            system_index: default_rocksdb_system_index_profile(),
+            hot_data: default_rocksdb_hot_data_profile(),
+            hot_index: default_rocksdb_hot_index_profile(),
+            raft: default_rocksdb_raft_profile(),
+        }
+    }
+}
+
 /// RocksDB-specific settings (MEMORY OPTIMIZED DEFAULTS)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RocksDbSettings {
-    /// Write buffer size per column family in bytes (default: 2MB)
-    /// Reduced from 64MB for lower memory footprint
-    #[serde(default = "default_rocksdb_write_buffer_size")]
-    pub write_buffer_size: usize,
-
-    /// Maximum number of write buffers (default: 2)
-    /// Reduced from 3 for lower memory usage
-    #[serde(default = "default_rocksdb_max_write_buffers")]
-    pub max_write_buffers: i32,
+    /// Per-profile tuning for different categories of column families.
+    #[serde(default)]
+    pub cf_profiles: RocksDbCfProfilesSettings,
 
     /// Block cache size for reads in bytes (default: 4MB, SHARED across all CFs)
     /// Reduced from 256MB. This cache is shared, so adding CFs doesn't multiply memory.
@@ -336,8 +385,7 @@ pub struct RocksDbSettings {
 impl Default for RocksDbSettings {
     fn default() -> Self {
         Self {
-            write_buffer_size: default_rocksdb_write_buffer_size(),
-            max_write_buffers: default_rocksdb_max_write_buffers(),
+            cf_profiles: RocksDbCfProfilesSettings::default(),
             block_cache_size: default_rocksdb_block_cache_size(),
             max_background_jobs: default_rocksdb_max_background_jobs(),
             max_open_files: default_rocksdb_max_open_files(),
@@ -469,7 +517,12 @@ pub struct PerformanceSettings {
     /// Increase for high-traffic servers
     #[serde(default = "default_backlog")]
     pub backlog: u32,
-    /// Max blocking threads per worker for CPU-intensive operations (default: 512 / workers)
+    /// Number of tokio runtime worker threads (default: 0 = auto, uses num_cpus capped at 4)
+    /// Lower values reduce idle RSS from thread stacks (~2MB per thread).
+    /// Set to 0 for auto-detection, or an explicit count for Docker/constrained environments.
+    #[serde(default)]
+    pub tokio_worker_threads: usize,
+    /// Max blocking threads per worker for CPU-intensive operations (default: 32)
     /// Used for RocksDB and other synchronous operations
     #[serde(default = "default_worker_max_blocking_threads")]
     pub worker_max_blocking_threads: usize,
@@ -523,6 +576,11 @@ pub struct FlushSettings {
     /// Lower values reduce memory usage but may increase flush duration
     #[serde(default = "default_flush_batch_size")]
     pub flush_batch_size: usize,
+
+    /// How often (in seconds) the background scheduler checks for tables with
+    /// pending writes and creates flush jobs (default: 60s). Set to 0 to disable.
+    #[serde(default = "default_flush_check_interval")]
+    pub check_interval_seconds: u64,
 }
 
 /// Manifest cache settings (Phase 4 - US6)
@@ -578,6 +636,12 @@ pub struct RetentionSettings {
     /// Default retention hours for soft-deleted rows (default: 168 hours = 7 days)
     #[serde(default = "default_deleted_retention_hours")]
     pub default_deleted_retention_hours: i32,
+
+    /// Enable periodic dba.stats collection (default: true)
+    /// When false, the background stats recorder is not started, saving memory
+    /// and CPU in resource-constrained environments (e.g. Docker containers).
+    #[serde(default = "default_true")]
+    pub enable_dba_stats: bool,
 
     /// Number of days to preserve dba.stats samples (default: 7 days)
     /// Set to 0 to disable automatic cleanup.
@@ -796,6 +860,12 @@ pub struct AuthSettings {
     /// Auto-create local users from trusted external auth provider subject when missing.
     #[serde(default = "default_auth_auto_create_users_from_provider")]
     pub auto_create_users_from_provider: bool,
+
+    /// Pre-shared token for authenticating pg_kalam FDW gRPC calls.
+    /// When set, the PG extension must send this value in the `authorization` gRPC metadata.
+    /// Override via `KALAMDB_PG_AUTH_TOKEN` env var.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pg_auth_token: Option<String>,
 }
 
 /// OAuth settings (Phase 10, User Story 8)
@@ -898,6 +968,7 @@ impl Default for AuthSettings {
             enforce_password_complexity: default_auth_enforce_password_complexity(),
             allow_remote_setup: default_auth_allow_remote_setup(),
             auto_create_users_from_provider: default_auth_auto_create_users_from_provider(),
+            pg_auth_token: None,
         }
     }
 }
@@ -919,6 +990,7 @@ impl Default for FlushSettings {
             default_row_limit: default_flush_row_limit(),
             default_time_interval: default_flush_time_interval(),
             flush_batch_size: default_flush_batch_size(),
+            check_interval_seconds: default_flush_check_interval(),
         }
     }
 }
@@ -927,6 +999,7 @@ impl Default for RetentionSettings {
     fn default() -> Self {
         Self {
             default_deleted_retention_hours: default_deleted_retention_hours(),
+            enable_dba_stats: true,
             dba_stats_retention_days: default_dba_stats_retention_days(),
         }
     }
@@ -1039,6 +1112,7 @@ impl Default for ServerConfig {
                 keepalive_timeout: 75,
                 max_connections: 25000,
                 backlog: default_backlog(),
+                tokio_worker_threads: 0,
                 worker_max_blocking_threads: default_worker_max_blocking_threads(),
                 client_request_timeout: default_client_request_timeout(),
                 client_disconnect_timeout: default_client_disconnect_timeout(),
@@ -1060,6 +1134,7 @@ impl Default for ServerConfig {
             security: SecuritySettings::default(),
             files: FileUploadSettings::default(),
             cluster: None, // Standalone mode by default
+            rpc_tls: super::rpc_tls::RpcTlsConfig::default(),
         }
     }
 }

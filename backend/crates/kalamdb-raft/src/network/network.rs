@@ -488,34 +488,14 @@ impl RaftNetworkFactory {
             return Ok(());
         }
 
-        let ca_cert_path = tls.ca_cert_path.as_deref().ok_or_else(|| {
-            crate::RaftError::Config("rpc_tls.enabled=true but ca_cert_path is missing".to_string())
+        let ca_pem = tls.load_ca_cert().map_err(|e| {
+            crate::RaftError::Config(format!("Failed loading cluster CA cert: {}", e))
         })?;
-        let node_cert_path = tls.node_cert_path.as_deref().ok_or_else(|| {
-            crate::RaftError::Config(
-                "rpc_tls.enabled=true but node_cert_path is missing".to_string(),
-            )
+        let cert_pem = tls.load_server_cert().map_err(|e| {
+            crate::RaftError::Config(format!("Failed loading node cert: {}", e))
         })?;
-        let node_key_path = tls.node_key_path.as_deref().ok_or_else(|| {
-            crate::RaftError::Config(
-                "rpc_tls.enabled=true but node_key_path is missing".to_string(),
-            )
-        })?;
-
-        let ca_pem = std::fs::read(ca_cert_path).map_err(|e| {
-            crate::RaftError::Config(format!(
-                "Failed reading cluster CA cert '{}': {}",
-                ca_cert_path, e
-            ))
-        })?;
-        let cert_pem = std::fs::read(node_cert_path).map_err(|e| {
-            crate::RaftError::Config(format!(
-                "Failed reading node cert '{}': {}",
-                node_cert_path, e
-            ))
-        })?;
-        let key_pem = std::fs::read(node_key_path).map_err(|e| {
-            crate::RaftError::Config(format!("Failed reading node key '{}': {}", node_key_path, e))
+        let key_pem = tls.load_server_key().map_err(|e| {
+            crate::RaftError::Config(format!("Failed loading node key: {}", e))
         })?;
 
         let mut peer_server_names = HashMap::new();

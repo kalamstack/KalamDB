@@ -87,7 +87,7 @@ impl FlushExecutor {
         let table_id = Arc::new(params.table_id.clone());
         let table_type = params.table_type;
 
-        ctx.log_debug(&format!("Flushing {} (type: {:?})", table_id, table_type));
+        log::trace!("[{}] Flushing {} (type: {:?})", ctx.job_id, table_id, table_type);
 
         // Get dependencies from AppContext
         let app_ctx = &ctx.app_ctx;
@@ -132,7 +132,7 @@ impl FlushExecutor {
         // Use spawn_blocking to avoid blocking the async runtime during RocksDB I/O
         let result = match table_type {
             TableType::User => {
-                ctx.log_debug("Executing UserTableFlushJob (non-blocking)");
+                ctx.log_trace("Executing UserTableFlushJob (non-blocking)");
 
                 // IMPORTANT: Use the per-table UserTableStore (created at table registration)
                 // instead of the generic prefix-only user_table_store() created in AppContext.
@@ -178,7 +178,7 @@ impl FlushExecutor {
                     .into_kalamdb_error("User table flush failed")?
             },
             TableType::Shared => {
-                ctx.log_debug("Executing SharedTableFlushJob (non-blocking)");
+                ctx.log_trace("Executing SharedTableFlushJob (non-blocking)");
 
                 // Get the SharedTableProvider from the schema registry to reuse the cached store
                 let provider_arc = schema_registry.get_provider(&table_id).ok_or_else(|| {
@@ -218,7 +218,7 @@ impl FlushExecutor {
                     .into_kalamdb_error("Shared table flush failed")?
             },
             TableType::Stream => {
-                ctx.log_debug("Stream table flush not yet implemented");
+                ctx.log_trace("Stream table flush not yet implemented");
                 // Streams: return Completed (no-op) for idempotency and clarity
                 return Ok(JobDecision::Completed {
                     message: Some(format!(
@@ -234,14 +234,15 @@ impl FlushExecutor {
             },
         };
 
-        ctx.log_debug(&format!(
-            "Flush operation completed: {} rows flushed, {} files created",
+        log::debug!(
+            "[{}] Flush operation completed: {} rows flushed, {} files created",
+            ctx.job_id,
             result.rows_flushed,
             result.parquet_files.len()
-        ));
+        );
 
         // Compact RocksDB partition after flush to reclaim space from tombstones
-        ctx.log_debug("Running RocksDB compaction to clean up tombstones...");
+        ctx.log_trace("Running RocksDB compaction to clean up tombstones...");
         let backend = app_ctx.storage_backend();
         let partition_name = match table_type {
             TableType::User => {
@@ -286,7 +287,7 @@ impl FlushExecutor {
 
         match compact_result {
             Ok(()) => {
-                ctx.log_debug("RocksDB compaction completed successfully");
+                ctx.log_trace("RocksDB compaction completed successfully");
             },
             Err(e) => {
                 // Log compaction failure but don't fail the flush job
@@ -321,8 +322,10 @@ impl JobExecutor for FlushExecutor {
         "FlushExecutor"
     }
 
-    /// Pre-validate: skip flush job creation when the table has no data in RocksDB.
+    /// Pre-validate: skip flush job creation when the table has insufficient data in RocksDB.
     ///
+    /// When `flush_threshold` is set, checks that the table has at least that many rows
+    /// before proceeding. Otherwise, just checks for any data at all.
     /// This avoids creating unnecessary jobs (and the associated Raft overhead) for
     /// tables that have already been flushed or that have no buffered writes.
     async fn pre_validate(
@@ -338,6 +341,9 @@ impl JobExecutor for FlushExecutor {
             None => return Ok(false),
         };
 
+        // Minimum rows needed: flush_threshold or 1 (just check for any data)
+        let min_rows = params.flush_threshold.unwrap_or(1) as usize;
+
         // Only check for User and Shared tables
         match table_def.table_type {
             TableType::User => {
@@ -347,12 +353,12 @@ impl JobExecutor for FlushExecutor {
                     {
                         let store = provider.store();
                         let partition = store.partition();
-                        let has_data = store
+                        let has_enough = store
                             .backend()
-                            .scan(&partition, None, None, Some(1))
-                            .map(|mut iter| iter.next().is_some())
+                            .scan(&partition, None, None, Some(min_rows))
+                            .map(|iter| iter.count() >= min_rows)
                             .unwrap_or(true); // on error, assume data exists
-                        return Ok(has_data);
+                        return Ok(has_enough);
                     }
                 }
                 Ok(false)
@@ -365,12 +371,12 @@ impl JobExecutor for FlushExecutor {
                     {
                         let store = provider.store();
                         let partition = store.partition();
-                        let has_data = store
+                        let has_enough = store
                             .backend()
-                            .scan(&partition, None, None, Some(1))
-                            .map(|mut iter| iter.next().is_some())
+                            .scan(&partition, None, None, Some(min_rows))
+                            .map(|iter| iter.count() >= min_rows)
                             .unwrap_or(true);
-                        return Ok(has_data);
+                        return Ok(has_enough);
                     }
                 }
                 Ok(false)
@@ -392,7 +398,7 @@ impl JobExecutor for FlushExecutor {
         &self,
         ctx: &JobContext<Self::Params>,
     ) -> Result<JobDecision, KalamDbError> {
-        ctx.log_debug("Flush local phase - preparing for leader actions");
+        ctx.log_trace("Flush local phase - preparing for leader actions");
         // No-op for now: followers don't do anything in local phase
         // The actual flush (including RocksDB deletion) happens in leader phase
         Ok(JobDecision::Completed {
@@ -412,8 +418,7 @@ impl JobExecutor for FlushExecutor {
         &self,
         ctx: &JobContext<Self::Params>,
     ) -> Result<JobDecision, KalamDbError> {
-        log::info!("[{}] FlushExecutor.execute_leader called - executing full flush", ctx.job_id);
-        ctx.log_debug("Flush leader phase - executing full flush");
+        ctx.log_trace("Flush leader phase - executing full flush");
         self.do_flush(ctx).await
     }
 }

@@ -1,7 +1,7 @@
 //! Integration tests for UPDATE/DELETE row count behavior (Phase 2.5)
 //!
-//! Verifies PostgreSQL-compatible row count reporting:
-//! - UPDATE returns count of rows that matched WHERE clause (even if values unchanged)
+//! Verifies KalamDB row count reporting:
+//! - UPDATE returns count of rows that produced a new row version
 //! - DELETE returns count of rows that were soft-deleted
 //! - Row counts are accurate and match expectations
 
@@ -108,7 +108,7 @@ async fn test_update_returns_correct_row_count() {
 }
 
 #[actix_web::test]
-async fn test_update_same_values_still_counts() {
+async fn test_update_same_values_returns_zero() {
     let server = TestServer::new_shared().await;
     let ns = consolidated_helpers::unique_namespace("test_ns_same");
 
@@ -138,7 +138,7 @@ async fn test_update_same_values_still_counts() {
         )
         .await;
 
-    // UPDATE to same value (PostgreSQL behavior: still counts as 1 row updated)
+    // UPDATE to the same value is a no-op and should not count as an update.
     let response = server
         .execute_sql_as_user(
             &format!("UPDATE {}.users SET name = 'Alice' WHERE id = 'user1'", ns),
@@ -146,9 +146,9 @@ async fn test_update_same_values_still_counts() {
         )
         .await;
 
-    assert_row_count(&response, 1, &["Updated"]);
+    assert_row_count(&response, 0, &["Updated"]);
 
-    println!("✅ UPDATE with unchanged values still counts (PostgreSQL-compatible)");
+    println!("✅ UPDATE with unchanged values is treated as a no-op");
 }
 
 #[actix_web::test]

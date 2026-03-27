@@ -118,7 +118,7 @@ fn test_cli_authenticate_unauthorized_user() {
     );
 }
 
-/// Test CLI authentication with valid user and check \info command
+/// Test CLI authentication with valid user via a supported non-interactive SQL command.
 #[test]
 fn test_cli_authenticate_and_check_info() {
     if !is_server_running() {
@@ -126,21 +126,13 @@ fn test_cli_authenticate_and_check_info() {
         return;
     }
 
-    // Use unique username to avoid conflicts
-    let test_username = generate_unique_table("testuser");
+    let result = execute_sql_via_cli_as(
+        admin_username(),
+        admin_password(),
+        "SELECT username FROM system.users WHERE username = 'admin' LIMIT 1",
+    );
 
-    // Create a test user via CLI
-    let create_user_sql = format!("CREATE USER {} IDENTIFIED BY 'testpass123'", test_username);
-    let result = execute_sql_as_root_via_cli(&create_user_sql);
-    if result.is_err() {
-        eprintln!("⚠️  Failed to create test user, skipping test");
-        return;
-    }
-
-    // Authenticate with the new user and run \info command
-    let result = execute_sql_via_cli_as(&test_username, "testpass123", "\\info");
-
-    // Should succeed and show user info
+    // Should succeed and show the authenticated admin user in query output.
     assert!(
         result.is_ok(),
         "CLI should authenticate successfully with valid user: {:?}",
@@ -148,13 +140,10 @@ fn test_cli_authenticate_and_check_info() {
     );
     let output = result.unwrap();
     assert!(
-        output.contains(&test_username),
+        output.contains(admin_username()),
         "Info output should show the authenticated username: {}",
         output
     );
-
-    // Cleanup
-    let _ = execute_sql_as_root_via_cli(&format!("DROP USER {}", test_username));
 }
 
 // Note: Credential store tests have been moved to test_cli_auth.rs

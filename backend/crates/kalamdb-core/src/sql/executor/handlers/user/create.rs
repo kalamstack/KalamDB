@@ -5,7 +5,7 @@ use crate::error::KalamDbError;
 use crate::error_extensions::KalamDbResultExt;
 use crate::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
 use crate::sql::executor::handlers::typed::TypedStatementHandler;
-use kalamdb_auth::security::password::{validate_password_with_policy, PasswordPolicy};
+use kalamdb_auth::security::password::{hash_password, validate_password_with_policy, PasswordPolicy};
 use kalamdb_commons::{AuthType, UserId};
 use kalamdb_sql::ddl::CreateUserStatement;
 use kalamdb_system::{AuthData, User};
@@ -34,10 +34,15 @@ impl TypedStatementHandler<CreateUserStatement> for CreateUserHandler {
         _params: Vec<ScalarValue>,
         context: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
-        let users = self.app_context.system_tables().users();
-
         // Duplicate check (provider enforces via username index but we do early check for clearer error)
-        if users.get_user_by_username(&statement.username)?.is_some() {
+        let app_ctx = self.app_context.clone();
+        let username = statement.username.clone();
+        let existing = tokio::task::spawn_blocking(move || {
+            app_ctx.system_tables().users().get_user_by_username(&username)
+        })
+        .await
+        .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))??;
+        if existing.is_some() {
             return Err(KalamDbError::AlreadyExists(format!(
                 "User '{}' already exists",
                 statement.username
@@ -61,8 +66,9 @@ impl TypedStatementHandler<CreateUserStatement> for CreateUserHandler {
                         .map_err(|e| KalamDbError::InvalidOperation(e.to_string()))?;
                 }
                 let bcrypt_cost = self.app_context.config().auth.bcrypt_cost;
-                let hash =
-                    bcrypt::hash(raw, bcrypt_cost).into_kalamdb_error("Password hash error")?;
+                let hash = hash_password(&raw, Some(bcrypt_cost))
+                    .await
+                    .map_err(|e| KalamDbError::InvalidOperation(format!("Password hash error: {}", e)))?;
                 (hash, None)
             },
             AuthType::OAuth => {

@@ -1,8 +1,10 @@
 //! Exponential backoff with jitter.
 
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use super::time::now_nanos;
+fn now_nanos() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos() as u64
+}
 
 pub fn jittered_exponential_backoff(base: Duration, attempt: u32, max: Duration) -> Duration {
     let base_ms = base.as_millis() as u64;

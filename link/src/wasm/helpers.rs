@@ -2,7 +2,12 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use wasm_bindgen::prelude::*;
-use web_sys::Request;
+use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::JsFuture;
+use web_sys::{Headers, MessageEvent, Request, RequestInit, RequestMode, Response};
+
+use super::console_log;
+use crate::compression;
 
 pub(crate) fn ws_url_from_http_opts(
     base_url: &str,
@@ -79,4 +84,107 @@ extern "C" {
 /// Returns a `js_sys::Promise` that resolves to a `Response`.
 pub(crate) fn fetch_request(request: &Request) -> js_sys::Promise {
     global_fetch_with_request(request)
+}
+
+/// Common HTTP fetch helper for WASM client methods.
+///
+/// Builds a CORS request with the given method, optional JSON body, and
+/// header list, executes `fetch()`, checks for HTTP errors, and returns the
+/// response body text.
+pub(crate) async fn wasm_fetch(
+    url: &str,
+    method: &str,
+    body: Option<&str>,
+    headers: &[(&str, &str)],
+    error_prefix: &str,
+) -> Result<String, JsValue> {
+    let opts = RequestInit::new();
+    opts.set_method(method);
+    opts.set_mode(RequestMode::Cors);
+
+    let h = Headers::new()?;
+    for &(name, value) in headers {
+        h.set(name, value)?;
+    }
+    opts.set_headers(&h);
+
+    if let Some(b) = body {
+        opts.set_body(&JsValue::from_str(b));
+    }
+
+    let request = Request::new_with_str_and_init(url, &opts)?;
+    let resp_value = JsFuture::from(fetch_request(&request)).await?;
+    let resp: Response = resp_value.dyn_into()?;
+
+    if !resp.ok() {
+        let status = resp.status();
+        let text = JsFuture::from(resp.text()?).await?;
+        let error_msg =
+            text.as_string().unwrap_or_else(|| format!("{}: HTTP {}", error_prefix, status));
+        return Err(JsValue::from_str(&error_msg));
+    }
+
+    let json = JsFuture::from(resp.text()?).await?;
+    Ok(json.as_string().unwrap_or_default())
+}
+
+/// Decode a WebSocket `MessageEvent` into a UTF-8 `String`.
+///
+/// Handles text (`JsString`), binary (`ArrayBuffer` — decompressed via gzip),
+/// `Blob` fallback, and unknown types. Returns `None` when the payload cannot
+/// be decoded (with a diagnostic logged to the JS console).
+pub(crate) fn decode_ws_message(e: &MessageEvent) -> Option<String> {
+    if let Ok(txt) = e.data().dyn_into::<js_sys::JsString>() {
+        return Some(String::from(txt));
+    }
+
+    if let Ok(array_buffer) = e.data().dyn_into::<js_sys::ArrayBuffer>() {
+        let uint8_array = js_sys::Uint8Array::new(&array_buffer);
+        let data = uint8_array.to_vec();
+
+        return match compression::decompress_gzip(&data) {
+            Ok(decompressed) => match String::from_utf8(decompressed) {
+                Ok(s) => Some(s),
+                Err(e) => {
+                    console_log(&format!(
+                        "KalamClient: Invalid UTF-8 in decompressed message: {}",
+                        e
+                    ));
+                    None
+                },
+            },
+            Err(e) => {
+                console_log(&format!("KalamClient: Failed to decompress message: {}", e));
+                None
+            },
+        };
+    }
+
+    if e.data().is_instance_of::<web_sys::Blob>() {
+        console_log(
+            "KalamClient: Received Blob message - binary mode may be misconfigured. Attempting to read as text.",
+        );
+        return e.data().as_string();
+    }
+
+    // Unknown message type — log diagnostics
+    let data = e.data();
+    let type_name = js_sys::Reflect::get(&data, &"constructor".into())
+        .ok()
+        .and_then(|c| js_sys::Reflect::get(&c, &"name".into()).ok())
+        .and_then(|n| n.as_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let typeof_str = data.js_typeof().as_string().unwrap_or_else(|| "?".to_string());
+    let data_preview = js_sys::JSON::stringify(&data)
+        .ok()
+        .and_then(|s| s.as_string())
+        .unwrap_or_else(|| format!("{:?}", data));
+
+    console_log(&format!(
+        "KalamClient: Received unknown message type: constructor={}, typeof={}, preview={}",
+        type_name,
+        typeof_str,
+        &data_preview[..data_preview.len().min(200)]
+    ));
+    None
 }

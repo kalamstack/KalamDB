@@ -103,8 +103,6 @@ impl StorageKey for JobNodeId {
             return Ok(key);
         }
 
-        // Legacy delimiter-based format fallback
-        let s = String::from_utf8(bytes.to_vec()).map_err(|e| e.to_string())?;
-        JobNodeId::from_string(&s)
+        Err("Invalid job node ID storage key".to_string())
     }
 }

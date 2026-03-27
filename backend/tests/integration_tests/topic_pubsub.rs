@@ -89,8 +89,6 @@ async fn wait_until_group_reads_at_least(
     let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(20);
     let mut seen_offsets = std::collections::HashSet::<(u32, u64)>::new();
     let mut aggregated_messages: Vec<HttpConsumeMessage> = Vec::new();
-    let mut next_offset = 0u64;
-    let mut has_more = false;
 
     loop {
         let request_body = json!({
@@ -113,8 +111,8 @@ async fn wait_until_group_reads_at_least(
         let response: HttpConsumeResponse = serde_json::from_value(payload)
             .expect("Consume payload should match HttpConsumeResponse");
 
-        next_offset = response.next_offset;
-        has_more = response.has_more;
+        let response_next_offset = response.next_offset;
+        let response_has_more = response.has_more;
         for message in &response.messages {
             if seen_offsets.insert((message.partition_id, message.offset)) {
                 aggregated_messages.push(message.clone());
@@ -124,8 +122,8 @@ async fn wait_until_group_reads_at_least(
         if aggregated_messages.len() >= min_messages {
             return HttpConsumeResponse {
                 messages: aggregated_messages,
-                next_offset,
-                has_more,
+                next_offset: response_next_offset,
+                has_more: response_has_more,
             };
         }
 

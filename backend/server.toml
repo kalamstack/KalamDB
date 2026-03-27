@@ -14,10 +14,9 @@ host = "0.0.0.0"
 port = 8080
 
 # Number of worker threads (0 = number of CPU cores)
-# INCREASED FOR TEST LOAD: More workers handle concurrent test connections
-# macOS has limited ephemeral ports (~16K), so more workers help process
-# connections faster, reducing TIME_WAIT port exhaustion
-workers = 24
+# Each worker adds ~2 MB idle RSS. For development, 4 workers is sufficient.
+# For production, 0 (auto) uses all CPU cores.
+workers = 0
 
 # Enable HTTP/2 protocol support (default: true)
 # When true, server uses automatic HTTP/1.1 and HTTP/2 cleartext (h2c) negotiation
@@ -28,10 +27,6 @@ workers = 24
 # - Binary protocol (more efficient parsing)
 # - Server push support (for future features)
 enable_http2 = true
-
-# API version (default: "v1")
-# Controls the versioned endpoint prefix (e.g., /v1/api/sql)
-api_version = "v1"
 
 [storage]
 # Base data directory for all KalamDB storage
@@ -51,42 +46,47 @@ shared_tables_template = "{namespace}/{tableName}"
 user_tables_template = "{namespace}/{tableName}/{userId}"
 
 [storage.rocksdb]
-# Write buffer size per column family in bytes (default: 512KB)
-# Lower values reduce memory with many column families
-# Formula: memory ~= write_buffer_size × max_write_buffers × num_column_families
-# MEMORY OPTIMIZATION: Reduced from 2MB to 512KB (saves ~100MB+ with many CFs)
-write_buffer_size = 524288
+# Block cache size for reads in bytes (default: 2MB)
+# Shared LRU cache across all column families
+block_cache_size = 2097152
 
-# Maximum number of write buffers (default: 2)
-# Allows writes to continue while buffers are being flushed
-# MEMORY OPTIMIZATION: Reduced from 6 to 2 (saves ~4x memory per CF)
+# Maximum number of background compaction/flush jobs.
+max_background_jobs = 2
+
+[storage.rocksdb.cf_profiles.system_meta]
+write_buffer_size = 32768
 max_write_buffers = 2
 
-# Block cache size for reads in bytes (default: 4MB)
-# Shared LRU cache across all column families
-# MEMORY OPTIMIZATION: Reduced from 16MB to 4MB for idle server
-block_cache_size = 4194304
+[storage.rocksdb.cf_profiles.system_index]
+write_buffer_size = 32768
+max_write_buffers = 2
 
-# Maximum number of background compaction/flush jobs (default: 4)
-max_background_jobs = 4
+[storage.rocksdb.cf_profiles.hot_data]
+write_buffer_size = 131072
+max_write_buffers = 2
+
+[storage.rocksdb.cf_profiles.hot_index]
+write_buffer_size = 65536
+max_write_buffers = 2
+
+[storage.rocksdb.cf_profiles.raft]
+write_buffer_size = 262144
+max_write_buffers = 2
 
 [datafusion]
-# Memory limit for query execution in bytes (default: 256MB)
-# Queries exceeding this limit will be terminated
-memory_limit = 268435456
+# Memory limit for query execution in bytes (default: 64MB)
+# KalamDB is optimised for mobile/OLTP workloads, not heavy analytics.
+# 64 MB is sufficient for key-based lookups and small aggregates.
+memory_limit = 67108864
 
-# Number of parallel threads for query execution (default: number of CPU cores)
-# Set to 0 to auto-detect CPU count
-query_parallelism = 0
+# Number of parallel threads for query execution (default: 2)
+query_parallelism = 2
 
-# Maximum number of partitions per query (default: 8)
-# Higher values increase parallelism but use more resources
-max_partitions = 8
+# Maximum number of partitions per query (default: 4)
+max_partitions = 2
 
-# Batch size for record processing (default: 2048 rows)
-# Lower batch size reduces memory pressure
-# MEMORY OPTIMIZATION: Reduced from 4096 to 2048 rows
-batch_size = 2048
+# Batch size for record processing (default: 1024 rows)
+batch_size = 1024
 
 [flush]
 # Default row limit for flush policies (default: 10000 rows)
@@ -103,10 +103,19 @@ default_time_interval = 300
 # Set to 0 to load all rows at once (not recommended for large tables)
 flush_batch_size = 10000
 
+# How often the background scheduler checks for tables with pending writes
+# and creates flush jobs (default: 60 seconds). Set to 0 to disable.
+check_interval_seconds = 60
+
 [retention]
 # Default retention hours for soft-deleted rows (default: 168 hours = 7 days)
 # Rows with _deleted=true will be kept in Parquet files for this duration
 default_deleted_retention_hours = 168
+
+# Enable periodic dba.stats collection (default: true)
+# Set to false to disable the background stats recorder, saving memory and CPU
+# in resource-constrained environments (e.g. Docker containers).
+enable_dba_stats = false
 
 # Number of days to preserve samples in dba.stats (default: 7 days)
 # Set to 0 to disable automatic cleanup of historical DBA metrics
@@ -156,7 +165,7 @@ default_query_limit = 50
 
 [logging]
 # Log level: error, warn, info, debug, trace (default: info)
-level = "debug"
+level = "info"
 
 # Directory for all log files (default: "./logs")
 # Server will create app.log, slow.log, and other log files in this directory
@@ -270,8 +279,8 @@ ban_duration_seconds = 300
 # Set to false to completely disable rate limiting (NOT recommended for production)
 enable_connection_protection = true
 
-# Maximum cached entries for rate limiting state (default: 100,000)
-cache_max_entries = 100000
+# Maximum cached entries for rate limiting state (default: 1,000)
+cache_max_entries = 1000
 
 # Time-to-idle for cached entries in seconds (default: 600 = 10 minutes)
 cache_ttl_seconds = 600
@@ -450,12 +459,12 @@ max_parameter_size_bytes = 524288
 # # This node's unique ID (must be >= 1)
 # # Node with node_id=1 is the designated bootstrap node
 node_id = 1
-# 
-# # RPC address for Raft inter-node communication
-# rpc_addr = "127.0.0.1:9188"
-# 
-# # API address advertised to peers/clients (should be reachable, not 0.0.0.0)
-# api_addr = "127.0.0.1:8080"
+
+# RPC address for Raft inter-node communication
+rpc_addr = "0.0.0.0:9188"
+
+# API address advertised to peers/clients
+api_addr = "0.0.0.0:8080"
 # #
 # # Optional mTLS for inter-node gRPC (Raft + cluster RPC)
 # # [cluster.rpc_tls]
@@ -503,7 +512,7 @@ user_shards = 8
 # #   max_snapshots_to_keep = 1   # Keep only the most recent snapshot (minimal disk usage)
 # #   max_snapshots_to_keep = 3   # Keep last 3 snapshots (balanced approach)
 # #   max_snapshots_to_keep = 0   # Keep all snapshots (useful for backup/recovery)
-# max_snapshots_to_keep = 3
+max_snapshots_to_keep = 1
 # 
 # # Timeout in milliseconds to wait for learner catchup during cluster membership changes
 # # (default: 5000ms = 5 seconds)

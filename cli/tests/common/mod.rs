@@ -1176,8 +1176,6 @@ pub fn test_context() -> &'static TestContext {
         let mut server_url = parse_test_arg("--url")
             .or_else(|| std::env::var("KALAMDB_SERVER_URL").ok())
             .unwrap_or_else(|| "http://127.0.0.1:8080".to_string());
-        let mut auto_started = false;
-
         // ── Branch by server type ─────────────────────────────────
         match server_type {
             Some(ServerType::Running) => {
@@ -1214,7 +1212,6 @@ pub fn test_context() -> &'static TestContext {
                         storage_dir.to_string_lossy().to_string(),
                     );
                     server_url = auto_url;
-                    auto_started = true;
                     eprintln!("✅ [TEST] Auto-started fresh server at {}", server_url);
                 } else {
                     panic!(
@@ -1265,7 +1262,6 @@ pub fn test_context() -> &'static TestContext {
                             storage_dir.to_string_lossy().to_string(),
                         );
                         server_url = auto_url;
-                        auto_started = true;
                         eprintln!("✅ [TEST] Auto-started fresh server at {}", server_url);
                     } else {
                         panic!(
@@ -3920,6 +3916,9 @@ impl SubscriptionListener {
                         }
                     }
                 }
+
+                let _ = subscription.close().await;
+                client.disconnect().await;
             });
         });
 

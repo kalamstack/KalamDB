@@ -173,21 +173,6 @@ impl TableVersionId {
             }
         }
 
-        // Legacy delimiter-based format fallback
-        let key_str = std::str::from_utf8(key).ok()?;
-        if let Some(base) = key_str.strip_suffix(LATEST_MARKER) {
-            let table_id = TableId::from_storage_key(base.as_bytes())?;
-            return Some(Self::latest(table_id));
-        }
-
-        if let Some(pos) = key_str.find(VERSION_MARKER) {
-            let base = &key_str[..pos];
-            let version_str = &key_str[pos + VERSION_MARKER.len()..];
-            let table_id = TableId::from_storage_key(base.as_bytes())?;
-            let version = version_str.parse::<u32>().ok()?;
-            return Some(Self::versioned(table_id, version));
-        }
-
         None
     }
 }

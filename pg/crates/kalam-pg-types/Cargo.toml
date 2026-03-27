@@ -1,0 +1,12 @@
+[package]
+name = "kalam-pg-types"
+version = { workspace = true }
+edition = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[dependencies]
+kalam-pg-common = { path = "../kalam-pg-common" }
+kalamdb-commons = { path = "../../../backend/crates/kalamdb-commons", default-features = false, features = ["serde"] }
+

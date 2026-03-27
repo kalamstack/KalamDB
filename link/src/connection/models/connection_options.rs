@@ -2,7 +2,38 @@ use serde::{Deserialize, Serialize};
 
 use crate::timestamp::{TimestampFormat, TimestampFormatter};
 
-use super::http_version::HttpVersion;
+/// HTTP protocol version to use for connections.
+///
+/// HTTP/2 provides benefits like multiplexing multiple requests over a single
+/// connection, header compression, and improved performance for multiple
+/// concurrent requests.
+///
+/// # Example
+///
+/// ```rust
+/// use kalam_link::{ConnectionOptions, HttpVersion};
+///
+/// let options = ConnectionOptions::new()
+///     .with_http_version(HttpVersion::Http2);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "wasm", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "wasm", tsify(into_wasm_abi, from_wasm_abi))]
+#[serde(rename_all = "lowercase")]
+pub enum HttpVersion {
+    /// HTTP/1.1 (default) - widely compatible, one request per connection
+    #[default]
+    #[serde(rename = "http1", alias = "http/1.1", alias = "1.1")]
+    Http1,
+
+    /// HTTP/2 - multiplexed requests, header compression, better performance
+    #[serde(rename = "http2", alias = "http/2", alias = "2")]
+    Http2,
+
+    /// Automatic - let the client negotiate the best version with the server
+    #[serde(rename = "auto")]
+    Auto,
+}
 
 /// Connection-level options for the WebSocket/HTTP client.
 ///
@@ -67,7 +98,7 @@ pub struct ConnectionOptions {
     /// interval to prevent the server-side heartbeat timeout from firing
     /// on idle connections.
     ///
-    /// Set to `0` to disable.  Default: `30_000` (30 seconds).
+    /// Set to `0` to disable.  Default: `5_000` (5 seconds).
     #[serde(default = "default_ping_interval_ms")]
     pub ping_interval_ms: u64,
 
@@ -123,7 +154,7 @@ fn default_max_reconnect_delay_ms() -> u64 {
 }
 
 fn default_ping_interval_ms() -> u64 {
-    30000
+    5000
 }
 
 fn default_ws_lazy_connect() -> bool {
@@ -139,7 +170,7 @@ impl Default for ConnectionOptions {
             max_reconnect_delay_ms: 30000,
             max_reconnect_attempts: None,
             timestamp_format: TimestampFormat::Iso8601,
-            ping_interval_ms: 30000,
+            ping_interval_ms: 5000,
             ws_local_bind_addresses: Vec::new(),
             disable_compression: false,
             ws_lazy_connect: true,

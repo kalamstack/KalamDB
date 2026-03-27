@@ -36,10 +36,6 @@ fn health_url() -> String {
     format!("{}/health", server_url())
 }
 
-fn cluster_health_url() -> String {
-    format!("{}/v1/api/cluster/health", server_url())
-}
-
 fn login_url() -> String {
     format!("{}/v1/api/auth/login", server_url())
 }

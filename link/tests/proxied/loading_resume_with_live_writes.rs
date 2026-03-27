@@ -1,5 +1,4 @@
 use super::helpers::*;
-use crate::common;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
 use kalam_link::models::BatchStatus;
 use kalam_link::seq_tracking::row_seq;
@@ -74,7 +73,7 @@ async fn test_loading_snapshot_with_live_writes_resumes_without_duplicate_rows()
             },
         };
 
-        let proxy = TcpDisconnectProxy::start(common::server_url()).await;
+        let proxy = TcpDisconnectProxy::start(upstream_server_url()).await;
         let (client, connect_count, disconnect_count) =
             match create_test_client_with_events_for_base_url(proxy.base_url()) {
                 Ok(v) => v,

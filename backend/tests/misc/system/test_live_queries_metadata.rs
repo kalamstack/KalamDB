@@ -23,7 +23,7 @@ async fn test_live_queries_metadata() {
     let connection_state = registration.state;
 
     // Authenticate the connection
-    connection_state.write().mark_authenticated(user_id.clone(), Role::User);
+    connection_state.mark_authenticated(user_id.clone(), Role::User);
     registry.on_authenticated(&conn_id, user_id.clone());
 
     let create_ns = format!("CREATE NAMESPACE IF NOT EXISTS {}", ns);
@@ -140,7 +140,7 @@ async fn test_cleanup_connection_removes_live_queries_and_registry_state() {
         .expect("Failed to register connection");
     let connection_state = registration.state;
 
-    connection_state.write().mark_authenticated(user_id.clone(), Role::User);
+    connection_state.mark_authenticated(user_id.clone(), Role::User);
     registry.on_authenticated(&conn_id, user_id.clone());
 
     let create_ns = format!("CREATE NAMESPACE IF NOT EXISTS {}", ns);

@@ -13,6 +13,12 @@ This file references the main `AGENTS.md` which contains:
 
 Always refer to `AGENTS.md` for the most up-to-date guidelines and best practices.
 
+Priority reminders from `AGENTS.md`:
+- Keep performance as a primary constraint, including compile-time and hot-path costs.
+- Batch related edits before running `cargo check` or `cargo build`.
+- For performance tests, report per-test runtime in seconds.
+- When adding dependencies, enable only the minimal required features.
+
 ## Active Technologies
 - Rust 1.90 (edition 2021) + DataFusion 40, Apache Arrow 52, Apache Parquet 52, Actix-Web 4, `kalamdb-store` EntityStore traits, `kalamdb-commons` system models (007-user-auth)
 - RocksDB 0.24 for buffered writes, Parquet files for flushed segments via StorageBackend abstraction (007-user-auth)

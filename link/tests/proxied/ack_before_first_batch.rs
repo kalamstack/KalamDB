@@ -1,5 +1,4 @@
 use super::helpers::*;
-use crate::common;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
 use kalam_link::{models::BatchStatus, ChangeEvent, SubscriptionConfig, SubscriptionOptions};
 use std::collections::HashSet;
@@ -21,7 +20,7 @@ async fn test_disconnect_after_ack_before_first_initial_batch() {
             },
         };
 
-        let proxy = TcpDisconnectProxy::start(common::server_url()).await;
+        let proxy = TcpDisconnectProxy::start(upstream_server_url()).await;
         let (client, connect_count, disconnect_count) =
             match create_test_client_with_events_for_base_url(proxy.base_url()) {
                 Ok(v) => v,

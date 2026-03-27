@@ -1,0 +1,10 @@
+# pg_kalam runtime — prebuilt extension + stock PostgreSQL 16.
+# Requires artifacts/ to contain pg_kalam.so, pg_kalam.control, pg_kalam--*.sql
+#
+# Build (from repo root):
+#   docker build -f pg/docker/Dockerfile.runtime -t kalamdb-pg:latest pg/docker
+FROM postgres:16-bookworm
+
+COPY artifacts/pg_kalam.so           /usr/lib/postgresql/16/lib/
+COPY artifacts/pg_kalam.control      /usr/share/postgresql/16/extension/
+COPY artifacts/pg_kalam--*.sql       /usr/share/postgresql/16/extension/

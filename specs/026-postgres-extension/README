@@ -1,0 +1,289 @@
+# KalamDB PostgreSQL Extension – Remote-First Design Specification
+
+## Companion Documents
+
+This specification is complemented by the following focused documents:
+
+* [Priority Shift and Scope Status](./priority-shift.md)
+* [Code Organization Plan (current)](./reorganization-plan-v2.md)
+* [Code Organization Plan (superseded)](./reorganization-plan.md)
+* [Transactional FDW Semantics](./transactional-fdw.md)
+* [Direct EntityStore DML Path](./direct-entitystore-dml.md)
+* [Implementation Status and Agent Handoff](./implementation-status-handoff.md)
+* [Legacy Dual-Mode Detailed Reference](./legacy-dual-mode-reference.md)
+
+## 1. Decision Summary
+
+The PostgreSQL extension operates in **remote-only mode**.
+
+The target is:
+
+* a PostgreSQL extension built with `pgrx`
+* an FDW surface inside PostgreSQL
+* typed RPC communication to an external KalamDB server
+
+Embedded mode has been fully removed from the codebase. All `kalam-pg-embedded` code, `#[cfg(feature = "embedded")]` guards, and embedded-specific SQL functions have been deleted.
+
+No previously written design detail should be treated as discarded unless explicitly contradicted. Earlier work that explored dual-mode and embedded-heavy options is preserved in [legacy-dual-mode-reference.md](/Users/jamal/git/KalamDB/specs/026-postgres-extension/legacy-dual-mode-reference.md) as historical reference.
+
+## 2. Objectives
+
+The goal of this design is to let PostgreSQL users access **KalamDB** tables directly from PostgreSQL and join them with native PostgreSQL tables through a **Foreign Data Wrapper (FDW)**.
+
+The baseline table families are:
+
+* user tables
+* shared tables
+* stream tables
+
+The remote-first design must preserve KalamDB core behavior, including:
+
+* typed access to table families
+* MVCC-aware reads
+* stream/TTL behavior
+* future transaction participation
+* access control and row visibility enforcement on the KalamDB side
+
+Key principle:
+
+👉 **Do not forward SQL for normal scans. Operate through typed scan/mutation requests.**
+
+This allows:
+
+* PostgreSQL to remain the SQL planner for cross-source joins
+* KalamDB to stay responsible for its own typed execution, storage, and security rules
+* transport stability for the remote execution model
+
+## 3. Execution Mode
+
+### Remote mode
+
+```text
+           +-------------------+       typed RPC       +--------------------+
+           |   PostgreSQL FDW  | <-------------------> |   KalamDB Server   |
+           | (pgrx extension)  |                       | (DataFusion engine |
+           +-------------------+                       |  + storage + auth) |
+                     |                                 +--------------------+
+                     |
+      Postgres planner splits the query plan
+                     |
+    ┌────────────────┴─────────────┐
+    │        local PostgreSQL      │
+    └───────────────────────────────┘
+```
+
+In this mode:
+
+* PostgreSQL owns SQL parsing and planning
+* the FDW extracts projections, filters, limits, and mutation payloads
+* KalamDB receives typed requests over RPC
+* KalamDB executes against its normal runtime and storage stack
+
+## 4. High-Level Architecture
+
+### 4.1 Remote request model
+
+The FDW builds transport-level typed requests rather than SQL strings.
+
+Core request families:
+
+* `ScanRequest`
+* `InsertRequest`
+* `UpdateRequest`
+* `DeleteRequest`
+* transaction lifecycle requests in later phases
+
+Each request should contain typed identifiers instead of loosely structured strings wherever possible, for example:
+
+* table identifier
+* table type
+* session/user context
+* projection
+* filter expressions that can be safely represented in the transport layer
+* limit/order information where pushdown is supported
+
+### 4.1.1 Remote implementation constraints
+
+The remote implementation should follow these constraints:
+
+* keep `kalamdb-server` lightweight and avoid pushing PostgreSQL-specific logic directly into the main server crate
+* add the new remote PostgreSQL bridge logic in a dedicated backend crate, expected to be `backend/crates/kalamdb-pg`
+* reuse the existing tonic/prost/gRPC infrastructure already present in the backend where practical, rather than inventing a second transport stack
+* prefer mounting `kalamdb-pg` onto the existing tonic server startup used by `kalamdb-raft` instead of introducing a second independent gRPC server stack
+* keep the PostgreSQL extension thin and lightweight, with most transport/session logic living in shared `kalam-pg-*` crates and the new backend `kalamdb-pg` crate
+* make session handling explicit between PostgreSQL and KalamDB instead of treating every request as unrelated anonymous execution
+* propagate the PostgreSQL current schema / default schema to KalamDB session state so DataFusion session creation respects the PostgreSQL-side namespace choice
+* authenticate PostgreSQL remote RPCs through lightweight gRPC metadata in the same transport style used by existing cluster RPCs, while keeping PostgreSQL clients separate from cluster-node authorization rules
+* centralize direct DML handling carefully so FDW mutations bypass SQL reparsing without scattering fragile write-path code across unrelated modules
+
+The working default assumption for the first remote implementation is:
+
+* one lazily opened KalamDB session per PostgreSQL backend connection
+* schema/default-namespace updates carried on that session
+* transaction state attached to that session when a PostgreSQL transaction begins to interact with Kalam foreign tables
+* a shared authorization token carried in gRPC metadata on each request until a richer dedicated PG remote auth model is added
+
+### 4.2 Server-side execution
+
+The KalamDB server should execute FDW requests through the normal typed runtime path:
+
+* resolve table provider / execution target
+* enforce authorization and visibility rules
+* read or mutate data through typed internal services
+* publish live-query / subscription changes when relevant
+
+The server must not depend on reparsing extension-generated SQL for standard FDW operations.
+
+The preferred layering is:
+
+* `kalamdb-server` does minimal wiring only
+* `kalamdb-pg` owns the PostgreSQL-facing remote service implementation
+* `kalamdb-pg` uses existing `AppContext`, `ExecutionContext`, table providers, and existing backend transport patterns
+* `kalamdb-server` registers the `kalamdb-pg` service during startup rather than embedding the behavior directly in its core lifecycle logic
+* `kalamdb-pg` should reuse existing core write primitives such as the applier / direct DML executor path where they fit, instead of creating a duplicate mutation engine
+
+### 4.3 Request contract design
+
+The FDW communicates with KalamDB through typed requests over gRPC.
+The extension-facing contract uses typed request/response structs
+(`ScanRequest`, `InsertRequest`, etc.) that the remote executor serializes
+for transport to the KalamDB server.
+
+## 5. PostgreSQL FDW Surface
+
+### 5.1 Extension packaging
+
+The extension is packaged as `pg_kalam` and implemented with `pgrx`.
+
+It provides the required FDW callbacks, including:
+
+* scan planning callbacks
+* scan execution callbacks
+* foreign modification callbacks for `INSERT`, `UPDATE`, and `DELETE`
+* transaction lifecycle integration
+
+### 5.2 Foreign server configuration
+
+The primary server model is remote:
+
+```sql
+CREATE EXTENSION pg_kalam;
+
+CREATE SERVER kalam_server FOREIGN DATA WRAPPER pg_kalam
+  OPTIONS (
+    host '127.0.0.1',
+    port '50051'
+  );
+```
+
+Authentication/session options should also be modeled as remote-server concerns.
+
+The first remote implementation should keep this surface small:
+
+* host
+* port
+* authentication token or equivalent remote credential source
+
+### 5.3 Foreign table definition
+
+Example:
+
+```sql
+CREATE FOREIGN TABLE kalam_messages (
+  id BIGINT,
+  content TEXT,
+  created_at TIMESTAMP,
+  embedding vector(384)
+) SERVER kalam_server
+  OPTIONS (
+    namespace 'app',
+    table 'messages',
+    table_type 'user'
+  );
+```
+
+Session-scoped user identity may be supplied through PostgreSQL session settings or authenticated server options so the FDW can pass tenant/user context with each request.
+
+## 6. Execution Flow
+
+The intended remote-first flow is:
+
+1. PostgreSQL planner invokes the FDW.
+2. The FDW opens or reuses a lightweight remote KalamDB session for the current PostgreSQL backend connection.
+3. The FDW updates remote session state when needed, including current schema/default namespace.
+4. The FDW extracts pushdown-safe scan or mutation data.
+5. The FDW builds a typed request.
+6. Remote mode sends that request to KalamDB over RPC.
+7. KalamDB executes through typed internal services and returns Arrow-compatible results or mutation outcomes.
+8. The FDW converts results into PostgreSQL tuples.
+
+### 6.1 Session behavior
+
+The remote design should explicitly support server-side sessions between PostgreSQL and KalamDB.
+
+Minimum session responsibilities:
+
+* identify the PostgreSQL backend connection / foreign server usage
+* carry authenticated identity and role information
+* track current schema / default namespace
+* allow transaction metadata to attach to an existing session
+* give the server a stable place to hang per-connection execution state without re-bootstrap on every request
+
+The first implementation should prefer a lightweight session registry in `kalamdb-pg` over invasive changes to the global server architecture.
+
+### 6.2 Initial transport/auth handshake
+
+The first remote transport slice should establish the following minimal behavior before broader scan/DML work continues:
+
+1. the PostgreSQL-side remote client can connect to the KalamDB gRPC endpoint
+2. the client sends authorization metadata on every remote request
+3. the backend `kalamdb-pg` service validates that metadata before serving the request
+4. the client can successfully issue a `ping`
+5. the client can open or reuse a remote session while sending PostgreSQL current schema/default namespace
+6. the server returns stable session identity and stored schema for later scan/DML reuse
+
+This handshake is the minimum proof that the extension and KalamDB server are actually connected in remote mode.
+
+For the first end-to-end server mount, it is acceptable to bootstrap this shared RPC credential from an existing server secret if that avoids introducing a second server listener or a large new config surface. That bootstrap choice should be treated as transitional until a dedicated PostgreSQL remote RPC credential model is added.
+
+## 7. Scope Guidance
+
+### In scope now
+
+* remote FDW scans
+* remote FDW mutations
+* typed request/response contracts
+* transaction-aware design for remote mode
+
+### Explicitly de-prioritized now
+
+* embedded-specific storage experiments
+* embedded-only table-model experiments
+* design work that exists only to optimize in-process execution
+
+### Future removal path
+
+If embedded mode is removed later, the desired outcome is:
+
+* no change to the FDW SQL surface users already adopted
+* minimal or no change to typed request semantics
+* deletion of the embedded adapter without redesigning the remote architecture
+
+## 8. Non-Goals
+
+This document does not require:
+
+* generic SQL forwarding into KalamDB for standard FDW operations
+* PostgreSQL to become KalamDB's storage engine
+* embedded mode to remain a permanent supported architecture
+* embedded-specific optimization work as a blocker for remote delivery
+
+## 9. Acceptance Criteria
+
+This specification is aligned when all of the following are true:
+
+1. The folder reads consistently as a remote-first design.
+2. Transaction and DML requirements are specified primarily for remote execution.
+3. Embedded mode is clearly retained only as temporary transitional scope.
+4. No companion document assumes embedded mode is the primary execution model.
+5. A minimal authenticated connectivity test proves the extension-side remote client can `ping` and `open_session` against the backend `kalamdb-pg` service.

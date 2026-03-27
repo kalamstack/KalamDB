@@ -11,7 +11,23 @@
 /// ## Tables vs Views
 /// - **Tables**: Persisted in RocksDB, have a column family
 /// - **Views**: Computed on-demand, no storage backing
+use crate::constants::ColumnFamilyNames;
 use crate::models::TableId;
+
+/// Memory/performance profile applied to a RocksDB column family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ColumnFamilyProfile {
+    /// System metadata tables and compatibility partitions.
+    SystemMeta,
+    /// System-maintained secondary indexes.
+    SystemIndex,
+    /// User/shared/stream data partitions and append-heavy message stores.
+    HotData,
+    /// PK and vector indexes that are latency-sensitive but smaller than data CFs.
+    HotIndex,
+    /// Raft log/state CF.
+    Raft,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SystemTable {
@@ -139,6 +155,11 @@ impl SystemTable {
             | SystemTable::Tables
             | SystemTable::Columns => None,
         }
+    }
+
+    /// Returns the RocksDB tuning profile for this persisted system table.
+    pub fn column_family_profile(&self) -> ColumnFamilyProfile {
+        ColumnFamilyProfile::SystemMeta
     }
 
     /// Parse from table name (with or without "system." prefix)
@@ -298,10 +319,6 @@ impl SystemTable {
 pub enum StoragePartition {
     /// Unified information_schema.tables storage
     InformationSchemaTables,
-    /// Legacy system columns metadata (kept for compatibility) TODO: Remove
-    SystemColumns,
-    /// User table flush counters
-    UserTableCounters, //TODO: Remove it not needed anymore
     /// Username index for system.users (unique index)
     SystemUsersUsernameIdx,
     /// Role index for system.users (non-unique index)
@@ -325,8 +342,6 @@ impl StoragePartition {
     pub fn name(&self) -> &'static str {
         match self {
             StoragePartition::InformationSchemaTables => "information_schema_tables",
-            StoragePartition::SystemColumns => "system_columns",
-            StoragePartition::UserTableCounters => "user_table_counters",
             StoragePartition::SystemUsersUsernameIdx => "system_users_username_idx",
             StoragePartition::SystemUsersRoleIdx => "system_users_role_idx",
             StoragePartition::SystemUsersDeletedAtIdx => "system_users_deleted_at_idx",
@@ -338,6 +353,37 @@ impl StoragePartition {
         }
     }
 
+    /// Returns the RocksDB tuning profile for this named partition.
+    pub fn column_family_profile(&self) -> ColumnFamilyProfile {
+        match self {
+            StoragePartition::SystemUsersUsernameIdx
+            | StoragePartition::SystemUsersRoleIdx
+            | StoragePartition::SystemUsersDeletedAtIdx
+            | StoragePartition::ManifestPendingWriteIdx
+            | StoragePartition::SystemJobsStatusIdx
+            | StoragePartition::SystemJobsIdempotencyIdx
+            | StoragePartition::SystemLiveQueriesTableIdx => ColumnFamilyProfile::SystemIndex,
+            StoragePartition::InformationSchemaTables
+            | StoragePartition::ManifestCache => ColumnFamilyProfile::SystemMeta,
+        }
+    }
+
+    /// Parse a persisted partition name into a known static partition.
+    pub fn from_partition_name(name: &str) -> Option<Self> {
+        match name {
+            "information_schema_tables" => Some(StoragePartition::InformationSchemaTables),
+            "system_users_username_idx" => Some(StoragePartition::SystemUsersUsernameIdx),
+            "system_users_role_idx" => Some(StoragePartition::SystemUsersRoleIdx),
+            "system_users_deleted_at_idx" => Some(StoragePartition::SystemUsersDeletedAtIdx),
+            "manifest_cache" => Some(StoragePartition::ManifestCache),
+            "manifest_pending_write_idx" => Some(StoragePartition::ManifestPendingWriteIdx),
+            "system_jobs_status_idx" => Some(StoragePartition::SystemJobsStatusIdx),
+            "system_jobs_idempotency_idx" => Some(StoragePartition::SystemJobsIdempotencyIdx),
+            "system_live_queries_table_idx" => Some(StoragePartition::SystemLiveQueriesTableIdx),
+            _ => None,
+        }
+    }
+
     /// Returns a shared Partition reference for this named partition.
     pub fn partition(&self) -> &'static crate::storage::Partition {
         use crate::storage::Partition;
@@ -345,10 +391,6 @@ impl StoragePartition {
 
         static INFO: Lazy<Partition> =
             Lazy::new(|| Partition::new(StoragePartition::InformationSchemaTables.name()));
-        static COLUMNS: Lazy<Partition> =
-            Lazy::new(|| Partition::new(StoragePartition::SystemColumns.name()));
-        static COUNTERS: Lazy<Partition> =
-            Lazy::new(|| Partition::new(StoragePartition::UserTableCounters.name()));
         static USERNAME_IDX: Lazy<Partition> =
             Lazy::new(|| Partition::new(StoragePartition::SystemUsersUsernameIdx.name()));
         static ROLE_IDX: Lazy<Partition> =
@@ -368,8 +410,6 @@ impl StoragePartition {
 
         match self {
             StoragePartition::InformationSchemaTables => &INFO,
-            StoragePartition::SystemColumns => &COLUMNS,
-            StoragePartition::UserTableCounters => &COUNTERS,
             StoragePartition::SystemUsersUsernameIdx => &USERNAME_IDX,
             StoragePartition::SystemUsersRoleIdx => &ROLE_IDX,
             StoragePartition::SystemUsersDeletedAtIdx => &DELETED_AT_IDX,
@@ -380,6 +420,53 @@ impl StoragePartition {
             StoragePartition::ManifestPendingWriteIdx => &MANIFEST_PENDING_WRITE_IDX,
         }
     }
+}
+
+/// Classify an arbitrary RocksDB column-family name into a typed tuning profile.
+#[must_use]
+pub fn classify_column_family_name(name: &str) -> ColumnFamilyProfile {
+    if let Ok(table) = SystemTable::from_name(name) {
+        if table.column_family_name().is_some() {
+            return table.column_family_profile();
+        }
+    }
+
+    if let Some(partition) = StoragePartition::from_partition_name(name) {
+        return partition.column_family_profile();
+    }
+
+    if name == "raft_data" {
+        return ColumnFamilyProfile::Raft;
+    }
+
+    if name == "topic_messages" {
+        return ColumnFamilyProfile::HotData;
+    }
+
+    if name == "topic_offsets" {
+        return ColumnFamilyProfile::HotIndex;
+    }
+
+    if name.starts_with(ColumnFamilyNames::USER_TABLE_PREFIX)
+        || name.starts_with(ColumnFamilyNames::SHARED_TABLE_PREFIX)
+        || name.starts_with(ColumnFamilyNames::STREAM_TABLE_PREFIX)
+    {
+        return if name.ends_with("_pk_idx") {
+            ColumnFamilyProfile::HotIndex
+        } else {
+            ColumnFamilyProfile::HotData
+        };
+    }
+
+    if name.starts_with("vix_") {
+        return if name.ends_with("_pk_idx") {
+            ColumnFamilyProfile::HotIndex
+        } else {
+            ColumnFamilyProfile::HotData
+        };
+    }
+
+    ColumnFamilyProfile::SystemMeta
 }
 
 impl std::fmt::Display for SystemTable {
@@ -447,6 +534,44 @@ mod tests {
         );
         // Invalid
         assert!(SystemTable::from_name("invalid_table").is_err());
+    }
+
+    #[test]
+    fn test_static_column_family_profiles() {
+        assert_eq!(SystemTable::Users.column_family_profile(), ColumnFamilyProfile::SystemMeta);
+        assert_eq!(
+            StoragePartition::SystemUsersUsernameIdx.column_family_profile(),
+            ColumnFamilyProfile::SystemIndex
+        );
+        assert_eq!(
+            StoragePartition::ManifestCache.column_family_profile(),
+            ColumnFamilyProfile::SystemMeta
+        );
+    }
+
+    #[test]
+    fn test_dynamic_column_family_profiles() {
+        assert_eq!(
+            classify_column_family_name("shared_default:profiles"),
+            ColumnFamilyProfile::HotData
+        );
+        assert_eq!(
+            classify_column_family_name("shared_default:profiles_pk_idx"),
+            ColumnFamilyProfile::HotIndex
+        );
+        assert_eq!(
+            classify_column_family_name("vix_default:profiles_embedding_shared_ops"),
+            ColumnFamilyProfile::HotData
+        );
+        assert_eq!(
+            classify_column_family_name("vix_default:profiles_embedding_shared_pk_idx"),
+            ColumnFamilyProfile::HotIndex
+        );
+        assert_eq!(
+            classify_column_family_name("topic_messages"),
+            ColumnFamilyProfile::HotData
+        );
+        assert_eq!(classify_column_family_name("raft_data"), ColumnFamilyProfile::Raft);
     }
 
     #[test]

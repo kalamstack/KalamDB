@@ -37,7 +37,6 @@ pub mod ddl_parent;
 pub mod execute_as;
 pub mod parser;
 pub mod query_cache;
-pub mod statement_classifier;
 pub mod validation;
 
 // Re-export system models from kalamdb-commons (single source of truth)

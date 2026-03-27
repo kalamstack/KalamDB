@@ -4,7 +4,7 @@
 //! Used for primary key handling, display formatting, and serialization.
 
 use arrow_schema::DataType;
-use datafusion::scalar::ScalarValue;
+use datafusion_common::ScalarValue;
 
 /// Parse a string value into a ScalarValue with the specified Arrow DataType
 ///

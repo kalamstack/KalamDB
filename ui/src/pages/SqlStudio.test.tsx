@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { configureStore } from "@reduxjs/toolkit";
 import { Provider } from "react-redux";
 import { MemoryRouter } from "react-router-dom";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { SqlPreviewProvider } from "@/components/sql-preview";
 import SqlStudio from "@/pages/SqlStudio";
 import sqlStudioUiReducer from "@/features/sql-studio/state/sqlStudioUiSlice";
@@ -16,13 +16,17 @@ const mockSchemaTreeQuery = vi.fn();
 const mockExecuteSqlStudioQuery = vi.fn();
 const mockSubscribe = vi.fn();
 const mockSetClientLogListener = vi.fn();
+const mockSetClientDisconnectListener = vi.fn();
+const mockSetClientErrorListener = vi.fn();
 const mockSetClientReceiveListener = vi.fn();
 const mockSetClientSendListener = vi.fn();
 const mockUnsubscribe = vi.fn();
 
 let liveCallback: ((message: Record<string, unknown>) => void) | null = null;
+let clientDisconnectCallback: ((reason: Record<string, unknown>) => void) | null = null;
 let clientReceiveCallback: ((message: string) => void) | null = null;
 let clientSendCallback: ((message: string) => void) | null = null;
+let latestEditorCommand: (() => void) | null = null;
 
 vi.mock("@/lib/auth", () => ({
   useAuth: () => mockUseAuth(),
@@ -42,6 +46,8 @@ vi.mock("@/services/sqlStudioService", async () => {
 
 vi.mock("@/lib/kalam-client", () => ({
   subscribe: (...args: unknown[]) => mockSubscribe(...args),
+  setClientDisconnectListener: (...args: unknown[]) => mockSetClientDisconnectListener(...args),
+  setClientErrorListener: (...args: unknown[]) => mockSetClientErrorListener(...args),
   setClientLogListener: (...args: unknown[]) => mockSetClientLogListener(...args),
   setClientReceiveListener: (...args: unknown[]) => mockSetClientReceiveListener(...args),
   setClientSendListener: (...args: unknown[]) => mockSetClientSendListener(...args),
@@ -76,7 +82,19 @@ vi.mock("@monaco-editor/react", () => ({
   }: {
     value?: string;
     onChange?: (value: string) => void;
-    onMount?: (editor: { addCommand: () => void }, monaco: {
+    onMount?: (editor: {
+      addCommand: (_keybinding: number, callback: () => void) => void;
+      getSelection: () => {
+        startLineNumber: number;
+        startColumn: number;
+        endLineNumber: number;
+        endColumn: number;
+        isEmpty: () => boolean;
+      };
+      getModel: () => { getValueInRange: () => string };
+      onDidChangeCursorSelection: (listener: () => void) => { dispose: () => void };
+      onDidChangeModelContent: (listener: () => void) => { dispose: () => void };
+    }, monaco: {
       KeyMod: { CtrlCmd: number };
       KeyCode: { Enter: number };
       languages: {
@@ -85,9 +103,45 @@ vi.mock("@monaco-editor/react", () => ({
       };
     }) => void;
   }) => {
+    const selectionListenersRef = useRef(new Set<() => void>());
+    const contentListenersRef = useRef(new Set<() => void>());
+
     useEffect(() => {
       onMount?.(
-        { addCommand: () => {} },
+        {
+          addCommand: (_keybinding: number, callback: () => void) => {
+            latestEditorCommand = callback;
+          },
+          getSelection: () => {
+            const textarea = document.querySelector("textarea[aria-label='SQL editor']") as HTMLTextAreaElement | null;
+            const start = textarea?.selectionStart ?? 0;
+            const end = textarea?.selectionEnd ?? 0;
+            return {
+              startLineNumber: 1,
+              startColumn: start + 1,
+              endLineNumber: 1,
+              endColumn: end + 1,
+              isEmpty: () => start === end,
+            };
+          },
+          getModel: () => ({
+            getValueInRange: () => {
+              const textarea = document.querySelector("textarea[aria-label='SQL editor']") as HTMLTextAreaElement | null;
+              const currentValue = textarea?.value ?? value ?? "";
+              const start = textarea?.selectionStart ?? 0;
+              const end = textarea?.selectionEnd ?? 0;
+              return currentValue.slice(start, end);
+            },
+          }),
+          onDidChangeCursorSelection: (listener: () => void) => {
+            selectionListenersRef.current.add(listener);
+            return { dispose: () => selectionListenersRef.current.delete(listener) };
+          },
+          onDidChangeModelContent: (listener: () => void) => {
+            contentListenersRef.current.add(listener);
+            return { dispose: () => contentListenersRef.current.delete(listener) };
+          },
+        },
         {
           KeyMod: { CtrlCmd: 1 },
           KeyCode: { Enter: 1 },
@@ -108,7 +162,13 @@ vi.mock("@monaco-editor/react", () => ({
       <textarea
         aria-label="SQL editor"
         value={value ?? ""}
-        onChange={(event) => onChange?.(event.target.value)}
+        onChange={(event) => {
+          onChange?.(event.target.value);
+          contentListenersRef.current.forEach((listener) => listener());
+        }}
+        onSelect={() => {
+          selectionListenersRef.current.forEach((listener) => listener());
+        }}
       />
     );
   },
@@ -154,12 +214,16 @@ describe("SqlStudio page", () => {
       },
     );
     liveCallback = null;
+    clientDisconnectCallback = null;
     clientReceiveCallback = null;
     clientSendCallback = null;
+    latestEditorCommand = null;
     mockUseAuth.mockReset();
     mockSchemaTreeQuery.mockReset();
     mockExecuteSqlStudioQuery.mockReset();
     mockSubscribe.mockReset();
+    mockSetClientDisconnectListener.mockReset();
+    mockSetClientErrorListener.mockReset();
     mockSetClientLogListener.mockReset();
     mockSetClientReceiveListener.mockReset();
     mockSetClientSendListener.mockReset();
@@ -195,6 +259,10 @@ describe("SqlStudio page", () => {
       liveCallback = callback;
       return mockUnsubscribe;
     });
+    mockSetClientDisconnectListener.mockImplementation((callback?: (reason: Record<string, unknown>) => void) => {
+      clientDisconnectCallback = callback ?? null;
+    });
+    mockSetClientErrorListener.mockImplementation(() => {});
     mockSetClientReceiveListener.mockImplementation((callback?: (message: string) => void) => {
       clientReceiveCallback = callback ?? null;
     });
@@ -227,13 +295,86 @@ describe("SqlStudio page", () => {
     fireEvent.change(getSqlEditor(), {
       target: { value: "SELECT id, name FROM default.events" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /run query/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^execute$/i }));
 
     await waitFor(() => {
       expect(mockExecuteSqlStudioQuery).toHaveBeenCalledWith("SELECT id, name FROM default.events");
     });
 
     expect(await screen.findByText("Ada")).toBeTruthy();
+  });
+
+  it("executes the current selection and exposes execute options", async () => {
+    mockExecuteSqlStudioQuery.mockResolvedValue({
+      status: "success",
+      rows: [{ id: 1 }],
+      schema: [
+        { name: "id", dataType: "INT", index: 0, isPrimaryKey: true },
+      ],
+      tookMs: 5,
+      rowCount: 1,
+      logs: [],
+    });
+
+    renderSqlStudio();
+
+    const fullSql = "SELECT id FROM default.events; SELECT name FROM default.events";
+    const selectedSql = "SELECT id FROM default.events";
+
+    fireEvent.change(getSqlEditor(), {
+      target: { value: fullSql },
+    });
+
+    const editor = getSqlEditor() as HTMLTextAreaElement;
+    editor.setSelectionRange(0, selectedSql.length);
+    fireEvent.select(editor);
+
+    expect(screen.getByRole("button", { name: /execute selected/i })).toBeTruthy();
+
+    expect(screen.getByRole("button", { name: /execute options/i })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /execute selected/i }));
+
+    await waitFor(() => {
+      expect(mockExecuteSqlStudioQuery).toHaveBeenCalledWith(selectedSql);
+    });
+  });
+
+  it("executes via Cmd/Ctrl+Enter using the current selection when present", async () => {
+    mockExecuteSqlStudioQuery.mockResolvedValue({
+      status: "success",
+      rows: [{ id: 1 }],
+      schema: [
+        { name: "id", dataType: "INT", index: 0, isPrimaryKey: true },
+      ],
+      tookMs: 5,
+      rowCount: 1,
+      logs: [],
+    });
+
+    renderSqlStudio();
+
+    const fullSql = "SELECT id FROM default.events; SELECT name FROM default.events";
+    const selectedSql = "SELECT name FROM default.events";
+
+    fireEvent.change(getSqlEditor(), {
+      target: { value: fullSql },
+    });
+
+    const editor = getSqlEditor() as HTMLTextAreaElement;
+    const selectionStart = fullSql.indexOf(selectedSql);
+    editor.setSelectionRange(selectionStart, selectionStart + selectedSql.length);
+    fireEvent.select(editor);
+
+    expect(latestEditorCommand).toBeTypeOf("function");
+
+    await act(async () => {
+      latestEditorCommand?.();
+    });
+
+    await waitFor(() => {
+      expect(mockExecuteSqlStudioQuery).toHaveBeenCalledWith(selectedSql);
+    });
   });
 
   it("starts a live subscription from the SQL Studio page and renders incoming change rows", async () => {
@@ -362,6 +503,42 @@ describe("SqlStudio page", () => {
       const messages = activeResult?.logs.map((entry) => entry.message) ?? [];
       expect(messages).toContain("WS SEND · subscribe");
       expect(messages).toContain("WS RECEIVE · subscription_ack");
+    });
+  });
+
+  it("marks the live query as errored when the websocket disconnects", async () => {
+    const { store } = renderSqlStudio();
+
+    fireEvent.change(getSqlEditor(), {
+      target: { value: "SELECT id, name FROM default.events" },
+    });
+
+    fireEvent.click(screen.getByRole("switch"));
+    fireEvent.click(screen.getByRole("button", { name: /subscribe/i }));
+
+    await waitFor(() => {
+      expect(mockSetClientDisconnectListener).toHaveBeenCalled();
+    });
+
+    await act(async () => {
+      liveCallback?.({
+        type: "subscription_ack",
+        schema: [
+          { name: "id", data_type: "Int64", index: 0, flags: ["pk"] },
+          { name: "name", data_type: "Utf8", index: 1 },
+        ],
+      });
+      clientDisconnectCallback?.({
+        message: "Heartbeat timeout",
+        code: 1000,
+      });
+    });
+
+    await waitFor(() => {
+      const state = store.getState().sqlStudioWorkspace;
+      const activeTabId = state.activeTabId;
+      expect(activeTabId).toBeTruthy();
+      expect(state.tabs.find((tab) => tab.id === activeTabId)?.liveStatus).toBe("error");
     });
   });
 });

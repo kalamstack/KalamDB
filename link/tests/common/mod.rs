@@ -1,6 +1,8 @@
+#![allow(dead_code)]
+
 pub mod tcp_proxy;
 
-use base64::Engine;
+use std::collections::HashMap;
 use kalamdb_configs::ServerConfig;
 use kalamdb_server::lifecycle::RunningTestHttpServer;
 use reqwest::Client;
@@ -13,9 +15,11 @@ use tokio::runtime::{Handle, Runtime};
 use tokio::sync::Mutex as TokioMutex;
 
 static SERVER_URL: OnceLock<String> = OnceLock::new();
+static ISOLATED_SERVER_URL: OnceLock<String> = OnceLock::new();
 static AUTO_TEST_SERVER: OnceLock<Mutex<Option<AutoTestServer>>> = OnceLock::new();
+static ISOLATED_AUTO_TEST_SERVER: OnceLock<Mutex<Option<AutoTestServer>>> = OnceLock::new();
 static AUTO_TEST_RUNTIME: OnceLock<Runtime> = OnceLock::new();
-static ACCESS_TOKEN: OnceLock<TokioMutex<Option<String>>> = OnceLock::new();
+static ACCESS_TOKENS: OnceLock<TokioMutex<HashMap<String, String>>> = OnceLock::new();
 
 struct AutoTestServer {
     base_url: String,
@@ -47,8 +51,10 @@ fn url_reachable(url: &str) -> bool {
     std::net::TcpStream::connect(host_port).map(|_| true).unwrap_or(false)
 }
 
-fn ensure_auto_test_server() -> Option<(String, PathBuf)> {
-    let server_mutex = AUTO_TEST_SERVER.get_or_init(|| Mutex::new(None));
+fn ensure_auto_test_server(
+    server_slot: &'static OnceLock<Mutex<Option<AutoTestServer>>>,
+) -> Option<(String, PathBuf)> {
+    let server_mutex = server_slot.get_or_init(|| Mutex::new(None));
     let mut guard = server_mutex.lock().ok()?;
 
     if guard.is_none() {
@@ -179,27 +185,58 @@ async fn fetch_access_token(
     Ok(token.to_string())
 }
 
-pub async fn root_access_token() -> Result<String, Box<dyn std::error::Error>> {
-    let token_cache = ACCESS_TOKEN.get_or_init(|| TokioMutex::new(None));
+async fn root_access_token_for_base_url(
+    base_url: &str,
+    password: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let token_cache = ACCESS_TOKENS.get_or_init(|| TokioMutex::new(HashMap::new()));
     let mut guard = token_cache.lock().await;
-    if let Some(token) = guard.as_ref() {
+    if let Some(token) = guard.get(base_url) {
         return Ok(token.clone());
     }
 
-    let password =
-        std::env::var("KALAMDB_ROOT_PASSWORD").unwrap_or_else(|_| "test_password".to_string());
-    let token = fetch_access_token(server_url(), "root", &password).await?;
-    *guard = Some(token.clone());
+    let token = fetch_access_token(base_url, "root", password).await?;
+    guard.insert(base_url.to_string(), token.clone());
     Ok(token)
 }
 
+pub async fn root_access_token() -> Result<String, Box<dyn std::error::Error>> {
+    let password =
+        std::env::var("KALAMDB_ROOT_PASSWORD").unwrap_or_else(|_| "test_password".to_string());
+    root_access_token_for_base_url(server_url(), &password).await
+}
+
 pub fn root_access_token_blocking() -> Result<String, Box<dyn std::error::Error>> {
+    let base_url = server_url().to_string();
+    let password =
+        std::env::var("KALAMDB_ROOT_PASSWORD").unwrap_or_else(|_| "test_password".to_string());
+    root_access_token_blocking_for_base_url(base_url, password)
+}
+
+pub async fn isolated_root_access_token() -> Result<String, Box<dyn std::error::Error>> {
+    root_access_token_for_base_url(isolated_server_url(), "test_password").await
+}
+
+pub fn isolated_root_access_token_blocking() -> Result<String, Box<dyn std::error::Error>> {
+    root_access_token_blocking_for_base_url(
+        isolated_server_url().to_string(),
+        "test_password".to_string(),
+    )
+}
+
+fn root_access_token_blocking_for_base_url(
+    base_url: String,
+    password: String,
+) -> Result<String, Box<dyn std::error::Error>> {
     if Handle::try_current().is_ok() {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let result = Runtime::new()
                 .map_err(|e| e.to_string())
-                .and_then(|rt| rt.block_on(root_access_token()).map_err(|e| e.to_string()));
+                .and_then(|rt| {
+                    rt.block_on(root_access_token_for_base_url(&base_url, &password))
+                        .map_err(|e| e.to_string())
+                });
             let _ = tx.send(result);
         });
 
@@ -212,7 +249,7 @@ pub fn root_access_token_blocking() -> Result<String, Box<dyn std::error::Error>
 
     let runtime = AUTO_TEST_RUNTIME
         .get_or_init(|| Runtime::new().expect("Failed to create runtime for access token"));
-    runtime.block_on(root_access_token())
+    runtime.block_on(root_access_token_for_base_url(&base_url, &password))
 }
 
 pub fn server_url() -> &'static str {
@@ -223,7 +260,7 @@ pub fn server_url() -> &'static str {
             }
 
             if should_auto_start_test_server() {
-                if let Some((url, storage_dir)) = ensure_auto_test_server() {
+                if let Some((url, storage_dir)) = ensure_auto_test_server(&AUTO_TEST_SERVER) {
                     std::env::set_var("KALAMDB_SERVER_URL", &url);
                     // Use a test password for the auto-started server
                     std::env::set_var("KALAMDB_ROOT_PASSWORD", "test_password");
@@ -241,6 +278,16 @@ pub fn server_url() -> &'static str {
             }
 
             default_url
+        })
+        .as_str()
+}
+
+pub fn isolated_server_url() -> &'static str {
+    ISOLATED_SERVER_URL
+        .get_or_init(|| {
+            let (url, _) = ensure_auto_test_server(&ISOLATED_AUTO_TEST_SERVER)
+                .expect("Failed to auto-start isolated kalam-link test server");
+            url
         })
         .as_str()
 }

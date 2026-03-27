@@ -75,6 +75,14 @@ RUN ln -sf /usr/local/bin/kalam-cli /usr/local/bin/kalam
 COPY --from=runtime-prep --chown=65532:65532 /runtime/data /data
 COPY --from=runtime-prep --chown=65532:65532 /runtime/config /config
 
+# Add a named runtime user/group entry and a writable HOME for the numeric UID.
+RUN printf 'kalamdb:x:65532:65532:KalamDB:/data:/bin/bash\n' >> /etc/passwd && \
+    printf 'kalamdb:x:65532:\n' >> /etc/group && \
+    mkdir -p /data/.kalam && \
+    chown -R 65532:65532 /data /config
+
+ENV HOME=/data
+
 # Run as the same non-root uid/gid used by the previous distroless image.
 USER 65532:65532
 

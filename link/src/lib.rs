@@ -150,10 +150,10 @@ pub use models::{
 };
 pub use seq_id::SeqId;
 pub use timeouts::{KalamLinkTimeouts, KalamLinkTimeoutsBuilder};
-pub use timestamp::{
-    now, parse_iso8601, TimestampFormat, TimestampFormatter, TimestampFormatterConfig,
-};
+pub use timestamp::{now, parse_iso8601, TimestampFormat, TimestampFormatter};
 
+#[cfg(feature = "tokio-runtime")]
+pub use query::AuthRefreshCallback;
 #[cfg(feature = "tokio-runtime")]
 pub use query::QueryExecutor;
 #[cfg(feature = "tokio-runtime")]

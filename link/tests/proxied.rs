@@ -29,5 +29,7 @@ mod server_down_initial_load;
 mod socket_drop_resume;
 #[path = "proxied/staggered_outages.rs"]
 mod staggered_outages;
+#[path = "proxied/transport_impairments.rs"]
+mod transport_impairments;
 #[path = "proxied/update_delete_resume.rs"]
 mod update_delete_resume;

@@ -34,10 +34,10 @@ use crate::errors::CommonError;
 // Chrono no longer needed - DataFusion handles timestamp serialization natively
 use crate::models::rows::Row;
 use crate::models::KalamCellValue;
-use datafusion::arrow::array::*;
-use datafusion::arrow::datatypes::{DataType, Field, SchemaRef, TimeUnit};
-use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::scalar::ScalarValue;
+use arrow::array::*;
+use arrow::datatypes::{DataType, Field, SchemaRef, TimeUnit};
+use arrow::record_batch::RecordBatch;
+use datafusion_common::{DataFusionError, ScalarValue};
 use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
@@ -45,7 +45,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 /// Type alias for Arc<dyn Array> to improve readability
-type ArrayRef = Arc<dyn datafusion::arrow::array::Array>;
+type ArrayRef = Arc<dyn Array>;
 
 /// Coerce a list of rows to match the schema types and fill defaults.
 ///
@@ -333,7 +333,7 @@ fn coerce_uuid_scalar(value: ScalarValue, field: &Field) -> Result<Option<Scalar
 #[cfg(test)]
 mod tests {
     use super::*;
-    use datafusion::arrow::datatypes::{DataType, Field, Schema};
+    use arrow::datatypes::{DataType, Field, Schema};
     use std::collections::BTreeMap;
     use std::sync::Arc;
 
@@ -420,15 +420,226 @@ mod tests {
         let ts_col = batch.column(0).as_any().downcast_ref::<TimestampMillisecondArray>().unwrap();
         assert_eq!(ts_col.value(0), 1609459200000i64);
     }
+
+    // ─── No-op UPDATE detection tests ────────────────────────────────────────
+    // These tests verify that `coerce_updates` produces values with proper types,
+    // ensuring that the Row equality check in `update_by_pk_value` correctly
+    // detects no-op UPDATEs (same logical value, potentially different ScalarValue type).
+
+    /// Build a schema matching the user's chat.messages table:
+    /// id TEXT PK, thread_id TEXT, role TEXT, content TEXT, created_at TIMESTAMP, _seq INT64, _deleted BOOLEAN
+    fn chat_messages_schema() -> Arc<Schema> {
+        Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Utf8, false),
+            Field::new("thread_id", DataType::Utf8, true),
+            Field::new("role", DataType::Utf8, true),
+            Field::new("content", DataType::Utf8, true),
+            Field::new("created_at", DataType::Timestamp(arrow::datatypes::TimeUnit::Microsecond, None), true),
+            Field::new("_seq", DataType::Int64, false),
+            Field::new("_deleted", DataType::Boolean, false),
+        ]))
+    }
+
+    /// Helper: simulate what coerce_rows produces during INSERT for a stored row.
+    fn stored_row() -> Row {
+        make_row(vec![
+            ("id", ScalarValue::Utf8(Some("abc123".into()))),
+            ("thread_id", ScalarValue::Utf8(Some("thread-1".into()))),
+            ("role", ScalarValue::Utf8(Some("user".into()))),
+            ("content", ScalarValue::Utf8(Some("hello world".into()))),
+            ("created_at", ScalarValue::TimestampMicrosecond(Some(1704067200000000), None)),
+            ("_seq", ScalarValue::Int64(Some(0))),
+            ("_deleted", ScalarValue::Boolean(Some(false))),
+        ])
+    }
+
+    #[test]
+    fn noop_update_text_same_value_detected() {
+        // UPDATE chat.messages SET role = 'user' WHERE id = 'abc123'
+        // The raw value from expr_to_scalar is Utf8, same as stored → must be no-op.
+        let schema = chat_messages_schema();
+        let update_row = make_row(vec![("role", ScalarValue::Utf8(Some("user".into())))]);
+
+        let coerced = coerce_updates(update_row, &schema).unwrap();
+
+        // Merge coerced onto stored
+        let stored = stored_row();
+        let mut merged = stored.values.clone();
+        for (k, v) in coerced.values {
+            merged.insert(k, v);
+        }
+        let merged_row = Row::new(merged);
+
+        assert_eq!(merged_row, stored, "no-op TEXT update should produce identical row");
+    }
+
+    #[test]
+    fn noop_update_text_different_value_detected() {
+        // UPDATE chat.messages SET role = 'admin' WHERE id = 'abc123'
+        let schema = chat_messages_schema();
+        let update_row = make_row(vec![("role", ScalarValue::Utf8(Some("admin".into())))]);
+
+        let coerced = coerce_updates(update_row, &schema).unwrap();
+
+        let stored = stored_row();
+        let mut merged = stored.values.clone();
+        for (k, v) in coerced.values {
+            merged.insert(k, v);
+        }
+        let merged_row = Row::new(merged);
+
+        assert_ne!(merged_row, stored, "changed TEXT update should not equal stored row");
+    }
+
+    #[test]
+    fn noop_update_timestamp_same_value_via_int_literal() {
+        // UPDATE ... SET created_at = 1704067200000000 (raw Int64 from SQL literal)
+        // After coercion: Int64 → TimestampMicrosecond(1704067200000000)
+        let schema = chat_messages_schema();
+        let update_row = make_row(vec![
+            ("created_at", ScalarValue::Int64(Some(1704067200000000))),
+        ]);
+
+        let coerced = coerce_updates(update_row, &schema).unwrap();
+
+        // Verify the coerced value is TimestampMicrosecond, not Int64
+        let coerced_ts = coerced.values.get("created_at").unwrap();
+        assert!(
+            matches!(coerced_ts, ScalarValue::TimestampMicrosecond(Some(1704067200000000), None)),
+            "Int64 should be coerced to TimestampMicrosecond, got {:?}",
+            coerced_ts
+        );
+
+        // Merge and verify no-op
+        let stored = stored_row();
+        let mut merged = stored.values.clone();
+        for (k, v) in coerced.values {
+            merged.insert(k, v);
+        }
+        let merged_row = Row::new(merged);
+
+        assert_eq!(merged_row, stored, "same TIMESTAMP value via Int64 should be no-op");
+    }
+
+    #[test]
+    fn noop_update_without_coercion_would_fail_for_timestamp() {
+        // Demonstrates the bug: without coercion, Int64(1704067200000000) != TimestampMicrosecond(1704067200000000)
+        let update_val = ScalarValue::Int64(Some(1704067200000000));
+        let stored_val = ScalarValue::TimestampMicrosecond(Some(1704067200000000), None);
+
+        assert_ne!(
+            update_val, stored_val,
+            "without coercion, Int64 != TimestampMicrosecond (the bug this fix addresses)"
+        );
+    }
+
+    #[test]
+    fn noop_update_multiple_columns_same_values() {
+        // UPDATE ... SET role = 'user', content = 'hello world'
+        let schema = chat_messages_schema();
+        let update_row = make_row(vec![
+            ("role", ScalarValue::Utf8(Some("user".into()))),
+            ("content", ScalarValue::Utf8(Some("hello world".into()))),
+        ]);
+
+        let coerced = coerce_updates(update_row, &schema).unwrap();
+
+        let stored = stored_row();
+        let mut merged = stored.values.clone();
+        for (k, v) in coerced.values {
+            merged.insert(k, v);
+        }
+        let merged_row = Row::new(merged);
+
+        assert_eq!(merged_row, stored, "multi-column no-op should be detected");
+    }
+
+    #[test]
+    fn noop_update_one_changed_one_same() {
+        // UPDATE ... SET role = 'admin', content = 'hello world'
+        // role changed, content same → overall row changed
+        let schema = chat_messages_schema();
+        let update_row = make_row(vec![
+            ("role", ScalarValue::Utf8(Some("admin".into()))),
+            ("content", ScalarValue::Utf8(Some("hello world".into()))),
+        ]);
+
+        let coerced = coerce_updates(update_row, &schema).unwrap();
+
+        let stored = stored_row();
+        let mut merged = stored.values.clone();
+        for (k, v) in coerced.values {
+            merged.insert(k, v);
+        }
+        let merged_row = Row::new(merged);
+
+        assert_ne!(merged_row, stored, "partial change should produce different row");
+    }
+
+    #[test]
+    fn coerce_updates_preserves_utf8_type() {
+        // TEXT columns: expr_to_scalar produces Utf8, stored is Utf8 → no coercion needed
+        let schema = chat_messages_schema();
+        let update_row = make_row(vec![("role", ScalarValue::Utf8(Some("test".into())))]);
+
+        let coerced = coerce_updates(update_row, &schema).unwrap();
+        let val = coerced.values.get("role").unwrap();
+        assert!(matches!(val, ScalarValue::Utf8(Some(s)) if s == "test"));
+    }
+
+    #[test]
+    fn coerce_updates_casts_int64_to_timestamp() {
+        // TIMESTAMP columns: expr_to_scalar produces Int64, stored is TimestampMicrosecond
+        let schema = chat_messages_schema();
+        let update_row = make_row(vec![
+            ("created_at", ScalarValue::Int64(Some(1704067200000000))),
+        ]);
+
+        let coerced = coerce_updates(update_row, &schema).unwrap();
+        let val = coerced.values.get("created_at").unwrap();
+        assert!(
+            matches!(val, ScalarValue::TimestampMicrosecond(Some(1704067200000000), None)),
+            "expected TimestampMicrosecond, got {:?}",
+            val
+        );
+    }
+
+    #[test]
+    fn coerce_updates_null_to_typed_null() {
+        // SET content = NULL should produce typed Utf8(None), not bare ScalarValue::Null
+        let schema = chat_messages_schema();
+        let update_row = make_row(vec![("content", ScalarValue::Null)]);
+
+        let coerced = coerce_updates(update_row, &schema).unwrap();
+        let val = coerced.values.get("content").unwrap();
+        assert!(
+            matches!(val, ScalarValue::Utf8(None)),
+            "bare NULL should be coerced to typed Utf8(None), got {:?}",
+            val
+        );
+    }
+
+    #[test]
+    fn coerce_updates_ignores_unknown_columns() {
+        // Columns not in schema should pass through unchanged
+        let schema = chat_messages_schema();
+        let update_row = make_row(vec![
+            ("nonexistent_col", ScalarValue::Utf8(Some("val".into()))),
+        ]);
+
+        let coerced = coerce_updates(update_row, &schema).unwrap();
+        let val = coerced.values.get("nonexistent_col").unwrap();
+        assert!(matches!(val, ScalarValue::Utf8(Some(s)) if s == "val"));
+    }
 }
 
 /// Convert Arrow array value at given index to DataFusion ScalarValue
 pub fn arrow_value_to_scalar(
-    array: &dyn datafusion::arrow::array::Array,
+    array: &dyn Array,
     row_idx: usize,
-) -> Result<ScalarValue, datafusion::error::DataFusionError> {
-    use datafusion::arrow::array::*;
-    use datafusion::arrow::datatypes::*;
+) -> Result<ScalarValue, DataFusionError> {
+    use arrow::array::*;
+    use arrow::datatypes::*;
 
     if array.is_null(row_idx) {
         return Ok(ScalarValue::try_from(array.data_type()).unwrap_or(ScalarValue::Null));

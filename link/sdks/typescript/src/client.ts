@@ -211,7 +211,7 @@ export class KalamDBClient {
     this.disableCompression = options.disableCompression ?? false;
     this.wasmUrl = options.wasmUrl;
     this.wsLazyConnect = options.wsLazyConnect ?? true;
-    this.pingIntervalMs = options.pingIntervalMs ?? 30_000;
+    this.pingIntervalMs = options.pingIntervalMs ?? 5_000;
     this._logLevel = options.logLevel ?? LogLevel.Warn;
     this._logListener = options.logListener;
     this._onConnect = options.onConnect;
@@ -390,11 +390,10 @@ export class KalamDBClient {
           this.log(LogLevel.Debug, 'auth', 'Auto-login successful');
         }
 
-        // Forward ping interval to the WASM client before connecting
-        if (this.pingIntervalMs !== 30_000) {
-          this.log(LogLevel.Debug, 'connection', `Setting ping interval to ${this.pingIntervalMs}ms`);
-          this.wasmClient.setPingInterval(this.pingIntervalMs);
-        }
+        // Always forward the effective ping interval so the TS and WASM
+        // defaults cannot silently drift apart.
+        this.log(LogLevel.Debug, 'connection', `Setting ping interval to ${this.pingIntervalMs}ms`);
+        this.wasmClient.setPingInterval?.(this.pingIntervalMs);
 
         await this.wasmClient.connect();
         this.log(LogLevel.Info, 'connection', `Connected to ${this.url} successfully`);
@@ -801,13 +800,21 @@ export class KalamDBClient {
       body: formData,
     });
 
-    const result = await response.json();
+    const result = (await response.json()) as QueryResponse;
+
+    // Auto-refresh on TOKEN_EXPIRED: re-login and refresh auth for next requests.
+    // Multipart uploads can't be replayed so we don't retry, but we refresh auth
+    // so subsequent requests succeed.
+    if (result.status === 'error' && result.error?.code === 'TOKEN_EXPIRED') {
+      this.log(LogLevel.Warn, 'auth', 'TOKEN_EXPIRED on file upload — refreshing credentials');
+      await this.reauthenticateFromAuthProvider();
+    }
 
     if (!response.ok && result.status !== 'success') {
       throw new Error(result.error?.message || `Upload failed: ${response.status}`);
     }
 
-    return result as QueryResponse;
+    return result;
   }
 
   /* ---------------------------------------------------------------- */
@@ -1629,6 +1636,26 @@ export class KalamDBClient {
   private async ensureJwtForBasicAuth(): Promise<void> {
     if (this.auth.type === 'basic') {
       await this.login();
+    }
+  }
+
+  /**
+   * Re-resolve credentials from the authProvider and update internal auth state.
+   * Used to recover from TOKEN_EXPIRED in code paths that bypass the WASM client
+   * (e.g. queryWithFiles which uses fetch() directly).
+   */
+  private async reauthenticateFromAuthProvider(): Promise<void> {
+    try {
+      const result = await this.resolveWasmAuthProvider();
+      if (result?.jwt?.token) {
+        this.auth = { type: 'jwt', token: result.jwt.token };
+        if (this.wasmClient) {
+          this.wasmClient = WasmClient.withJwt(this.url, result.jwt.token);
+          this.attachWasmClientState();
+        }
+      }
+    } catch (error) {
+      this.log(LogLevel.Warn, 'auth', `Failed to reauthenticate: ${error}`);
     }
   }
 

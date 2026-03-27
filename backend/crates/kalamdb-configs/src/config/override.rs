@@ -1,7 +1,6 @@
-use super::cluster::{ClusterConfig, ClusterRpcTlsConfig, PeerConfig};
+use super::cluster::{ClusterConfig, PeerConfig};
 use super::types::ServerConfig;
 use std::env;
-use std::path::Path;
 
 impl ServerConfig {
     /// Apply environment variable overrides for sensitive configuration
@@ -11,7 +10,6 @@ impl ServerConfig {
     /// - KALAMDB_SERVER_PORT: Override server.port
     /// - KALAMDB_LOG_LEVEL: Override logging.level
     /// - KALAMDB_LOGS_DIR: Override logging.logs_path
-    /// - KALAMDB_LOG_FILE: Override logging.file_path (legacy, extracts parent dir)
     /// - KALAMDB_LOG_TO_CONSOLE: Override logging.log_to_console
     /// - KALAMDB_OTLP_ENABLED: Override logging.otlp.enabled
     /// - KALAMDB_OTLP_ENDPOINT: Override logging.otlp.endpoint
@@ -19,10 +17,6 @@ impl ServerConfig {
     /// - KALAMDB_OTLP_SERVICE_NAME: Override logging.otlp.service_name
     /// - KALAMDB_OTLP_TIMEOUT_MS: Override logging.otlp.timeout_ms
     /// - KALAMDB_DATA_DIR: Override storage.data_path (base directory for rocksdb, storage, snapshots)
-    /// - KALAMDB_ROCKSDB_PATH: Override storage.data_path (legacy, extracts parent dir)
-    /// - KALAMDB_LOG_FILE_PATH: Override logging.file_path (legacy, prefer KALAMDB_LOG_FILE)
-    /// - KALAMDB_HOST: Override server.host (legacy, prefer KALAMDB_SERVER_HOST)
-    /// - KALAMDB_PORT: Override server.port (legacy, prefer KALAMDB_SERVER_PORT)
     /// - KALAMDB_CLUSTER_ID: Override cluster.cluster_id
     /// - KALAMDB_NODE_ID: Override cluster.node_id (alias: KALAMDB_CLUSTER_NODE_ID)
     /// - KALAMDB_CLUSTER_RPC_ADDR: Override cluster.rpc_addr
@@ -33,6 +27,7 @@ impl ServerConfig {
     /// - KALAMDB_CLUSTER_RPC_TLS_NODE_CERT_PATH: Override cluster.rpc_tls.node_cert_path
     /// - KALAMDB_CLUSTER_RPC_TLS_NODE_KEY_PATH: Override cluster.rpc_tls.node_key_path
     /// - KALAMDB_JWT_SECRET: Override auth.jwt_secret
+    /// - KALAMDB_PG_AUTH_TOKEN: Override auth.pg_auth_token
     /// - KALAMDB_JWT_TRUSTED_ISSUERS: Override auth.jwt_trusted_issuers
     /// - KALAMDB_JWT_EXPIRY_HOURS: Override auth.jwt_expiry_hours
     /// - KALAMDB_COOKIE_SECURE: Override auth.cookie_secure
@@ -43,27 +38,32 @@ impl ServerConfig {
     /// - KALAMDB_WEBSOCKET_CLIENT_TIMEOUT_SECS: Override websocket.client_timeout_secs
     /// - KALAMDB_WEBSOCKET_AUTH_TIMEOUT_SECS: Override websocket.auth_timeout_secs
     /// - KALAMDB_WEBSOCKET_HEARTBEAT_INTERVAL_SECS: Override websocket.heartbeat_interval_secs
+    /// - KALAMDB_RPC_TLS_ENABLED: Override rpc_tls.enabled
+    /// - KALAMDB_RPC_TLS_CA_CERT: Override rpc_tls.ca_cert (file path or inline PEM)
+    /// - KALAMDB_RPC_TLS_SERVER_CERT: Override rpc_tls.server_cert (file path or inline PEM)
+    /// - KALAMDB_RPC_TLS_SERVER_KEY: Override rpc_tls.server_key (file path or inline PEM)
+    /// - KALAMDB_RPC_TLS_REQUIRE_CLIENT_CERT: Override rpc_tls.require_client_cert
+    /// - KALAMDB_SERVER_WORKERS: Override server.workers (actix-web worker threads)
     ///
     /// Environment variables take precedence over server.toml values (T031)
     pub fn apply_env_overrides(&mut self) -> anyhow::Result<()> {
-        // Server host (new naming convention)
+        // Server workers (actix-web worker thread count)
+        if let Ok(val) = env::var("KALAMDB_SERVER_WORKERS") {
+            self.server.workers = val.parse().map_err(|_| {
+                anyhow::anyhow!("Invalid KALAMDB_SERVER_WORKERS value: {}", val)
+            })?;
+        }
+
+        // Server host
         if let Ok(host) = env::var("KALAMDB_SERVER_HOST") {
-            self.server.host = host;
-        } else if let Ok(host) = env::var("KALAMDB_HOST") {
-            // Legacy fallback
             self.server.host = host;
         }
 
-        // Server port (new naming convention)
+        // Server port
         if let Ok(port_str) = env::var("KALAMDB_SERVER_PORT") {
             self.server.port = port_str
                 .parse()
                 .map_err(|_| anyhow::anyhow!("Invalid KALAMDB_SERVER_PORT value: {}", port_str))?;
-        } else if let Ok(port_str) = env::var("KALAMDB_PORT") {
-            // Legacy fallback
-            self.server.port = port_str
-                .parse()
-                .map_err(|_| anyhow::anyhow!("Invalid KALAMDB_PORT value: {}", port_str))?;
         }
 
         // Log level
@@ -71,19 +71,9 @@ impl ServerConfig {
             self.logging.level = level;
         }
 
-        // Logs directory path (new naming convention)
+        // Logs directory path
         if let Ok(path) = env::var("KALAMDB_LOGS_DIR") {
             self.logging.logs_path = path;
-        } else if let Ok(path) = env::var("KALAMDB_LOG_FILE") {
-            // Legacy fallback - extract directory from file path
-            if let Some(parent) = Path::new(&path).parent() {
-                self.logging.logs_path = parent.to_string_lossy().to_string();
-            }
-        } else if let Ok(path) = env::var("KALAMDB_LOG_FILE_PATH") {
-            // Legacy fallback - extract directory from file path
-            if let Some(parent) = Path::new(&path).parent() {
-                self.logging.logs_path = parent.to_string_lossy().to_string();
-            }
         }
 
         // Log to console
@@ -147,6 +137,11 @@ impl ServerConfig {
                 val.to_lowercase() == "true" || val == "1" || val.to_lowercase() == "yes";
         }
 
+        // Pre-shared token for pg_kalam FDW gRPC authentication
+        if let Ok(val) = env::var("KALAMDB_PG_AUTH_TOKEN") {
+            self.auth.pg_auth_token = Some(val);
+        }
+
         // Trusted proxy ranges used for X-Forwarded-For / X-Real-IP trust.
         if let Ok(val) = env::var("KALAMDB_SECURITY_TRUSTED_PROXY_RANGES")
             .or_else(|_| env::var("KALAMDB_TRUSTED_PROXY_RANGES"))
@@ -185,14 +180,9 @@ impl ServerConfig {
             })?);
         }
 
-        // Data directory (new naming convention)
+        // Data directory
         if let Ok(path) = env::var("KALAMDB_DATA_DIR") {
             self.storage.data_path = path;
-        } else if let Ok(path) = env::var("KALAMDB_ROCKSDB_PATH") {
-            // Legacy fallback - KALAMDB_ROCKSDB_PATH now sets the parent data dir
-            if let Some(parent) = Path::new(&path).parent() {
-                self.storage.data_path = parent.to_string_lossy().to_string();
-            }
         }
 
         // Cluster overrides
@@ -203,20 +193,12 @@ impl ServerConfig {
         let rpc_addr = env::var("KALAMDB_CLUSTER_RPC_ADDR").ok();
         let api_addr = env::var("KALAMDB_CLUSTER_API_ADDR").ok();
         let peers_env = env::var("KALAMDB_CLUSTER_PEERS").ok();
-        let rpc_tls_enabled = env::var("KALAMDB_CLUSTER_RPC_TLS_ENABLED").ok();
-        let rpc_tls_ca_cert_path = env::var("KALAMDB_CLUSTER_RPC_TLS_CA_CERT_PATH").ok();
-        let rpc_tls_node_cert_path = env::var("KALAMDB_CLUSTER_RPC_TLS_NODE_CERT_PATH").ok();
-        let rpc_tls_node_key_path = env::var("KALAMDB_CLUSTER_RPC_TLS_NODE_KEY_PATH").ok();
 
         let has_cluster_env = cluster_id.is_some()
             || node_id.is_some()
             || rpc_addr.is_some()
             || api_addr.is_some()
-            || peers_env.is_some()
-            || rpc_tls_enabled.is_some()
-            || rpc_tls_ca_cert_path.is_some()
-            || rpc_tls_node_cert_path.is_some()
-            || rpc_tls_node_key_path.is_some();
+            || peers_env.is_some();
 
         if has_cluster_env {
             let parsed_node_id = match node_id {
@@ -234,7 +216,6 @@ impl ServerConfig {
                 rpc_addr: rpc_addr.clone().unwrap_or_else(|| "127.0.0.1:9188".to_string()),
                 api_addr: api_addr.clone().unwrap_or_else(|| "127.0.0.1:8080".to_string()),
                 peers: Vec::new(),
-                rpc_tls: ClusterRpcTlsConfig::default(),
                 user_shards: 12,
                 shared_shards: 1,
                 heartbeat_interval_ms: 250,
@@ -265,21 +246,27 @@ impl ServerConfig {
             if let Some(val) = peers_env {
                 cluster.peers = parse_cluster_peers(&val)?;
             }
+        }
 
-            if let Some(val) = rpc_tls_enabled {
-                cluster.rpc_tls.enabled = val.eq_ignore_ascii_case("true")
-                    || val == "1"
-                    || val.eq_ignore_ascii_case("yes");
-            }
-            if let Some(val) = rpc_tls_ca_cert_path {
-                cluster.rpc_tls.ca_cert_path = Some(val);
-            }
-            if let Some(val) = rpc_tls_node_cert_path {
-                cluster.rpc_tls.node_cert_path = Some(val);
-            }
-            if let Some(val) = rpc_tls_node_key_path {
-                cluster.rpc_tls.node_key_path = Some(val);
-            }
+        // Top-level RPC TLS overrides (unified mTLS config)
+        if let Ok(val) = env::var("KALAMDB_RPC_TLS_ENABLED") {
+            self.rpc_tls.enabled = val.eq_ignore_ascii_case("true")
+                || val == "1"
+                || val.eq_ignore_ascii_case("yes");
+        }
+        if let Ok(val) = env::var("KALAMDB_RPC_TLS_CA_CERT") {
+            self.rpc_tls.ca_cert = Some(val);
+        }
+        if let Ok(val) = env::var("KALAMDB_RPC_TLS_SERVER_CERT") {
+            self.rpc_tls.server_cert = Some(val);
+        }
+        if let Ok(val) = env::var("KALAMDB_RPC_TLS_SERVER_KEY") {
+            self.rpc_tls.server_key = Some(val);
+        }
+        if let Ok(val) = env::var("KALAMDB_RPC_TLS_REQUIRE_CLIENT_CERT") {
+            self.rpc_tls.require_client_cert = val.eq_ignore_ascii_case("true")
+                || val == "1"
+                || val.eq_ignore_ascii_case("yes");
         }
 
         Ok(())

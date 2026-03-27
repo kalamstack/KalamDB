@@ -115,4 +115,5 @@ pub use kalam_data_type::KalamDataType;
 pub use wire_format::{WireFormat, WireFormatError};
 
 // Re-export arrow_conversion from conversions module
+#[cfg(feature = "arrow-conversion")]
 pub use crate::conversions::arrow_conversion::{ArrowConversionError, FromArrowType, ToArrowType};

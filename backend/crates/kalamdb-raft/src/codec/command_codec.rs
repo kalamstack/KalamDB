@@ -17,24 +17,31 @@ const KIND_META_RESPONSE: &str = "meta_response";
 const KIND_DATA_RESPONSE: &str = "data_response";
 const KIND_RAFT_RESPONSE: &str = "raft_response";
 
-#[derive(Debug, Serialize, Deserialize)]
-struct TypedEnvelope<T> {
+#[derive(Debug, Serialize)]
+struct TypedEnvelopeEnc<'a, T> {
+    v: u16,
+    kind: &'a str,
+    payload: T,
+}
+
+#[derive(Debug, Deserialize)]
+struct TypedEnvelopeDec<T> {
     v: u16,
     kind: String,
     payload: T,
 }
 
 fn encode_typed<T: Serialize>(kind: &str, payload: &T) -> Result<Vec<u8>, RaftError> {
-    let envelope = TypedEnvelope {
+    let envelope = TypedEnvelopeEnc {
         v: COMMAND_WIRE_VERSION,
-        kind: kind.to_string(),
+        kind,
         payload,
     };
     flexbuffers::to_vec(&envelope).map_err(|e| RaftError::Serialization(e.to_string()))
 }
 
 fn decode_typed<T: DeserializeOwned>(bytes: &[u8], expected_kind: &str) -> Result<T, RaftError> {
-    let envelope: TypedEnvelope<T> =
+    let envelope: TypedEnvelopeDec<T> =
         flexbuffers::from_slice(bytes).map_err(|e| RaftError::Serialization(e.to_string()))?;
 
     if envelope.v != COMMAND_WIRE_VERSION {

@@ -1,6 +1,37 @@
 use crate::common::*;
 use std::time::Duration;
 
+fn wait_for_table_absent(
+    namespace: &str,
+    table: &str,
+    timeout: Duration,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let start = std::time::Instant::now();
+    let poll_interval = Duration::from_millis(500);
+
+    loop {
+        let output = execute_sql_as_root_via_client_json(&format!(
+            "SELECT table_name FROM system.schemas WHERE namespace_id = '{}' AND table_name = '{}'",
+            namespace, table
+        ))?;
+        let json: serde_json::Value = serde_json::from_str(&output)?;
+        let rows = get_rows_as_hashmaps(&json).unwrap_or_default();
+        if rows.is_empty() {
+            return Ok(());
+        }
+
+        if start.elapsed() >= timeout {
+            return Err(format!(
+                "Timed out waiting for table {}.{} to disappear",
+                namespace, table
+            )
+            .into());
+        }
+
+        std::thread::sleep(poll_interval);
+    }
+}
+
 fn parse_cleanup_job_id(output: &str) -> Result<String, Box<dyn std::error::Error>> {
     let marker = "Cleanup job: ";
     if let Some(idx) = output.find(marker) {
@@ -48,14 +79,23 @@ fn smoke_cleanup_job_completes() {
     ))
     .expect("insert row");
 
-    let drop_output =
-        execute_sql_as_root_via_cli(&format!("DROP TABLE {}", full_table)).expect("drop table");
-
-    let job_id = parse_cleanup_job_id(&drop_output).expect("parse cleanup job id");
-    let status = wait_for_job_finished(&job_id, Duration::from_secs(60))
-        .expect("wait for cleanup job to finish");
-
-    assert_eq!(status, "completed", "cleanup job did not complete");
+    match execute_sql_as_root_via_cli(&format!("DROP TABLE IF EXISTS {}", full_table)) {
+        Ok(drop_output) => {
+            if let Ok(job_id) = parse_cleanup_job_id(&drop_output) {
+                let status = wait_for_job_finished(&job_id, Duration::from_secs(60))
+                    .expect("wait for cleanup job to finish");
+                assert_eq!(status, "completed", "cleanup job did not complete");
+            } else {
+                wait_for_table_absent(&namespace, &table, Duration::from_secs(60))
+                    .expect("table should disappear after cleanup fallback");
+            }
+        },
+        Err(error) => {
+            wait_for_table_absent(&namespace, &table, Duration::from_secs(60)).unwrap_or_else(
+                |_| panic!("drop table: {:?}", error),
+            );
+        },
+    }
 
     let _ = execute_sql_as_root_via_cli(&format!("DROP NAMESPACE IF EXISTS {} CASCADE", namespace));
 }

@@ -2,6 +2,7 @@
 //!
 //! This module configures all HTTP and WebSocket routes for the KalamDB API.
 
+#[cfg(feature = "embedded-ui")]
 use crate::embedded_ui;
 use crate::handlers;
 use actix_web::{web, HttpRequest, HttpResponse};
@@ -73,13 +74,21 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
 ///
 /// Serves the Admin UI from embedded assets at /ui route.
 /// The UI is compressed and included in the binary at compile time.
+#[cfg(feature = "embedded-ui")]
 pub fn configure_embedded_ui_routes(cfg: &mut web::ServiceConfig) {
     embedded_ui::configure_embedded_ui(cfg);
 }
 
 /// Check if embedded UI is available
+#[cfg(feature = "embedded-ui")]
 pub fn is_embedded_ui_available() -> bool {
     embedded_ui::is_ui_embedded()
+}
+
+/// Check if embedded UI is available (always false when feature is disabled)
+#[cfg(not(feature = "embedded-ui"))]
+pub fn is_embedded_ui_available() -> bool {
+    false
 }
 
 /// Configure static file serving for Admin UI (filesystem fallback)

@@ -1,0 +1,16 @@
+[package]
+name = "kalam-pg-api"
+version = { workspace = true }
+edition = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[dependencies]
+arrow = { workspace = true }
+async-trait = { workspace = true }
+datafusion-common = { workspace = true }
+serde = { workspace = true }
+kalamdb-commons = { path = "../../../backend/crates/kalamdb-commons", default-features = false, features = ["rows"] }
+kalam-pg-common = { path = "../kalam-pg-common" }
+

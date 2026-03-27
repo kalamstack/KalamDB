@@ -5,7 +5,7 @@
     "KalamDB Team"
   ],
   "description": "WebAssembly-compatible KalamDB client library",
-  "version": "0.4.1-beta",
+  "version": "0.4.2-dev",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

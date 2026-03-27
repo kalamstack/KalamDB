@@ -34,6 +34,15 @@ impl QueryResponse {
         self.status == ResponseStatus::Success
     }
 
+    /// Returns true if the error is a TOKEN_EXPIRED error.
+    pub fn is_token_expired(&self) -> bool {
+        self.status == ResponseStatus::Error
+            && self
+                .error
+                .as_ref()
+                .is_some_and(|e| e.code == "TOKEN_EXPIRED")
+    }
+
     /// Returns the first result's rows, if any (as arrays).
     pub fn rows(&self) -> Vec<Vec<KalamCellValue>> {
         self.results.first().and_then(|r| r.rows.as_ref()).cloned().unwrap_or_default()

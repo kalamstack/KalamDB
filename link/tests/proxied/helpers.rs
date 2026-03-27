@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::common;
 use kalam_link::auth::AuthProvider;
 use kalam_link::seq_tracking::{extract_max_seq, row_seq};
@@ -19,10 +21,10 @@ fn reconnect_test_timeouts() -> KalamLinkTimeouts {
         send_timeout: Duration::from_secs(2),
         subscribe_timeout: Duration::from_secs(2),
         auth_timeout: Duration::from_secs(2),
-        initial_data_timeout: Duration::from_secs(10),
+        initial_data_timeout: Duration::from_secs(20),
         idle_timeout: Duration::ZERO,
         keepalive_interval: Duration::from_secs(1),
-        pong_timeout: Duration::from_secs(1),
+        pong_timeout: Duration::from_secs(2),
     }
 }
 
@@ -36,14 +38,18 @@ fn reconnect_test_connection_options() -> ConnectionOptions {
 
 /// Create a test client authenticated with root credentials.
 pub fn create_test_client() -> Result<KalamLinkClient, kalam_link::KalamLinkError> {
-    create_test_client_for_base_url(common::server_url())
+    create_test_client_for_base_url(common::isolated_server_url())
+}
+
+pub fn upstream_server_url() -> &'static str {
+    common::isolated_server_url()
 }
 
 pub fn create_test_client_for_base_url(
     base_url: &str,
 ) -> Result<KalamLinkClient, kalam_link::KalamLinkError> {
-    let token = common::root_access_token_blocking()
-        .map_err(|e| kalam_link::KalamLinkError::InternalError(e.to_string()))?;
+    let token = common::isolated_root_access_token_blocking()
+        .map_err(|e| kalam_link::KalamLinkError::ConfigurationError(e.to_string()))?;
     KalamLinkClient::builder()
         .base_url(base_url)
         .timeout(Duration::from_secs(10))
@@ -56,8 +62,8 @@ pub fn create_test_client_for_base_url(
 pub fn create_test_client_with_events_for_base_url(
     base_url: &str,
 ) -> Result<(KalamLinkClient, Arc<AtomicU32>, Arc<AtomicU32>), kalam_link::KalamLinkError> {
-    let token = common::root_access_token_blocking()
-        .map_err(|e| kalam_link::KalamLinkError::InternalError(e.to_string()))?;
+    let token = common::isolated_root_access_token_blocking()
+        .map_err(|e| kalam_link::KalamLinkError::ConfigurationError(e.to_string()))?;
 
     let connect_count = Arc::new(AtomicU32::new(0));
     let disconnect_count = Arc::new(AtomicU32::new(0));

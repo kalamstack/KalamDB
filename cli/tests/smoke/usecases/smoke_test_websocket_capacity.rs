@@ -1,8 +1,6 @@
 // Smoke test to stress WebSocket connection capacity and ensure HTTP API stays responsive
 
 use crate::common::*;
-use base64::engine::general_purpose::STANDARD;
-use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -203,11 +201,6 @@ fn smoke_test_websocket_capacity() {
     cleanup_namespace(&namespace_for_cleanup);
 
     println!("\n=== WebSocket Capacity Smoke Test Complete ===\n");
-}
-
-fn build_basic_auth_header(username: &str, password: &str) -> String {
-    let token = format!("{}:{}", username, password);
-    format!("Basic {}", STANDARD.encode(token))
 }
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;

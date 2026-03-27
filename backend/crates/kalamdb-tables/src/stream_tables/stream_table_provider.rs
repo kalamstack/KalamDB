@@ -34,7 +34,7 @@ use kalamdb_commons::models::UserId;
 use kalamdb_commons::NotLeaderError;
 use kalamdb_session::check_user_table_write_access;
 use std::any::Any;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -79,17 +79,6 @@ impl StreamTableProvider {
             store,
             ttl_seconds,
         }
-    }
-
-    /// Backward-compatible constructor that accepts pk_field/column_defaults as separate args.
-    pub fn new_with_defaults(
-        core: Arc<TableProviderCore>,
-        store: Arc<StreamTableStore>,
-        ttl_seconds: Option<u64>,
-        _primary_key_field_name: String,
-        _column_defaults: HashMap<String, Expr>,
-    ) -> Self {
-        Self::new(core, store, ttl_seconds)
     }
 
     /// Build a complete Row from StreamTableRow including system column (_seq)
@@ -228,7 +217,7 @@ impl BaseTableProvider<StreamTableRowId, StreamTableRow> for StreamTableProvider
         user_id: &UserId,
         _key: &StreamTableRowId,
         updates: Row,
-    ) -> Result<StreamTableRowId, KalamDbError> {
+    ) -> Result<Option<StreamTableRowId>, KalamDbError> {
         // TODO: Implement full UPDATE logic for stream tables
         // 1. Scan in-memory hot storage (no Parquet)
         // 2. Find row by key (user-scoped)
@@ -236,7 +225,7 @@ impl BaseTableProvider<StreamTableRowId, StreamTableRow> for StreamTableProvider
         // 4. Append new version
 
         // Placeholder: Just append as new version (incomplete implementation)
-        self.insert(user_id, updates).await
+        self.insert(user_id, updates).await.map(Some)
     }
 
     async fn update_by_pk_value(
@@ -244,10 +233,10 @@ impl BaseTableProvider<StreamTableRowId, StreamTableRow> for StreamTableProvider
         user_id: &UserId,
         _pk_value: &str,
         updates: Row,
-    ) -> Result<StreamTableRowId, KalamDbError> {
+    ) -> Result<Option<StreamTableRowId>, KalamDbError> {
         // TODO: Implement full UPDATE logic for stream tables
         // Stream tables are typically append-only, so UPDATE just inserts a new event
-        self.insert(user_id, updates).await
+        self.insert(user_id, updates).await.map(Some)
     }
 
     async fn delete(&self, user_id: &UserId, key: &StreamTableRowId) -> Result<(), KalamDbError> {
@@ -358,6 +347,7 @@ impl BaseTableProvider<StreamTableRowId, StreamTableRow> for StreamTableProvider
                 since_seq,
                 limit,
                 keep_deleted,
+                None,
             )
             .await?;
         let table_id = self.core.table_id();
@@ -387,6 +377,7 @@ impl BaseTableProvider<StreamTableRowId, StreamTableRow> for StreamTableProvider
         since_seq: Option<SeqId>,
         limit: Option<usize>,
         _keep_deleted: bool,
+        _cold_columns: Option<&[String]>,
     ) -> Result<Vec<(StreamTableRowId, StreamTableRow)>, KalamDbError> {
         let table_id = self.core.table_id();
 

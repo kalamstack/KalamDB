@@ -1,19 +1,20 @@
 //! Serialization helpers for Raft state machine payloads.
 //!
-//! This module provides simple helper functions for serializing and deserializing
-//! data using JSON.
+//! Uses MessagePack (rmp-serde) with named fields for encoding: compact binary,
+//! self-describing, schema-evolution-friendly (add/remove/reorder fields),
+//! and supports any serde key type including integer-keyed maps.
 
 use crate::error::RaftError;
 use serde::{de::DeserializeOwned, Serialize};
 
-/// Encode a value to bytes using JSON.
+/// Encode a value to bytes using MessagePack with named fields.
 pub fn encode<T: Serialize>(value: &T) -> Result<Vec<u8>, RaftError> {
-    serde_json::to_vec(value).map_err(|e| RaftError::Serialization(e.to_string()))
+    rmp_serde::to_vec_named(value).map_err(|e| RaftError::Serialization(e.to_string()))
 }
 
-/// Decode a value from bytes using JSON.
+/// Decode a value from MessagePack bytes.
 pub fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, RaftError> {
-    serde_json::from_slice(bytes).map_err(|e| RaftError::Serialization(e.to_string()))
+    rmp_serde::from_slice(bytes).map_err(|e| RaftError::Serialization(e.to_string()))
 }
 
 #[cfg(test)]
@@ -39,30 +40,32 @@ mod tests {
     }
 
     #[test]
+    fn test_msgpack_compact() {
+        let data = TestData {
+            id: 123456789,
+            name: "a_reasonably_long_name_for_testing".to_string(),
+        };
+        let mp_bytes = encode(&data).unwrap();
+        // MessagePack with named fields should be compact
+        assert!(mp_bytes.len() < 60, "msgpack should be compact, got {} bytes", mp_bytes.len());
+    }
+
+    #[test]
     fn test_entry_payload_membership_roundtrip() {
         use crate::storage::{KalamNode, KalamTypeConfig};
         use openraft::{EntryPayload, Membership};
         use std::collections::BTreeMap;
 
-        // Create a KalamNode
         let node = KalamNode::new("127.0.0.1:9081", "http://127.0.0.1:8081");
-
-        // Create a membership with one node
         let mut nodes = BTreeMap::new();
         nodes.insert(1u64, node);
         let membership: Membership<u64, KalamNode> = nodes.into();
-
-        // Create an EntryPayload::Membership
         let payload: EntryPayload<KalamTypeConfig> = EntryPayload::Membership(membership);
 
-        // Encode using the same helper path used by runtime.
         let bytes = encode(&payload).expect("Membership should encode");
-
-        // Decode should succeed - this was failing before the skip_serializing_if fix
         let decoded: EntryPayload<KalamTypeConfig> = decode(&bytes)
-            .expect("Membership should decode - KalamNode must NOT use skip_serializing_if");
+            .expect("Membership should decode");
 
-        // Verify the decoded data matches
         match (&payload, &decoded) {
             (EntryPayload::Membership(m1), EntryPayload::Membership(m2)) => {
                 assert_eq!(m1.nodes().count(), m2.nodes().count(), "Node count should match");
@@ -70,7 +73,6 @@ mod tests {
             _ => panic!("Decoded payload type mismatch"),
         }
 
-        // Also verify Blank still works
         let blank: EntryPayload<KalamTypeConfig> = EntryPayload::Blank;
         let blank_bytes = encode(&blank).expect("Blank should encode");
         let _: EntryPayload<KalamTypeConfig> = decode(&blank_bytes).expect("Blank should decode");
@@ -82,11 +84,8 @@ mod tests {
         use openraft::{EntryPayload, Membership};
         use std::collections::BTreeMap;
 
-        // Create two nodes - simulating add_learner scenario
         let node1 = KalamNode::new("127.0.0.1:9081", "http://127.0.0.1:8081");
         let node2 = KalamNode::new("127.0.0.1:9082", "http://127.0.0.1:8082");
-
-        // Create membership with both nodes
         let mut nodes = BTreeMap::new();
         nodes.insert(1u64, node1);
         nodes.insert(2u64, node2);
@@ -94,7 +93,6 @@ mod tests {
         let membership: Membership<u64, KalamNode> = nodes.into();
         let payload: EntryPayload<KalamTypeConfig> = EntryPayload::Membership(membership);
 
-        // Encode and decode roundtrip
         let bytes = encode(&payload).expect("2-node Membership should encode");
         let decoded: EntryPayload<KalamTypeConfig> =
             decode(&bytes).expect("2-node Membership should decode");

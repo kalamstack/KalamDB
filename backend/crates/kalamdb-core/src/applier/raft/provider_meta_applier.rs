@@ -243,11 +243,17 @@ impl MetaApplier for ProviderMetaApplier {
     async fn create_job(&self, job: &Job) -> Result<String, RaftError> {
         log::debug!("ProviderMetaApplier: Creating job {} (type: {:?})", job.job_id, job.job_type);
 
-        self.app_context
-            .system_tables()
-            .jobs()
-            .create_job(job.clone())
-            .map_err(|e| RaftError::Internal(format!("Failed to create job: {}", e)))
+        let app_context = self.app_context.clone();
+        let job = job.clone();
+        tokio::task::spawn_blocking(move || {
+            app_context
+                .system_tables()
+                .jobs()
+                .create_job(job)
+                .map_err(|e| RaftError::Internal(format!("Failed to create job: {}", e)))
+        })
+        .await
+        .map_err(|e| RaftError::Internal(format!("Task join error: {}", e)))?
     }
 
     async fn create_job_node(
@@ -268,11 +274,16 @@ impl MetaApplier for ProviderMetaApplier {
             finished_at: None,
         };
 
-        self.app_context
-            .system_tables()
-            .job_nodes()
-            .create_job_node(job_node)
-            .map_err(|e| RaftError::Internal(format!("Failed to create job_node: {}", e)))?;
+        let app_context = self.app_context.clone();
+        tokio::task::spawn_blocking(move || {
+            app_context
+                .system_tables()
+                .job_nodes()
+                .create_job_node(job_node)
+                .map_err(|e| RaftError::Internal(format!("Failed to create job_node: {}", e)))
+        })
+        .await
+        .map_err(|e| RaftError::Internal(format!("Task join error: {}", e)))??;
 
         // Awake the job on THIS node for immediate execution
         // This provides instant dispatch rather than relying on polling
@@ -290,13 +301,19 @@ impl MetaApplier for ProviderMetaApplier {
         node_id: NodeId,
         claimed_at: i64,
     ) -> Result<String, RaftError> {
-        if let Some(mut node) = self
-            .app_context
-            .system_tables()
-            .job_nodes()
-            .get_job_node(job_id, &node_id)
-            .map_err(|e| RaftError::Internal(format!("Failed to get job_node: {}", e)))?
-        {
+        let app_context = self.app_context.clone();
+        let job_id = job_id.clone();
+        let node = tokio::task::spawn_blocking(move || {
+            app_context
+                .system_tables()
+                .job_nodes()
+                .get_job_node(&job_id, &node_id)
+                .map_err(|e| RaftError::Internal(format!("Failed to get job_node: {}", e)))
+        })
+        .await
+        .map_err(|e| RaftError::Internal(format!("Task join error: {}", e)))??;
+
+        if let Some(mut node) = node {
             node.status = JobStatus::Running;
             node.started_at = Some(claimed_at);
             node.updated_at = claimed_at;
@@ -322,13 +339,19 @@ impl MetaApplier for ProviderMetaApplier {
         error_message: Option<&str>,
         updated_at: i64,
     ) -> Result<String, RaftError> {
-        if let Some(mut node) = self
-            .app_context
-            .system_tables()
-            .job_nodes()
-            .get_job_node(job_id, &node_id)
-            .map_err(|e| RaftError::Internal(format!("Failed to get job_node: {}", e)))?
-        {
+        let app_context = self.app_context.clone();
+        let job_id = job_id.clone();
+        let node = tokio::task::spawn_blocking(move || {
+            app_context
+                .system_tables()
+                .job_nodes()
+                .get_job_node(&job_id, &node_id)
+                .map_err(|e| RaftError::Internal(format!("Failed to get job_node: {}", e)))
+        })
+        .await
+        .map_err(|e| RaftError::Internal(format!("Task join error: {}", e)))??;
+
+        if let Some(mut node) = node {
             node.status = status;
             node.updated_at = updated_at;
             node.error_message = error_message.map(|s| s.to_string());
@@ -363,36 +386,41 @@ impl MetaApplier for ProviderMetaApplier {
     ) -> Result<String, RaftError> {
         log::info!("ProviderMetaApplier: Claiming job {} by node {}", job_id, node_id);
 
-        if let Some(mut job) = self
-            .app_context
-            .system_tables()
-            .jobs()
-            .get_job(job_id)
-            .map_err(|e| RaftError::Internal(format!("Failed to get job: {}", e)))?
-        {
-            // Check if job is already running (claimed by another node)
-            if job.status == JobStatus::Running {
-                return Err(RaftError::Internal(format!(
-                    "Job {} already claimed by node {}",
-                    job_id, job.node_id
-                )));
-            }
-
-            job.node_id = node_id;
-            job.started_at = Some(claimed_at);
-            job.status = JobStatus::Running;
-            job.updated_at = claimed_at;
-
-            self.app_context
+        let app_context = self.app_context.clone();
+        let job_id = job_id.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Some(mut job) = app_context
                 .system_tables()
                 .jobs()
-                .update_job(job)
-                .map_err(|e| RaftError::Internal(format!("Failed to claim job: {}", e)))?;
+                .get_job(&job_id)
+                .map_err(|e| RaftError::Internal(format!("Failed to get job: {}", e)))?
+            {
+                // Check if job is already running (claimed by another node)
+                if job.status == JobStatus::Running {
+                    return Err(RaftError::Internal(format!(
+                        "Job {} already claimed by node {}",
+                        job_id, job.node_id
+                    )));
+                }
 
-            return Ok(format!("Job {} claimed by node {}", job_id, node_id));
-        }
+                job.node_id = node_id;
+                job.started_at = Some(claimed_at);
+                job.status = JobStatus::Running;
+                job.updated_at = claimed_at;
 
-        Err(RaftError::Internal(format!("Job {} not found for claiming", job_id)))
+                app_context
+                    .system_tables()
+                    .jobs()
+                    .update_job(job)
+                    .map_err(|e| RaftError::Internal(format!("Failed to claim job: {}", e)))?;
+
+                return Ok(format!("Job {} claimed by node {}", job_id, node_id));
+            }
+
+            Err(RaftError::Internal(format!("Job {} not found for claiming", job_id)))
+        })
+        .await
+        .map_err(|e| RaftError::Internal(format!("Task join error: {}", e)))?
     }
 
     async fn update_job_status(
@@ -403,42 +431,51 @@ impl MetaApplier for ProviderMetaApplier {
     ) -> Result<String, RaftError> {
         log::debug!("ProviderMetaApplier: Updating job {} status to {:?}", job_id, status);
 
-        if let Some(mut job) = self
-            .app_context
-            .system_tables()
-            .jobs()
-            .get_job(job_id)
-            .map_err(|e| RaftError::Internal(format!("Failed to get job: {}", e)))?
-        {
-            let old_status = job.status;
-            job.status = status;
-            job.updated_at = updated_at;
-
-            if matches!(status, JobStatus::Running | JobStatus::Retrying)
-                && job.started_at.is_none()
-            {
-                job.started_at = Some(updated_at);
-            }
-
-            if matches!(status, JobStatus::Completed | JobStatus::Failed | JobStatus::Cancelled)
-                && job.finished_at.is_none()
-            {
-                job.finished_at = Some(updated_at);
-            }
-
-            self.app_context
+        let app_context = self.app_context.clone();
+        let job_id = job_id.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Some(mut job) = app_context
                 .system_tables()
                 .jobs()
-                .update_job(job)
-                .map_err(|e| RaftError::Internal(format!("Failed to update job status: {}", e)))?;
+                .get_job(&job_id)
+                .map_err(|e| RaftError::Internal(format!("Failed to get job: {}", e)))?
+            {
+                let old_status = job.status;
+                job.status = status;
+                job.updated_at = updated_at;
 
-            return Ok(format!(
-                "Job {} status updated from {:?} to {:?}",
-                job_id, old_status, status
-            ));
-        }
+                if matches!(status, JobStatus::Running | JobStatus::Retrying)
+                    && job.started_at.is_none()
+                {
+                    job.started_at = Some(updated_at);
+                }
 
-        Ok(format!("Job {} not found for status update", job_id))
+                if matches!(
+                    status,
+                    JobStatus::Completed | JobStatus::Failed | JobStatus::Cancelled
+                ) && job.finished_at.is_none()
+                {
+                    job.finished_at = Some(updated_at);
+                }
+
+                app_context
+                    .system_tables()
+                    .jobs()
+                    .update_job(job)
+                    .map_err(|e| {
+                        RaftError::Internal(format!("Failed to update job status: {}", e))
+                    })?;
+
+                return Ok(format!(
+                    "Job {} status updated from {:?} to {:?}",
+                    job_id, old_status, status
+                ));
+            }
+
+            Ok(format!("Job {} not found for status update", job_id))
+        })
+        .await
+        .map_err(|e| RaftError::Internal(format!("Task join error: {}", e)))?
     }
 
     async fn complete_job(
@@ -449,34 +486,42 @@ impl MetaApplier for ProviderMetaApplier {
     ) -> Result<String, RaftError> {
         log::info!("ProviderMetaApplier: Completing job {}", job_id);
 
-        if let Some(mut job) = self
-            .app_context
-            .system_tables()
-            .jobs()
-            .get_job(job_id)
-            .map_err(|e| RaftError::Internal(format!("Failed to get job: {}", e)))?
-        {
-            let job_type = job.job_type;
-            job.status = JobStatus::Completed;
-            job.message = Some(result.map(String::from).unwrap_or_else(|| {
-                serde_json::json!({ "message": "Job completed successfully" }).to_string()
-            }));
-            if job.started_at.is_none() {
-                job.started_at = Some(completed_at);
-            }
-            job.finished_at = Some(completed_at);
-            job.updated_at = completed_at;
-
-            self.app_context
+        let app_context = self.app_context.clone();
+        let job_id = job_id.clone();
+        let result = result.map(String::from);
+        tokio::task::spawn_blocking(move || {
+            if let Some(mut job) = app_context
                 .system_tables()
                 .jobs()
-                .update_job(job)
-                .map_err(|e| RaftError::Internal(format!("Failed to complete job: {}", e)))?;
+                .get_job(&job_id)
+                .map_err(|e| RaftError::Internal(format!("Failed to get job: {}", e)))?
+            {
+                let job_type = job.job_type;
+                job.status = JobStatus::Completed;
+                job.message = Some(result.unwrap_or_else(|| {
+                    serde_json::json!({ "message": "Job completed successfully" }).to_string()
+                }));
+                if job.started_at.is_none() {
+                    job.started_at = Some(completed_at);
+                }
+                job.finished_at = Some(completed_at);
+                job.updated_at = completed_at;
 
-            return Ok(format!("Job {} ({:?}) completed successfully", job_id, job_type));
-        }
+                app_context
+                    .system_tables()
+                    .jobs()
+                    .update_job(job)
+                    .map_err(|e| {
+                        RaftError::Internal(format!("Failed to complete job: {}", e))
+                    })?;
 
-        Ok(format!("Job {} not found for completion", job_id))
+                return Ok(format!("Job {} ({:?}) completed successfully", job_id, job_type));
+            }
+
+            Ok(format!("Job {} not found for completion", job_id))
+        })
+        .await
+        .map_err(|e| RaftError::Internal(format!("Task join error: {}", e)))?
     }
 
     async fn fail_job(
@@ -487,32 +532,38 @@ impl MetaApplier for ProviderMetaApplier {
     ) -> Result<String, RaftError> {
         log::warn!("ProviderMetaApplier: Failing job {}: {}", job_id, error_message);
 
-        if let Some(mut job) = self
-            .app_context
-            .system_tables()
-            .jobs()
-            .get_job(job_id)
-            .map_err(|e| RaftError::Internal(format!("Failed to get job: {}", e)))?
-        {
-            let job_type = job.job_type;
-            job.status = JobStatus::Failed;
-            job.message = Some(error_message.to_string());
-            job.finished_at = Some(failed_at);
-            job.updated_at = failed_at;
-
-            self.app_context
+        let app_context = self.app_context.clone();
+        let job_id = job_id.clone();
+        let error_message = error_message.to_string();
+        tokio::task::spawn_blocking(move || {
+            if let Some(mut job) = app_context
                 .system_tables()
                 .jobs()
-                .update_job(job)
-                .map_err(|e| RaftError::Internal(format!("Failed to fail job: {}", e)))?;
+                .get_job(&job_id)
+                .map_err(|e| RaftError::Internal(format!("Failed to get job: {}", e)))?
+            {
+                let job_type = job.job_type;
+                job.status = JobStatus::Failed;
+                job.message = Some(error_message.clone());
+                job.finished_at = Some(failed_at);
+                job.updated_at = failed_at;
 
-            return Ok(format!(
-                "Job {} ({:?}) marked as failed: {}",
-                job_id, job_type, error_message
-            ));
-        }
+                app_context
+                    .system_tables()
+                    .jobs()
+                    .update_job(job)
+                    .map_err(|e| RaftError::Internal(format!("Failed to fail job: {}", e)))?;
 
-        Ok(format!("Job {} not found for failure", job_id))
+                return Ok(format!(
+                    "Job {} ({:?}) marked as failed: {}",
+                    job_id, job_type, error_message
+                ));
+            }
+
+            Ok(format!("Job {} not found for failure", job_id))
+        })
+        .await
+        .map_err(|e| RaftError::Internal(format!("Task join error: {}", e)))?
     }
 
     async fn release_job(
@@ -523,29 +574,35 @@ impl MetaApplier for ProviderMetaApplier {
     ) -> Result<String, RaftError> {
         log::info!("ProviderMetaApplier: Releasing job {}: {}", job_id, reason);
 
-        if let Some(mut job) = self
-            .app_context
-            .system_tables()
-            .jobs()
-            .get_job(job_id)
-            .map_err(|e| RaftError::Internal(format!("Failed to get job: {}", e)))?
-        {
-            let job_type = job.job_type;
-            job.status = JobStatus::New;
-            job.node_id = NodeId::default();
-            job.started_at = None;
-            job.updated_at = released_at;
-
-            self.app_context
+        let app_context = self.app_context.clone();
+        let job_id = job_id.clone();
+        let reason = reason.to_string();
+        tokio::task::spawn_blocking(move || {
+            if let Some(mut job) = app_context
                 .system_tables()
                 .jobs()
-                .update_job(job)
-                .map_err(|e| RaftError::Internal(format!("Failed to release job: {}", e)))?;
+                .get_job(&job_id)
+                .map_err(|e| RaftError::Internal(format!("Failed to get job: {}", e)))?
+            {
+                let job_type = job.job_type;
+                job.status = JobStatus::New;
+                job.node_id = NodeId::default();
+                job.started_at = None;
+                job.updated_at = released_at;
 
-            return Ok(format!("Job {} ({:?}) released: {}", job_id, job_type, reason));
-        }
+                app_context
+                    .system_tables()
+                    .jobs()
+                    .update_job(job)
+                    .map_err(|e| RaftError::Internal(format!("Failed to release job: {}", e)))?;
 
-        Ok(format!("Job {} not found for release", job_id))
+                return Ok(format!("Job {} ({:?}) released: {}", job_id, job_type, reason));
+            }
+
+            Ok(format!("Job {} not found for release", job_id))
+        })
+        .await
+        .map_err(|e| RaftError::Internal(format!("Task join error: {}", e)))?
     }
 
     async fn cancel_job(
@@ -556,28 +613,34 @@ impl MetaApplier for ProviderMetaApplier {
     ) -> Result<String, RaftError> {
         log::info!("ProviderMetaApplier: Cancelling job {}: {}", job_id, reason);
 
-        if let Some(mut job) = self
-            .app_context
-            .system_tables()
-            .jobs()
-            .get_job(job_id)
-            .map_err(|e| RaftError::Internal(format!("Failed to get job: {}", e)))?
-        {
-            let job_type = job.job_type;
-            job.status = JobStatus::Cancelled;
-            job.finished_at = Some(cancelled_at);
-            job.message = Some(reason.to_string());
-            job.updated_at = cancelled_at;
-
-            self.app_context
+        let app_context = self.app_context.clone();
+        let job_id = job_id.clone();
+        let reason = reason.to_string();
+        tokio::task::spawn_blocking(move || {
+            if let Some(mut job) = app_context
                 .system_tables()
                 .jobs()
-                .update_job(job)
-                .map_err(|e| RaftError::Internal(format!("Failed to cancel job: {}", e)))?;
+                .get_job(&job_id)
+                .map_err(|e| RaftError::Internal(format!("Failed to get job: {}", e)))?
+            {
+                let job_type = job.job_type;
+                job.status = JobStatus::Cancelled;
+                job.finished_at = Some(cancelled_at);
+                job.message = Some(reason.clone());
+                job.updated_at = cancelled_at;
 
-            return Ok(format!("Job {} ({:?}) cancelled: {}", job_id, job_type, reason));
-        }
+                app_context
+                    .system_tables()
+                    .jobs()
+                    .update_job(job)
+                    .map_err(|e| RaftError::Internal(format!("Failed to cancel job: {}", e)))?;
 
-        Ok(format!("Job {} not found for cancellation", job_id))
+                return Ok(format!("Job {} ({:?}) cancelled: {}", job_id, job_type, reason));
+            }
+
+            Ok(format!("Job {} not found for cancellation", job_id))
+        })
+        .await
+        .map_err(|e| RaftError::Internal(format!("Task join error: {}", e)))?
     }
 }

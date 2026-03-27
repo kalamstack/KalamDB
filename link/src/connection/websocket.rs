@@ -8,7 +8,7 @@ use crate::{
     auth::AuthProvider,
     error::{KalamLinkError, Result},
     models::{
-        ChangeEvent, ChangeTypeRaw, ClientMessage, ServerMessage, SubscriptionOptions,
+        ChangeEvent, ClientMessage, ServerMessage, SubscriptionOptions,
         SubscriptionRequest, WsAuthCredentials,
     },
 };
@@ -412,61 +412,7 @@ pub(crate) fn parse_message(text: &str) -> Result<Option<ChangeEvent>> {
         ))
     })?;
 
-    let event = match msg {
-        ServerMessage::AuthSuccess { .. } | ServerMessage::AuthError { .. } => {
-            return Ok(None);
-        },
-        ServerMessage::SubscriptionAck {
-            subscription_id,
-            total_rows,
-            batch_control,
-            schema,
-        } => ChangeEvent::Ack {
-            subscription_id,
-            total_rows,
-            batch_control,
-            schema,
-        },
-        ServerMessage::InitialDataBatch {
-            subscription_id,
-            rows,
-            batch_control,
-        } => ChangeEvent::InitialDataBatch {
-            subscription_id,
-            rows,
-            batch_control,
-        },
-        ServerMessage::Change {
-            subscription_id,
-            change_type,
-            rows,
-            old_values,
-        } => match change_type {
-            ChangeTypeRaw::Insert => ChangeEvent::Insert {
-                subscription_id,
-                rows: rows.unwrap_or_default(),
-            },
-            ChangeTypeRaw::Update => ChangeEvent::Update {
-                subscription_id,
-                rows: rows.unwrap_or_default(),
-                old_rows: old_values.unwrap_or_default(),
-            },
-            ChangeTypeRaw::Delete => ChangeEvent::Delete {
-                subscription_id,
-                old_rows: old_values.unwrap_or_default(),
-            },
-        },
-        ServerMessage::Error {
-            subscription_id,
-            code,
-            message,
-        } => ChangeEvent::Error {
-            subscription_id,
-            code,
-            message,
-        },
-    };
-    Ok(Some(event))
+    Ok(ChangeEvent::from_server_message(msg))
 }
 
 // ── Keepalive Jitter ────────────────────────────────────────────────────────

@@ -15,6 +15,7 @@ use kalamdb_core::app_context::AppContext;
 use kalamdb_core::live::{ConnectionsManager, SharedConnectionState};
 use log::debug;
 use std::sync::Arc;
+use tracing::Instrument;
 
 use super::{send_auth_error, send_json};
 use crate::limiter::RateLimiter;
@@ -73,69 +74,55 @@ async fn authenticate_with_request(
     registry: &Arc<ConnectionsManager>,
     user_repo: &Arc<dyn UserRepository>,
 ) -> Result<(), String> {
-    let connection_id = connection_state.read().connection_id().clone();
+    let connection_id = connection_state.connection_id().clone();
 
     // Get username for logging (before authentication attempt)
     let username_for_log = extract_username_for_audit(&auth_request);
-
-    debug!(
-        "Authenticating WebSocket: connection_id={}, username={}",
-        connection_id,
-        username_for_log.as_str()
+    let auth_span = tracing::debug_span!(
+        "ws.authenticate",
+        connection_id = %connection_id,
+        username = %username_for_log.as_str(),
+        user_id = tracing::field::Empty,
+        role = tracing::field::Empty
     );
 
-    // Authenticate using unified auth module
-    let auth_result = match authenticate(auth_request, connection_info, user_repo).await {
-        Ok(result) => {
-            // // Log successful authentication
-            // let event_type = if connection_info.is_localhost() {
-            //     "LOGIN_WS_LOCALHOST"
-            // } else {
-            //     "LOGIN_WS"
-            // };
-            // let entry = audit::log_auth_event(&result.user.user_id, event_type, true, None);
-            // if let Err(_e) = audit::persist_audit_entry(app_context, &entry).await {
-            //     error!("Failed to persist audit log: {}", _e);
-            // }
-            result.user
-        },
-        Err(_e) => {
-            // Log failed authentication
-            // let entry = audit::log_auth_event_with_username(
-            //     &username_for_log,
-            //     "LOGIN_WS",
-            //     false,
-            //     Some(format!("{}", e)),
-            // );
-            // if let Err(e) = audit::persist_audit_entry(app_context, &entry).await {
-            //     error!("Failed to persist audit log: {}", e);
-            // }
+    async move {
+        debug!(
+            "Authenticating WebSocket: connection_id={}, username={}",
+            connection_id,
+            username_for_log.as_str()
+        );
 
-            let _ = send_auth_error(session.clone(), "Invalid username or password").await;
-            return Err("Authentication failed".to_string());
-        },
-    };
+        let auth_result = match authenticate(auth_request, connection_info, user_repo).await {
+            Ok(result) => result.user,
+            Err(_e) => {
+                let _ = send_auth_error(session.clone(), "Invalid username or password").await;
+                return Err("Authentication failed".to_string());
+            },
+        };
 
-    // Mark authenticated in connection state
-    connection_state
-        .write()
-        .mark_authenticated(auth_result.user_id.clone(), auth_result.role);
-    // Update registry's user index
-    registry.on_authenticated(&connection_id, auth_result.user_id.clone());
+        tracing::Span::current().record("user_id", auth_result.user_id.as_str());
+        tracing::Span::current().record("role", format!("{:?}", auth_result.role).as_str());
 
-    // Send success
-    let msg = WebSocketMessage::AuthSuccess {
-        user_id: auth_result.user_id.clone(),
-        role: format!("{:?}", auth_result.role),
-    };
-    let _ = send_json(session, &msg, true).await;
+        connection_state
+            .mark_authenticated(auth_result.user_id.clone(), auth_result.role);
+        registry.on_authenticated(&connection_id, auth_result.user_id.clone());
 
-    debug!(
-        "WebSocket authenticated: {} as {} ({:?})",
-        connection_id,
-        auth_result.user_id.as_str(),
-        auth_result.role
-    );
+        let msg = WebSocketMessage::AuthSuccess {
+            user_id: auth_result.user_id.clone(),
+            role: format!("{:?}", auth_result.role),
+        };
+        let _ = send_json(session, &msg, true).await;
 
-    Ok(())
+        debug!(
+            "WebSocket authenticated: {} as {} ({:?})",
+            connection_id,
+            auth_result.user_id.as_str(),
+            auth_result.role
+        );
+
+        Ok(())
+    }
+    .instrument(auth_span)
+    .await
 }

@@ -6,7 +6,7 @@
 //! The goal is to eliminate duplication of similar conversion logic scattered across multiple files
 //! and provide a single source of truth for all datatype conversions.
 
-use datafusion::scalar::ScalarValue;
+use datafusion_common::ScalarValue;
 
 /// Encode a scalar value to bytes for use in index keys or storage
 ///
@@ -55,13 +55,6 @@ pub fn scalar_value_to_bytes(value: &ScalarValue) -> Vec<u8> {
         // For other types, convert to string representation
         _ => value.to_string().into_bytes(),
     }
-}
-
-/// Alias for `scalar_value_to_bytes` for backwards compatibility
-///
-/// Older code may refer to this as "encoding" a value for primary keys.
-pub fn encode_pk_value(value: &ScalarValue) -> Vec<u8> {
-    scalar_value_to_bytes(value)
 }
 
 #[cfg(test)]

@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
 members = [
+    "pg",
+    "pg/crates/kalam-pg-common",
+    "pg/crates/kalam-pg-api",
+    "pg/crates/kalam-pg-fdw",
+    "pg/crates/kalam-pg-types",
+    "pg/crates/kalam-pg-client",
     "backend/crates/kalamdb-macros",
     "backend/crates/kalamdb-commons",
     "backend/crates/kalamdb-configs",
@@ -22,6 +28,8 @@ members = [
     "backend/crates/kalamdb-oidc",
     "backend/crates/kalamdb-raft",
     "backend/crates/kalamdb-views",
+    "backend/crates/kalamdb-pg",
+    "backend/crates/kalamdb-server-auth",
     "backend",
     "link",
     "link/kalam-link-dart",
@@ -30,7 +38,7 @@ members = [
 exclude = ["benchv2"]
 
 [workspace.package]
-version = "0.4.1-beta"
+version = "0.4.2-dev"
 edition = "2021"
 rust-version = "1.92"
 authors = ["KalamDB Team"]
@@ -51,7 +59,7 @@ anyhow = "1.0.102"
 log = "0.4.29"
 
 # Async runtime
-tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "io-std", "net", "signal"] }
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "io-util", "io-std", "net", "signal", "parking_lot"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 
 # HTTP client (with HTTP/2 support) - using rustls-tls for cross-compilation compatibility
@@ -60,25 +68,27 @@ reqwest = { version = "0.13.2", default-features = false, features = ["json", "r
 url = "2.5.8"
 
 # WebSocket
-tokio-tungstenite = { version = "0.28.0", features = ["rustls-tls-webpki-roots"] }
+tokio-tungstenite = { version = "0.29.0", features = ["rustls-tls-webpki-roots"] }
 
 # Time handling
 chrono = { version = "0.4.44", features = ["serde"] }
 
 # Storage
-rocksdb = { version = "0.24.0", default-features = false, features = ["snappy", "multi-threaded-cf"] }
+ rocksdb = { version = "0.24.0", default-features = false, features = ["snappy", "multi-threaded-cf", "bindgen-runtime"] }
 
 # Apache Arrow ecosystem
 # IMPORTANT: arrow, arrow-schema and parquet MUST match the version used by DataFusion.
 # DataFusion 52.3.0 resolves to Arrow 57.3.0; mixing in Arrow 58 pulls a second
 # arrow_array crate into the graph and causes FixedSizeListArray type mismatches.
 # Upgrade DataFusion first before bumping Arrow/Parquet beyond this family.
-arrow = { version = "57.3.0", default-features = false, features = ["prettyprint", "json"] }
-arrow-schema = { version = "57.3.0" }
-datafusion = { version = "52.3.0", default-features = false, features = ["sql", "parquet", "recursive_protection", "nested_expressions"] }
-datafusion-common = { version = "52.3.0" }
+arrow = { version = "58.1.0", default-features = false }
+arrow-ipc = { version = "58.1.0", default-features = false }
+arrow-schema = { version = "58.1.0" }
+datafusion = { version = "53.0.0", default-features = false, features = ["sql", "parquet", "recursive_protection", "nested_expressions"] }
+datafusion-common = { version = "53.0.0" }
+datafusion-expr = { version = "53.0.0" }
 sqlparser = { version = "0.61.0" }
-parquet = { version = "57.3.0", default-features = false, features = ["snap", "zstd", "arrow"] }
+parquet = { version = "58.1.0", default-features = false, features = ["snap", "zstd", "arrow", "async"] }
 
 # Web framework
 actix-web = { version = "4.13.0", features = ["http2"] }
@@ -110,7 +120,7 @@ rustyline = { version = "17.0.2" }
 
 # System
 num_cpus = "1.16"
-sysinfo = "0.38.4"
+sysinfo = { version = "0.38.4", default-features = false, features = ["system", "disk"] }
 hostname = "0.4"
 
 # Testing
@@ -123,6 +133,7 @@ criterion = { version = "0.8.2", features = ["html_reports"] }
 
 # Raft consensus
 openraft = { version = "0.9.21", features = ["serde"] }
+rmp-serde = "1.3"
 
 # gRPC for Raft network layer
 tonic = { version = "0.14.5" }
@@ -134,9 +145,12 @@ prost-types = "0.14.3"
 # Additional dependencies
 bcrypt = "0.19.0"
 rand = "0.10.0"
+rcgen = "0.14.1"
+x509-parser = "0.18.1"
 kalamdb-commons = { path = "backend/crates/kalamdb-commons" }
+kalamdb-tables = { path = "backend/crates/kalamdb-tables" }
 kalamdb-views = { path = "backend/crates/kalamdb-views" }
-cookie = { version = "0.18", features = ["secure"] }
+cookie = "0.18"
 colored = "3.1.1"
 fern = "0.7"
 indicatif = "0.18.4"
@@ -165,7 +179,7 @@ syn = { version = "2.0.117", features = ["full", "extra-traits"] }
 # Object storage abstraction (S3/GCS/Azure/local)
 # Kept as a workspace dependency so only kalamdb-filestore needs to opt-in.
 # Using 0.12.4 to match DataFusion 51.0.0 dependency
-object_store = { version = "0.13.1", features = ["aws", "gcp", "azure"] }
+object_store = { version = "0.13.1" }
  
 # Vector ANN engines
 usearch = "2.24.0"
@@ -174,9 +188,9 @@ parking_lot = "0.12"
 tokio-util = "0.7.18"
 hex = "0.4"
 hmac = "0.12"
-sha2 = "0.10"
+sha2 = "0.11.0"
 storekey = "0.11"
-moka = { version = "0.12.13", features = ["future", "sync"] }
+moka = { version = "0.12.15", features = ["future", "sync"] }
 ntest = "0.9.5"
 ipnet = "2.11.0"
 wasm-bindgen = { version = "0.2.114" }
@@ -191,10 +205,13 @@ tar = "0.4"
 zip = { version = "8.2.0", default-features = false, features = ["deflate"] }
 miniz_oxide = "0.9.1"
 flutter_rust_bridge = "=2.11.1"
-rust-embed = { version = "8.11.0", features = ["compression"] }
+rust-embed = { version = "8.11.0", features = ["compression", "include-exclude"] }
 mime_guess = "2.0"
 kalamdb-configs = { path = "backend/crates/kalamdb-configs" }
 kalamdb-server = { path = "backend" }
+pgrx = "=0.16.1"
+pgrx-tests = "=0.16.1"
+tokio-postgres = "0.7"
 
 # Tracing / observability
 tracing = "0.1"
@@ -206,26 +223,37 @@ opentelemetry = "0.31.0"
 opentelemetry_sdk = { version = "0.31.0", features = ["trace", "rt-tokio"] }
 opentelemetry-otlp = { version = "0.31.0", default-features = false, features = ["trace", "grpc-tonic", "http-proto"] }
 
-# Custom profile for distribution builds (smaller, optimized binaries)
+# Release profile: balanced for production use (good performance + reasonable size)
+[profile.release]
+opt-level = 3         # Full speed optimizations
+lto = "thin"          # Thin LTO: removes cross-crate dead code without huge link times
+codegen-units = 1     # Single codegen unit for better optimization
+panic = "abort"       # Removes stack unwinding code (~5-10% savings)
+strip = true          # Strip symbols from the binary
+
+# Custom profile for distribution builds (smallest possible binary)
 # Use with: cargo build --profile release-dist
 [profile.release-dist]
 inherits = "release"
-opt-level = "z"       # Optimize for size
-lto = true            # Enable Link Time Optimization (removes unused code across crates)
-codegen-units = 1     # Slower build, but better optimization
-panic = "abort"       # Removes stack unwinding code
-strip = true          # Automatically strip symbols from the binary
+opt-level = "z"       # Optimize for size (most aggressive)
+lto = true            # Full LTO (slower link, best dead-code elimination)
 
-# Custom profile for Docker builds (less memory-intensive for cross-compilation)
-# Uses thin LTO instead of full LTO to reduce memory usage during linking
+# Custom profile for Docker builds (smallest usable binary for containers)
+# Uses full LTO for maximum dead-code elimination to reduce loaded code pages.
 # Use with: cargo build --profile docker
 [profile.docker]
 inherits = "release"
 opt-level = "z"       # Optimize for size (most aggressive)
-lto = "thin"          # Thin LTO - uses less memory than full LTO during linking
-codegen-units = 1     # Better optimization (single unit)
-panic = "abort"       # Removes stack unwinding code
-strip = true          # Automatically strip symbols from the binary
+lto = true             # Full LTO: best dead-code elimination for minimal RSS
+
+# Custom profile for PostgreSQL extension builds (smallest possible .so)
+# Uses size optimization + full LTO + panic=unwind (required by pgrx)
+# Use with: cargo pgrx install --profile release-pg
+[profile.release-pg]
+inherits = "release"
+opt-level = "z"       # Optimize for size
+lto = true            # Full LTO for maximum dead-code elimination
+panic = "unwind"      # Required by pgrx (PostgreSQL longjmp unwinding)
 
 [profile.dev]
 opt-level = 0        # no optimizations = faster compile

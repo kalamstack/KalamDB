@@ -68,7 +68,7 @@ pub use shared_tables::shared_table_store::{
     SharedTableRow, SharedTableStore,
 };
 pub use stream_tables::stream_table_store::{
-    new_stream_table_store, StreamTableStore, StreamTableStoreConfig,
+    new_stream_table_store, StreamTableStorageMode, StreamTableStore, StreamTableStoreConfig,
 };
 pub use topics::topic_message_models::{TopicMessage, TopicMessageId};
 pub use topics::topic_message_store::TopicMessageStore;

@@ -128,6 +128,13 @@ pub async fn websocket_handler(
 
     // Extract client IP with security checks against spoofing
     let client_ip = kalamdb_auth::extract_client_ip_secure(&req);
+    let _connect_span = tracing::debug_span!(
+        "ws.connect",
+        connection_id = %connection_id,
+        client_ip = ?client_ip,
+        compression_enabled
+    )
+    .entered();
 
     debug!("New WebSocket connection: {} (auth required within 3s)", connection_id);
 
@@ -198,7 +205,7 @@ async fn handle_websocket(
     let mut event_rx = registration.event_rx;
     let mut notification_rx = registration.notification_rx;
     let connection_state = registration.state;
-    let connection_id = connection_state.read().connection_id().clone();
+    let connection_id = connection_state.connection_id().clone();
 
     // Scope WebSocket transport so it is dropped before cleanup.
     {
@@ -253,16 +260,16 @@ async fn handle_websocket(
                 msg = msg_stream.next() => {
                     match msg {
                         Some(Ok(Message::Ping(bytes))) => {
-                            connection_state.read().update_heartbeat();
+                            connection_state.update_heartbeat();
                             if session.pong(&bytes).await.is_err() {
                                 break;
                             }
                         }
                         Some(Ok(Message::Pong(_))) => {
-                            connection_state.read().update_heartbeat();
+                            connection_state.update_heartbeat();
                         }
                         Some(Ok(Message::Text(text))) => {
-                            connection_state.read().update_heartbeat();
+                            connection_state.update_heartbeat();
 
                             // Security: Check message size limit
                             if text.len() > max_message_size {
@@ -372,7 +379,7 @@ async fn handle_text_message(
 
     match msg {
         ClientMessage::Authenticate { credentials } => {
-            connection_state.write().mark_auth_started();
+            connection_state.mark_auth_started();
             handle_authenticate(
                 connection_state,
                 client_ip,
@@ -386,7 +393,7 @@ async fn handle_text_message(
             .await
         },
         ClientMessage::Subscribe { subscription } => {
-            if !connection_state.read().is_authenticated() {
+            if !connection_state.is_authenticated() {
                 let _ = send_error(
                     session,
                     "subscribe",
@@ -411,7 +418,7 @@ async fn handle_text_message(
             subscription_id,
             last_seq_id,
         } => {
-            if !connection_state.read().is_authenticated() {
+            if !connection_state.is_authenticated() {
                 return Ok(());
             }
             handle_next_batch(
@@ -425,7 +432,7 @@ async fn handle_text_message(
             .await
         },
         ClientMessage::Unsubscribe { subscription_id } => {
-            if !connection_state.read().is_authenticated() {
+            if !connection_state.is_authenticated() {
                 return Ok(());
             }
             handle_unsubscribe(connection_state, &subscription_id, rate_limiter, live_query_manager)

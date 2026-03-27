@@ -1,3 +1,5 @@
+#![allow(unused_imports)]
+
 use kalamdb_commons::models::{ConnectionId, ConnectionInfo, UserId};
 use kalamdb_commons::websocket::{SubscriptionOptions, SubscriptionRequest};
 

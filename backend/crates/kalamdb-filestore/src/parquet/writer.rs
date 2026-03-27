@@ -26,12 +26,10 @@ pub(crate) fn serialize_to_parquet(
     batches: Vec<RecordBatch>,
     bloom_filter_columns: Option<Vec<String>>,
 ) -> Result<Bytes> {
-    let batch_count = batches.len();
     let row_count: u64 = batches.iter().map(|batch| batch.num_rows() as u64).sum();
     let bloom_filter_count = bloom_filter_columns.as_ref().map_or(0, Vec::len);
-    let span = tracing::info_span!(
+    let span = tracing::debug_span!(
         "parquet.serialize",
-        batch_count = batch_count,
         row_count = row_count,
         bloom_filter_count = bloom_filter_count
     );
@@ -51,7 +49,7 @@ pub(crate) fn serialize_to_parquet(
     // Build writer properties
     let mut props_builder = WriterProperties::builder()
         .set_compression(Compression::ZSTD(zstd_level()))
-        .set_max_row_group_size(128 * 1024); // 128K rows per group
+        .set_max_row_group_row_count(Some(128 * 1024)); // 128K rows per group
 
     // Add bloom filters for specified columns
     if let Some(cols) = bloom_filter_columns {

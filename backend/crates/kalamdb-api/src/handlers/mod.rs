@@ -28,7 +28,7 @@ pub mod sql;
 pub mod topics;
 pub mod ws;
 
-// Re-export for backwards compatibility and convenient access
+// Re-export for convenient access
 pub use auth::{
     login_handler, logout_handler, me_handler, refresh_handler, server_setup_handler,
     setup_status_handler,

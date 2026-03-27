@@ -196,11 +196,10 @@ impl LiveQueryManager {
     ) -> Result<SubscriptionResult, KalamDbError> {
         // Get user_id from connection state
         let (user_id, user_role) = {
-            let state = connection_state.read();
-            let user_id = state.user_id().cloned().ok_or_else(|| {
+            let user_id = connection_state.user_id().cloned().ok_or_else(|| {
                 KalamDbError::InvalidOperation("Connection not authenticated".to_string())
             })?;
-            let user_role = state.user_role().ok_or_else(|| {
+            let user_role = connection_state.user_role().ok_or_else(|| {
                 KalamDbError::InvalidOperation(
                     "Connection authenticated without role context".to_string(),
                 )
@@ -379,21 +378,15 @@ impl LiveQueryManager {
         since_seq: Option<SeqId>,
     ) -> Result<InitialDataResult, KalamDbError> {
         // Get subscription state from connection
-        let sub_state = {
-            let state = connection_state.read();
-            state.subscriptions.get(subscription_id).map(|s| s.clone()).ok_or_else(|| {
-                KalamDbError::NotFound(format!("Subscription not found: {}", subscription_id))
-            })?
-        };
+        let sub_state = connection_state.get_subscription(subscription_id).ok_or_else(|| {
+            KalamDbError::NotFound(format!("Subscription not found: {}", subscription_id))
+        })?;
 
-        let user_role = {
-            let state = connection_state.read();
-            state.user_role().ok_or_else(|| {
-                KalamDbError::InvalidOperation(
-                    "Connection authenticated without role context".to_string(),
-                )
-            })?
-        };
+        let user_role = connection_state.user_role().ok_or_else(|| {
+            KalamDbError::InvalidOperation(
+                "Connection authenticated without role context".to_string(),
+            )
+        })?;
 
         let table_def = self
             .schema_registry
@@ -534,12 +527,9 @@ impl LiveQueryManager {
             KalamDbError::NotFound(format!("Connection not found: {}", connection_id))
         })?;
 
-        let user_id = {
-            let state = connection_state.read();
-            state.user_id.clone().ok_or_else(|| {
-                KalamDbError::NotFound(format!("User not found for connection: {}", connection_id))
-            })?
-        };
+        let user_id = connection_state.user_id().cloned().ok_or_else(|| {
+            KalamDbError::NotFound(format!("User not found for connection: {}", connection_id))
+        })?;
 
         let removed_ids = self.unregister_connection(&user_id, connection_id).await?;
 

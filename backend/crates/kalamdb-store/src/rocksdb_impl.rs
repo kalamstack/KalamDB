@@ -4,6 +4,7 @@
 //! as the underlying storage engine. It maps the generic partition concept to
 //! RocksDB column families.
 
+use crate::cf_tuning::apply_cf_settings;
 use crate::storage_trait::{Operation, Partition, Result, StorageBackend, StorageError};
 use kalamdb_configs::RocksDbSettings;
 use rocksdb::{BoundColumnFamily, Cache, IteratorMode, Options, PrefixRange, WriteOptions, DB};
@@ -171,7 +172,7 @@ impl StorageBackend for RocksDBBackend {
         start_key: Option<&[u8]>,
         limit: Option<usize>,
     ) -> Result<Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + Send + '_>> {
-        let _span = tracing::debug_span!("rocksdb.scan", partition = %partition.name(), has_prefix = prefix.is_some(), limit = ?limit).entered();
+        let _span = tracing::trace_span!("rocksdb.scan", partition = %partition.name(), has_prefix = prefix.is_some(), limit = ?limit).entered();
         use rocksdb::Direction;
 
         let cf = self.get_cf(partition)?;
@@ -252,7 +253,7 @@ impl StorageBackend for RocksDBBackend {
         start_key: Option<&[u8]>,
         limit: Option<usize>,
     ) -> Result<Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + Send + '_>> {
-        let _span = tracing::debug_span!(
+        let _span = tracing::trace_span!(
             "rocksdb.scan_reverse",
             partition = %partition.name(),
             has_prefix = prefix.is_some(),
@@ -339,8 +340,7 @@ impl StorageBackend for RocksDBBackend {
         // Create new column family
         // Note: With multi-threaded-cf feature, create_cf takes &self and handles locking internally
         let mut opts = Options::default();
-        opts.set_write_buffer_size(self.settings.write_buffer_size);
-        opts.set_max_write_buffer_number(self.settings.max_write_buffers);
+        apply_cf_settings(&mut opts, &self.settings, partition.name());
         // MEMORY OPTIMIZATION: Do NOT call optimize_for_point_lookup() per-CF.
         // It switches the memtable to a hash-based representation which has
         // significantly higher fixed memory overhead per column family.
@@ -407,6 +407,32 @@ impl StorageBackend for RocksDBBackend {
         // This removes tombstones and optimizes storage after flush operations
         // Note: compact_range_cf is infallible (no Result return)
         self.db.compact_range_cf(&cf, None::<&[u8]>, None::<&[u8]>);
+
+        Ok(())
+    }
+
+    fn flush_all_memtables(&self) -> Result<()> {
+        let names = self
+            .known_cf_names
+            .read()
+            .map_err(|e| StorageError::Other(format!("lock poisoned: {}", e)))?;
+
+        let mut flush_opts = rocksdb::FlushOptions::default();
+        flush_opts.set_wait(true);
+
+        for cf_name in names.iter() {
+            if let Some(cf) = self.db.cf_handle(cf_name) {
+                // Errors are non-fatal: a flush failure on one CF shouldn't
+                // prevent others from flushing.
+                if let Err(e) = self.db.flush_cf_opt(&cf, &flush_opts) {
+                    log::warn!("flush_all_memtables: failed to flush CF '{}': {}", cf_name, e);
+                }
+            }
+        }
+        // Flush the default CF as well
+        if let Err(e) = self.db.flush_opt(&flush_opts) {
+            log::warn!("flush_all_memtables: failed to flush default CF: {}", e);
+        }
 
         Ok(())
     }

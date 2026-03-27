@@ -3,6 +3,7 @@
 //! Provides a thin helper to open a RocksDB instance with required
 //! system column families present.
 
+use crate::cf_tuning::{apply_cf_settings, apply_db_settings};
 use anyhow::Result;
 use kalamdb_commons::system_tables::StoragePartition;
 use kalamdb_commons::SystemTable;
@@ -36,16 +37,7 @@ impl RocksDbInit {
         let mut db_opts = Options::default();
         db_opts.create_if_missing(true);
         db_opts.create_missing_column_families(true);
-
-        // Memory optimization: Use configured settings instead of hardcoded values
-        db_opts.set_write_buffer_size(self.settings.write_buffer_size);
-        db_opts.set_max_write_buffer_number(self.settings.max_write_buffers);
-        db_opts.set_max_background_jobs(self.settings.max_background_jobs);
-        db_opts.increase_parallelism(self.settings.max_background_jobs);
-
-        // Limit open files to prevent "Too many open files" errors
-        // This is critical when there are many SST files
-        db_opts.set_max_open_files(self.settings.max_open_files);
+        apply_db_settings(&mut db_opts, &self.settings);
 
         // Block cache: SHARED across all column families (memory efficient!)
         // Adding more CFs does NOT increase cache memory proportionally.
@@ -72,12 +64,7 @@ impl RocksDbInit {
         let mut db_opts = Options::default();
         db_opts.create_if_missing(true);
         db_opts.create_missing_column_families(true);
-
-        db_opts.set_write_buffer_size(self.settings.write_buffer_size);
-        db_opts.set_max_write_buffer_number(self.settings.max_write_buffers);
-        db_opts.set_max_background_jobs(self.settings.max_background_jobs);
-        db_opts.increase_parallelism(self.settings.max_background_jobs);
-        db_opts.set_max_open_files(self.settings.max_open_files);
+        apply_db_settings(&mut db_opts, &self.settings);
 
         let cache = Cache::new_lru_cache(self.settings.block_cache_size);
         let block_opts = create_block_options_with_cache(&cache);
@@ -95,7 +82,7 @@ impl RocksDbInit {
             .iter()
             .map(|name| {
                 let mut cf_opts = Options::default();
-                apply_cf_settings(&mut cf_opts, &self.settings);
+                apply_cf_settings(&mut cf_opts, &self.settings, name);
                 cf_opts.set_block_based_table_factory(&create_block_options_with_cache(&cache));
                 ColumnFamilyDescriptor::new(name, cf_opts)
             })
@@ -136,8 +123,6 @@ impl RocksDbInit {
 
         let extra_partitions = [
             StoragePartition::InformationSchemaTables.name(),
-            StoragePartition::SystemColumns.name(),
-            StoragePartition::UserTableCounters.name(),
             StoragePartition::SystemUsersUsernameIdx.name(),
             StoragePartition::SystemUsersRoleIdx.name(),
             StoragePartition::SystemUsersDeletedAtIdx.name(),
@@ -156,17 +141,6 @@ impl RocksDbInit {
 
     /// Close database handle (drop Arc)
     pub fn close(_db: Arc<DB>) {}
-}
-
-fn apply_cf_settings(cf_opts: &mut Options, settings: &RocksDbSettings) {
-    cf_opts.set_write_buffer_size(settings.write_buffer_size);
-    cf_opts.set_max_write_buffer_number(settings.max_write_buffers);
-    // NOTE: We intentionally do NOT call optimize_for_point_lookup() per-CF.
-    // That function switches the memtable to a hash-based representation which
-    // has significantly higher fixed memory overhead per column family (~2-4x).
-    // With 50-100+ CFs this wastes tens of MB. The DB-level call already sets
-    // the read-path optimizations (bloom filter, block cache) via
-    // set_block_based_table_factory() which is applied per-CF separately.
 }
 
 pub(crate) fn create_block_options_with_cache(cache: &Cache) -> BlockBasedOptions {

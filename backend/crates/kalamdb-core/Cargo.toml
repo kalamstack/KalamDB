@@ -14,12 +14,13 @@ kalamdb-commons = { path = "../kalamdb-commons", features = ["full"] }
 kalamdb-configs = { path = "../kalamdb-configs" }
 kalamdb-filestore = { path = "../kalamdb-filestore" }
 kalamdb-observability = { path = "../kalamdb-observability" }
+kalamdb-pg = { path = "../kalamdb-pg" }
 kalamdb-raft = { path = "../kalamdb-raft" }
 kalamdb-session = { path = "../kalamdb-session" }
 kalamdb-sharding = { path = "../kalamdb-sharding" }
 kalamdb-sql = { path = "../kalamdb-sql" }
 kalamdb-store = { path = "../kalamdb-store" }
-kalamdb-auth = { path = "../kalamdb-auth" }
+kalamdb-auth = { path = "../kalamdb-auth", default-features = false, features = ["websocket"] }
 kalamdb-system = { path = "../kalamdb-system" }
 kalamdb-tables = { path = "../kalamdb-tables" }
 kalamdb-publisher = { path = "../kalamdb-publisher" }
@@ -28,6 +29,7 @@ kalamdb-vector = { path = "../kalamdb-vector" }
 
 # Apache Arrow ecosystem
 arrow = { workspace = true }
+bytes = { workspace = true }
 datafusion = { workspace = true }
 datafusion-common = { workspace = true }
 
@@ -61,6 +63,9 @@ chrono = { workspace = true }
 # Logging
 log = { workspace = true }
 
+# gRPC (for PgQueryExecutor trait)
+tonic = { workspace = true }
+
 # Tracing / observability
 tracing = { workspace = true }
 
@@ -70,9 +75,6 @@ uuid = { workspace = true }
 # ULID generation
 ulid = { workspace = true }
 
-# Password hashing
-bcrypt = { workspace = true }
-
 # Single-assignment statics
 once_cell = { workspace = true }
 
@@ -81,12 +83,6 @@ regex = { workspace = true }
 
 # ZIP archive creation
 zip = { workspace = true }
-
-# Parquet writer (for user export)
-parquet = { workspace = true }
-
-# Byte buffers
-bytes = { workspace = true }
 
 [dev-dependencies]
 # Testing utilities

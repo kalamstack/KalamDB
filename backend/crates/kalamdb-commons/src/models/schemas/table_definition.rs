@@ -760,4 +760,5 @@ mod tests {
 }
 
 // KSerializable implementation for EntityStore support
+#[cfg(feature = "serialization")]
 impl crate::serialization::KSerializable for TableDefinition {}

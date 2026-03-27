@@ -273,13 +273,24 @@ build_web() {
   mkdir -p "$WEB_OUT_DIR"
 
   (cd "$LINK_CRATE_DIR" && RUSTC_WRAPPER="" wasm-pack build \
-    --release \
     --target web \
     --out-dir "$WEB_OUT_DIR" \
     --out-name kalam_link_dart \
-    -- --features wasm --no-default-features) || {
+    --no-opt \
+    --profile release-dist \
+    --features wasm \
+    --no-default-features) || {
     fail "Web WASM build failed"; return 1
   }
+
+  if command -v wasm-opt >/dev/null 2>&1; then
+    info "Optimizing web WASM with wasm-opt..."
+    wasm-opt -Oz --all-features -o "$WEB_OUT_DIR/kalam_link_dart_bg.wasm" "$WEB_OUT_DIR/kalam_link_dart_bg.wasm" || {
+      fail "Web WASM optimization failed"; return 1
+    }
+  else
+    warn "wasm-opt not found; skipping post-build size optimization"
+  fi
 
   ok "Web: $(find "$WEB_OUT_DIR" -name '*.wasm' -exec du -sh {} \; | cut -f1) WASM module"
 }

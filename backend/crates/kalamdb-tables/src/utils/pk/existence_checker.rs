@@ -341,7 +341,10 @@ impl PkExistenceChecker {
         }
     }
 
-    /// Async check if a PK exists in a specific Parquet file
+    /// Async check if a PK exists in a specific Parquet file via streaming.
+    ///
+    /// Uses column-projected streaming — only reads pk/_seq/_deleted column chunks,
+    /// never loads the entire file into memory.
     async fn pk_exists_in_parquet_async(
         &self,
         storage_cached: &kalamdb_filestore::StorageCached,
@@ -353,45 +356,33 @@ impl PkExistenceChecker {
         pk_value: &str,
     ) -> Result<bool, KalamDbError> {
         use datafusion::arrow::array::{Array, BooleanArray, Int64Array, UInt64Array};
+        use futures_util::TryStreamExt;
         use kalamdb_commons::constants::SystemColumnNames;
-        use std::collections::HashMap;
 
-        // Step 1: Use bloom filter to check if PK value is definitely absent.
-        // This avoids reading row data entirely when the bloom filter can prove absence.
-        let data = storage_cached
-            .get(table_type, table_id, user_id, parquet_filename)
-            .await
-            .into_kalamdb_error("Failed to read Parquet file")?
-            .data;
-
-        // Try bloom filter check first — O(metadata) with zero row decoding
-        let definitely_absent =
-            kalamdb_filestore::bloom_filter_check_absent(data.clone(), pk_column, &pk_value)
-                .unwrap_or(false);
-
-        if definitely_absent {
-            log::trace!(
-                "[PkExistenceChecker] Bloom filter confirmed PK '{}' absent from '{}'",
-                pk_value,
-                parquet_filename
-            );
-            return Ok(false);
-        }
-
-        // Step 2: Read only the columns needed for PK existence check
-        // (pk_column, _seq, _deleted) instead of the entire file
-        let columns_to_read = [
+        let columns_to_read: Vec<&str> = vec![
             pk_column,
             SystemColumnNames::SEQ,
             SystemColumnNames::DELETED,
         ];
-        let batches = kalamdb_filestore::parse_parquet_projected(data, &columns_to_read)
-            .into_kalamdb_error("Failed to parse projected Parquet")?;
+        let mut stream = storage_cached
+            .read_parquet_file_stream(
+                table_type,
+                table_id,
+                user_id,
+                parquet_filename,
+                &columns_to_read,
+            )
+            .await
+            .into_kalamdb_error("Failed to open Parquet stream")?;
 
-        // Track latest version per PK value: pk_value -> (max_seq, is_deleted)
-        let mut versions: HashMap<String, (i64, bool)> = HashMap::new();
+        // Track latest version: (max_seq, is_deleted)
+        let mut latest: Option<(i64, bool)> = None;
 
-        for batch in batches {
+        while let Some(batch) = stream
+            .try_next()
+            .await
+            .into_kalamdb_error("Failed to read Parquet batch")?
+        {
             let pk_idx = batch.schema().index_of(pk_column).ok();
             let seq_idx = batch.schema().index_of(SystemColumnNames::SEQ).ok();
             let deleted_idx = batch.schema().index_of(SystemColumnNames::DELETED).ok();
@@ -434,20 +425,20 @@ impl PkExistenceChecker {
                     false
                 };
 
-                versions
-                    .entry(row_pk_str)
-                    .and_modify(|(current_seq, current_deleted)| {
-                        if seq > *current_seq {
-                            *current_seq = seq;
-                            *current_deleted = deleted;
+                match &mut latest {
+                    Some((max_seq, del)) => {
+                        if seq > *max_seq {
+                            *max_seq = seq;
+                            *del = deleted;
                         }
-                    })
-                    .or_insert((seq, deleted));
+                    }
+                    None => latest = Some((seq, deleted)),
+                }
             }
         }
 
-        if let Some((_, is_deleted)) = versions.get(pk_value) {
-            Ok(!*is_deleted)
+        if let Some((_, is_deleted)) = latest {
+            Ok(!is_deleted)
         } else {
             Ok(false)
         }
@@ -463,6 +454,7 @@ mod tests {
     };
     use kalamdb_commons::{NamespaceId, TableName};
 
+    #[allow(dead_code)]
     fn create_test_table_def(pk_default: ColumnDefault) -> TableDefinition {
         TableDefinition {
             namespace_id: NamespaceId::new("test"),

@@ -1,15 +1,11 @@
 //! Authentication and identity models.
 
-pub mod login_request;
-pub mod login_response;
-pub mod login_user_info;
+pub mod login;
 pub mod setup_models;
 pub mod username;
 pub mod ws_auth_credentials;
 
-pub use login_request::LoginRequest;
-pub use login_response::LoginResponse;
-pub use login_user_info::LoginUserInfo;
+pub use login::{LoginRequest, LoginResponse, LoginUserInfo};
 pub use setup_models::{
     ServerSetupRequest, ServerSetupResponse, SetupStatusResponse, SetupUserInfo,
 };

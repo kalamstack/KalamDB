@@ -146,6 +146,8 @@ curl -X POST http://localhost:8080/v1/api/sql \
 
 The image includes the Kalam CLI under both `kalam` and `kalam-cli`.
 
+Inside the container, the CLI stores local config, credentials, and history in `/data/.kalam` by default so they persist with the `/data` volume.
+
 ```bash
 docker exec -it kalamdb kalam --version
 docker exec -it kalamdb kalam-cli --version

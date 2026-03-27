@@ -128,8 +128,6 @@ mod tests {
 
     #[test]
     fn test_current_user_id_authorization() {
-        let user_id = UserId::new("u_123");
-
         // Test authorized roles
         assert!(CurrentUserIdFunction::is_authorized(Role::System));
         assert!(CurrentUserIdFunction::is_authorized(Role::Dba));

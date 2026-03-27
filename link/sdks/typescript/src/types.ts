@@ -191,10 +191,6 @@ export interface LiveRowsOptions<T> {
    */
   keyColumns?: string[];
   /**
-   * Deprecated alias for `keyColumns`.
-   */
-  keyColumn?: string | string[];
-  /**
    * Resolve a stable key for upsert/delete handling.
    *
    * When this is provided, live row reconciliation falls back to the
@@ -485,7 +481,7 @@ export interface ClientOptions {
    * SDK sends a JSON `{"type":"ping"}` message instead to prevent the
    * server-side heartbeat timeout from closing idle connections.
    *
-   * Defaults to `30000` (30 seconds). Set to `0` to disable.
+  * Defaults to `5000` (5 seconds). Set to `0` to disable.
    */
   pingIntervalMs?: number;
 

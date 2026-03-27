@@ -103,3 +103,6 @@ ui/package-lock.json
 /target_cli_smoke_run
 /link/sdks/dart/build
 /link/sdks/dart/.dart_tool
+/vendor
+/link/sdks/typescript/.wasm-cargo-home-test1
+/link/sdks/typescript/.wasm-cargo-home-test2

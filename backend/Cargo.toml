@@ -10,11 +10,11 @@ build = "build.rs"
 
 [dependencies]
 # Memory optimization
-tikv-jemallocator = { version = "0.5", optional = true }
+mimalloc = { version = "0.1", default-features = false, optional = true }
 
 # Core library
 kalamdb-core = { path = "crates/kalamdb-core" }
-kalamdb-api = { path = "crates/kalamdb-api" }
+kalamdb-api = { path = "crates/kalamdb-api", default-features = false }
 kalamdb-sql = { path = "crates/kalamdb-sql" }
 kalamdb-store = { path = "crates/kalamdb-store" }
 kalamdb-auth = { path = "crates/kalamdb-auth" }
@@ -56,10 +56,10 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-actix-web = { workspace = true }
 tracing-log = { workspace = true }
-tracing-opentelemetry = { workspace = true }
-opentelemetry = { workspace = true }
-opentelemetry_sdk = { workspace = true }
-opentelemetry-otlp = { workspace = true }
+tracing-opentelemetry = { workspace = true, optional = true }
+opentelemetry = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true }
 
 # Time handling
 chrono = { workspace = true }
@@ -81,8 +81,10 @@ num_cpus = { workspace = true }
 libc = { workspace = true }
 
 [features]
-default = []
-jemalloc = ["tikv-jemallocator"]
+default = ["embedded-ui", "mimalloc"]
+mimalloc = ["dep:mimalloc"]
+embedded-ui = ["kalamdb-api/embedded-ui"]
+otel = ["dep:tracing-opentelemetry", "dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp"]
 # End-to-end tests that require a full test server instance
 e2e-tests = []
 
@@ -125,7 +127,7 @@ cc = { workspace = true }
 [dev-dependencies]
 # Internal crates (needed for tests)
 kalamdb-core = { path = "crates/kalamdb-core" }
-kalamdb-api = { path = "crates/kalamdb-api" }
+kalamdb-api = { path = "crates/kalamdb-api", default-features = false }
 kalamdb-auth = { path = "crates/kalamdb-auth" }
 kalamdb-sql = { path = "crates/kalamdb-sql" }
 kalamdb-store = { path = "crates/kalamdb-store" }

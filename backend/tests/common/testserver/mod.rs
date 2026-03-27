@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub mod auth_helper;
 pub mod cluster;
 pub mod consolidated_helpers;

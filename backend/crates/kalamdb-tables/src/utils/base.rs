@@ -59,7 +59,7 @@ use crate::error_extensions::KalamDbResultExt;
 use crate::manifest::ManifestAccessPlanner;
 use crate::utils::unified_dml;
 use async_trait::async_trait;
-use datafusion::arrow::array::{Array, BooleanArray, Int64Array, UInt64Array};
+use datafusion::arrow::array::{Array, BooleanArray, Float32Array, Int64Array, UInt64Array};
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::catalog::Session;
@@ -246,8 +246,8 @@ pub trait BaseTableProvider<K: StorageKey, V>: Send + Sync + TableProvider {
     /// * `updates` - Row object with column updates
     ///
     /// # Returns
-    /// New storage key (new SeqId for versioning)
-    async fn update(&self, user_id: &UserId, key: &K, updates: Row) -> Result<K, KalamDbError>;
+    /// `Ok(Some(key))` if the row was updated, `Ok(None)` if the row was unchanged (no-op).
+    async fn update(&self, user_id: &UserId, key: &K, updates: Row) -> Result<Option<K>, KalamDbError>;
 
     /// Delete a row by key (appends tombstone with _deleted=true)
     ///
@@ -258,7 +258,8 @@ pub trait BaseTableProvider<K: StorageKey, V>: Send + Sync + TableProvider {
     /// * `key` - Storage key identifying the row
     async fn delete(&self, user_id: &UserId, key: &K) -> Result<(), KalamDbError>;
 
-    /// Update multiple rows in a batch (default implementation)
+    /// Update multiple rows in a batch (default implementation).
+    /// Returns only the keys that were actually modified (skips no-op updates).
     async fn update_batch(
         &self,
         user_id: &UserId,
@@ -266,7 +267,9 @@ pub trait BaseTableProvider<K: StorageKey, V>: Send + Sync + TableProvider {
     ) -> Result<Vec<K>, KalamDbError> {
         let mut results = Vec::with_capacity(updates.len());
         for (key, update) in updates {
-            results.push(BaseTableProvider::update(self, user_id, &key, update).await?);
+            if let Some(k) = BaseTableProvider::update(self, user_id, &key, update).await? {
+                results.push(k);
+            }
         }
         Ok(results)
     }
@@ -319,13 +322,13 @@ pub trait BaseTableProvider<K: StorageKey, V>: Send + Sync + TableProvider {
     /// * `updates` - Row object with column updates
     ///
     /// # Returns
-    /// New storage key (new SeqId for versioning)
+    /// `Ok(Some(key))` if the row was updated, `Ok(None)` if the row was unchanged (no-op).
     async fn update_by_pk_value(
         &self,
         user_id: &UserId,
         pk_value: &str,
         updates: Row,
-    ) -> Result<K, KalamDbError>;
+    ) -> Result<Option<K>, KalamDbError>;
 
     /// Update a row by searching for matching ID field value
     async fn update_by_id_field(
@@ -333,7 +336,7 @@ pub trait BaseTableProvider<K: StorageKey, V>: Send + Sync + TableProvider {
         user_id: &UserId,
         id_value: &str,
         updates: Row,
-    ) -> Result<K, KalamDbError> {
+    ) -> Result<Option<K>, KalamDbError> {
         // Directly update by PK value - no need to find key first, then load row to extract PK
         self.update_by_pk_value(user_id, id_value, updates).await
     }
@@ -532,6 +535,7 @@ pub trait BaseTableProvider<K: StorageKey, V>: Send + Sync + TableProvider {
         since_seq: Option<SeqId>,
         limit: Option<usize>,
         keep_deleted: bool,
+        cold_columns: Option<&[String]>,
     ) -> Result<Vec<(K, V)>, KalamDbError>;
 
     /// Extract row fields from provider-specific value type
@@ -620,7 +624,7 @@ where
 
     // Scan cold storage for this PK value using async I/O
     let batch =
-        scan_parquet_files_as_batch_async(core, table_id, table_type, scope, schema, Some(&filter))
+        scan_parquet_files_as_batch_async(core, table_id, table_type, scope, schema, Some(&filter), None)
             .await?;
 
     if batch.num_rows() == 0 {
@@ -778,35 +782,14 @@ pub async fn pk_exists_in_cold(
     let files_to_scan: Vec<String> = if let Some(ref m) = manifest {
         let pruned_paths = planner.plan_by_pk_value(m, pk_column_id, pk_value);
         if pruned_paths.is_empty() {
-            let list_result = match storage_cached.list(table_type, table_id, user_id).await {
-                Ok(result) => result,
-                Err(_) => {
-                    log::trace!(
-                        "[pk_exists_in_cold] No storage dir for {}.{} {} - PK not in cold",
-                        namespace.as_str(),
-                        table.as_str(),
-                        scope_label
-                    );
-                    return Ok(false);
-                },
-            };
-            if list_result.is_empty() {
-                log::trace!(
-                    "[pk_exists_in_cold] No files in storage for {}.{} {} - PK not in cold",
-                    namespace.as_str(),
-                    table.as_str(),
-                    scope_label
-                );
-                return Ok(false);
-            }
             log::trace!(
-                "[pk_exists_in_cold] Manifest pruning returned no candidate segments for PK {} on {}.{} {} - falling back to full parquet scan",
+                "[pk_exists_in_cold] Manifest pruning returned no candidate segments for PK {} on {}.{} {} - PK not in cold",
                 pk_value,
                 namespace.as_str(),
                 table.as_str(),
                 scope_label
             );
-            collect_parquet_files_from_list(&list_result)
+            return Ok(false);
         } else {
             log::trace!(
                 "[pk_exists_in_cold] Manifest pruning: {} of {} segments may contain PK {} for {}.{} {}",
@@ -1003,34 +986,13 @@ pub async fn pk_exists_batch_in_cold(
             relevant_files.extend(pruned_paths);
         }
         if relevant_files.is_empty() {
-            let list_result = match storage_cached.list(table_type, table_id, user_id).await {
-                Ok(result) => result,
-                Err(_) => {
-                    log::trace!(
-                        "[pk_exists_batch_in_cold] No storage dir for {}.{} {} - PK not in cold",
-                        namespace.as_str(),
-                        table.as_str(),
-                        scope_label
-                    );
-                    return Ok(None);
-                },
-            };
-            if list_result.is_empty() {
-                log::trace!(
-                    "[pk_exists_batch_in_cold] No files in storage for {}.{} {} - PK not in cold",
-                    namespace.as_str(),
-                    table.as_str(),
-                    scope_label
-                );
-                return Ok(None);
-            }
             log::trace!(
-                "[pk_exists_batch_in_cold] Manifest pruning returned no candidate segments for {}.{} {} - falling back to full parquet scan",
+                "[pk_exists_batch_in_cold] Manifest pruning returned no candidate segments for {}.{} {} - PKs not in cold",
                 namespace.as_str(),
                 table.as_str(),
                 scope_label
             );
-            collect_parquet_files_from_list(&list_result)
+            return Ok(None);
         } else {
             log::trace!(
                 "[pk_exists_batch_in_cold] Manifest pruning: {} of {} segments may contain {} PKs for {}.{} {}",
@@ -1104,9 +1066,10 @@ pub async fn pk_exists_batch_in_cold(
     Ok(None)
 }
 
-/// Batch check if any PK values exist in a single Parquet file via StorageCached (async).
+/// Batch check if any PK values exist in a single Parquet file via streaming (async).
 ///
-/// **Phase 13.7: Uses bloom filter fast-fail + column projection for optimal batch checking.**
+/// Uses column-projected streaming — only reads pk/_seq/_deleted column chunks,
+/// never loads the entire file into memory.
 /// Returns the first matching PK found (with non-deleted latest version).
 async fn pk_exists_batch_in_parquet_via_storage_cache(
     storage_cached: &kalamdb_filestore::StorageCached,
@@ -1117,42 +1080,26 @@ async fn pk_exists_batch_in_parquet_via_storage_cache(
     pk_column: &str,
     pk_values: &std::collections::HashSet<&str>,
 ) -> Result<Option<String>, KalamDbError> {
-    // Get file data once
-    let result = storage_cached
-        .get(table_type, table_id, user_id, parquet_filename)
-        .await
-        .into_kalamdb_error("Failed to read Parquet file")?;
+    use futures_util::TryStreamExt;
 
-    // Phase 1: Bloom filter fast-fail for each PK (O(metadata) checks)
-    let mut maybe_present = Vec::new();
-    for &pk in pk_values {
-        let definitely_absent =
-            kalamdb_filestore::bloom_filter_check_absent(result.data.clone(), pk_column, &pk)
-                .unwrap_or(false);
-
-        if !definitely_absent {
-            maybe_present.push(pk);
-        }
-    }
-
-    // Early exit if all PKs are definitely absent
-    if maybe_present.is_empty() {
-        return Ok(None);
-    }
-
-    // Phase 2: Read with column projection (only pk, _seq, _deleted)
-    let columns_to_read = [
+    let columns_to_read: Vec<&str> = vec![
         pk_column,
         SystemColumnNames::SEQ,
         SystemColumnNames::DELETED,
     ];
-    let batches = kalamdb_filestore::parse_parquet_projected(result.data, &columns_to_read)
-        .into_kalamdb_error("Failed to parse projected Parquet")?;
+    let mut stream = storage_cached
+        .read_parquet_file_stream(table_type, table_id, user_id, parquet_filename, &columns_to_read)
+        .await
+        .into_kalamdb_error("Failed to open Parquet stream")?;
 
     // Track latest version per PK value: pk_value -> (max_seq, is_deleted)
     let mut versions: HashMap<String, (i64, bool)> = HashMap::new();
 
-    for batch in batches {
+    while let Some(batch) = stream
+        .try_next()
+        .await
+        .into_kalamdb_error("Failed to read Parquet batch")?
+    {
         let pk_idx = batch.schema().index_of(pk_column).ok();
         let seq_idx = batch.schema().index_of(SystemColumnNames::SEQ).ok();
         let deleted_idx = batch.schema().index_of(SystemColumnNames::DELETED).ok();
@@ -1169,7 +1116,6 @@ async fn pk_exists_batch_in_parquet_via_storage_cache(
             let row_pk = extract_pk_as_string(pk_col.as_ref(), row_idx);
             let Some(row_pk_str) = row_pk else { continue };
 
-            // Only check rows matching target PKs (O(1) lookup)
             if !pk_values.contains(row_pk_str.as_str()) {
                 continue;
             }
@@ -1192,7 +1138,6 @@ async fn pk_exists_batch_in_parquet_via_storage_cache(
                 false
             };
 
-            // Update version tracking (keep only latest _seq)
             versions
                 .entry(row_pk_str)
                 .and_modify(|(max_seq, del)| {
@@ -1215,10 +1160,10 @@ async fn pk_exists_batch_in_parquet_via_storage_cache(
     Ok(None)
 }
 
-/// Check if a PK value exists in a single Parquet file via StorageCached (async, with MVCC version resolution).
+/// Check if a PK value exists in a single Parquet file via streaming (async, with MVCC version resolution).
 ///
-/// **Phase 13.7: Uses bloom filter-based reading for optimal performance.**
-/// Fast-fails if bloom filter proves absence (O(metadata)), then projects only pk/_seq/_deleted columns.
+/// Uses column-projected streaming — only reads pk/_seq/_deleted column chunks,
+/// never loads the entire file into memory.
 async fn pk_exists_in_parquet_via_storage_cache(
     storage_cached: &kalamdb_filestore::StorageCached,
     table_type: TableType,
@@ -1228,34 +1173,26 @@ async fn pk_exists_in_parquet_via_storage_cache(
     pk_column: &str,
     pk_value: &str,
 ) -> Result<bool, KalamDbError> {
-    // Step 1: Get file data
-    let result = storage_cached
-        .get(table_type, table_id, user_id, parquet_filename)
-        .await
-        .into_kalamdb_error("Failed to read Parquet file")?;
+    use futures_util::TryStreamExt;
 
-    // Step 2: Bloom filter fast-fail (O(metadata))
-    let definitely_absent =
-        kalamdb_filestore::bloom_filter_check_absent(result.data.clone(), pk_column, &pk_value)
-            .unwrap_or(false);
-
-    if definitely_absent {
-        return Ok(false);
-    }
-
-    // Step 3: Read with column projection (only pk, _seq, _deleted)
-    let columns_to_read = [
+    let columns_to_read: Vec<&str> = vec![
         pk_column,
         SystemColumnNames::SEQ,
         SystemColumnNames::DELETED,
     ];
-    let batches = kalamdb_filestore::parse_parquet_projected(result.data, &columns_to_read)
-        .into_kalamdb_error("Failed to parse projected Parquet")?;
+    let mut stream = storage_cached
+        .read_parquet_file_stream(table_type, table_id, user_id, parquet_filename, &columns_to_read)
+        .await
+        .into_kalamdb_error("Failed to open Parquet stream")?;
 
-    // Track latest version: pk_value -> (max_seq, is_deleted)
-    let mut versions: HashMap<String, (i64, bool)> = HashMap::new();
+    // Track latest version: (max_seq, is_deleted)
+    let mut latest: Option<(i64, bool)> = None;
 
-    for batch in batches {
+    while let Some(batch) = stream
+        .try_next()
+        .await
+        .into_kalamdb_error("Failed to read Parquet batch")?
+    {
         let pk_idx = batch.schema().index_of(pk_column).ok();
         let seq_idx = batch.schema().index_of(SystemColumnNames::SEQ).ok();
         let deleted_idx = batch.schema().index_of(SystemColumnNames::DELETED).ok();
@@ -1294,21 +1231,19 @@ async fn pk_exists_in_parquet_via_storage_cache(
                 false
             };
 
-            // Update version tracking (keep only latest _seq)
-            versions
-                .entry(row_pk_str)
-                .and_modify(|(max_seq, del)| {
+            match &mut latest {
+                Some((max_seq, del)) => {
                     if seq > *max_seq {
                         *max_seq = seq;
                         *del = deleted;
                     }
-                })
-                .or_insert((seq, deleted));
+                }
+                None => latest = Some((seq, deleted)),
+            }
         }
     }
 
-    // Return true if latest version is not deleted
-    Ok(versions.get(pk_value).map(|(_, is_deleted)| !*is_deleted).unwrap_or(false))
+    Ok(latest.map(|(_, is_deleted)| !is_deleted).unwrap_or(false))
 }
 
 /// Extract PK value as string from an Arrow array at given index (delegates to shared utility).
@@ -1425,6 +1360,32 @@ pub fn warn_if_unfiltered_scan(
     // }
 }
 
+/// Compute the minimal set of column names needed from the Parquet cold path.
+///
+/// When a query projects specific columns, we only need those columns plus
+/// system columns (`_seq`, `_deleted`) and the primary key for version resolution.
+/// Returns `None` when all columns should be read (projection is None).
+pub fn compute_cold_columns(
+    projection: Option<&Vec<usize>>,
+    schema: &SchemaRef,
+    pk_name: &str,
+) -> Option<Vec<String>> {
+    let proj = projection?;
+    let mut cols: Vec<String> = proj.iter().map(|&i| schema.field(i).name().clone()).collect();
+    // Always include columns required for version resolution
+    for sys_col in [SystemColumnNames::SEQ, SystemColumnNames::DELETED] {
+        let s = sys_col.to_string();
+        if !cols.contains(&s) {
+            cols.push(s);
+        }
+    }
+    let pk = pk_name.to_string();
+    if !cols.contains(&pk) {
+        cols.push(pk);
+    }
+    Some(cols)
+}
+
 /// Validate that an UPDATE operation doesn't change the PK to an existing value
 ///
 /// This is called when an UPDATE includes the PK column in the SET clause.
@@ -1515,4 +1476,95 @@ pub fn apply_limit<T>(result: &mut Vec<T>, limit: Option<usize>) {
 /// Default is 100,000 if no limit is provided.
 pub fn calculate_scan_limit(limit: Option<usize>) -> usize {
     limit.map(|l| std::cmp::max(l * 2, 1000)).unwrap_or(100_000)
+}
+
+/// Extract an embedding vector from a ScalarValue, validating dimensions.
+///
+/// Shared between SharedTableProvider and UserTableProvider for vector
+/// column upsert operations.
+pub fn extract_embedding_vector(
+    value: &ScalarValue,
+    expected_dimensions: u32,
+) -> Option<Vec<f32>> {
+    let parse_inner = |array: &dyn Array| -> Option<Vec<f32>> {
+        let float_array = array.as_any().downcast_ref::<Float32Array>()?;
+        if float_array.len() != expected_dimensions as usize {
+            return None;
+        }
+        Some(
+            (0..float_array.len())
+                .map(|idx| {
+                    if float_array.is_null(idx) {
+                        0.0
+                    } else {
+                        float_array.value(idx)
+                    }
+                })
+                .collect(),
+        )
+    };
+
+    match value {
+        ScalarValue::FixedSizeList(list) => {
+            if list.is_empty() || list.is_null(0) {
+                return None;
+            }
+            parse_inner(list.value(0).as_ref())
+        },
+        ScalarValue::List(list) => {
+            if list.is_empty() || list.is_null(0) {
+                return None;
+            }
+            parse_inner(list.value(0).as_ref())
+        },
+        ScalarValue::LargeList(list) => {
+            if list.is_empty() || list.is_null(0) {
+                return None;
+            }
+            parse_inner(list.value(0).as_ref())
+        },
+        ScalarValue::Utf8(Some(json)) | ScalarValue::LargeUtf8(Some(json)) => {
+            let parsed = serde_json::from_str::<Vec<f32>>(json).ok()?;
+            if parsed.len() != expected_dimensions as usize {
+                return None;
+            }
+            Some(parsed)
+        },
+        _ => None,
+    }
+}
+
+/// Build a notification row from any entity that has common MVCC fields.
+///
+/// Both SharedTableRow and UserTableRow have `_seq`, `_deleted`, and `fields`.
+/// This function avoids duplicating the notification row building logic.
+pub fn build_notification_row(fields: &Row, seq: SeqId, deleted: bool) -> Row {
+    let mut values = fields.values.clone();
+    values.insert(
+        SystemColumnNames::SEQ.to_string(),
+        ScalarValue::Int64(Some(seq.as_i64())),
+    );
+    values.insert(
+        SystemColumnNames::DELETED.to_string(),
+        ScalarValue::Boolean(Some(deleted)),
+    );
+    Row::new(values)
+}
+
+/// Build a count-only RecordBatch with no columns but the given row count.
+///
+/// Used by the COUNT(*) fast-path in both SharedTableProvider and UserTableProvider
+/// when projection is empty.
+pub fn build_count_only_batch(count: usize) -> Result<RecordBatch, KalamDbError> {
+    let empty_schema = Arc::new(datafusion::arrow::datatypes::Schema::new(
+        Vec::<datafusion::arrow::datatypes::Field>::new(),
+    ));
+    if count == 0 {
+        return Ok(RecordBatch::new_empty(empty_schema));
+    }
+    let options = datafusion::arrow::record_batch::RecordBatchOptions::new()
+        .with_row_count(Some(count));
+    RecordBatch::try_new_with_options(empty_schema, vec![], &options).map_err(|e| {
+        KalamDbError::InvalidOperation(format!("Failed to build count-only batch: {}", e))
+    })
 }

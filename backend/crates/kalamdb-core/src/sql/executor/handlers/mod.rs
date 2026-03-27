@@ -16,7 +16,7 @@
 //! - **audit**: Audit logging (future)
 
 use crate::error::KalamDbError;
-use kalamdb_sql::statement_classifier::SqlStatement;
+use kalamdb_sql::classifier::SqlStatement;
 
 // Typed handlers organized by category
 pub mod backup;

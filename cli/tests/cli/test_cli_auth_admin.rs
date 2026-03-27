@@ -17,8 +17,6 @@ use crate::common::*;
 use assert_cmd::Command;
 use std::time::Duration;
 
-const TEST_TIMEOUT: Duration = Duration::from_secs(10);
-
 /// Test that root user can create namespaces
 #[tokio::test]
 async fn test_root_can_create_namespace() {
@@ -473,7 +471,7 @@ async fn test_cli_flush_table() {
     };
 
     // If we extracted a job ID, verify it matches
-    if let Some(expected_job_id) = job_id {
+    if let Some(ref expected_job_id) = job_id {
         assert_eq!(
             job["job_id"].as_str().unwrap(),
             expected_job_id,
@@ -504,52 +502,15 @@ async fn test_cli_flush_table() {
         "Job parameters should reference correct table_id (namespace.table format)"
     );
 
-    // Actively poll until the job leaves 'running' (avoid false positives on stuck jobs)
-    use std::time::{Duration, Instant};
-    let deadline = Instant::now() + Duration::from_secs(8);
-    let final_status = loop {
-        let status = job["status"].as_str().unwrap_or("");
-        if status != "running" {
-            break status.to_string();
-        }
-        if Instant::now() > deadline {
-            panic!("Timed out waiting for flush job to complete; last status was 'running'");
-        }
-
-        // Requery current job status
-        let refetch = execute_sql_via_http_as_root(&jobs_query).await.unwrap();
-        let rows = refetch["results"][0]["rows"].as_array().cloned().unwrap_or_default();
-        if let Some(updated) = rows.first() {
-            // DataFusion may return rows as arrays; normalize using schema metadata if needed.
-            let status = if updated.is_array() {
-                let mut obj = serde_json::Map::new();
-                let schema_vec =
-                    refetch["results"][0]["schema"].as_array().cloned().unwrap_or_default();
-                let values = updated.as_array().unwrap();
-                for schema_entry in schema_vec.iter() {
-                    if let (Some(col_name), Some(idx)) =
-                        (schema_entry["name"].as_str(), schema_entry["index"].as_u64())
-                    {
-                        let val =
-                            values.get(idx as usize).cloned().unwrap_or(serde_json::Value::Null);
-                        obj.insert(col_name.to_string(), val);
-                    }
-                }
-                let updated_value = serde_json::Value::Object(obj);
-                updated_value["status"].as_str().unwrap_or("").to_string()
-            } else {
-                updated["status"].as_str().unwrap_or("").to_string()
-            };
-
-            if status != "running" && status != "queued" {
-                break status;
-            }
-        }
+    let final_status = if let Some(expected_job_id) = job_id {
+        wait_for_job_finished(&expected_job_id, Duration::from_secs(90))
+            .expect("Flush job should reach a terminal state")
+    } else {
+        job["status"].as_str().unwrap_or("").to_lowercase()
     };
 
-    // Verify job completed successfully or still processing (do not accept 'failed')
-    assert!(
-        final_status == "completed" || final_status == "running" || final_status == "queued",
+    assert_eq!(
+        final_status, "completed",
         "Flush job failed (status: {})",
         final_status
     );

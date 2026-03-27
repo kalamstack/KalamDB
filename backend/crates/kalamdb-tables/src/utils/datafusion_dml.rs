@@ -38,7 +38,7 @@ pub async fn collect_input_rows(
     state: &dyn Session,
     input: Arc<dyn ExecutionPlan>,
 ) -> DataFusionResult<Vec<Row>> {
-    tracing::debug!("collect_input_rows");
+    tracing::debug!("dml.collect_input_rows");
     let task_ctx = state.task_ctx();
 
     // Try executing the input plan directly.
@@ -168,7 +168,7 @@ pub fn evaluate_assignment_expr(
 fn record_batches_to_rows(batches: &[RecordBatch]) -> DataFusionResult<Vec<Row>> {
     let total_rows: usize = batches.iter().map(RecordBatch::num_rows).sum();
     let _span =
-        tracing::info_span!("record_batches_to_rows", total_rows, batch_count = batches.len())
+        tracing::debug_span!("record_batches_to_rows", total_rows, batch_count = batches.len())
             .entered();
     let mut rows = Vec::with_capacity(total_rows);
 

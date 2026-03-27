@@ -1,0 +1,64 @@
+# KalamDB PostgreSQL Extension — E2E Test Compose
+#
+# Isolated stack for Rust integration tests. Uses different ports and
+# ephemeral volumes so it can run alongside the development stack.
+#
+# The Rust test harness starts/stops this file automatically.
+#
+# Manual usage:
+#   docker compose -f docker-compose.test.yml up -d
+#   docker compose -f docker-compose.test.yml down -v
+
+services:
+  kalamdb:
+    image: ${KALAMDB_IMAGE:-jamals86/kalamdb:latest}
+    container_name: kalamdb-e2e
+    ports:
+      - "${KALAMDB_TEST_HTTP_PORT:-18088}:8080"
+      - "${KALAMDB_TEST_RPC_PORT:-19188}:9188"
+    environment:
+      KALAMDB_SERVER_HOST: "0.0.0.0"
+      RUST_LOG: "${RUST_LOG:-warn}"
+      KALAMDB_JWT_SECRET: "e2e-test-jwt-secret-at-least-32-chars!!"
+      KALAMDB_ALLOW_REMOTE_SETUP: "true"
+      KALAMDB_SECURITY_TRUSTED_PROXY_RANGES: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+      # Pre-shared token for pg_kalam FDW gRPC auth (must match auth_header in init-test.sql).
+      KALAMDB_PG_AUTH_TOKEN: "Bearer e2e-pg-shared-secret-token-for-testing"
+      # Enable cluster mode so the gRPC service starts on port 9188 (required by pg_kalam FDW).
+      # rpc_addr uses the service hostname so validation passes; the server binds 0.0.0.0:9188.
+      KALAMDB_NODE_ID: "1"
+      KALAMDB_CLUSTER_RPC_ADDR: "kalamdb:9188"
+      KALAMDB_CLUSTER_API_ADDR: "http://kalamdb:8080"
+    user: "0:0"
+    tmpfs:
+      - /data
+    restart: "no"
+    command: ["/usr/local/bin/kalamdb-server", "/config/server.toml"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8080/v1/api/healthcheck || exit 1"]
+      interval: 5s
+      timeout: 3s
+      start_period: 8s
+      retries: 10
+
+  postgres:
+    image: ${KALAMDB_PG_IMAGE:-kalamdb-pg:latest}
+    container_name: kalamdb-pg-e2e
+    depends_on:
+      kalamdb:
+        condition: service_healthy
+    ports:
+      - "${KALAMDB_TEST_PG_PORT:-15433}:5432"
+    environment:
+      POSTGRES_USER: kalamdb
+      POSTGRES_PASSWORD: kalamdb123
+      POSTGRES_DB: kalamdb
+    volumes:
+      - ./init-test.sql:/docker-entrypoint-initdb.d/01-kalam-init.sql:ro
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kalamdb -d kalamdb"]
+      interval: 3s
+      timeout: 2s
+      retries: 15

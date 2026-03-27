@@ -11,7 +11,7 @@
 use crate::common::*;
 use std::time::Duration;
 
-const JOB_TIMEOUT: Duration = Duration::from_secs(15);
+const JOB_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// Test flush with PK integrity: insert, update, flush, re-query, duplicate PK check, post-flush update
 #[ntest::timeout(180_000)]

@@ -15,13 +15,17 @@ use std::sync::Arc;
 
 static RE_ALPHANUMERIC: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-zA-Z0-9_]+$").unwrap());
 static RE_STORAGE_ID: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-zA-Z0-9_-]+$").unwrap());
-static LEGACY_CREATE_PREFIX_RE: Lazy<Regex> =
+static CREATE_TYPED_PREFIX_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)^\s*CREATE\s+(USER|SHARED|STREAM)\s+TABLE").unwrap());
+/// Matches `USING <identifier>` clause after the closing paren of column definitions.
+/// PostgreSQL uses this for table access methods, e.g. `CREATE TABLE t (...) USING kalamdb`.
+static USING_ACCESS_METHOD_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)\)\s*USING\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*").unwrap());
 
 impl CreateTableStatement {
     /// Parse a SQL statement into a CreateTableStatement
     pub fn parse(sql: &str, default_namespace: &str) -> Result<Self, String> {
-        let (mut normalized_sql, legacy_table_type) = normalize_create_table_sql(sql);
+        let (mut normalized_sql, create_prefix_table_type) = normalize_create_table_sql(sql);
 
         // Rewrite MySQL-style AUTO_INCREMENT into an explicit DEFAULT expression
         // so the parser consistently assigns SNOWFLAKE_ID() as the default value.
@@ -99,7 +103,7 @@ impl CreateTableStatement {
                 }
 
                 // 2. Parse options (TYPE, STORAGE, FLUSH_POLICY, etc.)
-                let mut table_type = legacy_table_type.unwrap_or(TableType::Shared);
+                let mut table_type = create_prefix_table_type.unwrap_or(TableType::Shared);
                 let mut storage_id = None;
                 let mut use_user_storage = false;
                 let mut flush_policy = None;
@@ -125,11 +129,11 @@ impl CreateTableStatement {
                                     format!("Invalid TYPE option '{}'. Supported: USER, SHARED, STREAM", value_str)
                                 })?;
 
-                                if let Some(ref legacy_type) = legacy_table_type {
-                                    if requested_type != *legacy_type {
+                                if let Some(prefix_type) = create_prefix_table_type {
+                                    if requested_type != prefix_type {
                                         return Err(format!(
-                                            "Conflicting table type definitions: legacy prefix {:?} vs TYPE option {:?}",
-                                            legacy_type, requested_type
+                                            "Conflicting table type definitions: CREATE {:?} TABLE vs TYPE option {:?}",
+                                            prefix_type, requested_type
                                         ));
                                     }
                                 }
@@ -319,17 +323,41 @@ impl CreateTableStatement {
                                     .collect::<Vec<_>>()
                                     .join(" ");
                                 if s.to_uppercase().contains("AUTO_INCREMENT") {
-                                    // Set default to SNOWFLAKE_ID()
                                     column_defaults.insert(
                                         col_name.clone(),
                                         ColumnDefault::function("SNOWFLAKE_ID", vec![]),
                                     );
                                 }
                             },
-                            _ => {
-                                println!("  - OTHER");
+                            // GENERATED { ALWAYS | BY DEFAULT } AS IDENTITY
+                            ColumnOption::Generated {
+                                generated_as: sqlparser::ast::GeneratedAs::Always
+                                    | sqlparser::ast::GeneratedAs::ByDefault,
+                                generation_expr: None,
+                                ..
+                            } => {
+                                column_defaults.insert(
+                                    col_name.clone(),
+                                    ColumnDefault::function("SNOWFLAKE_ID", vec![]),
+                                );
                             },
+                            ColumnOption::Identity(..) => {
+                                column_defaults.insert(
+                                    col_name.clone(),
+                                    ColumnDefault::function("SNOWFLAKE_ID", vec![]),
+                                );
+                            },
+                            _ => {},
                         }
+                    }
+
+                    // SERIAL/BIGSERIAL/SMALLSERIAL types imply auto-increment.
+                    // Add SNOWFLAKE_ID() default if no explicit default was set.
+                    if !column_defaults.contains_key(&col_name) && is_serial_type(&col.data_type) {
+                        column_defaults.insert(
+                            col_name.clone(),
+                            ColumnDefault::function("SNOWFLAKE_ID", vec![]),
+                        );
                     }
 
                     // Create the field and attach KalamDataType metadata for types
@@ -389,23 +417,24 @@ fn normalize_create_table_sql(sql: &str) -> (String, Option<TableType>) {
     // Replace CURRENT_USER() with CURRENT_USER to satisfy sqlparser GenericDialect
     // which doesn't support function calls for this keyword in DEFAULT clause
     let re_current_user = Regex::new(r"(?i)CURRENT_USER\s*\(\s*\)").unwrap();
-    let sql_cow = re_current_user.replace_all(sql, "CURRENT_USER");
-    let sql_ref = sql_cow.as_ref();
+    let mut normalized = re_current_user.replace_all(sql, "CURRENT_USER").into_owned();
 
-    if let Some(caps) = LEGACY_CREATE_PREFIX_RE.captures(sql_ref) {
+    // Strip `USING <access_method>` clause (PostgreSQL table access method syntax).
+    // e.g. `CREATE TABLE t (...) USING kalamdb WITH (...)` → `CREATE TABLE t (...) WITH (...)`
+    // We accept the access method for compatibility but KalamDB always uses its own engine.
+    normalized = USING_ACCESS_METHOD_RE
+        .replace(&normalized, ") ")
+        .into_owned();
+
+    if let Some(caps) = CREATE_TYPED_PREFIX_RE.captures(&normalized) {
         let requested_type = caps[1].to_ascii_uppercase();
         let table_type = TableType::from_str_opt(&requested_type).unwrap_or(TableType::User);
-
-        // let table_type = match requested_type.as_str() {
-        //     "USER" => TableType::User,
-        //     "SHARED" => TableType::Shared,
-        //     "STREAM" => TableType::Stream,
-        //     _ => TableType::User,
-        // };
-        let normalized = LEGACY_CREATE_PREFIX_RE.replace(sql_ref, "CREATE TABLE ").into_owned();
-        (normalized, Some(table_type))
+        let normalized_sql = CREATE_TYPED_PREFIX_RE
+            .replace(&normalized, "CREATE TABLE")
+            .into_owned();
+        (normalized_sql, Some(table_type))
     } else {
-        (sql_ref.to_string(), None)
+        (normalized, None)
     }
 }
 
@@ -467,6 +496,25 @@ fn expr_to_column_default(expr: &sqlparser::ast::Expr) -> ColumnDefault {
                 ColumnDefault::literal(serde_json::Value::String(val))
             }
         },
+    }
+}
+
+/// Returns true if the SQL data type is a PostgreSQL SERIAL type that implies
+/// auto-increment semantics (SERIAL, BIGSERIAL, SMALLSERIAL and their aliases).
+fn is_serial_type(data_type: &sqlparser::ast::DataType) -> bool {
+    if let sqlparser::ast::DataType::Custom(name, _) = data_type {
+        let ident = name
+            .0
+            .iter()
+            .map(|id| id.to_string().to_lowercase())
+            .collect::<Vec<_>>()
+            .join(".");
+        matches!(
+            ident.as_str(),
+            "serial" | "serial2" | "serial4" | "serial8" | "bigserial" | "smallserial"
+        )
+    } else {
+        false
     }
 }
 
@@ -569,5 +617,88 @@ CREATE TABLE concurrent.user_data_no_parens (
 "#;
         let stmt = CreateTableStatement::parse(sql, DEFAULT_NS).unwrap();
         assert!(stmt.column_defaults.contains_key("current_user_id"));
+    }
+
+    #[test]
+    fn test_serial_auto_increment() {
+        let sql = r#"
+CREATE TABLE sales.orders (
+    id BIGSERIAL PRIMARY KEY,
+    title TEXT NOT NULL
+) WITH (TYPE = 'SHARED')
+"#;
+        let stmt = CreateTableStatement::parse(sql, DEFAULT_NS).unwrap();
+        assert!(
+            stmt.column_defaults.contains_key("id"),
+            "BIGSERIAL should auto-add SNOWFLAKE_ID() default"
+        );
+        assert_eq!(stmt.primary_key_column.as_deref(), Some("id"));
+    }
+
+    #[test]
+    fn test_serial_variants_get_auto_increment() {
+        for (serial_type, label) in &[
+            ("SERIAL", "SERIAL"),
+            ("BIGSERIAL", "BIGSERIAL"),
+            ("SMALLSERIAL", "SMALLSERIAL"),
+        ] {
+            let sql = format!(
+                "CREATE TABLE sales.t_{} (id {} PRIMARY KEY, name TEXT) WITH (TYPE = 'SHARED')",
+                label.to_lowercase(),
+                serial_type
+            );
+            let stmt = CreateTableStatement::parse(&sql, DEFAULT_NS)
+                .unwrap_or_else(|e| panic!("{label} failed: {e}"));
+            assert!(
+                stmt.column_defaults.contains_key("id"),
+                "{label} should auto-add SNOWFLAKE_ID() default"
+            );
+        }
+    }
+
+    #[test]
+    fn test_using_access_method_stripped() {
+        let sql = r#"
+CREATE TABLE sales.compression_test (
+    id BIGINT PRIMARY KEY DEFAULT SNOWFLAKE_ID(),
+    data TEXT
+) USING kalamdb
+  WITH (TYPE = 'USER')
+"#;
+        let stmt = CreateTableStatement::parse(sql, DEFAULT_NS).unwrap();
+        assert_eq!(stmt.table_type, TableType::User);
+        assert_eq!(stmt.table_name.as_str(), "compression_test");
+    }
+
+    #[test]
+    fn test_using_access_method_with_options() {
+        let sql = r#"
+CREATE TABLE sales.my_table (
+    id BIGSERIAL PRIMARY KEY,
+    title TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+) USING kalamdb
+  WITH (TYPE = 'USER', STORAGE_ID = 'local-ssd')
+"#;
+        let stmt = CreateTableStatement::parse(sql, DEFAULT_NS).unwrap();
+        assert_eq!(stmt.table_type, TableType::User);
+        assert_eq!(stmt.storage_id.unwrap().as_str(), "local-ssd");
+        assert!(stmt.column_defaults.contains_key("id"), "BIGSERIAL auto-increment");
+        assert!(stmt.column_defaults.contains_key("created_at"), "NOW() default");
+    }
+
+    #[test]
+    fn test_generated_always_as_identity() {
+        let sql = r#"
+CREATE TABLE sales.identity_test (
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name TEXT
+) WITH (TYPE = 'SHARED')
+"#;
+        let stmt = CreateTableStatement::parse(sql, DEFAULT_NS).unwrap();
+        assert!(
+            stmt.column_defaults.contains_key("id"),
+            "GENERATED ALWAYS AS IDENTITY should add SNOWFLAKE_ID() default"
+        );
     }
 }

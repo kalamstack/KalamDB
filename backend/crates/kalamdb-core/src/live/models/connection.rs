@@ -8,10 +8,10 @@ use kalamdb_commons::ids::SeqId;
 use kalamdb_commons::models::{ConnectionId, ConnectionInfo, LiveQueryId, TableId, UserId};
 use kalamdb_commons::Notification;
 use kalamdb_commons::Role;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
@@ -47,8 +47,11 @@ pub type EventSender = mpsc::Sender<ConnectionEvent>;
 /// Type alias for receiving control events
 pub type EventReceiver = mpsc::Receiver<ConnectionEvent>;
 
-/// Shared connection state - can be held by handlers for direct access
-pub type SharedConnectionState = Arc<RwLock<ConnectionState>>;
+/// Shared connection state — lock-free, held by handlers for direct access.
+///
+/// All fields are either immutable after construction, set-once (OnceLock/AtomicBool),
+/// or interior-mutable (DashMap/AtomicU64), so no outer RwLock is needed.
+pub type SharedConnectionState = Arc<ConnectionState>;
 
 /// Events sent to connection tasks from the heartbeat checker
 #[derive(Debug, Clone)]
@@ -194,110 +197,191 @@ pub struct SubscriptionState {
     pub is_shared: bool,
 }
 
-/// Connection state - everything about a connection in one struct
+/// Connection state — lock-free interior mutability for 100k+ concurrent connections.
 ///
-/// Handlers hold `Arc<RwLock<ConnectionState>>` for direct access.
+/// Identity and channel fields are immutable after construction.
+/// Auth fields use set-once primitives (OnceLock + AtomicBool).
+/// Subscriptions use DashMap for concurrent shard-level locking.
+/// Heartbeat uses AtomicU64 for zero-contention updates.
+///
 /// Used for both WebSocket live query connections and topic consumer connections.
 pub struct ConnectionState {
-    // === Identity ===
-    /// Connection ID
-    pub connection_id: ConnectionId,
-    /// User ID (None until authenticated)
-    pub user_id: Option<UserId>,
-    /// User role (None until authenticated)
-    pub user_role: Option<Role>,
-    /// Client IP address (for localhost bypass check)
-    pub client_ip: ConnectionInfo,
+    // === Identity (immutable) ===
+    connection_id: ConnectionId,
+    client_ip: ConnectionInfo,
+    connected_at: Instant,
 
-    // === Authentication State ===
-    /// Whether connection has been authenticated
-    pub is_authenticated: bool,
-    /// Whether auth attempt has started (for timeout logic)
-    pub auth_started: bool,
+    // === Authentication (set-once) ===
+    is_authenticated: AtomicBool,
+    auth_started: AtomicBool,
+    user_id: OnceLock<UserId>,
+    user_role: OnceLock<Role>,
 
-    // === Heartbeat/Timing ===
-    /// When connection was established
-    pub connected_at: Instant,
-    /// Last heartbeat timestamp in epoch millis (atomic for lock-free updates)
-    /// Use `update_heartbeat()` and `millis_since_heartbeat()` to access.
-    pub last_heartbeat_ms: AtomicU64,
+    // === Heartbeat (atomic) ===
+    last_heartbeat_ms: AtomicU64,
 
-    // === Subscriptions ===
-    /// Active subscriptions for this connection (subscription_id -> state)
-    /// For WebSocket: live query subscriptions
-    /// For topic consumers: topic consumption sessions
-    pub subscriptions: DashMap<String, SubscriptionState>,
+    // === Subscriptions (concurrent interior-mutable) ===
+    subscriptions: DashMap<String, SubscriptionState>,
 
-    // === Channels ===
-    /// Channel to send notifications to this connection's handler task (bounded for backpressure)
+    // === Channels (immutable after construction) ===
     pub notification_tx: Arc<NotificationSender>,
-    /// Channel to send control events (ping, timeout, shutdown) (bounded)
     pub event_tx: EventSender,
 }
 
 impl ConnectionState {
-    /// Update heartbeat timestamp — lock-free, callable with `&self` (no write lock needed)
-    #[inline]
-    pub fn update_heartbeat(&self) {
-        self.last_heartbeat_ms.store(epoch_millis(), Ordering::Release);
+    /// Create a new connection state with the given identity and channels.
+    pub fn new(
+        connection_id: ConnectionId,
+        client_ip: ConnectionInfo,
+        notification_tx: Arc<NotificationSender>,
+        event_tx: EventSender,
+    ) -> Self {
+        Self {
+            connection_id,
+            client_ip,
+            connected_at: Instant::now(),
+            is_authenticated: AtomicBool::new(false),
+            auth_started: AtomicBool::new(false),
+            user_id: OnceLock::new(),
+            user_role: OnceLock::new(),
+            last_heartbeat_ms: AtomicU64::new(epoch_millis()),
+            subscriptions: DashMap::new(),
+            notification_tx,
+            event_tx,
+        }
     }
 
-    /// Milliseconds elapsed since last heartbeat activity
-    #[inline]
-    pub fn millis_since_heartbeat(&self) -> u64 {
-        epoch_millis().saturating_sub(self.last_heartbeat_ms.load(Ordering::Acquire))
-    }
+    // === Identity accessors ===
 
-    /// Mark that authentication has started (for timeout logic)
-    #[inline]
-    pub fn mark_auth_started(&mut self) {
-        self.auth_started = true;
-    }
-
-    /// Mark connection as authenticated with user identity
-    #[inline]
-    pub fn mark_authenticated(&mut self, user_id: UserId, user_role: Role) {
-        self.is_authenticated = true;
-        self.user_id = Some(user_id);
-        self.user_role = Some(user_role);
-    }
-
-    /// Check if connection is authenticated
-    #[inline]
-    pub fn is_authenticated(&self) -> bool {
-        self.is_authenticated
-    }
-
-    /// Get user ID (None if not authenticated)
-    #[inline]
-    pub fn user_id(&self) -> Option<&UserId> {
-        self.user_id.as_ref()
-    }
-
-    /// Get user role (None if not authenticated)
-    #[inline]
-    pub fn user_role(&self) -> Option<Role> {
-        self.user_role
-    }
-
-    /// Get connection ID
     #[inline]
     pub fn connection_id(&self) -> &ConnectionId {
         &self.connection_id
     }
 
-    /// Get client IP
     #[inline]
     pub fn client_ip(&self) -> Option<&ConnectionInfo> {
         Some(&self.client_ip)
     }
 
-    /// Get a subscription by ID
+    #[inline]
+    pub fn connected_at(&self) -> Instant {
+        self.connected_at
+    }
+
+    // === Authentication ===
+
+    /// Mark that authentication has started (for timeout logic). Lock-free.
+    #[inline]
+    pub fn mark_auth_started(&self) {
+        self.auth_started.store(true, Ordering::Release);
+    }
+
+    /// Whether auth attempt has started.
+    #[inline]
+    pub fn auth_started(&self) -> bool {
+        self.auth_started.load(Ordering::Acquire)
+    }
+
+    /// Mark connection as authenticated with user identity. Lock-free (set-once).
+    #[inline]
+    pub fn mark_authenticated(&self, user_id: UserId, user_role: Role) {
+        let _ = self.user_id.set(user_id);
+        let _ = self.user_role.set(user_role);
+        self.is_authenticated.store(true, Ordering::Release);
+    }
+
+    #[inline]
+    pub fn is_authenticated(&self) -> bool {
+        self.is_authenticated.load(Ordering::Acquire)
+    }
+
+    #[inline]
+    pub fn user_id(&self) -> Option<&UserId> {
+        self.user_id.get()
+    }
+
+    #[inline]
+    pub fn user_role(&self) -> Option<Role> {
+        self.user_role.get().copied()
+    }
+
+    // === Heartbeat ===
+
+    /// Update heartbeat timestamp — lock-free atomic store.
+    #[inline]
+    pub fn update_heartbeat(&self) {
+        self.last_heartbeat_ms.store(epoch_millis(), Ordering::Release);
+    }
+
+    /// Milliseconds elapsed since last heartbeat activity.
+    #[inline]
+    pub fn millis_since_heartbeat(&self) -> u64 {
+        epoch_millis().saturating_sub(self.last_heartbeat_ms.load(Ordering::Acquire))
+    }
+
+    // === Subscription management ===
+
+    /// Number of active subscriptions.
+    pub fn subscription_count(&self) -> usize {
+        self.subscriptions.len()
+    }
+
+    /// Insert a subscription into the connection's map.
+    pub fn insert_subscription(&self, key: String, state: SubscriptionState) {
+        self.subscriptions.insert(key, state);
+    }
+
+    /// Remove a subscription by key, returning the removed value.
+    pub fn remove_subscription(&self, key: &str) -> Option<(String, SubscriptionState)> {
+        self.subscriptions.remove(key)
+    }
+
+    /// Remove a subscription by primary key, falling back to a secondary key
+    /// produced by `fallback_fn` if the primary is not found.
+    pub fn remove_subscription_with_fallback<F>(
+        &self,
+        primary_key: &str,
+        fallback_fn: F,
+    ) -> Option<(String, SubscriptionState)>
+    where
+        F: FnOnce() -> Option<String>,
+    {
+        self.subscriptions
+            .remove(primary_key)
+            .or_else(|| fallback_fn().and_then(|key| self.subscriptions.remove(&key)))
+    }
+
+    /// Get a subscription by ID (cloned out of the DashMap).
     pub fn get_subscription(&self, subscription_id: &str) -> Option<SubscriptionState> {
         self.subscriptions.get(subscription_id).map(|s| s.clone())
     }
 
-    /// Update snapshot_end_seq for a subscription
+    /// Iterate all subscriptions, calling `f` for each.
+    pub fn for_each_subscription<F>(&self, mut f: F)
+    where
+        F: FnMut(&str, &SubscriptionState),
+    {
+        for entry in self.subscriptions.iter() {
+            f(entry.key(), entry.value());
+        }
+    }
+
+    /// Collect info from all subscriptions, removing them in the process.
+    /// Returns the collected values.
+    pub fn collect_subscription_info<F, T>(&self, mut f: F) -> Vec<T>
+    where
+        F: FnMut(&SubscriptionState) -> T,
+    {
+        let mut result = Vec::with_capacity(self.subscriptions.len());
+        // Drain all entries
+        self.subscriptions.retain(|_k, v| {
+            result.push(f(v));
+            false // remove every entry
+        });
+        result
+    }
+
+    /// Update snapshot_end_seq for a subscription.
     pub fn update_snapshot_end_seq(&self, subscription_id: &str, snapshot_end_seq: Option<SeqId>) {
         if let Some(mut sub) = self.subscriptions.get_mut(subscription_id) {
             sub.snapshot_end_seq = snapshot_end_seq;
@@ -305,37 +389,38 @@ impl ConnectionState {
         }
     }
 
-    /// Mark initial load complete and flush buffered notifications
+    /// Mark initial load complete and flush buffered notifications.
+    ///
+    /// Clones the flow_control Arc and drops the DashMap ref before flushing
+    /// to avoid holding the shard lock during channel sends.
     pub fn complete_initial_load(&self, subscription_id: &str) -> usize {
-        if let Some(sub) = self.subscriptions.get(subscription_id) {
-            let flow_control = Arc::clone(&sub.flow_control);
-            flow_control.mark_initial_complete();
-            let buffered = flow_control.drain_buffered_notifications();
+        let flow_control = match self.subscriptions.get(subscription_id) {
+            Some(sub) => Arc::clone(&sub.flow_control),
+            None => return 0,
+        };
+        // DashMap ref dropped — shard lock released before sending.
 
-            let mut sent = 0usize;
-            for item in buffered {
-                // TODO: Backpressure limitation: buffered notifications are flushed with try_send.
-                // If the channel is full, remaining buffered notifications are dropped.
-                // Consider a blocking flush, retry queue, or persistent spool for lossless delivery.
-                if let Err(e) = self.notification_tx.try_send(item.notification) {
-                    if matches!(e, mpsc::error::TrySendError::Full(_)) {
-                        log::warn!(
-                            "Notification channel full while flushing buffered notifications for {}",
-                            subscription_id
-                        );
-                        break;
-                    }
-                } else {
-                    sent += 1;
+        flow_control.mark_initial_complete();
+        let buffered = flow_control.drain_buffered_notifications();
+
+        let mut sent = 0usize;
+        for item in buffered {
+            if let Err(e) = self.notification_tx.try_send(item.notification) {
+                if matches!(e, mpsc::error::TrySendError::Full(_)) {
+                    log::warn!(
+                        "Notification channel full while flushing buffered notifications for {}",
+                        subscription_id
+                    );
+                    break;
                 }
+            } else {
+                sent += 1;
             }
-            sent
-        } else {
-            0
         }
+        sent
     }
 
-    /// Increment current batch number for a subscription and return the new value
+    /// Increment current batch number for a subscription and return the new value.
     pub fn increment_batch_num(&self, subscription_id: &str) -> Option<u32> {
         if let Some(mut sub) = self.subscriptions.get_mut(subscription_id) {
             sub.current_batch_num += 1;

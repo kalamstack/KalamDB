@@ -62,10 +62,6 @@ pub struct ClusterConfig {
     #[serde(default)]
     pub peers: Vec<PeerConfig>,
 
-    /// TLS/mTLS settings for inter-node RPC.
-    #[serde(default)]
-    pub rpc_tls: ClusterRpcTlsConfig,
-
     /// Number of user data shards (default: 12)
     /// Each shard is a separate Raft group for user table data.
     #[serde(default = "default_user_shards")]
@@ -144,23 +140,6 @@ pub struct PeerConfig {
     /// Optional TLS server name override for this peer's RPC endpoint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rpc_server_name: Option<String>,
-}
-
-/// TLS/mTLS settings for inter-node RPC.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ClusterRpcTlsConfig {
-    /// Enable TLS/mTLS for Raft and cluster gRPC.
-    #[serde(default)]
-    pub enabled: bool,
-    /// PEM-encoded CA certificate path used to validate peer certificates.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ca_cert_path: Option<String>,
-    /// PEM-encoded node certificate path for this node identity.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub node_cert_path: Option<String>,
-    /// PEM-encoded private key path for `node_cert_path`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub node_key_path: Option<String>,
 }
 
 // Default value functions for serde
@@ -249,20 +228,24 @@ impl ClusterConfig {
             return Err("node_id must be > 0".to_string());
         }
 
-        validate_advertised_address("cluster.rpc_addr", &self.rpc_addr)?;
-        validate_advertised_address("cluster.api_addr", &self.api_addr)?;
+        let has_peers = !self.peers.is_empty();
+        validate_advertised_address("cluster.rpc_addr", &self.rpc_addr, has_peers)?;
+        validate_advertised_address("cluster.api_addr", &self.api_addr, has_peers)?;
 
         for peer in &self.peers {
             if peer.node_id == 0 {
                 return Err("cluster.peers[].node_id must be > 0".to_string());
             }
+            // Peer addresses must always be concrete (we need to reach them)
             validate_advertised_address(
                 &format!("cluster.peers(node_id={}).rpc_addr", peer.node_id),
                 &peer.rpc_addr,
+                true,
             )?;
             validate_advertised_address(
                 &format!("cluster.peers(node_id={}).api_addr", peer.node_id),
                 &peer.api_addr,
+                true,
             )?;
         }
 
@@ -288,30 +271,6 @@ impl ClusterConfig {
             return Err("reconnect_interval_ms must be > 0".to_string());
         }
 
-        if self.rpc_tls.enabled {
-            if self.rpc_tls.ca_cert_path.as_deref().unwrap_or("").trim().is_empty() {
-                return Err("cluster.rpc_tls.ca_cert_path is required when rpc_tls.enabled=true"
-                    .to_string());
-            }
-            if self.rpc_tls.node_cert_path.as_deref().unwrap_or("").trim().is_empty() {
-                return Err("cluster.rpc_tls.node_cert_path is required when rpc_tls.enabled=true"
-                    .to_string());
-            }
-            if self.rpc_tls.node_key_path.as_deref().unwrap_or("").trim().is_empty() {
-                return Err("cluster.rpc_tls.node_key_path is required when rpc_tls.enabled=true"
-                    .to_string());
-            }
-
-            for peer in &self.peers {
-                if peer.rpc_server_name.as_deref().unwrap_or("").trim().is_empty() {
-                    return Err(format!(
-                        "cluster.peers(node_id={}) requires rpc_server_name when rpc_tls.enabled=true",
-                        peer.node_id
-                    ));
-                }
-            }
-        }
-
         Ok(())
     }
 
@@ -328,16 +287,16 @@ impl ClusterConfig {
     }
 }
 
-fn validate_advertised_address(field_name: &str, value: &str) -> Result<(), String> {
+fn validate_advertised_address(field_name: &str, value: &str, has_peers: bool) -> Result<(), String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return Err(format!("{} cannot be empty", field_name));
     }
 
     if let Ok(addr) = trimmed.parse::<std::net::SocketAddr>() {
-        if addr.ip().is_unspecified() {
+        if addr.ip().is_unspecified() && has_peers {
             return Err(format!(
-                "{} must not use an unspecified/wildcard address ({}). Use a reachable hostname or IP instead",
+                "{} must not use an unspecified/wildcard address ({}) when peers are configured. Use a reachable hostname or IP instead",
                 field_name, value
             ));
         }
@@ -362,7 +321,6 @@ mod tests {
                 api_addr: "127.0.0.2:8080".to_string(),
                 rpc_server_name: None,
             }],
-            rpc_tls: ClusterRpcTlsConfig::default(),
             user_shards: 12,
             shared_shards: 1,
             heartbeat_interval_ms: 250,
@@ -411,32 +369,25 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_tls_requires_paths() {
-        let mut config = valid_config();
-        config.rpc_tls.enabled = true;
-        assert!(config.validate().is_err());
-
-        config.rpc_tls.ca_cert_path = Some("/tmp/ca.pem".to_string());
-        config.rpc_tls.node_cert_path = Some("/tmp/node.pem".to_string());
-        config.rpc_tls.node_key_path = Some("/tmp/node.key".to_string());
-        assert!(config.validate().is_err());
-
-        config.peers[0].rpc_server_name = Some("node2.cluster.local".to_string());
-        assert!(config.validate().is_ok());
-    }
-
-    #[test]
     fn test_total_groups() {
         let config = valid_config();
         assert_eq!(config.total_groups(), 1 + 12 + 1);
     }
 
     #[test]
-    fn test_validate_rejects_wildcard_rpc_addr() {
+    fn test_validate_allows_wildcard_rpc_addr_without_peers() {
+        let mut config = valid_config();
+        config.rpc_addr = "0.0.0.0:9188".to_string();
+        config.peers.clear();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_rejects_wildcard_rpc_addr_with_peers() {
         let mut config = valid_config();
         config.rpc_addr = "0.0.0.0:9188".to_string();
 
-        let err = config.validate().expect_err("wildcard advertise address must be rejected");
+        let err = config.validate().expect_err("wildcard advertise address must be rejected when peers exist");
         assert!(err.contains("cluster.rpc_addr"));
     }
 

@@ -1,0 +1,4 @@
+# Pre-built extension artifacts (extracted from builder image)
+*.so
+*.sql
+*.control

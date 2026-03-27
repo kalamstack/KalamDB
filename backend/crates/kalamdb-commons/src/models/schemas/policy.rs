@@ -241,6 +241,15 @@ impl FlushPolicy {
         policy.validate()?;
         Ok(policy)
     }
+
+    /// Extract the row limit from this policy, if any
+    pub fn get_row_limit(&self) -> Option<u32> {
+        match self {
+            FlushPolicy::RowLimit { row_limit } => Some(*row_limit),
+            FlushPolicy::Combined { row_limit, .. } => Some(*row_limit),
+            FlushPolicy::TimeInterval { .. } => None,
+        }
+    }
 }
 
 impl Default for FlushPolicy {

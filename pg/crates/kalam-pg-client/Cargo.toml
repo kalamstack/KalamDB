@@ -1,0 +1,30 @@
+[package]
+name = "kalam-pg-client"
+version = { workspace = true }
+edition = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[features]
+default = ["tls"]
+tls = ["tonic/tls-webpki-roots", "tonic/tls-ring", "kalamdb-pg/tls"]
+
+[dependencies]
+arrow = { workspace = true }
+arrow-ipc = { workspace = true, default-features = false }
+bytes = { workspace = true }
+kalam-pg-api = { path = "../kalam-pg-api" }
+kalam-pg-common = { path = "../kalam-pg-common" }
+kalamdb-pg = { path = "../../../backend/crates/kalamdb-pg", default-features = false }
+serde_json = { workspace = true }
+tonic = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+arrow = { workspace = true }
+async-trait = { workspace = true }
+kalamdb-pg = { path = "../../../backend/crates/kalamdb-pg", features = ["server"] }
+ntest = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tonic = { workspace = true }

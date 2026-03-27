@@ -285,6 +285,7 @@ mod cluster_common {
     }
 
     /// Execute SQL on a specific cluster node without leader routing
+    #[allow(dead_code)]
     pub fn execute_on_node_raw(base_url: &str, sql: &str) -> Result<String, String> {
         execute_on_node_internal(base_url, sql, false)
     }
@@ -339,6 +340,7 @@ mod cluster_common {
     }
 
     /// Execute SQL on a specific cluster node and return the structured response without leader routing
+    #[allow(dead_code)]
     pub fn execute_on_node_response_raw(
         base_url: &str,
         sql: &str,
@@ -400,6 +402,7 @@ mod cluster_common {
     }
 
     /// Execute SQL on a specific cluster node as a custom user without leader routing
+    #[allow(dead_code)]
     pub fn execute_on_node_as_user_raw(
         base_url: &str,
         username: &str,
@@ -466,6 +469,7 @@ mod cluster_common {
     }
 
     /// Execute SQL on a specific cluster node as a custom user and return the response without leader routing
+    #[allow(dead_code)]
     pub fn execute_on_node_as_user_response_raw(
         base_url: &str,
         username: &str,

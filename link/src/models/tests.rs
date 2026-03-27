@@ -24,6 +24,10 @@ fn test_connection_options_default() {
         opts.ws_local_bind_addresses.is_empty(),
         "ws_local_bind_addresses should default to empty"
     );
+    assert_eq!(
+        opts.ping_interval_ms, 5000,
+        "ping_interval_ms should default to 5000"
+    );
 }
 
 #[test]
@@ -36,6 +40,7 @@ fn test_connection_options_new() {
     assert_eq!(opts.max_reconnect_delay_ms, 30000);
     assert!(opts.max_reconnect_attempts.is_none());
     assert!(opts.ws_local_bind_addresses.is_empty());
+    assert_eq!(opts.ping_interval_ms, 5000);
 }
 
 #[test]
@@ -45,12 +50,14 @@ fn test_connection_options_builder_pattern() {
         .with_reconnect_delay_ms(2000)
         .with_max_reconnect_delay_ms(60000)
         .with_max_reconnect_attempts(Some(5))
+        .with_ping_interval_ms(2500)
         .with_ws_local_bind_addresses(vec!["127.0.0.1".to_string(), "127.0.0.2".to_string()]);
 
     assert!(!opts.auto_reconnect);
     assert_eq!(opts.reconnect_delay_ms, 2000);
     assert_eq!(opts.max_reconnect_delay_ms, 60000);
     assert_eq!(opts.max_reconnect_attempts, Some(5));
+    assert_eq!(opts.ping_interval_ms, 2500);
     assert_eq!(
         opts.ws_local_bind_addresses,
         vec!["127.0.0.1".to_string(), "127.0.0.2".to_string()]
@@ -79,7 +86,8 @@ fn test_connection_options_serialization() {
         .with_auto_reconnect(true)
         .with_reconnect_delay_ms(500)
         .with_max_reconnect_delay_ms(10000)
-        .with_max_reconnect_attempts(Some(3));
+        .with_max_reconnect_attempts(Some(3))
+        .with_ping_interval_ms(4000);
 
     let json = serde_json::to_string(&opts).unwrap();
     let parsed: ConnectionOptions = serde_json::from_str(&json).unwrap();
@@ -88,6 +96,7 @@ fn test_connection_options_serialization() {
     assert_eq!(parsed.reconnect_delay_ms, opts.reconnect_delay_ms);
     assert_eq!(parsed.max_reconnect_delay_ms, opts.max_reconnect_delay_ms);
     assert_eq!(parsed.max_reconnect_attempts, opts.max_reconnect_attempts);
+    assert_eq!(parsed.ping_interval_ms, opts.ping_interval_ms);
     assert_eq!(parsed.ws_local_bind_addresses, opts.ws_local_bind_addresses);
 }
 
@@ -100,6 +109,7 @@ fn test_connection_options_deserialization_with_defaults() {
     assert!(!opts.auto_reconnect);
     assert_eq!(opts.reconnect_delay_ms, 1000); // default
     assert_eq!(opts.max_reconnect_delay_ms, 30000); // default
+    assert_eq!(opts.ping_interval_ms, 5000); // default
     assert!(opts.max_reconnect_attempts.is_none()); // default
     assert!(opts.ws_local_bind_addresses.is_empty()); // default
 }

@@ -1,10 +1,11 @@
 import { KalamCellValue, type SchemaField } from "kalam-link";
 import { executeQuery, getCurrentToken } from "./kalam-client";
+import { getApiBaseUrl } from "./backend-url";
 
 // HTTP API client for auth/setup endpoints.
 // SQL calls should go through kalam-link in `kalam-client.ts`.
 
-const API_BASE = "/v1/api";
+const API_BASE = getApiBaseUrl();
 const NO_AUTH_ENDPOINTS = new Set([
   "/auth/login",
   "/auth/refresh",

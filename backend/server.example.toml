@@ -57,44 +57,60 @@ connect_timeout_secs = 10
 
 
 [storage.rocksdb]
-# Write buffer size per column family in bytes (default: 512KB)
-# MEMORY OPTIMIZATION: Reduced from 2MB for lower idle memory footprint
-# Formula: memory ≈ write_buffer_size × max_write_buffers × num_column_families
-# Lower values reduce memory with many column families
-# Example: 50 CFs × 512KB × 2 buffers = 50MB vs 50 CFs × 2MB × 2 = 200MB
-write_buffer_size = 524288
-
-# Maximum number of write buffers (default: 2)
-# Allows writes to continue while buffers are being flushed
-max_write_buffers = 2
-
-# Block cache size for reads in bytes (default: 4MB)
-# MEMORY OPTIMIZATION: Reduced from 256MB to 4MB
+# Block cache size for reads in bytes (default: 2MB)
 # IMPORTANT: This cache is SHARED across ALL column families
 # Adding more column families does NOT increase memory proportionally
-# Example: 100 CFs × 4MB cache = still only 4MB total (not 400MB)
-block_cache_size = 4194304
+block_cache_size = 2097152
 
 # Maximum number of background compaction/flush jobs (default: 4)
 max_background_jobs = 4
 
+[storage.rocksdb.cf_profiles.system_meta]
+# Low-write system metadata tables and compatibility partitions.
+write_buffer_size = 32768
+max_write_buffers = 2
+
+[storage.rocksdb.cf_profiles.system_index]
+# Secondary indexes for system tables.
+write_buffer_size = 32768
+max_write_buffers = 2
+
+[storage.rocksdb.cf_profiles.hot_data]
+# User/shared/stream data CFs and topic message payloads.
+# These stay warmer because they sit on the main read/write path.
+write_buffer_size = 131072
+max_write_buffers = 2
+
+[storage.rocksdb.cf_profiles.hot_index]
+# PK indexes and vector PK indexes. These are latency-sensitive, but smaller than data CFs.
+write_buffer_size = 65536
+max_write_buffers = 2
+
+[storage.rocksdb.cf_profiles.raft]
+# The single raft_data CF is append-heavy and benefits from a larger memtable.
+write_buffer_size = 262144
+max_write_buffers = 2
+
 [datafusion]
-# Memory limit for query execution in bytes (default: 256MB)
-# Queries exceeding this limit will be terminated
-memory_limit = 268435456
+# Memory limit for query execution in bytes (default: 64MB)
+# KalamDB is optimised for mobile/OLTP workloads, not heavy analytics.
+# 64 MB is sufficient for key-based lookups and small aggregates.
+# Queries that exceed this limit are terminated immediately.
+memory_limit = 67108864
 
-# Number of parallel threads for query execution (default: number of CPU cores)
-# Set to 0 to auto-detect CPU count
-query_parallelism = 0
+# Number of parallel threads for query execution (default: 2)
+# Low fixed value: mobile app queries are short-lived key lookups;
+# high parallelism just increases context-switch overhead.
+# Set to 0 to auto-detect CPU count (not recommended for shared servers).
+query_parallelism = 2
 
-# Maximum number of partitions per query (default: 8)
-# Higher values increase parallelism but use more resources
-max_partitions = 8
+# Maximum number of partitions per query (default: 4)
+# Caps concurrent partition scans; reduces memory and CPU burst per query.
+max_partitions = 4
 
-# Batch size for record processing (default: 2048 rows)
-# MEMORY OPTIMIZATION: Reduced from 8192 for lower memory usage
-# Lower batch size reduces memory pressure during query execution
-batch_size = 2048
+# Batch size for record processing (default: 1024 rows)
+# Smaller batches limit peak arrow allocation per operator.
+batch_size = 1024
 
 [flush]
 # Default row limit for flush policies (default: 10000 rows)
@@ -105,10 +121,19 @@ default_row_limit = 10000
 # Tables will flush to Parquet after this duration
 default_time_interval = 300
 
+# How often the background scheduler checks for tables with pending writes
+# and creates flush jobs (default: 60 seconds). Set to 0 to disable.
+check_interval_seconds = 60
+
 [retention]
 # Default retention hours for soft-deleted rows (default: 168 hours = 7 days)
 # Rows with _deleted=true will be kept in Parquet files for this duration
 default_deleted_retention_hours = 168
+
+# Enable periodic dba.stats collection (default: true)
+# Set to false to disable the background stats recorder, saving memory and CPU
+# in resource-constrained environments (e.g. Docker containers).
+enable_dba_stats = false
 
 # Number of days to preserve samples in dba.stats (default: 7 days)
 # Set to 0 to disable automatic cleanup of historical DBA metrics
@@ -216,10 +241,16 @@ max_connections = 25000
 # Industry standards: Nginx (511), Apache (511), Caddy (1024), Actix (2048)
 backlog = 4096
 
-# Max blocking threads per worker for CPU-intensive operations (default: 512)
+# Max blocking threads per worker for CPU-intensive operations (default: 32)
 # Used for RocksDB I/O and synchronous operations
 # Increase for high-concurrency workloads or test environments
-worker_max_blocking_threads = 512
+worker_max_blocking_threads = 32
+
+# Number of tokio runtime worker threads (default: 0 = auto, num_cpus capped at 4)
+# Lower values reduce idle RSS from thread stacks (~2MB per thread).
+# Set to 0 for auto-detection, or an explicit count for Docker/constrained environments.
+# Can also be overridden via KALAMDB_TOKIO_WORKER_THREADS env var.
+tokio_worker_threads = 0
 
 # Client request timeout in seconds (default: 5)
 # Time allowed for client to send complete request headers
@@ -277,8 +308,10 @@ ban_duration_seconds = 300
 # Set to false to completely disable rate limiting (NOT recommended for production)
 enable_connection_protection = true
 
-# Maximum cached entries for rate limiting state (default: 100,000)
-cache_max_entries = 100000
+# Maximum cached entries for rate limiting state (default: 1,000)
+# MEMORY OPTIMIZATION: Reduced from 100k. Moka internal bookkeeping scales
+# with max_capacity. 1k handles typical mobile-app deployments.
+cache_max_entries = 1000
 
 # Time-to-idle for cached entries in seconds (default: 600 = 10 minutes)
 cache_ttl_seconds = 600
@@ -488,42 +521,52 @@ max_parameters = 50
 # Prevents memory exhaustion from individual large parameters
 max_parameter_size_bytes = 524288
 
-# Maximum number of cached SQL logical plans (default: 1000)
+# Maximum number of cached SQL logical plans (default: 200)
 # Bound memory used by SQL plan cache
-sql_plan_cache_max_entries = 1000
+sql_plan_cache_max_entries = 200
 
 # Time-to-idle TTL for SQL cached plans in seconds (default: 900 = 15 minutes)
 # Unused plans are evicted automatically after this idle period
 sql_plan_cache_ttl_seconds = 900
 
 # ============================================================================
-# Cluster Configuration (Multi-Node Raft Replication)
+# RPC TLS / mTLS Configuration
 # ============================================================================
-# Enable distributed clustering with Raft consensus for strong consistency.
-# When enabled, the server runs as part of a multi-node cluster.
-# When disabled (default), the server runs in standalone mode with no overhead.
-
-# IMPORTANT: All nodes in a cluster MUST have:
-# - Matching cluster_id values
-# - The same members list
-# - Matching sharding configuration
-# - Unique node_id values
-
-# ============================================================================
-# Cluster Configuration - Multi-Node Raft Replication (v0.2.0)
-# ============================================================================
-# Enable distributed clustering with Raft consensus for strong consistency.
-# When [cluster] section is present, the server runs as part of a multi-node cluster.
-# When absent (default), the server runs in standalone mode with no overhead.
+# Secures the shared gRPC listener used by Raft replication, cluster RPCs,
+# and the PostgreSQL extension.
 #
-# IMPORTANT: All nodes in a cluster MUST have:
-# - Matching cluster_id values
-# - The same peers list (with this node's entry removed)
-# - Matching sharding configuration (user_shards, shared_shards)
-# - Unique node_id values
+# Both cluster nodes and PG extension clients present a certificate signed by
+# the same CA. The server identifies the caller from the certificate CN:
+#   kalamdb-node-{node_id}  → cluster node
+#   kalamdb-pg-{name}       → PG extension client
 #
-# Node with node_id=1 automatically becomes the bootstrap node.
-# No explicit bootstrap flag needed - cluster auto-initializes.
+# All cert values accept EITHER a file path OR an inline PEM string.
+# Inline detection: if the value starts with "-----BEGIN", it is used directly.
+# Otherwise the value is treated as a file path and read from disk.
+
+# [rpc_tls]
+# enabled = true
+# # CA cert — validates ALL incoming client certs (cluster nodes + PG extension)
+# ca_cert = "/etc/kalamdb/certs/ca.pem"
+# # This server's identity cert and key
+# server_cert = "/etc/kalamdb/certs/node1.pem"
+# server_key  = "/etc/kalamdb/certs/node1.key"
+# # Require clients to present a cert (full mTLS). Set false for server-only TLS.
+# require_client_cert = true
+
+# ============================================================================
+# Cluster Configuration — Multi-Node Raft Replication
+# ============================================================================
+# When [cluster] is present the server joins a distributed cluster.
+# When absent (default) the server runs standalone with no clustering overhead.
+#
+# All nodes in a cluster MUST have:
+#   - Matching cluster_id values
+#   - The same peers list (this node omitted)
+#   - Matching sharding configuration (user_shards, shared_shards)
+#   - Unique node_id values
+#
+# Node with node_id=1 is the bootstrap node (no explicit flag needed).
 
 # [cluster]
 # # Unique cluster identifier - all nodes must share this
@@ -541,11 +584,7 @@ sql_plan_cache_ttl_seconds = 900
 # #
 # # Optional mTLS for inter-node gRPC (Raft + cluster RPC)
 # # When enabled, all three paths are required.
-# # [cluster.rpc_tls]
-# # enabled = true
-# # ca_cert_path = "/etc/kalamdb/certs/cluster-ca.pem"
-# # node_cert_path = "/etc/kalamdb/certs/node1.pem"
-# # node_key_path = "/etc/kalamdb/certs/node1.key"
+# # Note: TLS for this node's identity lives in the top-level [rpc_tls] section, not here.
 # 
 # # Number of user data shards (default: 8)
 # # MEMORY OPTIMIZATION: Reduced from 32 (saves ~5-8 MB)

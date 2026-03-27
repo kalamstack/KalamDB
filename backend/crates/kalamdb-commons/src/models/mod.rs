@@ -46,8 +46,12 @@ mod topic_op;
 mod user_name;
 
 // Row types only available with full feature (datafusion dependency)
-#[cfg(feature = "full")]
+#[cfg(feature = "rows")]
 pub mod rows;
+
+// Domain-typed operation request/result types for the PG extension bridge
+#[cfg(feature = "rows")]
+pub mod pg_operations;
 
 // Re-export all types from submodules for convenience
 pub use auth_type::AuthType;
@@ -62,7 +66,7 @@ pub use topic_op::TopicOp;
 pub use user_name::UserName;
 pub use user_name::UserName as Username;
 
-#[cfg(feature = "full")]
+#[cfg(feature = "rows")]
 pub use rows::{KTableRow, StreamTableRow, SystemTableRow, UserTableRow};
 
 pub use connection::ConnectionInfo;

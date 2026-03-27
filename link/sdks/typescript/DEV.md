@@ -26,11 +26,18 @@ Node.js and browser environments — no manual WASM bootstrap required for norma
 | npm | >= 9 |
 | Rust toolchain | stable (via `rustup`) |
 | `wasm-pack` | latest |
+| `wasm-opt` (Binaryen) | recommended |
 
 Install `wasm-pack`:
 
 ```bash
 cargo install wasm-pack
+```
+
+Install `wasm-opt` on macOS:
+
+```bash
+brew install binaryen
 ```
 
 ## Build From Source
@@ -45,7 +52,7 @@ The full `build` script runs these steps in order:
 
 | Step | Command | Description |
 |------|---------|-------------|
-| 1 | `build:wasm` | Compile Rust → WASM with `wasm-pack` (web target, `wasm` feature) |
+| 1 | `build:wasm` | Compile Rust → WASM with `wasm-pack --profile release-dist`, then run `wasm-opt -Oz --all-features` when available |
 | 2 | `build:fix-types` | Patch `JsonValue` type into generated `.d.ts` |
 | 3 | `build:ts` | Compile TypeScript → `dist/` |
 | 4 | `build:copy-wasm` | Copy WASM artifacts into `dist/wasm/` |

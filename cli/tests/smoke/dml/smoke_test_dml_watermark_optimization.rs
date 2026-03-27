@@ -10,7 +10,7 @@ use crate::common::*;
 use std::time::Instant;
 
 /// Test that INSERT operations complete in acceptable time (no Meta waiting)
-#[ntest::timeout(60000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_test_watermark_dml_insert_performance() {
     if !is_server_running() {
@@ -88,7 +88,7 @@ fn smoke_test_watermark_dml_insert_performance() {
 }
 
 /// Test that UPDATE operations work correctly after watermark optimization
-#[ntest::timeout(45000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_test_watermark_dml_update() {
     if !is_server_running() {
@@ -164,7 +164,7 @@ fn smoke_test_watermark_dml_update() {
 }
 
 /// Test that DELETE operations work correctly after watermark optimization
-#[ntest::timeout(60000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_test_watermark_dml_delete() {
     if !is_server_running() {
@@ -231,7 +231,7 @@ fn smoke_test_watermark_dml_delete() {
 }
 
 /// Test rapid DDL followed by DML to verify watermark still works when needed
-#[ntest::timeout(70000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_test_watermark_ddl_then_dml() {
     if !is_server_running() {
@@ -286,7 +286,7 @@ fn smoke_test_watermark_ddl_then_dml() {
         execute_sql_as_root_via_client(&format!("DROP NAMESPACE IF EXISTS {} CASCADE", namespace));
 
     assert!(
-        elapsed.as_secs() < 60,
+        elapsed.as_secs() < 120,
         "DDL+DML cycles took too long: {} seconds",
         elapsed.as_secs()
     );

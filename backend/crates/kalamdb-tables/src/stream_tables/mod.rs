@@ -10,7 +10,9 @@ pub mod stream_table_store;
 
 pub use kalamdb_commons::models::StreamTableRow;
 pub use stream_table_provider::StreamTableProvider;
-pub use stream_table_store::{new_stream_table_store, StreamTableStore, StreamTableStoreConfig};
+pub use stream_table_store::{
+    new_stream_table_store, StreamTableStorageMode, StreamTableStore, StreamTableStoreConfig,
+};
 
 // Re-export StreamTableRowId from kalamdb_commons for convenience
 pub use kalamdb_commons::ids::StreamTableRowId;

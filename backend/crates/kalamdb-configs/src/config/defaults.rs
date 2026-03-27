@@ -1,5 +1,3 @@
-use num_cpus;
-
 // Default value functions
 pub fn default_workers() -> usize {
     0
@@ -102,7 +100,7 @@ pub fn default_backlog() -> u32 {
 }
 
 pub fn default_worker_max_blocking_threads() -> usize {
-    512 // Max blocking threads per worker (actix default: 512 / parallelism)
+    32 // Max blocking threads per worker; reduced from 64 to lower idle RSS
 }
 
 pub fn default_client_request_timeout() -> u64 {
@@ -119,19 +117,19 @@ pub fn default_max_header_size() -> usize {
 
 // DataFusion defaults
 pub fn default_datafusion_memory_limit() -> usize {
-    256 * 1024 * 1024 // 256MB (lower idle footprint)
+    32 * 1024 * 1024 // 32MB — sufficient for mobile/OLTP queries; keeps peak RSS low
 }
 
 pub fn default_datafusion_parallelism() -> usize {
-    num_cpus::get()
+    2 // Fixed low concurrency: mobile app queries are key-based, not analytical
 }
 
 pub fn default_datafusion_max_partitions() -> usize {
-    8
+    4 // Reduced from 8; limits parallel partition scans per query
 }
 
 pub fn default_datafusion_batch_size() -> usize {
-    2048 // Reduced from 8192 for lower memory usage
+    1024 // Reduced from 2048; lower peak memory per batch
 }
 
 // Flush defaults
@@ -145,6 +143,10 @@ pub fn default_flush_time_interval() -> u64 {
 
 pub fn default_flush_batch_size() -> usize {
     10000 // 10k rows per batch to avoid loading all into memory
+}
+
+pub fn default_flush_check_interval() -> u64 {
+    60 // Check for pending writes every 60 seconds
 }
 
 // Manifest cache defaults (Phase 4 - US6)
@@ -226,7 +228,7 @@ pub fn default_max_parameter_size_bytes() -> usize {
 }
 
 pub fn default_sql_plan_cache_max_entries() -> u64 {
-    1000 // bounded SQL logical plan cache entries
+    200 // bounded SQL logical plan cache entries (reduced from 1000)
 }
 
 pub fn default_sql_plan_cache_ttl_seconds() -> u64 {
@@ -272,10 +274,10 @@ pub fn default_enable_connection_protection() -> bool {
 }
 
 pub fn default_rate_limit_cache_max_entries() -> u64 {
-    10_000 // Maximum 10k cached rate limit entries
-           // MEMORY OPTIMIZATION: reduced from 100k. Each moka cache has internal
-           // overhead proportional to max_capacity. 5 caches × 100k entries was
-           // over-provisioned for most deployments. 10k handles typical load.
+    1_000 // Maximum 1k cached rate limit entries
+          // MEMORY OPTIMIZATION: reduced from 10k. Moka internal bookkeeping
+          // scales with max_capacity. 5 caches × 10k was over-provisioned.
+          // 1k handles typical mobile-app deployments without waste.
 }
 
 pub fn default_rate_limit_cache_ttl_seconds() -> u64 {
@@ -374,18 +376,84 @@ pub fn default_websocket_heartbeat_interval() -> Option<u64> {
 }
 
 // RocksDB defaults (MEMORY OPTIMIZED)
-pub fn default_rocksdb_write_buffer_size() -> usize {
-    512 * 1024 // 512KB (reduced from 2MB for lower memory footprint with many CFs)
-               // With 50+ column families, write buffers dominate memory usage:
-               // 512KB × 2 buffers × 50 CFs = 50MB vs 2MB × 2 × 50 = 200MB
+pub fn default_rocksdb_system_meta_write_buffer_size() -> usize {
+    32 * 1024 // 32KB: low-write system metadata and compatibility partitions
 }
 
-pub fn default_rocksdb_max_write_buffers() -> i32 {
-    2 // Reduced from 3 for lower memory usage
+pub fn default_rocksdb_system_meta_max_write_buffers() -> i32 {
+    2
+}
+
+pub fn default_rocksdb_system_index_write_buffer_size() -> usize {
+    32 * 1024 // 32KB: compact system secondary indexes
+}
+
+pub fn default_rocksdb_system_index_max_write_buffers() -> i32 {
+    2
+}
+
+pub fn default_rocksdb_hot_data_write_buffer_size() -> usize {
+    128 * 1024 // 128KB: user/shared/stream/topic data partitions stay warmer
+}
+
+pub fn default_rocksdb_hot_data_max_write_buffers() -> i32 {
+    2
+}
+
+pub fn default_rocksdb_hot_index_write_buffer_size() -> usize {
+    64 * 1024 // 64KB: PK/vector indexes need decent write/read latency
+}
+
+pub fn default_rocksdb_hot_index_max_write_buffers() -> i32 {
+    2
+}
+
+pub fn default_rocksdb_raft_write_buffer_size() -> usize {
+    256 * 1024 // 256KB: single append-heavy raft CF can afford a larger buffer
+}
+
+pub fn default_rocksdb_raft_max_write_buffers() -> i32 {
+    2
+}
+
+pub fn default_rocksdb_system_meta_profile() -> crate::config::types::RocksDbCfProfileSettings {
+    crate::config::types::RocksDbCfProfileSettings {
+        write_buffer_size: default_rocksdb_system_meta_write_buffer_size(),
+        max_write_buffers: default_rocksdb_system_meta_max_write_buffers(),
+    }
+}
+
+pub fn default_rocksdb_system_index_profile() -> crate::config::types::RocksDbCfProfileSettings {
+    crate::config::types::RocksDbCfProfileSettings {
+        write_buffer_size: default_rocksdb_system_index_write_buffer_size(),
+        max_write_buffers: default_rocksdb_system_index_max_write_buffers(),
+    }
+}
+
+pub fn default_rocksdb_hot_data_profile() -> crate::config::types::RocksDbCfProfileSettings {
+    crate::config::types::RocksDbCfProfileSettings {
+        write_buffer_size: default_rocksdb_hot_data_write_buffer_size(),
+        max_write_buffers: default_rocksdb_hot_data_max_write_buffers(),
+    }
+}
+
+pub fn default_rocksdb_hot_index_profile() -> crate::config::types::RocksDbCfProfileSettings {
+    crate::config::types::RocksDbCfProfileSettings {
+        write_buffer_size: default_rocksdb_hot_index_write_buffer_size(),
+        max_write_buffers: default_rocksdb_hot_index_max_write_buffers(),
+    }
+}
+
+pub fn default_rocksdb_raft_profile() -> crate::config::types::RocksDbCfProfileSettings {
+    crate::config::types::RocksDbCfProfileSettings {
+        write_buffer_size: default_rocksdb_raft_write_buffer_size(),
+        max_write_buffers: default_rocksdb_raft_max_write_buffers(),
+    }
 }
 
 pub fn default_rocksdb_block_cache_size() -> usize {
-    4 * 1024 * 1024 // 4MB (reduced from 256MB, SHARED across all column families)
+    2 * 1024 * 1024 // 2MB shared across all CFs (down from 4MB)
+                     // Sufficient for point-lookup workloads; most hot blocks stay cached.
 }
 
 pub fn default_rocksdb_max_background_jobs() -> i32 {

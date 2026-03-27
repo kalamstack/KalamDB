@@ -7,6 +7,8 @@ use std::time::Duration;
 
 use kalamdb_commons::models::NodeId;
 
+pub use kalamdb_configs::RpcTlsConfig;
+
 /// Default number of user data shards
 pub const DEFAULT_USER_DATA_SHARDS: u32 = 32;
 
@@ -39,7 +41,7 @@ pub struct RaftManagerConfig {
     pub peers: Vec<PeerNode>,
 
     /// TLS/mTLS settings for inter-node RPC.
-    pub rpc_tls: RpcTlsConfig,
+    pub rpc_tls: kalamdb_configs::RpcTlsConfig,
 
     /// Number of user data shards (default: 32)
     pub user_shards: u32,
@@ -86,7 +88,7 @@ impl Default for RaftManagerConfig {
             rpc_addr: "127.0.0.1:9188".to_string(),
             api_addr: "127.0.0.1:8080".to_string(),
             peers: vec![],
-            rpc_tls: RpcTlsConfig::default(),
+            rpc_tls: kalamdb_configs::RpcTlsConfig::default(),
             user_shards: DEFAULT_USER_DATA_SHARDS,
             shared_shards: DEFAULT_SHARED_DATA_SHARDS,
             heartbeat_interval_ms: 250,
@@ -122,7 +124,7 @@ impl RaftManagerConfig {
             rpc_addr: "127.0.0.1:0".to_string(), // Port 0 = OS assigns random available port
             api_addr,
             peers: vec![], // No peers - single node cluster
-            rpc_tls: RpcTlsConfig::default(),
+            rpc_tls: kalamdb_configs::RpcTlsConfig::default(),
             user_shards: 1,   // Single shard - no distribution needed
             shared_shards: 1, // Single shard - no distribution needed
             heartbeat_interval_ms: 250,
@@ -148,12 +150,7 @@ impl From<kalamdb_configs::ClusterConfig> for RaftManagerConfig {
             rpc_addr: config.rpc_addr,
             api_addr: config.api_addr,
             peers: config.peers.into_iter().map(PeerNode::from).collect(),
-            rpc_tls: RpcTlsConfig {
-                enabled: config.rpc_tls.enabled,
-                ca_cert_path: config.rpc_tls.ca_cert_path,
-                node_cert_path: config.rpc_tls.node_cert_path,
-                node_key_path: config.rpc_tls.node_key_path,
-            },
+            rpc_tls: kalamdb_configs::RpcTlsConfig::default(),
             user_shards: config.user_shards,
             shared_shards: config.shared_shards,
             heartbeat_interval_ms: config.heartbeat_interval_ms,
@@ -184,19 +181,6 @@ pub struct PeerNode {
 
     /// Optional TLS server-name override for this peer.
     pub rpc_server_name: Option<String>,
-}
-
-/// Runtime TLS/mTLS settings for inter-node RPC.
-#[derive(Debug, Clone, Default)]
-pub struct RpcTlsConfig {
-    /// Enable TLS for cluster RPC.
-    pub enabled: bool,
-    /// PEM-encoded CA certificate path.
-    pub ca_cert_path: Option<String>,
-    /// PEM-encoded node certificate path.
-    pub node_cert_path: Option<String>,
-    /// PEM-encoded node private key path.
-    pub node_key_path: Option<String>,
 }
 
 impl From<kalamdb_configs::PeerConfig> for PeerNode {

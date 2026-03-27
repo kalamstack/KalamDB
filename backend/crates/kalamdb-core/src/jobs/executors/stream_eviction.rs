@@ -326,6 +326,7 @@ mod tests {
                 max_rows_per_user: 256, // Default per-user retention limit
                 shard_router: ShardRouter::default_config(),
                 ttl_seconds: Some(1),
+                storage_mode: kalamdb_tables::StreamTableStorageMode::Memory,
             },
         ));
         let tables_schema_registry =

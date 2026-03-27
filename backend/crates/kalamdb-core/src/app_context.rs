@@ -27,6 +27,7 @@ use kalamdb_commons::models::{NamespaceId, UserId};
 use kalamdb_commons::{constants::ColumnFamilyNames, NodeId};
 use kalamdb_configs::ServerConfig;
 use kalamdb_filestore::StorageRegistry;
+use kalamdb_pg::KalamPgService;
 use kalamdb_raft::CommandExecutor;
 use kalamdb_sharding::{GroupId, ShardRouter};
 use kalamdb_store::StorageBackend;
@@ -373,7 +374,7 @@ impl AppContext {
             // ALWAYS use RaftExecutor - same code path for standalone and cluster
             // In standalone mode: single-node Raft cluster (no peers, instant leader election)
             // In cluster mode: multi-node Raft cluster with peers
-            let raft_config = if let Some(cluster_config) = &config.cluster {
+            let mut raft_config = if let Some(cluster_config) = &config.cluster {
                 // Multi-node cluster mode
                 kalamdb_raft::manager::RaftManagerConfig::from(cluster_config.clone())
             } else {
@@ -386,6 +387,9 @@ impl AppContext {
                 let api_addr = format!("{}:{}", config.server.host, config.server.port);
                 kalamdb_raft::manager::RaftManagerConfig::for_single_node(cluster_id, api_addr)
             };
+
+            // Merge top-level [rpc_tls] into the raft config.
+            raft_config.rpc_tls = config.rpc_tls.clone();
 
             log::debug!("Creating RaftManager...");
             let snapshots_dir = config.storage.resolved_snapshots_dir();
@@ -497,6 +501,17 @@ impl AppContext {
                     Arc::clone(&notification_service),
                 ));
                 raft_executor.set_cluster_handler(cluster_handler);
+                let pg_executor = Arc::new(crate::operations::OperationService::new(
+                    Arc::clone(&app_ctx),
+                ));
+                let mtls = app_ctx.config().rpc_tls.enabled
+                    && app_ctx.config().rpc_tls.require_client_cert;
+                let pg_auth_token = app_ctx.config().auth.pg_auth_token.clone();
+                let pg_service = Arc::new(
+                    KalamPgService::new(mtls, pg_auth_token)
+                        .with_operation_executor(pg_executor),
+                );
+                raft_executor.set_pg_service(pg_service);
                 log::info!("Wired gRPC ClusterClient and CoreClusterHandler for cluster RPC");
             }
 
@@ -1115,12 +1130,25 @@ impl AppContext {
         self.server_start_time
     }
 
-    /// Compute current system metrics snapshot
+    /// Compute current system metrics snapshot (sync — for StatsTableProvider callback).
     ///
     /// Returns a vector of (metric_name, metric_value) tuples for display
     /// in system.stats virtual view.
     pub fn compute_metrics(&self) -> Vec<(String, String)> {
         crate::metrics::runtime::compute_metrics(self)
+    }
+
+    /// Async variant of [`compute_metrics`] that offloads the sync RocksDB
+    /// scans to a blocking thread so the tokio worker pool is not starved.
+    pub async fn compute_metrics_async(
+        self: &Arc<Self>,
+    ) -> Result<Vec<(String, String)>, crate::error::KalamDbError> {
+        let ctx = Arc::clone(self);
+        tokio::task::spawn_blocking(move || ctx.compute_metrics())
+            .await
+            .map_err(|e| {
+                crate::error::KalamDbError::ExecutionError(format!("Task join error: {}", e))
+            })
     }
 
     /// Log a concise snapshot of runtime metrics to the console.

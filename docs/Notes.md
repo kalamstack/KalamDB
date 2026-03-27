@@ -436,9 +436,9 @@ Parquet Querying Limitation: After flush, data is removed from RocksDB but queri
 ├────────────────────────────────────────────────────────────┤
 │  Test Type              │  Rows   │  Time    │  Rate       │
 ├────────────────────────────────────────────────────────────┤
-│  Single-row inserts     │    200  │    0.09s │    2288.5/s  │
-│  Batched (100/batch)    │   2000  │    0.04s │   51687.4/s  │
-│  Parallel (10 threads)  │   1000  │    0.09s │   11409.2/s  │
+│  Single-row inserts     │    200  │    0.09s │    2288.5/s │
+│  Batched (100/batch)    │   2000  │    0.04s │   51687.4/s │
+│  Parallel (10 threads)  │   1000  │    0.09s │   11409.2/s │
 └────────────────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────┐
@@ -446,9 +446,9 @@ Parquet Querying Limitation: After flush, data is removed from RocksDB but queri
 ├────────────────────────────────────────────────────────────┤
 │  Test Type              │  Rows   │  Time    │  Rate       │
 ├────────────────────────────────────────────────────────────┤
-│  Single-row inserts     │    200  │    0.30s │     675.8/s  │
-│  Batched (100/batch)    │   2000  │    0.04s │   45610.3/s  │
-│  Parallel (10 threads)  │      1  │    0.47s │       2.1/s  │
+│  Single-row inserts     │    200  │    0.30s │     675.8/s │
+│  Batched (100/batch)    │   2000  │    0.04s │   45610.3/s │
+│  Parallel (10 threads)  │      1  │    0.47s │       2.1/s │
 └────────────────────────────────────────────────────────────┘
 
 14) [MEDIUM] In the cli add a command to kill a live query by its live id
@@ -806,26 +806,6 @@ Tasks To Repo:
 1) [HIGH] Add ci/cd pipelines to the new repo
 2) [MEDIUM] Add code coverage to the new repo
 
-
-
-│                    BENCHMARK RESULTS                       │
-├────────────────────────────────────────────────────────────┤
-│  Test Type              │  Rows   │  Time    │  Rate       │
-├────────────────────────────────────────────────────────────┤
-│  Single-row inserts     │    200  │    0.13s │    1532.5/s │
-│  Batched (100/batch)    │   2000  │    1.84s │    1088.3/s │
-│  Parallel (10 threads)  │   1000  │    0.26s │    3878.1/s │
-└────────────────────────────────────────────────────────────┘
-
-┌────────────────────────────────────────────────────────────┐
-│                    BENCHMARK RESULTS                       │
-├────────────────────────────────────────────────────────────┤
-│  Test Type              │  Rows   │  Time    │  Rate       │
-├────────────────────────────────────────────────────────────┤
-│  Single-row inserts     │    200  │    0.14s │    1445.0/s │
-│  Batched (100/batch)    │   2000  │    1.63s │    1229.0/s │
-│  Parallel (10 threads)  │   1000  │    0.20s │    5119.9/s │
-└────────────────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────┐
 │                    BENCHMARK RESULTS                       │
@@ -1303,6 +1283,7 @@ pub(crate) fn compose_provider_username(issuer: &str, subject: &str) -> UserName
 
 198) when subscribing if the query has an orderby or group by then return an error its not supported only a select and where is supported, also the _seq and _deleted cant be included in the subscription at all
 
+199) if we run select * from dba.stats limit 100 - the results each time come in different order they should always come by the order of the primary key of the table
 
 
 Main Epics:
@@ -1329,4 +1310,28 @@ Target Usecase:
 1) Have a service code which subscribes to chat messages/conversations/typing events and process them in real-time
 2) Having a chat app messages which recieves and send messages in real-time using subscriptions websocket
 3) Authenticate using Firebase auth tokens
+
+
+
+Postgres Extension:
+---------------------
+- Remove all the expirement xcode for the embedded server
+- Add mTLS + short-lived JWT - for Postgres to kalamdb-server connection
+- In KalamDB unify thr mTLS to use in both cluster and pg extension connection and not repeat the same logic twice organize the code in kalamdb-security crate
+- Add transaction begin/commit to kalamdb then wire it to pg
+- Make sure in the sqlparser we are using Postgres Dialect instead of geenric, i want kalamdb to be so close to postgres in all ways
+- Lock on the create table statement maybe we can create regular or any table and then we can alter it to be a kalam table with options and also migrate the data which is currently there
+- since these ar eused in both pg_kalam and cluster rename:  KALAMDB_CLUSTER_RPC_ADDR,KALAMDB_CLUSTER_API_ADDR
+- KALAMDB_PG_AUTH_TOKEN is only temporary for now come up with a new auth which we can generate 
+- Check ability to use this syntax: CREATE TABLE compression_test
+(
+...
+)  USING kalamdb
+   WITH (type = 'user', migrate = true, compress = 5, ...);
+- Can we support migrating a current table from postgres to kalamdb using something like: SELECT set_kalam_table('schema.table1', migrate => true, compress => 5, ...); this will convert the current table to a kalamdb table and move the data as well without needing to create a new table and move the data there
+- for parquet stick with only one compression for now
+- Make sure all pg_kalam methods is called using kalam spefic also using should have USING kalam
+also these: kalam_version(), kalam_compiled_mode();
+
+
 

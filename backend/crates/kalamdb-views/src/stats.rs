@@ -184,7 +184,6 @@ impl VirtualView for StatsView {
     }
 }
 
-// Re-export as StatsTableProvider for backward compatibility
 pub type StatsTableProvider = crate::view_base::ViewTableProvider<StatsView>;
 
 /// Helper function to create a stats table provider

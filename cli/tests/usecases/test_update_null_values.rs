@@ -201,7 +201,7 @@ fn test_update_row_with_null_columns_cold() {
     let _ = execute_sql_as_root_via_cli(&format!("DROP NAMESPACE IF EXISTS {} CASCADE", namespace));
 }
 
-/// Test UPDATE with no actual changes - should still report correctly
+/// Test UPDATE with no actual changes - should be a no-op (0 rows affected)
 #[test]
 fn test_update_no_changes() {
     if !is_server_running() {
@@ -213,7 +213,7 @@ fn test_update_no_changes() {
     let namespace = generate_unique_namespace("test_no_change");
     let full_table_name = format!("{}.{}", namespace, table_name);
 
-    println!("\n=== Test: UPDATE with no actual changes ===");
+    println!("\n=== Test: UPDATE with no actual changes (no-op detection) ===");
 
     // Setup namespace
     let _ = execute_sql_as_root_via_cli(&format!("CREATE NAMESPACE IF NOT EXISTS {}", namespace));
@@ -239,21 +239,41 @@ fn test_update_no_changes() {
     assert!(output.contains("1 row"), "Insert failed: {}", output);
 
     // === KEY TEST: UPDATE with same value (no actual change) ===
+    // No-op detection: when the new values match the existing row, the UPDATE
+    // is skipped entirely — no RocksDB write, no notification, 0 rows affected.
     let update_sql = format!("UPDATE {} SET value = 'unchanged' WHERE id = 555", full_table_name);
 
     let output = execute_sql_as_root_via_cli(&update_sql).unwrap();
     println!("[DEBUG] Update (no change) output: {}", output);
 
-    // Currently this reports 1 row affected even when no change occurred
-    // This is EXPECTED BEHAVIOR in MVCC systems (new version is always created)
-    // But we should document this behavior
     assert!(
-        output.contains("1 row") || output.contains("Updated 1"),
-        "UPDATE should report 1 row affected (MVCC creates new version): {}",
+        output.contains("0 row") || output.contains("Updated 0"),
+        "No-op UPDATE should report 0 rows affected: {}",
         output
     );
 
-    println!("✅ Test passed: UPDATE reports affected rows correctly (MVCC behavior)");
+    // Verify row is still intact after no-op update
+    let verify_sql = format!("SELECT id, value FROM {} WHERE id = 555", full_table_name);
+    let output = execute_sql_as_root_via_cli(&verify_sql).unwrap();
+    assert!(output.contains("555"), "Row should still exist: {}", output);
+    assert!(
+        output.contains("unchanged"),
+        "Value should be unchanged: {}",
+        output
+    );
+
+    // Now do an actual update and verify it still works
+    let real_update_sql =
+        format!("UPDATE {} SET value = 'changed' WHERE id = 555", full_table_name);
+    let output = execute_sql_as_root_via_cli(&real_update_sql).unwrap();
+    println!("[DEBUG] Update (real change) output: {}", output);
+    assert!(
+        output.contains("1 row") || output.contains("Updated 1"),
+        "Real UPDATE should report 1 row affected: {}",
+        output
+    );
+
+    println!("✅ Test passed: No-op UPDATE correctly reports 0 rows affected");
 
     // Cleanup
     let _ = execute_sql_as_root_via_cli(&format!("DROP NAMESPACE IF EXISTS {} CASCADE", namespace));

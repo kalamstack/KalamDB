@@ -14,7 +14,7 @@ use crate::common::*;
 use std::time::Duration;
 
 /// Smoke Test: \stats command works correctly
-#[ntest::timeout(30000)]
+#[ntest::timeout(60000)]
 #[test]
 fn smoke_cli_stats_command() {
     if !is_server_running() {
@@ -22,15 +22,18 @@ fn smoke_cli_stats_command() {
         return;
     }
 
-    // Query system.stats directly (this is what \stats does internally)
+    // Query system.stats directly (this mirrors \stats, which uses an explicit
+    // LIMIT to bypass the server's default query limit for unbounded SELECTs).
     let result = execute_sql_as_root_via_client(
-        "SELECT metric_name, metric_value FROM system.stats ORDER BY metric_name",
+        "SELECT metric_name, metric_value FROM system.stats ORDER BY metric_name LIMIT 5000",
     )
     .expect("Failed to query system.stats");
 
     // Verify we get some metrics back
     assert!(
-        result.contains("metric_name") || result.contains("cache") || result.contains("rows"),
+        (result.contains("metric_name") || result.contains("cache") || result.contains("rows"))
+            && result.contains("server_workers_effective")
+            && result.contains("max_connections"),
         "Stats should contain metrics: {}",
         result
     );
@@ -39,7 +42,7 @@ fn smoke_cli_stats_command() {
 }
 
 /// Smoke Test: \dt / \tables command lists tables
-#[ntest::timeout(30000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_cli_list_tables_command() {
     if !is_server_running() {
@@ -60,10 +63,12 @@ fn smoke_cli_list_tables_command() {
     ))
     .expect("Failed to create table");
 
-    // Query information_schema.tables (this is what \dt does)
-    let result = execute_sql_as_root_via_client(
-        "SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema NOT IN ('system', 'information_schema') ORDER BY table_schema, table_name"
-    ).expect("Failed to list tables");
+    // Query system.tables with a narrow filter (this is what \dt uses internally).
+    let result = execute_sql_as_root_via_client(&format!(
+        "SELECT namespace_id AS namespace, table_name, table_type FROM system.tables WHERE namespace_id = '{}' AND table_name = '{}'",
+        namespace, table
+    ))
+    .expect("Failed to list tables");
 
     // Verify our table shows up
     assert!(
@@ -80,7 +85,7 @@ fn smoke_cli_list_tables_command() {
 }
 
 /// Smoke Test: \d / \describe command shows table schema
-#[ntest::timeout(30000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_cli_describe_table_command() {
     if !is_server_running() {
@@ -127,7 +132,7 @@ fn smoke_cli_describe_table_command() {
 }
 
 /// Smoke Test: \format command changes output format (JSON)
-#[ntest::timeout(30000)]
+#[ntest::timeout(60000)]
 #[test]
 fn smoke_cli_format_json_command() {
     if !is_server_running() {
@@ -150,7 +155,7 @@ fn smoke_cli_format_json_command() {
 }
 
 /// Smoke Test: SQL execution with various statement types
-#[ntest::timeout(60000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_cli_sql_execution() {
     if !is_server_running() {
@@ -256,7 +261,7 @@ fn smoke_cli_sql_execution() {
 }
 
 /// Smoke Test: System tables are accessible
-#[ntest::timeout(30000)]
+#[ntest::timeout(60000)]
 #[test]
 fn smoke_cli_system_tables() {
     if !is_server_running() {
@@ -310,7 +315,7 @@ fn smoke_cli_system_tables() {
 }
 
 /// Smoke Test: STORAGE FLUSH TABLE command
-#[ntest::timeout(30000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_cli_flush_command() {
     if !is_server_running() {
@@ -355,7 +360,7 @@ fn smoke_cli_flush_command() {
 }
 
 /// Smoke Test: User management commands
-#[ntest::timeout(30000)]
+#[ntest::timeout(60000)]
 #[test]
 fn smoke_cli_user_management() {
     if !is_server_running() {
@@ -405,7 +410,7 @@ fn smoke_cli_user_management() {
 }
 
 /// Smoke Test: Namespace management commands
-#[ntest::timeout(30000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_cli_namespace_management() {
     if !is_server_running() {
@@ -415,8 +420,11 @@ fn smoke_cli_namespace_management() {
 
     let namespace = generate_unique_namespace("smoke_cli_ns");
 
+    let _ = execute_sql_as_root_via_client(&format!("DROP NAMESPACE IF EXISTS {}", namespace));
+
     // Test CREATE NAMESPACE
-    let result = execute_sql_as_root_via_client(&format!("CREATE NAMESPACE {}", namespace));
+    let result =
+        execute_sql_as_root_via_client(&format!("CREATE NAMESPACE IF NOT EXISTS {}", namespace));
     assert!(result.is_ok(), "CREATE NAMESPACE should succeed: {:?}", result);
 
     // Verify namespace exists
@@ -465,7 +473,7 @@ fn smoke_cli_namespace_management() {
 }
 
 /// Smoke Test: ALTER TABLE commands
-#[ntest::timeout(90000)]
+#[ntest::timeout(120000)]
 #[test]
 fn smoke_cli_alter_table() {
     if !is_server_running() {

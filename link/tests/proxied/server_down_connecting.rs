@@ -1,5 +1,4 @@
 use super::helpers::*;
-use crate::common;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -9,7 +8,7 @@ use tokio::time::sleep;
 /// The client should fail to connect (or auto-reconnect once the proxy resumes).
 #[tokio::test]
 async fn test_proxy_server_down_while_connecting() {
-    let proxy = TcpDisconnectProxy::start(common::server_url()).await;
+    let proxy = TcpDisconnectProxy::start(upstream_server_url()).await;
 
     // Pause the proxy BEFORE the client tries to connect — simulates
     // the server being unreachable.

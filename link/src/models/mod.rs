@@ -9,7 +9,6 @@
 //! - Subscription: [`crate::subscription::models`]
 
 // ── Core shared types (defined here) ────────────────────────────────────────
-pub mod field_flag;
 pub mod file_ref;
 pub mod kalam_cell_value;
 pub mod kalam_data_type;
@@ -19,11 +18,10 @@ pub mod utils;
 #[cfg(test)]
 mod tests;
 
-pub use field_flag::{FieldFlag, FieldFlags};
 pub use file_ref::FileRef;
 pub use kalam_cell_value::{KalamCellValue, RowData};
 pub use kalam_data_type::KalamDataType;
-pub use schema_field::SchemaField;
+pub use schema_field::{FieldFlag, FieldFlags, SchemaField};
 pub use utils::parse_i64;
 
 // ── Auth models ──────────────────────────────────────────────────────────────

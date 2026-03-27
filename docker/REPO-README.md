@@ -251,6 +251,8 @@ Make sure the password you use matches `KALAMDB_ROOT_PASSWORD` from container st
 
 The image runs as a non-root user.
 
+The bundled CLI uses `/data/.kalam` as its default local state directory inside the container.
+
 Check these first:
 
 - if you mounted a custom `server.toml`, make sure the file is readable inside the container

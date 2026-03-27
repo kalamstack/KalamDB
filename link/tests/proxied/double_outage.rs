@@ -1,5 +1,4 @@
 use super::helpers::*;
-use crate::common;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
 use kalam_link::SubscriptionConfig;
 use std::sync::atomic::Ordering;
@@ -18,7 +17,7 @@ async fn test_proxy_server_down_while_reconnecting() {
         },
     };
 
-    let proxy = TcpDisconnectProxy::start(common::server_url()).await;
+    let proxy = TcpDisconnectProxy::start(upstream_server_url()).await;
     let (client, connect_count, disconnect_count) =
         match create_test_client_with_events_for_base_url(proxy.base_url()) {
             Ok(v) => v,
@@ -92,11 +91,23 @@ async fn test_proxy_server_down_while_reconnecting() {
     // Briefly resume the proxy so the client starts its reconnect attempt,
     // then kill it again immediately.
     proxy.simulate_server_up();
-    sleep(Duration::from_millis(300)).await;
+    for _ in 0..20 {
+        if connect_count.load(Ordering::SeqCst) >= 2 || proxy.active_count().await >= 1 {
+            break;
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
 
     // ── Second outage while reconnecting ────────────────────────────────
     let dc2 = disconnect_count.load(Ordering::SeqCst);
     proxy.simulate_server_down().await;
+
+    for _ in 0..40 {
+        if disconnect_count.load(Ordering::SeqCst) > dc2 {
+            break;
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
 
     // Insert data while doubly-disconnected.
     writer
@@ -109,18 +120,44 @@ async fn test_proxy_server_down_while_reconnecting() {
         .await
         .expect("insert gap-double");
 
-    sleep(Duration::from_millis(500)).await;
+    sleep(Duration::from_millis(900)).await;
 
     // ── Final recovery ──────────────────────────────────────────────────
+    let expected_connects = connect_count.load(Ordering::SeqCst) + 1;
     proxy.simulate_server_up();
 
     for _ in 0..100 {
-        if connect_count.load(Ordering::SeqCst) >= 2 && client.is_connected().await {
+        if connect_count.load(Ordering::SeqCst) >= expected_connects && client.is_connected().await {
             break;
         }
         sleep(Duration::from_millis(100)).await;
     }
     assert!(client.is_connected().await, "client should recover after double outage");
+
+    let mut resumed_ids = Vec::<String>::new();
+    let mut resumed_seq = Some(resume_from);
+    for _ in 0..40 {
+        if resumed_ids.iter().any(|id| id == "gap-double") {
+            break;
+        }
+        match timeout(Duration::from_millis(2000), sub.next()).await {
+            Ok(Some(Ok(ev))) => {
+                collect_ids_and_track_seq(
+                    &ev,
+                    &mut resumed_ids,
+                    &mut resumed_seq,
+                    Some(resume_from),
+                    "reconn-drop gap",
+                );
+            },
+            _ => {},
+        }
+    }
+
+    assert!(
+        resumed_ids.iter().any(|id| id == "gap-double"),
+        "should receive gap-double row after double outage"
+    );
 
     // Insert a live row.
     writer
@@ -133,15 +170,13 @@ async fn test_proxy_server_down_while_reconnecting() {
         .await
         .expect("insert live-after-double");
 
-    let mut resumed_ids = Vec::<String>::new();
-    let mut resumed_seq = Some(resume_from);
-    for _ in 0..20 {
+    for _ in 0..40 {
         if resumed_ids.iter().any(|id| id == "gap-double")
             && resumed_ids.iter().any(|id| id == "live-after-double")
         {
             break;
         }
-        match timeout(Duration::from_millis(1200), sub.next()).await {
+        match timeout(Duration::from_millis(2000), sub.next()).await {
             Ok(Some(Ok(ev))) => {
                 collect_ids_and_track_seq(
                     &ev,

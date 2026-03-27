@@ -20,11 +20,11 @@ use kalamdb_commons::models::rows::row::Row;
 use kalamdb_commons::schemas::TableType;
 use kalamdb_commons::TableId;
 use kalamdb_tables::KalamTableProvider;
-use sqlparser::ast::{
-    Expr, Insert, ObjectNamePart, SetExpr, Statement, TableObject, UnaryOperator, Value,
-};
+use sqlparser::ast::{Expr, SetExpr, Statement};
 use std::collections::BTreeMap;
 use std::sync::Arc;
+
+use super::helpers::ast_parsing;
 
 /// Attempt a fast-path INSERT that bypasses DataFusion's optimizer/physical planner.
 ///
@@ -39,26 +39,9 @@ pub async fn try_fast_insert(
     prepared_table_type: Option<TableType>,
 ) -> Result<Option<ExecutionResult>, KalamDbError> {
     let insert = match statement {
-        Statement::Insert(insert) => insert.clone(),
+        Statement::Insert(insert) => insert,
         _ => return Ok(None),
     };
-    try_fast_insert_from_insert(
-        insert,
-        exec_ctx,
-        schema_registry,
-        prepared_table_id,
-        prepared_table_type,
-    )
-    .await
-}
-
-async fn try_fast_insert_from_insert(
-    insert: Insert,
-    exec_ctx: &ExecutionContext,
-    schema_registry: &Arc<SchemaRegistry>,
-    prepared_table_id: Option<&TableId>,
-    prepared_table_type: Option<TableType>,
-) -> Result<Option<ExecutionResult>, KalamDbError> {
     let default_namespace = exec_ctx.default_namespace();
 
     // 2. Quick bail for features we don't optimize
@@ -87,7 +70,8 @@ async fn try_fast_insert_from_insert(
     // 3. Extract table name
     let table_id = match prepared_table_id {
         Some(id) => id.clone(),
-        None => match extract_table_id(&insert, default_namespace.as_str()) {
+        None => match ast_parsing::extract_table_id_from_insert(insert, default_namespace.as_str())
+        {
             Some(id) => id,
             None => return Ok(None),
         },
@@ -99,7 +83,7 @@ async fn try_fast_insert_from_insert(
     }
 
     // 5. Extract VALUES body (reject INSERT ... SELECT, etc.)
-    let source = match insert.source {
+    let source = match insert.source.as_ref() {
         Some(source) => source,
         None => return Ok(None),
     };
@@ -108,8 +92,8 @@ async fn try_fast_insert_from_insert(
         return Ok(None);
     }
 
-    let value_rows = match *source.body {
-        SetExpr::Values(values) => values.rows,
+    let value_rows = match &*source.body {
+        SetExpr::Values(values) => &values.rows,
         _ => return Ok(None),
     };
 
@@ -176,7 +160,7 @@ async fn try_fast_insert_from_insert(
     }
 
     // 8. Convert VALUES to Row objects
-    let rows = match values_to_rows(&value_rows, &column_names) {
+    let rows = match values_to_rows(value_rows, &column_names) {
         Ok(rows) => rows,
         Err(_) => return Ok(None),
     };
@@ -217,27 +201,6 @@ async fn try_fast_insert_from_insert(
     }
 }
 
-/// Extract TableId from INSERT's table reference.
-fn extract_table_id(insert: &Insert, default_namespace: &str) -> Option<TableId> {
-    let parts: Vec<String> = match &insert.table {
-        TableObject::TableName(obj_name) => obj_name
-            .0
-            .iter()
-            .filter_map(|part| match part {
-                ObjectNamePart::Identifier(ident) => Some(ident.value.clone()),
-                _ => None,
-            })
-            .collect(),
-        _ => return None,
-    };
-
-    match parts.len() {
-        1 => Some(TableId::from_strings(default_namespace, &parts[0])),
-        2 => Some(TableId::from_strings(&parts[0], &parts[1])),
-        _ => None,
-    }
-}
-
 /// Convert parsed VALUES rows into Row objects.
 fn values_to_rows(
     value_rows: &[Vec<Expr>],
@@ -252,7 +215,7 @@ fn values_to_rows(
 
         let mut values = BTreeMap::new();
         for (expr, col_name) in value_row.iter().zip(column_names.iter()) {
-            let scalar = expr_to_scalar(expr)?;
+            let scalar = ast_parsing::expr_to_scalar(expr)?;
             values.insert(col_name.clone(), scalar);
         }
         rows.push(Row::new(values));
@@ -261,53 +224,4 @@ fn values_to_rows(
     Ok(rows)
 }
 
-/// Convert a sqlparser Expr to a DataFusion ScalarValue.
-///
-/// Only handles literal values and simple negation. Returns Err for anything
-/// more complex (functions, casts, subqueries, etc.) to trigger DataFusion fallback.
-fn expr_to_scalar(expr: &Expr) -> Result<ScalarValue, &'static str> {
-    match expr {
-        Expr::Value(val) => sql_value_to_scalar(&val.value),
-        Expr::UnaryOp {
-            op: UnaryOperator::Minus,
-            expr,
-        } => match expr.as_ref() {
-            Expr::Value(val) => match &val.value {
-                Value::Number(n, _) => {
-                    if let Ok(i) = n.parse::<i64>() {
-                        Ok(ScalarValue::Int64(Some(-i)))
-                    } else if let Ok(f) = n.parse::<f64>() {
-                        Ok(ScalarValue::Float64(Some(-f)))
-                    } else {
-                        Err("unsupported negative number")
-                    }
-                },
-                _ => Err("unsupported unary minus operand"),
-            },
-            _ => Err("unsupported unary expression"),
-        },
-        _ => Err("unsupported expression type"),
-    }
-}
 
-/// Convert a sqlparser Value to a DataFusion ScalarValue.
-fn sql_value_to_scalar(value: &Value) -> Result<ScalarValue, &'static str> {
-    match value {
-        Value::Number(n, _) => {
-            // Try integer first, then float
-            if let Ok(i) = n.parse::<i64>() {
-                Ok(ScalarValue::Int64(Some(i)))
-            } else if let Ok(f) = n.parse::<f64>() {
-                Ok(ScalarValue::Float64(Some(f)))
-            } else {
-                Err("unsupported number format")
-            }
-        },
-        Value::SingleQuotedString(s) | Value::DoubleQuotedString(s) => {
-            Ok(ScalarValue::Utf8(Some(s.clone())))
-        },
-        Value::Boolean(b) => Ok(ScalarValue::Boolean(Some(*b))),
-        Value::Null => Ok(ScalarValue::Null),
-        _ => Err("unsupported value type"), // Hex, BitString, etc.
-    }
-}

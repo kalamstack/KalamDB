@@ -23,6 +23,28 @@ use std::net::{SocketAddr, TcpListener};
 use std::sync::Arc;
 use tracing_actix_web::{RootSpanBuilder, TracingLogger};
 
+/// Resolve the effective number of actix-web worker threads.
+///
+/// Precedence: `KALAMDB_SERVER_WORKERS` env var > server.toml `workers` > auto.
+/// When auto (`configured == 0`), uses `num_cpus` but caps at 4 to keep
+/// idle RSS low (~2 MB per worker). For high-throughput production
+/// deployments, set `workers` explicitly in server.toml or the env var.
+fn effective_workers(configured: usize) -> usize {
+    // Environment variable takes highest priority
+    if let Ok(val) = std::env::var("KALAMDB_SERVER_WORKERS") {
+        if let Ok(n) = val.parse::<usize>() {
+            if n > 0 {
+                return n;
+            }
+        }
+    }
+    if configured == 0 {
+        num_cpus::get().min(4)
+    } else {
+        configured
+    }
+}
+
 /// Custom root span builder that forces `parent: None` on every request span.
 ///
 /// The default `TracingLogger` inherits whatever span is "current" on the
@@ -82,6 +104,61 @@ pub struct ApplicationComponents {
     pub live_query_manager: Arc<LiveQueryManager>,
     pub user_repo: Arc<dyn kalamdb_auth::UserRepository>,
     pub connection_registry: Arc<ConnectionsManager>,
+}
+
+/// Prepare services and background tasks for an already-initialized [`AppContext`].
+pub async fn prepare_components(
+    config: &ServerConfig,
+    app_context: Arc<kalamdb_core::app_context::AppContext>,
+) -> Result<ApplicationComponents> {
+    let live_query_manager = app_context.live_query_manager();
+    let session_factory = app_context.session_factory();
+    let users_provider = app_context.system_tables().users();
+    let user_repo: Arc<dyn kalamdb_auth::UserRepository> =
+        Arc::new(kalamdb_api::repositories::CachedUsersRepo::new(users_provider));
+
+    let sql_executor =
+        Arc::new(SqlExecutor::new(app_context.clone(), config.auth.enforce_password_complexity));
+
+    app_context.set_sql_executor(sql_executor.clone());
+    live_query_manager.set_sql_executor(sql_executor.clone());
+
+    sql_executor.load_existing_tables().await?;
+    initialize_dba_namespace(app_context.clone())?;
+
+    app_context.restore_raft_state_machines().await;
+
+    let job_manager = app_context.job_manager();
+    let max_concurrent = config.jobs.max_concurrent;
+    tokio::spawn(async move {
+        debug!("Starting JobsManager run loop with max {} concurrent jobs", max_concurrent);
+        if let Err(e) = job_manager.run_loop(max_concurrent as usize).await {
+            log::error!("JobsManager run loop failed: {}", e);
+        }
+    });
+
+    let rate_limiter = Arc::new(RateLimiter::with_config(&config.rate_limit));
+    let connection_registry = app_context.connection_registry();
+
+    let users_provider_for_init = app_context.system_tables().users();
+    create_default_system_user(users_provider_for_init.clone(), config.auth.root_password.clone())
+        .await?;
+    if config.retention.enable_dba_stats {
+        if let Err(error) = start_stats_recorder(app_context.clone()).await {
+            log::error!("Failed to start DBA stats recorder: {}", error);
+        }
+    } else {
+        log::info!("DBA stats recorder disabled via config (retention.enable_dba_stats = false)");
+    }
+
+    Ok(ApplicationComponents {
+        session_factory,
+        sql_executor,
+        rate_limiter,
+        live_query_manager,
+        user_repo,
+        connection_registry,
+    })
 }
 
 /// Initialize the storage backend, DataFusion, services, rate limiter, and flush scheduler.
@@ -250,115 +327,7 @@ pub async fn bootstrap(
         phase_start.elapsed().as_secs_f64() * 1000.0
     );
 
-    // Get references from AppContext for services that need them
-    let live_query_manager = app_context.live_query_manager();
-    let session_factory = app_context.session_factory();
-    // session_factory obtained above
-
-    // Get system table providers for job executor and flush scheduler
-    let users_provider = app_context.system_tables().users();
-    // Use CachedUsersRepo for ~1-3ms faster auth per request (avoids RocksDB lookup on cache hit)
-    let user_repo: Arc<dyn kalamdb_auth::UserRepository> =
-        Arc::new(kalamdb_api::repositories::CachedUsersRepo::new(users_provider));
-
-    // SqlExecutor now uses AppContext directly
-    let phase_start = std::time::Instant::now();
-    let sql_executor =
-        Arc::new(SqlExecutor::new(app_context.clone(), config.auth.enforce_password_complexity));
-
-    app_context.set_sql_executor(sql_executor.clone());
-    live_query_manager.set_sql_executor(sql_executor.clone());
-
-    sql_executor.load_existing_tables().await?;
-    debug!(
-        "Existing tables loaded and registered with DataFusion ({:.2}ms)",
-        phase_start.elapsed().as_secs_f64() * 1000.0
-    );
-
-    initialize_dba_namespace(app_context.clone())?;
-    debug!("DBA namespace bootstrap completed");
-
-    // Now that all infrastructure is ready (system tables, storages, user/shared tables),
-    // restore state machines from persisted snapshots. This sets the state machine's
-    // internal last_applied_index to prevent duplicate application of log entries.
-    // The state machine idempotency checks use this index to skip already-applied entries.
-    app_context.restore_raft_state_machines().await;
-
-    // Start JobsManager run loop (Phase 9, T163) after state restore.
-    let job_manager = app_context.job_manager();
-    let max_concurrent = config.jobs.max_concurrent;
-    tokio::spawn(async move {
-        debug!("Starting JobsManager run loop with max {} concurrent jobs", max_concurrent);
-        if let Err(e) = job_manager.run_loop(max_concurrent as usize).await {
-            log::error!("JobsManager run loop failed: {}", e);
-        }
-    });
-    debug!("JobsManager background task spawned");
-
-    // Rate limiter - uses RateLimitSettings from config
-    let rate_limiter = Arc::new(RateLimiter::with_config(&config.rate_limit));
-    debug!(
-        "Rate limiter initialized ({} queries/sec, {} messages/sec, {} max subscriptions)",
-        config.rate_limit.max_queries_per_sec,
-        config.rate_limit.max_messages_per_sec,
-        config.rate_limit.max_subscriptions_per_user
-    );
-
-    // Connection Manager for WebSocket connections - use the one from AppContext
-    // This is CRITICAL: the same ConnectionsManager must be used by both:
-    // 1. ws_handler (for registering connections and marking authentication)
-    // 2. LiveQueryManager's SubscriptionService (for checking connection state during subscription)
-    //
-    // Previously, lifecycle.rs created a NEW ConnectionsManager which caused the error:
-    // "Connection not found" when trying to register subscriptions because the connection
-    // was registered in one manager but looked up in another.
-    let connection_registry = app_context.connection_registry();
-    let client_timeout = config.websocket.client_timeout_secs.unwrap_or(10);
-    let auth_timeout = config.websocket.auth_timeout_secs.unwrap_or(3);
-    let heartbeat_interval = 5; // Fixed at 5s in AppContext
-    debug!(
-        "ConnectionsManager initialized (client_timeout={}s, auth_timeout={}s, heartbeat_interval={}s)",
-        client_timeout,
-        auth_timeout,
-        heartbeat_interval
-    );
-
-    // Phase 9: All job scheduling now handled by JobsManager
-    // Stream eviction is now handled by JobsManager.run_loop() - no separate scheduler needed
-    // JobsManager periodically checks for STREAM tables with TTL and creates eviction jobs
-    // Crash recovery handled by JobsManager.recover_incomplete_jobs() in run_loop
-    // Flush scheduling via STORAGE FLUSH TABLE/STORAGE FLUSH ALL commands
-
-    debug!("Job management delegated to JobsManager (already running in background, handles stream eviction)");
-
-    // Get users provider for system user initialization
-    let phase_start = std::time::Instant::now();
-    let users_provider_for_init = app_context.system_tables().users();
-
-    // T125-T127: Create default system user on first startup
-    create_default_system_user(users_provider_for_init.clone(), config.auth.root_password.clone())
-        .await?;
-    if let Err(error) = start_stats_recorder(app_context.clone()).await {
-        log::error!("Failed to start DBA stats recorder: {}", error);
-    } else {
-        debug!("DBA stats recorder started");
-    }
-
-    // // Security warning: Check if remote access is enabled with empty root password
-    // check_remote_access_security(config, users_provider_for_init).await?;
-    debug!(
-        "User initialization completed ({:.2}ms)",
-        phase_start.elapsed().as_secs_f64() * 1000.0
-    );
-
-    let components = ApplicationComponents {
-        session_factory,
-        sql_executor,
-        rate_limiter,
-        live_query_manager,
-        user_repo,
-        connection_registry,
-    };
+    let components = prepare_components(config, app_context.clone()).await?;
 
     Ok((components, app_context))
 }
@@ -442,58 +411,7 @@ pub async fn bootstrap_isolated(
         storages_provider.insert_storage(default_storage)?;
     }
 
-    // Get references from AppContext
-    let live_query_manager = app_context.live_query_manager();
-    let session_factory = app_context.session_factory();
-    let users_provider = app_context.system_tables().users();
-    // Use CachedUsersRepo for ~1-3ms faster auth per request (avoids RocksDB lookup on cache hit)
-    let user_repo: Arc<dyn kalamdb_auth::UserRepository> =
-        Arc::new(kalamdb_api::repositories::CachedUsersRepo::new(users_provider));
-
-    // SqlExecutor
-    let sql_executor =
-        Arc::new(SqlExecutor::new(app_context.clone(), config.auth.enforce_password_complexity));
-
-    app_context.set_sql_executor(sql_executor.clone());
-    live_query_manager.set_sql_executor(sql_executor.clone());
-
-    sql_executor.load_existing_tables().await?;
-    initialize_dba_namespace(app_context.clone())?;
-
-    // Now that all infrastructure is ready, restore state machines from snapshots
-    app_context.restore_raft_state_machines().await;
-
-    // Start JobsManager run loop after state restore
-    let job_manager = app_context.job_manager();
-    let max_concurrent = config.jobs.max_concurrent;
-    tokio::spawn(async move {
-        if let Err(e) = job_manager.run_loop(max_concurrent as usize).await {
-            log::error!("JobsManager run loop failed: {}", e);
-        }
-    });
-
-    // Rate limiter - uses RateLimitSettings from config
-    let rate_limiter = Arc::new(RateLimiter::with_config(&config.rate_limit));
-
-    let connection_registry = app_context.connection_registry();
-
-    // Create default system user
-    let users_provider_for_init = app_context.system_tables().users();
-    create_default_system_user(users_provider_for_init.clone(), config.auth.root_password.clone())
-        .await?;
-    if let Err(error) = start_stats_recorder(app_context.clone()).await {
-        log::error!("Failed to start DBA stats recorder: {}", error);
-    }
-    // check_remote_access_security(config, users_provider_for_init).await?;
-
-    let components = ApplicationComponents {
-        session_factory,
-        sql_executor,
-        rate_limiter,
-        live_query_manager,
-        user_repo,
-        connection_registry,
-    };
+    let components = prepare_components(config, app_context.clone()).await?;
 
     debug!(
         "🚀 Server bootstrap (isolated) completed in {:.2}ms",
@@ -517,11 +435,7 @@ pub async fn run(
     // Log server configuration for debugging
     debug!(
         "Server config: workers={}, max_connections={}, backlog={}, blocking_threads={}, body_limit={}MB",
-        if config.server.workers == 0 {
-            num_cpus::get()
-        } else {
-            config.server.workers
-        },
+        effective_workers(config.server.workers),
         config.performance.max_connections,
         config.performance.backlog,
         config.performance.worker_max_blocking_threads,
@@ -605,9 +519,18 @@ pub async fn run(
             .configure(routes::configure);
 
         // Add UI routes - prefer embedded, fallback to filesystem path
+        #[cfg(feature = "embedded-ui")]
         if kalamdb_api::routes::is_embedded_ui_available() {
             app = app.configure(kalamdb_api::routes::configure_embedded_ui_routes);
         } else if let Some(ref path) = ui_path {
+            let path: String = path.clone();
+            app = app.configure(move |cfg| {
+                kalamdb_api::routes::configure_ui_routes(cfg, &path);
+            });
+        }
+
+        #[cfg(not(feature = "embedded-ui"))]
+        if let Some(ref path) = ui_path {
             let path: String = path.clone();
             app = app.configure(move |cfg| {
                 kalamdb_api::routes::configure_ui_routes(cfg, &path);
@@ -642,11 +565,7 @@ pub async fn run(
     );
 
     let server = server
-    .workers(if config.server.workers == 0 {
-        num_cpus::get()
-    } else {
-        config.server.workers
-    })
+    .workers(effective_workers(config.server.workers))
     // Per-worker max concurrent connections (default: 25000)
     .max_connections(config.performance.max_connections)
     // Blocking thread pool size per worker for RocksDB and CPU-intensive ops
@@ -829,9 +748,18 @@ pub async fn run_for_tests(
             .app_data(web::Data::new(auth_settings.clone()))
             .configure(routes::configure);
 
+        #[cfg(feature = "embedded-ui")]
         if kalamdb_api::routes::is_embedded_ui_available() {
             app = app.configure(kalamdb_api::routes::configure_embedded_ui_routes);
         } else if let Some(ref path) = ui_path {
+            let path: String = path.clone();
+            app = app.configure(move |cfg| {
+                kalamdb_api::routes::configure_ui_routes(cfg, &path);
+            });
+        }
+
+        #[cfg(not(feature = "embedded-ui"))]
+        if let Some(ref path) = ui_path {
             let path: String = path.clone();
             app = app.configure(move |cfg| {
                 kalamdb_api::routes::configure_ui_routes(cfg, &path);
@@ -844,11 +772,7 @@ pub async fn run_for_tests(
 
     let server = server
         .listen(listener)?
-        .workers(if config.server.workers == 0 {
-            num_cpus::get()
-        } else {
-            config.server.workers
-        })
+        .workers(effective_workers(config.server.workers))
         .max_connections(config.performance.max_connections)
         .worker_max_blocking_threads(config.performance.worker_max_blocking_threads)
         .keep_alive(std::time::Duration::from_secs(config.performance.keepalive_timeout))
@@ -862,6 +786,102 @@ pub async fn run_for_tests(
 
     let server_handle = server.handle();
     let server_task = tokio::spawn(server);
+    let base_url = format!("http://{}", bind_addr);
+
+    Ok(RunningTestHttpServer {
+        base_url,
+        bind_addr,
+        app_context,
+        server_handle,
+        server_task,
+    })
+}
+
+/// Start the HTTP server without Ctrl+C handling and bind to the configured address.
+pub async fn run_detached(
+    config: &ServerConfig,
+    components: ApplicationComponents,
+    app_context: Arc<kalamdb_core::app_context::AppContext>,
+) -> Result<RunningTestHttpServer> {
+    let bind_addr = format!("{}:{}", config.server.host, config.server.port);
+
+    let session_factory = components.session_factory.clone();
+    let sql_executor = components.sql_executor.clone();
+    let rate_limiter = components.rate_limiter.clone();
+    let live_query_manager = components.live_query_manager.clone();
+    let user_repo = components.user_repo.clone();
+    let connection_registry = components.connection_registry.clone();
+
+    let connection_protection = middleware::ConnectionProtection::from_server_config(config);
+    let cors_config = config.clone();
+
+    let app_context_for_handler = app_context.clone();
+    let connection_registry_for_handler = connection_registry.clone();
+
+    kalamdb_auth::services::unified::init_auth_config(&config.auth, &config.oauth);
+    kalamdb_auth::init_trusted_proxy_ranges(&config.security.trusted_proxy_ranges)?;
+    let auth_settings = config.auth.clone();
+    let ui_path = config.server.ui_path.clone();
+
+    let server = HttpServer::new(move || {
+        let mut app = App::new()
+            .wrap(connection_protection.clone())
+            .wrap(TracingLogger::<KalamDbRootSpanBuilder>::new())
+            .wrap(middleware::build_cors_from_config(&cors_config))
+            .app_data(web::Data::new(app_context_for_handler.clone()))
+            .app_data(web::Data::new(session_factory.clone()))
+            .app_data(web::Data::new(sql_executor.clone()))
+            .app_data(web::Data::new(rate_limiter.clone()))
+            .app_data(web::Data::new(live_query_manager.clone()))
+            .app_data(web::Data::new(user_repo.clone()))
+            .app_data(web::Data::new(connection_registry_for_handler.clone()))
+            .app_data(web::Data::new(auth_settings.clone()))
+            .configure(routes::configure);
+
+        #[cfg(feature = "embedded-ui")]
+        if kalamdb_api::routes::is_embedded_ui_available() {
+            app = app.configure(kalamdb_api::routes::configure_embedded_ui_routes);
+        } else if let Some(ref path) = ui_path {
+            let path: String = path.clone();
+            app = app.configure(move |cfg| {
+                kalamdb_api::routes::configure_ui_routes(cfg, &path);
+            });
+        }
+
+        #[cfg(not(feature = "embedded-ui"))]
+        if let Some(ref path) = ui_path {
+            let path: String = path.clone();
+            app = app.configure(move |cfg| {
+                kalamdb_api::routes::configure_ui_routes(cfg, &path);
+            });
+        }
+
+        app
+    })
+    .backlog(config.performance.backlog);
+
+    let server = if config.server.enable_http2 {
+        server.bind_auto_h2c(&bind_addr)?
+    } else {
+        server.bind(&bind_addr)?
+    };
+
+    let server = server
+        .workers(effective_workers(config.server.workers))
+        .max_connections(config.performance.max_connections)
+        .worker_max_blocking_threads(config.performance.worker_max_blocking_threads)
+        .keep_alive(std::time::Duration::from_secs(config.performance.keepalive_timeout))
+        .client_request_timeout(std::time::Duration::from_secs(
+            config.performance.client_request_timeout,
+        ))
+        .client_disconnect_timeout(std::time::Duration::from_secs(
+            config.performance.client_disconnect_timeout,
+        ))
+        .run();
+
+    let server_handle = server.handle();
+    let server_task = tokio::spawn(server);
+    let bind_addr = bind_addr.parse()?;
     let base_url = format!("http://{}", bind_addr);
 
     Ok(RunningTestHttpServer {

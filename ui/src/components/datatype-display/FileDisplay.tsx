@@ -3,6 +3,7 @@ import { Download, ExternalLink, File, FileText, Image, Link2, Music, Video } fr
 import { FileRef } from "kalam-link";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { getBackendOrigin } from "@/lib/backend-url";
 
 interface FileDisplayProps {
   value: unknown;
@@ -27,7 +28,7 @@ export function FileDisplay({ value, namespace, tableName, baseUrl }: FileDispla
     return <span className="text-muted-foreground italic">null</span>;
   }
 
-  const serverUrl = baseUrl || window.location.origin;
+  const serverUrl = baseUrl || getBackendOrigin();
   const downloadUrl = namespace && tableName
     ? fileRef.getDownloadUrl(serverUrl, namespace, tableName)
     : null;

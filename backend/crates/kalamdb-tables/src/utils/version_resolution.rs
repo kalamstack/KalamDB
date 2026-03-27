@@ -15,6 +15,7 @@ use kalamdb_commons::constants::SystemColumnNames;
 use kalamdb_commons::conversions::arrow_json_conversion::arrow_value_to_scalar;
 use kalamdb_commons::ids::SeqId;
 use kalamdb_commons::models::rows::Row;
+use kalamdb_commons::serialization::row_codec::RowMetadata;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
@@ -502,6 +503,142 @@ impl VersionedRow for UserTableRow {
             }
         })
     }
+}
+
+impl VersionedRow for RowMetadata {
+    fn seq_id(&self) -> SeqId {
+        self.seq
+    }
+
+    fn deleted(&self) -> bool {
+        self.deleted
+    }
+
+    fn pk_value(&self, _pk_name: &str) -> Option<String> {
+        self.pk_value.clone()
+    }
+}
+
+/// Extract lightweight metadata (seq, deleted, pk_value) from a Parquet RecordBatch
+/// without materializing full Row objects. Used for count-only scan paths.
+pub fn parquet_batch_to_metadata(
+    batch: &RecordBatch,
+    pk_name: &str,
+) -> Result<Vec<(SeqId, RowMetadata)>, KalamDbError> {
+    use datafusion::arrow::array::{Array, BooleanArray, Int64Array};
+
+    if batch.num_rows() == 0 {
+        return Ok(Vec::new());
+    }
+
+    let schema = batch.schema();
+    let seq_idx = schema
+        .fields()
+        .iter()
+        .position(|f| f.name() == SystemColumnNames::SEQ)
+        .ok_or_else(|| KalamDbError::Other("Missing _seq column in Parquet batch".to_string()))?;
+    let deleted_idx = schema.fields().iter().position(|f| f.name() == SystemColumnNames::DELETED);
+    let pk_idx = schema.fields().iter().position(|f| f.name() == pk_name);
+
+    let seq_array = batch
+        .column(seq_idx)
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .ok_or_else(|| KalamDbError::Other("_seq column is not Int64Array".to_string()))?;
+    let deleted_array =
+        deleted_idx.and_then(|idx| batch.column(idx).as_any().downcast_ref::<BooleanArray>());
+
+    let mut rows = Vec::with_capacity(batch.num_rows());
+    for row_idx in 0..batch.num_rows() {
+        let seq_val = seq_array.value(row_idx);
+        let seq_id = SeqId::from_i64(seq_val);
+        let deleted = deleted_array
+            .and_then(|arr| {
+                if !arr.is_null(row_idx) {
+                    Some(arr.value(row_idx))
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(false);
+
+        let pk_value = pk_idx.and_then(|idx| {
+            let array = batch.column(idx);
+            arrow_value_to_scalar(array.as_ref(), row_idx)
+                .ok()
+                .and_then(|sv| match &sv {
+                    ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)) => Some(s.clone()),
+                    other if other.is_null() => None,
+                    other => Some(other.to_string()),
+                })
+        });
+
+        rows.push((seq_id, RowMetadata {
+            seq: seq_id,
+            deleted,
+            pk_value,
+        }));
+    }
+
+    Ok(rows)
+}
+
+/// Count unique non-deleted rows after version resolution (hot + cold merge).
+/// Only tracks (SeqId, deleted) per PK — avoids storing full row metadata.
+pub fn count_merged_rows<R, I, J>(
+    pk_name: &str,
+    hot_rows: I,
+    cold_rows: J,
+) -> usize
+where
+    I: IntoIterator<Item = R>,
+    J: IntoIterator<Item = R>,
+    R: VersionedRow,
+{
+    use std::collections::hash_map::Entry;
+
+    let mut best: HashMap<String, (SeqId, bool)> = HashMap::new();
+
+    for row in hot_rows.into_iter().chain(cold_rows) {
+        let pk_key = row
+            .pk_value(pk_name)
+            .filter(|val| !val.is_empty())
+            .unwrap_or_else(|| format!("_seq:{}", row.seq_id().as_i64()));
+        let seq = row.seq_id();
+        let deleted = row.deleted();
+
+        match best.entry(pk_key) {
+            Entry::Occupied(mut entry) => {
+                if seq > entry.get().0 {
+                    *entry.get_mut() = (seq, deleted);
+                }
+            },
+            Entry::Vacant(entry) => {
+                entry.insert((seq, deleted));
+            },
+        }
+    }
+
+    best.values().filter(|(_, deleted)| !deleted).count()
+}
+
+/// Count resolved rows from hot + cold storage using metadata-only decode.
+///
+/// Generic helper used by both SharedTableProvider and UserTableProvider for COUNT(*)
+/// queries. Accepts the hot metadata (pre-scanned from RocksDB with metadata-only decode)
+/// and a Parquet RecordBatch from cold storage.
+pub fn count_resolved_from_metadata(
+    pk_name: &str,
+    hot_metadata: Vec<RowMetadata>,
+    cold_batch: &RecordBatch,
+) -> Result<usize, KalamDbError> {
+    let cold_metadata = parquet_batch_to_metadata(cold_batch, pk_name)?;
+
+    Ok(count_merged_rows(
+        pk_name,
+        hot_metadata,
+        cold_metadata.into_iter().map(|(_, m)| m),
+    ))
 }
 
 /// Merge hot (RocksDB) and cold (Parquet) rows keeping latest version per PK

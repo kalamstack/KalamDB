@@ -1,5 +1,4 @@
 use super::helpers::*;
-use crate::common;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
 use kalam_link::{models::BatchStatus, ChangeEvent, SubscriptionConfig};
 use std::sync::atomic::Ordering;
@@ -20,7 +19,7 @@ async fn test_update_and_delete_events_resume_without_replay() {
             },
         };
 
-        let proxy = TcpDisconnectProxy::start(common::server_url()).await;
+        let proxy = TcpDisconnectProxy::start(upstream_server_url()).await;
         let (client, connect_count, disconnect_count) =
             match create_test_client_with_events_for_base_url(proxy.base_url()) {
                 Ok(v) => v,
@@ -231,6 +230,34 @@ async fn test_update_and_delete_events_resume_without_replay() {
             "client should reconnect for update/delete scenario"
         );
 
+        let mut resumed_ids = Vec::<String>::new();
+        let mut resumed_seq = Some(resume_from);
+        for _ in 0..16 {
+            if resumed_ids.iter().any(|id| id == "update-gap") {
+                break;
+            }
+
+            match timeout(Duration::from_millis(1200), sub.next()).await {
+                Ok(Some(Ok(ev))) => {
+                    collect_ids_and_track_seq(
+                        &ev,
+                        &mut resumed_ids,
+                        &mut resumed_seq,
+                        Some(resume_from),
+                        "update-delete reconnect gap",
+                    );
+                },
+                Ok(Some(Err(e))) => panic!("subscription errored while waiting for gap update: {}", e),
+                Ok(None) => panic!("subscription ended unexpectedly while waiting for gap update"),
+                Err(_) => {},
+            }
+        }
+
+        assert!(
+            resumed_ids.iter().any(|id| id == "update-gap"),
+            "gap update should be delivered after reconnect resumes"
+        );
+
         writer
             .execute_query(
                 &format!("DELETE FROM {} WHERE id = 'delete-gap'", table),
@@ -259,8 +286,6 @@ async fn test_update_and_delete_events_resume_without_replay() {
             .await
             .expect("post-reconnect delete should succeed");
 
-        let mut resumed_ids = Vec::<String>::new();
-        let mut resumed_seq = Some(resume_from);
         for _ in 0..24 {
             if resumed_ids.iter().any(|id| id == "update-gap")
                 && resumed_ids.iter().any(|id| id == "delete-gap")
