@@ -97,7 +97,7 @@ CREATE SERVER kalam_server
 Verify the extension loaded correctly:
 
 ```sql
-SELECT pg_kalam_version(), pg_kalam_compiled_mode();
+SELECT kalam_version(), kalam_compiled_mode();
 ```
 
 If you need to reinstall during development:
@@ -180,7 +180,7 @@ psql "postgresql://kalamdb:kalamdb123@127.0.0.1:5433/kalamdb"
 Then verify:
 
 ```sql
-SELECT pg_kalam_version(), pg_kalam_compiled_mode();
+SELECT kalam_version(), kalam_compiled_mode();
 \des+
 ```
 

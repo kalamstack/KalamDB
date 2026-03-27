@@ -1,6 +1,6 @@
 //! FDW handler and validator registration.
 //!
-//! Provides the `pg_kalam_handler` and `pg_kalam_validator` C functions
+//! Provides the `kalam_handler` and `kalam_validator` C functions
 //! and registers the `pg_kalam` foreign data wrapper via extension SQL.
 
 use pgrx::pg_guard;
@@ -43,13 +43,13 @@ fn create_fdw_routine() -> *mut pg_sys::FdwRoutine {
 
 // PG_FUNCTION_INFO_V1 equivalents — PostgreSQL requires these to find the finfo record.
 #[no_mangle]
-pub extern "C" fn pg_finfo_pg_kalam_handler_c() -> &'static pg_sys::Pg_finfo_record {
+pub extern "C" fn pg_finfo_kalam_handler_c() -> &'static pg_sys::Pg_finfo_record {
     static V1: pg_sys::Pg_finfo_record = pg_sys::Pg_finfo_record { api_version: 1 };
     &V1
 }
 
 #[no_mangle]
-pub extern "C" fn pg_finfo_pg_kalam_validator_c() -> &'static pg_sys::Pg_finfo_record {
+pub extern "C" fn pg_finfo_kalam_validator_c() -> &'static pg_sys::Pg_finfo_record {
     static V1: pg_sys::Pg_finfo_record = pg_sys::Pg_finfo_record { api_version: 1 };
     &V1
 }
@@ -60,7 +60,7 @@ pub extern "C" fn pg_finfo_pg_kalam_validator_c() -> &'static pg_sys::Pg_finfo_r
 /// Called by PostgreSQL through the function manager interface.
 #[no_mangle]
 #[pg_guard]
-pub unsafe extern "C-unwind" fn pg_kalam_handler_c(
+pub unsafe extern "C-unwind" fn kalam_handler_c(
     _fcinfo: pg_sys::FunctionCallInfo,
 ) -> pg_sys::Datum {
     let routine_ptr = create_fdw_routine();
@@ -73,7 +73,7 @@ pub unsafe extern "C-unwind" fn pg_kalam_handler_c(
 /// Called by PostgreSQL through the function manager interface.
 #[no_mangle]
 #[pg_guard]
-pub unsafe extern "C-unwind" fn pg_kalam_validator_c(
+pub unsafe extern "C-unwind" fn kalam_validator_c(
     _fcinfo: pg_sys::FunctionCallInfo,
 ) -> pg_sys::Datum {
     // Accept any options for now. Validation happens at scan/modify time
@@ -85,19 +85,19 @@ pub unsafe extern "C-unwind" fn pg_kalam_validator_c(
 // This SQL is injected into the extension's installation script by pgrx.
 pgrx::extension_sql!(
     r#"
-CREATE FUNCTION pg_kalam_handler()
+CREATE FUNCTION kalam_handler()
 RETURNS fdw_handler
 LANGUAGE c STRICT
-AS 'MODULE_PATHNAME', 'pg_kalam_handler_c';
+AS 'MODULE_PATHNAME', 'kalam_handler_c';
 
-CREATE FUNCTION pg_kalam_validator(text[], oid)
+CREATE FUNCTION kalam_validator(text[], oid)
 RETURNS void
 LANGUAGE c STRICT
-AS 'MODULE_PATHNAME', 'pg_kalam_validator_c';
+AS 'MODULE_PATHNAME', 'kalam_validator_c';
 
 CREATE FOREIGN DATA WRAPPER pg_kalam
-  HANDLER pg_kalam_handler
-  VALIDATOR pg_kalam_validator;
+    HANDLER kalam_handler
+    VALIDATOR kalam_validator;
 "#,
-    name = "pg_kalam_registration",
+    name = "kalam_registration",
 );

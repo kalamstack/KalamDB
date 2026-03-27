@@ -176,6 +176,32 @@ pub struct ExecuteSqlRpcResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Execute query (kalam_exec) RPC messages
+// ---------------------------------------------------------------------------
+
+/// Request to execute an arbitrary SQL statement against KalamDB and return results.
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct ExecuteQueryRpcRequest {
+    #[prost(string, tag = "1")]
+    pub sql: String,
+    #[prost(string, tag = "2")]
+    pub session_id: String,
+}
+
+/// Response for execute_query. For SELECT queries the result rows are encoded
+/// as Arrow IPC stream bytes (one entry per RecordBatch). For DML/DDL the
+/// `ipc_batches` is empty and `message` carries the status string.
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct ExecuteQueryRpcResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub message: String,
+    #[prost(bytes = "bytes", repeated, tag = "3")]
+    pub ipc_batches: Vec<bytes::Bytes>,
+}
+
+// ---------------------------------------------------------------------------
 // Transaction RPC messages
 // ---------------------------------------------------------------------------
 
@@ -403,6 +429,20 @@ pub mod pg_service_client {
             request.extensions_mut().insert(GrpcMethod::new(PG_SERVICE_NAME, "ExecuteSql"));
             self.inner.unary(request, path, codec).await
         }
+
+        pub async fn execute_query(
+            &mut self,
+            request: impl tonic::IntoRequest<ExecuteQueryRpcRequest>,
+        ) -> Result<Response<ExecuteQueryRpcResponse>, Status> {
+            self.inner.ready().await.map_err(|error| {
+                Status::new(tonic::Code::Unknown, format!("Service not ready: {:?}", error))
+            })?;
+            let codec = ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static("/kalamdb.pg.PgService/ExecuteQuery");
+            let mut request = request.into_request();
+            request.extensions_mut().insert(GrpcMethod::new(PG_SERVICE_NAME, "ExecuteQuery"));
+            self.inner.unary(request, path, codec).await
+        }
     }
 }
 
@@ -466,6 +506,11 @@ pub mod pg_service_server {
             &self,
             request: Request<ExecuteSqlRpcRequest>,
         ) -> Result<Response<ExecuteSqlRpcResponse>, Status>;
+
+        async fn execute_query(
+            &self,
+            request: Request<ExecuteQueryRpcRequest>,
+        ) -> Result<Response<ExecuteQueryRpcResponse>, Status>;
     }
 
     #[derive(Debug, Clone)]
@@ -600,6 +645,15 @@ pub mod pg_service_server {
                     let fut = async move {
                         let mut grpc = tonic::server::Grpc::new(ProstCodec::default());
                         let method = ExecuteSqlSvc(inner);
+                        let response = grpc.unary(method, req).await;
+                        Ok(response)
+                    };
+                    Box::pin(fut)
+                },
+                "/kalamdb.pg.PgService/ExecuteQuery" => {
+                    let fut = async move {
+                        let mut grpc = tonic::server::Grpc::new(ProstCodec::default());
+                        let method = ExecuteQuerySvc(inner);
                         let response = grpc.unary(method, req).await;
                         Ok(response)
                     };
@@ -753,6 +807,19 @@ pub mod pg_service_server {
         fn call(&mut self, request: Request<ExecuteSqlRpcRequest>) -> Self::Future {
             let inner = Arc::clone(&self.0);
             let fut = async move { inner.execute_sql(request).await };
+            Box::pin(fut)
+        }
+    }
+
+    struct ExecuteQuerySvc<T: PgService>(Arc<T>);
+
+    impl<T: PgService> tonic::server::UnaryService<ExecuteQueryRpcRequest> for ExecuteQuerySvc<T> {
+        type Response = ExecuteQueryRpcResponse;
+        type Future = BoxFuture<Response<Self::Response>, Status>;
+
+        fn call(&mut self, request: Request<ExecuteQueryRpcRequest>) -> Self::Future {
+            let inner = Arc::clone(&self.0);
+            let fut = async move { inner.execute_query(request).await };
             Box::pin(fut)
         }
     }
@@ -1072,6 +1139,26 @@ impl PgService for KalamPgService {
         Ok(Response::new(ExecuteSqlRpcResponse {
             success: true,
             message: result,
+        }))
+    }
+
+    async fn execute_query(
+        &self,
+        request: Request<ExecuteQueryRpcRequest>,
+    ) -> Result<Response<ExecuteQueryRpcResponse>, Status> {
+        self.authorize(&request)?;
+        let inner = request.into_inner();
+        let sql = inner.sql.trim();
+        if sql.is_empty() {
+            return Err(Status::invalid_argument("sql must not be empty"));
+        }
+
+        log::debug!("PG execute_query: {}", sql);
+        let (message, ipc_batches) = self.operation_executor()?.execute_query(sql).await?;
+        Ok(Response::new(ExecuteQueryRpcResponse {
+            success: true,
+            message,
+            ipc_batches,
         }))
     }
 }

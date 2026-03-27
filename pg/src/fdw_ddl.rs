@@ -32,7 +32,7 @@ static mut PREV_PROCESS_UTILITY: pg_sys::ProcessUtility_hook_type = None;
 pub fn register_hook() {
     unsafe {
         PREV_PROCESS_UTILITY = pg_sys::ProcessUtility_hook;
-        pg_sys::ProcessUtility_hook = Some(pg_kalam_process_utility);
+        pg_sys::ProcessUtility_hook = Some(kalam_process_utility);
     }
 }
 
@@ -41,7 +41,7 @@ pub fn register_hook() {
 /// # Safety
 /// Called by PostgreSQL for every utility (DDL) statement.
 #[pgrx::pg_guard]
-unsafe extern "C-unwind" fn pg_kalam_process_utility(
+unsafe extern "C-unwind" fn kalam_process_utility(
     pstmt: *mut pg_sys::PlannedStmt,
     query_string: *const std::ffi::c_char,
     read_only_tree: bool,

@@ -68,6 +68,10 @@ impl OperationExecutor for MockExecutor {
     async fn execute_sql(&self, sql: &str) -> Result<String, Status> {
         Ok(format!("executed: {sql}"))
     }
+
+    async fn execute_query(&self, sql: &str) -> Result<(String, Vec<bytes::Bytes>), Status> {
+        Ok((format!("executed: {sql}"), Vec::new()))
+    }
 }
 
 // ---------------------------------------------------------------------------

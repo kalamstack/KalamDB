@@ -1330,3 +1330,8 @@ Postgres Extension:
    WITH (type = 'user', migrate = true, compress = 5, ...);
 - Can we support migrating a current table from postgres to kalamdb using something like: SELECT set_kalam_table('schema.table1', migrate => true, compress => 5, ...); this will convert the current table to a kalamdb table and move the data as well without needing to create a new table and move the data there
 - for parquet stick with only one compression for now
+- Make sure all pg_kalam methods is called using kalam spefic also using should have USING kalam
+also these: kalam_version(), kalam_compiled_mode();
+
+
+

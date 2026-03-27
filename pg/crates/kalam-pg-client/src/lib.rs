@@ -7,7 +7,7 @@ use kalam_pg_api::{MutationResponse, ScanResponse};
 use kalam_pg_common::{KalamPgError, RemoteServerConfig};
 use kalamdb_pg::{
     BeginTransactionRequest, CloseSessionRequest, CommitTransactionRequest, DeleteRpcRequest,
-    ExecuteSqlRpcRequest,
+    ExecuteQueryRpcRequest, ExecuteSqlRpcRequest,
     InsertRpcRequest, OpenSessionRequest, PgServiceClient, PingRequest,
     RollbackTransactionRequest, ScanRpcRequest, UpdateRpcRequest,
 };
@@ -440,6 +440,30 @@ impl RemoteKalamClient {
         Ok(response.message)
     }
 
+    /// Execute an arbitrary SQL statement and return JSON rows.
+    ///
+    /// For SELECT queries the returned `Vec<String>` contains one JSON object per row.
+    /// For DDL/DML an empty vec is returned and the status message is in the `String`.
+    pub async fn execute_query(
+        &self,
+        sql: &str,
+        session_id: &str,
+    ) -> Result<(String, Vec<String>), KalamPgError> {
+        let mut client = PgServiceClient::new(self.channel.clone());
+        let request = self.authorized_request(ExecuteQueryRpcRequest {
+            sql: sql.to_string(),
+            session_id: session_id.to_string(),
+        });
+        let response = client
+            .execute_query(request)
+            .await
+            .map_err(|e| Self::grpc_err(e, &self.server_addr))?
+            .into_inner();
+        let batches = Self::decode_ipc_batches(&response.ipc_batches)?;
+        let json_rows = Self::batches_to_json_rows(&batches);
+        Ok((response.message, json_rows))
+    }
+
     fn authorized_request<T>(&self, payload: T) -> Request<T> {
         let mut req = Request::new(payload);
         if let Some(val) = &self.auth_header {
@@ -465,5 +489,97 @@ impl RemoteKalamClient {
             }
         }
         Ok(batches)
+    }
+
+    /// Serialize Arrow RecordBatches into a Vec of JSON object strings (one per row).
+    fn batches_to_json_rows(batches: &[RecordBatch]) -> Vec<String> {
+        use arrow::array::{
+            Array, BooleanArray, Float32Array, Float64Array, Int16Array, Int32Array, Int64Array,
+            Int8Array, LargeStringArray, StringArray, UInt16Array, UInt32Array, UInt64Array,
+            UInt8Array,
+        };
+        use arrow::datatypes::DataType;
+
+        let mut rows = Vec::new();
+        for batch in batches {
+            let schema = batch.schema();
+            let field_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
+            for row_idx in 0..batch.num_rows() {
+                let mut obj = serde_json::Map::new();
+                for (col_idx, col) in batch.columns().iter().enumerate() {
+                    let field_name = field_names[col_idx].to_string();
+                    let value = if col.is_null(row_idx) {
+                        serde_json::Value::Null
+                    } else {
+                        match col.data_type() {
+                            DataType::Utf8 => {
+                                let arr = col.as_any().downcast_ref::<StringArray>().unwrap();
+                                serde_json::Value::String(arr.value(row_idx).to_string())
+                            }
+                            DataType::LargeUtf8 => {
+                                let arr = col.as_any().downcast_ref::<LargeStringArray>().unwrap();
+                                serde_json::Value::String(arr.value(row_idx).to_string())
+                            }
+                            DataType::Int8 => {
+                                let arr = col.as_any().downcast_ref::<Int8Array>().unwrap();
+                                serde_json::Value::Number(arr.value(row_idx).into())
+                            }
+                            DataType::Int16 => {
+                                let arr = col.as_any().downcast_ref::<Int16Array>().unwrap();
+                                serde_json::Value::Number(arr.value(row_idx).into())
+                            }
+                            DataType::Int32 => {
+                                let arr = col.as_any().downcast_ref::<Int32Array>().unwrap();
+                                serde_json::Value::Number(arr.value(row_idx).into())
+                            }
+                            DataType::Int64 => {
+                                let arr = col.as_any().downcast_ref::<Int64Array>().unwrap();
+                                serde_json::Value::Number(arr.value(row_idx).into())
+                            }
+                            DataType::UInt8 => {
+                                let arr = col.as_any().downcast_ref::<UInt8Array>().unwrap();
+                                serde_json::Value::Number(arr.value(row_idx).into())
+                            }
+                            DataType::UInt16 => {
+                                let arr = col.as_any().downcast_ref::<UInt16Array>().unwrap();
+                                serde_json::Value::Number(arr.value(row_idx).into())
+                            }
+                            DataType::UInt32 => {
+                                let arr = col.as_any().downcast_ref::<UInt32Array>().unwrap();
+                                serde_json::Value::Number(arr.value(row_idx).into())
+                            }
+                            DataType::UInt64 => {
+                                let arr = col.as_any().downcast_ref::<UInt64Array>().unwrap();
+                                serde_json::Value::Number(arr.value(row_idx).into())
+                            }
+                            DataType::Float32 => {
+                                let arr = col.as_any().downcast_ref::<Float32Array>().unwrap();
+                                let v = arr.value(row_idx) as f64;
+                                serde_json::Number::from_f64(v)
+                                    .map(serde_json::Value::Number)
+                                    .unwrap_or(serde_json::Value::Null)
+                            }
+                            DataType::Float64 => {
+                                let arr = col.as_any().downcast_ref::<Float64Array>().unwrap();
+                                serde_json::Number::from_f64(arr.value(row_idx))
+                                    .map(serde_json::Value::Number)
+                                    .unwrap_or(serde_json::Value::Null)
+                            }
+                            DataType::Boolean => {
+                                let arr = col.as_any().downcast_ref::<BooleanArray>().unwrap();
+                                serde_json::Value::Bool(arr.value(row_idx))
+                            }
+                            _ => {
+                                // For all other types, produce a string representation.
+                                serde_json::Value::String(format!("{:?}", col.data_type()))
+                            }
+                        }
+                    };
+                    obj.insert(field_name, value);
+                }
+                rows.push(serde_json::Value::Object(obj).to_string());
+            }
+        }
+        rows
     }
 }

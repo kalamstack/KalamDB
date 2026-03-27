@@ -8,8 +8,8 @@
 -- ==========================================================================
 
 \echo '--- Extension info ---'
-SELECT pg_kalam_version()       AS version,
-       pg_kalam_compiled_mode() AS mode;
+SELECT kalam_version()       AS version,
+       kalam_compiled_mode() AS mode;
 
 -- ==========================================================================
 -- 1. SCHEMA OPT-IN
@@ -19,8 +19,8 @@ SELECT pg_kalam_version()       AS version,
 
 DO $$
 BEGIN
-  IF pg_kalam_compiled_mode() <> 'remote' THEN
-    RAISE EXCEPTION 'Extension is NOT compiled in remote mode (got: %)', pg_kalam_compiled_mode();
+  IF kalam_compiled_mode() <> 'remote' THEN
+    RAISE EXCEPTION 'Extension is NOT compiled in remote mode (got: %)', kalam_compiled_mode();
   END IF;
 END;
 $$;

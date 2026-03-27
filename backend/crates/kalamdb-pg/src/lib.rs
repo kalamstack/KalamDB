@@ -21,6 +21,7 @@ pub use service::{
     BeginTransactionRequest, BeginTransactionResponse, CloseSessionRequest, CloseSessionResponse,
     CommitTransactionRequest,
     CommitTransactionResponse, DeleteRpcRequest, DeleteRpcResponse,
+    ExecuteQueryRpcRequest, ExecuteQueryRpcResponse,
     ExecuteSqlRpcRequest, ExecuteSqlRpcResponse,
     InsertRpcRequest,
     InsertRpcResponse, OpenSessionRequest, OpenSessionResponse, PgServiceClient, PingRequest,

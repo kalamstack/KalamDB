@@ -28,6 +28,11 @@ pub trait OperationExecutor: Send + Sync + 'static {
     async fn execute_update(&self, request: UpdateRequest) -> Result<MutationResult, Status>;
     async fn execute_delete(&self, request: DeleteRequest) -> Result<MutationResult, Status>;
     async fn execute_sql(&self, sql: &str) -> Result<String, Status>;
+    /// Execute an arbitrary SQL statement and return (message, ipc_batches).
+    ///
+    /// For SELECT queries `ipc_batches` contains Arrow IPC-encoded RecordBatches.
+    /// For DDL/DML `ipc_batches` is empty and `message` carries the status string.
+    async fn execute_query(&self, sql: &str) -> Result<(String, Vec<bytes::Bytes>), Status>;
 }
 
 // ── Helpers for gRPC ↔ domain translation ──────────────────────────────────

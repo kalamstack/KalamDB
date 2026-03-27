@@ -28,25 +28,25 @@ pub extern "C-unwind" fn _PG_init() {
 
 /// Return the extension crate version exposed through PostgreSQL.
 #[pg_extern]
-pub fn pg_kalam_version() -> &'static str {
+pub fn kalam_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
 /// Return the compile-time backend mode baked into the extension.
 #[pg_extern]
-pub fn pg_kalam_compiled_mode() -> &'static str {
+pub fn kalam_compiled_mode() -> &'static str {
     "remote"
 }
 
 /// Return the configured `kalam.user_id` value for the current PostgreSQL session.
 #[pg_extern]
-pub fn pg_kalam_user_id() -> Option<String> {
+pub fn kalam_user_id() -> Option<String> {
     current_kalam_user_id()
 }
 
 /// Return the exact PostgreSQL GUC name used for KalamDB tenant context.
 #[pg_extern]
-pub fn pg_kalam_user_id_guc_name() -> &'static str {
+pub fn kalam_user_id_guc_name() -> &'static str {
     USER_ID_GUC
 }
 
@@ -82,5 +82,70 @@ pub fn current_kalam_user_id() -> Option<String> {
     KALAM_USER_ID_SETTING
         .get()
         .map(|value| value.to_string_lossy().into_owned())
+}
+
+/// Execute an arbitrary SQL statement on the connected KalamDB server and return the
+/// results as a JSON array string: `[{"col": value, ...}, ...]`.
+///
+/// For DDL/DML statements the message is returned (e.g. `"OK (affected: 1)"`).
+///
+/// Requires an active `kalam_server` foreign server (as set up for the FDW).
+///
+/// Example:
+/// ```sql
+/// SELECT kalam_exec('SELECT * FROM system.users');
+/// -- returns: [{"user_id":"u_admin","username":"admin",...}, ...]
+/// ```
+#[pg_extern]
+pub fn kalam_exec(sql: &str) -> String {
+    use crate::fdw_options::parse_options;
+    use kalam_pg_common::KalamPgError;
+    use kalam_pg_fdw::ServerOptions;
+
+    const DEFAULT_SERVER: &str = "kalam_server";
+
+    let state = match crate::remote_state::get_remote_extension_state() {
+        Some(s) => s,
+        None => {
+            let c_name = std::ffi::CString::new(DEFAULT_SERVER).unwrap_or_default();
+            let server = unsafe { pgrx::pg_sys::GetForeignServerByName(c_name.as_ptr(), true) };
+            if server.is_null() {
+                pgrx::error!(
+                    "kalam_exec: foreign server '{}' not found – create it first with CREATE SERVER",
+                    DEFAULT_SERVER
+                );
+            }
+            let server_options = parse_options(unsafe { (*server).options });
+            let parsed = match ServerOptions::parse(&server_options) {
+                Ok(p) => p,
+                Err(e) => pgrx::error!("kalam_exec: failed to parse server options: {}", e),
+            };
+            let remote_config = match parsed.remote {
+                Some(c) => c,
+                None => pgrx::error!("kalam_exec: foreign server must have host and port options"),
+            };
+            match crate::remote_state::ensure_remote_extension_state(remote_config) {
+                Ok(s) => s,
+                Err(e) => pgrx::error!("kalam_exec: failed to connect to KalamDB: {}", e),
+            }
+        }
+    };
+
+    let result: Result<(String, Vec<String>), KalamPgError> = state.runtime().block_on(async {
+        state.client().execute_query(sql, state.session_id()).await
+    });
+
+    match result {
+        Ok((_message, rows)) if !rows.is_empty() => {
+            format!("[{}]", rows.join(","))
+        }
+        Ok((message, _)) => {
+            // DDL/DML or empty SELECT — return status as JSON string
+            serde_json::json!(message).to_string()
+        }
+        Err(e) => {
+            pgrx::error!("kalam_exec: {}", e);
+        }
+    }
 }
 

@@ -29,6 +29,7 @@ kalamdb-vector = { path = "../kalamdb-vector" }
 
 # Apache Arrow ecosystem
 arrow = { workspace = true }
+bytes = { workspace = true }
 datafusion = { workspace = true }
 datafusion-common = { workspace = true }
 

@@ -203,6 +203,34 @@ impl OperationExecutor for OperationService {
         };
         Ok(message)
     }
+
+    async fn execute_query(&self, sql: &str) -> Result<(String, Vec<bytes::Bytes>), Status> {
+        let base = self.app_context.base_session_context();
+        let exec_ctx = ExecutionContext::with_namespace(
+            UserId::new("pg-extension"),
+            Role::Dba,
+            NamespaceId::new("default"),
+            base,
+        );
+
+        let sql_executor = crate::sql::executor::SqlExecutor::new(
+            Arc::clone(&self.app_context),
+            false,
+        );
+        let result = sql_executor
+            .execute(sql, &exec_ctx, Vec::new())
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        match result {
+            crate::sql::ExecutionResult::Rows { batches, row_count, .. } => {
+                let (ipc_batches, _) = kalamdb_pg::encode_batches(&batches)?;
+                Ok((format!("{} row(s)", row_count), ipc_batches))
+            }
+            crate::sql::ExecutionResult::Success { message } => Ok((message, Vec::new())),
+            other => Ok((format!("OK (affected: {})", other.affected_rows()), Vec::new())),
+        }
+    }
 }
 
 fn require_user_id(
