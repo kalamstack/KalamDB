@@ -31,6 +31,7 @@ export interface QueryTab {
   title: string;
   sql: string;
   isDirty: boolean;
+  unreadChangeCount: number;
   isLive: boolean;
   liveStatus: "idle" | "connecting" | "connected" | "error";
   resultView: SqlStudioResultView;

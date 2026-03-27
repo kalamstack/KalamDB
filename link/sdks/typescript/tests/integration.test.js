@@ -17,8 +17,8 @@ if (SKIP_INTEGRATION) {
 }
 
 const SERVER_URL = process.env.KALAMDB_URL || 'http://localhost:8080';
-const USERNAME = process.env.KALAMDB_USER || 'root';
-const PASSWORD = process.env.KALAMDB_PASSWORD || 'root';
+const USERNAME = process.env.KALAMDB_USER || 'admin';
+const PASSWORD = process.env.KALAMDB_PASSWORD || 'kalamdb123';
 
 test('KalamDB Integration Tests', async (t) => {
   let client;

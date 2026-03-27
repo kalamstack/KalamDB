@@ -1,0 +1,1 @@
+PostgreSQL with the pg_kalam extension preinstalled for connecting PostgreSQL foreign tables to a remote KalamDB server.

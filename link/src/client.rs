@@ -193,9 +193,7 @@ impl KalamLinkClient {
 
     /// Subscribe to real-time changes
     ///
-    /// If a shared connection has been established via [`connect()`](Self::connect),
-    /// the subscription is multiplexed over it.  Otherwise falls back to a
-    /// per-subscription WebSocket (legacy behaviour).
+    /// Subscriptions are multiplexed over the shared WebSocket connection.
     pub async fn subscribe(&self, query: &str) -> Result<SubscriptionManager> {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -207,9 +205,6 @@ impl KalamLinkClient {
     }
 
     /// Subscribe with advanced configuration (pre-generated ID, options, ws_url override)
-    ///
-    /// Uses the shared connection when available, otherwise falls back to a
-    /// per-subscription WebSocket.
     ///
     /// When [`ConnectionOptions::ws_lazy_connect`] is `true` (the default)
     /// and no shared connection exists yet, `connect()` is called

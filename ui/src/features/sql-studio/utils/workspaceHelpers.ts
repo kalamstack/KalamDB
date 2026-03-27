@@ -47,6 +47,7 @@ export function createQueryTab(index: number): QueryTab {
     title: index === 1 ? "Untitled query" : `Query ${index}`,
     sql: DEFAULT_SQL,
     isDirty: false,
+    unreadChangeCount: 0,
     isLive: false,
     liveStatus: "idle",
     resultView: "results",

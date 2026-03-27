@@ -337,10 +337,34 @@ const sqlStudioWorkspaceSlice = createSlice({
       if (state.activeTabId === tabId) {
         const fallback = nextTabs[Math.max(0, index - 1)] ?? nextTabs[0] ?? null;
         state.activeTabId = fallback?.id ?? null;
+        if (fallback) {
+          fallback.unreadChangeCount = 0;
+        }
       }
     },
     setWorkspaceActiveTabId(state, action: PayloadAction<string>) {
       state.activeTabId = action.payload;
+      const activeTab = state.tabs.find((item) => item.id === action.payload);
+      if (activeTab) {
+        activeTab.unreadChangeCount = 0;
+      }
+    },
+    incrementWorkspaceTabUnreadChanges(
+      state,
+      action: PayloadAction<{ tabId: string; amount?: number }>,
+    ) {
+      const tab = state.tabs.find((item) => item.id === action.payload.tabId);
+      if (!tab) {
+        return;
+      }
+      tab.unreadChangeCount += Math.max(1, action.payload.amount ?? 1);
+    },
+    resetWorkspaceTabUnreadChanges(state, action: PayloadAction<string>) {
+      const tab = state.tabs.find((item) => item.id === action.payload);
+      if (!tab) {
+        return;
+      }
+      tab.unreadChangeCount = 0;
     },
     setWorkspaceSavedQueries(state, action: PayloadAction<SavedQuery[]>) {
       state.savedQueries = action.payload;
@@ -407,6 +431,8 @@ export const {
   updateWorkspaceTab,
   closeWorkspaceTab,
   setWorkspaceActiveTabId,
+  incrementWorkspaceTabUnreadChanges,
+  resetWorkspaceTabUnreadChanges,
   setWorkspaceSavedQueries,
   setWorkspaceRunning,
   setWorkspaceTabResult,

@@ -4,14 +4,14 @@
  * Requires a running KalamDB server.
  * Configure via env vars:
  *   KALAMDB_URL      (default: http://localhost:8080)
- *   KALAMDB_USER     (default: root)
+ *   KALAMDB_USER     (default: admin)
  *   KALAMDB_PASSWORD (default: kalamdb123)
  */
 
 import { createClient, Auth, KalamDBClient } from '../../dist/src/index.js';
 
 export const SERVER_URL = process.env.KALAMDB_URL || 'http://localhost:8080';
-export const ADMIN_USER = process.env.KALAMDB_USER || 'root';
+export const ADMIN_USER = process.env.KALAMDB_USER || 'admin';
 export const ADMIN_PASS = process.env.KALAMDB_PASSWORD || 'kalamdb123';
 
 let sharedJwtPromise = null;

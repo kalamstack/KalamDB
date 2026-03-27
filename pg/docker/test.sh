@@ -63,7 +63,8 @@ echo ""
 # Step 1: Check KalamDB server is reachable
 echo "Checking KalamDB server at $KALAMDB_API_URL ..."
 for i in $(seq 1 15); do
-    if curl -sf "$KALAMDB_API_URL/health" > /dev/null 2>&1; then
+    if curl -sf "$KALAMDB_API_URL/health" > /dev/null 2>&1 \
+        || curl -sf "$KALAMDB_API_URL/v1/api/healthcheck" > /dev/null 2>&1; then
         echo "KalamDB server is reachable."
         break
     fi

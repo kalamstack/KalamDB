@@ -3,12 +3,17 @@
 # Context directory must contain: pg_kalam.so, pg_kalam.control, pg_kalam--*.sql
 #
 # Usage (from CI or manually):
-#   docker build -f pg/docker/Dockerfile.release-pg -t kalamdb-pg:latest <artifacts-dir>
+#   docker build -f pg/docker/Dockerfile.release-pg -t pg-kalam:latest <artifacts-dir>
 ARG POSTGRES_BASE_IMAGE=public.ecr.aws/docker/library/postgres:16-bookworm
 ARG PG_MAJOR=16
+ARG OCI_IMAGE_DESCRIPTION="PostgreSQL with the pg_kalam extension preinstalled for connecting PostgreSQL foreign tables to a remote KalamDB server."
 FROM ${POSTGRES_BASE_IMAGE}
 
 ARG PG_MAJOR
+ARG OCI_IMAGE_DESCRIPTION
+
+LABEL org.opencontainers.image.title="pg-kalam" \
+	org.opencontainers.image.description="${OCI_IMAGE_DESCRIPTION}"
 
 COPY pg_kalam.so /pg-artifacts/pg_kalam.so
 COPY pg_kalam.control /pg-artifacts/pg_kalam.control

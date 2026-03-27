@@ -7,7 +7,7 @@
 #
 # Usage:
 #   1. Build the postgres+extension image (from repo root):
-#        docker build -f pg/docker/Dockerfile -t kalamdb-pg:latest .
+#        docker build -f pg/docker/Dockerfile -t pg-kalam:latest .
 #   2. Start both services:
 #        cd pg/docker && docker compose up -d
 #   3. Run tests:
@@ -46,11 +46,11 @@ services:
       retries: 5
 
   postgres:
-    image: kalamdb-pg:latest
+    image: pg-kalam:latest
     build:
       context: ../..
       dockerfile: pg/docker/Dockerfile
-    container_name: kalamdb-pg
+    container_name: pg-kalam
     depends_on:
       kalamdb:
         condition: service_healthy

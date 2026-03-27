@@ -3,7 +3,7 @@
 /// Requires a running KalamDB server.
 /// Configure via env vars:
 ///   KALAMDB_URL or KALAM_URL               (default: http://localhost:8080)
-///   KALAMDB_USER or KALAM_USER             (default: root)
+///   KALAMDB_USER or KALAM_USER             (default: admin)
 ///   KALAMDB_PASSWORD or KALAM_PASS         (default: kalamdb123)
 library;
 
@@ -16,7 +16,7 @@ import 'package:kalam_link/kalam_link.dart';
 // ── Configuration ──────────────────────────────────────────────────────
 
 final serverUrl = _env(['KALAMDB_URL', 'KALAM_URL'], 'http://localhost:8080');
-final adminUser = _env(['KALAMDB_USER', 'KALAM_USER'], 'root');
+final adminUser = _env(['KALAMDB_USER', 'KALAM_USER'], 'admin');
 final adminPass = _env(['KALAMDB_PASSWORD', 'KALAM_PASS'], 'kalamdb123');
 
 String _env(List<String> keys, String defaultValue) {

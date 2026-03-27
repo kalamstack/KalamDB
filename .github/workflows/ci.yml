@@ -250,7 +250,7 @@ jobs:
           cat > .github/badges/tests.json << EOF
           {
             "schemaVersion": 1,
-            "label": "tests",
+            "label": "overall tests ($TOTAL)",
             "message": "$MESSAGE",
             "color": "$COLOR"
           }

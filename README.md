@@ -6,9 +6,10 @@
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-1.92%2B-orange.svg" alt="Rust" /></a>
   <a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License" /></a>
   <a href="https://github.com/jamals86/KalamDB/actions/workflows/ci.yml"><img src="https://github.com/jamals86/KalamDB/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <a href="https://github.com/jamals86/KalamDB/actions/workflows/ci.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jamals86/KalamDB/main/.github/badges/tests.json" alt="Tests" /></a>
+  <a href="https://github.com/jamals86/KalamDB/actions/workflows/ci.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jamals86/KalamDB/main/.github/badges/tests.json" alt="Overall Tests" /></a>
   <a href="https://github.com/jamals86/KalamDB/releases"><img src="https://img.shields.io/github/v/release/jamals86/KalamDB?display_name=tag" alt="Release" /></a>
   <a href="https://hub.docker.com/r/jamals86/kalamdb"><img src="https://img.shields.io/docker/pulls/jamals86/kalamdb" alt="Docker Pulls" /></a>
+  <a href="https://hub.docker.com/r/jamals86/pg-kalam"><img src="https://img.shields.io/docker/pulls/jamals86/pg-kalam?label=pg-kalam%20docker" alt="pg-kalam Docker Pulls" /></a>
 </p>
 
 <p align="center"><strong>SDKs</strong></p>
@@ -24,6 +25,8 @@ KalamDB is a SQL-first realtime state database for AI agents, chat products, and
 It combines SQL execution, live subscriptions, pub/sub streams, and hot/cold storage in one Rust runtime.
 
 Supported SDKs: [TypeScript/JavaScript](https://www.npmjs.com/package/kalam-link) and [Dart/Flutter](https://pub.dev/packages/kalam_link).
+
+PostgreSQL extension Docker image: [jamals86/pg-kalam](https://hub.docker.com/r/jamals86/pg-kalam) with `pg_kalam` preinstalled.
 
 > Frontend clients can execute SQL directly against KalamDB. This is not only a backend database layer.
 
@@ -196,6 +199,7 @@ CREATE TABLE chat.messages (
 - Quick start: `docs/getting-started/quick-start.md`
 - TypeScript SDK: `link/sdks/typescript/`
 - Docker deployment: `docker/run/`
+- PostgreSQL extension Docker image: `jamals86/pg-kalam`
 - Website: <https://kalamdb.org>
 
 KalamDB is under active development and evolving quickly.

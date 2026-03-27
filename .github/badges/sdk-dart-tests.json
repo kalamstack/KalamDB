@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "label": "dart sdk tests",
-  "message": "",
-  "color": ""
+  "label": "dart sdk tests (112)",
+  "message": "status updated by release workflow",
+  "color": "blue"
 }

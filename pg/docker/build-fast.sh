@@ -24,7 +24,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ARTIFACTS_DIR="$SCRIPT_DIR/artifacts"
-IMAGE_NAME="${KALAMDB_PG_IMAGE:-kalamdb-pg:latest}"
+IMAGE_NAME="${KALAMDB_PG_IMAGE:-pg-kalam:latest}"
+IMAGE_DESCRIPTION_FILE="$SCRIPT_DIR/image-description.txt"
+OCI_IMAGE_DESCRIPTION="$(tr '\n' ' ' < "$IMAGE_DESCRIPTION_FILE" | sed 's/[[:space:]]\+/ /g; s/^ //; s/ $//')"
 PG_MAJOR="${PG_MAJOR:-16}"
 PG_EXTENSION_FLAVOR="${PG_EXTENSION_FLAVOR:-pg${PG_MAJOR}}"
 BUILDER_IMAGE="pg-kalam-builder-pg${PG_MAJOR}"
@@ -131,6 +133,7 @@ build_runtime() {
     echo "==> Building runtime image ($IMAGE_NAME) ..."
     docker build \
         --build-arg PG_MAJOR="$PG_MAJOR" \
+        --build-arg OCI_IMAGE_DESCRIPTION="$OCI_IMAGE_DESCRIPTION" \
         --build-arg POSTGRES_BASE_IMAGE="$POSTGRES_BASE_IMAGE" \
         -f "$SCRIPT_DIR/Dockerfile.runtime" \
         -t "$IMAGE_NAME" \

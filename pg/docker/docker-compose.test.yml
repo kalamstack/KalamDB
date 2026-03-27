@@ -42,8 +42,8 @@ services:
       retries: 10
 
   postgres:
-    image: ${KALAMDB_PG_IMAGE:-kalamdb-pg:latest}
-    container_name: kalamdb-pg-e2e
+    image: ${KALAMDB_PG_IMAGE:-pg-kalam:latest}
+    container_name: pg-kalam-e2e
     depends_on:
       kalamdb:
         condition: service_healthy

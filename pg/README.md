@@ -150,7 +150,7 @@ What this does:
 - builds the extension inside a Linux builder container
 - caches Cargo registry, git, and target directories in Docker volumes
 - writes installable artifacts to `pg/docker/artifacts/`
-- builds the `kalamdb-pg:latest` runtime image
+- builds the `pg-kalam:latest` runtime image
 
 ### Clean Docker build
 
@@ -170,7 +170,7 @@ docker build \
   --build-arg RUST_BASE_IMAGE=public.ecr.aws/docker/library/rust:1.92-bookworm \
   --build-arg POSTGRES_BASE_IMAGE=public.ecr.aws/docker/library/postgres:17-bookworm \
   -f pg/docker/Dockerfile \
-  -t kalamdb-pg:latest .
+  -t pg-kalam:latest .
 ```
 
 ## Run PostgreSQL and KalamDB together with Docker Compose
@@ -251,12 +251,12 @@ If you want PostgreSQL with the extension already installed in a container, buil
 
 ```bash
 ./pg/docker/build-fast.sh
-docker run --name kalamdb-pg \
+docker run --name pg-kalam \
   -e POSTGRES_USER=kalamdb \
   -e POSTGRES_PASSWORD=kalamdb123 \
   -e POSTGRES_DB=kalamdb \
   -p 5433:5432 \
-  -d kalamdb-pg:latest
+  -d pg-kalam:latest
 ```
 
 Then connect and install the extension or let your own init SQL handle it.
@@ -304,12 +304,12 @@ If PostgreSQL runs in Docker on the same host, use `host.docker.internal` as the
 If you already have a KalamDB server running elsewhere, you can run just the PostgreSQL container:
 
 ```bash
-docker run --name kalamdb-pg \
+docker run --name pg-kalam \
   -e POSTGRES_USER=kalamdb \
   -e POSTGRES_PASSWORD=kalamdb123 \
   -e POSTGRES_DB=kalamdb \
   -p 5433:5432 \
-  -d kalamdb-pg:latest
+  -d pg-kalam:latest
 ```
 
 Then connect:

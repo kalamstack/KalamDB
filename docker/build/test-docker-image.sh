@@ -13,8 +13,13 @@ NC='\033[0m' # No Color
 # Configuration
 IMAGE_NAME="${1:-jamals86/kalamdb:test}"
 CONTAINER_NAME="kalamdb-test-$$"
-TEST_PORT=8081
-TIMEOUT=30
+TEST_PORT="${TEST_PORT:-8081}"
+TIMEOUT="${TIMEOUT:-30}"
+DOCKER_PLATFORM="${DOCKER_PLATFORM:-}"
+MAX_IMAGE_SIZE_BYTES="${MAX_IMAGE_SIZE_BYTES:-0}"
+EXPECTED_OCI_VERSION="${EXPECTED_OCI_VERSION:-}"
+EXPECTED_OCI_SOURCE="${EXPECTED_OCI_SOURCE:-}"
+EXPECTED_RUNTIME_UID="${EXPECTED_RUNTIME_UID:-65532}"
 
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
@@ -45,27 +50,49 @@ main() {
         log_error "Image $IMAGE_NAME not found!"
         exit 1
     fi
+
+    IMAGE_SIZE_BYTES=$(docker image inspect "$IMAGE_NAME" --format '{{.Size}}')
+    IMAGE_SIZE_MIB=$(( (IMAGE_SIZE_BYTES + 1048575) / 1048576 ))
+    log_info "Image size: ${IMAGE_SIZE_MIB} MiB (${IMAGE_SIZE_BYTES} bytes)"
+    if [[ "$MAX_IMAGE_SIZE_BYTES" -gt 0 && "$IMAGE_SIZE_BYTES" -gt "$MAX_IMAGE_SIZE_BYTES" ]]; then
+        log_error "✗ Image exceeds size budget (${IMAGE_SIZE_BYTES} > ${MAX_IMAGE_SIZE_BYTES})"
+        exit 1
+    fi
+
+    log_info "Test 0: Checking OCI metadata labels..."
+    IMAGE_VERSION_LABEL=$(docker image inspect "$IMAGE_NAME" --format '{{ index .Config.Labels "org.opencontainers.image.version" }}')
+    IMAGE_SOURCE_LABEL=$(docker image inspect "$IMAGE_NAME" --format '{{ index .Config.Labels "org.opencontainers.image.source" }}')
+    if [[ -n "$EXPECTED_OCI_VERSION" && "$IMAGE_VERSION_LABEL" != "$EXPECTED_OCI_VERSION" ]]; then
+        log_error "✗ OCI version label mismatch: expected '$EXPECTED_OCI_VERSION', got '$IMAGE_VERSION_LABEL'"
+        exit 1
+    fi
+    if [[ -n "$EXPECTED_OCI_SOURCE" && "$IMAGE_SOURCE_LABEL" != "$EXPECTED_OCI_SOURCE" ]]; then
+        log_error "✗ OCI source label mismatch: expected '$EXPECTED_OCI_SOURCE', got '$IMAGE_SOURCE_LABEL'"
+        exit 1
+    fi
+    log_info "✓ OCI metadata labels look correct"
     
     log_info "Starting container..."
     # Set root password for testing
     ROOT_PASSWORD="testpass123"
+    DOCKER_RUN_ARGS=(
+        -d
+        --name "$CONTAINER_NAME"
+        -p "$TEST_PORT:8080"
+        -e KALAMDB_SERVER_HOST=0.0.0.0
+        -e KALAMDB_LOG_LEVEL=info
+        -e KALAMDB_ROOT_PASSWORD="$ROOT_PASSWORD"
+    )
+
+    if [[ -n "$DOCKER_PLATFORM" ]]; then
+        DOCKER_RUN_ARGS+=(--platform "$DOCKER_PLATFORM")
+    fi
+
     if [ -n "${KALAMDB_JWT_SECRET:-}" ]; then
-        docker run -d \
-            --name "$CONTAINER_NAME" \
-            -p "$TEST_PORT:8080" \
-            -e KALAMDB_SERVER_HOST=0.0.0.0 \
-            -e KALAMDB_LOG_LEVEL=info \
-            -e KALAMDB_ROOT_PASSWORD="$ROOT_PASSWORD" \
-            -e "KALAMDB_JWT_SECRET=${KALAMDB_JWT_SECRET}" \
-            "$IMAGE_NAME"
+        DOCKER_RUN_ARGS+=(-e "KALAMDB_JWT_SECRET=${KALAMDB_JWT_SECRET}")
+        docker run "${DOCKER_RUN_ARGS[@]}" "$IMAGE_NAME"
     else
-        docker run -d \
-            --name "$CONTAINER_NAME" \
-            -p "$TEST_PORT:8080" \
-            -e KALAMDB_SERVER_HOST=0.0.0.0 \
-            -e KALAMDB_LOG_LEVEL=info \
-            -e KALAMDB_ROOT_PASSWORD="$ROOT_PASSWORD" \
-            "$IMAGE_NAME"
+        docker run "${DOCKER_RUN_ARGS[@]}" "$IMAGE_NAME"
     fi
     
     log_info "Waiting for server to start (timeout: ${TIMEOUT}s)..."
@@ -76,6 +103,13 @@ main() {
         
         if [ $ELAPSED -ge $TIMEOUT ]; then
             log_error "Server did not start within ${TIMEOUT}s"
+            log_info "Container logs:"
+            docker logs "$CONTAINER_NAME"
+            exit 1
+        fi
+
+        if ! docker ps --format '{{.Names}}' | grep -Fx "$CONTAINER_NAME" &>/dev/null; then
+            log_error "Container exited before becoming ready"
             log_info "Container logs:"
             docker logs "$CONTAINER_NAME"
             exit 1
@@ -109,8 +143,24 @@ main() {
         exit 1
     fi
     
-    # Test 3: Check binary existence
-    log_info "Test 3: Checking binaries inside container..."
+    # Test 3: Runtime user and writable paths
+    log_info "Test 3: Checking runtime user and writable paths..."
+    RUNTIME_UID=$(docker exec "$CONTAINER_NAME" /usr/local/bin/busybox sh -c 'id -u')
+    if [[ "$RUNTIME_UID" != "$EXPECTED_RUNTIME_UID" ]]; then
+        log_error "✗ Container is running as unexpected uid: $RUNTIME_UID"
+        exit 1
+    fi
+
+    docker exec "$CONTAINER_NAME" /usr/local/bin/busybox sh -c 'test -f /config/server.toml && test -d /data && test -w /data && mkdir -p /data/.kalam && touch /data/.kalam/write-test && rm /data/.kalam/write-test' &>/dev/null
+    if [ $? -eq 0 ]; then
+        log_info "✓ Runtime paths are present and writable"
+    else
+        log_error "✗ Runtime paths are not writable as the runtime user"
+        exit 1
+    fi
+
+    # Test 4: Check binary existence
+    log_info "Test 4: Checking binaries inside container..."
     docker exec "$CONTAINER_NAME" /usr/local/bin/busybox sh -c "test -x /usr/local/bin/kalamdb-server" &>/dev/null
     if [ $? -eq 0 ]; then
         log_info "✓ Server binary exists and is executable"
@@ -128,8 +178,8 @@ main() {
         exit 1
     fi
     
-    # Test 4: Check symlink
-    log_info "Test 4: Checking CLI symlink..."
+    # Test 5: Check symlink
+    log_info "Test 5: Checking CLI symlink..."
     docker exec "$CONTAINER_NAME" /usr/local/bin/kalam --version &>/dev/null
     if [ $? -eq 0 ]; then
         log_info "✓ CLI symlink works"
@@ -138,8 +188,8 @@ main() {
         exit 1
     fi
     
-    # Test 5: Authentication and SQL query test
-    log_info "Test 5: Testing authentication and SQL query execution..."
+    # Test 6: Authentication and SQL query test
+    log_info "Test 6: Testing authentication and SQL query execution..."
     
     # First, login to get JWT token
     LOGIN_RESPONSE=$(curl -sf -X POST \
@@ -183,9 +233,26 @@ main() {
         docker logs "$CONTAINER_NAME" | tail -50
         exit 1
     fi
+
+    # Test 7: Packaged CLI can talk to the packaged server
+    log_info "Test 7: Testing packaged CLI against the running server..."
+    CLI_QUERY_OUTPUT=$(docker exec "$CONTAINER_NAME" /usr/local/bin/kalam-cli \
+        -u http://127.0.0.1:8080 \
+        --token "$TOKEN" \
+        --command "SELECT 1 AS packaged_cli_test" 2>&1 || echo "FAILED")
+
+    if [[ "$CLI_QUERY_OUTPUT" != "FAILED" && "$CLI_QUERY_OUTPUT" == *"packaged_cli_test"* ]]; then
+        log_info "✓ Packaged CLI query passed"
+    else
+        log_error "✗ Packaged CLI query failed"
+        log_info "CLI output: $CLI_QUERY_OUTPUT"
+        log_info "Container logs:"
+        docker logs "$CONTAINER_NAME" | tail -50
+        exit 1
+    fi
     
-    # Test 6: Check container resource usage
-    log_info "Test 6: Checking container resource usage..."
+    # Test 8: Check container resource usage
+    log_info "Test 8: Checking container resource usage..."
     STATS=$(docker stats "$CONTAINER_NAME" --no-stream --format "table {{.CPUPerc}}\t{{.MemUsage}}")
     log_info "Container stats:\n$STATS"
     

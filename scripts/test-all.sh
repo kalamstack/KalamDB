@@ -158,12 +158,21 @@ run_npm_test() {
     step "$label"
     (
         cd "$ROOT_DIR/$dir"
-        npm install
+        npm install --no-audit --no-fund
         if [[ "$dir" == "ui" ]]; then
             npm test -- --run
         else
             npm test
         fi
+    )
+}
+
+run_typescript_sdk_tests() {
+    step "Running TypeScript SDK tests"
+    (
+        cd "$ROOT_DIR/link/sdks/typescript"
+        chmod +x ./test.sh
+        ./test.sh
     )
 }
 
@@ -225,7 +234,7 @@ else
     "$ROOT_DIR/pg/test.sh" --fail-fast
 fi
 
-run_npm_test "link/sdks/typescript" "Running TypeScript SDK tests"
+run_typescript_sdk_tests
 run_npm_test "ui" "Running admin UI tests"
 
 step "Running Dart SDK tests"

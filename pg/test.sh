@@ -28,7 +28,7 @@ BUILD_EXTENSION=false
 BUILD_SERVER=false
 NO_CLEANUP=false
 export KALAMDB_IMAGE="${KALAMDB_IMAGE:-}"
-export KALAMDB_PG_IMAGE="${KALAMDB_PG_IMAGE:-kalamdb-pg:latest}"
+export KALAMDB_PG_IMAGE="${KALAMDB_PG_IMAGE:-pg-kalam:latest}"
 NEXTEST_FILTER="test(e2e)"
 USE_NO_FAIL_FAST=false
 

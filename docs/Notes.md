@@ -1332,6 +1332,3 @@ Postgres Extension:
 - for parquet stick with only one compression for now
 - Make sure all pg_kalam methods is called using kalam spefic also using should have USING kalam
 also these: kalam_version(), kalam_compiled_mode();
-
-
-

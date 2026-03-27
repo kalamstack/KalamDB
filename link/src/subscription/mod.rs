@@ -18,8 +18,6 @@ pub use models::{SubscriptionConfig, SubscriptionInfo, SubscriptionOptions, Subs
 mod live_rows_subscription;
 #[cfg(feature = "tokio-runtime")]
 mod manager;
-#[cfg(feature = "tokio-runtime")]
-mod reader;
 pub(crate) use checkpoint::filter_replayed_event;
 #[cfg(feature = "tokio-runtime")]
 pub(crate) use checkpoint::{
@@ -29,5 +27,3 @@ pub(crate) use checkpoint::{
 pub use live_rows_subscription::LiveRowsSubscription;
 #[cfg(feature = "tokio-runtime")]
 pub use manager::SubscriptionManager;
-#[cfg(feature = "tokio-runtime")]
-pub(crate) use reader::ws_reader_loop;

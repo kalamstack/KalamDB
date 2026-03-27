@@ -210,7 +210,7 @@ pub struct CLISession {
     cluster_name: Option<String>,
 
     /// Credential store for managing saved credentials
-    credential_store: Option<crate::credentials::FileCredentialStore>,
+    credential_store: Option<Arc<Mutex<crate::credentials::FileCredentialStore>>>,
 
     /// Whether credentials were loaded from storage (vs. provided on command line)
     credentials_loaded: bool,
@@ -288,6 +288,8 @@ impl CLISession {
             .map(|opts| opts.create_formatter())
             .unwrap_or_else(|| ConnectionOptions::default().create_formatter());
 
+        let credential_store = credential_store.map(|store| Arc::new(Mutex::new(store)));
+
         // Build client with connection options if provided
         let mut builder = KalamLinkClient::builder()
             .base_url(&server_url)
@@ -299,7 +301,7 @@ impl CLISession {
         if let Some(refresher) = Self::build_auth_refresher(
             &server_url,
             instance.as_deref(),
-            credential_store.as_ref(),
+            credential_store.clone(),
         ) {
             builder = builder.auth_refresher(refresher);
         }
@@ -391,12 +393,11 @@ impl CLISession {
     pub fn build_auth_refresher(
         server_url: &str,
         instance: Option<&str>,
-        credential_store: Option<&crate::credentials::FileCredentialStore>,
+        credential_store: Option<Arc<Mutex<crate::credentials::FileCredentialStore>>>,
     ) -> Option<AuthRefreshCallback> {
         let instance = instance?.to_owned();
-        let store = credential_store.cloned()?;
+        let store = credential_store?;
         let url = server_url.to_owned();
-        let store = Arc::new(std::sync::Mutex::new(store));
 
         Some(Arc::new(move || {
             let instance = instance.clone();
@@ -2435,7 +2436,7 @@ impl CLISession {
         use kalam_link::credentials::CredentialStore;
 
         match (&self.instance, &self.credential_store) {
-            (Some(instance), Some(store)) => match store.get_credentials(instance) {
+            (Some(instance), Some(store)) => match store.lock().unwrap().get_credentials(instance) {
                 Ok(Some(creds)) => {
                     println!("{}", "Stored Credentials".bold().cyan());
                     println!("  Instance: {}", creds.instance.green());
@@ -2512,7 +2513,7 @@ impl CLISession {
                             login_response.refresh_expires_at.clone(),
                         );
 
-                        store.set_credentials(&creds)?;
+                        store.lock().unwrap().set_credentials(&creds)?;
 
                         println!("{}", "✓ Credentials updated successfully".green().bold());
                         println!("  Instance: {}", instance.cyan());
@@ -2557,7 +2558,7 @@ impl CLISession {
 
         match (&self.instance, &mut self.credential_store) {
             (Some(instance), Some(store)) => {
-                store.delete_credentials(instance)?;
+                store.lock().unwrap().delete_credentials(instance)?;
 
                 println!("{}", "✓ Credentials deleted successfully".green().bold());
                 println!("  Instance: {}", instance.cyan());
@@ -3187,6 +3188,8 @@ mod tests {
             .credential_store
             .as_ref()
             .expect("credential store available")
+            .lock()
+            .unwrap()
             .get_credentials("local")
             .expect("load refreshed credentials")
             .expect("stored credentials present");

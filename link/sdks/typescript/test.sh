@@ -8,7 +8,7 @@ cd "$SCRIPT_DIR"
 
 # ── Configuration ──────────────────────────────────────────────────────
 export KALAMDB_URL="${KALAMDB_URL:-http://localhost:8080}"
-export KALAMDB_USER="${KALAMDB_USER:-root}"
+export KALAMDB_USER="${KALAMDB_USER:-admin}"
 export KALAMDB_PASSWORD="${KALAMDB_PASSWORD:-kalamdb123}"
 
 # ── Build SDK ──────────────────────────────────────────────────────────
@@ -36,7 +36,8 @@ NO_SERVER=true node --test \
 # ── E2E tests (require running KalamDB server) ────────────────────────
 echo ""
 echo "🔗 Checking server at $KALAMDB_URL ..."
-if curl -sf "$KALAMDB_URL/health" > /dev/null 2>&1; then
+if curl -sf "$KALAMDB_URL/health" > /dev/null 2>&1 \
+  || curl -sf "$KALAMDB_URL/v1/api/healthcheck" > /dev/null 2>&1; then
   echo "✅ Server is reachable"
   echo ""
   echo "🧪 Running e2e tests..."

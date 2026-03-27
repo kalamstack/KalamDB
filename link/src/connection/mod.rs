@@ -20,7 +20,7 @@ pub(crate) use shared::SharedConnection;
 pub(crate) use websocket::{
     apply_ws_auth_headers, connect_with_optional_local_bind, decode_ws_payload,
     jitter_keepalive_interval, parse_message, resolve_ws_url, send_auth_and_wait,
-    send_next_batch_request, send_subscription_request, WebSocketStream,
+    send_next_batch_request, WebSocketStream,
 };
 
 #[cfg(feature = "tokio-runtime")]

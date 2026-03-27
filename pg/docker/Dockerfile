@@ -8,13 +8,14 @@
 # connects to a KalamDB server via gRPC.  The full backend is NOT built.
 #
 # Build from repo root:
-#   docker build -f pg/docker/Dockerfile -t kalamdb-pg:latest .
+#   docker build -f pg/docker/Dockerfile -t pg-kalam:latest .
 
 ARG RUST_BASE_IMAGE=public.ecr.aws/docker/library/rust:1.92-bookworm
 ARG POSTGRES_BASE_IMAGE=public.ecr.aws/docker/library/postgres:16-bookworm
 ARG PG_MAJOR=16
 ARG PG_EXTENSION_FLAVOR=pg16
 ARG PGRX_VERSION=0.17.0
+ARG OCI_IMAGE_DESCRIPTION="PostgreSQL with the pg_kalam extension preinstalled for connecting PostgreSQL foreign tables to a remote KalamDB server."
 
 # ---------------------------------------------------------------------------
 # Stage 1: Builder — Rust toolchain + selected PG dev headers → .so + .sql
@@ -134,6 +135,10 @@ RUN mkdir -p /pg-artifacts \
 FROM ${POSTGRES_BASE_IMAGE}
 
 ARG PG_MAJOR
+ARG OCI_IMAGE_DESCRIPTION
+
+LABEL org.opencontainers.image.title="pg-kalam" \
+    org.opencontainers.image.description="${OCI_IMAGE_DESCRIPTION}"
 
 COPY --from=builder /pg-artifacts/ /pg-artifacts/
 

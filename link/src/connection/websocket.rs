@@ -1,4 +1,4 @@
-//! Low-level WebSocket helpers shared by per-subscription and shared connections.
+//! Low-level WebSocket helpers for shared connections.
 //!
 //! Contains URL resolution, authentication header application, WS connection
 //! with optional local bind addresses, message parsing, keepalive jitter,
@@ -7,10 +7,7 @@
 use crate::{
     auth::AuthProvider,
     error::{KalamLinkError, Result},
-    models::{
-        ChangeEvent, ClientMessage, ServerMessage, SubscriptionOptions,
-        SubscriptionRequest, WsAuthCredentials,
-    },
+    models::{ChangeEvent, ClientMessage, ServerMessage, WsAuthCredentials},
 };
 use futures_util::{SinkExt, StreamExt};
 use reqwest::Url;
@@ -483,33 +480,6 @@ pub(crate) async fn send_next_batch_request(
         .send(Message::Text(payload.into()))
         .await
         .map_err(|e| KalamLinkError::WebSocketError(format!("Failed to send NextBatch: {}", e)))
-}
-
-/// Send a subscription request over the WebSocket.
-pub(crate) async fn send_subscription_request(
-    ws_stream: &mut WebSocketStream,
-    subscription_id: &str,
-    sql: &str,
-    options: Option<SubscriptionOptions>,
-) -> Result<()> {
-    let subscription_req = SubscriptionRequest {
-        id: subscription_id.to_string(),
-        sql: sql.to_string(),
-        options: options.unwrap_or_default(),
-    };
-
-    let message = ClientMessage::Subscribe {
-        subscription: subscription_req,
-    };
-
-    let payload = serde_json::to_string(&message).map_err(|e| {
-        KalamLinkError::WebSocketError(format!("Failed to serialize subscription: {}", e))
-    })?;
-
-    ws_stream
-        .send(Message::Text(payload.into()))
-        .await
-        .map_err(|e| KalamLinkError::WebSocketError(format!("Failed to subscribe: {}", e)))
 }
 
 #[cfg(test)]

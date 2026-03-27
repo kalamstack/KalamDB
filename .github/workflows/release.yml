@@ -1155,6 +1155,21 @@ jobs:
             echo "⚠️ Some smoke tests failed"
           fi
 
+      - name: Validate packaged CLI binary
+        shell: bash
+        env:
+          KALAMDB_SERVER_URL: "http://localhost:8080"
+        run: |
+          set -euo pipefail
+          ./kalamcli \
+            -u "$KALAMDB_SERVER_URL" \
+            --username root \
+            --password kalamdb123 \
+            --json \
+            --command "SELECT 1 AS packaged_cli_release_check" \
+            | tee packaged-cli-smoke-output.txt
+          grep -q 'packaged_cli_release_check' packaged-cli-smoke-output.txt
+
       - name: Stop server
         if: always()
         shell: bash
@@ -1168,6 +1183,7 @@ jobs:
           name: smoke-test-results
           path: |
             smoke-test-output.txt
+            packaged-cli-smoke-output.txt
             server.log
           if-no-files-found: ignore
 
@@ -1230,7 +1246,7 @@ jobs:
           cat > .github/badges/sdk-typescript-tests.json <<EOF
           {
             "schemaVersion": 1,
-            "label": "typescript sdk tests",
+            "label": "typescript sdk tests (${{ needs.sdk_tests_typescript.outputs.total }})",
             "message": "${{ needs.sdk_tests_typescript.outputs.message }}",
             "color": "${{ needs.sdk_tests_typescript.outputs.color }}"
           }
@@ -1239,7 +1255,7 @@ jobs:
           cat > .github/badges/sdk-dart-tests.json <<EOF
           {
             "schemaVersion": 1,
-            "label": "dart sdk tests",
+            "label": "dart sdk tests (${{ needs.sdk_tests_dart.outputs.total }})",
             "message": "${{ needs.sdk_tests_dart.outputs.message }}",
             "color": "${{ needs.sdk_tests_dart.outputs.color }}"
           }
@@ -1339,8 +1355,12 @@ jobs:
             SHORT_SHA="$(git rev-parse --short=7 HEAD)"
           fi
           DOCKER_VERSION_COMMIT_TAG="${VERSION}-h${SHORT_SHA}"
+          DOCKER_VALIDATE_TAG_AMD64="${VERSION}-ci-${SHORT_SHA}-amd64"
+          DOCKER_VALIDATE_TAG_ARM64="${VERSION}-ci-${SHORT_SHA}-arm64"
           echo "docker_repo=$DOCKER_REPO" >> "$GITHUB_OUTPUT"
           echo "docker_version_commit_tag=$DOCKER_VERSION_COMMIT_TAG" >> "$GITHUB_OUTPUT"
+          echo "docker_validate_tag_amd64=$DOCKER_VALIDATE_TAG_AMD64" >> "$GITHUB_OUTPUT"
+          echo "docker_validate_tag_arm64=$DOCKER_VALIDATE_TAG_ARM64" >> "$GITHUB_OUTPUT"
           echo "docker_image_source=$DOCKER_IMAGE_SOURCE" >> "$GITHUB_OUTPUT"
           echo "docker_image_created=$DOCKER_IMAGE_CREATED" >> "$GITHUB_OUTPUT"
 
@@ -1416,7 +1436,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push Docker image (linux/amd64)
+      - name: Build and push Docker image candidate (linux/amd64)
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -1436,23 +1456,9 @@ jobs:
             OCI_IMAGE_VENDOR=KalamDB
             OCI_IMAGE_LICENSES=Apache-2.0
           tags: |
-            ${{ steps.vars.outputs.docker_repo }}:${{ needs.read_version.outputs.version }}-amd64
+            ${{ steps.vars.outputs.docker_repo }}:${{ steps.vars.outputs.docker_validate_tag_amd64 }}
 
-      - name: Test Docker startup (linux/amd64)
-        shell: bash
-        run: |
-          set -euo pipefail
-          export KALAMDB_JWT_SECRET="$(openssl rand -base64 32)"
-          export DOCKER_PLATFORM="linux/amd64"
-          
-          # Pull the just-built image
-          docker pull ${{ steps.vars.outputs.docker_repo }}:${{ needs.read_version.outputs.version }}-amd64
-          
-          # Require at least a clean startup before publishing multi-arch tags
-          chmod +x docker/build/test-docker-startup.sh
-          ./docker/build/test-docker-startup.sh ${{ steps.vars.outputs.docker_repo }}:${{ needs.read_version.outputs.version }}-amd64
-
-      - name: Build and push Docker image (linux/arm64)
+      - name: Build and push Docker image candidate (linux/arm64)
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -1472,7 +1478,89 @@ jobs:
             OCI_IMAGE_VENDOR=KalamDB
             OCI_IMAGE_LICENSES=Apache-2.0
           tags: |
-            ${{ steps.vars.outputs.docker_repo }}:${{ needs.read_version.outputs.version }}-arm64
+            ${{ steps.vars.outputs.docker_repo }}:${{ steps.vars.outputs.docker_validate_tag_arm64 }}
+
+      - name: Validate Docker image candidate (linux/amd64)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export KALAMDB_JWT_SECRET="$(openssl rand -base64 32)"
+          export TEST_PORT=18081
+          export TIMEOUT=45
+          export MAX_IMAGE_SIZE_BYTES=300000000
+          export EXPECTED_OCI_VERSION="${{ needs.read_version.outputs.version }}"
+          export EXPECTED_OCI_SOURCE="${{ steps.vars.outputs.docker_image_source }}"
+          IMAGE="${{ steps.vars.outputs.docker_repo }}:${{ steps.vars.outputs.docker_validate_tag_amd64 }}"
+          docker pull "$IMAGE"
+          chmod +x docker/build/test-docker-image.sh
+          ./docker/build/test-docker-image.sh "$IMAGE" 2>&1 | tee docker-image-amd64-verification.txt
+
+      - name: Validate Docker image candidate (linux/arm64)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export KALAMDB_JWT_SECRET="$(openssl rand -base64 32)"
+          export DOCKER_PLATFORM="linux/arm64"
+          export TEST_PORT=18082
+          export TIMEOUT=75
+          export MAX_IMAGE_SIZE_BYTES=300000000
+          export EXPECTED_OCI_VERSION="${{ needs.read_version.outputs.version }}"
+          export EXPECTED_OCI_SOURCE="${{ steps.vars.outputs.docker_image_source }}"
+          IMAGE="${{ steps.vars.outputs.docker_repo }}:${{ steps.vars.outputs.docker_validate_tag_arm64 }}"
+          docker pull --platform linux/arm64 "$IMAGE"
+          chmod +x docker/build/test-docker-image.sh
+          ./docker/build/test-docker-image.sh "$IMAGE" 2>&1 | tee docker-image-arm64-verification.txt
+
+      - name: Inspect validated Docker image candidates
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "Docker image candidate inspection"
+            echo "================================"
+            for image in \
+              "${{ steps.vars.outputs.docker_repo }}:${{ steps.vars.outputs.docker_validate_tag_amd64 }}" \
+              "${{ steps.vars.outputs.docker_repo }}:${{ steps.vars.outputs.docker_validate_tag_arm64 }}"; do
+              echo
+              echo "IMAGE: $image"
+              if docker image inspect "$image" >/dev/null 2>&1; then
+                docker image inspect "$image" --format 'user={{.Config.User}} size={{.Size}} bytes created={{.Created}}'
+                docker image inspect "$image" --format 'version={{ index .Config.Labels "org.opencontainers.image.version" }} source={{ index .Config.Labels "org.opencontainers.image.source" }} revision={{ index .Config.Labels "org.opencontainers.image.revision" }}'
+              else
+                echo "image not present locally"
+              fi
+            done
+          } > docker-image-inspection.txt
+
+      - name: Upload Docker verification artifacts
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: docker-image-verification
+          path: |
+            docker-image-amd64-verification.txt
+            docker-image-arm64-verification.txt
+            docker-image-inspection.txt
+          if-no-files-found: ignore
+
+      - name: Promote validated Docker image (linux/amd64)
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPO="${{ steps.vars.outputs.docker_repo }}"
+          VERSION="${{ needs.read_version.outputs.version }}"
+          CANDIDATE_TAG="${{ steps.vars.outputs.docker_validate_tag_amd64 }}"
+          docker buildx imagetools create -t "${REPO}:${VERSION}-amd64" "${REPO}:${CANDIDATE_TAG}"
+
+      - name: Promote validated Docker image (linux/arm64)
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPO="${{ steps.vars.outputs.docker_repo }}"
+          VERSION="${{ needs.read_version.outputs.version }}"
+          CANDIDATE_TAG="${{ steps.vars.outputs.docker_validate_tag_arm64 }}"
+          docker buildx imagetools create -t "${REPO}:${VERSION}-arm64" "${REPO}:${CANDIDATE_TAG}"
 
       - name: Create and push multi-arch manifest
         shell: bash
@@ -1523,6 +1611,8 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build_pg_extension_x86_64
+      - docker
+      - smoke_tests
       - read_version
 
     if: ${{ github.event_name == 'push' || github.event.inputs.docker_push == 'true' }}
@@ -1530,6 +1620,31 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Set PG candidate tag
+        id: pg_vars
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.read_version.outputs.version }}"
+          SHORT_SHA="${GITHUB_SHA:-}"
+          if [[ -n "$SHORT_SHA" ]]; then
+            SHORT_SHA="${SHORT_SHA:0:7}"
+          else
+            SHORT_SHA="$(git rev-parse --short=7 HEAD)"
+          fi
+          PG_REPO="jamals86/pg-kalam"
+          PG_CANDIDATE_TAG="${VERSION}-${PG_EXTENSION_FLAVOR}-ci-${SHORT_SHA}"
+          echo "pg_repo=$PG_REPO" >> "$GITHUB_OUTPUT"
+          echo "pg_candidate_tag=$PG_CANDIDATE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Read PG image description
+        id: pg_image_description
+        shell: bash
+        run: |
+          set -euo pipefail
+          DESCRIPTION="$(tr '\n' ' ' < pg/docker/image-description.txt | sed 's/[[:space:]]\+/ /g; s/^ //; s/ $//')"
+          echo "value=$DESCRIPTION" >> "$GITHUB_OUTPUT"
 
       - name: Download PG extension artifact (x86_64)
         uses: actions/download-artifact@v4
@@ -1559,63 +1674,135 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push PG image (amd64)
+      - name: Build and push PG image candidate (amd64)
         uses: docker/build-push-action@v6
         with:
           context: pg-ext-amd64
           file: pg/docker/Dockerfile.release-pg
           push: true
           platforms: linux/amd64
+          build-args: |
+            OCI_IMAGE_DESCRIPTION=${{ steps.pg_image_description.outputs.value }}
+          labels: |
+            org.opencontainers.image.title=pg-kalam
+            org.opencontainers.image.description=${{ steps.pg_image_description.outputs.value }}
           tags: |
-            jamals86/kalamdb-pg:${{ needs.read_version.outputs.version }}-${{ env.PG_EXTENSION_FLAVOR }}
-            jamals86/kalamdb-pg:latest-${{ env.PG_EXTENSION_FLAVOR }}
+            ${{ steps.pg_vars.outputs.pg_repo }}:${{ steps.pg_vars.outputs.pg_candidate_tag }}
 
-      - name: Smoke test PG image
+      - name: Install PostgreSQL client tools
         shell: bash
         run: |
           set -euo pipefail
-          REPO="jamals86/kalamdb-pg"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client
+
+      - name: Run PG Docker compose smoke suite
+        id: pg_docker_tests
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
           VERSION="${{ needs.read_version.outputs.version }}"
-          IMAGE="${REPO}:${VERSION}-${PG_EXTENSION_FLAVOR}"
-
-          docker pull "$IMAGE"
-          docker rm -f kalamdb-pg-smoke >/dev/null 2>&1 || true
-          docker run -d \
-            --name kalamdb-pg-smoke \
-            -e POSTGRES_PASSWORD=postgres \
-            -p 55432:5432 \
-            "$IMAGE"
-
-          cleanup() {
-            status=$?
-            if [[ $status -ne 0 ]]; then
-              docker logs kalamdb-pg-smoke || true
-            fi
-            docker rm -f kalamdb-pg-smoke >/dev/null 2>&1 || true
-            exit $status
-          }
-          trap cleanup EXIT
-
-          ready=false
-          for i in {1..30}; do
-            if docker exec kalamdb-pg-smoke pg_isready -U postgres -d postgres >/dev/null 2>&1; then
-              ready=true
-              break
-            fi
-            sleep 2
-          done
-
-          if [[ "$ready" != "true" ]]; then
-            echo "PostgreSQL in ${IMAGE} did not become ready in time" >&2
-            exit 1
+          SERVER_REPO="${{ github.event.inputs.docker_repo }}"
+          if [[ -z "$SERVER_REPO" ]]; then
+            SERVER_REPO="jamals86/kalamdb"
           fi
 
-          docker exec -e PGPASSWORD=postgres kalamdb-pg-smoke \
-            psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
-            -c "CREATE EXTENSION IF NOT EXISTS pg_kalam;" \
-            -c "SELECT extname FROM pg_extension WHERE extname = 'pg_kalam';"
+          SERVER_IMAGE="${SERVER_REPO}:${VERSION}"
+          PG_IMAGE="${{ steps.pg_vars.outputs.pg_repo }}:${{ steps.pg_vars.outputs.pg_candidate_tag }}"
+          COMPOSE_FILE="pg/docker/docker-compose.test.yml"
+          COMPOSE_PROJECT="pg-kalam-release"
+          export KALAMDB_IMAGE="$SERVER_IMAGE"
+          export KALAMDB_PG_IMAGE="$PG_IMAGE"
+          export KALAMDB_TEST_HTTP_PORT=18088
+          export KALAMDB_TEST_RPC_PORT=19188
+          export KALAMDB_TEST_PG_PORT=15433
+          export RUST_LOG=info
 
-          echo "✅ PG Docker image verified: ${IMAGE}"
+          docker pull "$SERVER_IMAGE"
+          docker pull "$PG_IMAGE"
+
+          docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT" down -v --remove-orphans 2>/dev/null || true
+          docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT" up -d
+
+          if PGHOST=127.0.0.1 \
+             PGPORT="$KALAMDB_TEST_PG_PORT" \
+             PGUSER=kalamdb \
+             PGPASSWORD=kalamdb123 \
+             PGDATABASE=kalamdb \
+             KALAMDB_API_URL="http://127.0.0.1:${KALAMDB_TEST_HTTP_PORT}" \
+             KALAMDB_PASSWORD=kalamdb123 \
+             ./pg/docker/test.sh 2>&1 | tee pg-docker-test-output.txt; then
+            echo "pg_docker_tests_passed=true" >> "$GITHUB_OUTPUT"
+            echo "✅ PG Docker image verified with compose-based smoke suite: ${PG_IMAGE}"
+          else
+            echo "pg_docker_tests_passed=false" >> "$GITHUB_OUTPUT"
+            echo "⚠️ PG Docker compose smoke suite failed"
+          fi
+
+      - name: Inspect validated PG Docker image candidate
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="${{ steps.pg_vars.outputs.pg_repo }}:${{ steps.pg_vars.outputs.pg_candidate_tag }}"
+          if docker image inspect "$IMAGE" >/dev/null 2>&1; then
+            docker image inspect "$IMAGE" --format 'user={{.Config.User}} size={{.Size}} bytes created={{.Created}}' > pg-docker-image-inspection.txt
+            docker image inspect "$IMAGE" --format 'version={{ index .Config.Labels "org.opencontainers.image.version" }} description={{ index .Config.Labels "org.opencontainers.image.description" }}' >> pg-docker-image-inspection.txt
+          else
+            echo "image not present locally" > pg-docker-image-inspection.txt
+          fi
+
+      - name: Capture PG Docker logs
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose -f pg/docker/docker-compose.test.yml -p pg-kalam-release logs --no-color > pg-docker-compose.log 2>&1 || true
+
+      - name: Upload PG Docker test artifacts
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pg-docker-test-results
+          path: |
+            pg-docker-test-output.txt
+            pg-docker-compose.log
+            pg-docker-image-inspection.txt
+          if-no-files-found: ignore
+
+      - name: Stop PG Docker compose stack
+        if: always()
+        shell: bash
+        run: |
+          docker compose -f pg/docker/docker-compose.test.yml -p pg-kalam-release down -v --remove-orphans 2>/dev/null || true
+
+      - name: Report PG Docker test status
+        if: always()
+        shell: bash
+        run: |
+          if [[ "${{ steps.pg_docker_tests.outputs.pg_docker_tests_passed }}" == "true" ]]; then
+            echo "::notice::✅ PG Docker compose smoke suite passed"
+          else
+            echo "::error::PG Docker compose smoke suite failed - review pg-docker-test-results artifact for details"
+          fi
+
+      - name: Fail if PG Docker tests failed
+        if: always() && steps.pg_docker_tests.outputs.pg_docker_tests_passed != 'true'
+        shell: bash
+        run: |
+          echo "PG Docker compose smoke suite failed" >&2
+          exit 1
+
+      - name: Promote validated PG Docker image
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPO="${{ steps.pg_vars.outputs.pg_repo }}"
+          VERSION="${{ needs.read_version.outputs.version }}"
+          CANDIDATE_TAG="${{ steps.pg_vars.outputs.pg_candidate_tag }}"
+          docker buildx imagetools create -t "${REPO}:${VERSION}-${PG_EXTENSION_FLAVOR}" "${REPO}:${CANDIDATE_TAG}"
+          docker buildx imagetools create -t "${REPO}:latest-${PG_EXTENSION_FLAVOR}" "${REPO}:${CANDIDATE_TAG}"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # INTEGRATION TESTS - Smoke + TypeScript SDK + Dart SDK against Docker image
@@ -1706,6 +1893,15 @@ jobs:
           done
           echo "❌ Timed out"; cat ts-sdk-server.log; exit 1
 
+      - name: Bootstrap SDK test admin user
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sf http://localhost:8080/v1/api/auth/setup \
+            -H "Content-Type: application/json" \
+            -d '{"username":"admin","password":"kalamdb123","root_password":"kalamdb123"}' \
+            >/dev/null || true
+
       - name: Run TypeScript SDK tests (offline + serial e2e)
         id: run_typescript_tests
         continue-on-error: true
@@ -1713,7 +1909,7 @@ jobs:
         working-directory: link/sdks/typescript
         env:
           KALAMDB_URL: "http://localhost:8080"
-          KALAMDB_USER: "root"
+          KALAMDB_USER: "admin"
           KALAMDB_PASSWORD: "kalamdb123"
         run: |
           set -euo pipefail
@@ -1855,6 +2051,15 @@ jobs:
           done
           echo "❌ Timed out"; cat dart-sdk-server.log; exit 1
 
+      - name: Bootstrap SDK test admin user
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sf http://localhost:8080/v1/api/auth/setup \
+            -H "Content-Type: application/json" \
+            -d '{"username":"admin","password":"kalamdb123","root_password":"kalamdb123"}' \
+            >/dev/null || true
+
       - name: Run Dart SDK tests
         id: run_dart_tests
         continue-on-error: true
@@ -1862,7 +2067,7 @@ jobs:
         working-directory: link/sdks/dart
         env:
           KALAM_URL: "http://localhost:8080"
-          KALAM_USER: "root"
+          KALAM_USER: "admin"
           KALAM_PASS: "kalamdb123"
         run: |
           set -euo pipefail
