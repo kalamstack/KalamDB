@@ -398,7 +398,7 @@ impl JobsManager {
 
             match job_result {
                 Ok(Some((job, job_node))) => {
-                    log::info!(
+                    log::debug!(
                         "[{}] Job fetched for execution: type={:?}, status={:?}, is_leader={}",
                         job.job_id,
                         job.job_type,

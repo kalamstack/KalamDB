@@ -33,6 +33,11 @@ log_warn() {
     echo -e "${YELLOW}[WARN]${NC} $1"
 }
 
+container_get() {
+    local path="$1"
+    docker exec "$CONTAINER_NAME" /usr/local/bin/busybox wget -qO- "http://127.0.0.1:8080${path}"
+}
+
 cleanup() {
     log_info "Cleaning up test container..."
     docker stop "$CONTAINER_NAME" 2>/dev/null || true
@@ -115,7 +120,7 @@ main() {
             exit 1
         fi
         
-        if curl -sf "http://localhost:$TEST_PORT/health" &>/dev/null; then
+        if docker exec "$CONTAINER_NAME" /usr/local/bin/busybox wget --spider -q "http://127.0.0.1:8080/health" &>/dev/null; then
             log_info "Server is ready! (took ${ELAPSED}s)"
             break
         fi
@@ -125,7 +130,7 @@ main() {
     
     # Test 1: Health check
     log_info "Test 1: Health check endpoint..."
-    HEALTH_RESPONSE=$(curl -sf "http://localhost:$TEST_PORT/health")
+    HEALTH_RESPONSE=$(container_get "/health")
     if [ $? -eq 0 ]; then
         log_info "✓ Health check passed: $HEALTH_RESPONSE"
     else
@@ -135,7 +140,7 @@ main() {
     
     # Test 2: Version info (healthcheck)
     log_info "Test 2: Version info (healthcheck)..."
-    VERSION_RESPONSE=$(curl -sf "http://localhost:$TEST_PORT/v1/api/healthcheck" || echo "FAILED")
+    VERSION_RESPONSE=$(container_get "/v1/api/healthcheck" || echo "FAILED")
     if [ "$VERSION_RESPONSE" != "FAILED" ]; then
         log_info "✓ Version info passed: $VERSION_RESPONSE"
     else

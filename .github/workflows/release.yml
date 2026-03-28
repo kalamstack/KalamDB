@@ -1204,6 +1204,174 @@ jobs:
           echo "Smoke tests failed" >&2
           exit 1
 
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PG EXTENSION TESTS - Native e2e suite against live KalamDB + pgrx PostgreSQL
+  # ═══════════════════════════════════════════════════════════════════════════
+  pg_extension_tests_native:
+    name: PG Extension Tests (native)
+    runs-on: ubuntu-latest
+    needs:
+      - build_linux_x86_64
+      - read_version
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download server binary
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-linux-x86_64
+          path: dist/
+
+      - name: Install system dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang \
+            libclang-dev \
+            llvm-dev \
+            pkg-config \
+            libssl-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: pg-extension-tests-native
+          cache-on-failure: true
+
+      - name: Install cargo-nextest and cargo-pgrx
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C ${CARGO_HOME:-~/.cargo}/bin
+          cargo install cargo-pgrx --version "${PGRX_VERSION}" --locked --force
+          cargo nextest --version
+          cargo pgrx --version
+
+      - name: Initialize pgrx PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo pgrx init "--pg${PG_EXTENSION_MAJOR}" download
+
+      - name: Prepare server binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          find dist -name "*.tar.gz" -type f -exec tar -xzf {} -C dist/ \;
+          SERVER_BIN=$(find dist -name "kalamdb-server-*-linux-x86_64" -type f ! -name "*.tar.gz" | head -1)
+          [[ -z "$SERVER_BIN" ]] && { echo "Server binary not found"; exit 1; }
+          chmod +x "$SERVER_BIN"
+          cp "$SERVER_BIN" ./kalamdb-server
+          ls -la ./kalamdb-server
+
+      - name: Create server config
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp backend/server.example.toml server.toml
+          sed -i 's|rocksdb_path = "./data/rocksdb"|rocksdb_path = "./test-data/rocksdb"|g' server.toml
+          sed -i 's|default_storage_path = "./data/storage"|default_storage_path = "./test-data/storage"|g' server.toml
+          sed -i 's|logs_path = "./logs"|logs_path = "./test-data/logs"|g' server.toml
+          sed -i 's|jwt_secret = ".*"|jwt_secret = "pg-native-test-secret-key-minimum-32-characters-long"|g' server.toml
+
+      - name: Start server
+        shell: bash
+        env:
+          KALAMDB_SERVER_HOST: "0.0.0.0"
+          KALAMDB_ROOT_PASSWORD: "kalamdb123"
+          KALAMDB_JWT_SECRET: "pg-native-test-secret-key-minimum-32-characters-long"
+          KALAMDB_NODE_ID: "1"
+          KALAMDB_CLUSTER_RPC_ADDR: "0.0.0.0:9188"
+          KALAMDB_CLUSTER_API_ADDR: "http://127.0.0.1:8080"
+        run: |
+          set -euo pipefail
+          mkdir -p test-data/rocksdb test-data/storage test-data/logs
+          ./kalamdb-server > pg-server.log 2>&1 &
+          SERVER_PID=$!
+          echo "SERVER_PID=$SERVER_PID" >> "$GITHUB_ENV"
+          for i in {1..60}; do
+            if curl -sf http://127.0.0.1:8080/health >/dev/null 2>&1; then
+              echo "✅ Server is ready (${i}s)"
+              exit 0
+            fi
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              echo "❌ Server process died"
+              cat pg-server.log || true
+              exit 1
+            fi
+            echo "  Waiting... ($i/60)"
+            sleep 1
+          done
+          echo "❌ Timed out waiting for server"
+          cat pg-server.log || true
+          exit 1
+
+      - name: Setup pgrx PostgreSQL and install extension
+        shell: bash
+        env:
+          PG_MAJOR: ${{ env.PG_EXTENSION_MAJOR }}
+          PG_EXTENSION_FLAVOR: ${{ env.PG_EXTENSION_FLAVOR }}
+        run: |
+          set -euo pipefail
+          ./pg/scripts/pgrx-test-setup.sh 2>&1 | tee pg-pgrx-setup-output.txt
+
+      - name: Run native PG extension e2e tests
+        shell: bash
+        env:
+          KALAMDB_SERVER_URL: "http://127.0.0.1:8080"
+          KALAMDB_ROOT_PASSWORD: "kalamdb123"
+        run: |
+          set -euo pipefail
+          cargo nextest run \
+            -p kalam-pg-extension \
+            --features e2e \
+            -E 'test(e2e)' \
+            --test-threads 1 \
+            2>&1 | tee pg-native-test-output.txt
+
+      - name: Stop pgrx PostgreSQL
+        if: always()
+        shell: bash
+        env:
+          PG_MAJOR: ${{ env.PG_EXTENSION_MAJOR }}
+          PG_EXTENSION_FLAVOR: ${{ env.PG_EXTENSION_FLAVOR }}
+        run: |
+          ./pg/scripts/pgrx-test-setup.sh --stop || true
+
+      - name: Stop server
+        if: always()
+        shell: bash
+        run: |
+          [[ -n "${SERVER_PID:-}" ]] && kill "$SERVER_PID" 2>/dev/null || true
+
+      - name: Collect PG native test logs
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p pg-native-test-results
+          cp pg-server.log pg-native-test-results/ 2>/dev/null || true
+          cp pg-pgrx-setup-output.txt pg-native-test-results/ 2>/dev/null || true
+          cp pg-native-test-output.txt pg-native-test-results/ 2>/dev/null || true
+          cp "$HOME/.pgrx/data-${PG_EXTENSION_MAJOR}/pgrx.log" pg-native-test-results/pgrx.log 2>/dev/null || true
+
+      - name: Upload PG native test results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pg-native-test-results
+          path: pg-native-test-results/*
+          if-no-files-found: ignore
+
   release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
@@ -1220,6 +1388,7 @@ jobs:
       - build_pg_extension_x86_64
       - read_version
       - smoke_tests
+      - pg_extension_tests_native
       - sdk_tests_typescript
       - sdk_tests_dart
       - docker
@@ -1613,6 +1782,7 @@ jobs:
       - build_pg_extension_x86_64
       - docker
       - smoke_tests
+      - pg_extension_tests_native
       - read_version
 
     if: ${{ github.event_name == 'push' || github.event.inputs.docker_push == 'true' }}
@@ -1877,7 +2047,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          export KALAMDB_ROOT_PASSWORD="kalamdb123"
           cp backend/server.example.toml server.toml
           sed -i 's|data_path = "./data"|data_path = "./test-data"|g' server.toml
           sed -i 's|logs_path = "./logs"|logs_path = "./test-data/logs"|g' server.toml
@@ -1897,10 +2066,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -sf http://localhost:8080/v1/api/auth/setup \
+          curl -fsS http://localhost:8080/v1/api/auth/setup \
             -H "Content-Type: application/json" \
             -d '{"username":"admin","password":"kalamdb123","root_password":"kalamdb123"}' \
-            >/dev/null || true
+            >/dev/null
 
       - name: Run TypeScript SDK tests (offline + serial e2e)
         id: run_typescript_tests
@@ -2035,7 +2204,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          export KALAMDB_ROOT_PASSWORD="kalamdb123"
           cp backend/server.example.toml server.toml
           sed -i 's|data_path = "./data"|data_path = "./test-data"|g' server.toml
           sed -i 's|logs_path = "./logs"|logs_path = "./test-data/logs"|g' server.toml
@@ -2055,10 +2223,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -sf http://localhost:8080/v1/api/auth/setup \
+          curl -fsS http://localhost:8080/v1/api/auth/setup \
             -H "Content-Type: application/json" \
             -d '{"username":"admin","password":"kalamdb123","root_password":"kalamdb123"}' \
-            >/dev/null || true
+            >/dev/null
 
       - name: Run Dart SDK tests
         id: run_dart_tests
