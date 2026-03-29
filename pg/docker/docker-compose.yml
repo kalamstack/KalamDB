@@ -39,7 +39,7 @@ services:
     restart: unless-stopped
     command: ["/usr/local/bin/kalamdb-server", "/config/server.toml"]
     healthcheck:
-      test: ["CMD", "/usr/local/bin/busybox", "wget", "--spider", "-q", "http://127.0.0.1:8080/v1/api/healthcheck"]
+      test: ["CMD", "/usr/local/bin/busybox", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/v1/api/healthcheck"]
       interval: 10s
       timeout: 5s
       start_period: 10s
