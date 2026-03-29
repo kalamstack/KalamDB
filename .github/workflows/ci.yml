@@ -58,7 +58,7 @@ jobs:
             libssl-dev
 
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/registry
           key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
@@ -66,7 +66,7 @@ jobs:
             ${{ runner.os }}-cargo-registry-
 
       - name: Cache cargo index
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/git
           key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
@@ -74,7 +74,7 @@ jobs:
             ${{ runner.os }}-cargo-index-
 
       - name: Cache cargo build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: target
           key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
@@ -106,7 +106,7 @@ jobs:
   #           libssl-dev
 
   #     - name: Cache cargo registry
-  #       uses: actions/cache@v4
+  #       uses: actions/cache@v5
   #       with:
   #         path: ~/.cargo/registry
   #         key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
@@ -114,7 +114,7 @@ jobs:
   #           ${{ runner.os }}-cargo-registry-
 
   #     - name: Cache cargo index
-  #       uses: actions/cache@v4
+  #       uses: actions/cache@v5
   #       with:
   #         path: ~/.cargo/git
   #         key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
@@ -122,7 +122,7 @@ jobs:
   #           ${{ runner.os }}-cargo-index-
 
   #     - name: Cache cargo build
-  #       uses: actions/cache@v4
+  #       uses: actions/cache@v5
   #       with:
   #         path: target
   #         key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
@@ -154,7 +154,7 @@ jobs:
             libssl-dev
 
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/registry
           key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
@@ -162,7 +162,7 @@ jobs:
             ${{ runner.os }}-cargo-registry-
 
       - name: Cache cargo index
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/git
           key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
@@ -170,7 +170,7 @@ jobs:
             ${{ runner.os }}-cargo-index-
 
       - name: Cache cargo build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: target
           key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
@@ -310,10 +310,10 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
-      - name: Setup Node 20
+      - name: Setup Node 22
         uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install cargo-license
         shell: bash

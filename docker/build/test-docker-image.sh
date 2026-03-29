@@ -120,7 +120,7 @@ main() {
             exit 1
         fi
         
-        if docker exec "$CONTAINER_NAME" /usr/local/bin/busybox wget --spider -q "http://127.0.0.1:8080/health" &>/dev/null; then
+        if curl -sf "http://localhost:$TEST_PORT/health" > /dev/null 2>&1; then
             log_info "Server is ready! (took ${ELAPSED}s)"
             break
         fi

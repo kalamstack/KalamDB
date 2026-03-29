@@ -9,6 +9,7 @@ use web_sys::{Headers, MessageEvent, Request, RequestInit, RequestMode, Response
 use super::console_log;
 use crate::compression;
 
+#[inline]
 pub(crate) fn ws_url_from_http_opts(
     base_url: &str,
     disable_compression: bool,
@@ -33,6 +34,7 @@ pub(crate) fn ws_url_from_http_opts(
 ///
 /// Uses `DefaultHasher` (SipHash) — fast and collision-resistant enough for
 /// subscription deduplication.  Not a cryptographic hash.
+#[inline]
 pub(crate) fn subscription_hash(s: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
     s.hash(&mut hasher);
@@ -133,38 +135,41 @@ pub(crate) async fn wasm_fetch(
 /// Handles text (`JsString`), binary (`ArrayBuffer` — decompressed via gzip),
 /// `Blob` fallback, and unknown types. Returns `None` when the payload cannot
 /// be decoded (with a diagnostic logged to the JS console).
+///
+/// Optimized to use `decompress_if_gzip` which returns `Cow<[u8]>` — avoiding
+/// a heap allocation when the payload is not gzip-compressed.
+#[inline]
 pub(crate) fn decode_ws_message(e: &MessageEvent) -> Option<String> {
-    if let Ok(txt) = e.data().dyn_into::<js_sys::JsString>() {
+    let data = e.data();
+
+    if let Ok(txt) = data.dyn_into::<js_sys::JsString>() {
         return Some(String::from(txt));
     }
 
-    if let Ok(array_buffer) = e.data().dyn_into::<js_sys::ArrayBuffer>() {
+    let data = e.data();
+    if let Ok(array_buffer) = data.dyn_into::<js_sys::ArrayBuffer>() {
         let uint8_array = js_sys::Uint8Array::new(&array_buffer);
-        let data = uint8_array.to_vec();
+        let raw = uint8_array.to_vec();
 
-        return match compression::decompress_gzip(&data) {
-            Ok(decompressed) => match String::from_utf8(decompressed) {
-                Ok(s) => Some(s),
-                Err(e) => {
-                    console_log(&format!(
-                        "KalamClient: Invalid UTF-8 in decompressed message: {}",
-                        e
-                    ));
-                    None
-                },
-            },
+        let decompressed = compression::decompress_if_gzip(&raw);
+        return match std::str::from_utf8(&decompressed) {
+            Ok(s) => Some(s.to_owned()),
             Err(e) => {
-                console_log(&format!("KalamClient: Failed to decompress message: {}", e));
+                console_log(&format!(
+                    "KalamClient: Invalid UTF-8 in message: {}",
+                    e
+                ));
                 None
             },
         };
     }
 
-    if e.data().is_instance_of::<web_sys::Blob>() {
+    let data = e.data();
+    if data.is_instance_of::<web_sys::Blob>() {
         console_log(
             "KalamClient: Received Blob message - binary mode may be misconfigured. Attempting to read as text.",
         );
-        return e.data().as_string();
+        return data.as_string();
     }
 
     // Unknown message type — log diagnostics

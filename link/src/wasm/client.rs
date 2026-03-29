@@ -26,6 +26,13 @@ use super::validation::{
     quote_table_name, validate_column_name, validate_row_id, validate_sql_identifier,
 };
 
+// Pre-serialized ping message to avoid re-serializing `ClientMessage::Ping`
+// on every keepalive tick. WASM is single-threaded, so a thread-local is safe.
+thread_local! {
+    pub(crate) static PING_PAYLOAD: String = serde_json::to_string(&ClientMessage::Ping)
+        .expect("ClientMessage::Ping serialization is infallible");
+}
+
 /// WASM-compatible KalamDB client with auto-reconnection support
 ///
 /// Supports multiple authentication methods:
@@ -1212,9 +1219,9 @@ impl KalamClient {
         let ping_cb = Closure::wrap(Box::new(move || {
             if let Some(ws) = ws_ref.borrow().as_ref() {
                 if ws.ready_state() == WebSocket::OPEN {
-                    if let Ok(payload) = serde_json::to_string(&ClientMessage::Ping) {
-                        let _ = ws.send_with_str(&payload);
-                    }
+                    PING_PAYLOAD.with(|payload| {
+                        let _ = ws.send_with_str(payload);
+                    });
                 }
             }
         }) as Box<dyn FnMut()>);

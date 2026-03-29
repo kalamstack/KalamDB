@@ -45,7 +45,7 @@ while true; do
         exit 1
     fi
 
-    if docker exec "$CONTAINER_NAME" /usr/local/bin/busybox wget --spider -q http://127.0.0.1:8080/health >/dev/null 2>&1; then
+    if docker exec "$CONTAINER_NAME" /usr/local/bin/busybox wget -q -O /dev/null http://127.0.0.1:8080/health >/dev/null 2>&1; then
         echo "Docker startup test passed in ${ELAPSED}s"
         break
     fi

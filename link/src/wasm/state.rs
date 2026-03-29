@@ -64,6 +64,7 @@ pub(crate) struct WasmLiveRowsOptions {
     pub(crate) subscription_options: Option<SubscriptionOptions>,
 }
 
+#[inline]
 pub(crate) fn track_subscription_checkpoint(last_seq_id: &mut Option<SeqId>, event: &ChangeEvent) {
     match event {
         ChangeEvent::Ack { batch_control, .. } => {
@@ -95,6 +96,7 @@ pub(crate) fn track_subscription_checkpoint(last_seq_id: &mut Option<SeqId>, eve
     }
 }
 
+#[inline]
 pub(crate) fn filter_subscription_event(
     options: &SubscriptionOptions,
     event: &ServerMessage,
@@ -103,6 +105,7 @@ pub(crate) fn filter_subscription_event(
     crate::subscription::filter_replayed_event(change_event, options.from)
 }
 
+#[inline]
 pub(crate) fn callback_payload(
     mode: &mut SubscriptionCallbackMode,
     event: &ChangeEvent,

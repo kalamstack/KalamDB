@@ -116,10 +116,10 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
-      - name: Setup Node 20
+      - name: Setup Node 22
         uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install cargo-license
         shell: bash
@@ -213,10 +213,10 @@ jobs:
           shared-key: wasm-build
           cache-on-failure: true
 
-      - name: Setup Node 20
+      - name: Setup Node 22
         uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install wasm-pack
         shell: bash
@@ -472,7 +472,7 @@ jobs:
 
       - name: Download UI dist
         if: ${{ steps.vars.outputs.build_linux == 'true' }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: ui-dist
           path: ui/dist
@@ -563,7 +563,7 @@ jobs:
 
       - name: Download UI dist
         if: ${{ steps.vars.outputs.build_linux_arm == 'true' }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: ui-dist
           path: ui/dist
@@ -720,7 +720,7 @@ jobs:
 
       - name: Download UI dist
         if: ${{ steps.vars.outputs.build_windows == 'true' }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: ui-dist
           path: ui/dist
@@ -837,7 +837,7 @@ jobs:
 
       - name: Download UI dist
         if: ${{ steps.vars.outputs.build_macos == 'true' }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: ui-dist
           path: ui/dist
@@ -1048,13 +1048,13 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Download server binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: dist-linux-x86_64
           path: dist/
 
       - name: Download CLI binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: dist-cli-linux-x86_64
           path: dist/
@@ -1219,7 +1219,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Download server binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: dist-linux-x86_64
           path: dist/
@@ -1443,7 +1443,7 @@ jobs:
           git push origin main
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           path: release-assets
           pattern: 'dist-*'
@@ -1535,25 +1535,25 @@ jobs:
           echo "docker_image_created=$DOCKER_IMAGE_CREATED" >> "$GITHUB_OUTPUT"
 
       - name: Download pre-built artifacts (x86_64)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: dist-linux-x86_64
           path: artifacts/server-amd64
 
       - name: Download pre-built CLI artifact (x86_64)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: dist-cli-linux-x86_64
           path: artifacts/cli-amd64
 
       - name: Download pre-built artifacts (aarch64)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: dist-linux-aarch64
           path: artifacts/server-arm64
 
       - name: Download pre-built CLI artifact (aarch64)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: dist-cli-linux-aarch64
           path: artifacts/cli-arm64
@@ -1818,7 +1818,7 @@ jobs:
           echo "value=$DESCRIPTION" >> "$GITHUB_OUTPUT"
 
       - name: Download PG extension artifact (x86_64)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: dist-pg-extension-linux-x86_64
           path: pg-artifacts-amd64/
@@ -1999,7 +1999,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Download server binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: dist-linux-x86_64
           path: dist/
@@ -2023,10 +2023,10 @@ jobs:
           shared-key: sdk-tests-typescript
           cache-on-failure: true
 
-      - name: Setup Node 20
+      - name: Setup Node 22
         uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install wasm-pack
         shell: bash
@@ -2137,7 +2137,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Download server binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: dist-linux-x86_64
           path: dist/
@@ -2148,6 +2148,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             clang libclang-dev pkg-config libssl-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Cache Rust (dart bridge)
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: dart-bridge
+          cache-on-failure: true
+          workspaces: link -> link/target
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -2348,7 +2360,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Setup Rust

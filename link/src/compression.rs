@@ -172,6 +172,21 @@ mod tests {
     }
 
     #[test]
+    fn test_decompress_if_gzip_plain_returns_borrowed() {
+        // Non-gzip data should return a Cow::Borrowed (zero-copy).
+        let plain = b"not compressed";
+        let result = decompress_if_gzip(plain);
+        assert!(matches!(result, std::borrow::Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_decompress_if_gzip_empty() {
+        let result = decompress_if_gzip(&[]);
+        assert!(result.is_empty());
+        assert!(matches!(result, std::borrow::Cow::Borrowed(_)));
+    }
+
+    #[test]
     fn test_decompress_gzip_with_limit_rejects_large_advertised_size() {
         // Minimal gzip payload with empty deflate body and a forged trailer
         // advertising a large uncompressed size.

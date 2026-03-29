@@ -172,9 +172,9 @@ pub(crate) fn restart_ping_timer(
     let ping_cb = Closure::wrap(Box::new(move || {
         if let Some(ws) = ws_clone.borrow().as_ref() {
             if ws.ready_state() == WebSocket::OPEN {
-                if let Ok(payload) = serde_json::to_string(&ClientMessage::Ping) {
-                    let _ = ws.send_with_str(&payload);
-                }
+                super::client::PING_PAYLOAD.with(|payload| {
+                    let _ = ws.send_with_str(payload);
+                });
             }
         }
     }) as Box<dyn FnMut()>);

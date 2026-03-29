@@ -92,9 +92,9 @@ WORKDIR /data
 # Expose default port
 EXPOSE 8080
 
-# Health check uses busybox wget to avoid pulling extra packages into the runtime image.
+# Health check: use wget GET to /dev/null (--spider sends HEAD which is incompatible with h2c auto-detect).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["/usr/local/bin/busybox", "wget", "--spider", "-q", "http://127.0.0.1:8080/health"]
+    CMD ["/usr/local/bin/busybox", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
 
 # Default command: run server (looks for server.toml in current directory)
 CMD ["/usr/local/bin/kalamdb-server", "/config/server.toml"]

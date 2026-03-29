@@ -173,10 +173,19 @@ fn parse_offset_millis(bytes: &[u8], start: usize) -> Result<i64, ParseError> {
     }
 }
 
+/// Format timestamp parts to ISO 8601 string.
+///
+/// Uses `write!` into a pre-sized `String` to avoid the formatting overhead
+/// of `format!()` which goes through `fmt::Arguments` heap allocation.
+#[inline]
 fn format_parts_iso8601(parts: UtcDateTimeParts, include_millis: bool, zulu: bool) -> String {
+    use std::fmt::Write;
+    // Max length: "YYYY-MM-DDTHH:MM:SS.mmm+00:00" = 29 chars
+    let mut buf = String::with_capacity(32);
     if include_millis {
         if zulu {
-            format!(
+            let _ = write!(
+                buf,
                 "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
                 parts.year,
                 parts.month,
@@ -185,9 +194,10 @@ fn format_parts_iso8601(parts: UtcDateTimeParts, include_millis: bool, zulu: boo
                 parts.minute,
                 parts.second,
                 parts.millisecond
-            )
+            );
         } else {
-            format!(
+            let _ = write!(
+                buf,
                 "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}+00:00",
                 parts.year,
                 parts.month,
@@ -196,14 +206,16 @@ fn format_parts_iso8601(parts: UtcDateTimeParts, include_millis: bool, zulu: boo
                 parts.minute,
                 parts.second,
                 parts.millisecond
-            )
+            );
         }
     } else {
-        format!(
+        let _ = write!(
+            buf,
             "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
             parts.year, parts.month, parts.day, parts.hour, parts.minute, parts.second
-        )
+        );
     }
+    buf
 }
 
 /// Timestamp format options.
@@ -323,7 +335,12 @@ impl TimestampFormatter {
     /// Format as ISO 8601 date only: `2024-12-14`
     fn format_iso8601_date(&self, ms: i64) -> String {
         match split_timestamp(ms) {
-            Some(parts) => format!("{:04}-{:02}-{:02}", parts.year, parts.month, parts.day),
+            Some(parts) => {
+                use std::fmt::Write;
+                let mut buf = String::with_capacity(10);
+                let _ = write!(buf, "{:04}-{:02}-{:02}", parts.year, parts.month, parts.day);
+                buf
+            },
             None => format!("Invalid timestamp: {}", ms),
         }
     }
@@ -339,16 +356,22 @@ impl TimestampFormatter {
     /// Format as RFC 2822: `Fri, 14 Dec 2024 15:30:45 +0000`
     fn format_rfc2822(&self, ms: i64) -> String {
         match split_timestamp(ms) {
-            Some(parts) => format!(
-                "{}, {:02} {} {:04} {:02}:{:02}:{:02} +0000",
-                WEEKDAY_NAMES[usize::from(parts.weekday)],
-                parts.day,
-                MONTH_NAMES[usize::from(parts.month - 1)],
-                parts.year,
-                parts.hour,
-                parts.minute,
-                parts.second
-            ),
+            Some(parts) => {
+                use std::fmt::Write;
+                let mut buf = String::with_capacity(32);
+                let _ = write!(
+                    buf,
+                    "{}, {:02} {} {:04} {:02}:{:02}:{:02} +0000",
+                    WEEKDAY_NAMES[usize::from(parts.weekday)],
+                    parts.day,
+                    MONTH_NAMES[usize::from(parts.month - 1)],
+                    parts.year,
+                    parts.hour,
+                    parts.minute,
+                    parts.second
+                );
+                buf
+            },
             None => format!("Invalid timestamp: {}", ms),
         }
     }
@@ -568,5 +591,78 @@ mod tests {
     fn test_now() {
         let ms = now();
         assert!(ms > 1700000000000);
+    }
+
+    // ── Regression tests for write!-based formatting (zero-alloc rewrite) ──
+
+    #[test]
+    fn test_format_iso8601_exact_output() {
+        let formatter = TimestampFormatter::new(TimestampFormat::Iso8601);
+        assert_eq!(
+            formatter.format(Some(1734211234567)),
+            "2024-12-14T21:20:34.567Z"
+        );
+    }
+
+    #[test]
+    fn test_format_iso8601_date_exact() {
+        let formatter = TimestampFormatter::new(TimestampFormat::Iso8601Date);
+        // Known epoch: 2024-01-01T00:00:00.000Z
+        assert_eq!(formatter.format(Some(1704067200000)), "2024-01-01");
+        // End-of-year rollover
+        assert_eq!(formatter.format(Some(1735689599999)), "2024-12-31");
+    }
+
+    #[test]
+    fn test_format_rfc2822_exact() {
+        let formatter = TimestampFormatter::new(TimestampFormat::Rfc2822);
+        // Mon, 01 Jan 2024 00:00:00 +0000
+        assert_eq!(
+            formatter.format(Some(1704067200000)),
+            "Mon, 01 Jan 2024 00:00:00 +0000"
+        );
+    }
+
+    #[test]
+    fn test_format_rfc3339_exact() {
+        let formatter = TimestampFormatter::new(TimestampFormat::Rfc3339);
+        assert_eq!(
+            formatter.format(Some(1734211234567)),
+            "2024-12-14T21:20:34.567+00:00"
+        );
+    }
+
+    #[test]
+    fn test_format_iso8601_datetime_no_millis() {
+        let formatter = TimestampFormatter::new(TimestampFormat::Iso8601DateTime);
+        assert_eq!(
+            formatter.format(Some(1734211234567)),
+            "2024-12-14T21:20:34Z"
+        );
+    }
+
+    #[test]
+    fn test_format_epoch_zero() {
+        let iso = TimestampFormatter::new(TimestampFormat::Iso8601);
+        assert_eq!(iso.format(Some(0)), "1970-01-01T00:00:00.000Z");
+
+        let date = TimestampFormatter::new(TimestampFormat::Iso8601Date);
+        assert_eq!(date.format(Some(0)), "1970-01-01");
+
+        let rfc = TimestampFormatter::new(TimestampFormat::Rfc2822);
+        assert_eq!(rfc.format(Some(0)), "Thu, 01 Jan 1970 00:00:00 +0000");
+    }
+
+    #[test]
+    fn test_format_consistency_across_formats() {
+        // All formats should agree on the date portion for the same timestamp
+        let ms = 1734211234567_i64;
+        let iso = TimestampFormatter::new(TimestampFormat::Iso8601).format(Some(ms));
+        let date = TimestampFormatter::new(TimestampFormat::Iso8601Date).format(Some(ms));
+        let rfc = TimestampFormatter::new(TimestampFormat::Rfc3339).format(Some(ms));
+
+        assert!(iso.starts_with("2024-12-14"));
+        assert_eq!(date, "2024-12-14");
+        assert!(rfc.starts_with("2024-12-14"));
     }
 }
