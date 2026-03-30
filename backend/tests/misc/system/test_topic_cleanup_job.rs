@@ -7,6 +7,7 @@
 
 use super::test_support::TestServer;
 use anyhow::Result;
+use kalamdb_jobs::AppContextJobsExt;
 
 /// Test that TopicCleanup job is scheduled when dropping a topic
 #[actix_web::test]
@@ -142,12 +143,12 @@ async fn test_topic_cleanup_job_idempotent() -> Result<()> {
     // Try to schedule another cleanup job manually (simulating retry)
     // This should be idempotent and not fail
     let topic_id = kalamdb_commons::models::TopicId::new(&topic_name);
-    let params = kalamdb_core::jobs::executors::topic_cleanup::TopicCleanupParams {
+    let params = kalamdb_jobs::executors::topic_cleanup::TopicCleanupParams {
         topic_id: topic_id.clone(),
         topic_name: topic_name.clone(),
     };
     
-    let result = ctx.jobs_manager().create_job_typed(
+    let result = ctx.job_manager().create_job_typed(
         kalamdb_system::providers::jobs::models::JobType::TopicCleanup,
         params,
     );

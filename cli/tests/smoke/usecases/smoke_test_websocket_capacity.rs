@@ -231,33 +231,35 @@ async fn open_authenticated_connection(
         .await
         .unwrap_or_else(|e| panic!("Failed to open websocket #{}: {}", idx, e));
 
-    let auth_payload = json!({
-        "type": "authenticate",
-        "method": "jwt",
-        "token": token,
-    });
-
-    stream
-        .send(Message::Text(auth_payload.to_string().into()))
-        .await
-        .unwrap_or_else(|e| panic!("Failed to send auth message on websocket #{}: {}", idx, e));
-
-    let auth_payload = tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            let next = stream
-                .next()
-                .await
-                .unwrap_or_else(|| panic!("Websocket #{} closed before auth response", idx))
-                .unwrap_or_else(|e| panic!("Websocket #{} auth response error: {}", idx, e));
-            match next {
-                Message::Text(payload) => break payload,
-                Message::Ping(_) | Message::Pong(_) => continue,
-                other => panic!("Websocket #{} expected text auth response, got {:?}", idx, other),
-            }
-        }
-    })
+    let auth_payload = match tokio::time::timeout(
+        Duration::from_secs(2),
+        read_ws_text_message(idx, &mut stream, "auth response"),
+    )
     .await
-    .unwrap_or_else(|_| panic!("Websocket #{} auth response timed out", idx));
+    {
+        Ok(Ok(payload)) => payload,
+        Ok(Err(err)) => panic!("Websocket #{} header-auth response failed: {}", idx, err),
+        Err(_) => {
+            let auth_payload = json!({
+                "type": "authenticate",
+                "method": "jwt",
+                "token": token,
+            });
+
+            stream
+                .send(Message::Text(auth_payload.to_string().into()))
+                .await
+                .unwrap_or_else(|e| panic!("Failed to send auth message on websocket #{}: {}", idx, e));
+
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                read_ws_text_message(idx, &mut stream, "auth response"),
+            )
+            .await
+            .unwrap_or_else(|_| panic!("Websocket #{} auth response timed out", idx))
+            .unwrap_or_else(|err| panic!("Websocket #{} auth response failed: {}", idx, err))
+        },
+    };
 
     let value: serde_json::Value = serde_json::from_str(&auth_payload)
         .unwrap_or_else(|e| panic!("Invalid auth response JSON on websocket #{}: {}", idx, e));
@@ -303,6 +305,34 @@ async fn open_authenticated_connection(
     }
 
     stream
+}
+
+async fn read_ws_text_message(
+    idx: usize,
+    stream: &mut WsStream,
+    context: &str,
+) -> Result<String, String> {
+    loop {
+        let message = stream
+            .next()
+            .await
+            .ok_or_else(|| format!("Websocket #{} closed before {}", idx, context))?
+            .map_err(|e| format!("Websocket #{} {} error: {}", idx, context, e))?;
+
+        match message {
+            Message::Text(payload) => return Ok(payload.to_string()),
+            Message::Ping(payload) => {
+                let _ = stream.send(Message::Pong(payload)).await;
+            },
+            Message::Pong(_) => continue,
+            other => {
+                return Err(format!(
+                    "Websocket #{} expected text {} , got {:?}",
+                    idx, context, other
+                ));
+            },
+        }
+    }
 }
 
 async fn run_simple_sql() -> Duration {

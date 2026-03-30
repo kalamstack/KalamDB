@@ -1,25 +1,26 @@
 use kalam_pg_client::RemoteKalamClient;
 use kalam_pg_common::RemoteServerConfig;
 use kalamdb_pg::{KalamPgService, PgServiceServer};
-use std::net::SocketAddr;
 use std::time::Duration;
+use tokio::net::TcpListener;
 
-/// Helper: start a gRPC PgService on `addr` and return a connected client.
-async fn start_server_and_client(addr: &str) -> RemoteKalamClient {
-    let bind_addr: SocketAddr = addr.parse().expect("bind addr");
+/// Helper: start a gRPC PgService on an ephemeral port and return a connected client.
+async fn start_server_and_client() -> RemoteKalamClient {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind ephemeral port");
+    let port = listener.local_addr().expect("local addr").port();
+    let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
     let service = KalamPgService::new(false, None);
 
     tokio::spawn(async move {
         tonic::transport::Server::builder()
             .add_service(PgServiceServer::new(service))
-            .serve(bind_addr)
+            .serve_with_incoming(incoming)
             .await
             .expect("serve pg grpc");
     });
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
 
-    let port = bind_addr.port();
     RemoteKalamClient::connect(RemoteServerConfig {
         host: "127.0.0.1".to_string(),
         port,
@@ -32,7 +33,7 @@ async fn start_server_and_client(addr: &str) -> RemoteKalamClient {
 #[tokio::test]
 #[ntest::timeout(10000)]
 async fn remote_client_connects_and_opens_session() {
-    let client = start_server_and_client("127.0.0.1:59971").await;
+    let client = start_server_and_client().await;
 
     client.ping().await.expect("ping");
     let session = client
@@ -50,7 +51,7 @@ async fn remote_client_connects_and_opens_session() {
 #[tokio::test]
 #[ntest::timeout(10000)]
 async fn sequential_transactions_commit_cleanly() {
-    let client = start_server_and_client("127.0.0.1:59972").await;
+    let client = start_server_and_client().await;
 
     client.open_session("pg-seq-tx", None).await.expect("open session");
 
@@ -72,7 +73,7 @@ async fn sequential_transactions_commit_cleanly() {
 #[tokio::test]
 #[ntest::timeout(10000)]
 async fn stale_transaction_auto_rollback_on_new_begin() {
-    let client = start_server_and_client("127.0.0.1:59973").await;
+    let client = start_server_and_client().await;
 
     client.open_session("pg-stale-tx", None).await.expect("open session");
 
@@ -92,7 +93,7 @@ async fn stale_transaction_auto_rollback_on_new_begin() {
 #[tokio::test]
 #[ntest::timeout(10000)]
 async fn close_session_removes_server_state() {
-    let client = start_server_and_client("127.0.0.1:59974").await;
+    let client = start_server_and_client().await;
 
     client.open_session("pg-close-test", None).await.expect("open session");
 
@@ -110,9 +111,14 @@ async fn close_session_removes_server_state() {
 #[tokio::test]
 #[ntest::timeout(10000)]
 async fn connect_with_timeout_fails_on_unreachable_server() {
+    // Bind and immediately drop to guarantee the port is free and nothing listens.
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let free_port = listener.local_addr().expect("addr").port();
+    drop(listener);
+
     let config = RemoteServerConfig {
         host: "127.0.0.1".to_string(),
-        port: 59999, // Nothing listening here
+        port: free_port,
         timeout_ms: 1000,
         ..Default::default()
     };

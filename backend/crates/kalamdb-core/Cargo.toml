@@ -90,10 +90,14 @@ tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 parquet = { workspace = true }
 ntest = { workspace = true }
+kalamdb-handlers = { path = "../kalamdb-handlers" }
+kalamdb-jobs = { path = "../kalamdb-jobs" }
 
 [features]
 # Feature to run expensive/slow tests (disabled by default)
 expensive_tests = []
+# Expose test helpers to other crates' test code (dev-dependencies)
+test-helpers = []
 
 [lib]
 doctest = false

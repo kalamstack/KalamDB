@@ -4,6 +4,8 @@ use crate::auth::models::WsAuthCredentials;
 use crate::seq_id::SeqId;
 use crate::subscription::models::SubscriptionRequest;
 
+use super::ProtocolOptions;
+
 /// Client-to-server request messages
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -15,10 +17,13 @@ pub enum ClientMessage {
     /// Server responds with AuthSuccess or AuthError.
     ///
     /// Supports multiple authentication methods via the credentials field.
+    /// Optionally negotiates wire format via `protocol`.
     Authenticate {
         /// Authentication credentials (basic, jwt, or future methods)
         #[serde(flatten)]
         credentials: WsAuthCredentials,
+        /// Protocol negotiation (serialization + compression).
+        protocol: ProtocolOptions,
     },
 
     /// Subscribe to live query updates

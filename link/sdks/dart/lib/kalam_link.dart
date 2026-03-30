@@ -23,7 +23,7 @@
 ///
 /// **Important:** Only `init()` should be awaited before `runApp()`.
 /// `connect()` performs network I/O — awaiting it before `runApp()`
-/// will freeze the UI until the WebSocket handshake completes.
+/// can delay first render while auth or other startup work completes.
 library;
 
 export 'src/auth.dart';

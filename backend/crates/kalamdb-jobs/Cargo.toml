@@ -1,0 +1,56 @@
+[package]
+name = "kalamdb-jobs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Job management system for KalamDB: executors, schedulers, and orchestration"
+
+[dependencies]
+# Internal crates
+kalamdb-commons = { path = "../kalamdb-commons", features = ["full"] }
+kalamdb-core = { path = "../kalamdb-core" }
+kalamdb-observability = { path = "../kalamdb-observability" }
+kalamdb-raft = { path = "../kalamdb-raft" }
+kalamdb-sharding = { path = "../kalamdb-sharding" }
+kalamdb-store = { path = "../kalamdb-store" }
+kalamdb-system = { path = "../kalamdb-system" }
+kalamdb-tables = { path = "../kalamdb-tables" }
+
+# Async
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time", "rt"] }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Time handling
+chrono = { workspace = true }
+
+# Logging
+log = { workspace = true }
+
+# Tracing
+tracing = { workspace = true }
+
+# UUID generation
+uuid = { workspace = true }
+
+# ZIP archive creation
+zip = { workspace = true }
+
+# Concurrent
+parking_lot = { workspace = true }
+
+# DataFusion (for test TableProvider downcast)
+datafusion = { workspace = true }
+
+[lib]
+doctest = false
+
+[dev-dependencies]
+kalamdb-core = { path = "../kalamdb-core", features = ["test-helpers"] }
+tempfile = { workspace = true }

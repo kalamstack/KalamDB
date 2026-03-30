@@ -3792,6 +3792,7 @@ dependencies = [
  "log",
  "miniz_oxide 0.9.1",
  "reqwest 0.13.2",
+ "rmp-serde",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
@@ -3842,6 +3843,7 @@ dependencies = [
  "ntest",
  "serde_json",
  "tokio",
+ "tokio-stream",
  "tonic",
 ]
 
@@ -3917,6 +3919,7 @@ dependencies = [
  "kalamdb-configs",
  "kalamdb-core",
  "kalamdb-filestore",
+ "kalamdb-jobs",
  "kalamdb-raft",
  "kalamdb-session",
  "kalamdb-sql",
@@ -3926,6 +3929,7 @@ dependencies = [
  "mime_guess",
  "moka",
  "parking_lot",
+ "rmp-serde",
  "rust-embed",
  "serde",
  "serde_json",
@@ -3979,6 +3983,7 @@ dependencies = [
  "nanoid",
  "once_cell",
  "parking_lot",
+ "rmp-serde",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -4016,6 +4021,8 @@ dependencies = [
  "kalamdb-commons",
  "kalamdb-configs",
  "kalamdb-filestore",
+ "kalamdb-handlers",
+ "kalamdb-jobs",
  "kalamdb-observability",
  "kalamdb-pg",
  "kalamdb-publisher",
@@ -4096,6 +4103,67 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "kalamdb-handlers"
+version = "0.4.2-dev"
+dependencies = [
+ "arrow",
+ "async-trait",
+ "chrono",
+ "dashmap 6.1.0",
+ "datafusion",
+ "kalamdb-auth",
+ "kalamdb-commons",
+ "kalamdb-configs",
+ "kalamdb-core",
+ "kalamdb-filestore",
+ "kalamdb-jobs",
+ "kalamdb-publisher",
+ "kalamdb-raft",
+ "kalamdb-session",
+ "kalamdb-sql",
+ "kalamdb-store",
+ "kalamdb-system",
+ "kalamdb-tables",
+ "kalamdb-vector",
+ "kalamdb-views",
+ "log",
+ "serde",
+ "serde_json",
+ "sqlparser",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+ "zip",
+]
+
+[[package]]
+name = "kalamdb-jobs"
+version = "0.4.2-dev"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "datafusion",
+ "kalamdb-commons",
+ "kalamdb-core",
+ "kalamdb-observability",
+ "kalamdb-raft",
+ "kalamdb-sharding",
+ "kalamdb-store",
+ "kalamdb-system",
+ "kalamdb-tables",
+ "log",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
+ "zip",
 ]
 
 [[package]]
@@ -4227,6 +4295,8 @@ dependencies = [
  "kalamdb-configs",
  "kalamdb-core",
  "kalamdb-dba",
+ "kalamdb-handlers",
+ "kalamdb-jobs",
  "kalamdb-raft",
  "kalamdb-sharding",
  "kalamdb-sql",

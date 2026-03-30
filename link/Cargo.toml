@@ -25,6 +25,7 @@ tokio-tungstenite = { workspace = true, optional = true }
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
+rmp-serde = { workspace = true }
 
 # Byte buffers for upload streaming
 bytes = { workspace = true, optional = true }

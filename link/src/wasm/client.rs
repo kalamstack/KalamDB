@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -9,14 +9,17 @@ use wasm_bindgen_futures::JsFuture;
 use web_sys::{CloseEvent, ErrorEvent, MessageEvent, WebSocket};
 
 use crate::models::{
-    ClientMessage, ConnectionOptions, QueryRequest, ServerMessage, SubscriptionOptions,
-    SubscriptionRequest,
+    ClientMessage, ConnectionOptions, QueryRequest, SerializationType, ServerMessage,
+    SubscriptionOptions, SubscriptionRequest,
 };
 use base64::Engine;
 
 use super::auth::WasmAuthProvider;
 use super::console_log;
-use super::helpers::{create_promise, decode_ws_message, subscription_hash};
+use super::helpers::{
+    create_promise, decode_ws_binary_payload, decode_ws_message, send_ws_message,
+    subscription_hash,
+};
 use super::reconnect::{self, reconnect_internal_with_auth, resubscribe_all};
 use super::state::{
     callback_payload, filter_subscription_event, track_subscription_checkpoint,
@@ -25,13 +28,6 @@ use super::state::{
 use super::validation::{
     quote_table_name, validate_column_name, validate_row_id, validate_sql_identifier,
 };
-
-// Pre-serialized ping message to avoid re-serializing `ClientMessage::Ping`
-// on every keepalive tick. WASM is single-threaded, so a thread-local is safe.
-thread_local! {
-    pub(crate) static PING_PAYLOAD: String = serde_json::to_string(&ClientMessage::Ping)
-        .expect("ClientMessage::Ping serialization is infallible");
-}
 
 /// WASM-compatible KalamDB client with auto-reconnection support
 ///
@@ -113,6 +109,8 @@ pub struct KalamClient {
     /// The callback must return a Promise that resolves to an object of the
     /// shape `{ jwt: { token: string } }` or `{ none: null }`.
     auth_provider_cb: Rc<RefCell<Option<js_sys::Function>>>,
+    /// Negotiated serialization format for this WebSocket connection.
+    negotiated_ser: Rc<Cell<SerializationType>>,
 }
 
 impl KalamClient {
@@ -152,16 +150,11 @@ impl KalamClient {
                     options: subscription_options,
                 },
             };
-            let payload = serde_json::to_string(&subscribe_msg)
-                .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?;
             console_log(&format!(
                 "KalamClient: Sending subscribe request - id: {}, sql: {}",
                 subscription_id, sql
             ));
-            if let Some(cb) = self.on_send_cb.borrow().as_ref() {
-                let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&payload));
-            }
-            if let Err(error) = ws.send_with_str(&payload) {
+            if let Err(error) = send_ws_message(ws, &subscribe_msg, self.negotiated_ser.get()) {
                 self.subscription_state.borrow_mut().remove(&subscription_id);
                 return Err(error);
             }
@@ -193,6 +186,7 @@ impl KalamClient {
             on_receive_cb: Rc::new(RefCell::new(None)),
             on_send_cb: Rc::new(RefCell::new(None)),
             auth_provider_cb: Rc::new(RefCell::new(None)),
+            negotiated_ser: Rc::new(Cell::new(SerializationType::Json)),
         }
     }
 }
@@ -507,25 +501,30 @@ fn install_runtime_message_handler(
     ws: &WebSocket,
     subscriptions: Rc<RefCell<HashMap<String, SubscriptionState>>>,
     on_receive_cb: Rc<RefCell<Option<js_sys::Function>>>,
+    negotiated_ser: Rc<Cell<SerializationType>>,
 ) {
     let onmessage_callback = Closure::wrap(Box::new(move |e: MessageEvent| {
-        let message = match decode_ws_message(&e) {
-            Some(m) => m,
-            None => return,
-        };
+        let event: Option<ServerMessage> = (|| {
+            let data = e.data();
+            if data.is_instance_of::<js_sys::JsString>() {
+                let text: String = data.dyn_into::<js_sys::JsString>().ok()?.into();
+                if let Some(cb) = on_receive_cb.borrow().as_ref() {
+                    let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&text));
+                }
+                serde_json::from_str::<ServerMessage>(&text).ok()
+            } else if negotiated_ser.get() == SerializationType::MessagePack {
+                let raw = decode_ws_binary_payload(&e)?;
+                rmp_serde::from_slice::<ServerMessage>(&raw).ok()
+            } else {
+                let message = decode_ws_message(&e)?;
+                if let Some(cb) = on_receive_cb.borrow().as_ref() {
+                    let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&message));
+                }
+                serde_json::from_str::<ServerMessage>(&message).ok()
+            }
+        })();
 
-        if message.len() > 200 {
-            console_log(&format!(
-                "KalamClient: Received WebSocket message ({} bytes)",
-                message.len()
-            ));
-        }
-
-        if let Some(cb) = on_receive_cb.borrow().as_ref() {
-            let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&message));
-        }
-
-        if let Ok(event) = serde_json::from_str::<ServerMessage>(&message) {
+        if let Some(event) = event {
             if let Some(dispatch) = dispatch_subscription_server_message(&subscriptions, &event) {
                 dispatch.invoke();
             }
@@ -910,7 +909,8 @@ impl KalamClient {
         let (auth_promise, auth_resolve, auth_reject) = create_promise();
 
         // Clone auth message for the onopen handler
-        let auth_message = resolved_auth.to_ws_auth_message();
+        let protocol_opts = self.connection_options.borrow().protocol.clone();
+        let auth_message = resolved_auth.to_ws_auth_message(protocol_opts);
         let ws_clone_for_auth = ws.clone();
         let auth_resolve_for_anon = auth_resolve.clone();
         let on_send_for_open = Rc::clone(&self.on_send_cb);
@@ -1040,82 +1040,91 @@ impl KalamClient {
         let on_receive_for_msg = Rc::clone(&self.on_receive_cb);
         let on_connect_for_msg = Rc::clone(&self.on_connect_cb);
         let on_error_for_msg = Rc::clone(&self.on_error_cb);
+        let negotiated_ser_for_msg = Rc::clone(&self.negotiated_ser);
 
         let onmessage_callback = Closure::wrap(Box::new(move |e: MessageEvent| {
-            let message = match decode_ws_message(&e) {
-                Some(m) => m,
+            // Try to parse the message as a ServerMessage.
+            // Text frames are always JSON. Binary frames depend on negotiated format.
+            let event: Option<ServerMessage> = (|| {
+                let data = e.data();
+                if data.is_instance_of::<js_sys::JsString>() {
+                    // Text frame — always JSON (auth messages and JSON-mode data)
+                    let text: String = data.dyn_into::<js_sys::JsString>().ok()?.into();
+                    if let Some(cb) = on_receive_for_msg.borrow().as_ref() {
+                        let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&text));
+                    }
+                    serde_json::from_str::<ServerMessage>(&text).ok()
+                } else if negotiated_ser_for_msg.get() == SerializationType::MessagePack {
+                    // Binary frame with msgpack negotiated
+                    let raw = decode_ws_binary_payload(&e)?;
+                    rmp_serde::from_slice::<ServerMessage>(&raw).ok()
+                } else {
+                    // Binary frame with JSON (gzip-compressed JSON)
+                    let message = decode_ws_message(&e)?;
+                    if let Some(cb) = on_receive_for_msg.borrow().as_ref() {
+                        let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&message));
+                    }
+                    serde_json::from_str::<ServerMessage>(&message).ok()
+                }
+            })();
+
+            let event = match event {
+                Some(e) => e,
                 None => return,
             };
 
-            // SECURITY: Do not log full message content — it may contain
-            // sensitive row data.  Log only the message type for debugging.
-            if message.len() > 200 {
-                console_log(&format!(
-                    "KalamClient: Received WebSocket message ({} bytes)",
-                    message.len()
-                ));
+            // Check for authentication response first
+            if !*auth_handled_clone.borrow() {
+                match &event {
+                    ServerMessage::AuthSuccess { user_id, role, protocol } => {
+                        console_log(&format!(
+                            "KalamClient: Authentication successful - user_id: {}, role: {}",
+                            user_id, role
+                        ));
+                        // Store the negotiated serialization type
+                        negotiated_ser_for_msg.set(protocol.serialization);
+                        *auth_handled_clone.borrow_mut() = true;
+                        if let Some(cb) = on_connect_for_msg.borrow().as_ref() {
+                            let _ = cb.call0(&JsValue::NULL);
+                        }
+                        let _ = auth_resolve_clone.call0(&JsValue::NULL);
+                        return;
+                    },
+                    ServerMessage::AuthError { message: error_msg } => {
+                        console_log(&format!(
+                            "KalamClient: Authentication failed - {}",
+                            error_msg
+                        ));
+                        *auth_handled_clone.borrow_mut() = true;
+                        if let Some(cb) = on_error_for_msg.borrow().as_ref() {
+                            let err_obj = js_sys::Object::new();
+                            let _ = js_sys::Reflect::set(
+                                &err_obj,
+                                &"message".into(),
+                                &JsValue::from_str(&format!(
+                                    "Authentication failed: {}",
+                                    error_msg
+                                )),
+                            );
+                            let _ = js_sys::Reflect::set(
+                                &err_obj,
+                                &"recoverable".into(),
+                                &JsValue::FALSE,
+                            );
+                            let _ = cb.call1(&JsValue::NULL, &err_obj);
+                        }
+                        let error =
+                            JsValue::from_str(&format!("Authentication failed: {}", error_msg));
+                        let _ = auth_reject_clone2.call1(&JsValue::NULL, &error);
+                        return;
+                    },
+                    _ => {},
+                }
             }
 
-            // Emit on_receive callback for debug tracing
-            if let Some(cb) = on_receive_for_msg.borrow().as_ref() {
-                let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&message));
-            }
-
-            // Parse message using ServerMessage enum
-            if let Ok(event) = serde_json::from_str::<ServerMessage>(&message) {
-                // Check for authentication response first
-                if !*auth_handled_clone.borrow() {
-                    match &event {
-                        ServerMessage::AuthSuccess { user_id, role } => {
-                            console_log(&format!(
-                                "KalamClient: Authentication successful - user_id: {}, role: {}",
-                                user_id, role
-                            ));
-                            *auth_handled_clone.borrow_mut() = true;
-                            // Emit on_connect — connection is fully established and authenticated
-                            if let Some(cb) = on_connect_for_msg.borrow().as_ref() {
-                                let _ = cb.call0(&JsValue::NULL);
-                            }
-                            let _ = auth_resolve_clone.call0(&JsValue::NULL);
-                            return;
-                        },
-                        ServerMessage::AuthError { message: error_msg } => {
-                            console_log(&format!(
-                                "KalamClient: Authentication failed - {}",
-                                error_msg
-                            ));
-                            *auth_handled_clone.borrow_mut() = true;
-                            // Emit on_error for auth failure
-                            if let Some(cb) = on_error_for_msg.borrow().as_ref() {
-                                let err_obj = js_sys::Object::new();
-                                let _ = js_sys::Reflect::set(
-                                    &err_obj,
-                                    &"message".into(),
-                                    &JsValue::from_str(&format!(
-                                        "Authentication failed: {}",
-                                        error_msg
-                                    )),
-                                );
-                                let _ = js_sys::Reflect::set(
-                                    &err_obj,
-                                    &"recoverable".into(),
-                                    &JsValue::FALSE,
-                                );
-                                let _ = cb.call1(&JsValue::NULL, &err_obj);
-                            }
-                            let error =
-                                JsValue::from_str(&format!("Authentication failed: {}", error_msg));
-                            let _ = auth_reject_clone2.call1(&JsValue::NULL, &error);
-                            return;
-                        },
-                        _ => {}, // Not an auth message, continue to subscription handling
-                    }
-                }
-
-                if let Some(dispatch) = dispatch_subscription_server_message(&subscriptions, &event)
-                {
-                    dispatch.invoke();
-                }
+            if let Some(dispatch) = dispatch_subscription_server_message(&subscriptions, &event)
+            {
+                dispatch.invoke();
             }
         }) as Box<dyn FnMut(MessageEvent)>);
         ws.set_onmessage(Some(onmessage_callback.as_ref().unchecked_ref()));
@@ -1196,9 +1205,7 @@ impl KalamClient {
     pub fn send_ping(&self) -> Result<(), JsValue> {
         if let Some(ws) = self.ws.borrow().as_ref() {
             if ws.ready_state() == WebSocket::OPEN {
-                let payload = serde_json::to_string(&ClientMessage::Ping)
-                    .map_err(|e| JsValue::from_str(&format!("Ping serialization error: {}", e)))?;
-                ws.send_with_str(&payload)?;
+                send_ws_message(ws, &ClientMessage::Ping, self.negotiated_ser.get())?;
             }
         }
         Ok(())
@@ -1216,12 +1223,11 @@ impl KalamClient {
         }
 
         let ws_ref = Rc::clone(&self.ws);
+        let negotiated_ser_for_ping = Rc::clone(&self.negotiated_ser);
         let ping_cb = Closure::wrap(Box::new(move || {
             if let Some(ws) = ws_ref.borrow().as_ref() {
                 if ws.ready_state() == WebSocket::OPEN {
-                    PING_PAYLOAD.with(|payload| {
-                        let _ = ws.send_with_str(payload);
-                    });
+                    let _ = send_ws_message(ws, &ClientMessage::Ping, negotiated_ser_for_ping.get());
                 }
             }
         }) as Box<dyn FnMut()>);
@@ -1490,13 +1496,7 @@ impl KalamClient {
             let unsubscribe_msg = ClientMessage::Unsubscribe {
                 subscription_id: subscription_id.clone(),
             };
-            let payload = serde_json::to_string(&unsubscribe_msg)
-                .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))?;
-            // Emit on_send for debug tracing
-            if let Some(cb) = self.on_send_cb.borrow().as_ref() {
-                let _ = cb.call1(&JsValue::NULL, &JsValue::from_str(&payload));
-            }
-            ws.send_with_str(&payload)?;
+            send_ws_message(ws, &unsubscribe_msg, self.negotiated_ser.get())?;
         }
 
         console_log(&format!("KalamClient: Unsubscribed from: {}", subscription_id));
@@ -1985,6 +1985,7 @@ impl KalamClient {
             Rc::clone(&self.on_disconnect_cb),
             Rc::clone(&self.on_error_cb),
             Rc::clone(&self.on_receive_cb),
+            Rc::clone(&self.negotiated_ser),
         );
     }
 }
@@ -2005,6 +2006,7 @@ fn install_auto_reconnect_listener(
     on_disconnect_cb: Rc<RefCell<Option<js_sys::Function>>>,
     on_error_cb: Rc<RefCell<Option<js_sys::Function>>>,
     on_receive_cb: Rc<RefCell<Option<js_sys::Function>>>,
+    negotiated_ser: Rc<Cell<SerializationType>>,
 ) {
     let source_ws = ws.clone();
     let onclose_reconnect = Closure::wrap(Box::new(move |_e: CloseEvent| {
@@ -2056,6 +2058,7 @@ fn install_auto_reconnect_listener(
         let on_error_clone = on_error_cb.clone();
         let on_receive_clone = on_receive_cb.clone();
         let auth_provider_rc = auth_provider_cb.clone();
+        let negotiated_ser_clone = negotiated_ser.clone();
 
         let reconnect_fn = Closure::wrap(Box::new(move || {
             {
@@ -2093,6 +2096,8 @@ fn install_auto_reconnect_listener(
             let ws_ref_next = ws_ref_clone.clone();
             let ping_id_next = ping_interval_id_clone.clone();
             let auth_provider_next = auth_provider_rc.clone();
+            let negotiated_ser_inner = negotiated_ser_clone.clone();
+            let negotiated_ser_next = negotiated_ser_clone.clone();
 
             wasm_bindgen_futures::spawn_local(async move {
                 match reconnect_internal_with_auth(url, auth, cb, disable_compression).await {
@@ -2110,6 +2115,7 @@ fn install_auto_reconnect_listener(
                             &ws,
                             Rc::clone(&subscription_state),
                             Rc::clone(&on_receive),
+                            Rc::clone(&negotiated_ser_inner),
                         );
                         if let Some(cb) = on_connect.borrow().as_ref() {
                             let _ = cb.call0(&JsValue::NULL);
@@ -2131,9 +2137,10 @@ fn install_auto_reconnect_listener(
                             Rc::clone(&on_disconnect),
                             Rc::clone(&on_error),
                             Rc::clone(&on_receive),
+                            Rc::clone(&negotiated_ser_next),
                         );
-                        resubscribe_all(ws_ref.clone(), subscription_state).await;
-                        reconnect::restart_ping_timer(&ws_ref, &conn_opts, &ping_id);
+                        resubscribe_all(ws_ref.clone(), subscription_state, negotiated_ser_inner.get()).await;
+                        reconnect::restart_ping_timer(&ws_ref, &conn_opts, &ping_id, &negotiated_ser_inner);
                     },
                     Err(e) => {
                         console_log(&format!("KalamClient: Reconnection failed: {:?}", e));

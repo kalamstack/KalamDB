@@ -164,7 +164,10 @@ mod tests {
         let app_ctx = test_app_context_simple();
 
         // Register SqlExecutor into AppContext so DdlExecutor can clear plan cache.
-        let sql_executor = Arc::new(SqlExecutor::new(app_ctx.clone(), false));
+        let sql_executor = Arc::new(SqlExecutor::new(
+            app_ctx.clone(),
+            Arc::new(crate::sql::executor::handler_registry::HandlerRegistry::new(app_ctx.clone())),
+        ));
         app_ctx.set_sql_executor(sql_executor.clone());
 
         // Build a minimal STREAM table definition (avoids storage registry requirements).

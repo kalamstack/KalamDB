@@ -13,6 +13,7 @@ build = "../../build.rs"
 kalamdb-commons = { path = "../kalamdb-commons" }
 kalamdb-configs = { path = "../kalamdb-configs" }
 kalamdb-core = { path = "../kalamdb-core" }
+kalamdb-jobs = { path = "../kalamdb-jobs" }
 kalamdb-raft = { path = "../kalamdb-raft" }
 kalamdb-sql = { path = "../kalamdb-sql" }
 kalamdb-auth = { path = "../kalamdb-auth" }
@@ -32,6 +33,7 @@ actix-multipart = { workspace = true }
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
+rmp-serde = { workspace = true }
 
 
 # Bytes

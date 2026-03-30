@@ -23,7 +23,7 @@
 //! ```rust,ignore
 //! use kalamdb_core::sql::SqlExecutor;
 //!
-//! let executor = SqlExecutor::new(app_context, false);
+//! let executor = SqlExecutor::new(app_context, handler_registry);
 //! let result = executor.execute("SELECT * FROM users", None, None).await?;
 //! ```
 

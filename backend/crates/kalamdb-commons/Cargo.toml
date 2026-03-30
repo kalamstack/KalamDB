@@ -29,6 +29,7 @@ flexbuffers = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
 arrow = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
+rmp-serde = { workspace = true, optional = true }
 nanoid = { workspace = true, optional = true }
 log = { workspace = true, optional = true }
 tracing = { workspace = true }
@@ -71,6 +72,7 @@ arrow-utils = [
 	"rows",
 	]
 websocket-auth = ["serde"]
+msgpack = ["serde", "dep:rmp-serde"]
 # Full feature set including Arrow/DataFusion-backed utilities (for server use)
 full = [
 	"serde",
@@ -85,9 +87,10 @@ full = [
 	"dep:log",
  	"websocket-auth",
 	"dep:datafusion-common",
+	"msgpack",
 ]
 # WASM-compatible subset (no datafusion but has serialization)
-wasm = ["serde"]
+wasm = ["serde", "msgpack"]
 default = ["full"]
 
 [lib]

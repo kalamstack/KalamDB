@@ -11,11 +11,45 @@ use kalamdb_configs::ServerConfig;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::sql::context::ExecutionContext;
 use kalamdb_core::sql::context::ExecutionResult;
+use kalamdb_core::sql::executor::handler_registry::HandlerRegistry;
 use kalamdb_core::sql::executor::SqlExecutor;
+use kalamdb_jobs::executors::{
+    BackupExecutor, CleanupExecutor, CompactExecutor, FlushExecutor, JobRegistry, RestoreExecutor,
+    RetentionExecutor, StreamEvictionExecutor, UserCleanupExecutor, VectorIndexExecutor,
+};
+use kalamdb_jobs::JobsManager;
 use kalamdb_store::test_utils::TestDb;
 use kalamdb_system::providers::storages::models::StorageType;
 use kalamdb_system::Storage;
 use std::sync::Arc;
+
+fn create_executor(app_context: Arc<AppContext>) -> SqlExecutor {
+    let registry = Arc::new(HandlerRegistry::new(app_context.clone()));
+    kalamdb_handlers::register_all_handlers(&registry, app_context.clone(), false);
+    SqlExecutor::new(app_context, registry)
+}
+
+fn init_job_manager(app_context: &Arc<AppContext>) {
+    let registry = Arc::new(JobRegistry::new());
+    registry.register(Arc::new(FlushExecutor::new()));
+    registry.register(Arc::new(CleanupExecutor::new()));
+    registry.register(Arc::new(RetentionExecutor::new()));
+    registry.register(Arc::new(StreamEvictionExecutor::new()));
+    registry.register(Arc::new(UserCleanupExecutor::new()));
+    registry.register(Arc::new(CompactExecutor::new()));
+    registry.register(Arc::new(BackupExecutor::new()));
+    registry.register(Arc::new(RestoreExecutor::new()));
+    registry.register(Arc::new(VectorIndexExecutor::new()));
+    let jobs_provider = app_context.system_tables().jobs();
+    let job_nodes_provider = app_context.system_tables().job_nodes();
+    let job_manager = Arc::new(JobsManager::new(
+        jobs_provider,
+        job_nodes_provider,
+        registry,
+        Arc::clone(app_context),
+    ));
+    app_context.set_job_manager(job_manager.clone(), job_manager);
+}
 
 /// Helper to create AppContext with temporary RocksDB for testing
 async fn create_test_app_context() -> (Arc<AppContext>, TestDb) {
@@ -58,6 +92,7 @@ async fn create_test_app_context() -> (Arc<AppContext>, TestDb) {
             .expect("Failed to create default local storage");
     }
 
+    init_job_manager(&app_context);
     (app_context, test_db)
 }
 
@@ -65,7 +100,7 @@ async fn create_test_app_context() -> (Arc<AppContext>, TestDb) {
 #[ignore = "Requires Raft for CREATE NAMESPACE"]
 async fn test_typed_handler_create_namespace() {
     let (app_ctx, _test_db) = create_test_app_context().await;
-    let executor = SqlExecutor::new(Arc::clone(&app_ctx), false);
+    let executor = create_executor(Arc::clone(&app_ctx));
     let exec_ctx =
         ExecutionContext::new(UserId::from("admin"), Role::Dba, app_ctx.base_session_context());
 
@@ -88,7 +123,7 @@ async fn test_typed_handler_create_namespace() {
 #[tokio::test]
 async fn test_typed_handler_authorization() {
     let (app_ctx, _temp_dir) = create_test_app_context().await;
-    let executor = SqlExecutor::new(Arc::clone(&app_ctx), false);
+    let executor = create_executor(Arc::clone(&app_ctx));
     let user_ctx = ExecutionContext::new(
         UserId::from("regular_user"),
         Role::User,
@@ -107,7 +142,7 @@ async fn test_classifier_prioritizes_select() {
     // This test verifies that SELECT queries go through the fast path
     // without attempting DDL parsing
     let (app_ctx, _temp_dir) = create_test_app_context().await;
-    let executor = SqlExecutor::new(Arc::clone(&app_ctx), false);
+    let executor = create_executor(Arc::clone(&app_ctx));
     let exec_ctx =
         ExecutionContext::new(UserId::from("user"), Role::User, app_ctx.base_session_context());
 
@@ -123,7 +158,7 @@ async fn test_classifier_prioritizes_select() {
 #[ntest::timeout(90000)]
 async fn test_storage_flush_table_returns_noop_when_no_pending_writes() {
     let (app_ctx, _temp_dir) = create_test_app_context().await;
-    let executor = SqlExecutor::new(Arc::clone(&app_ctx), false);
+    let executor = create_executor(Arc::clone(&app_ctx));
     let exec_ctx =
         ExecutionContext::new(UserId::from("admin"), Role::Dba, app_ctx.base_session_context());
 
@@ -156,7 +191,7 @@ async fn test_storage_flush_table_returns_noop_when_no_pending_writes() {
 #[ntest::timeout(90000)]
 async fn test_storage_flush_table_returns_noop_when_flush_already_in_progress() {
     let (app_ctx, _temp_dir) = create_test_app_context().await;
-    let executor = SqlExecutor::new(Arc::clone(&app_ctx), false);
+    let executor = create_executor(Arc::clone(&app_ctx));
     let exec_ctx =
         ExecutionContext::new(UserId::from("admin"), Role::Dba, app_ctx.base_session_context());
 

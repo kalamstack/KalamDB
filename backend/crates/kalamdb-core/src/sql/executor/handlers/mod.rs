@@ -18,22 +18,8 @@
 use crate::error::KalamDbError;
 use kalamdb_sql::classifier::SqlStatement;
 
-// Typed handlers organized by category
-pub mod backup;
-pub mod cluster;
-pub mod compact;
-pub mod export;
-pub mod flush;
-pub mod jobs;
-pub mod namespace;
-pub mod storage;
-pub mod subscription;
-pub mod system;
-pub mod table;
-pub mod topics;
+// Typed handler trait (stays in core; handler impls are in kalamdb-handlers)
 pub mod typed;
-pub mod user;
-pub mod view;
 
 // Re-export core types from executor/models for convenience
 pub use crate::sql::context::{ExecutionContext, ExecutionMetadata, ExecutionResult, ScalarValue};

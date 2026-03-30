@@ -289,7 +289,7 @@ impl MetaApplier for ProviderMetaApplier {
         // This provides instant dispatch rather than relying on polling
         let this_node_id = *self.app_context.node_id().as_ref();
         if node_id == this_node_id {
-            self.app_context.job_manager().awake_job(job_id.clone());
+            self.app_context.job_waker().awake_job(job_id.clone());
         }
 
         Ok(format!("Job node {} created and awakened", node_id))

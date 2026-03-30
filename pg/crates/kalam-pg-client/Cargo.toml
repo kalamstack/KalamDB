@@ -27,4 +27,5 @@ async-trait = { workspace = true }
 kalamdb-pg = { path = "../../../backend/crates/kalamdb-pg", features = ["server"] }
 ntest = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio-stream = { workspace = true }
 tonic = { workspace = true }

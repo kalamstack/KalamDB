@@ -8,8 +8,14 @@ use kalamdb_commons::{NodeId, Role, UserId};
 use kalamdb_configs::ServerConfig;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult};
+use kalamdb_core::sql::executor::handler_registry::HandlerRegistry;
 use kalamdb_core::sql::executor::SqlExecutor;
 use kalamdb_core::vector::flush_shared_scope_vectors;
+use kalamdb_jobs::executors::{
+    BackupExecutor, CleanupExecutor, CompactExecutor, FlushExecutor, JobRegistry, RestoreExecutor,
+    RetentionExecutor, StreamEvictionExecutor, UserCleanupExecutor, VectorIndexExecutor,
+};
+use kalamdb_jobs::JobsManager;
 use kalamdb_store::test_utils::TestDb;
 use kalamdb_store::EntityStore;
 use kalamdb_store::Partition;
@@ -20,6 +26,34 @@ use kalamdb_vector::{
     shared_vector_pk_index_partition_name, SharedVectorHotOpId, VectorHotOp, VectorHotOpType,
 };
 use std::sync::Arc;
+
+fn create_executor(app_context: Arc<AppContext>) -> SqlExecutor {
+    let registry = Arc::new(HandlerRegistry::new(app_context.clone()));
+    kalamdb_handlers::register_all_handlers(&registry, app_context.clone(), false);
+    SqlExecutor::new(app_context, registry)
+}
+
+fn init_job_manager(app_context: &Arc<AppContext>) {
+    let registry = Arc::new(JobRegistry::new());
+    registry.register(Arc::new(FlushExecutor::new()));
+    registry.register(Arc::new(CleanupExecutor::new()));
+    registry.register(Arc::new(RetentionExecutor::new()));
+    registry.register(Arc::new(StreamEvictionExecutor::new()));
+    registry.register(Arc::new(UserCleanupExecutor::new()));
+    registry.register(Arc::new(CompactExecutor::new()));
+    registry.register(Arc::new(BackupExecutor::new()));
+    registry.register(Arc::new(RestoreExecutor::new()));
+    registry.register(Arc::new(VectorIndexExecutor::new()));
+    let jobs_provider = app_context.system_tables().jobs();
+    let job_nodes_provider = app_context.system_tables().job_nodes();
+    let job_manager = Arc::new(JobsManager::new(
+        jobs_provider,
+        job_nodes_provider,
+        registry,
+        Arc::clone(app_context),
+    ));
+    app_context.set_job_manager(job_manager.clone(), job_manager);
+}
 
 async fn create_test_app_context() -> (Arc<AppContext>, TestDb) {
     let test_db = TestDb::with_system_tables().expect("Failed to create test database");
@@ -61,6 +95,7 @@ async fn create_test_app_context() -> (Arc<AppContext>, TestDb) {
             .expect("Failed to create default local storage");
     }
 
+    init_job_manager(&app_context);
     (app_context, test_db)
 }
 
@@ -171,7 +206,7 @@ async fn setup_vector_table(executor: &SqlExecutor, exec_ctx: &ExecutionContext)
 async fn test_cosine_distance_order_by_syntax_on_table() {
     let (app_context, _temp_dir) = create_test_app_context().await;
     let exec_ctx = create_exec_context(app_context.clone());
-    let executor = SqlExecutor::new(app_context.clone(), false);
+    let executor = create_executor(app_context.clone());
 
     setup_vector_table(&executor, &exec_ctx).await;
 
@@ -200,7 +235,7 @@ async fn test_cosine_distance_order_by_syntax_on_table() {
 async fn test_create_and_drop_vector_index_lifecycle() {
     let (app_context, _temp_dir) = create_test_app_context().await;
     let exec_ctx = create_exec_context(app_context.clone());
-    let executor = SqlExecutor::new(app_context.clone(), false);
+    let executor = create_executor(app_context.clone());
 
     setup_vector_table(&executor, &exec_ctx).await;
 
@@ -344,7 +379,7 @@ async fn test_create_and_drop_vector_index_lifecycle() {
 async fn test_multiple_vector_indexes_flush_and_selection() {
     let (app_context, _temp_dir) = create_test_app_context().await;
     let exec_ctx = create_exec_context(app_context.clone());
-    let executor = SqlExecutor::new(app_context.clone(), false);
+    let executor = create_executor(app_context.clone());
 
     setup_vector_table(&executor, &exec_ctx).await;
 
@@ -452,7 +487,7 @@ async fn test_multiple_vector_indexes_flush_and_selection() {
 async fn test_vector_search_with_hundred_rows_real_embeddings() {
     let (app_context, _temp_dir) = create_test_app_context().await;
     let exec_ctx = create_exec_context(app_context.clone());
-    let executor = SqlExecutor::new(app_context.clone(), false);
+    let executor = create_executor(app_context.clone());
 
     execute_sql(&executor, &exec_ctx, "CREATE NAMESPACE test_ns").await;
     execute_sql(
@@ -560,7 +595,7 @@ async fn test_vector_search_with_hundred_rows_real_embeddings() {
 async fn test_cosine_distance_query_combines_hot_and_cold_rows_after_index_flush() {
     let (app_context, _temp_dir) = create_test_app_context().await;
     let exec_ctx = create_exec_context(app_context.clone());
-    let executor = SqlExecutor::new(app_context.clone(), false);
+    let executor = create_executor(app_context.clone());
 
     execute_sql(&executor, &exec_ctx, "CREATE NAMESPACE test_ns").await;
     execute_sql(
@@ -674,7 +709,7 @@ async fn test_cosine_distance_query_combines_hot_and_cold_rows_after_index_flush
 async fn test_vector_index_multiple_flush_cycles_and_watermark() {
     let (app_context, _temp_dir) = create_test_app_context().await;
     let exec_ctx = create_exec_context(app_context.clone());
-    let executor = SqlExecutor::new(app_context.clone(), false);
+    let executor = create_executor(app_context.clone());
 
     execute_sql(&executor, &exec_ctx, "CREATE NAMESPACE test_ns").await;
     execute_sql(
@@ -823,7 +858,7 @@ async fn test_vector_index_multiple_flush_cycles_and_watermark() {
 async fn test_cosine_distance_query_combines_hot_and_cold_rows() {
     let (app_context, _temp_dir) = create_test_app_context().await;
     let exec_ctx = create_exec_context(app_context.clone());
-    let executor = SqlExecutor::new(app_context.clone(), false);
+    let executor = create_executor(app_context.clone());
 
     execute_sql(&executor, &exec_ctx, "CREATE NAMESPACE test_ns").await;
     execute_sql(
@@ -872,7 +907,7 @@ async fn test_cosine_distance_query_combines_hot_and_cold_rows() {
 async fn test_vector_delete_stages_hot_tombstone_and_flushes_cleanup() {
     let (app_context, _temp_dir) = create_test_app_context().await;
     let exec_ctx = create_exec_context(app_context.clone());
-    let executor = SqlExecutor::new(app_context.clone(), false);
+    let executor = create_executor(app_context.clone());
 
     execute_sql(&executor, &exec_ctx, "CREATE NAMESPACE test_ns").await;
     execute_sql(
@@ -1022,7 +1057,7 @@ async fn test_vector_delete_stages_hot_tombstone_and_flushes_cleanup() {
 async fn test_multiple_vector_indexes_with_mixed_rows_and_null_embeddings() {
     let (app_context, _temp_dir) = create_test_app_context().await;
     let exec_ctx = create_exec_context(app_context.clone());
-    let executor = SqlExecutor::new(app_context.clone(), false);
+    let executor = create_executor(app_context.clone());
 
     execute_sql(&executor, &exec_ctx, "CREATE NAMESPACE test_ns").await;
     execute_sql(

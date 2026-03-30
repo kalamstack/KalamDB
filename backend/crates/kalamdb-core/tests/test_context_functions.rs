@@ -9,10 +9,17 @@ use kalamdb_core::app_context::AppContext;
 use kalamdb_core::sql::context::ExecutionContext;
 use kalamdb_core::sql::context::ExecutionResult;
 use kalamdb_core::sql::datafusion_session::DataFusionSessionFactory;
+use kalamdb_core::sql::executor::handler_registry::HandlerRegistry;
 use kalamdb_core::sql::executor::SqlExecutor;
 use kalamdb_session::AuthSession;
 use kalamdb_store::test_utils::TestDb;
 use std::sync::Arc;
+
+fn create_executor(app_context: Arc<AppContext>) -> SqlExecutor {
+    let registry = Arc::new(HandlerRegistry::new(app_context.clone()));
+    kalamdb_handlers::register_all_handlers(&registry, app_context.clone(), false);
+    SqlExecutor::new(app_context, registry)
+}
 
 /// Helper to create a simple test session with custom functions registered
 fn create_test_session() -> Arc<SessionContext> {
@@ -382,7 +389,7 @@ async fn test_sql_standard_context_function_aliases() {
     );
 
     let exec_ctx = ExecutionContext::from_session(auth_session, app_context.base_session_context());
-    let executor = SqlExecutor::new(app_context, false);
+    let executor = create_executor(app_context);
 
     let result = executor
         .execute(

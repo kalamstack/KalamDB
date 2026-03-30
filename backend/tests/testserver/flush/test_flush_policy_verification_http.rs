@@ -17,7 +17,8 @@ use super::test_support::jobs::{
 };
 use kalam_link::models::ResponseStatus;
 use kalamdb_commons::Role;
-use kalamdb_core::jobs::FlushScheduler;
+use kalamdb_jobs::FlushScheduler;
+use kalamdb_jobs::AppContextJobsExt;
 use tokio::time::Duration;
 
 async fn count_matching_flush_jobs(

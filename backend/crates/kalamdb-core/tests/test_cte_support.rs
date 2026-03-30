@@ -14,11 +14,19 @@ use kalamdb_commons::{NodeId, Role, UserId};
 use kalamdb_configs::ServerConfig;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult};
+use kalamdb_core::sql::executor::handler_registry::HandlerRegistry;
 use kalamdb_core::sql::executor::SqlExecutor;
 use kalamdb_store::test_utils::TestDb;
 use kalamdb_system::providers::storages::models::StorageType;
 use kalamdb_system::Storage;
 use std::sync::Arc;
+
+/// Helper to create a fully-wired SqlExecutor with all handlers registered.
+fn create_executor(app_context: Arc<AppContext>) -> SqlExecutor {
+    let registry = Arc::new(HandlerRegistry::new(app_context.clone()));
+    kalamdb_handlers::register_all_handlers(&registry, app_context.clone(), false);
+    SqlExecutor::new(app_context, registry)
+}
 
 /// Helper to create AppContext with temporary RocksDB for testing
 async fn create_test_app_context() -> (Arc<AppContext>, TestDb) {
@@ -128,7 +136,7 @@ async fn setup_test_table(
 async fn test_simple_cte() {
     let (app_context, _temp_dir) = create_test_app_context().await;
     let exec_ctx = create_exec_context_with_app_context(app_context.clone(), "u_admin", Role::Dba);
-    let executor = SqlExecutor::new(app_context.clone(), false);
+    let executor = create_executor(app_context.clone());
 
     // Setup test data
     setup_test_table(&executor, &exec_ctx).await.unwrap();
@@ -167,7 +175,7 @@ async fn test_simple_cte() {
 async fn test_cte_with_aggregation() {
     let (app_context, _temp_dir) = create_test_app_context().await;
     let exec_ctx = create_exec_context_with_app_context(app_context.clone(), "u_admin", Role::Dba);
-    let executor = SqlExecutor::new(app_context.clone(), false);
+    let executor = create_executor(app_context.clone());
 
     // Setup test data
     setup_test_table(&executor, &exec_ctx).await.unwrap();
@@ -213,7 +221,7 @@ async fn test_cte_with_aggregation() {
 async fn test_multiple_ctes() {
     let (app_context, _temp_dir) = create_test_app_context().await;
     let exec_ctx = create_exec_context_with_app_context(app_context.clone(), "u_admin", Role::Dba);
-    let executor = SqlExecutor::new(app_context.clone(), false);
+    let executor = create_executor(app_context.clone());
 
     // Setup test data
     setup_test_table(&executor, &exec_ctx).await.unwrap();
@@ -261,7 +269,7 @@ async fn test_multiple_ctes() {
 async fn test_chained_ctes() {
     let (app_context, _temp_dir) = create_test_app_context().await;
     let exec_ctx = create_exec_context_with_app_context(app_context.clone(), "u_admin", Role::Dba);
-    let executor = SqlExecutor::new(app_context.clone(), false);
+    let executor = create_executor(app_context.clone());
 
     // Setup test data
     setup_test_table(&executor, &exec_ctx).await.unwrap();
@@ -308,7 +316,7 @@ async fn test_chained_ctes() {
 async fn test_cte_with_where_clause() {
     let (app_context, _temp_dir) = create_test_app_context().await;
     let exec_ctx = create_exec_context_with_app_context(app_context.clone(), "u_admin", Role::Dba);
-    let executor = SqlExecutor::new(app_context.clone(), false);
+    let executor = create_executor(app_context.clone());
 
     // Setup test data
     setup_test_table(&executor, &exec_ctx).await.unwrap();
@@ -349,7 +357,7 @@ async fn test_cte_with_where_clause() {
 async fn test_cte_with_limit() {
     let (app_context, _temp_dir) = create_test_app_context().await;
     let exec_ctx = create_exec_context_with_app_context(app_context.clone(), "u_admin", Role::Dba);
-    let executor = SqlExecutor::new(app_context.clone(), false);
+    let executor = create_executor(app_context.clone());
 
     // Setup test data
     setup_test_table(&executor, &exec_ctx).await.unwrap();
@@ -392,7 +400,7 @@ async fn test_cte_with_limit() {
 async fn test_cte_syntax_error() {
     let (app_context, _temp_dir) = create_test_app_context().await;
     let exec_ctx = create_exec_context_with_app_context(app_context.clone(), "u_admin", Role::Dba);
-    let executor = SqlExecutor::new(app_context.clone(), false);
+    let executor = create_executor(app_context.clone());
 
     // Setup test data
     setup_test_table(&executor, &exec_ctx).await.unwrap();
@@ -421,7 +429,7 @@ async fn test_cte_syntax_error() {
 async fn test_cte_undefined_table() {
     let (app_context, _temp_dir) = create_test_app_context().await;
     let exec_ctx = create_exec_context_with_app_context(app_context.clone(), "u_admin", Role::Dba);
-    let executor = SqlExecutor::new(app_context.clone(), false);
+    let executor = create_executor(app_context.clone());
 
     // No setup - testing undefined table
 

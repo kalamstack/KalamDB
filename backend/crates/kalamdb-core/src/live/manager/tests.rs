@@ -155,7 +155,10 @@ async fn create_test_manager() -> (Arc<ConnectionsManager>, LiveQueryManager, Te
         base_session_context,
         Arc::clone(&app_ctx),
     );
-    let sql_executor = Arc::new(SqlExecutor::new(app_ctx, false));
+    let sql_executor = Arc::new(SqlExecutor::new(
+        app_ctx.clone(),
+        Arc::new(crate::sql::executor::handler_registry::HandlerRegistry::new(app_ctx.clone())),
+    ));
     manager.set_sql_executor(sql_executor);
     (connection_registry, manager, test_db)
 }

@@ -5,6 +5,7 @@ use kalamdb_commons::{models::UserName, AuthType, Role, StorageId, UserId};
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::error::KalamDbError;
 use kalamdb_core::sql::{ExecutionContext, ExecutionResult, SqlExecutor};
+use kalamdb_core::sql::executor::handler_registry::HandlerRegistry;
 use kalamdb_system::providers::storages::models::StorageMode;
 use std::sync::Arc;
 
@@ -17,7 +18,9 @@ async fn setup_executor(
     let session_context = server.session_context.clone();
 
     // Create SqlExecutor with desired password complexity enforcement
-    let executor = SqlExecutor::new(app_context.clone(), enforce_complexity);
+    let registry = Arc::new(HandlerRegistry::new(app_context.clone()));
+    kalamdb_handlers::register_all_handlers(&registry, app_context.clone(), enforce_complexity);
+    let executor = SqlExecutor::new(app_context.clone(), registry);
 
     (executor, app_context, session_context)
 }

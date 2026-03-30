@@ -10,6 +10,7 @@
 //! eliminating the need to pass connection_id as a separate parameter.
 //!
 //! Messages are compressed with gzip when they exceed 512 bytes.
+//! When the client negotiates MessagePack, payloads are sent as binary frames.
 
 pub mod auth;
 pub mod batch;
@@ -18,6 +19,7 @@ pub mod subscription;
 pub mod unsubscribe;
 
 use actix_ws::{CloseCode, CloseReason, Session};
+use kalamdb_commons::websocket::SerializationType;
 use kalamdb_commons::WebSocketMessage;
 
 use crate::compression::{is_gzip, maybe_compress};
@@ -68,6 +70,29 @@ pub async fn send_json<T: serde::Serialize>(
     }
 }
 
+/// Protocol-aware message sender.
+///
+/// Serializes `msg` using the connection's negotiated serialization type:
+/// - **Json**: serialized to JSON text, optionally gzip-compressed.
+/// - **MessagePack**: serialized to msgpack binary, optionally gzip-compressed.
+///
+/// The `compress` flag respects the `?compress=false` query-parameter override
+/// and the negotiated `CompressionType`.
+pub async fn send_message<T: serde::Serialize>(
+    session: &mut Session,
+    msg: &T,
+    serialization: SerializationType,
+    compress: bool,
+) -> Result<(), ()> {
+    match serialization {
+        SerializationType::Json => send_json(session, msg, compress).await,
+        SerializationType::MessagePack => {
+            let bytes = rmp_serde::to_vec_named(msg).map_err(|_| ())?;
+            send_data_binary(session, &bytes, compress).await
+        },
+    }
+}
+
 /// Send raw data with optional compression.
 ///
 /// When `compress` is `true`, messages over 512 bytes are gzip compressed and
@@ -90,4 +115,20 @@ async fn send_data(session: &mut Session, data: &[u8], compress: bool) -> Result
         let text = String::from_utf8_lossy(&payload);
         session.text(text.into_owned()).await.map_err(|_| ())
     }
+}
+
+/// Send binary data (msgpack or already-binary) with optional gzip compression.
+///
+/// Always sends as a binary WebSocket frame (never text).
+async fn send_data_binary(
+    session: &mut Session,
+    data: &[u8],
+    compress: bool,
+) -> Result<(), ()> {
+    if !compress {
+        return session.binary(data.to_vec()).await.map_err(|_| ());
+    }
+
+    let (payload, _compressed) = maybe_compress(data);
+    session.binary(payload).await.map_err(|_| ())
 }

@@ -8,6 +8,7 @@ use web_sys::{Headers, MessageEvent, Request, RequestInit, RequestMode, Response
 
 use super::console_log;
 use crate::compression;
+use crate::models::SerializationType;
 
 #[inline]
 pub(crate) fn ws_url_from_http_opts(
@@ -192,4 +193,42 @@ pub(crate) fn decode_ws_message(e: &MessageEvent) -> Option<String> {
         &data_preview[..data_preview.len().min(200)]
     ));
     None
+}
+
+/// Extract raw bytes from a binary WebSocket frame, decompressing gzip if needed.
+///
+/// Returns `None` if the frame is not a binary `ArrayBuffer`.
+#[inline]
+pub(crate) fn decode_ws_binary_payload(e: &MessageEvent) -> Option<Vec<u8>> {
+    let data = e.data();
+    if let Ok(array_buffer) = data.dyn_into::<js_sys::ArrayBuffer>() {
+        let uint8_array = js_sys::Uint8Array::new(&array_buffer);
+        let raw = uint8_array.to_vec();
+        let decompressed = compression::decompress_if_gzip(&raw);
+        Some(decompressed.into_owned())
+    } else {
+        None
+    }
+}
+
+/// Send a `ClientMessage` using the negotiated serialization format.
+///
+/// JSON messages are sent as text frames; MessagePack messages as binary frames.
+pub(crate) fn send_ws_message(
+    ws: &web_sys::WebSocket,
+    msg: &crate::models::ClientMessage,
+    serialization: SerializationType,
+) -> Result<(), JsValue> {
+    match serialization {
+        SerializationType::Json => {
+            let json = serde_json::to_string(msg)
+                .map_err(|e| JsValue::from_str(&format!("JSON serialization error: {}", e)))?;
+            ws.send_with_str(&json)
+        },
+        SerializationType::MessagePack => {
+            let bytes = rmp_serde::to_vec_named(msg)
+                .map_err(|e| JsValue::from_str(&format!("MessagePack serialization error: {}", e)))?;
+            ws.send_with_u8_array(&bytes)
+        },
+    }
 }

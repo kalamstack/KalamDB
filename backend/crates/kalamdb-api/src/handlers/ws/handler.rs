@@ -14,12 +14,12 @@
 use actix_web::{get, web, Error, HttpRequest, HttpResponse};
 use actix_ws::{CloseCode, CloseReason, Message, ProtocolError, Session};
 use futures_util::StreamExt;
-use kalamdb_auth::UserRepository;
-use kalamdb_commons::models::ConnectionInfo;
-use kalamdb_commons::websocket::ClientMessage;
-use kalamdb_commons::WebSocketMessage;
+use kalamdb_auth::{authenticate, AuthRequest, UserRepository};
+use kalamdb_commons::models::{ConnectionInfo, UserId};
+use kalamdb_commons::websocket::{ClientMessage, CompressionType, ProtocolOptions, SerializationType};
+use kalamdb_commons::{Role, WebSocketMessage};
 use kalamdb_core::app_context::AppContext;
-use kalamdb_core::jobs::health_monitor::{
+use kalamdb_jobs::health_monitor::{
     decrement_websocket_sessions, increment_websocket_sessions,
 };
 use kalamdb_core::live::{
@@ -27,6 +27,39 @@ use kalamdb_core::live::{
 };
 use log::{debug, error, info, warn};
 use std::sync::Arc;
+
+/// Pre-authenticated connection information extracted from the HTTP upgrade
+/// request's `Authorization: Bearer` header.
+struct UpgradeAuth {
+    user_id: UserId,
+    role: Role,
+    protocol: ProtocolOptions,
+}
+
+/// Parse protocol options from the WebSocket upgrade query string.
+///
+/// Supports: `serialization=msgpack` (default json), `compression=none` (default gzip).
+fn parse_protocol_from_query(query: &str) -> ProtocolOptions {
+    let mut protocol = ProtocolOptions::default();
+    for kv in query.split('&') {
+        if let Some((key, value)) = kv.split_once('=') {
+            match key {
+                "serialization" => {
+                    if value.eq_ignore_ascii_case("msgpack") {
+                        protocol.serialization = SerializationType::MessagePack;
+                    }
+                },
+                "compression" => {
+                    if value.eq_ignore_ascii_case("none") {
+                        protocol.compression = CompressionType::None;
+                    }
+                },
+                _ => {},
+            }
+        }
+    }
+    protocol
+}
 
 /// Returns `true` for WebSocket errors that represent a normal client
 /// disconnect rather than a server-side fault.
@@ -64,8 +97,9 @@ fn is_expected_ws_disconnect(e: &ProtocolError) -> bool {
 }
 
 use super::events::{
-    auth::handle_authenticate, batch::handle_next_batch, cleanup::cleanup_connection, send_error,
-    send_json, subscription::handle_subscribe, unsubscribe::handle_unsubscribe,
+    auth::{complete_ws_auth, handle_authenticate, send_current_auth_success},
+    batch::handle_next_batch, cleanup::cleanup_connection, send_error,
+    send_json, send_message, subscription::handle_subscribe, unsubscribe::handle_unsubscribe,
 };
 use crate::handlers::ws::models::WsErrorCode;
 use crate::limiter::RateLimiter;
@@ -123,6 +157,39 @@ pub async fn websocket_handler(
         .split('&')
         .any(|kv| kv.eq_ignore_ascii_case("compress=false"));
 
+    // --- Header-auth fast path: validate JWT from upgrade request headers ---
+    // If the Authorization header carries a valid Bearer token, authenticate
+    // during the HTTP upgrade so the client can skip the explicit Authenticate
+    // message round-trip. Invalid tokens are rejected immediately with 401.
+    let pre_auth = if let Some(auth_header) = req.headers().get("Authorization") {
+        if let Ok(auth_str) = auth_header.to_str() {
+            if let Some(token) = auth_str.strip_prefix("Bearer ") {
+                let client_ip_for_auth = kalamdb_auth::extract_client_ip_secure(&req);
+                let auth_request = AuthRequest::Jwt { token: token.to_string() };
+                match authenticate(auth_request, &client_ip_for_auth, user_repo.get_ref()).await {
+                    Ok(result) => {
+                        let protocol = parse_protocol_from_query(req.query_string());
+                        Some(UpgradeAuth {
+                            user_id: result.user.user_id,
+                            role: result.user.role,
+                            protocol,
+                        })
+                    },
+                    Err(_) => {
+                        warn!("WebSocket upgrade rejected: invalid Bearer token");
+                        return Ok(HttpResponse::Unauthorized().body("Invalid token"));
+                    },
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     // Generate unique connection ID
     let connection_id = ConnectionId::new(uuid::Uuid::new_v4().simple().to_string());
 
@@ -136,7 +203,11 @@ pub async fn websocket_handler(
     )
     .entered();
 
-    debug!("New WebSocket connection: {} (auth required within 3s)", connection_id);
+    debug!(
+        "New WebSocket connection: {} (pre_auth={})",
+        connection_id,
+        if pre_auth.is_some() { "header" } else { "pending" }
+    );
 
     // Register connection with unified registry (handles heartbeat tracking)
     let registration =
@@ -175,6 +246,7 @@ pub async fn websocket_handler(
             user_repository,
             max_message_size,
             compression_enabled,
+            pre_auth,
         )
         .await;
 
@@ -201,6 +273,7 @@ async fn handle_websocket(
     user_repo: Arc<dyn UserRepository>,
     max_message_size: usize,
     compression_enabled: bool,
+    pre_auth: Option<UpgradeAuth>,
 ) {
     let mut event_rx = registration.event_rx;
     let mut notification_rx = registration.notification_rx;
@@ -211,6 +284,23 @@ async fn handle_websocket(
     {
         let mut session = session;
         let mut msg_stream = msg_stream;
+
+        // Header-auth fast path: if JWT was validated during HTTP upgrade,
+        // mark authenticated immediately and send AuthSuccess as the first frame.
+        if let Some(auth) = pre_auth {
+            connection_state.mark_auth_started();
+            let _ = complete_ws_auth(
+                &connection_state,
+                &registry,
+                auth.user_id,
+                auth.role,
+                auth.protocol,
+                &mut session,
+                compression_enabled,
+            )
+            .await;
+            debug!("WebSocket pre-authenticated from header: {}", connection_id);
+        }
 
         loop {
             tokio::select! {
@@ -307,9 +397,66 @@ async fn handle_websocket(
                                 break;
                             }
                         }
-                        Some(Ok(Message::Binary(_))) => {
-                            warn!("Binary messages not supported: {}", connection_id);
-                            let _ = send_error(&mut session, "protocol", WsErrorCode::UnsupportedData, "Binary not supported", compression_enabled).await;
+                        Some(Ok(Message::Binary(data))) => {
+                            connection_state.update_heartbeat();
+
+                            // After msgpack negotiation, binary frames carry msgpack payloads.
+                            // With JSON negotiation, binary frames are gzip-compressed JSON (existing behaviour).
+                            let serialization = connection_state.serialization_type();
+
+                            match serialization {
+                                SerializationType::MessagePack => {
+                                    // Decompress if gzip, then deserialize msgpack
+                                    let raw = if data.len() >= 2 && data[0] == 0x1f && data[1] == 0x8b {
+                                        use flate2::read::GzDecoder;
+                                        use std::io::Read;
+                                        let mut decoder = GzDecoder::new(&data[..]);
+                                        let mut buf = Vec::new();
+                                        if decoder.read_to_end(&mut buf).is_err() {
+                                            warn!("Failed to decompress binary msgpack from {}", connection_id);
+                                            continue;
+                                        }
+                                        buf
+                                    } else {
+                                        data.to_vec()
+                                    };
+                                    match rmp_serde::from_slice::<ClientMessage>(&raw) {
+                                        Ok(client_msg) => {
+                                            if let Err(e) = handle_client_message(
+                                                client_msg,
+                                                &connection_state,
+                                                &client_ip,
+                                                &mut session,
+                                                &registry,
+                                                &app_context,
+                                                &rate_limiter,
+                                                &live_query_manager,
+                                                &user_repo,
+                                                compression_enabled,
+                                            ).await {
+                                                error!("Error handling msgpack message: {}", e);
+                                                let _ = session.close(Some(CloseReason {
+                                                    code: CloseCode::Error,
+                                                    description: Some(e),
+                                                })).await;
+                                                break;
+                                            }
+                                        },
+                                        Err(e) => {
+                                            warn!("Invalid msgpack from {}: {}", connection_id, e);
+                                            let _ = send_error(&mut session, "protocol",
+                                                WsErrorCode::UnsupportedData,
+                                                &format!("Invalid MessagePack: {}", e),
+                                                compression_enabled).await;
+                                        },
+                                    }
+                                },
+                                SerializationType::Json => {
+                                    // Legacy: binary = gzip-compressed JSON
+                                    warn!("Binary messages not supported for JSON protocol: {}", connection_id);
+                                    let _ = send_error(&mut session, "protocol", WsErrorCode::UnsupportedData, "Binary not supported", compression_enabled).await;
+                                },
+                            }
                         }
                         Some(Ok(Message::Close(reason))) => {
                             debug!("Client requested close: {:?}", reason);
@@ -339,8 +486,9 @@ async fn handle_websocket(
                 notification = notification_rx.recv() => {
                     match notification {
                         Some(notif) => {
-                            // Use send_json for automatic compression of large payloads
-                            if send_json(&mut session, notif.as_ref(), compression_enabled).await.is_err() {
+                            // Use protocol-aware send for automatic format selection
+                            let ser = connection_state.serialization_type();
+                            if send_message(&mut session, notif.as_ref(), ser, compression_enabled).await.is_err() {
                                 break;
                             }
                         }
@@ -377,18 +525,57 @@ async fn handle_text_message(
     let msg: ClientMessage =
         serde_json::from_str(text).map_err(|e| format!("Invalid message: {}", e))?;
 
+    handle_client_message(
+        msg,
+        connection_state,
+        client_ip,
+        session,
+        registry,
+        app_context,
+        rate_limiter,
+        live_query_manager,
+        user_repo,
+        compression_enabled,
+    )
+    .await
+}
+
+/// Dispatch a parsed `ClientMessage` to the appropriate handler.
+#[allow(clippy::too_many_arguments)]
+async fn handle_client_message(
+    msg: ClientMessage,
+    connection_state: &SharedConnectionState,
+    client_ip: &ConnectionInfo,
+    session: &mut Session,
+    registry: &Arc<ConnectionsManager>,
+    app_context: &Arc<AppContext>,
+    rate_limiter: &Arc<RateLimiter>,
+    live_query_manager: &Arc<kalamdb_core::live::LiveQueryManager>,
+    user_repo: &Arc<dyn UserRepository>,
+    compression_enabled: bool,
+) -> Result<(), String> {
     match msg {
-        ClientMessage::Authenticate { credentials } => {
+        ClientMessage::Authenticate {
+            credentials,
+            protocol,
+        } => {
+            // If already authenticated (header-auth), just re-send AuthSuccess.
+            if connection_state.is_authenticated() {
+                return send_current_auth_success(connection_state, session, compression_enabled)
+                    .await;
+            }
             connection_state.mark_auth_started();
             handle_authenticate(
                 connection_state,
                 client_ip,
                 credentials,
+                protocol,
                 session,
                 registry,
                 app_context,
                 rate_limiter,
                 user_repo,
+                compression_enabled,
             )
             .await
         },
@@ -443,5 +630,59 @@ async fn handle_text_message(
             // text-message arm above; nothing else to do.
             Ok(())
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_protocol_defaults_when_empty() {
+        let proto = parse_protocol_from_query("");
+        assert_eq!(proto.serialization, SerializationType::Json);
+        assert_eq!(proto.compression, CompressionType::Gzip);
+    }
+
+    #[test]
+    fn parse_protocol_msgpack_serialization() {
+        let proto = parse_protocol_from_query("serialization=msgpack");
+        assert_eq!(proto.serialization, SerializationType::MessagePack);
+        assert_eq!(proto.compression, CompressionType::Gzip);
+    }
+
+    #[test]
+    fn parse_protocol_compression_none() {
+        let proto = parse_protocol_from_query("compression=none");
+        assert_eq!(proto.serialization, SerializationType::Json);
+        assert_eq!(proto.compression, CompressionType::None);
+    }
+
+    #[test]
+    fn parse_protocol_both_options() {
+        let proto = parse_protocol_from_query("serialization=msgpack&compression=none");
+        assert_eq!(proto.serialization, SerializationType::MessagePack);
+        assert_eq!(proto.compression, CompressionType::None);
+    }
+
+    #[test]
+    fn parse_protocol_mixed_with_compress_false() {
+        let proto = parse_protocol_from_query("compress=false&serialization=msgpack");
+        assert_eq!(proto.serialization, SerializationType::MessagePack);
+        assert_eq!(proto.compression, CompressionType::Gzip);
+    }
+
+    #[test]
+    fn parse_protocol_case_insensitive() {
+        let proto = parse_protocol_from_query("serialization=MSGPACK&compression=NONE");
+        assert_eq!(proto.serialization, SerializationType::MessagePack);
+        assert_eq!(proto.compression, CompressionType::None);
+    }
+
+    #[test]
+    fn parse_protocol_unknown_values_keep_defaults() {
+        let proto = parse_protocol_from_query("serialization=avro&compression=lz4");
+        assert_eq!(proto.serialization, SerializationType::Json);
+        assert_eq!(proto.compression, CompressionType::Gzip);
     }
 }

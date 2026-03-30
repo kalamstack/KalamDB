@@ -1,0 +1,201 @@
+   Compiling kalam-link v0.4.2-dev (/Users/jamal/git/KalamDB/link)
+   Compiling kalam-cli v0.4.2-dev (/Users/jamal/git/KalamDB/cli)
+    Finished `test` profile [unoptimized] target(s) in 5.33s
+────────────
+ Nextest run ID 7bc6e5cd-fcd4-48ee-9ecd-60651c8904b2 with nextest profile: default
+    Starting 192 tests across 1 binary
+        PASS [   0.029s] (  1/192) kalam-cli::smoke leader_only_reads::smoke_test_not_leader_error_detection
+        PASS [   6.158s] (  2/192) kalam-cli::smoke leader_only_reads::smoke_test_leader_read_succeeds_on_leader
+        PASS [   6.131s] (  3/192) kalam-cli::smoke smoke_test_all_system_tables_schemas::smoke_test_system_table_column_counts
+        PASS [   6.199s] (  4/192) kalam-cli::smoke leader_only_reads::smoke_test_system_table_reads
+        PASS [   6.207s] (  5/192) kalam-cli::smoke leader_only_reads::smoke_test_leader_read_shared_table
+        PASS [   6.487s] (  6/192) kalam-cli::smoke leader_only_reads::smoke_test_leader_read_with_filters
+        PASS [   6.604s] (  7/192) kalam-cli::smoke leader_only_reads::smoke_test_read_after_write_consistency
+        PASS [   6.608s] (  8/192) kalam-cli::smoke smoke_test_00_parallel_query_burst::smoke_test_00_parallel_query_burst
+        PASS [   6.785s] (  9/192) kalam-cli::smoke smoke_test_all_datatypes::smoke_all_datatypes_user_shared_stream
+        PASS [   8.350s] ( 10/192) kalam-cli::smoke chat_ai_example_smoke::smoke_chat_ai_example_from_readme
+        PASS [   6.119s] ( 11/192) kalam-cli::smoke smoke_test_all_system_tables_schemas::smoke_test_system_tables_in_information_schema
+        PASS [   6.249s] ( 12/192) kalam-cli::smoke smoke_test_all_system_tables_schemas::smoke_test_topic_offsets_schema_and_operations
+        PASS [   6.266s] ( 13/192) kalam-cli::smoke smoke_test_alter_with_data::smoke_test_alter_table_with_data_verification
+        PASS [  13.637s] ( 14/192) kalam-cli::smoke smoke_test_all_system_tables_schemas::smoke_test_all_system_tables_and_views_queryable
+        PASS [  11.602s] ( 15/192) kalam-cli::smoke smoke_test_as_user_authorization::smoke_security_regular_user_cannot_impersonate_privileged_users_in_batch
+        PASS [   9.751s] ( 16/192) kalam-cli::smoke smoke_test_as_user_impersonation::smoke_as_user_blocked_for_regular_user
+        PASS [  13.603s] ( 17/192) kalam-cli::smoke smoke_test_as_user_chat_impersonation::smoke_as_user_chat_select_scope_for_different_user
+        PASS [  15.016s] ( 18/192) kalam-cli::smoke smoke_test_as_user_chat_impersonation::smoke_as_user_chat_delete_flow
+        PASS [  15.036s] ( 19/192) kalam-cli::smoke smoke_test_as_user_chat_impersonation::smoke_as_user_chat_insert_and_select_flow
+        PASS [  15.410s] ( 20/192) kalam-cli::smoke smoke_test_as_user_chat_impersonation::smoke_as_user_chat_update_flow
+        PASS [  11.082s] ( 21/192) kalam-cli::smoke smoke_test_as_user_impersonation::smoke_as_user_delete_with_dba_role
+        PASS [  11.577s] ( 22/192) kalam-cli::smoke smoke_test_as_user_impersonation::smoke_as_user_insert_with_service_role
+        PASS [  10.483s] ( 23/192) kalam-cli::smoke smoke_test_as_user_impersonation::smoke_as_user_rejected_on_shared_table
+        PASS [  15.005s] ( 24/192) kalam-cli::smoke smoke_test_as_user_impersonation::smoke_as_user_full_workflow
+        PASS [   6.951s] ( 25/192) kalam-cli::smoke smoke_test_backup_restore::smoke_backup_database_job_completes
+        PASS [   6.885s] ( 26/192) kalam-cli::smoke smoke_test_backup_restore::smoke_backup_job_visible_in_system_jobs
+        PASS [   6.092s] ( 27/192) kalam-cli::smoke smoke_test_backup_restore::smoke_restore_nonexistent_path_returns_error
+        PASS [   7.069s] ( 28/192) kalam-cli::smoke smoke_test_backup_restore::smoke_restore_from_backup_job_completes
+        PASS [  13.379s] ( 29/192) kalam-cli::smoke smoke_test_as_user_impersonation::smoke_as_user_select_scopes_reads_for_user_tables
+        PASS [   9.536s] ( 30/192) kalam-cli::smoke smoke_test_backup_restore::smoke_backup_requires_dba_role
+        PASS [  13.827s] ( 31/192) kalam-cli::smoke smoke_test_as_user_impersonation::smoke_as_user_stream_table_isolation
+        PASS [  13.001s] ( 32/192) kalam-cli::smoke smoke_test_as_user_impersonation::smoke_as_user_update_with_dba_role
+        PASS [   9.436s] ( 33/192) kalam-cli::smoke smoke_test_backup_restore::smoke_restore_requires_dba_role
+        PASS [   6.218s] ( 34/192) kalam-cli::smoke smoke_test_batch_control::smoke_batch_control_data_ordering
+        PASS [   6.481s] ( 35/192) kalam-cli::smoke smoke_test_batch_control::smoke_batch_control_empty_table
+        PASS [   6.538s] ( 36/192) kalam-cli::smoke smoke_test_batch_control::smoke_batch_control_multi_batch
+        PASS [   6.714s] ( 37/192) kalam-cli::smoke smoke_test_batch_control::smoke_batch_control_single_batch
+        PASS [   6.199s] ( 38/192) kalam-cli::smoke smoke_test_cli_commands::smoke_cli_describe_table_command
+        PASS [   6.135s] ( 39/192) kalam-cli::smoke smoke_test_cli_commands::smoke_cli_error_handling
+        PASS [   7.226s] ( 40/192) kalam-cli::smoke smoke_test_cli_commands::smoke_cli_alter_table
+        PASS [   8.441s] ( 41/192) kalam-cli::smoke smoke_test_cleanup_job::smoke_cleanup_job_completes
+        PASS [   6.343s] ( 42/192) kalam-cli::smoke smoke_test_cli_commands::smoke_cli_flush_command
+        PASS [   6.016s] ( 43/192) kalam-cli::smoke smoke_test_cli_commands::smoke_cli_format_json_command
+        PASS [   6.257s] ( 44/192) kalam-cli::smoke smoke_test_cli_commands::smoke_cli_list_tables_command
+        PASS [   6.311s] ( 45/192) kalam-cli::smoke smoke_test_cli_commands::smoke_cli_namespace_management
+        PASS [   6.444s] ( 46/192) kalam-cli::smoke smoke_test_cli_commands::smoke_cli_sql_execution
+        PASS [   4.742s] ( 47/192) kalam-cli::smoke smoke_test_cluster_operations::smoke_test_cluster_all
+        PASS [   6.577s] ( 48/192) kalam-cli::smoke smoke_test_cli_commands::smoke_cli_stats_command
+        PASS [   7.282s] ( 49/192) kalam-cli::smoke smoke_test_cli_commands::smoke_cli_system_tables
+        PASS [   7.470s] ( 50/192) kalam-cli::smoke smoke_test_cluster_operations::smoke_test_cluster_batch_insert_consistency
+        PASS [   6.116s] ( 51/192) kalam-cli::smoke smoke_test_cluster_operations::smoke_test_cluster_namespace_consistency
+        PASS [   7.890s] ( 52/192) kalam-cli::smoke smoke_test_cluster_operations::smoke_test_cluster_concurrent_operations
+        PASS [   7.656s] ( 53/192) kalam-cli::smoke smoke_test_cluster_operations::smoke_test_cluster_live_query_tracking
+        PASS [   7.989s] ( 54/192) kalam-cli::smoke smoke_test_cluster_operations::smoke_test_cluster_job_tracking
+        PASS [  10.845s] ( 55/192) kalam-cli::smoke smoke_test_cli_commands::smoke_cli_user_management
+        PASS [   6.785s] ( 56/192) kalam-cli::smoke smoke_test_cluster_operations::smoke_test_cluster_system_table_counts_consistent
+        PASS [   8.422s] ( 57/192) kalam-cli::smoke smoke_test_cluster_operations::smoke_test_cluster_storage_operations
+        PASS [  11.054s] ( 58/192) kalam-cli::smoke smoke_test_cluster_operations::smoke_test_cluster_shared_table_consistency
+        PASS [   7.630s] ( 59/192) kalam-cli::smoke smoke_test_cluster_operations::smoke_test_cluster_table_type_consistency
+        PASS [   6.685s] ( 60/192) kalam-cli::smoke smoke_test_custom_functions::smoke_test_current_user_default
+        PASS [   7.102s] ( 61/192) kalam-cli::smoke smoke_test_custom_functions::smoke_test_all_custom_functions_combined
+        PASS [   6.801s] ( 62/192) kalam-cli::smoke smoke_test_custom_functions::smoke_test_snowflake_id_default
+        PASS [   8.480s] ( 63/192) kalam-cli::smoke smoke_test_core_operations::smoke_test_core_operations
+        PASS [   6.656s] ( 64/192) kalam-cli::smoke smoke_test_custom_functions::smoke_test_ulid_default
+        PASS [   6.821s] ( 65/192) kalam-cli::smoke smoke_test_custom_functions::smoke_test_uuid_v7_default
+        PASS [  11.441s] ( 66/192) kalam-cli::smoke smoke_test_cluster_operations::smoke_test_cluster_user_operations
+        PASS [   6.634s] ( 67/192) kalam-cli::smoke smoke_test_datatype_preservation::test_all_kalam_datatypes_are_preserved
+        PASS [   6.600s] ( 68/192) kalam-cli::smoke smoke_test_datatype_preservation::test_system_tables_shows_correct_datatypes
+        PASS [  13.624s] ( 69/192) kalam-cli::smoke smoke_test_cluster_operations::smoke_test_cluster_user_data_partitioning
+        PASS [   7.079s] ( 70/192) kalam-cli::smoke smoke_test_ddl_alter::smoke_test_alter_add_not_null_without_default_error
+        PASS [   7.359s] ( 71/192) kalam-cli::smoke smoke_test_ddl_alter::smoke_test_alter_shared_table_access_level
+        PASS [   7.327s] ( 72/192) kalam-cli::smoke smoke_test_ddl_alter::smoke_test_alter_system_columns_error
+        PASS [   7.582s] ( 73/192) kalam-cli::smoke smoke_test_ddl_alter::smoke_test_alter_table_add_column
+        PASS [   7.395s] ( 74/192) kalam-cli::smoke smoke_test_ddl_alter::smoke_test_alter_table_drop_column
+        PASS [   7.362s] ( 75/192) kalam-cli::smoke smoke_test_ddl_alter::smoke_test_alter_table_modify_column
+        PASS [   7.597s] ( 76/192) kalam-cli::smoke smoke_test_dml_extended::smoke_test_aggregation_queries
+        PASS [   7.895s] ( 77/192) kalam-cli::smoke smoke_test_dml_extended::smoke_test_hard_delete_stream_table
+        PASS [   8.518s] ( 78/192) kalam-cli::smoke smoke_test_dml_extended::smoke_test_multi_row_insert
+        PASS [   8.676s] ( 79/192) kalam-cli::smoke smoke_test_dml_extended::smoke_test_multi_row_update
+        PASS [   8.589s] ( 80/192) kalam-cli::smoke smoke_test_dml_extended::smoke_test_soft_delete_shared_table
+        PASS [   8.853s] ( 81/192) kalam-cli::smoke smoke_test_dml_extended::smoke_test_soft_delete_user_table
+        PASS [   8.619s] ( 82/192) kalam-cli::smoke smoke_test_dml_watermark_optimization::smoke_test_watermark_dml_delete
+        PASS [   9.290s] ( 83/192) kalam-cli::smoke smoke_test_dml_watermark_optimization::smoke_test_watermark_ddl_then_dml
+        PASS [   9.551s] ( 84/192) kalam-cli::smoke smoke_test_dml_watermark_optimization::smoke_test_watermark_dml_insert_performance
+        PASS [  10.111s] ( 85/192) kalam-cli::smoke smoke_test_dml_watermark_optimization::smoke_test_watermark_dml_update
+        PASS [   9.673s] ( 86/192) kalam-cli::smoke smoke_test_dml_wide_columns::smoke_shared_table_dml_wide_columns
+        PASS [  10.081s] ( 87/192) kalam-cli::smoke smoke_test_dml_wide_columns::smoke_subscription_update_delete_notifications
+        PASS [  10.034s] ( 88/192) kalam-cli::smoke smoke_test_dml_wide_columns::smoke_user_table_dml_wide_columns
+        PASS [   8.047s] ( 89/192) kalam-cli::smoke smoke_test_file_datatype::test_file_datatype_upload_and_download
+        PASS [  12.646s] ( 90/192) kalam-cli::smoke smoke_test_export_user_data::smoke_export_download_zip_is_valid
+        PASS [   7.235s] ( 91/192) kalam-cli::smoke smoke_test_flush_manifest::smoke_test_flush_stream_table_error
+        PASS [  11.302s] ( 92/192) kalam-cli::smoke smoke_test_export_user_data::smoke_show_export_empty_for_new_user
+        PASS [  12.664s] ( 93/192) kalam-cli::smoke smoke_test_export_user_data::smoke_export_user_data_job_completes
+        PASS [   8.082s] ( 94/192) kalam-cli::smoke smoke_test_flush_manifest::smoke_test_manifest_updated_on_second_flush
+        PASS [  16.204s] ( 95/192) kalam-cli::smoke smoke_test_export_user_data::smoke_export_download_forbidden_for_other_user
+        PASS [   7.626s] ( 96/192) kalam-cli::smoke smoke_test_flush_manifest::smoke_test_shared_table_flush_manifest
+        PASS [  12.686s] ( 97/192) kalam-cli::smoke smoke_test_export_user_data::smoke_show_export_returns_completed_status_and_download_url
+        PASS [   7.195s] ( 98/192) kalam-cli::smoke smoke_test_flush_manifest::smoke_test_user_table_flush_manifest
+        PASS [   7.711s] ( 99/192) kalam-cli::smoke smoke_test_flush_operations::smoke_test_mixed_source_query
+        PASS [   7.609s] (100/192) kalam-cli::smoke smoke_test_flush_operations::smoke_test_shared_table_flush
+        PASS [   7.658s] (101/192) kalam-cli::smoke smoke_test_flush_operations::smoke_test_user_table_flush
+        PASS [   7.720s] (102/192) kalam-cli::smoke smoke_test_flush_pk_integrity::smoke_test_flush_pk_integrity_shared_table
+        PASS [   7.611s] (103/192) kalam-cli::smoke smoke_test_flush_pk_integrity::smoke_test_flush_pk_integrity_user_table
+        PASS [   7.351s] (104/192) kalam-cli::smoke smoke_test_insert_returning::smoke_insert_returning_seq_multi_row
+        PASS [   7.510s] (105/192) kalam-cli::smoke smoke_test_insert_returning::smoke_insert_returning_seq_single_row
+        PASS [   7.538s] (106/192) kalam-cli::smoke smoke_test_insert_returning::smoke_insert_returning_seq_on_user_table
+        PASS [   7.673s] (107/192) kalam-cli::smoke smoke_test_insert_returning::smoke_insert_returning_star
+        PASS [   8.152s] (108/192) kalam-cli::smoke smoke_test_insert_throughput::smoke_test_insert_throughput_batched
+        PASS [   6.608s] (109/192) kalam-cli::smoke smoke_test_rpc_auth::smoke_rpc_health_is_public
+        PASS [   8.307s] (110/192) kalam-cli::smoke smoke_test_int64_precision::smoke_int64_negative_large_values
+        PASS [   9.956s] (111/192) kalam-cli::smoke smoke_test_insert_throughput::smoke_test_insert_throughput_parallel
+        PASS [   9.276s] (112/192) kalam-cli::smoke smoke_test_insert_throughput::smoke_test_insert_throughput_single
+        PASS [   8.177s] (113/192) kalam-cli::smoke smoke_test_int64_precision::smoke_int64_precision_preserved_as_string
+        PASS [   8.688s] (114/192) kalam-cli::smoke smoke_test_int64_precision::smoke_int64_edge_case_exactly_max_safe
+        PASS [   8.300s] (115/192) kalam-cli::smoke smoke_test_int64_precision::smoke_int64_small_values_remain_numbers
+        PASS [   9.403s] (116/192) kalam-cli::smoke smoke_test_queries_benchmark::smoke_queries_benchmark
+        PASS [   9.001s] (117/192) kalam-cli::smoke smoke_test_rpc_auth::smoke_rpc_login_nonexistent_user_matches_wrong_password_response
+        PASS [  12.689s] (118/192) kalam-cli::smoke smoke_test_insert_throughput::smoke_test_insert_throughput_summary
+        PASS [   6.820s] (119/192) kalam-cli::smoke smoke_test_rpc_auth::smoke_rpc_me_no_auth_returns_401
+        PASS [   6.776s] (120/192) kalam-cli::smoke smoke_test_rpc_auth::smoke_rpc_sql_basic_auth_returns_401
+        PASS [   6.750s] (121/192) kalam-cli::smoke smoke_test_rpc_auth::smoke_rpc_sql_forged_jwt_alg_none_returns_401
+        PASS [   6.909s] (122/192) kalam-cli::smoke smoke_test_rpc_auth::smoke_rpc_sql_invalid_bearer_returns_401
+        PASS [   6.671s] (123/192) kalam-cli::smoke smoke_test_rpc_auth::smoke_rpc_sql_no_auth_returns_401
+        PASS [   8.701s] (124/192) kalam-cli::smoke smoke_test_rpc_auth::smoke_rpc_login_wrong_password_returns_401_generic_message
+        PASS [   8.526s] (125/192) kalam-cli::smoke smoke_test_rpc_auth::smoke_rpc_sql_empty_body_returns_error
+        PASS [   8.528s] (126/192) kalam-cli::smoke smoke_test_schema_history::smoke_test_drop_table_removes_schema_history
+        PASS [  12.726s] (127/192) kalam-cli::smoke smoke_test_rpc_auth::smoke_rpc_user_cannot_escalate_own_role
+        PASS [  12.348s] (128/192) kalam-cli::smoke smoke_test_rpc_auth::smoke_rpc_user_role_cannot_read_system_users
+        PASS [   8.651s] (129/192) kalam-cli::smoke smoke_test_schema_history::smoke_test_schema_history_in_system_tables
+        PASS [   8.113s] (130/192) kalam-cli::smoke smoke_test_shared_table_crud::smoke_shared_table_crud
+        PASS [  12.827s] (131/192) kalam-cli::smoke smoke_test_security_access::smoke_security_private_shared_table_blocked_in_batch
+        PASS [  12.960s] (132/192) kalam-cli::smoke smoke_test_security_access::smoke_security_query_length_limit
+        PASS [  12.933s] (133/192) kalam-cli::smoke smoke_test_security_access::smoke_security_system_table_write_blocked
+        PASS [  14.028s] (134/192) kalam-cli::smoke smoke_test_security_access::smoke_security_subscription_blocked_for_system_and_private_shared
+        PASS [  12.786s] (135/192) kalam-cli::smoke smoke_test_security_access::smoke_security_system_tables_blocked_in_batch
+        PASS [   9.316s] (136/192) kalam-cli::smoke smoke_test_show_storages::smoke_show_storages_basic
+        PASS [   9.429s] (137/192) kalam-cli::smoke smoke_test_show_storages::smoke_show_storages_cli_timestamps_are_not_epoch_shifted
+        PASS [  12.871s] (138/192) kalam-cli::smoke smoke_test_shared_table_subscription::smoke_shared_table_subscription_private_denied
+        PASS [  15.605s] (139/192) kalam-cli::smoke smoke_test_shared_table_subscription::smoke_shared_table_subscription_lifecycle
+        PASS [   8.814s] (140/192) kalam-cli::smoke smoke_test_storage_compact::smoke_storage_compact_table_job_and_rocksdb
+        PASS [   8.226s] (141/192) kalam-cli::smoke smoke_test_storage_health::smoke_storage_check_local_basic
+        PASS [  12.935s] (142/192) kalam-cli::smoke smoke_test_show_storages::smoke_show_storages_user_access
+        PASS [   8.434s] (143/192) kalam-cli::smoke smoke_test_storage_health::smoke_storage_check_extended
+        PASS [  12.342s] (144/192) kalam-cli::smoke smoke_test_storage_health::smoke_storage_check_authorization
+        PASS [  12.137s] (145/192) kalam-cli::smoke smoke_test_storage_health::smoke_storage_check_dba_access
+        PASS [   8.953s] (146/192) kalam-cli::smoke smoke_test_storage_health::smoke_storage_check_nonexistent
+        PASS [   9.680s] (147/192) kalam-cli::smoke smoke_test_subscription_advanced::smoke_subscription_column_projection
+        PASS [   9.357s] (148/192) kalam-cli::smoke smoke_test_subscription_advanced::smoke_subscription_delete_events
+        PASS [   9.478s] (149/192) kalam-cli::smoke smoke_test_subscription_advanced::smoke_subscription_high_volume_changes
+        PASS [   9.342s] (150/192) kalam-cli::smoke smoke_test_subscription_advanced::smoke_subscription_resume_from_seq_id
+        PASS [  14.217s] (151/192) kalam-cli::smoke smoke_test_storage_templates::smoke_storage_custom_templates
+        PASS [  10.469s] (152/192) kalam-cli::smoke smoke_test_subscription_advanced::smoke_subscription_multi_batch_initial_data
+        PASS [  12.289s] (153/192) kalam-cli::smoke smoke_test_stream_subscription::smoke_stream_table_subscription
+        PASS [   9.573s] (154/192) kalam-cli::smoke smoke_test_subscription_close::smoke_subscription_drop_removes_live_query
+        PASS [   8.869s] (155/192) kalam-cli::smoke smoke_test_subscription_close::smoke_subscription_explicit_close_removes_live_query
+        PASS [   8.984s] (156/192) kalam-cli::smoke smoke_test_subscription_delta_updates::smoke_subscription_update_sends_delta_only
+        PASS [   7.829s] (157/192) kalam-cli::smoke smoke_test_subscription_reconnect_resume::smoke_subscription_reconnect_basic_resume
+        PASS [   8.007s] (158/192) kalam-cli::smoke smoke_test_subscription_listing::smoke_subscription_listing_tracks_seq_id
+        PASS [   9.217s] (159/192) kalam-cli::smoke smoke_test_subscription_listing::smoke_subscription_listing_and_close_removes
+        PASS [  14.368s] (160/192) kalam-cli::smoke smoke_test_subscription_delete::smoke_subscription_receives_delete_event
+        PASS [   8.410s] (161/192) kalam-cli::smoke smoke_test_subscription_reconnect_resume::smoke_subscription_resume_from_seq_id
+        PASS [   7.457s] (162/192) kalam-cli::smoke smoke_test_system_tables_extended::smoke_test_dt_meta_command
+        PASS [   7.825s] (163/192) kalam-cli::smoke smoke_test_system_tables_extended::smoke_test_describe_table_meta_command
+        PASS [  10.125s] (164/192) kalam-cli::smoke smoke_test_system_and_users::smoke_system_tables_and_user_lifecycle
+        PASS [  14.567s] (165/192) kalam-cli::smoke smoke_test_subscription_multi_reconnect::smoke_subscription_multi_reconnect_parallel
+        PASS [   8.593s] (166/192) kalam-cli::smoke smoke_test_system_tables_extended::smoke_test_system_tables_options_column
+        PASS [   9.158s] (167/192) kalam-cli::smoke smoke_test_system_tables_extended::smoke_test_system_live_queries
+        PASS [   9.068s] (168/192) kalam-cli::smoke smoke_test_system_tables_extended::smoke_test_system_stats_meta_command
+        PASS [   9.407s] (169/192) kalam-cli::smoke smoke_test_timing_output::smoke_test_timing_ddl_operations
+        PASS [  10.118s] (170/192) kalam-cli::smoke smoke_test_timing_output::smoke_test_timing_aggregation_query
+        PASS [  10.790s] (171/192) kalam-cli::smoke smoke_test_timing_output::smoke_test_timing_flush_operation
+        PASS [   9.749s] (172/192) kalam-cli::smoke smoke_test_timing_output::smoke_test_timing_output_format
+        PASS [  10.729s] (173/192) kalam-cli::smoke smoke_test_timing_output::smoke_test_timing_join_query
+        PASS [  10.772s] (174/192) kalam-cli::smoke smoke_test_timing_output::smoke_test_timing_scaling_medium_table
+        PASS [  10.586s] (175/192) kalam-cli::smoke smoke_test_timing_output::smoke_test_timing_scaling_small_table
+        PASS [  10.146s] (176/192) kalam-cli::smoke smoke_test_topic_consumption::test_topic_consume_delete_events
+        PASS [  10.219s] (177/192) kalam-cli::smoke smoke_test_topic_consumption::test_topic_consume_from_earliest
+        PASS [   9.855s] (178/192) kalam-cli::smoke smoke_test_topic_consumption::test_topic_consume_mixed_operations
+        PASS [  10.121s] (179/192) kalam-cli::smoke smoke_test_topic_consumption::test_topic_consume_insert_events
+        PASS [  11.458s] (180/192) kalam-cli::smoke smoke_test_topic_consumption::test_topic_consume_from_latest
+        PASS [   9.630s] (181/192) kalam-cli::smoke smoke_test_topic_consumption::test_topic_consume_offset_persistence
+        PASS [  10.445s] (182/192) kalam-cli::smoke smoke_test_topic_consumption::test_topic_consume_update_events
+        PASS [  15.029s] (183/192) kalam-cli::smoke smoke_test_topic_high_load::test_topic_fan_out_different_groups_receive_all
+        PASS [   8.873s] (184/192) kalam-cli::smoke smoke_test_websocket_capacity::smoke_test_websocket_capacity
+        PASS [  12.502s] (185/192) kalam-cli::smoke smoke_test_user_table_rls::smoke_user_table_rls_isolation
+        PASS [  15.185s] (186/192) kalam-cli::smoke smoke_test_topic_high_load::test_topic_high_load_concurrent_publishers
+        PASS [  15.815s] (187/192) kalam-cli::smoke smoke_test_topic_high_load::test_topic_four_consumers_same_group_no_duplicates
+        PASS [  14.827s] (188/192) kalam-cli::smoke smoke_test_topic_high_load::test_topic_high_load_two_consumers_same_group_single_delivery
+        PASS [  23.100s] (189/192) kalam-cli::smoke smoke_test_topic_consumption::test_topic_consume_option_matrix_start_batch_auto_ack_modes
+        PASS [  15.565s] (190/192) kalam-cli::smoke smoke_test_user_table_subscription::smoke_user_table_subscription_lifecycle
+        PASS [  22.043s] (191/192) kalam-cli::smoke smoke_test_topic_throughput::smoke_test_topic_throughput_benchmark
+        SLOW [> 60.000s] (───────) kalam-cli::smoke smoke_test_topic_high_load::test_topic_ack_failure_recovery_no_message_loss_with_latency
+        PASS [  78.064s] (192/192) kalam-cli::smoke smoke_test_topic_high_load::test_topic_ack_failure_recovery_no_message_loss_with_latency
+────────────
+     Summary [ 238.922s] 192 tests run: 192 passed (1 slow), 0 skipped

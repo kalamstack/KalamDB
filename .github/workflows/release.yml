@@ -1894,7 +1894,41 @@ jobs:
           docker pull "$PG_IMAGE"
 
           docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT" down -v --remove-orphans 2>/dev/null || true
-          docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT" up -d
+
+          docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT" up -d kalamdb
+
+          KALAMDB_CONTAINER_ID="$(docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT" ps -q kalamdb)"
+          if [[ -z "$KALAMDB_CONTAINER_ID" ]]; then
+            echo "Failed to resolve kalamdb container id" >&2
+            docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT" ps || true
+            echo "pg_docker_tests_passed=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          KALAMDB_READY=false
+          for i in {1..90}; do
+            if docker exec "$KALAMDB_CONTAINER_ID" /usr/local/bin/busybox wget -q -O /dev/null http://127.0.0.1:8080/health >/dev/null 2>&1; then
+              KALAMDB_READY=true
+              break
+            fi
+
+            if [[ "$(docker inspect --format '{{.State.Status}}' "$KALAMDB_CONTAINER_ID")" != "running" ]]; then
+              echo "KalamDB container stopped before becoming ready" >&2
+              docker logs "$KALAMDB_CONTAINER_ID" || true
+              break
+            fi
+
+            sleep 1
+          done
+
+          if [[ "$KALAMDB_READY" != "true" ]]; then
+            echo "KalamDB container did not become ready in time" >&2
+            docker logs "$KALAMDB_CONTAINER_ID" || true
+            echo "pg_docker_tests_passed=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT" up -d postgres
 
           if PGHOST=127.0.0.1 \
              PGPORT="$KALAMDB_TEST_PG_PORT" \

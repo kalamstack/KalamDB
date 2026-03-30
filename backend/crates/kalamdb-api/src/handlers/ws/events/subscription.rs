@@ -13,7 +13,7 @@ use std::sync::Arc;
 use crate::handlers::ws::models::WsErrorCode;
 use crate::limiter::RateLimiter;
 
-use super::{send_error, send_json};
+use super::{send_error, send_message};
 
 /// Handle subscription request
 ///
@@ -121,7 +121,8 @@ pub async fn handle_subscribe(
                 batch_control.clone(),
                 result.schema.clone(),
             );
-            let _ = send_json(session, &ack, compression_enabled).await;
+            let ser = connection_state.serialization_type();
+            let _ = send_message(session, &ack, ser, compression_enabled).await;
 
             if let Some(initial) = result.initial_data {
                 // Convert Row objects to HashMap (always using simple JSON format)
@@ -165,7 +166,7 @@ pub async fn handle_subscribe(
                     rows_json,
                     batch_control,
                 );
-                let _ = send_json(session, &batch_msg, compression_enabled).await;
+                let _ = send_message(session, &batch_msg, ser, compression_enabled).await;
 
                 if !initial.has_more {
                     let flushed = connection_state.complete_initial_load(&subscription_id);

@@ -1,28 +1,42 @@
-//! Test helpers compiled only for kalamdb-core unit tests.
+//! Test helpers for kalamdb-core.
+//!
+//! All helpers are compiled when the `test-helpers` feature (or `cfg(test)`) is active.
+//! They have no dependency on `kalamdb-jobs`, so they are safe to use from other crates'
+//! test code via `kalamdb-core = { ..., features = ["test-helpers"] }` in dev-dependencies.
 
 use crate::app_context::AppContext;
-use crate::jobs::executors::{
-    BackupExecutor, CleanupExecutor, CompactExecutor, FlushExecutor, JobRegistry, RestoreExecutor,
-    RetentionExecutor, StreamEvictionExecutor, UserCleanupExecutor, VectorIndexExecutor,
-};
 use datafusion::prelude::SessionContext;
-use kalamdb_commons::models::{NamespaceId, NodeId, StorageId};
+use kalamdb_commons::models::{NodeId, StorageId};
 use kalamdb_store::test_utils::TestDb;
 use kalamdb_store::StorageBackend;
 use kalamdb_system::{StoragePartition, SystemTable};
-use once_cell::sync::OnceCell;
 use std::sync::Arc;
+
+// ── Imports needed by init_test_app_context / test_app_context ─────────────────
+#[cfg(any(test, feature = "test-helpers"))]
+use kalamdb_commons::models::NamespaceId;
+#[cfg(any(test, feature = "test-helpers"))]
+use once_cell::sync::OnceCell;
+#[cfg(any(test, feature = "test-helpers"))]
 use std::sync::Once;
 
+#[cfg(any(test, feature = "test-helpers"))]
 static TEST_DB: OnceCell<Arc<TestDb>> = OnceCell::new();
+#[cfg(any(test, feature = "test-helpers"))]
 static TEST_RUNTIME: OnceCell<Arc<tokio::runtime::Runtime>> = OnceCell::new();
+#[cfg(any(test, feature = "test-helpers"))]
 static TEST_APP_CONTEXT: OnceCell<Arc<AppContext>> = OnceCell::new();
+#[cfg(any(test, feature = "test-helpers"))]
 static INIT: Once = Once::new();
+#[cfg(any(test, feature = "test-helpers"))]
 static BOOTSTRAP_INIT: Once = Once::new();
+
+// ── Full helpers (no kalamdb-jobs dep) ─────────────────────────────────────────
 
 /// Initialize AppContext with minimal test dependencies.
 ///
 /// This is used by unit tests inside `kalamdb-core/src/**` that run with `cfg(test)`.
+#[cfg(any(test, feature = "test-helpers"))]
 pub fn init_test_app_context() -> Arc<TestDb> {
     INIT.call_once(|| {
         let mut column_families: Vec<&'static str> = SystemTable::all_tables()
@@ -128,6 +142,7 @@ pub fn init_test_app_context() -> Arc<TestDb> {
     TEST_DB.get().expect("TEST_DB should be initialized").clone()
 }
 
+#[cfg(any(test, feature = "test-helpers"))]
 pub fn test_app_context() -> Arc<AppContext> {
     init_test_app_context();
     TEST_APP_CONTEXT.get().expect("TEST_APP_CONTEXT should be initialized").clone()
@@ -190,27 +205,6 @@ pub fn test_app_context_simple() -> Arc<AppContext> {
 
     std::mem::forget(test_db);
     app_ctx
-}
-
-pub fn create_test_job_registry() -> JobRegistry {
-    let registry = JobRegistry::new();
-
-    registry.register(Arc::new(FlushExecutor::new()));
-    registry.register(Arc::new(CleanupExecutor::new()));
-    registry.register(Arc::new(RetentionExecutor::new()));
-    registry.register(Arc::new(StreamEvictionExecutor::new()));
-    registry.register(Arc::new(UserCleanupExecutor::new()));
-    registry.register(Arc::new(CompactExecutor::new()));
-    registry.register(Arc::new(BackupExecutor::new()));
-    registry.register(Arc::new(RestoreExecutor::new()));
-    registry.register(Arc::new(VectorIndexExecutor::new()));
-
-    registry
-}
-
-pub fn create_test_session() -> Arc<SessionContext> {
-    let app_ctx = test_app_context();
-    Arc::new(app_ctx.session_factory().create_session())
 }
 
 /// Creates a SessionContext using test_app_context_simple() (no Raft bootstrap).

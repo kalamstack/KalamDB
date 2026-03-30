@@ -1,6 +1,6 @@
 use super::{PreparedExecutionStatement, SqlExecutor};
 use crate::error::KalamDbError;
-use crate::sql::executor::helpers::guards::block_system_namespace_modification;
+use crate::sql::executor::handler_registry::HandlerRegistry;
 use crate::sql::plan_cache::PlanCacheKey;
 use crate::sql::{ExecutionContext, ExecutionResult};
 use arrow::array::RecordBatch;
@@ -8,6 +8,7 @@ use datafusion::scalar::ScalarValue;
 use kalamdb_commons::conversions::arrow_json_conversion::arrow_value_to_scalar;
 use kalamdb_commons::models::TableId;
 use kalamdb_sql::classifier::{SqlStatement, SqlStatementKind};
+use std::sync::Arc;
 use std::time::Duration;
 use tracing::Instrument;
 
@@ -74,12 +75,16 @@ impl SqlExecutor {
             return Ok(());
         };
 
-        block_system_namespace_modification(
-            table_id.namespace_id(),
-            Self::dml_operation_name(dml_kind),
-            "TABLE",
-            Some(table_id.table_name().as_str()),
-        )
+        if table_id.namespace_id().is_system_namespace() {
+            let op = Self::dml_operation_name(dml_kind);
+            return Err(KalamDbError::InvalidOperation(format!(
+                "Cannot {} system table '{}.{}'",
+                op.to_lowercase(),
+                table_id.namespace_id().as_str(),
+                table_id.table_name().as_str(),
+            )));
+        }
+        Ok(())
     }
 
     /// Try to extract a typed `KalamDbError::NotLeader` from a `DataFusionError`.
@@ -128,16 +133,11 @@ impl SqlExecutor {
         }
     }
 
-    /// Construct a new executor hooked into the shared `AppContext`.
+    /// Construct a new executor with a pre-built handler registry.
     pub fn new(
         app_context: std::sync::Arc<crate::app_context::AppContext>,
-        enforce_password_complexity: bool,
+        handler_registry: Arc<HandlerRegistry>,
     ) -> Self {
-        let handler_registry =
-            std::sync::Arc::new(crate::sql::executor::handler_registry::HandlerRegistry::new(
-                app_context.clone(),
-                enforce_password_complexity,
-            ));
         let plan_cache = std::sync::Arc::new(crate::sql::plan_cache::PlanCache::with_config(
             app_context.config().execution.sql_plan_cache_max_entries,
             Duration::from_secs(app_context.config().execution.sql_plan_cache_ttl_seconds),

@@ -131,19 +131,10 @@ fn create_client_inner(
         builder = builder.max_retries(r as u32);
     }
 
-    // Build connection options from the individual flags.
-    {
-        let mut conn_opts = kalam_link::ConnectionOptions::default();
-        if disable_compression.unwrap_or(false) {
-            conn_opts.disable_compression = true;
-        }
-        // ws_lazy_connect defaults to true in ConnectionOptions::default().
-        // Only override when the caller explicitly passes false.
-        if let Some(lazy) = ws_lazy_connect {
-            conn_opts.ws_lazy_connect = lazy;
-        }
-        builder = builder.connection_options(conn_opts);
-    }
+    builder = builder.connection_options(build_dart_connection_options(
+        disable_compression,
+        ws_lazy_connect,
+    ));
 
     if let Some(ms) = keepalive_interval_ms {
         let mut timeouts = kalam_link::KalamLinkTimeouts::default();
@@ -167,6 +158,28 @@ fn create_client_inner(
     })
 }
 
+fn build_dart_connection_options(
+    disable_compression: Option<bool>,
+    ws_lazy_connect: Option<bool>,
+) -> kalam_link::ConnectionOptions {
+    let mut conn_opts = kalam_link::ConnectionOptions::default();
+
+    // Favor the smaller binary wire format for Dart subscriptions by default.
+    conn_opts.protocol.serialization = kalam_link::models::SerializationType::MessagePack;
+
+    if disable_compression.unwrap_or(false) {
+        conn_opts.disable_compression = true;
+    }
+
+    // ws_lazy_connect defaults to true in ConnectionOptions::default().
+    // Only override when the caller explicitly passes false.
+    if let Some(lazy) = ws_lazy_connect {
+        conn_opts.ws_lazy_connect = lazy;
+    }
+
+    conn_opts
+}
+
 /// Update the authentication credentials on a live client.
 ///
 /// This is used to implement refresh-token flows from Dart:
@@ -185,6 +198,30 @@ fn create_client_inner(
 pub fn dart_update_auth(client: &DartKalamClient, auth: DartAuthProvider) -> anyhow::Result<()> {
     client.inner.update_shared_auth(auth.into_native());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_dart_connection_options;
+    use kalam_link::models::SerializationType;
+
+    #[test]
+    fn dart_connection_options_default_to_msgpack() {
+        let options = build_dart_connection_options(None, None);
+
+        assert_eq!(options.protocol.serialization, SerializationType::MessagePack);
+        assert!(options.ws_lazy_connect);
+        assert!(!options.disable_compression);
+    }
+
+    #[test]
+    fn dart_connection_options_preserve_explicit_flags() {
+        let options = build_dart_connection_options(Some(true), Some(false));
+
+        assert_eq!(options.protocol.serialization, SerializationType::MessagePack);
+        assert!(!options.ws_lazy_connect);
+        assert!(options.disable_compression);
+    }
 }
 
 /// Build [`EventHandlers`](kalam_link::EventHandlers) that push events into

@@ -46,7 +46,7 @@ with `live()` so row reconciliation still stays inside the shared Rust core:
 
 ```ts
 const stop = await client.live(
-  'SELECT room_id, message_id, body FROM support.messages',
+  "SELECT room_id, message_id, body FROM support.messages WHERE room_id = 'main'",
   (rows) => {
     console.log(rows.length);
   },
@@ -93,6 +93,7 @@ function renderInbox(rows) {
 const inboxSql = `
   SELECT id, room, role, body, created_at
   FROM support.inbox
+  WHERE room = 'main'
 `;
 
 const stop = await client.live(
@@ -140,6 +141,7 @@ function renderInbox(rows) {
 const inboxSql = `
   SELECT id, room, role, body, created_at
   FROM support.inbox
+  WHERE room = 'main'
 `;
 
 // Start from a specific known sequence ID.
@@ -194,7 +196,7 @@ If you need raw subscription frames, `subscribeWithSql()` still exists.
 import { ChangeType, MessageType } from 'kalam-link';
 
 const stop = await client.subscribeWithSql(
-  'SELECT * FROM support.inbox',
+  "SELECT * FROM support.inbox WHERE room = 'main'",
   (event) => {
     // Use this path when you need raw subscription protocol events.
     if (event.type !== MessageType.Change) {

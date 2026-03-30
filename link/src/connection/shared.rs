@@ -13,16 +13,17 @@
 use crate::{
     auth::{AuthProvider, ResolvedAuth},
     connection::{
-        apply_ws_auth_headers, connect_with_optional_local_bind, decode_ws_payload,
-        jitter_keepalive_interval, parse_message, resolve_ws_url, send_auth_and_wait,
-        send_next_batch_request, WebSocketStream, DEFAULT_EVENT_CHANNEL_CAPACITY, FAR_FUTURE,
-        MAX_WS_TEXT_MESSAGE_BYTES,
+        apply_ws_auth_headers, authenticate_ws, connect_with_optional_local_bind,
+        decode_ws_payload, jitter_keepalive_interval, parse_message, parse_message_msgpack,
+        resolve_ws_url, send_client_message, send_next_batch_request_with_format,
+        WebSocketStream,
+        DEFAULT_EVENT_CHANNEL_CAPACITY, FAR_FUTURE, MAX_WS_TEXT_MESSAGE_BYTES,
     },
     error::{KalamLinkError, Result},
     event_handlers::{ConnectionError, DisconnectReason, EventHandlers},
     models::{
-        ChangeEvent, ClientMessage, ConnectionOptions, SubscriptionInfo, SubscriptionOptions,
-        SubscriptionRequest,
+        ChangeEvent, ClientMessage, CompressionType, ConnectionOptions, SerializationType,
+        SubscriptionInfo, SubscriptionOptions, SubscriptionRequest,
     },
     seq_id::SeqId,
     seq_tracking,
@@ -462,12 +463,28 @@ async fn establish_ws(
     timeouts: &KalamLinkTimeouts,
     connection_options: &ConnectionOptions,
     event_handlers: &EventHandlers,
-) -> Result<(WebSocketStream, AuthProvider)> {
+) -> Result<(WebSocketStream, AuthProvider, SerializationType)> {
     log::debug!("[kalam-link] Establishing WebSocket connection to {}", base_url);
     let resolved = resolved_auth.read().unwrap().clone();
     let auth = resolved.resolve().await?;
 
-    let request_url = resolve_ws_url(base_url, None, connection_options.disable_compression)?;
+    let uses_header_auth = matches!(&auth, AuthProvider::JwtToken(_));
+
+    let mut request_url = resolve_ws_url(base_url, None, connection_options.disable_compression)?;
+
+    // For header-auth fast path, include protocol preferences in query params
+    // so the server can negotiate without a separate Authenticate message.
+    if uses_header_auth {
+        let protocol = connection_options.protocol;
+        if protocol.serialization != SerializationType::Json {
+            let sep = if request_url.contains('?') { "&" } else { "?" };
+            request_url.push_str(&format!("{}serialization=msgpack", sep));
+        }
+        if protocol.compression == CompressionType::None {
+            let sep = if request_url.contains('?') { "&" } else { "?" };
+            request_url.push_str(&format!("{}compression=none", sep));
+        }
+    }
 
     let mut request = request_url.into_client_request().map_err(|e| {
         KalamLinkError::WebSocketError(format!("Failed to build WebSocket request: {}", e))
@@ -535,10 +552,19 @@ async fn establish_ws(
         },
     };
 
-    send_auth_and_wait(&mut ws_stream, &auth, timeouts.auth_timeout).await?;
-    log::info!("[kalam-link] WebSocket authenticated successfully");
+    let ser = if uses_header_auth {
+        // Header-auth fast path: JWT was sent in the upgrade request's
+        // Authorization header. The server validates it during the HTTP
+        // upgrade and sends AuthSuccess proactively — no explicit
+        // Authenticate message needed, saving a full round-trip.
+        authenticate_ws(&mut ws_stream, &auth, timeouts.auth_timeout, connection_options.protocol, false).await?
+    } else {
+        // Fallback: send an explicit Authenticate message and wait.
+        authenticate_ws(&mut ws_stream, &auth, timeouts.auth_timeout, connection_options.protocol, true).await?
+    };
+    log::info!("[kalam-link] WebSocket authenticated successfully (header_auth={})", uses_header_auth);
 
-    Ok((ws_stream, auth))
+    Ok((ws_stream, auth, ser))
 }
 
 async fn send_subscribe(
@@ -546,6 +572,7 @@ async fn send_subscribe(
     id: &str,
     sql: &str,
     options: SubscriptionOptions,
+    serialization: SerializationType,
 ) -> Result<()> {
     let msg = ClientMessage::Subscribe {
         subscription: SubscriptionRequest {
@@ -554,24 +581,18 @@ async fn send_subscribe(
             options,
         },
     };
-    let payload = serde_json::to_string(&msg).map_err(|e| {
-        KalamLinkError::WebSocketError(format!("Failed to serialize subscribe: {}", e))
-    })?;
-    ws.send(Message::Text(payload.into()))
-        .await
-        .map_err(|e| KalamLinkError::WebSocketError(format!("Failed to send subscribe: {}", e)))
+    send_client_message(ws, &msg, serialization).await
 }
 
-async fn send_unsubscribe(ws: &mut WebSocketStream, id: &str) -> Result<()> {
+async fn send_unsubscribe(
+    ws: &mut WebSocketStream,
+    id: &str,
+    serialization: SerializationType,
+) -> Result<()> {
     let msg = ClientMessage::Unsubscribe {
         subscription_id: id.to_string(),
     };
-    let payload = serde_json::to_string(&msg).map_err(|e| {
-        KalamLinkError::WebSocketError(format!("Failed to serialize unsubscribe: {}", e))
-    })?;
-    ws.send(Message::Text(payload.into()))
-        .await
-        .map_err(|e| KalamLinkError::WebSocketError(format!("Failed to send unsubscribe: {}", e)))
+    send_client_message(ws, &msg, serialization).await
 }
 
 async fn route_event(
@@ -580,6 +601,7 @@ async fn route_event(
     subs: &mut HashMap<String, SubEntry>,
     seq_id_cache: &mut HashMap<String, SeqId>,
     timeouts: &KalamLinkTimeouts,
+    serialization: SerializationType,
 ) {
     let incoming_sub_id = match event.subscription_id() {
         Some(id) => id.to_string(),
@@ -617,7 +639,7 @@ async fn route_event(
                 .as_ref()
                 .and_then(|key| subs.get(key))
                 .and_then(|entry| entry.batch_seq_id.or(entry.last_seq_id));
-            if let Err(e) = send_next_batch_request(ws, &incoming_sub_id, last_seq).await {
+            if let Err(e) = send_next_batch_request_with_format(ws, &incoming_sub_id, last_seq, serialization).await {
                 log::warn!("Failed to send NextBatch for {}: {}", incoming_sub_id, e);
             }
         }
@@ -700,6 +722,7 @@ async fn resubscribe_all(
     subs: &mut HashMap<String, SubEntry>,
     timeouts: &KalamLinkTimeouts,
     event_handlers: &EventHandlers,
+    serialization: SerializationType,
 ) {
     log::info!(
         "[kalam-link] Re-subscribing {} active subscription(s) after reconnect",
@@ -728,7 +751,7 @@ async fn resubscribe_all(
             options.snapshot_end_seq.map(|s| s.to_string())
         );
 
-        if let Err(e) = send_subscribe(ws, id, &entry.sql, options).await {
+        if let Err(e) = send_subscribe(ws, id, &entry.sql, options, serialization).await {
             log::warn!("Failed to re-subscribe {}: {}", id, e);
             event_handlers.emit_error(ConnectionError::new(
                 format!("Failed to re-subscribe {}: {}", id, e),
@@ -822,6 +845,9 @@ async fn connection_task(
     let mut ws_stream: Option<WebSocketStream> = None;
     let mut shutdown_requested = false;
     let mut next_generation: u64 = 1;
+    // Negotiated serialization format for the current connection.
+    // Reset to Json on disconnect; updated after each successful auth.
+    let mut negotiated_ser = SerializationType::Json;
 
     let keepalive_dur = if timeouts.keepalive_interval.is_zero() {
         FAR_FUTURE
@@ -842,8 +868,9 @@ async fn connection_task(
     match establish_ws(&base_url, &resolved_auth, &timeouts, &connection_options, &event_handlers)
         .await
     {
-        Ok((stream, _auth)) => {
+        Ok((stream, _auth, ser)) => {
             ws_stream = Some(stream);
+            negotiated_ser = ser;
             connected.store(true, Ordering::SeqCst);
             event_handlers.emit_connect();
             ping_deadline = TokioInstant::now() + keepalive_dur;
@@ -863,7 +890,7 @@ async fn connection_task(
         if shutdown_requested {
             if let Some(ref mut ws) = ws_stream {
                 for id in subs.keys() {
-                    let _ = send_unsubscribe(ws, id).await;
+                    let _ = send_unsubscribe(ws, id, negotiated_ser).await;
                 }
                 let _ = ws.close(None).await;
             }
@@ -923,7 +950,7 @@ async fn connection_task(
                                     "[kalam-link] Replacing existing subscription '{}'",
                                     id,
                                 );
-                                let _ = send_unsubscribe(ws, &id).await;
+                                let _ = send_unsubscribe(ws, &id, negotiated_ser).await;
                                 if let Some(mut old_entry) =
                                     remove_subscription_entry(&mut subs, &mut seq_id_cache, &id, None)
                                 {
@@ -935,7 +962,7 @@ async fn connection_task(
                             let inherited_seq = seq_id_cache.get(&id).copied();
                             let mut send_options = options.clone();
                             let effective_from = merge_resume_from(&mut send_options, inherited_seq);
-                            let result = send_subscribe(ws, &id, &sql, send_options).await;
+                            let result = send_subscribe(ws, &id, &sql, send_options, negotiated_ser).await;
                             if result.is_ok() {
                                 register_subscription_entry(
                                     &mut subs,
@@ -959,7 +986,7 @@ async fn connection_task(
                                 if let Some(result_tx) = entry.pending_result_tx.take() {
                                     let _ = result_tx.send(Err(KalamLinkError::Cancelled));
                                 }
-                                let _ = send_unsubscribe(ws, &id).await;
+                                let _ = send_unsubscribe(ws, &id, negotiated_ser).await;
                             } else {
                                 log::debug!(
                                     "[kalam-link] Ignoring stale unsubscribe for '{}' (gen={:?})",
@@ -993,12 +1020,10 @@ async fn connection_task(
                         ws_stream = None;
                         continue;
                     }
-                    // Also send an application-level JSON ping so the server's
+                    // Also send an application-level ping so the server's
                     // heartbeat checker is satisfied.  The server tracks
                     // {"type":"ping"} messages, not native WebSocket Ping frames.
-                    if let Ok(json_ping) = serde_json::to_string(&ClientMessage::Ping) {
-                        let _ = ws.send(Message::Text(json_ping.into())).await;
-                    }
+                    let _ = send_client_message(ws, &ClientMessage::Ping, negotiated_ser).await;
                     event_handlers.emit_send("[ping]");
                     if has_pong_timeout {
                         awaiting_pong = true;
@@ -1022,26 +1047,55 @@ async fn connection_task(
                             event_handlers.emit_receive(&text);
                             match parse_message(&text) {
                                 Ok(Some(event)) => {
-                                    route_event(event, ws, &mut subs, &mut seq_id_cache, &timeouts).await;
+                                    route_event(event, ws, &mut subs, &mut seq_id_cache, &timeouts, negotiated_ser).await;
                                 },
                                 Ok(None) => {},
                                 Err(e) => log::warn!("Failed to parse WS message: {}", e),
                             }
                         },
                         Some(Ok(Message::Binary(data))) => {
-                            match decode_ws_payload(&data) {
-                                Ok(text) => {
-                                    event_handlers.emit_receive(&text);
-                                    match parse_message(&text) {
+                            match negotiated_ser {
+                                SerializationType::MessagePack => {
+                                    // Msgpack binary frame (possibly gzip-compressed)
+                                    let raw = if data.len() >= 2 && data[0] == 0x1f && data[1] == 0x8b {
+                                        match crate::compression::decompress_gzip_with_limit(
+                                            &data,
+                                            crate::connection::MAX_WS_DECOMPRESSED_MESSAGE_BYTES,
+                                        ) {
+                                            Ok(d) => d,
+                                            Err(e) => {
+                                                log::warn!("Failed to decompress msgpack: {}", e);
+                                                continue;
+                                            },
+                                        }
+                                    } else {
+                                        data.to_vec()
+                                    };
+                                    match parse_message_msgpack(&raw) {
                                         Ok(Some(event)) => {
-                                            route_event(event, ws, &mut subs, &mut seq_id_cache, &timeouts).await;
+                                            route_event(event, ws, &mut subs, &mut seq_id_cache, &timeouts, negotiated_ser).await;
                                         },
                                         Ok(None) => {},
-                                        Err(e) => log::warn!("Failed to parse decompressed WS message: {}", e),
+                                        Err(e) => log::warn!("Failed to parse msgpack message: {}", e),
                                     }
                                 },
-                                Err(e) => {
-                                    event_handlers.emit_error(ConnectionError::new(e.to_string(), false));
+                                SerializationType::Json => {
+                                    // Legacy: gzip-compressed JSON binary frame
+                                    match decode_ws_payload(&data) {
+                                        Ok(text) => {
+                                            event_handlers.emit_receive(&text);
+                                            match parse_message(&text) {
+                                                Ok(Some(event)) => {
+                                                    route_event(event, ws, &mut subs, &mut seq_id_cache, &timeouts, negotiated_ser).await;
+                                                },
+                                                Ok(None) => {},
+                                                Err(e) => log::warn!("Failed to parse decompressed WS message: {}", e),
+                                            }
+                                        },
+                                        Err(e) => {
+                                            event_handlers.emit_error(ConnectionError::new(e.to_string(), false));
+                                        },
+                                    }
                                 },
                             }
                         },
@@ -1053,6 +1107,7 @@ async fn connection_task(
                             };
                             event_handlers.emit_disconnect(reason);
                             connected.store(false, Ordering::SeqCst);
+                            negotiated_ser = SerializationType::Json;
                             ws_stream = None;
                             continue;
                         },
@@ -1070,12 +1125,14 @@ async fn connection_task(
                                 "WebSocket error: {}", msg
                             )));
                             connected.store(false, Ordering::SeqCst);
+                            negotiated_ser = SerializationType::Json;
                             ws_stream = None;
                             continue;
                         },
                         None => {
                             event_handlers.emit_disconnect(DisconnectReason::new("WebSocket stream ended"));
                             connected.store(false, Ordering::SeqCst);
+                            negotiated_ser = SerializationType::Json;
                             ws_stream = None;
                             continue;
                         },
@@ -1257,12 +1314,13 @@ async fn connection_task(
             )
             .await
             {
-                Ok((mut stream, _auth)) => {
+                Ok((mut stream, _auth, ser)) => {
                     log::info!("Reconnection successful");
+                    negotiated_ser = ser;
                     reconnect_attempts.store(0, Ordering::SeqCst);
                     connected.store(true, Ordering::SeqCst);
                     event_handlers.emit_connect();
-                    resubscribe_all(&mut stream, &mut subs, &timeouts, &event_handlers).await;
+                    resubscribe_all(&mut stream, &mut subs, &timeouts, &event_handlers, negotiated_ser).await;
                     ws_stream = Some(stream);
                     ping_deadline = TokioInstant::now() + keepalive_dur;
                     awaiting_pong = false;

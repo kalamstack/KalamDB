@@ -298,15 +298,36 @@ pub(crate) fn apply_ws_auth_headers(
 
 // ── Authentication Handshake ────────────────────────────────────────────────
 
-/// Send authentication message and wait for AuthSuccess response.
+/// Authenticate the WebSocket connection.
 ///
-/// The WebSocket protocol requires an explicit Authenticate message after
-/// connection. This function sends credentials and waits for the server's
-/// response within the configured timeout.
-pub(crate) async fn send_auth_and_wait(
+/// When `send_credentials` is `true` (message-auth fallback), sends an explicit
+/// `Authenticate` message carrying the JWT and protocol options, then waits for
+/// the server's `AuthSuccess`.
+///
+/// When `send_credentials` is `false` (header-auth fast path), the JWT was
+/// already in the HTTP upgrade request header. The server validates it during
+/// the upgrade and proactively sends `AuthSuccess` as the first frame — no
+/// `Authenticate` message is sent, saving a full round-trip.
+///
+/// Returns the negotiated `SerializationType` from the server's `AuthSuccess`.
+pub(crate) async fn authenticate_ws(
     ws_stream: &mut WebSocketStream,
     auth: &AuthProvider,
     auth_timeout: Duration,
+    protocol: crate::models::ProtocolOptions,
+    send_credentials: bool,
+) -> Result<crate::models::SerializationType> {
+    if send_credentials {
+        send_authenticate_message(ws_stream, auth, protocol).await?;
+    }
+    await_auth_response(ws_stream, auth_timeout).await
+}
+
+/// Send the explicit `Authenticate` client message on the WebSocket.
+async fn send_authenticate_message(
+    ws_stream: &mut WebSocketStream,
+    auth: &AuthProvider,
+    protocol: crate::models::ProtocolOptions,
 ) -> Result<()> {
     let credentials = match auth {
         AuthProvider::BasicAuth(_, _) => {
@@ -324,7 +345,10 @@ pub(crate) async fn send_auth_and_wait(
         },
     };
 
-    let auth_message = ClientMessage::Authenticate { credentials };
+    let auth_message = ClientMessage::Authenticate {
+        credentials,
+        protocol,
+    };
     let payload = serde_json::to_string(&auth_message).map_err(|e| {
         KalamLinkError::WebSocketError(format!("Failed to serialize auth message: {}", e))
     })?;
@@ -333,7 +357,17 @@ pub(crate) async fn send_auth_and_wait(
         KalamLinkError::WebSocketError(format!("Failed to send auth message: {}", e))
     })?;
 
-    // Loop until AuthSuccess/AuthError, tolerating Ping/Pong during handshake.
+    Ok(())
+}
+
+/// Wait for the server's `AuthSuccess` or `AuthError` response.
+///
+/// Shared by both the message-auth and header-auth paths. Tolerates
+/// Ping/Pong frames during the handshake window.
+async fn await_auth_response(
+    ws_stream: &mut WebSocketStream,
+    auth_timeout: Duration,
+) -> Result<crate::models::SerializationType> {
     let deadline = TokioInstant::now() + auth_timeout;
     loop {
         let remaining = deadline.saturating_duration_since(TokioInstant::now());
@@ -347,7 +381,9 @@ pub(crate) async fn send_auth_and_wait(
         match tokio::time::timeout(remaining, ws_stream.next()).await {
             Ok(Some(Ok(Message::Text(text)))) => {
                 match serde_json::from_str::<ServerMessage>(&text) {
-                    Ok(ServerMessage::AuthSuccess { .. }) => return Ok(()),
+                    Ok(ServerMessage::AuthSuccess { protocol: negotiated, .. }) => {
+                        return Ok(negotiated.serialization);
+                    },
                     Ok(ServerMessage::AuthError { message }) => {
                         return Err(KalamLinkError::AuthenticationError(format!(
                             "WebSocket authentication failed: {}",
@@ -412,6 +448,18 @@ pub(crate) fn parse_message(text: &str) -> Result<Option<ChangeEvent>> {
     Ok(ChangeEvent::from_server_message(msg))
 }
 
+/// Parse a binary MessagePack payload into a `ChangeEvent`.
+pub(crate) fn parse_message_msgpack(data: &[u8]) -> Result<Option<ChangeEvent>> {
+    let msg: ServerMessage = rmp_serde::from_slice(data).map_err(|e| {
+        KalamLinkError::SerializationError(format!(
+            "Failed to parse msgpack as ServerMessage: {}",
+            e
+        ))
+    })?;
+
+    Ok(ChangeEvent::from_server_message(msg))
+}
+
 // ── Keepalive Jitter ────────────────────────────────────────────────────────
 
 /// Spread keepalive pings across connections to avoid synchronized bursts.
@@ -463,28 +511,61 @@ pub(crate) fn decode_ws_payload(data: &[u8]) -> Result<String> {
     })
 }
 
-/// Send a `NextBatch` request through the WebSocket stream.
-pub(crate) async fn send_next_batch_request(
+/// Send a `NextBatch` request using the negotiated serialization format.
+pub(crate) async fn send_next_batch_request_with_format(
     ws_stream: &mut WebSocketStream,
     subscription_id: &str,
     last_seq_id: Option<crate::seq_id::SeqId>,
+    serialization: crate::models::SerializationType,
 ) -> Result<()> {
     let message = ClientMessage::NextBatch {
         subscription_id: subscription_id.to_string(),
         last_seq_id,
     };
-    let payload = serde_json::to_string(&message).map_err(|e| {
-        KalamLinkError::WebSocketError(format!("Failed to serialize NextBatch: {}", e))
-    })?;
-    ws_stream
-        .send(Message::Text(payload.into()))
-        .await
-        .map_err(|e| KalamLinkError::WebSocketError(format!("Failed to send NextBatch: {}", e)))
+    send_client_message(ws_stream, &message, serialization).await
+}
+
+/// Encode and send a `ClientMessage` using the given serialization format.
+pub(crate) async fn send_client_message(
+    ws_stream: &mut WebSocketStream,
+    msg: &ClientMessage,
+    serialization: crate::models::SerializationType,
+) -> Result<()> {
+    match serialization {
+        crate::models::SerializationType::Json => {
+            let payload = serde_json::to_string(msg).map_err(|e| {
+                KalamLinkError::WebSocketError(format!("Failed to serialize message: {}", e))
+            })?;
+            ws_stream
+                .send(Message::Text(payload.into()))
+                .await
+                .map_err(|e| {
+                    KalamLinkError::WebSocketError(format!("Failed to send message: {}", e))
+                })
+        },
+        crate::models::SerializationType::MessagePack => {
+            let payload = rmp_serde::to_vec_named(msg).map_err(|e| {
+                KalamLinkError::WebSocketError(format!("Failed to serialize msgpack: {}", e))
+            })?;
+            ws_stream
+                .send(Message::Binary(payload.into()))
+                .await
+                .map_err(|e| {
+                    KalamLinkError::WebSocketError(format!("Failed to send binary message: {}", e))
+                })
+        },
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::AuthProvider;
+    use crate::error::KalamLinkError;
+    use tokio_tungstenite::tungstenite::{
+        client::IntoClientRequest,
+        http::header::AUTHORIZATION,
+    };
 
     #[test]
     fn test_ws_url_conversion() {
@@ -557,6 +638,39 @@ mod tests {
     }
 
     #[test]
+    fn test_apply_ws_auth_headers_sets_bearer_header_for_jwt() {
+        let mut request = "ws://localhost:3000/v1/ws".into_client_request().unwrap();
+
+        apply_ws_auth_headers(
+            &mut request,
+            &AuthProvider::jwt_token("token-123".to_string()),
+        )
+            .expect("jwt auth should be applied via Authorization header");
+
+        assert_eq!(
+            request.headers().get(AUTHORIZATION).unwrap(),
+            "Bearer token-123"
+        );
+    }
+
+    #[test]
+    fn test_apply_ws_auth_headers_rejects_basic_auth() {
+        let mut request = "ws://localhost:3000/v1/ws".into_client_request().unwrap();
+
+        let err = apply_ws_auth_headers(
+            &mut request,
+            &AuthProvider::basic_auth("admin".to_string(), "secret".to_string()),
+        )
+        .expect_err("basic auth should not be used for websocket upgrades");
+
+        assert!(matches!(
+            err,
+            KalamLinkError::AuthenticationError(message)
+            if message.contains("requires a JWT token")
+        ));
+    }
+
+    #[test]
     fn test_keepalive_jitter_is_deterministic() {
         let base = Duration::from_secs(20);
         let a = jitter_keepalive_interval(base, "sub-a");
@@ -577,5 +691,46 @@ mod tests {
             min,
             max
         );
+    }
+
+    #[test]
+    fn test_parse_message_msgpack_server_message() {
+        use crate::models::{ProtocolOptions, SerializationType, ServerMessage};
+
+        let msg = ServerMessage::AuthSuccess {
+            user_id: "user-1".to_string(),
+            role: "admin".to_string(),
+            protocol: ProtocolOptions {
+                serialization: SerializationType::MessagePack,
+                compression: crate::models::CompressionType::Gzip,
+            },
+        };
+        let bytes = rmp_serde::to_vec_named(&msg).unwrap();
+        let result = parse_message_msgpack(&bytes).unwrap();
+        // AuthSuccess is not a ChangeEvent, so parse_message_msgpack should return None
+        // (it only handles subscription events)
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_msgpack_client_message_roundtrip() {
+        use crate::models::{ClientMessage, SubscriptionOptions, SubscriptionRequest};
+
+        let msg = ClientMessage::Subscribe {
+            subscription: SubscriptionRequest {
+                id: "sub-1".to_string(),
+                sql: "SELECT * FROM test".to_string(),
+                options: SubscriptionOptions::default(),
+            },
+        };
+        let bytes = rmp_serde::to_vec_named(&msg).unwrap();
+        let parsed: ClientMessage = rmp_serde::from_slice(&bytes).unwrap();
+        match parsed {
+            ClientMessage::Subscribe { subscription } => {
+                assert_eq!(subscription.id, "sub-1");
+                assert_eq!(subscription.sql, "SELECT * FROM test");
+            },
+            _ => panic!("Expected Subscribe"),
+        }
     }
 }

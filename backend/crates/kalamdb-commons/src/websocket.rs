@@ -107,6 +107,56 @@ use datafusion_common::ScalarValue;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
+/// Wire-format serialization type negotiated during authentication.
+///
+/// The client sends its preferred serialization in the `Authenticate` message.
+/// After a successful auth response (always JSON), all subsequent frames use
+/// the negotiated format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SerializationType {
+    /// JSON text frames (default, backward-compatible).
+    #[default]
+    Json,
+    /// MessagePack binary frames — compact and fast with the same Serde model.
+    #[serde(rename = "msgpack")]
+    MessagePack,
+}
+
+/// Wire-format compression negotiated during authentication.
+///
+/// Applied independently of serialization type. Large payloads may still
+/// benefit from gzip even when using MessagePack.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompressionType {
+    /// No compression.
+    None,
+    /// Gzip compression for payloads above the server threshold (default).
+    #[default]
+    Gzip,
+}
+
+/// Protocol options negotiated once per connection during authentication.
+///
+/// Always sent in `ClientMessage::Authenticate` and echoed in `AuthSuccess`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProtocolOptions {
+    /// Serialization format for messages after auth.
+    pub serialization: SerializationType,
+    /// Compression policy.
+    pub compression: CompressionType,
+}
+
+impl Default for ProtocolOptions {
+    fn default() -> Self {
+        Self {
+            serialization: SerializationType::Json,
+            compression: CompressionType::Gzip,
+        }
+    }
+}
+
 /// Type alias for row data in WebSocket messages (column_name -> cell value)
 pub type RowData = HashMap<String, KalamCellValue>;
 
@@ -124,11 +174,15 @@ pub enum WebSocketMessage {
     ///
     /// Sent after client sends Authenticate message with valid credentials.
     /// Client can now send Subscribe/Unsubscribe messages.
+    /// Always sent as JSON text, even when msgpack was negotiated; the
+    /// negotiated protocol takes effect for all *subsequent* frames.
     AuthSuccess {
         /// Authenticated user ID
         user_id: UserId,
         /// User role
         role: String,
+        /// Negotiated protocol echoed back to the client.
+        protocol: ProtocolOptions,
     },
 
     /// Authentication failed response
@@ -187,10 +241,13 @@ pub enum ClientMessage {
     /// Server responds with AuthSuccess or AuthError.
     ///
     /// Supports token-based authentication via the `credentials` field.
+    /// Optionally negotiates wire format via `protocol`.
     Authenticate {
         /// Authentication credentials (jwt or future token-based methods)
         #[serde(flatten)]
         credentials: WsAuthCredentials,
+        /// Protocol negotiation (serialization + compression).
+        protocol: ProtocolOptions,
     },
 
     /// Subscribe to live query updates
@@ -801,5 +858,165 @@ mod tests {
         let json = serde_json::to_string(&notification).unwrap();
         assert!(json.contains("error"));
         assert!(json.contains("INVALID_QUERY"));
+    }
+
+    #[test]
+    fn test_serialization_type_default() {
+        assert_eq!(SerializationType::default(), SerializationType::Json);
+    }
+
+    #[test]
+    fn test_compression_type_default() {
+        assert_eq!(CompressionType::default(), CompressionType::Gzip);
+    }
+
+    #[test]
+    fn test_protocol_options_default() {
+        let opts = ProtocolOptions::default();
+        assert_eq!(opts.serialization, SerializationType::Json);
+        assert_eq!(opts.compression, CompressionType::Gzip);
+    }
+
+    #[test]
+    fn test_protocol_options_json_roundtrip() {
+        let opts = ProtocolOptions {
+            serialization: SerializationType::MessagePack,
+            compression: CompressionType::None,
+        };
+        let json = serde_json::to_string(&opts).unwrap();
+        assert!(json.contains("\"msgpack\""));
+        assert!(json.contains("\"none\""));
+        let parsed: ProtocolOptions = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.serialization, SerializationType::MessagePack);
+        assert_eq!(parsed.compression, CompressionType::None);
+    }
+
+    #[test]
+    fn test_protocol_options_default_omitted() {
+        // Default protocol should serialize cleanly and round-trip
+        let opts = ProtocolOptions::default();
+        let json = serde_json::to_string(&opts).unwrap();
+        let parsed: ProtocolOptions = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, opts);
+    }
+
+    #[test]
+    fn test_authenticate_with_protocol() {
+        let msg = ClientMessage::Authenticate {
+            credentials: crate::websocket::WsAuthCredentials::Jwt {
+                token: "test_token".to_string(),
+            },
+            protocol: ProtocolOptions {
+                serialization: SerializationType::MessagePack,
+                compression: CompressionType::Gzip,
+            },
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"protocol\""));
+        assert!(json.contains("\"msgpack\""));
+        let parsed: ClientMessage = serde_json::from_str(&json).unwrap();
+        match parsed {
+            ClientMessage::Authenticate { protocol, .. } => {
+                assert_eq!(protocol.serialization, SerializationType::MessagePack);
+            },
+            _ => panic!("Expected Authenticate"),
+        }
+    }
+
+    #[test]
+    fn test_authenticate_default_protocol() {
+        let msg = ClientMessage::Authenticate {
+            credentials: crate::websocket::WsAuthCredentials::Jwt {
+                token: "test_token".to_string(),
+            },
+            protocol: ProtocolOptions::default(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"protocol\""));
+        let parsed: ClientMessage = serde_json::from_str(&json).unwrap();
+        match parsed {
+            ClientMessage::Authenticate { protocol, .. } => {
+                assert_eq!(protocol.serialization, SerializationType::Json);
+                assert_eq!(protocol.compression, CompressionType::Gzip);
+            },
+            _ => panic!("Expected Authenticate"),
+        }
+    }
+
+    #[test]
+    fn test_auth_success_with_protocol() {
+        let msg = WebSocketMessage::AuthSuccess {
+            user_id: UserId::from("user-1"),
+            role: "admin".to_string(),
+            protocol: ProtocolOptions {
+                serialization: SerializationType::MessagePack,
+                compression: CompressionType::Gzip,
+            },
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"protocol\""));
+        let parsed: WebSocketMessage = serde_json::from_str(&json).unwrap();
+        match parsed {
+            WebSocketMessage::AuthSuccess { protocol, .. } => {
+                assert_eq!(protocol.serialization, SerializationType::MessagePack);
+            },
+            _ => panic!("Expected AuthSuccess"),
+        }
+    }
+
+    #[cfg(feature = "msgpack")]
+    #[test]
+    fn test_client_message_msgpack_roundtrip() {
+        let msg = ClientMessage::subscribe(SubscriptionRequest {
+            id: "sub-1".to_string(),
+            sql: "SELECT * FROM test".to_string(),
+            options: SubscriptionOptions::default(),
+        });
+        let bytes = rmp_serde::to_vec_named(&msg).unwrap();
+        let parsed: ClientMessage = rmp_serde::from_slice(&bytes).unwrap();
+        match parsed {
+            ClientMessage::Subscribe { subscription } => {
+                assert_eq!(subscription.id, "sub-1");
+                assert_eq!(subscription.sql, "SELECT * FROM test");
+            },
+            _ => panic!("Expected Subscribe"),
+        }
+    }
+
+    #[cfg(feature = "msgpack")]
+    #[test]
+    fn test_websocket_message_msgpack_roundtrip() {
+        let msg = WebSocketMessage::AuthSuccess {
+            user_id: UserId::from("user-1"),
+            role: "admin".to_string(),
+            protocol: ProtocolOptions {
+                serialization: SerializationType::MessagePack,
+                compression: CompressionType::None,
+            },
+        };
+        let bytes = rmp_serde::to_vec_named(&msg).unwrap();
+        let parsed: WebSocketMessage = rmp_serde::from_slice(&bytes).unwrap();
+        match parsed {
+            WebSocketMessage::AuthSuccess { user_id, role, protocol } => {
+                assert_eq!(user_id, UserId::from("user-1"));
+                assert_eq!(role, "admin");
+                assert_eq!(protocol.serialization, SerializationType::MessagePack);
+            },
+            _ => panic!("Expected AuthSuccess"),
+        }
+    }
+
+    #[cfg(feature = "msgpack")]
+    #[test]
+    fn test_notification_msgpack_roundtrip() {
+        let notification = Notification::insert("sub-1".to_string(), vec![]);
+        let bytes = rmp_serde::to_vec_named(&notification).unwrap();
+        let parsed: Notification = rmp_serde::from_slice(&bytes).unwrap();
+        match parsed {
+            Notification::Change { subscription_id, .. } => {
+                assert_eq!(subscription_id, "sub-1");
+            }
+            _ => panic!("Expected Change"),
+        }
     }
 }

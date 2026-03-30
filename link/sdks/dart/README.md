@@ -14,9 +14,11 @@ KalamDB is a SQL-first realtime database. The current Dart SDK focuses on the ap
 - **SQL queries** over HTTP with `$1`, `$2`, ... parameter binding
 - **Typed rows** via `Map<String, KalamCellValue>` accessors like `asString()`, `asInt()`, and `asFile()`
 - **Live subscriptions** to any `SELECT` query over WebSocket
+- **Materialized live rows** with `liveQueryRowsWithSql()` and `liveTableRows()`
 - **Authentication flows** with `Auth.jwt`, `Auth.basic`, `Auth.none`, `login()`, `refreshToken()`, and `refreshAuth()`
 - **Connection diagnostics** with `ConnectionHandlers`, keepalive control, and SDK logging hooks
 - **Subscription inspection** with `getSubscriptions()` and `SeqId` resume support
+- **Manual shared-socket control** with `isConnected`, `disconnectWebSocket()`, and `reconnectWebSocket()`
 
 ## Installation
 
@@ -145,6 +147,8 @@ final client = await KalamClient.connect(
 | `authProviderMaxAttempts` | `int` | `3` | Retry attempts for transient auth provider failures |
 | `authProviderInitialBackoff` | `Duration` | `250ms` | Initial auth-provider retry backoff |
 | `authProviderMaxBackoff` | `Duration` | `2s` | Maximum auth-provider retry backoff |
+
+Native Dart subscriptions default to MessagePack over the shared Rust transport. That reduces payload size and decoding overhead on the connect-to-first-batch path without changing the global Rust client default used by other SDKs.
 
 ## Authentication
 
@@ -321,6 +325,26 @@ for (final sub in subs) {
 }
 ```
 
+For UI-facing row lists, prefer the materialized helpers instead of reconciling
+change events yourself:
+
+```dart
+final rowsStream = client.liveQueryRowsWithSql<Map<String, KalamCellValue>>(
+  "SELECT id, body FROM chat.messages WHERE room = 'main'",
+  lastRows: 20,
+);
+
+await for (final rows in rowsStream) {
+  print('materialized rows=${rows.length}');
+}
+```
+
+Or use table-name convenience:
+
+```dart
+final tasks = client.liveTableRows<Map<String, KalamCellValue>>('app.tasks');
+```
+
 ## Connection Lifecycle and Logging
 
 ```dart
@@ -469,10 +493,15 @@ Avoid this pattern. Build the UI first, then resolve auth and connect from a pro
 | `KalamClient.connect(...)` | Create a client handle and configure auth, logging, retries, and WebSocket behavior |
 | `query(sql, {params, namespace})` | Execute SQL over HTTP |
 | `subscribe(sql, {batchSize, lastRows, from, subscriptionId})` | Subscribe to live query changes |
+| `liveQueryRowsWithSql(sql, {batchSize, lastRows, from, subscriptionId, limit, keyColumns, mapRow})` | Subscribe to a reconciled live row set |
+| `liveTableRows(tableName, {batchSize, lastRows, from, subscriptionId, limit, keyColumns, mapRow})` | Subscribe to reconciled rows for `SELECT * FROM table` |
 | `login(username, password)` | Exchange Basic credentials for JWT tokens |
 | `refreshToken(refreshToken)` | Refresh an access token |
 | `refreshAuth(...)` | Re-run `authProvider` and update credentials in place |
 | `healthCheck()` | Read server health/version metadata |
+| `isConnected` | Report whether the shared WebSocket is currently open |
+| `disconnectWebSocket()` | Close the shared WebSocket explicitly |
+| `reconnectWebSocket()` | Refresh auth as needed and reopen the shared WebSocket |
 | `getSubscriptions()` | Inspect active subscriptions and resume checkpoints |
 | `dispose()` | Release client resources |
 

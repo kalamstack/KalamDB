@@ -14,7 +14,7 @@ use tracing::debug;
 
 use crate::handlers::ws::models::WsErrorCode;
 
-use super::{send_error, send_json};
+use super::{send_error, send_message};
 
 /// Handle next batch request
 ///
@@ -82,7 +82,8 @@ pub async fn handle_next_batch(
                 rows_json,
                 batch_control,
             );
-            let _ = send_json(session, &msg, compression_enabled).await;
+            let ser = connection_state.serialization_type();
+            let _ = send_message(session, &msg, ser, compression_enabled).await;
 
             if !result.has_more {
                 let flushed = connection_state.complete_initial_load(subscription_id);

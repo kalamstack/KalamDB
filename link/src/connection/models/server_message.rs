@@ -6,6 +6,8 @@ use crate::models::SchemaField;
 use crate::subscription::models::BatchControl;
 use crate::subscription::models::ChangeTypeRaw;
 
+use super::ProtocolOptions;
+
 /// WebSocket message types sent from server to client
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "wasm", derive(tsify_next::Tsify))]
@@ -18,6 +20,8 @@ pub enum ServerMessage {
         user_id: String, //TODO: Use UserId type instead
         /// User role
         role: String, //TODO: Use UserRole type instead
+        /// Negotiated protocol echoed back from the server.
+        protocol: ProtocolOptions,
     },
 
     /// Authentication failed response (browser clients only)

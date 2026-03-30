@@ -39,7 +39,7 @@ pub mod app_context;
 pub mod applier;
 pub mod error;
 pub mod error_extensions;
-pub mod jobs;
+pub mod job_waker;
 pub mod live;
 pub mod manifest;
 pub mod metrics;
@@ -67,7 +67,7 @@ pub mod system_columns {
     pub use crate::schema_registry::SystemColumnsService;
 }
 
-// Test helpers module for unit tests inside this crate.
-// Integration tests should include their own helpers or use path-based modules.
-#[cfg(test)]
+// Test helpers module — compiled for internal unit tests and for other crates'
+// dev-dependencies that enable the "test-helpers" feature.
+#[cfg(any(test, feature = "test-helpers"))]
 pub mod test_helpers;

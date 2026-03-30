@@ -13,8 +13,10 @@ use kalamdb_configs::ServerConfig;
 use kalamdb_core::live::ConnectionsManager;
 use kalamdb_core::live_query::LiveQueryManager;
 use kalamdb_core::sql::datafusion_session::DataFusionSessionFactory;
+use kalamdb_core::sql::executor::handler_registry::HandlerRegistry;
 use kalamdb_core::sql::executor::SqlExecutor;
 use kalamdb_dba::{initialize_dba_namespace, start_stats_recorder};
+use kalamdb_jobs::AppContextJobsExt;
 use kalamdb_store::open_storage_backend;
 use kalamdb_system::providers::storages::models::StorageMode;
 use log::debug;
@@ -117,8 +119,15 @@ pub async fn prepare_components(
     let user_repo: Arc<dyn kalamdb_auth::UserRepository> =
         Arc::new(kalamdb_api::repositories::CachedUsersRepo::new(users_provider));
 
+    let handler_registry = Arc::new(HandlerRegistry::new(app_context.clone()));
+    kalamdb_handlers::register_all_handlers(
+        &handler_registry,
+        app_context.clone(),
+        config.auth.enforce_password_complexity,
+    );
+
     let sql_executor =
-        Arc::new(SqlExecutor::new(app_context.clone(), config.auth.enforce_password_complexity));
+        Arc::new(SqlExecutor::new(app_context.clone(), handler_registry));
 
     app_context.set_sql_executor(sql_executor.clone());
     live_query_manager.set_sql_executor(sql_executor.clone());
@@ -127,6 +136,9 @@ pub async fn prepare_components(
     initialize_dba_namespace(app_context.clone())?;
 
     app_context.restore_raft_state_machines().await;
+
+    // Initialize job system (executors, manager, waker) — extracted to kalamdb-jobs crate
+    kalamdb_jobs::init_job_manager(&app_context);
 
     let job_manager = app_context.job_manager();
     let max_concurrent = config.jobs.max_concurrent;

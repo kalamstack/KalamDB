@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use super::ProtocolOptions;
 use crate::timestamp::{TimestampFormat, TimestampFormatter};
 
 /// HTTP protocol version to use for connections.
@@ -139,6 +140,19 @@ pub struct ConnectionOptions {
     /// Default: `true`.
     #[serde(default = "default_ws_lazy_connect")]
     pub ws_lazy_connect: bool,
+
+    /// Protocol options for the WebSocket connection.
+    ///
+    /// Controls the serialization format (JSON or MessagePack) and compression
+    /// (None or Gzip) used for WebSocket messages after authentication.
+    ///
+    /// Authentication messages are always sent as JSON text frames regardless
+    /// of this setting. The negotiated protocol takes effect after the server
+    /// confirms it in the `AuthSuccess` response.
+    ///
+    /// Default: JSON serialization + Gzip compression.
+    #[serde(default)]
+    pub protocol: ProtocolOptions,
 }
 
 fn default_auto_reconnect() -> bool {
@@ -174,6 +188,7 @@ impl Default for ConnectionOptions {
             ws_local_bind_addresses: Vec::new(),
             disable_compression: false,
             ws_lazy_connect: true,
+            protocol: ProtocolOptions::default(),
         }
     }
 }
@@ -263,6 +278,12 @@ impl ConnectionOptions {
     /// subscribing.
     pub fn with_ws_lazy_connect(mut self, lazy: bool) -> Self {
         self.ws_lazy_connect = lazy;
+        self
+    }
+
+    /// Set the protocol options for the WebSocket connection.
+    pub fn with_protocol(mut self, protocol: ProtocolOptions) -> Self {
+        self.protocol = protocol;
         self
     }
 }

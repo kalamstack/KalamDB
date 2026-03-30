@@ -175,10 +175,7 @@ impl OperationExecutor for OperationService {
             base,
         );
 
-        let sql_executor = crate::sql::executor::SqlExecutor::new(
-            Arc::clone(&self.app_context),
-            false, // no password-complexity enforcement for DDL
-        );
+        let sql_executor = self.app_context.sql_executor();
         let result = sql_executor
             .execute(sql, &exec_ctx, Vec::new())
             .await
@@ -200,8 +197,7 @@ impl OperationExecutor for OperationService {
             base,
         );
 
-        let sql_executor =
-            crate::sql::executor::SqlExecutor::new(Arc::clone(&self.app_context), false);
+        let sql_executor = self.app_context.sql_executor();
         let result = sql_executor
             .execute(sql, &exec_ctx, Vec::new())
             .await

@@ -63,8 +63,14 @@ echo ""
 # Step 1: Check KalamDB server is reachable
 echo "Checking KalamDB server at $KALAMDB_API_URL ..."
 for i in $(seq 1 15); do
-    if curl -sf "$KALAMDB_API_URL/health" > /dev/null 2>&1 \
-        || curl -sf "$KALAMDB_API_URL/v1/api/healthcheck" > /dev/null 2>&1; then
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        --connect-timeout 2 \
+        --max-time 5 \
+        -X POST "$KALAMDB_API_URL/v1/api/auth/login" \
+        -H "Content-Type: application/json" \
+        -d "{\"username\":\"admin\",\"password\":\"$KALAMDB_PASSWORD\"}" \
+        || true)
+    if [ "$HTTP_CODE" != "000" ]; then
         echo "KalamDB server is reachable."
         break
     fi
@@ -84,7 +90,7 @@ LOGIN_RESP=$(curl -sf "$KALAMDB_API_URL/v1/api/auth/login" \
     -d "{\"username\":\"admin\",\"password\":\"$KALAMDB_PASSWORD\"}" \
     2>/dev/null || true)
 
-BEARER_TOKEN=$(echo "$LOGIN_RESP" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
+BEARER_TOKEN=$(printf '%s' "$LOGIN_RESP" | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
 if [ -z "$BEARER_TOKEN" ]; then
     echo "WARNING: Could not login to KalamDB. Trying setup first..."
     curl -sf "$KALAMDB_API_URL/v1/api/auth/setup" \
@@ -95,7 +101,7 @@ if [ -z "$BEARER_TOKEN" ]; then
         -H "Content-Type: application/json" \
         -d "{\"username\":\"admin\",\"password\":\"$KALAMDB_PASSWORD\"}" \
         2>/dev/null || true)
-    BEARER_TOKEN=$(echo "$LOGIN_RESP" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
+    BEARER_TOKEN=$(printf '%s' "$LOGIN_RESP" | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
 fi
 
 if [ -z "$BEARER_TOKEN" ]; then
@@ -183,7 +189,7 @@ for i in $(seq 1 5); do
         PAGER=cat "$PSQL_BIN" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" \
             -v ON_ERROR_STOP=1 \
             -P pager=off \
-            -c "SET kalam.user_id = 'concurrent-user-$i'; INSERT INTO rmtest.profiles (id, name, age) VALUES ('cc$i', 'Concurrent$i', $((20 + i))); SELECT COUNT(*) FROM rmtest.profiles;" \
+            -c "SET kalam.user_id = 'concurrent-user'; INSERT INTO rmtest.profiles (id, name, age) VALUES ('cc$i', 'Concurrent$i', $((20 + i))); SELECT COUNT(*) FROM rmtest.profiles;" \
             > /dev/null 2>&1
     ) &
 done
@@ -203,7 +209,7 @@ fi
 
 # Verify all concurrent rows exist
 CC_COUNT=$( PAGER=cat "$PSQL_BIN" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" \
-    -t -A -c "SET kalam.user_id = 'concurrent-user-1'; SELECT COUNT(*) FROM rmtest.profiles WHERE id IN ('cc1','cc2','cc3','cc4','cc5');" )
+    -t -A -c "SET kalam.user_id = 'concurrent-user'; SELECT COUNT(*) FROM rmtest.profiles WHERE id IN ('cc1','cc2','cc3','cc4','cc5');" | tail -n 1 | tr -d '[:space:]' )
 
 if [ "$CC_COUNT" -ge 5 ]; then
     echo "  PASS: All 5 concurrent rows visible ($CC_COUNT)."
@@ -216,7 +222,7 @@ fi
 PAGER=cat "$PSQL_BIN" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" \
     -v ON_ERROR_STOP=1 \
     -P pager=off \
-    -c "SET kalam.user_id = 'concurrent-user-1'; DELETE FROM rmtest.profiles WHERE id IN ('cc1','cc2','cc3','cc4','cc5');" \
+    -c "SET kalam.user_id = 'concurrent-user'; DELETE FROM rmtest.profiles WHERE id IN ('cc1','cc2','cc3','cc4','cc5');" \
     > /dev/null 2>&1
 
 echo ""

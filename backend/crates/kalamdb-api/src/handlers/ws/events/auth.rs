@@ -1,16 +1,17 @@
-//! WebSocket authentication handler
+//! WebSocket authentication service
 //!
-//! Handles the Authenticate message for WebSocket connections.
-//! Uses the unified authentication module from kalamdb-auth.
+//! Provides a single code path for completing WebSocket authentication
+//! regardless of how the user was validated (header-auth fast path or
+//! explicit Authenticate message).
 //!
 //! Only JWT token authentication is accepted for WebSocket connections.
 //! This keeps username/password auth limited to the login endpoint.
 
 use actix_ws::Session;
 use kalamdb_auth::{authenticate, extract_username_for_audit, AuthRequest, UserRepository};
-use kalamdb_commons::models::ConnectionInfo;
-use kalamdb_commons::websocket::WsAuthCredentials;
-use kalamdb_commons::WebSocketMessage;
+use kalamdb_commons::models::{ConnectionInfo, UserId};
+use kalamdb_commons::websocket::{ProtocolOptions, WsAuthCredentials};
+use kalamdb_commons::{Role, WebSocketMessage};
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::live::{ConnectionsManager, SharedConnectionState};
 use log::debug;
@@ -32,11 +33,13 @@ pub async fn handle_authenticate(
     connection_state: &SharedConnectionState,
     client_ip: &ConnectionInfo,
     credentials: WsAuthCredentials,
+    protocol: ProtocolOptions,
     session: &mut Session,
     registry: &Arc<ConnectionsManager>,
     _app_context: &Arc<AppContext>,
     rate_limiter: &Arc<RateLimiter>,
     user_repo: &Arc<dyn UserRepository>,
+    compression: bool,
 ) -> Result<(), String> {
     // SECURITY: Rate limit auth attempts per IP to prevent brute-force via WebSocket.
     // This mirrors the rate limiting applied to the HTTP login endpoint.
@@ -58,11 +61,76 @@ pub async fn handle_authenticate(
         connection_state,
         client_ip,
         auth_request,
+        protocol,
         session,
         registry,
         user_repo,
+        compression,
     )
     .await
+}
+
+/// Complete WebSocket authentication after a user has been validated.
+///
+/// This is the single source of truth for post-validation auth steps.
+/// Called from both the header-auth fast path (handler.rs) and the
+/// message-auth path (authenticate_with_request). Consolidates:
+/// - Marking the connection as authenticated
+/// - Notifying the registry
+/// - Setting the negotiated protocol
+/// - Sending the AuthSuccess response
+pub async fn complete_ws_auth(
+    connection_state: &SharedConnectionState,
+    registry: &Arc<ConnectionsManager>,
+    user_id: UserId,
+    role: Role,
+    protocol: ProtocolOptions,
+    session: &mut Session,
+    compression: bool,
+) -> Result<(), String> {
+    let connection_id = connection_state.connection_id().clone();
+
+    connection_state.mark_authenticated(user_id.clone(), role);
+    registry.on_authenticated(&connection_id, user_id.clone());
+    connection_state.set_protocol(protocol);
+
+    let msg = WebSocketMessage::AuthSuccess {
+        user_id: user_id.clone(),
+        role: format!("{:?}", role),
+        protocol,
+    };
+    let _ = send_json(session, &msg, compression).await;
+
+    debug!(
+        "WebSocket authenticated: {} as {} ({:?})",
+        connection_id,
+        user_id.as_str(),
+        role
+    );
+
+    Ok(())
+}
+
+/// Send an AuthSuccess response for an already-authenticated connection.
+///
+/// Used when a client sends an Authenticate message on a connection that
+/// was already authenticated (e.g. header-auth). Idempotent — simply echoes
+/// the current auth state without re-validating.
+pub async fn send_current_auth_success(
+    connection_state: &SharedConnectionState,
+    session: &mut Session,
+    compression: bool,
+) -> Result<(), String> {
+    if let (Some(user_id), Some(role)) = (connection_state.user_id(), connection_state.user_role())
+    {
+        let msg = WebSocketMessage::AuthSuccess {
+            user_id: user_id.clone(),
+            role: format!("{:?}", role),
+            protocol: connection_state.protocol(),
+        };
+        let _ = send_json(session, &msg, compression).await;
+    }
+    Ok(())
 }
 
 /// Internal function that handles authentication for any AuthRequest type
@@ -70,9 +138,11 @@ async fn authenticate_with_request(
     connection_state: &SharedConnectionState,
     connection_info: &ConnectionInfo,
     auth_request: AuthRequest,
+    protocol: ProtocolOptions,
     session: &mut Session,
     registry: &Arc<ConnectionsManager>,
     user_repo: &Arc<dyn UserRepository>,
+    compression: bool,
 ) -> Result<(), String> {
     let connection_id = connection_state.connection_id().clone();
 
@@ -104,23 +174,16 @@ async fn authenticate_with_request(
         tracing::Span::current().record("user_id", auth_result.user_id.as_str());
         tracing::Span::current().record("role", format!("{:?}", auth_result.role).as_str());
 
-        connection_state.mark_authenticated(auth_result.user_id.clone(), auth_result.role);
-        registry.on_authenticated(&connection_id, auth_result.user_id.clone());
-
-        let msg = WebSocketMessage::AuthSuccess {
-            user_id: auth_result.user_id.clone(),
-            role: format!("{:?}", auth_result.role),
-        };
-        let _ = send_json(session, &msg, true).await;
-
-        debug!(
-            "WebSocket authenticated: {} as {} ({:?})",
-            connection_id,
-            auth_result.user_id.as_str(),
-            auth_result.role
-        );
-
-        Ok(())
+        complete_ws_auth(
+            connection_state,
+            registry,
+            auth_result.user_id,
+            auth_result.role,
+            protocol,
+            session,
+            compression,
+        )
+        .await
     }
     .instrument(auth_span)
     .await

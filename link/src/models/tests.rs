@@ -305,6 +305,7 @@ fn test_client_message_authenticate_jwt_serialization() {
         credentials: WsAuthCredentials::Jwt {
             token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test".to_string(),
         },
+        protocol: ProtocolOptions::default(),
     };
 
     let json = serde_json::to_string(&msg).unwrap();

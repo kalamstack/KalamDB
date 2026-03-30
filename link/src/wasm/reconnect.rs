@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -7,11 +7,11 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{ErrorEvent, MessageEvent, WebSocket};
 
-use crate::models::{ClientMessage, ConnectionOptions, ServerMessage, SubscriptionRequest};
+use crate::models::{ClientMessage, ConnectionOptions, ProtocolOptions, SerializationType, ServerMessage, SubscriptionRequest};
 
 use super::auth::WasmAuthProvider;
 use super::console_log;
-use super::helpers::{create_promise, ws_url_from_http_opts};
+use super::helpers::{create_promise, send_ws_message, ws_url_from_http_opts};
 use super::state::SubscriptionState;
 
 /// Resolve a `WasmAuthProvider` from an optional JS async callback.
@@ -83,7 +83,7 @@ pub(crate) async fn reconnect_internal_with_auth(
 
     // Check if auth is required
     let requires_auth = !matches!(resolved_auth, WasmAuthProvider::None);
-    let auth_message = resolved_auth.to_ws_auth_message();
+    let auth_message = resolved_auth.to_ws_auth_message(ProtocolOptions::default());
     let ws_clone = ws.clone();
     let auth_resolve_for_anon = auth_resolve.clone();
 
@@ -155,6 +155,7 @@ pub(crate) fn restart_ping_timer(
     ws_ref: &Rc<RefCell<Option<WebSocket>>>,
     connection_options: &Rc<RefCell<ConnectionOptions>>,
     ping_interval_id: &Rc<RefCell<i32>>,
+    negotiated_ser: &Rc<Cell<SerializationType>>,
 ) {
     // Stop any previous timer
     let old_id = *ping_interval_id.borrow();
@@ -169,12 +170,11 @@ pub(crate) fn restart_ping_timer(
     }
 
     let ws_clone = Rc::clone(ws_ref);
+    let ser = Rc::clone(negotiated_ser);
     let ping_cb = Closure::wrap(Box::new(move || {
         if let Some(ws) = ws_clone.borrow().as_ref() {
             if ws.ready_state() == WebSocket::OPEN {
-                super::client::PING_PAYLOAD.with(|payload| {
-                    let _ = ws.send_with_str(payload);
-                });
+                let _ = send_ws_message(ws, &ClientMessage::Ping, ser.get());
             }
         }
     }) as Box<dyn FnMut()>);
@@ -189,6 +189,7 @@ pub(crate) fn restart_ping_timer(
 pub(crate) async fn resubscribe_all(
     ws_ref: Rc<RefCell<Option<WebSocket>>>,
     subscription_state: Rc<RefCell<HashMap<String, SubscriptionState>>>,
+    negotiated_ser: SerializationType,
 ) {
     let states: Vec<(String, SubscriptionState)> = {
         let mut subs = subscription_state.borrow_mut();
@@ -224,13 +225,11 @@ pub(crate) async fn resubscribe_all(
         };
 
         if let Some(ws) = ws_ref.borrow().as_ref() {
-            if let Ok(payload) = serde_json::to_string(&subscribe_msg) {
-                if let Err(e) = ws.send_with_str(&payload) {
-                    console_log(&format!(
-                        "KalamClient: Failed to re-subscribe to {}: {:?}",
-                        subscription_id, e
-                    ));
-                }
+            if let Err(e) = send_ws_message(ws, &subscribe_msg, negotiated_ser) {
+                console_log(&format!(
+                    "KalamClient: Failed to re-subscribe to {}: {:?}",
+                    subscription_id, e
+                ));
             }
         }
     }

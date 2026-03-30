@@ -5,11 +5,7 @@
 
 use crate::applier::UnifiedApplier;
 use crate::error_extensions::KalamDbResultExt;
-use crate::jobs::executors::{
-    BackupExecutor, CleanupExecutor, CompactExecutor, FlushExecutor, JobCleanupExecutor,
-    JobRegistry, RestoreExecutor, RetentionExecutor, StreamEvictionExecutor, TopicCleanupExecutor,
-    TopicRetentionExecutor, UserCleanupExecutor, UserExportExecutor, VectorIndexExecutor,
-};
+use crate::job_waker::JobWaker;
 use crate::live::notification::NotificationService;
 use crate::live::ConnectionsManager;
 use crate::live::TopicPublisherService;
@@ -70,7 +66,11 @@ pub struct AppContext {
     storage_backend: Arc<dyn StorageBackend>,
 
     // ===== Managers =====
-    job_manager: OnceCell<Arc<crate::jobs::JobsManager>>,
+    /// Type-erased job manager (concrete type is `kalamdb_jobs::JobsManager`).
+    /// Consumers downcast via the `kalamdb_jobs::AppContextJobsExt` trait.
+    job_manager: OnceCell<Arc<dyn std::any::Any + Send + Sync>>,
+    /// Lightweight waker so the Raft applier can notify the job loop.
+    job_waker: OnceCell<Arc<dyn JobWaker>>,
     live_query_manager: OnceCell<Arc<LiveQueryManager>>,
 
     // ===== Notification Service =====
@@ -128,7 +128,8 @@ impl std::fmt::Debug for AppContext {
             .field("user_table_store", &"Arc<UserTableStore>")
             .field("shared_table_store", &"Arc<SharedTableStore>")
             .field("storage_backend", &"Arc<dyn StorageBackend>")
-            .field("job_manager", &"OnceCell<Arc<JobsManager>>")
+            .field("job_manager", &"OnceCell<Arc<dyn Any>>")
+            .field("job_waker", &"OnceCell<Arc<dyn JobWaker>>")
             .field("live_query_manager", &"OnceCell<Arc<LiveQueryManager>>")
             .field("connection_registry", &"Arc<ConnectionsManager>")
             .field("storage_registry", &"Arc<StorageRegistry>")
@@ -299,25 +300,10 @@ impl AppContext {
             // Note: information_schema.tables and information_schema.columns are provided
             // by DataFusion's built-in support (enabled via .with_information_schema(true))
 
-            // Create job registry and register all 8 executors (Phase 9, T154)
-            let job_registry = Arc::new(JobRegistry::new());
-            job_registry.register(Arc::new(FlushExecutor::new()));
-            job_registry.register(Arc::new(CleanupExecutor::new()));
-            job_registry.register(Arc::new(JobCleanupExecutor::new()));
-            job_registry.register(Arc::new(RetentionExecutor::new()));
-            job_registry.register(Arc::new(StreamEvictionExecutor::new()));
-            job_registry.register(Arc::new(UserCleanupExecutor::new()));
-            job_registry.register(Arc::new(CompactExecutor::new()));
-            job_registry.register(Arc::new(BackupExecutor::new()));
-            job_registry.register(Arc::new(RestoreExecutor::new()));
-            job_registry.register(Arc::new(TopicRetentionExecutor::new()));
-            job_registry.register(Arc::new(TopicCleanupExecutor::new()));
-            job_registry.register(Arc::new(UserExportExecutor::new()));
-            job_registry.register(Arc::new(VectorIndexExecutor::new()));
-
-            // Create unified job manager (Phase 9, T154)
-            let jobs_provider = system_tables.jobs();
-            let job_nodes_provider = system_tables.job_nodes();
+            // Create job registry and register all 13 executors (Phase 9, T154)
+            // Moved to kalamdb-jobs — callers set job_manager via set_job_manager()
+            let job_registry_placeholder: Option<()> = None;
+            let _ = job_registry_placeholder;
 
             // Create connections manager (unified WebSocket connection management)
             // Timeouts from config or defaults
@@ -428,6 +414,7 @@ impl AppContext {
                 shared_table_store,
                 storage_backend,
                 job_manager: OnceCell::new(),
+                job_waker: OnceCell::new(),
                 live_query_manager: OnceCell::new(),
                 notification_service: Arc::clone(&notification_service),
                 connection_registry,
@@ -513,15 +500,7 @@ impl AppContext {
                 log::info!("Wired gRPC ClusterClient and CoreClusterHandler for cluster RPC");
             }
 
-            let job_manager = Arc::new(crate::jobs::JobsManager::new(
-                jobs_provider,
-                job_nodes_provider,
-                job_registry,
-                Arc::clone(&app_ctx),
-            ));
-            if app_ctx.job_manager.set(job_manager).is_err() {
-                panic!("JobsManager already initialized");
-            }
+            // Job manager is initialized externally by kalamdb-jobs (via set_job_manager)
 
             let applier = crate::applier::create_applier(Arc::clone(&app_ctx));
             if app_ctx.applier.set(applier).is_err() {
@@ -662,7 +641,7 @@ impl AppContext {
     /// let sys_cols = app_context.system_columns_service();
     /// let (snowflake_id, updated_ns, deleted) = sys_cols.handle_insert(None).unwrap();
     /// ```
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-helpers"))]
     pub fn new_test() -> Arc<AppContext> {
         use kalamdb_store::test_utils::InMemoryBackend;
 
@@ -698,10 +677,7 @@ impl AppContext {
         );
         let base_session_context = Arc::new(session_factory.create_session());
 
-        // Create minimal job manager registry
-        let job_registry = Arc::new(JobRegistry::new());
-        let jobs_provider = system_tables.jobs();
-        let job_nodes_provider = system_tables.job_nodes();
+        // Job registry creation is deferred to kalamdb-jobs (set_job_manager)
 
         // Create test NodeId
         let node_id = Arc::new(NodeId::new(22));
@@ -765,6 +741,7 @@ impl AppContext {
             shared_table_store,
             storage_backend,
             job_manager: OnceCell::new(),
+            job_waker: OnceCell::new(),
             live_query_manager: OnceCell::new(),
             notification_service: Arc::clone(&notification_service),
             connection_registry,
@@ -797,15 +774,7 @@ impl AppContext {
         // Wire AppContext into notification service for leadership checks (tests)
         notification_service.set_app_context(Arc::downgrade(&app_ctx));
 
-        let job_manager = Arc::new(crate::jobs::JobsManager::new(
-            jobs_provider,
-            job_nodes_provider,
-            job_registry,
-            Arc::clone(&app_ctx),
-        ));
-        if app_ctx.job_manager.set(job_manager).is_err() {
-            panic!("JobsManager already initialized");
-        }
+        // Job manager is initialized externally by kalamdb-jobs (via set_job_manager)
 
         let applier = crate::applier::create_applier(Arc::clone(&app_ctx));
         if app_ctx.applier.set(applier).is_err() {
@@ -852,8 +821,29 @@ impl AppContext {
         self.storage_backend.clone()
     }
 
-    pub fn job_manager(&self) -> Arc<crate::jobs::JobsManager> {
-        self.job_manager.get().expect("JobsManager not initialized").clone()
+    pub fn job_manager_raw(&self) -> &Arc<dyn std::any::Any + Send + Sync> {
+        self.job_manager.get().expect("JobsManager not initialized")
+    }
+
+    /// Set the type-erased job manager and its waker.
+    ///
+    /// Called once from `kalamdb-jobs` initialization (typically in lifecycle.rs).
+    pub fn set_job_manager(
+        &self,
+        mgr: Arc<dyn std::any::Any + Send + Sync>,
+        waker: Arc<dyn JobWaker>,
+    ) {
+        if self.job_manager.set(mgr).is_err() {
+            panic!("JobsManager already initialized");
+        }
+        if self.job_waker.set(waker).is_err() {
+            panic!("JobWaker already initialized");
+        }
+    }
+
+    /// Get the job waker (used by the Raft applier to notify the job loop).
+    pub fn job_waker(&self) -> &Arc<dyn JobWaker> {
+        self.job_waker.get().expect("JobWaker not initialized")
     }
 
     pub fn live_query_manager(&self) -> Arc<LiveQueryManager> {

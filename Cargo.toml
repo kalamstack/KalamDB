@@ -20,6 +20,8 @@ members = [
     "backend/crates/kalamdb-observability",
     "backend/crates/kalamdb-vector",
     "backend/crates/kalamdb-core",
+    "backend/crates/kalamdb-handlers",
+    "backend/crates/kalamdb-jobs",
     "backend/crates/kalamdb-publisher",
     "backend/crates/kalamdb-sql",
     "backend/crates/kalamdb-store",

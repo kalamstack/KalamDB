@@ -454,6 +454,7 @@ mod tests {
     use crate::providers::UserTableProvider;
     use crate::schema_registry::CachedTableData;
     use crate::schema_registry::TablesSchemaRegistryAdapter;
+    use crate::sql::executor::handler_registry::HandlerRegistry;
     use crate::sql::executor::SqlExecutor;
     use kalamdb_commons::ids::{SeqId, UserTableRowId};
     use kalamdb_commons::models::datatypes::KalamDataType;
@@ -626,7 +627,10 @@ mod tests {
 
         let fetcher =
             InitialDataFetcher::new(app_context.base_session_context(), schema_registry.clone());
-        let sql_executor = Arc::new(SqlExecutor::new(app_context.clone(), false));
+        let sql_executor = Arc::new(SqlExecutor::new(
+            app_context.clone(),
+            Arc::new(HandlerRegistry::new(app_context.clone())),
+        ));
         fetcher.set_sql_executor(sql_executor);
 
         // LiveId for connection user 'userA' (RLS enforced)
@@ -770,7 +774,10 @@ mod tests {
 
         let fetcher =
             InitialDataFetcher::new(app_context.base_session_context(), schema_registry.clone());
-        let sql_executor = Arc::new(SqlExecutor::new(app_context.clone(), false));
+        let sql_executor = Arc::new(SqlExecutor::new(
+            app_context.clone(),
+            Arc::new(HandlerRegistry::new(app_context.clone())),
+        ));
         fetcher.set_sql_executor(sql_executor);
         let user_id = UserId::new("userb");
         let conn = ConnId::new("conn2");
@@ -948,7 +955,10 @@ mod tests {
 
         let fetcher =
             InitialDataFetcher::new(app_context.base_session_context(), schema_registry.clone());
-        let sql_executor = Arc::new(SqlExecutor::new(app_context.clone(), false));
+        let sql_executor = Arc::new(SqlExecutor::new(
+            app_context.clone(),
+            Arc::new(HandlerRegistry::new(app_context.clone())),
+        ));
         fetcher.set_sql_executor(sql_executor);
         let user_id = UserId::new("userc");
         let conn = ConnId::new("conn3");

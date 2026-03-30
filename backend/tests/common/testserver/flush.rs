@@ -1,8 +1,9 @@
 use anyhow::Result;
 use kalam_link::models::{QueryResponse, ResponseStatus};
 use kalamdb_commons::{NamespaceId, TableId, TableName};
-use kalamdb_core::jobs::executors::flush::{FlushExecutor, FlushParams};
-use kalamdb_core::jobs::executors::{JobContext, JobExecutor};
+use kalamdb_jobs::executors::flush::{FlushExecutor, FlushParams};
+use kalamdb_jobs::executors::{JobContext, JobExecutor};
+use kalamdb_jobs::AppContextJobsExt;
 use std::path::{Path, PathBuf};
 use tokio::time::{sleep, Duration, Instant};
 

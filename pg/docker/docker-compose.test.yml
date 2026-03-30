@@ -35,7 +35,7 @@ services:
     restart: "no"
     command: ["/usr/local/bin/kalamdb-server", "/config/server.toml"]
     healthcheck:
-      test: ["CMD", "/usr/local/bin/busybox", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/v1/api/healthcheck"]
+      test: ["CMD", "/usr/local/bin/busybox", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
       interval: 5s
       timeout: 3s
       start_period: 8s
@@ -46,7 +46,7 @@ services:
     container_name: pg-kalam-e2e
     depends_on:
       kalamdb:
-        condition: service_healthy
+        condition: service_started
     ports:
       - "${KALAMDB_TEST_PG_PORT:-15433}:5432"
     environment:

@@ -6,6 +6,7 @@ use dashmap::DashMap;
 use datafusion::sql::sqlparser::ast::Expr;
 use kalamdb_commons::ids::SeqId;
 use kalamdb_commons::models::{ConnectionId, ConnectionInfo, LiveQueryId, TableId, UserId};
+use kalamdb_commons::websocket::{CompressionType, ProtocolOptions, SerializationType};
 use kalamdb_commons::Notification;
 use kalamdb_commons::Role;
 use parking_lot::Mutex;
@@ -217,6 +218,9 @@ pub struct ConnectionState {
     user_id: OnceLock<UserId>,
     user_role: OnceLock<Role>,
 
+    // === Protocol negotiation (set-once at auth time) ===
+    protocol: OnceLock<ProtocolOptions>,
+
     // === Heartbeat (atomic) ===
     last_heartbeat_ms: AtomicU64,
 
@@ -244,6 +248,7 @@ impl ConnectionState {
             auth_started: AtomicBool::new(false),
             user_id: OnceLock::new(),
             user_role: OnceLock::new(),
+            protocol: OnceLock::new(),
             last_heartbeat_ms: AtomicU64::new(epoch_millis()),
             subscriptions: DashMap::new(),
             notification_tx,
@@ -303,6 +308,32 @@ impl ConnectionState {
     #[inline]
     pub fn user_role(&self) -> Option<Role> {
         self.user_role.get().copied()
+    }
+
+    // === Protocol ===
+
+    /// Store negotiated protocol options (set-once at auth time).
+    #[inline]
+    pub fn set_protocol(&self, opts: ProtocolOptions) {
+        let _ = self.protocol.set(opts);
+    }
+
+    /// Negotiated serialization type (defaults to Json if not yet set).
+    #[inline]
+    pub fn serialization_type(&self) -> SerializationType {
+        self.protocol.get().map_or(SerializationType::Json, |p| p.serialization)
+    }
+
+    /// Negotiated compression type (defaults to Gzip if not yet set).
+    #[inline]
+    pub fn compression_type(&self) -> CompressionType {
+        self.protocol.get().map_or(CompressionType::Gzip, |p| p.compression)
+    }
+
+    /// Negotiated protocol options (defaults if not yet set).
+    #[inline]
+    pub fn protocol(&self) -> ProtocolOptions {
+        self.protocol.get().copied().unwrap_or_default()
     }
 
     // === Heartbeat ===
