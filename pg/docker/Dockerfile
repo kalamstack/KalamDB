@@ -15,7 +15,7 @@ ARG POSTGRES_BASE_IMAGE=public.ecr.aws/docker/library/postgres:16-bookworm
 ARG PG_MAJOR=16
 ARG PG_EXTENSION_FLAVOR=pg16
 ARG PGRX_VERSION=0.17.0
-ARG OCI_IMAGE_DESCRIPTION="PostgreSQL with the pg_kalam extension preinstalled for connecting PostgreSQL foreign tables to a remote KalamDB server."
+ARG OCI_IMAGE_DESCRIPTION="PostgreSQL with the pg_kalam extension preinstalled so you can connect PostgreSQL foreign tables to a remote KalamDB server."
 
 # ---------------------------------------------------------------------------
 # Stage 1: Builder — Rust toolchain + selected PG dev headers → .so + .sql
