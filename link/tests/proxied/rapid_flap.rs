@@ -21,7 +21,7 @@ async fn test_rapid_flapping_connection_stabilises_and_resumes() {
         };
 
         let proxy = TcpDisconnectProxy::start(upstream_server_url()).await;
-        let (client, connect_count, disconnect_count) =
+        let (client, _connect_count, disconnect_count) =
             match create_test_client_with_events_for_base_url(proxy.base_url()) {
                 Ok(v) => v,
                 Err(e) => {
