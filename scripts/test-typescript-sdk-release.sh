@@ -71,6 +71,11 @@ if ! curl -sf "$SERVER_URL/health" > /dev/null 2>&1 \
     exit 1
 fi
 
+if [[ -s "$SERVER_LOG" ]]; then
+    echo "Recent TypeScript SDK server log output:"
+    tail -n 40 "$SERVER_LOG" || true
+fi
+
 if [[ "$SKIP_AUTH_SETUP" != "true" ]]; then
     curl -fsS "$SERVER_URL/v1/api/auth/setup" \
         -H "Content-Type: application/json" \

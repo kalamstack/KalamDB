@@ -18,10 +18,6 @@ on:
         type: boolean
         required: false
         default: false
-      docker_repo:
-        description: "Docker Hub repo used for released SDK compatibility tests"
-        required: false
-        default: "jamals86/kalamdb"
 
 permissions:
   contents: write
@@ -43,19 +39,18 @@ jobs:
       dart_version: ${{ steps.versions.outputs.dart_version }}
       sdk_version: ${{ steps.versions.outputs.sdk_version }}
       test_source: ${{ steps.versions.outputs.test_source }}
-      docker_image: ${{ steps.versions.outputs.docker_image }}
+      release_tag: ${{ steps.versions.outputs.release_tag }}
+      release_server_asset_name: ${{ steps.versions.outputs.release_server_asset_name }}
+      release_server_asset_url: ${{ steps.versions.outputs.release_server_asset_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup Node 22
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-
-      - name: Read versions and choose SDK test source
+      - name: Resolve versions and release asset
         id: versions
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -66,19 +61,16 @@ jobs:
           fi
 
           SDK_VERSION="$ROOT_VERSION"
+          RELEASE_TAG="v${SDK_VERSION}"
+          RELEASE_SERVER_ASSET_NAME="kalamdb-server-${SDK_VERSION}-linux-x86_64.tar.gz"
+          RELEASE_SERVER_ASSET_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${RELEASE_SERVER_ASSET_NAME}"
+          TEST_SOURCE="workspace-binary"
 
-          TEST_SOURCE="binaries"
-          DOCKER_IMAGE=""
-          DOCKER_REPO="${{ github.event.inputs.docker_repo }}"
-          if [[ -z "$DOCKER_REPO" ]]; then
-            DOCKER_REPO="jamals86/kalamdb"
-          fi
-
-          DOCKER_IMAGE="${DOCKER_REPO}:${SDK_VERSION}"
-          if docker manifest inspect "$DOCKER_IMAGE" >/dev/null 2>&1; then
-            TEST_SOURCE="docker-release"
-          else
-            DOCKER_IMAGE=""
+          if curl -fsIL \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/octet-stream" \
+            "$RELEASE_SERVER_ASSET_URL" >/dev/null 2>&1; then
+            TEST_SOURCE="release-binary"
           fi
 
           echo "root_version=$ROOT_VERSION" >> "$GITHUB_OUTPUT"
@@ -86,22 +78,23 @@ jobs:
           echo "dart_version=$SDK_VERSION" >> "$GITHUB_OUTPUT"
           echo "sdk_version=$SDK_VERSION" >> "$GITHUB_OUTPUT"
           echo "test_source=$TEST_SOURCE" >> "$GITHUB_OUTPUT"
-          echo "docker_image=$DOCKER_IMAGE" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "release_server_asset_name=$RELEASE_SERVER_ASSET_NAME" >> "$GITHUB_OUTPUT"
+          echo "release_server_asset_url=$RELEASE_SERVER_ASSET_URL" >> "$GITHUB_OUTPUT"
 
           echo "Resolved workspace version: $ROOT_VERSION"
           echo "Resolved SDK version: $SDK_VERSION (from Cargo.toml)"
-          echo "SDK test source: $TEST_SOURCE"
-          if [[ -n "$DOCKER_IMAGE" ]]; then
-            echo "Docker image: $DOCKER_IMAGE"
+          if [[ "$TEST_SOURCE" == "release-binary" ]]; then
+            echo "Using published release server binary: $RELEASE_SERVER_ASSET_NAME"
           else
-            echo "No released Docker image found for ${DOCKER_REPO}:${SDK_VERSION}; using fresh binaries."
+            echo "No published release server binary found for $RELEASE_TAG; using workspace build instead."
           fi
 
-  build_server_binary:
-    name: Build SDK Test Server Binary
+  build_workspace_server_binary:
+    name: Build Workspace SDK Server Binary
     runs-on: ubuntu-24.04
     needs: resolve_versions
-    if: ${{ needs.resolve_versions.outputs.test_source == 'binaries' }}
+    if: ${{ needs.resolve_versions.outputs.test_source == 'workspace-binary' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -146,13 +139,49 @@ jobs:
           path: target/x86_64-unknown-linux-gnu/release-dist/kalamdb-server
           if-no-files-found: error
 
-  sdk_tests_typescript_binary:
-    name: TypeScript SDK Tests (Binary)
+  download_release_server_binary:
+    name: Download Released SDK Server Binary
+    runs-on: ubuntu-latest
+    needs: resolve_versions
+    if: ${{ needs.resolve_versions.outputs.test_source == 'release-binary' }}
+    steps:
+      - name: Download release server asset
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          ASSET_NAME="${{ needs.resolve_versions.outputs.release_server_asset_name }}"
+          ASSET_URL="${{ needs.resolve_versions.outputs.release_server_asset_url }}"
+          mkdir -p release-server dist
+
+          curl -fsSL \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/octet-stream" \
+            -o "dist/${ASSET_NAME}" \
+            "$ASSET_URL"
+
+          tar -xzf "dist/${ASSET_NAME}" -C release-server
+          chmod +x "release-server/kalamdb-server-${{ needs.resolve_versions.outputs.sdk_version }}-linux-x86_64"
+          mv "release-server/kalamdb-server-${{ needs.resolve_versions.outputs.sdk_version }}-linux-x86_64" release-server/kalamdb-server
+          ls -la release-server/
+
+      - name: Upload SDK test server binary
+        uses: actions/upload-artifact@v6
+        with:
+          name: sdk-test-server-linux-x86_64
+          path: release-server/kalamdb-server
+          if-no-files-found: error
+
+  sdk_tests_typescript:
+    name: TypeScript SDK Tests
     runs-on: ubuntu-latest
     needs:
       - resolve_versions
-      - build_server_binary
-    if: ${{ needs.resolve_versions.outputs.test_source == 'binaries' }}
+      - build_workspace_server_binary
+      - download_release_server_binary
+    if: ${{ always() && needs.resolve_versions.result == 'success' }}
     outputs:
       total: ${{ steps.parse_typescript_badge.outputs.total }}
       passed: ${{ steps.parse_typescript_badge.outputs.passed }}
@@ -205,6 +234,7 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x ./kalamdb-server
+          echo "SDK test source: ${{ needs.resolve_versions.outputs.test_source }}"
 
       - name: Run TypeScript SDK tests
         id: run_typescript_tests
@@ -281,13 +311,14 @@ jobs:
           echo "TypeScript SDK tests failed" >&2
           exit 1
 
-  sdk_tests_dart_binary:
-    name: Dart SDK Tests (Binary)
+  sdk_tests_dart:
+    name: Dart SDK Tests
     runs-on: ubuntu-latest
     needs:
       - resolve_versions
-      - build_server_binary
-    if: ${{ needs.resolve_versions.outputs.test_source == 'binaries' }}
+      - build_workspace_server_binary
+      - download_release_server_binary
+    if: ${{ always() && needs.resolve_versions.result == 'success' }}
     outputs:
       total: ${{ steps.parse_dart_badge.outputs.total }}
       passed: ${{ steps.parse_dart_badge.outputs.passed }}
@@ -333,8 +364,9 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x ./kalamdb-server
+          echo "SDK test source: ${{ needs.resolve_versions.outputs.test_source }}"
 
-      - name: Start binary test server
+      - name: Start SDK test server
         shell: bash
         run: |
           set -euo pipefail
@@ -343,19 +375,23 @@ jobs:
           sed -i 's|logs_path = "./logs"|logs_path = "./test-data/logs"|g' server.toml
           sed -i 's|jwt_secret = ".*"|jwt_secret = "sdk-test-secret-key-minimum-32-characters-long"|g' server.toml
           mkdir -p test-data/rocksdb test-data/storage test-data/logs
-          ./kalamdb-server > dart-sdk-server.log 2>&1 &
+          ./kalamdb-server server.toml > dart-sdk-server.log 2>&1 &
           SERVER_PID=$!
           echo "SERVER_PID=$SERVER_PID" >> "$GITHUB_ENV"
           for i in {1..60}; do
             if curl -sf http://localhost:8080/health > /dev/null 2>&1 || curl -sf http://localhost:8080/v1/api/healthcheck > /dev/null 2>&1; then
-              echo "✅ Binary test server ready (${i}s)"
+              echo "✅ SDK test server ready (${i}s)"
+              if [[ -s dart-sdk-server.log ]]; then
+                echo "Recent server log output:"
+                tail -n 40 dart-sdk-server.log || true
+              fi
               exit 0
             fi
             kill -0 "$SERVER_PID" 2>/dev/null || { echo "❌ Server died"; cat dart-sdk-server.log; exit 1; }
             echo "  Waiting... ($i/60)"
             sleep 1
           done
-          echo "❌ Timed out waiting for binary test server"
+          echo "❌ Timed out waiting for SDK test server"
           cat dart-sdk-server.log || true
           exit 1
 
@@ -363,12 +399,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker exec "$SDK_SERVER_CONTAINER" /usr/local/bin/busybox sh -c '
-            wget -qO- \
-              --header="Content-Type: application/json" \
-              --post-data='"'"'{"username":"admin","password":"kalamdb123","root_password":"kalamdb123"}'"'"' \
-              http://127.0.0.1:8080/v1/api/auth/setup >/dev/null
-          '
+          curl -fsS http://localhost:8080/v1/api/auth/setup \
+            -H "Content-Type: application/json" \
+            -d '{"username":"admin","password":"kalamdb123","root_password":"kalamdb123"}' \
+            >/dev/null
 
       - name: Run Dart SDK tests
         id: run_dart_tests
@@ -474,7 +508,7 @@ jobs:
               handle.write(f"color={color}\n")
           PYTHON
 
-      - name: Stop binary test server
+      - name: Stop SDK test server
         if: always()
         shell: bash
         run: |
@@ -504,387 +538,6 @@ jobs:
         run: |
           echo "Dart SDK tests failed" >&2
           exit 1
-
-  sdk_tests_docker_shared:
-    name: SDK Tests (Released Docker Image)
-    runs-on: ubuntu-latest
-    needs:
-      - resolve_versions
-    if: ${{ needs.resolve_versions.outputs.test_source == 'docker-release' }}
-    outputs:
-      ts_total: ${{ steps.parse_typescript_badge.outputs.total }}
-      ts_passed: ${{ steps.parse_typescript_badge.outputs.passed }}
-      ts_failed: ${{ steps.parse_typescript_badge.outputs.failed }}
-      ts_message: ${{ steps.parse_typescript_badge.outputs.message }}
-      ts_color: ${{ steps.parse_typescript_badge.outputs.color }}
-      ts_suite_status: ${{ steps.run_typescript_tests.outcome }}
-      dart_total: ${{ steps.parse_dart_badge.outputs.total }}
-      dart_passed: ${{ steps.parse_dart_badge.outputs.passed }}
-      dart_failed: ${{ steps.parse_dart_badge.outputs.failed }}
-      dart_message: ${{ steps.parse_dart_badge.outputs.message }}
-      dart_color: ${{ steps.parse_dart_badge.outputs.color }}
-      dart_suite_status: ${{ steps.run_dart_tests.outcome }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Install system dependencies
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            clang \
-            libclang-dev \
-            pkg-config \
-            libssl-dev
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-          targets: wasm32-unknown-unknown
-
-      - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: sdk-tests-docker-rust
-          cache-on-failure: true
-          workspaces: link -> link/target
-
-      - name: Setup Node 22
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-
-      - name: Install wasm-pack
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo install wasm-pack --version "$WASM_PACK_VERSION" --locked
-          wasm-pack --version
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-
-      - name: Start released Docker image
-        shell: bash
-        run: |
-          set -euo pipefail
-          IMAGE="${{ needs.resolve_versions.outputs.docker_image }}"
-          CONTAINER_NAME="kalamdb-sdk-suite"
-
-          docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
-          docker pull "$IMAGE"
-          docker run -d \
-            --name "$CONTAINER_NAME" \
-            -p 8080:8080 \
-            -e KALAMDB_SERVER_HOST=0.0.0.0 \
-            -e KALAMDB_LOG_LEVEL=info \
-            -e KALAMDB_JWT_SECRET=sdk-test-secret-key-minimum-32-characters-long \
-            "$IMAGE"
-
-          echo "SDK_SERVER_CONTAINER=$CONTAINER_NAME" >> "$GITHUB_ENV"
-
-          for i in {1..60}; do
-            if ! docker ps --format '{{.Names}}' | grep -Fx "$CONTAINER_NAME" >/dev/null 2>&1; then
-              echo "Released Docker test server exited before becoming ready" >&2
-              docker logs "$CONTAINER_NAME" || true
-              exit 1
-            fi
-
-            if docker exec "$CONTAINER_NAME" /usr/local/bin/busybox wget -q -O /dev/null "http://127.0.0.1:8080/health" >/dev/null 2>&1 \
-              || docker exec "$CONTAINER_NAME" /usr/local/bin/busybox wget -q -O /dev/null "http://127.0.0.1:8080/v1/api/healthcheck" >/dev/null 2>&1; then
-              echo "✅ Released Docker test server ready (${i}s)"
-              exit 0
-            fi
-
-            echo "  Waiting for Docker test server... ($i/60)"
-            sleep 1
-          done
-
-          echo "Released Docker test server failed to become ready" >&2
-          docker logs "$CONTAINER_NAME" || true
-          exit 1
-
-      - name: Bootstrap SDK test admin user
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fsS http://localhost:8080/v1/api/auth/setup \
-            -H "Content-Type: application/json" \
-            -d '{"username":"admin","password":"kalamdb123","root_password":"kalamdb123"}' \
-            >/dev/null
-
-      - name: Run TypeScript SDK tests
-        id: run_typescript_tests
-        continue-on-error: true
-        shell: bash
-        env:
-          KALAMDB_URL: "http://localhost:8080"
-          KALAMDB_USER: "admin"
-          KALAMDB_PASSWORD: "kalamdb123"
-          KALAMDB_SKIP_SERVER_START: "true"
-          KALAMDB_SKIP_AUTH_SETUP: "true"
-        run: |
-          set -euo pipefail
-          ./scripts/test-typescript-sdk-release.sh
-
-      - name: Parse TypeScript SDK test counts
-        if: always()
-        id: parse_typescript_badge
-        shell: bash
-        env:
-          STEP_OUTCOME: ${{ steps.run_typescript_tests.outcome }}
-        run: |
-          set -euo pipefail
-          python3 <<'PYTHON'
-          import os
-          import re
-          from pathlib import Path
-
-          output_path = Path("ts-sdk-test-output.txt")
-          text = output_path.read_text(encoding="utf-8", errors="replace") if output_path.exists() else ""
-
-          total = sum(int(value) for value in re.findall(r"^# tests (\d+)$", text, flags=re.MULTILINE))
-          passed = sum(int(value) for value in re.findall(r"^# pass (\d+)$", text, flags=re.MULTILINE))
-          failed = sum(int(value) for value in re.findall(r"^# fail (\d+)$", text, flags=re.MULTILINE))
-          outcome = os.environ.get("STEP_OUTCOME", "failure")
-
-          if total == 0 and outcome == "success":
-              message = "passed"
-              color = "brightgreen"
-          elif total == 0:
-              message = "failed"
-              color = "red"
-          else:
-              message = f"{passed}/{total} passed" if failed == 0 and outcome == "success" else f"{passed}/{total} passed, {failed} failed"
-              color = "brightgreen" if failed == 0 and outcome == "success" else "red"
-
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
-              handle.write(f"total={total}\n")
-              handle.write(f"passed={passed}\n")
-              handle.write(f"failed={failed}\n")
-              handle.write(f"message={message}\n")
-              handle.write(f"color={color}\n")
-          PYTHON
-
-      - name: Run Dart SDK tests
-        id: run_dart_tests
-        continue-on-error: true
-        shell: bash
-        working-directory: link/sdks/dart
-        env:
-          KALAM_URL: "http://localhost:8080"
-          KALAM_USER: "admin"
-          KALAM_PASS: "kalamdb123"
-        run: |
-          set -euo pipefail
-          flutter pub get
-
-          BRIDGE_DIR="$PWD/../../kalam-link-dart"
-          (
-            cd "$BRIDGE_DIR"
-            CARGO_TARGET_DIR="$BRIDGE_DIR/target" cargo build --release
-          )
-
-          flutter analyze
-
-          flutter test --machine test/models_test.dart | tee ../../../dart-sdk-models-machine.jsonl
-
-          export KALAM_INTEGRATION_TEST=1
-          flutter test --machine \
-            test/e2e/auth/auth_test.dart \
-            test/e2e/query/query_test.dart \
-            test/e2e/ddl/ddl_test.dart \
-            test/e2e/lifecycle/lifecycle_test.dart \
-            test/e2e/health/health_test.dart \
-            test/e2e/subscription/subscription_test.dart | tee ../../../dart-sdk-e2e-machine.jsonl
-
-      - name: Parse Dart SDK test counts
-        if: always()
-        id: parse_dart_badge
-        shell: bash
-        env:
-          STEP_OUTCOME: ${{ steps.run_dart_tests.outcome }}
-        run: |
-          set -euo pipefail
-          python3 <<'PYTHON'
-          import json
-          import os
-          from pathlib import Path
-
-          def iter_events(path: Path):
-              if not path.exists():
-                  return
-              for raw_line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-                  line = raw_line.strip()
-                  if not line:
-                      continue
-                  try:
-                      parsed = json.loads(line)
-                  except json.JSONDecodeError:
-                      continue
-                  events = parsed if isinstance(parsed, list) else [parsed]
-                  for event in events:
-                      if isinstance(event, dict):
-                          yield event
-
-          hidden = {}
-          total = 0
-          passed = 0
-          failed = 0
-
-          for path_str in ("dart-sdk-models-machine.jsonl", "dart-sdk-e2e-machine.jsonl"):
-              for event in iter_events(Path(path_str)):
-                  event_type = event.get("type")
-                  if event_type == "testStart":
-                      test_info = event.get("test", {})
-                      test_id = test_info.get("id")
-                      if test_id is not None:
-                          hidden[test_id] = bool(test_info.get("hidden", False))
-                  elif event_type == "testDone":
-                      test_id = event.get("testID")
-                      if hidden.get(test_id, False):
-                          continue
-                      total += 1
-                      result = event.get("result")
-                      if result == "success":
-                          passed += 1
-                      elif result in {"failure", "error"}:
-                          failed += 1
-
-          outcome = os.environ.get("STEP_OUTCOME", "failure")
-          if total == 0 and outcome == "success":
-              message = "passed"
-              color = "brightgreen"
-          elif total == 0:
-              message = "failed"
-              color = "red"
-          else:
-              message = f"{passed}/{total} passed" if failed == 0 and outcome == "success" else f"{passed}/{total} passed, {failed} failed"
-              color = "brightgreen" if failed == 0 and outcome == "success" else "red"
-
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
-              handle.write(f"total={total}\n")
-              handle.write(f"passed={passed}\n")
-              handle.write(f"failed={failed}\n")
-              handle.write(f"message={message}\n")
-              handle.write(f"color={color}\n")
-          PYTHON
-
-      - name: Collect Docker server log
-        if: always()
-        shell: bash
-        run: |
-          docker logs "$SDK_SERVER_CONTAINER" > sdk-docker-server.log 2>&1 || true
-
-      - name: Stop Docker test server
-        if: always()
-        shell: bash
-        run: |
-          docker rm -f "$SDK_SERVER_CONTAINER" >/dev/null 2>&1 || true
-
-      - name: Upload server log
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: sdk-docker-server-log
-          path: sdk-docker-server.log
-          if-no-files-found: ignore
-
-      - name: Upload TypeScript SDK test output
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: ts-sdk-test-output
-          path: ts-sdk-test-output.txt
-          if-no-files-found: ignore
-
-      - name: Upload Dart SDK test output
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: dart-sdk-test-output
-          path: |
-            dart-sdk-models-machine.jsonl
-            dart-sdk-e2e-machine.jsonl
-          if-no-files-found: ignore
-
-  sdk_tests_typescript:
-    name: TypeScript SDK Tests
-    runs-on: ubuntu-latest
-    needs:
-      - resolve_versions
-      - sdk_tests_typescript_binary
-      - sdk_tests_docker_shared
-    if: ${{ always() && needs.resolve_versions.result == 'success' }}
-    outputs:
-      total: ${{ needs.resolve_versions.outputs.test_source == 'binaries' && needs.sdk_tests_typescript_binary.outputs.total || needs.sdk_tests_docker_shared.outputs.ts_total }}
-      passed: ${{ needs.resolve_versions.outputs.test_source == 'binaries' && needs.sdk_tests_typescript_binary.outputs.passed || needs.sdk_tests_docker_shared.outputs.ts_passed }}
-      failed: ${{ needs.resolve_versions.outputs.test_source == 'binaries' && needs.sdk_tests_typescript_binary.outputs.failed || needs.sdk_tests_docker_shared.outputs.ts_failed }}
-      message: ${{ needs.resolve_versions.outputs.test_source == 'binaries' && needs.sdk_tests_typescript_binary.outputs.message || needs.sdk_tests_docker_shared.outputs.ts_message }}
-      color: ${{ needs.resolve_versions.outputs.test_source == 'binaries' && needs.sdk_tests_typescript_binary.outputs.color || needs.sdk_tests_docker_shared.outputs.ts_color }}
-    steps:
-      - name: Check TypeScript SDK test result
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "${{ needs.resolve_versions.outputs.test_source }}" == "binaries" ]]; then
-            if [[ "${{ needs.sdk_tests_typescript_binary.result }}" != "success" ]]; then
-              echo "TypeScript SDK binary tests failed" >&2
-              exit 1
-            fi
-            exit 0
-          fi
-
-          if [[ "${{ needs.sdk_tests_docker_shared.result }}" != "success" ]]; then
-            echo "Released Docker SDK test job failed before TypeScript results were finalized" >&2
-            exit 1
-          fi
-
-          if [[ "${{ needs.sdk_tests_docker_shared.outputs.ts_suite_status }}" != "success" ]]; then
-            echo "TypeScript SDK tests failed against released Docker image" >&2
-            exit 1
-          fi
-
-  sdk_tests_dart:
-    name: Dart SDK Tests
-    runs-on: ubuntu-latest
-    needs:
-      - resolve_versions
-      - sdk_tests_dart_binary
-      - sdk_tests_docker_shared
-    if: ${{ always() && needs.resolve_versions.result == 'success' }}
-    outputs:
-      total: ${{ needs.resolve_versions.outputs.test_source == 'binaries' && needs.sdk_tests_dart_binary.outputs.total || needs.sdk_tests_docker_shared.outputs.dart_total }}
-      passed: ${{ needs.resolve_versions.outputs.test_source == 'binaries' && needs.sdk_tests_dart_binary.outputs.passed || needs.sdk_tests_docker_shared.outputs.dart_passed }}
-      failed: ${{ needs.resolve_versions.outputs.test_source == 'binaries' && needs.sdk_tests_dart_binary.outputs.failed || needs.sdk_tests_docker_shared.outputs.dart_failed }}
-      message: ${{ needs.resolve_versions.outputs.test_source == 'binaries' && needs.sdk_tests_dart_binary.outputs.message || needs.sdk_tests_docker_shared.outputs.dart_message }}
-      color: ${{ needs.resolve_versions.outputs.test_source == 'binaries' && needs.sdk_tests_dart_binary.outputs.color || needs.sdk_tests_docker_shared.outputs.dart_color }}
-    steps:
-      - name: Check Dart SDK test result
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "${{ needs.resolve_versions.outputs.test_source }}" == "binaries" ]]; then
-            if [[ "${{ needs.sdk_tests_dart_binary.result }}" != "success" ]]; then
-              echo "Dart SDK binary tests failed" >&2
-              exit 1
-            fi
-            exit 0
-          fi
-
-          if [[ "${{ needs.sdk_tests_docker_shared.result }}" != "success" ]]; then
-            echo "Released Docker SDK test job failed before Dart results were finalized" >&2
-            exit 1
-          fi
-
-          if [[ "${{ needs.sdk_tests_docker_shared.outputs.dart_suite_status }}" != "success" ]]; then
-            echo "Dart SDK tests failed against released Docker image" >&2
-            exit 1
-          fi
 
   update_sdk_badges:
     name: Update SDK Badges
