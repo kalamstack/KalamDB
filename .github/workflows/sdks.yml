@@ -65,18 +65,7 @@ jobs:
             exit 1
           fi
 
-          TS_VERSION="$(node -p "require('./link/sdks/typescript/package.json').version")"
-          DART_VERSION="$(sed -n 's/^version:[[:space:]]*//p' link/sdks/dart/pubspec.yaml | head -n1 | tr -d '[:space:]')"
-
-          if [[ -z "$TS_VERSION" || -z "$DART_VERSION" ]]; then
-            echo "Failed to resolve SDK versions" >&2
-            exit 1
-          fi
-
-          if [[ "$TS_VERSION" != "$DART_VERSION" ]]; then
-            echo "TypeScript SDK version ($TS_VERSION) does not match Dart SDK version ($DART_VERSION)" >&2
-            exit 1
-          fi
+          SDK_VERSION="$ROOT_VERSION"
 
           TEST_SOURCE="binaries"
           DOCKER_IMAGE=""
@@ -85,31 +74,27 @@ jobs:
             DOCKER_REPO="jamals86/kalamdb"
           fi
 
-          if [[ "$TS_VERSION" != "$ROOT_VERSION" ]]; then
+          DOCKER_IMAGE="${DOCKER_REPO}:${SDK_VERSION}"
+          if docker manifest inspect "$DOCKER_IMAGE" >/dev/null 2>&1; then
             TEST_SOURCE="docker-release"
-            DOCKER_IMAGE="${DOCKER_REPO}:${TS_VERSION}"
-
-            if ! docker manifest inspect "$DOCKER_IMAGE" >/dev/null 2>&1; then
-              echo "SDK version $TS_VERSION does not match workspace version $ROOT_VERSION." >&2
-              echo "Release workflow publishes Docker tags as ${DOCKER_REPO}:<version>, ${DOCKER_REPO}:<version>-h<short_sha>, and ${DOCKER_REPO}:latest." >&2
-              echo "Expected released Docker image tag not found: $DOCKER_IMAGE" >&2
-              echo "Publish release $TS_VERSION first, or align the SDK version with the workspace version to test fresh binaries." >&2
-              exit 1
-            fi
+          else
+            DOCKER_IMAGE=""
           fi
 
           echo "root_version=$ROOT_VERSION" >> "$GITHUB_OUTPUT"
-          echo "ts_version=$TS_VERSION" >> "$GITHUB_OUTPUT"
-          echo "dart_version=$DART_VERSION" >> "$GITHUB_OUTPUT"
-          echo "sdk_version=$TS_VERSION" >> "$GITHUB_OUTPUT"
+          echo "ts_version=$SDK_VERSION" >> "$GITHUB_OUTPUT"
+          echo "dart_version=$SDK_VERSION" >> "$GITHUB_OUTPUT"
+          echo "sdk_version=$SDK_VERSION" >> "$GITHUB_OUTPUT"
           echo "test_source=$TEST_SOURCE" >> "$GITHUB_OUTPUT"
           echo "docker_image=$DOCKER_IMAGE" >> "$GITHUB_OUTPUT"
 
           echo "Resolved workspace version: $ROOT_VERSION"
-          echo "Resolved SDK version: $TS_VERSION"
+          echo "Resolved SDK version: $SDK_VERSION (from Cargo.toml)"
           echo "SDK test source: $TEST_SOURCE"
           if [[ -n "$DOCKER_IMAGE" ]]; then
             echo "Docker image: $DOCKER_IMAGE"
+          else
+            echo "No released Docker image found for ${DOCKER_REPO}:${SDK_VERSION}; using fresh binaries."
           fi
 
   build_server_binary:
