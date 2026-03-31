@@ -64,10 +64,21 @@ jobs:
           RELEASE_SERVER_ASSET_NAME="kalamdb-server-${SDK_VERSION}-linux-x86_64.tar.gz"
           RELEASE_SERVER_ASSET_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${RELEASE_SERVER_ASSET_NAME}"
 
-          if ! curl -fsIL \
+          # Use the GitHub Releases API to verify the asset exists.
+          # Direct HEAD probes against the download URL fail because GitHub
+          # redirects to a time-limited S3 pre-signed GET URL that rejects HEAD.
+          API_URL="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}"
+          echo "Checking GitHub release: ${API_URL}"
+          RELEASE_JSON="$(curl -fsS \
             -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -H "Accept: application/octet-stream" \
-            "$RELEASE_SERVER_ASSET_URL" >/dev/null 2>&1; then
+            -H "Accept: application/vnd.github+json" \
+            "$API_URL" 2>&1)" || {
+            echo "GitHub release ${RELEASE_TAG} not found or API error." >&2
+            echo "Publish the GitHub release assets first, then rerun the SDK workflow." >&2
+            exit 1
+          }
+
+          if ! echo "$RELEASE_JSON" | grep -qF "\"${RELEASE_SERVER_ASSET_NAME}\""; then
             echo "Missing released server binary for ${RELEASE_TAG}: ${RELEASE_SERVER_ASSET_NAME}" >&2
             echo "Publish the GitHub release assets first, then rerun the SDK workflow." >&2
             exit 1
