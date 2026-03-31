@@ -363,10 +363,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl -fsS http://localhost:8080/v1/api/auth/setup \
-            -H "Content-Type: application/json" \
-            -d '{"username":"admin","password":"kalamdb123","root_password":"kalamdb123"}' \
-            >/dev/null
+          docker exec "$SDK_SERVER_CONTAINER" /usr/local/bin/busybox sh -c '
+            wget -qO- \
+              --header="Content-Type: application/json" \
+              --post-data='"'"'{"username":"admin","password":"kalamdb123","root_password":"kalamdb123"}'"'"' \
+              http://127.0.0.1:8080/v1/api/auth/setup >/dev/null
+          '
 
       - name: Run Dart SDK tests
         id: run_dart_tests
@@ -624,6 +626,7 @@ jobs:
           KALAMDB_USER: "admin"
           KALAMDB_PASSWORD: "kalamdb123"
           KALAMDB_SKIP_SERVER_START: "true"
+          KALAMDB_SKIP_AUTH_SETUP: "true"
         run: |
           set -euo pipefail
           ./scripts/test-typescript-sdk-release.sh
