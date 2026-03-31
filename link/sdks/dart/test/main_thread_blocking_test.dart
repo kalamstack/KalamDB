@@ -44,6 +44,8 @@ class _MockRustLibApi extends MockRustLibApi {
   int createClientCalls = 0;
   int updateAuthCalls = 0;
   int connectCalls = 0;
+  int connectFailuresBeforeSuccess = 0;
+  String connectFailureMessage = '401 unauthorized token expired';
 
   /// Artificial work duration for the (now async) functions.
   /// Used to simulate the cost of client construction on slow devices.
@@ -102,6 +104,10 @@ class _MockRustLibApi extends MockRustLibApi {
   Future<void> crateApiDartConnect({required DartKalamClient client}) async {
     connectCalls++;
     await Future<void>.delayed(const Duration(milliseconds: 10));
+    if (connectFailuresBeforeSuccess > 0) {
+      connectFailuresBeforeSuccess -= 1;
+      throw StateError(connectFailureMessage);
+    }
   }
 
   @override
@@ -315,6 +321,8 @@ void main() {
     mockApi.createClientCalls = 0;
     mockApi.updateAuthCalls = 0;
     mockApi.connectCalls = 0;
+    mockApi.connectFailuresBeforeSuccess = 0;
+    mockApi.connectFailureMessage = '401 unauthorized token expired';
   });
 
   group('Main-thread blocking detection', () {
@@ -391,13 +399,15 @@ void main() {
   });
 
   group('Async API contract', () {
-    test('connect() creates client and defers websocket connect by default', () async {
+    test('connect() creates client and defers websocket connect by default',
+        () async {
       final client = await KalamClient.connect(url: 'https://test.example.com');
 
       expect(mockApi.createClientCalls, 1,
           reason: 'connect() should create exactly one client');
       expect(mockApi.connectCalls, 0,
-          reason: 'connect() should not eagerly connect the WebSocket when wsLazyConnect=true');
+          reason:
+              'connect() should not eagerly connect the WebSocket when wsLazyConnect=true');
 
       await client.dispose();
     });
@@ -411,7 +421,8 @@ void main() {
       expect(mockApi.createClientCalls, 1,
           reason: 'connect() should create exactly one client');
       expect(mockApi.connectCalls, 1,
-          reason: 'connect() should establish one WebSocket connection when wsLazyConnect=false');
+          reason:
+              'connect() should establish one WebSocket connection when wsLazyConnect=false');
 
       await client.dispose();
     });
@@ -448,6 +459,43 @@ void main() {
       print('Event loop ticks during query(): $ticks');
       expect(ticks, greaterThanOrEqualTo(0),
           reason: 'query() should not block the event loop');
+
+      await client.dispose();
+    });
+
+    test('reconnectWebSocket reuses current JWT without refreshing auth',
+        () async {
+      final client = await KalamClient.connect(
+        url: 'https://test.example.com',
+        authProvider: () async => Auth.jwt('cached-token'),
+      );
+
+      await client.reconnectWebSocket();
+
+      expect(mockApi.connectCalls, 1,
+          reason: 'manual reconnect should attempt one websocket connect');
+      expect(mockApi.updateAuthCalls, 0,
+          reason: 'manual reconnect should reuse the current JWT first');
+
+      await client.dispose();
+    });
+
+    test('reconnectWebSocket refreshes auth and retries once on auth failure',
+        () async {
+      mockApi.connectFailuresBeforeSuccess = 1;
+
+      final client = await KalamClient.connect(
+        url: 'https://test.example.com',
+        authProvider: () async => Auth.jwt('fresh-token'),
+      );
+
+      await client.reconnectWebSocket();
+
+      expect(mockApi.connectCalls, 2,
+          reason: 'manual reconnect should retry once after auth refresh');
+      expect(mockApi.updateAuthCalls, 1,
+          reason:
+              'auth refresh should only happen after an auth-related reconnect failure');
 
       await client.dispose();
     });

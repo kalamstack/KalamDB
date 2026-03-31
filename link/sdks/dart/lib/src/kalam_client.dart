@@ -268,6 +268,25 @@ class KalamClient {
     await _ensureJwtForBasicAuth();
   }
 
+  static bool _isLikelyReconnectAuthError(Object error) {
+    final message = error.toString().toLowerCase();
+    const authMarkers = <String>[
+      '401',
+      '403',
+      'auth',
+      'authentication',
+      'authorization',
+      'credential',
+      'expired',
+      'forbidden',
+      'jwt',
+      'token',
+      'unauthorized',
+      'unauthenticated',
+    ];
+    return authMarkers.any(message.contains);
+  }
+
   gen.DartSubscriptionConfig? _buildSubscriptionConfig({
     required String sql,
     required String subscriptionId,
@@ -604,8 +623,22 @@ class KalamClient {
   /// Re-establish the shared WebSocket connection after a manual
   /// [disconnectWebSocket] or if the automatic reconnection was exhausted.
   Future<void> reconnectWebSocket() async {
-    await _prepareManualReconnect();
-    await bridge.dartConnect(client: _handle);
+    await _ensureJwtForBasicAuth();
+
+    try {
+      await bridge.dartConnect(client: _handle);
+    } catch (error) {
+      if (!_isLikelyReconnectAuthError(error)) {
+        rethrow;
+      }
+
+      KalamLogger.warn(
+        'auth',
+        'Reconnect failed with an auth-related error; refreshing credentials and retrying once',
+      );
+      await _prepareManualReconnect();
+      await bridge.dartConnect(client: _handle);
+    }
   }
 
   String _ensureSubscriptionId(String? subscriptionId,

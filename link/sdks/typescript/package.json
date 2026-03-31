@@ -1,7 +1,7 @@
 {
   "name": "kalam-link",
   "type": "module",
-  "version": "0.4.1-beta.2",
+  "version": "0.4.2-rc.1",
   "description": "WebAssembly-compatible KalamDB client library with TypeScript support",
   "license": "Apache-2.0",
   "author": "KalamDB Team",

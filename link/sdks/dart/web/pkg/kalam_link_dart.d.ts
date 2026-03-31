@@ -388,6 +388,22 @@ export interface ConsumeRequest {
 }
 
 /**
+ * Protocol options negotiated once per connection during authentication.
+ *
+ * Mirrors `ProtocolOptions` from `kalamdb-commons`.
+ */
+export interface ProtocolOptions {
+    /**
+     * Serialization format for messages after auth.
+     */
+    serialization: SerializationType;
+    /**
+     * Compression policy.
+     */
+    compression: CompressionType;
+}
+
+/**
  * Response status enum
  */
 export type ResponseStatus = "success" | "error";
@@ -578,7 +594,21 @@ export interface LoginUserInfo {
 /**
  * WebSocket message types sent from server to client
  */
-export type ServerMessage = { type: "auth_success"; user_id: string; role: string } | { type: "auth_error"; message: string } | { type: "subscription_ack"; subscription_id: string; total_rows: number; batch_control: BatchControl; schema: SchemaField[] } | { type: "initial_data_batch"; subscription_id: string; rows: Map<string, KalamCellValue>[]; batch_control: BatchControl } | { type: "change"; subscription_id: string; change_type: ChangeTypeRaw; rows?: Map<string, KalamCellValue>[]; old_values?: Map<string, KalamCellValue>[] } | { type: "error"; subscription_id: string; code: string; message: string };
+export type ServerMessage = { type: "auth_success"; user_id: string; role: string; protocol: ProtocolOptions } | { type: "auth_error"; message: string } | { type: "subscription_ack"; subscription_id: string; total_rows: number; batch_control: BatchControl; schema: SchemaField[] } | { type: "initial_data_batch"; subscription_id: string; rows: Map<string, KalamCellValue>[]; batch_control: BatchControl } | { type: "change"; subscription_id: string; change_type: ChangeTypeRaw; rows?: Map<string, KalamCellValue>[]; old_values?: Map<string, KalamCellValue>[] } | { type: "error"; subscription_id: string; code: string; message: string };
+
+/**
+ * Wire-format compression negotiated during authentication.
+ *
+ * Mirrors `CompressionType` from `kalamdb-commons`.
+ */
+export type CompressionType = "none" | "gzip";
+
+/**
+ * Wire-format serialization type negotiated during authentication.
+ *
+ * Mirrors `SerializationType` from `kalamdb-commons`.
+ */
+export type SerializationType = "json" | "msgpack";
 
 export type FieldFlag = "pk" | "nn" | "uq";
 
@@ -1236,19 +1266,18 @@ export interface InitOutput {
     readonly wasmtimestampformatter_new: () => number;
     readonly wasmtimestampformatter_withFormat: (a: number, b: number, c: number) => void;
     readonly timestampNow: () => number;
-    readonly __wasm_bindgen_func_elem_2155: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_192: (a: number, b: number) => void;
-    readonly __wasm_bindgen_func_elem_2237: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_2249: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_1031: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_1031_2: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_1031_3: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_1030: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_2779: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_2789: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_1481: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_1481_2: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_1481_3: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_1480: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;
+    readonly __wbindgen_export4: (a: number, b: number) => void;
     readonly __wbindgen_add_to_stack_pointer: (a: number) => number;
-    readonly __wbindgen_export4: (a: number, b: number, c: number) => void;
+    readonly __wbindgen_export5: (a: number, b: number, c: number) => void;
 }
 
 export type SyncInitInput = BufferSource | WebAssembly.Module;

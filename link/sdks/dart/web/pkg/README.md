@@ -72,19 +72,19 @@ cargo build --release
 
 **WASM (web target):**
 ```bash
-wasm-pack build --profile release-dist --target web --features wasm --no-default-features
+wasm-pack build --target web --no-opt --profile release-dist --features wasm --no-default-features
 wasm-opt -Oz --all-features -o pkg/kalam_link_bg.wasm pkg/kalam_link_bg.wasm
 ```
 
 **WASM (Node.js target):**
 ```bash
-wasm-pack build --profile release-dist --target nodejs --features wasm --no-default-features
+wasm-pack build --target nodejs --no-opt --profile release-dist --features wasm --no-default-features
 wasm-opt -Oz --all-features -o pkg/kalam_link_bg.wasm pkg/kalam_link_bg.wasm
 ```
 
 **WASM (bundler target for Webpack/Rollup):**
 ```bash
-wasm-pack build --profile release-dist --target bundler --features wasm --no-default-features
+wasm-pack build --target bundler --no-opt --profile release-dist --features wasm --no-default-features
 wasm-opt -Oz --all-features -o pkg/kalam_link_bg.wasm pkg/kalam_link_bg.wasm
 ```
 
