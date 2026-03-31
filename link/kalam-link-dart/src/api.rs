@@ -30,6 +30,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
 
+const DART_INITIAL_RECONNECT_DELAY_MS: u64 = 200;
+const DART_MAX_RECONNECT_DELAY_MS: u64 = 2_000;
+
 // ---------------------------------------------------------------------------
 // Client wrapper
 // ---------------------------------------------------------------------------
@@ -166,6 +169,10 @@ fn build_dart_connection_options(
 
     // Favor the smaller binary wire format for Dart subscriptions by default.
     conn_opts.protocol.serialization = kalam_link::models::SerializationType::MessagePack;
+    // Mobile apps resume and reconnect frequently. Favor a faster first retry
+    // than the generic SDK defaults while keeping exponential backoff.
+    conn_opts.reconnect_delay_ms = DART_INITIAL_RECONNECT_DELAY_MS;
+    conn_opts.max_reconnect_delay_ms = DART_MAX_RECONNECT_DELAY_MS;
 
     if disable_compression.unwrap_or(false) {
         conn_opts.disable_compression = true;
@@ -203,6 +210,7 @@ pub fn dart_update_auth(client: &DartKalamClient, auth: DartAuthProvider) -> any
 #[cfg(test)]
 mod tests {
     use super::build_dart_connection_options;
+    use super::{DART_INITIAL_RECONNECT_DELAY_MS, DART_MAX_RECONNECT_DELAY_MS};
     use kalam_link::models::SerializationType;
 
     #[test]
@@ -212,6 +220,11 @@ mod tests {
         assert_eq!(options.protocol.serialization, SerializationType::MessagePack);
         assert!(options.ws_lazy_connect);
         assert!(!options.disable_compression);
+        assert_eq!(options.reconnect_delay_ms, DART_INITIAL_RECONNECT_DELAY_MS);
+        assert_eq!(
+            options.max_reconnect_delay_ms,
+            DART_MAX_RECONNECT_DELAY_MS
+        );
     }
 
     #[test]
@@ -221,6 +234,11 @@ mod tests {
         assert_eq!(options.protocol.serialization, SerializationType::MessagePack);
         assert!(!options.ws_lazy_connect);
         assert!(options.disable_compression);
+        assert_eq!(options.reconnect_delay_ms, DART_INITIAL_RECONNECT_DELAY_MS);
+        assert_eq!(
+            options.max_reconnect_delay_ms,
+            DART_MAX_RECONNECT_DELAY_MS
+        );
     }
 }
 
