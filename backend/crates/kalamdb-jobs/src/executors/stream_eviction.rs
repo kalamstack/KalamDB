@@ -21,17 +21,17 @@
 //! }
 //! ```
 
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::error_extensions::KalamDbResultExt;
 use crate::executors::{JobContext, JobDecision, JobExecutor, JobParams};
-use kalamdb_core::providers::StreamTableProvider;
-#[cfg(test)]
-use kalamdb_core::schema_registry::TablesSchemaRegistryAdapter;
 use async_trait::async_trait;
 use kalamdb_commons::ids::{SeqId, SnowflakeGenerator};
 use kalamdb_commons::schemas::TableType;
 use kalamdb_commons::TableId;
+use kalamdb_core::app_context::AppContext;
+use kalamdb_core::error::KalamDbError;
+use kalamdb_core::error_extensions::KalamDbResultExt;
+use kalamdb_core::providers::StreamTableProvider;
+#[cfg(test)]
+use kalamdb_core::schema_registry::TablesSchemaRegistryAdapter;
 #[cfg(test)]
 use kalamdb_sharding::ShardRouter;
 use kalamdb_system::JobType;
@@ -235,11 +235,6 @@ impl Default for StreamEvictionExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kalamdb_core::app_context::AppContext;
-    use kalamdb_core::providers::arrow_json_conversion::json_to_row;
-    use kalamdb_core::providers::base::{BaseTableProvider, TableProviderCore};
-    use kalamdb_core::providers::StreamTableProvider;
-    use kalamdb_core::test_helpers::test_app_context_simple;
     use chrono::Utc;
     use datafusion::datasource::TableProvider;
     use kalamdb_commons::models::datatypes::KalamDataType;
@@ -248,6 +243,11 @@ mod tests {
     };
     use kalamdb_commons::models::{TableId, TableName, UserId};
     use kalamdb_commons::{ChangeNotification, JobId, NamespaceId, NodeId};
+    use kalamdb_core::app_context::AppContext;
+    use kalamdb_core::providers::arrow_json_conversion::json_to_row;
+    use kalamdb_core::providers::base::{BaseTableProvider, TableProviderCore};
+    use kalamdb_core::providers::StreamTableProvider;
+    use kalamdb_core::test_helpers::test_app_context_simple;
     use kalamdb_system::providers::jobs::models::Job;
     use kalamdb_system::NotificationService;
     use kalamdb_system::SchemaRegistry;

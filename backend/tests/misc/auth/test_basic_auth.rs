@@ -27,8 +27,7 @@ async fn test_bearer_auth_success() {
     let password = "SecurePassword123!";
     auth_helper::create_test_user(&server, username, password, Role::User).await;
 
-    use kalamdb_api::repositories::user_repo::CoreUsersRepo;
-    use kalamdb_auth::{authenticate, AuthRequest, UserRepository};
+    use kalamdb_auth::{authenticate, AuthRequest, CoreUsersRepo, UserRepository};
 
     let connection_info = ConnectionInfo::new(Some("127.0.0.1".to_string()));
 
@@ -80,8 +79,7 @@ async fn test_basic_auth_rejected() {
     let wrong_password = "WrongPassword456!";
     auth_helper::create_test_user(&server, username, correct_password, Role::User).await;
 
-    use kalamdb_api::repositories::user_repo::CoreUsersRepo;
-    use kalamdb_auth::{authenticate, AuthRequest, UserRepository};
+    use kalamdb_auth::{authenticate, AuthRequest, CoreUsersRepo, UserRepository};
 
     let connection_info = ConnectionInfo::new(Some("127.0.0.1".to_string()));
 
@@ -107,8 +105,7 @@ async fn test_basic_auth_rejected() {
 /// Test authentication failure with missing Authorization header
 #[tokio::test]
 async fn test_auth_missing_header() {
-    use kalamdb_api::repositories::user_repo::CoreUsersRepo;
-    use kalamdb_auth::{authenticate, AuthRequest, UserRepository};
+    use kalamdb_auth::{authenticate, AuthRequest, CoreUsersRepo, UserRepository};
 
     let server = TestServer::new_shared().await;
     let connection_info = ConnectionInfo::new(Some("127.0.0.1".to_string()));
@@ -130,8 +127,7 @@ async fn test_auth_missing_header() {
 /// Test authentication failure with malformed Authorization header
 #[tokio::test]
 async fn test_basic_auth_malformed_header() {
-    use kalamdb_api::repositories::user_repo::CoreUsersRepo;
-    use kalamdb_auth::{authenticate, AuthRequest, UserRepository};
+    use kalamdb_auth::{authenticate, AuthRequest, CoreUsersRepo, UserRepository};
 
     let server = TestServer::new_shared().await;
     let connection_info = ConnectionInfo::new(Some("127.0.0.1".to_string()));
@@ -166,8 +162,7 @@ async fn test_basic_auth_malformed_header() {
 /// Test authentication with non-existent user
 #[tokio::test]
 async fn test_basic_auth_nonexistent_user() {
-    use kalamdb_api::repositories::user_repo::CoreUsersRepo;
-    use kalamdb_auth::{authenticate, AuthRequest, UserRepository};
+    use kalamdb_auth::{authenticate, AuthRequest, CoreUsersRepo, UserRepository};
 
     let server = TestServer::new_shared().await;
     let connection_info = ConnectionInfo::new(Some("127.0.0.1".to_string()));

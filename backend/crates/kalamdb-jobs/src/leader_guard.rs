@@ -23,8 +23,8 @@ use chrono::Utc;
 use kalamdb_raft::{CommandExecutor, GroupId, MetaCommand, MetaResponse};
 use std::sync::Arc;
 
-use kalamdb_core::error::KalamDbError;
 use kalamdb_commons::models::{JobId, NodeId};
+use kalamdb_core::error::KalamDbError;
 
 /// Result of checking leadership status
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -3,9 +3,9 @@
 //! Common authorization and validation guards for DDL operations.
 //! These helpers consolidate repeated validation patterns across handlers.
 
+use kalamdb_commons::models::NamespaceId;
 use kalamdb_core::error::KalamDbError;
 use kalamdb_core::sql::context::ExecutionContext;
-use kalamdb_commons::models::NamespaceId;
 
 /// Block modifications (ALTER, DROP, CREATE) on system namespaces.
 ///

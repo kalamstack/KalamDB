@@ -1,13 +1,11 @@
 //! Centralized Permission Checking
 //!
-//! This module provides all permission checking logic for table access.
-//! Used by both the SQL executor (plan-level checks) and SecuredSystemTableProvider (scan-level checks).
+//! This module provides pure role- and table-definition-based permission helpers.
+//! DataFusion session extraction and provider wrappers live in
+//! `kalamdb-session-datafusion`.
 
 use crate::error::SessionError;
-use crate::user_context::UserContext as SessionUserContext;
-use datafusion::catalog::Session;
-use datafusion::execution::context::SessionState;
-use kalamdb_commons::models::{NamespaceId, ReadContext, Role, TableId, TableName, UserId};
+use kalamdb_commons::models::{NamespaceId, Role, TableName};
 use kalamdb_commons::schemas::{TableDefinition, TableOptions, TableType};
 use kalamdb_commons::TableAccess;
 
@@ -114,85 +112,6 @@ pub fn can_downgrade_shared_to_user(role: Role) -> bool {
     matches!(role, Role::User | Role::Service)
 }
 
-/// Extract the full SessionUserContext from a DataFusion session.
-///
-/// # Returns
-/// * `Ok(&SessionUserContext)` - The session context
-/// * `Err(SessionError::SessionContextNotFound)` - Context not in session
-pub fn extract_session_context(session: &dyn Session) -> Result<&SessionUserContext, SessionError> {
-    session
-        .as_any()
-        .downcast_ref::<SessionState>()
-        .ok_or(SessionError::InvalidSessionState("Expected SessionState".to_string()))?
-        .config()
-        .options()
-        .extensions
-        .get::<SessionUserContext>()
-        .ok_or(SessionError::SessionContextNotFound)
-}
-
-/// Extract user role from DataFusion session.
-///
-/// Falls back to Role::User (least privileged) if context is not found.
-/// This is the fail-closed behavior for security.
-pub fn extract_user_role(session: &dyn Session) -> Role {
-    extract_session_context(session).map(|ctx| ctx.role).unwrap_or(Role::User) // Fail closed: default to least privileged
-}
-
-/// Extract user ID from DataFusion session.
-///
-/// Falls back to "anonymous" if context is not found.
-pub fn extract_user_id(session: &dyn Session) -> UserId {
-    extract_session_context(session)
-        .map(|ctx| ctx.user_id.clone())
-        .unwrap_or_else(|_| UserId::anonymous())
-}
-
-/// Extract (user_id, role) from DataFusion session.
-pub fn extract_user_context(session: &dyn Session) -> Result<(&UserId, Role), SessionError> {
-    let ctx = extract_session_context(session)?;
-    Ok((&ctx.user_id, ctx.role))
-}
-
-/// Extract full session context (user_id, role, read_context) from DataFusion session.
-pub fn extract_full_user_context(
-    session: &dyn Session,
-) -> Result<(&UserId, Role, ReadContext), SessionError> {
-    let ctx = extract_session_context(session)?;
-    Ok((&ctx.user_id, ctx.role, ctx.read_context))
-}
-
-/// Check if the current session can access a system table.
-///
-/// This is the primary security check for system table providers.
-/// Call this at the start of `TableProvider::scan()` to enforce
-/// defense-in-depth permission checking.
-///
-/// # Arguments
-/// * `session` - DataFusion session reference
-/// * `table_id` - The TableId (namespace + table name)
-///
-/// # Returns
-/// * `Ok(())` if access is allowed
-/// * `Err(SessionError::AccessDenied)` if access is denied
-pub fn check_system_table_access(
-    session: &dyn Session,
-    table_id: &TableId,
-) -> Result<(), SessionError> {
-    let role = extract_user_role(session);
-
-    if can_access_system_table(role) {
-        Ok(())
-    } else {
-        Err(SessionError::AccessDenied {
-            namespace_id: table_id.namespace_id().clone(),
-            table_name: table_id.table_name().clone(),
-            role,
-            reason: "System tables require 'dba' or 'system' role.".to_string(),
-        })
-    }
-}
-
 /// Check if a role can access a user table.
 ///
 /// # Access Rules
@@ -201,26 +120,6 @@ pub fn check_system_table_access(
 #[inline]
 pub fn can_access_user_table(role: Role) -> bool {
     matches!(role, Role::System | Role::Dba | Role::Service | Role::User)
-}
-
-/// Check if the current session can access a user table.
-///
-/// User tables rely on row-level security in the provider to scope data by user_id.
-pub fn check_user_table_access(
-    session: &dyn Session,
-    table_id: &TableId,
-) -> Result<(), SessionError> {
-    let role = extract_user_role(session);
-    if can_access_user_table(role) {
-        Ok(())
-    } else {
-        Err(SessionError::AccessDenied {
-            namespace_id: table_id.namespace_id().clone(),
-            table_name: table_id.table_name().clone(),
-            role,
-            reason: "User tables require user/service or admin role".to_string(),
-        })
-    }
 }
 
 /// Check if a role can read all user rows (RLS bypass).
@@ -245,24 +144,6 @@ pub fn can_execute_maintenance(role: Role) -> bool {
 #[inline]
 pub fn can_write_user_table(role: Role) -> bool {
     matches!(role, Role::System | Role::Dba | Role::Service | Role::User)
-}
-
-/// Check if the current session can write to a user table.
-pub fn check_user_table_write_access(
-    session: &dyn Session,
-    table_id: &TableId,
-) -> Result<(), SessionError> {
-    let role = extract_user_role(session);
-    if can_write_user_table(role) {
-        Ok(())
-    } else {
-        Err(SessionError::AccessDenied {
-            namespace_id: table_id.namespace_id().clone(),
-            table_name: table_id.table_name().clone(),
-            role,
-            reason: "User table write denied due to insufficient privileges.".to_string(),
-        })
-    }
 }
 
 /// Check user table write access using table identity.
@@ -352,51 +233,6 @@ pub fn can_write_shared_table(access_level: TableAccess, role: Role) -> bool {
     }
 }
 
-/// Check if the current session can access a shared table.
-///
-/// Uses TableDefinition to read access level and applies RBAC rules.
-pub fn check_shared_table_access(
-    session: &dyn Session,
-    table_def: &TableDefinition,
-) -> Result<(), SessionError> {
-    let role = extract_user_role(session);
-    //let user_id = extract_user_id(session);
-    let access_level = shared_table_access_level(table_def);
-
-    if can_access_shared_table(access_level, role) {
-        Ok(())
-    } else {
-        Err(SessionError::AccessDenied {
-            namespace_id: table_def.namespace_id.clone(),
-            table_name: table_def.table_name.clone(),
-            role,
-            reason: format!("Shared table access denied (access_level={:?})", access_level),
-        })
-    }
-}
-
-/// Check if the current session can write to a shared table.
-///
-/// Uses TableDefinition to read access level and applies RBAC rules.
-pub fn check_shared_table_write_access(
-    session: &dyn Session,
-    table_def: &TableDefinition,
-) -> Result<(), SessionError> {
-    let role = extract_user_role(session);
-    let access_level = shared_table_access_level(table_def);
-
-    if can_write_shared_table(access_level, role) {
-        Ok(())
-    } else {
-        Err(SessionError::AccessDenied {
-            namespace_id: table_def.namespace_id.clone(),
-            table_name: table_def.table_name.clone(),
-            role,
-            reason: format!("Shared table write denied (access_level={:?})", access_level),
-        })
-    }
-}
-
 /// Check shared table write access using table identity and access level.
 pub fn check_shared_table_write_access_level(
     role: Role,
@@ -413,86 +249,6 @@ pub fn check_shared_table_write_access_level(
             role,
             reason: format!("Shared table write denied (access_level={:?})", access_level),
         })
-    }
-}
-
-/// Check system table access using namespace and table name directly.
-///
-/// Convenience function when you don't have a TableId constructed.
-pub fn check_system_table_access_by_name(
-    session: &dyn Session,
-    namespace_id: &NamespaceId,
-    table_name: &TableName,
-) -> Result<(), SessionError> {
-    let table_id = TableId::new(namespace_id.clone(), table_name.clone());
-    check_system_table_access(session, &table_id)
-}
-
-/// Centralized permission checker for use across the codebase.
-///
-/// Provides both session-based and role-based permission checks.
-pub struct PermissionChecker;
-
-impl PermissionChecker {
-    /// Check if the current session can access a system table.
-    ///
-    /// Returns a DataFusion error on access denial for easy integration.
-    pub fn check_system_table(
-        session: &dyn Session,
-        table_id: &TableId,
-    ) -> datafusion::error::Result<()> {
-        check_system_table_access(session, table_id).map_err(|e| e.into())
-    }
-
-    /// Check if the current session can access a user table.
-    pub fn check_user_table(
-        session: &dyn Session,
-        table_id: &TableId,
-    ) -> datafusion::error::Result<()> {
-        check_user_table_access(session, table_id).map_err(|e| e.into())
-    }
-
-    /// Check if the current session can access a shared table.
-    pub fn check_shared_table(
-        session: &dyn Session,
-        table_def: &TableDefinition,
-    ) -> datafusion::error::Result<()> {
-        check_shared_table_access(session, table_def).map_err(|e| e.into())
-    }
-
-    /// Check if the current session can write to a shared table.
-    pub fn check_shared_table_write(
-        session: &dyn Session,
-        table_def: &TableDefinition,
-    ) -> datafusion::error::Result<()> {
-        check_shared_table_write_access(session, table_def).map_err(|e| e.into())
-    }
-
-    /// Check if the current session can write to a user table.
-    pub fn check_user_table_write(
-        session: &dyn Session,
-        table_id: &TableId,
-    ) -> datafusion::error::Result<()> {
-        check_user_table_write_access(session, table_id).map_err(|e| e.into())
-    }
-
-    /// Check if the current session has admin privileges (System or Dba role).
-    #[inline]
-    pub fn is_admin(session: &dyn Session) -> bool {
-        let role = extract_user_role(session);
-        matches!(role, Role::System | Role::Dba)
-    }
-
-    /// Get the role from session without performing any check.
-    #[inline]
-    pub fn get_role(session: &dyn Session) -> Role {
-        extract_user_role(session)
-    }
-
-    /// Get the user ID from session.
-    #[inline]
-    pub fn get_user_id(session: &dyn Session) -> UserId {
-        extract_user_id(session)
     }
 }
 

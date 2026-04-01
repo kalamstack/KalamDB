@@ -8,6 +8,7 @@ use crate::{middleware, routes};
 use actix_web::{web, App, HttpServer};
 use anyhow::Result;
 use kalamdb_api::limiter::RateLimiter;
+use kalamdb_auth::CachedUsersRepo;
 use kalamdb_commons::{AuthType, Role, StorageId, UserId};
 use kalamdb_configs::ServerConfig;
 use kalamdb_core::live::ConnectionsManager;
@@ -117,7 +118,7 @@ pub async fn prepare_components(
     let session_factory = app_context.session_factory();
     let users_provider = app_context.system_tables().users();
     let user_repo: Arc<dyn kalamdb_auth::UserRepository> =
-        Arc::new(kalamdb_api::repositories::CachedUsersRepo::new(users_provider));
+        Arc::new(CachedUsersRepo::new(users_provider));
 
     let handler_registry = Arc::new(HandlerRegistry::new(app_context.clone()));
     kalamdb_handlers::register_all_handlers(
@@ -126,8 +127,7 @@ pub async fn prepare_components(
         config.auth.enforce_password_complexity,
     );
 
-    let sql_executor =
-        Arc::new(SqlExecutor::new(app_context.clone(), handler_registry));
+    let sql_executor = Arc::new(SqlExecutor::new(app_context.clone(), handler_registry));
 
     app_context.set_sql_executor(sql_executor.clone());
     live_query_manager.set_sql_executor(sql_executor.clone());

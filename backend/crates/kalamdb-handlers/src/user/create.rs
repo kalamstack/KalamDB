@@ -1,14 +1,14 @@
 //! Typed handler for CREATE USER statement
 
+use kalamdb_auth::security::password::{
+    hash_password, validate_password_with_policy, PasswordPolicy,
+};
+use kalamdb_commons::{AuthType, UserId};
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::error::KalamDbError;
 use kalamdb_core::error_extensions::KalamDbResultExt;
 use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
 use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
-use kalamdb_auth::security::password::{
-    hash_password, validate_password_with_policy, PasswordPolicy,
-};
-use kalamdb_commons::{AuthType, UserId};
 use kalamdb_sql::ddl::CreateUserStatement;
 use kalamdb_system::{AuthData, User};
 use std::sync::Arc;

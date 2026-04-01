@@ -35,7 +35,10 @@ use kalamdb_commons::models::datatypes::KalamDataType;
 use kalamdb_commons::models::UserId;
 use kalamdb_commons::NotLeaderError;
 use kalamdb_commons::StorageKey;
-use kalamdb_session::{can_read_all_users, check_user_table_access, check_user_table_write_access};
+use kalamdb_session::can_read_all_users;
+use kalamdb_session_datafusion::{
+    check_user_table_access, check_user_table_write_access, session_error_to_datafusion,
+};
 use kalamdb_store::EntityStore;
 use kalamdb_system::VectorMetric;
 use kalamdb_vector::{
@@ -43,12 +46,12 @@ use kalamdb_vector::{
     VectorHotOpType,
 };
 use std::any::Any;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tracing::Instrument;
 
 // Arrow <-> JSON helpers
-use crate::utils::version_resolution::{merge_versioned_rows, parquet_batch_to_rows};
+use crate::utils::version_resolution::resolve_latest_kvs_from_cold_batch;
 use kalamdb_commons::models::rows::Row;
 
 use kalamdb_commons::websocket::ChangeNotification;
@@ -399,9 +402,12 @@ impl UserTableProvider {
                 ))
             })?;
 
+        let mut hot_rows_by_user: HashMap<UserId, Vec<(UserTableRowId, UserTableRow)>> =
+            HashMap::new();
         let mut user_ids = HashSet::new();
-        for (_row_id, row) in &hot_rows {
+        for (row_id, row) in hot_rows {
             user_ids.insert(row.user_id.clone());
+            hot_rows_by_user.entry(row.user_id.clone()).or_default().push((row_id, row));
         }
 
         if let Ok(scopes) = self.core.services.manifest_service.get_manifest_user_ids(table_id) {
@@ -412,25 +418,34 @@ impl UserTableProvider {
             user_ids.insert(user_id.clone());
         }
 
-        let mut cold_rows = Vec::new();
+        let pk_name = self.primary_key_field_name().to_string();
+        let mut result = Vec::new();
+
         for user_id in user_ids {
             // Use async version to avoid blocking the runtime
             let parquet_batch =
                 self.scan_parquet_files_as_batch_async(&user_id, filter, None).await?;
-            for row_data in parquet_batch_to_rows(&parquet_batch)? {
-                let seq_id = row_data.seq_id;
-                let row = UserTableRow {
-                    user_id: user_id.clone(),
-                    _seq: seq_id,
-                    _deleted: row_data.deleted,
-                    fields: row_data.fields,
-                };
-                cold_rows.push((UserTableRowId::new(user_id.clone(), seq_id), row));
-            }
+            let hot_rows = hot_rows_by_user.remove(&user_id).unwrap_or_default();
+            result.extend(resolve_latest_kvs_from_cold_batch(
+                &pk_name,
+                hot_rows,
+                &parquet_batch,
+                keep_deleted,
+                |row_data| {
+                    let seq_id = row_data.seq_id;
+                    Ok((
+                        UserTableRowId::new(user_id.clone(), seq_id),
+                        UserTableRow {
+                            user_id: user_id.clone(),
+                            _seq: seq_id,
+                            _deleted: row_data.deleted,
+                            fields: row_data.fields,
+                        },
+                    ))
+                },
+            )?);
         }
 
-        let pk_name = self.primary_key_field_name().to_string();
-        let mut result = merge_versioned_rows(&pk_name, hot_rows, cold_rows, keep_deleted);
         base::apply_limit(&mut result, limit);
 
         Ok(result)
@@ -440,8 +455,12 @@ impl UserTableProvider {
         &self,
         state: &dyn Session,
         filters: &[Expr],
+        projection: Option<&Vec<usize>>,
     ) -> DataFusionResult<Vec<Row>> {
-        crate::utils::datafusion_dml::collect_matching_rows(self, state, filters).await
+        crate::utils::datafusion_dml::collect_matching_rows_with_projection(
+            self, state, filters, projection,
+        )
+        .await
     }
 }
 
@@ -1462,32 +1481,37 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         // 2) Scan cold storage (Parquet files)
         let parquet_batch = cold_result?;
 
-        let cold_rows: Vec<(UserTableRowId, UserTableRow)> = parquet_batch_to_rows(&parquet_batch)?
-            .into_iter()
-            .map(|row_data| {
-                let seq_id = row_data.seq_id;
-                let row = UserTableRow {
-                    user_id: user_id.clone(),
-                    _seq: seq_id,
-                    _deleted: row_data.deleted,
-                    fields: row_data.fields,
-                };
-                (UserTableRowId::new(user_id.clone(), seq_id), row)
-            })
-            .collect();
+        let pk_name = self.primary_key_field_name().to_string();
+        let cold_rows_scanned = parquet_batch.num_rows();
 
         if log::log_enabled!(log::Level::Trace) {
             log::trace!(
                 "[UserProvider] Cold scan: {} Parquet rows (table={}; user={})",
-                cold_rows.len(),
+                cold_rows_scanned,
                 table_id,
                 user_id.as_str()
             );
         }
 
-        // 3) Version resolution: keep MAX(_seq) per primary key; honor tombstones
-        let pk_name = self.primary_key_field_name().to_string();
-        let mut result = merge_versioned_rows(&pk_name, hot_rows, cold_rows, keep_deleted);
+        // 3) Version resolution: keep MAX(_seq) per primary key; only materialize cold winners
+        let mut result = resolve_latest_kvs_from_cold_batch(
+            &pk_name,
+            hot_rows,
+            &parquet_batch,
+            keep_deleted,
+            |row_data| {
+                let seq_id = row_data.seq_id;
+                Ok((
+                    UserTableRowId::new(user_id.clone(), seq_id),
+                    UserTableRow {
+                        user_id: user_id.clone(),
+                        _seq: seq_id,
+                        _deleted: row_data.deleted,
+                        fields: row_data.fields,
+                    },
+                ))
+            },
+        )?;
 
         // Apply limit after resolution using common helper
         base::apply_limit(&mut result, limit);
@@ -1619,7 +1643,8 @@ impl TableProvider for UserTableProvider {
         limit: Option<usize>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
         // SECURITY: Enforce user table access rules (namespace isolation)
-        check_user_table_access(state, self.core.table_id()).map_err(DataFusionError::from)?;
+        check_user_table_access(state, self.core.table_id())
+            .map_err(session_error_to_datafusion)?;
 
         // Extract user context including read_context for leader check
         let (_user_id, _role, read_context) = extract_full_user_context(state).map_err(|e| {
@@ -1652,7 +1677,7 @@ impl TableProvider for UserTableProvider {
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
         tracing::debug!(table_id = %self.core.table_id(), "table.insert_into");
         check_user_table_write_access(state, self.core.table_id())
-            .map_err(DataFusionError::from)?;
+            .map_err(session_error_to_datafusion)?;
 
         if insert_op != InsertOp::Append {
             return Err(DataFusionError::Plan(format!(
@@ -1679,18 +1704,27 @@ impl TableProvider for UserTableProvider {
         filters: Vec<Expr>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
         check_user_table_write_access(state, self.core.table_id())
-            .map_err(DataFusionError::from)?;
+            .map_err(session_error_to_datafusion)?;
         crate::utils::datafusion_dml::validate_where_clause(&filters, "DELETE")?;
 
         let (user_id, _role) =
             extract_user_context(state).map_err(|e| DataFusionError::Execution(e.to_string()))?;
 
-        let rows = self.collect_matching_rows_for_subject(state, &filters).await?;
+        let pk_column = self.primary_key_field_name().to_string();
+        let schema = self.schema_ref();
+        let projection = crate::utils::datafusion_dml::dml_scan_projection(
+            &schema,
+            &filters,
+            &[],
+            &[&pk_column],
+        )?;
+        let rows = self
+            .collect_matching_rows_for_subject(state, &filters, projection.as_ref())
+            .await?;
         if rows.is_empty() {
             return crate::utils::datafusion_dml::rows_affected_plan(state, 0).await;
         }
 
-        let pk_column = self.primary_key_field_name().to_string();
         let mut seen = HashSet::new();
         let mut deleted: u64 = 0;
 
@@ -1719,7 +1753,7 @@ impl TableProvider for UserTableProvider {
         filters: Vec<Expr>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
         check_user_table_write_access(state, self.core.table_id())
-            .map_err(DataFusionError::from)?;
+            .map_err(session_error_to_datafusion)?;
         crate::utils::datafusion_dml::validate_where_clause(&filters, "UPDATE")?;
 
         let pk_column = self.primary_key_field_name().to_string();
@@ -1728,12 +1762,20 @@ impl TableProvider for UserTableProvider {
         let (user_id, _role) =
             extract_user_context(state).map_err(|e| DataFusionError::Execution(e.to_string()))?;
 
-        let rows = self.collect_matching_rows_for_subject(state, &filters).await?;
+        let schema = self.schema_ref();
+        let projection = crate::utils::datafusion_dml::dml_scan_projection(
+            &schema,
+            &filters,
+            &assignments,
+            &[&pk_column],
+        )?;
+        let rows = self
+            .collect_matching_rows_for_subject(state, &filters, projection.as_ref())
+            .await?;
         if rows.is_empty() {
             return crate::utils::datafusion_dml::rows_affected_plan(state, 0).await;
         }
 
-        let schema = self.schema_ref();
         let mut seen = HashSet::new();
         let mut updated: u64 = 0;
 
@@ -1743,16 +1785,17 @@ impl TableProvider for UserTableProvider {
                 continue;
             }
 
-            let mut values = BTreeMap::new();
-            for (column, expr) in &assignments {
-                let value = crate::utils::datafusion_dml::evaluate_assignment_expr(
-                    state, &schema, &row, expr,
-                )?;
-                values.insert(column.clone(), value);
-            }
-
             let result = self
-                .update_by_pk_value(user_id, &pk_value, Row::new(values))
+                .update_by_pk_value(
+                    user_id,
+                    &pk_value,
+                    crate::utils::datafusion_dml::evaluate_assignment_values(
+                        state,
+                        &schema,
+                        &row,
+                        &assignments,
+                    )?,
+                )
                 .await
                 .map_err(|e| DataFusionError::Execution(e.to_string()))?;
             if result.is_some() {

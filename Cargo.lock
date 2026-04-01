@@ -3907,7 +3907,6 @@ dependencies = [
  "actix-web",
  "actix-ws",
  "arrow",
- "async-trait",
  "base64",
  "bytes",
  "cc",
@@ -3955,11 +3954,13 @@ dependencies = [
  "jsonwebtoken",
  "kalamdb-commons",
  "kalamdb-configs",
- "kalamdb-oidc",
  "kalamdb-session",
  "kalamdb-system",
  "log",
+ "moka",
  "once_cell",
+ "reqwest 0.13.2",
+ "serde",
  "serde_json",
  "sha2 0.11.0",
  "thiserror 2.0.18",
@@ -4028,6 +4029,7 @@ dependencies = [
  "kalamdb-publisher",
  "kalamdb-raft",
  "kalamdb-session",
+ "kalamdb-session-datafusion",
  "kalamdb-sharding",
  "kalamdb-sql",
  "kalamdb-store",
@@ -4187,22 +4189,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kalamdb-oidc"
-version = "0.4.2-rc1"
-dependencies = [
- "base64",
- "chrono",
- "jsonwebtoken",
- "kalamdb-commons",
- "log",
- "reqwest 0.13.2",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
 name = "kalamdb-pg"
 version = "0.4.2-rc1"
 dependencies = [
@@ -4306,12 +4292,14 @@ dependencies = [
  "libc",
  "log",
  "mimalloc",
+ "moka",
  "ntest",
  "num_cpus",
  "once_cell",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "parking_lot",
  "rand 0.10.0",
  "reqwest 0.13.2",
  "serde",
@@ -4342,10 +4330,19 @@ dependencies = [
 name = "kalamdb-session"
 version = "0.4.2-rc1"
 dependencies = [
+ "kalamdb-commons",
+ "tokio",
+]
+
+[[package]]
+name = "kalamdb-session-datafusion"
+version = "0.4.2-rc1"
+dependencies = [
  "arrow",
  "async-trait",
  "datafusion",
  "kalamdb-commons",
+ "kalamdb-session",
  "tokio",
  "tracing",
 ]
@@ -4424,7 +4421,7 @@ dependencies = [
  "flexbuffers",
  "kalamdb-commons",
  "kalamdb-macros",
- "kalamdb-session",
+ "kalamdb-session-datafusion",
  "kalamdb-store",
  "log",
  "once_cell",
@@ -4449,6 +4446,7 @@ dependencies = [
  "kalamdb-commons",
  "kalamdb-filestore",
  "kalamdb-session",
+ "kalamdb-session-datafusion",
  "kalamdb-sharding",
  "kalamdb-store",
  "kalamdb-streams",
@@ -4475,7 +4473,7 @@ dependencies = [
  "datafusion",
  "kalamdb-commons",
  "kalamdb-filestore",
- "kalamdb-session",
+ "kalamdb-session-datafusion",
  "kalamdb-store",
  "kalamdb-system",
  "once_cell",

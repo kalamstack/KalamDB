@@ -20,11 +20,11 @@
 //! }
 //! ```
 
-use kalamdb_core::error::KalamDbError;
 use crate::executors::{JobContext, JobDecision, JobExecutor, JobParams};
 use async_trait::async_trait;
 use kalamdb_commons::schemas::TableType;
 use kalamdb_commons::TableId;
+use kalamdb_core::error::KalamDbError;
 use kalamdb_system::JobType;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

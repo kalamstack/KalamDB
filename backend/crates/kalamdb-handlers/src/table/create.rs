@@ -1,11 +1,11 @@
 //! Typed DDL handler for CREATE TABLE statements
 
+use kalamdb_commons::models::TableId;
+use kalamdb_commons::schemas::TableType;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::error::KalamDbError;
 use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
 use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
-use kalamdb_commons::models::TableId;
-use kalamdb_commons::schemas::TableType;
 use kalamdb_sql::ddl::CreateTableStatement;
 use std::sync::Arc;
 
@@ -134,11 +134,11 @@ impl TypedStatementHandler<CreateTableStatement> for CreateTableHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
     use arrow::datatypes::{DataType, Field, Schema};
     use kalamdb_commons::models::{NamespaceId, UserId};
     use kalamdb_commons::schemas::TableType;
     use kalamdb_commons::Role;
+    use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
 
     fn create_test_context(role: Role) -> ExecutionContext {
         ExecutionContext::new(UserId::new("test_user"), role, create_test_session_simple())

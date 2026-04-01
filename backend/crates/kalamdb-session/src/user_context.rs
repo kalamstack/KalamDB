@@ -1,12 +1,16 @@
 //! User Context
 //!
-//! This module provides `UserContext` - the unified way to pass user identity
-//! and role information through DataFusion's session configuration.
+//! This module provides `UserContext` - the lightweight shared user identity
+//! and read-routing metadata used across transport, auth, and execution code.
 //!
 //! ## Usage
 //!
-//! The context is injected into DataFusion's SessionState extensions by `ExecutionContext`
-//! and read by TableProviders during `scan()` for:
+//! DataFusion-specific session extension support lives in
+//! `kalamdb-session-datafusion`. This base type stays free of query-engine
+//! dependencies so it remains cheap to clone and widely reusable.
+//!
+//! The context is injected into DataFusion's SessionState extensions by the
+//! adapter crate and read by TableProviders during `scan()` for:
 //! - Per-user data filtering (USER tables)
 //! - Role-based access control (SYSTEM tables)
 //! - Read routing in Raft clusters
@@ -16,10 +20,7 @@
 //! ```text
 //! HTTP Handler → ExecutionContext → SessionState.extensions → TableProvider.scan()
 //! ```
-
-use datafusion::common::config::{ConfigEntry, ConfigExtension, ExtensionOptions};
 use kalamdb_commons::models::{ReadContext, Role, UserId};
-use std::any::Any;
 
 /// Session-level user context passed via DataFusion's extension system
 ///
@@ -112,34 +113,6 @@ impl UserContext {
     pub fn is_system(&self) -> bool {
         matches!(self.role, Role::System)
     }
-}
-
-impl ExtensionOptions for UserContext {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
-    fn cloned(&self) -> Box<dyn ExtensionOptions> {
-        Box::new(self.clone())
-    }
-
-    fn set(&mut self, _key: &str, _value: &str) -> datafusion::common::Result<()> {
-        // UserContext is immutable - ignore set operations
-        Ok(())
-    }
-
-    fn entries(&self) -> Vec<ConfigEntry> {
-        // No configuration entries
-        vec![]
-    }
-}
-
-impl ConfigExtension for UserContext {
-    const PREFIX: &'static str = "kalamdb";
 }
 
 #[cfg(test)]

@@ -12,7 +12,7 @@ use datafusion::error::Result as DataFusionResult;
 use kalamdb_commons::SystemTable;
 use kalamdb_configs::ServerConfig;
 use kalamdb_raft::CommandExecutor;
-use kalamdb_session::secure_provider;
+use kalamdb_session_datafusion::secure_provider;
 use kalamdb_system::SystemTablesRegistry;
 use parking_lot::RwLock;
 use std::any::Any;

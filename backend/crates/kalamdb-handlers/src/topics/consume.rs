@@ -1,14 +1,14 @@
 //! CONSUME FROM handler
 
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
-use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
 use datafusion::arrow::{
     array::{ArrayRef, BinaryBuilder, Int32Array, Int64Array, StringBuilder},
     record_batch::RecordBatch,
 };
 use kalamdb_commons::models::{ConsumerGroupId, TopicId};
+use kalamdb_core::app_context::AppContext;
+use kalamdb_core::error::KalamDbError;
+use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
+use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
 use kalamdb_sql::ddl::{ConsumePosition, ConsumeStatement};
 use kalamdb_tables::topics::topic_message_schema::topic_message_schema;
 use std::sync::Arc;

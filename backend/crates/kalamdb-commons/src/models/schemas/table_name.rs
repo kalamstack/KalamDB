@@ -1,6 +1,7 @@
 //! Type-safe wrapper for table names.
 
 use std::fmt;
+use std::sync::Arc;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -22,20 +23,11 @@ impl std::error::Error for TableNameValidationError {}
 
 /// Type-safe wrapper for table names.
 ///
-/// Ensures table names cannot be accidentally used where user IDs or namespace IDs
-/// are expected.
-///
-/// # Security
-///
-/// Table names are validated to prevent path traversal attacks. The following
-/// are rejected:
-/// - Empty strings
-/// - Names containing `..` (parent directory traversal)
-/// - Names containing `/` or `\` (path separators)
-/// - Names containing null bytes
+/// Stored as `Arc<str>` so `clone()` is a cheap atomic refcount increment
+/// rather than a heap allocation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct TableName(String);
+pub struct TableName(Arc<str>);
 
 impl TableName {
     /// Validates a table name for security issues.
@@ -85,7 +77,7 @@ impl TableName {
     pub fn try_new(name: impl Into<String>) -> Result<Self, TableNameValidationError> {
         let name = name.into();
         Self::validate(&name)?;
-        Ok(Self(name.to_lowercase()))
+        Ok(Self(Arc::<str>::from(name.to_lowercase())))
     }
 
     /// Creates a new TableName from a string.
@@ -100,7 +92,7 @@ impl TableName {
     pub fn new(name: impl Into<String>) -> Self {
         let name = name.into();
         Self::validate(&name).expect("Invalid table name");
-        Self(name.to_lowercase())
+        Self(Arc::<str>::from(name.to_lowercase()))
     }
 
     /// Returns the table name as a string slice.
@@ -112,7 +104,7 @@ impl TableName {
     /// Consumes the wrapper and returns the inner String.
     #[inline]
     pub fn into_string(self) -> String {
-        self.0
+        String::from(&*self.0)
     }
 }
 
@@ -125,14 +117,14 @@ impl fmt::Display for TableName {
 impl From<String> for TableName {
     fn from(s: String) -> Self {
         Self::validate(&s).expect("Invalid table name");
-        Self(s.to_lowercase())
+        Self(Arc::<str>::from(s.to_lowercase()))
     }
 }
 
 impl From<&str> for TableName {
     fn from(s: &str) -> Self {
         Self::validate(s).expect("Invalid table name");
-        Self(s.to_lowercase())
+        Self(Arc::<str>::from(s.to_lowercase()))
     }
 }
 

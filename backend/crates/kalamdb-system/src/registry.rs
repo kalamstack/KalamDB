@@ -25,7 +25,7 @@ use super::providers::{
 use datafusion::datasource::TableProvider;
 use kalamdb_commons::schemas::{TableDefinition, TableType};
 use kalamdb_commons::SystemTable;
-use kalamdb_session::secure_provider;
+use kalamdb_session_datafusion::secure_provider;
 use kalamdb_store::StorageBackend;
 use once_cell::sync::OnceCell;
 use parking_lot::RwLock;

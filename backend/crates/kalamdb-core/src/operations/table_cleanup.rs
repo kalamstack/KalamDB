@@ -85,11 +85,7 @@ pub async fn cleanup_table_data_internal(
             use kalamdb_commons::constants::ColumnFamilyNames;
             use kalamdb_store::storage_trait::Partition as StorePartition;
 
-            let partition_name = format!(
-                "{}{}",
-                ColumnFamilyNames::STREAM_TABLE_PREFIX,
-                table_id
-            );
+            let partition_name = format!("{}{}", ColumnFamilyNames::STREAM_TABLE_PREFIX, table_id);
 
             let backend = app_context.storage_backend();
             let partition = StorePartition::new(partition_name.clone());
@@ -156,9 +152,7 @@ pub async fn cleanup_parquet_files_internal(
         })?;
 
     let files_deleted = storage_cached
-        .delete_prefix(
-            table_type, table_id, None,
-        )
+        .delete_prefix(table_type, table_id, None)
         .await
         .into_kalamdb_error("Failed to delete Parquet tree")?
         .files_deleted;

@@ -1,8 +1,8 @@
 // JWT configuration cache, trusted issuer parsing, and OIDC validator registry.
 
 use crate::errors::error::{AuthError, AuthResult};
+use crate::oidc::{OidcConfig, OidcValidator};
 use crate::providers::jwt_auth;
-use kalamdb_oidc::{OidcConfig, OidcValidator};
 use once_cell::sync::OnceCell;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
@@ -64,7 +64,7 @@ impl JwtConfig {
     /// On first call for an issuer, performs OIDC Discovery to resolve the
     /// `jwks_uri`, then creates and caches the validator. Subsequent calls
     /// return the existing validator which maintains its own JWKS key cache.
-    pub async fn get_oidc_validator(&self, issuer: &str) -> AuthResult<OidcValidator> {
+    pub(crate) async fn get_oidc_validator(&self, issuer: &str) -> AuthResult<OidcValidator> {
         // Fast path: read lock
         {
             let validators = self.oidc_validators.read().await;

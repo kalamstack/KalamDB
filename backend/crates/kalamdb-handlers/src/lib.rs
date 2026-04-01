@@ -405,15 +405,14 @@ pub fn register_all_handlers(
         },
     );
 
-    let placeholder_live =
-        kalamdb_commons::models::LiveQueryId::from_string("user123-conn_abc-q1")
-            .unwrap_or_else(|_| {
-                kalamdb_commons::models::LiveQueryId::new(
-                    kalamdb_commons::models::UserId::new("user123"),
-                    kalamdb_commons::models::ConnectionId::new("conn_abc"),
-                    "q1".to_string(),
-                )
-            });
+    let placeholder_live = kalamdb_commons::models::LiveQueryId::from_string("user123-conn_abc-q1")
+        .unwrap_or_else(|_| {
+            kalamdb_commons::models::LiveQueryId::new(
+                kalamdb_commons::models::UserId::new("user123"),
+                kalamdb_commons::models::ConnectionId::new("conn_abc"),
+                "q1".to_string(),
+            )
+        });
     registry.register_typed(
         SqlStatementKind::KillLiveQuery(kalamdb_sql::ddl::KillLiveQueryStatement {
             live_id: placeholder_live,
@@ -429,7 +428,9 @@ pub fn register_all_handlers(
     // USER HANDLERS
     // ============================================================================
     use kalamdb_commons::AuthType;
-    use kalamdb_sql::ddl::{AlterUserStatement, CreateUserStatement, DropUserStatement, UserModification};
+    use kalamdb_sql::ddl::{
+        AlterUserStatement, CreateUserStatement, DropUserStatement, UserModification,
+    };
 
     registry.register_typed(
         SqlStatementKind::CreateUser(CreateUserStatement {

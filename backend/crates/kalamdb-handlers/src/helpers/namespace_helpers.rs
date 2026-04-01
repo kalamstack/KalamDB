@@ -2,11 +2,11 @@
 //!
 //! Handlers for CREATE NAMESPACE and DROP NAMESPACE statements.
 
+use datafusion::execution::context::SessionContext;
+use kalamdb_commons::models::NamespaceId;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::error::KalamDbError;
 use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult};
-use datafusion::execution::context::SessionContext;
-use kalamdb_commons::models::NamespaceId;
 use kalamdb_sql::ddl::{CreateNamespaceStatement, DropNamespaceStatement};
 use kalamdb_system::Namespace;
 use std::sync::Arc;
@@ -137,10 +137,10 @@ pub async fn execute_drop_namespace(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
     use datafusion::prelude::SessionContext;
     use kalamdb_commons::models::UserId;
     use kalamdb_commons::Role;
+    use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
     use std::sync::Arc;
 
     fn init_app_context() -> Arc<AppContext> {

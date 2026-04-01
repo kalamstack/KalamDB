@@ -19,14 +19,14 @@
 //! }
 //! ```
 
-use kalamdb_core::error::KalamDbError;
 use crate::executors::{JobContext, JobDecision, JobExecutor, JobParams};
-use kalamdb_core::operations::table_cleanup::{
-    cleanup_metadata_internal, cleanup_parquet_files_internal, cleanup_table_data_internal,
-};
 use async_trait::async_trait;
 use kalamdb_commons::schemas::TableType;
 use kalamdb_commons::TableId;
+use kalamdb_core::error::KalamDbError;
+use kalamdb_core::operations::table_cleanup::{
+    cleanup_metadata_internal, cleanup_parquet_files_internal, cleanup_table_data_internal,
+};
 use kalamdb_system::JobType;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -162,8 +162,8 @@ impl Default for CleanupExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kalamdb_commons::{NamespaceId, TableName};
     use kalamdb_commons::StorageId;
+    use kalamdb_commons::{NamespaceId, TableName};
 
     #[test]
     fn test_executor_properties() {

@@ -67,7 +67,13 @@ async fn test_subscribe_during_reconnect_eventually_delivers() {
             }
             match timeout(Duration::from_millis(1200), sub_a.next()).await {
                 Ok(Some(Ok(ev))) => {
-                    collect_ids_and_track_seq(&ev, &mut a_ids, &mut a_seq, None, "sub-reconn A pre");
+                    collect_ids_and_track_seq(
+                        &ev,
+                        &mut a_ids,
+                        &mut a_seq,
+                        None,
+                        "sub-reconn A pre",
+                    );
                 },
                 _ => {},
             }
@@ -170,20 +176,12 @@ async fn test_subscribe_during_reconnect_eventually_delivers() {
         let mut b_ids = Vec::<String>::new();
         let mut b_seq = None;
         for _ in 0..30 {
-            if b_ids.iter().any(|id| id == "b-seed")
-                && b_ids.iter().any(|id| id == "b-post")
-            {
+            if b_ids.iter().any(|id| id == "b-seed") && b_ids.iter().any(|id| id == "b-post") {
                 break;
             }
             match timeout(Duration::from_millis(2000), sub_b.next()).await {
                 Ok(Some(Ok(ev))) => {
-                    collect_ids_and_track_seq(
-                        &ev,
-                        &mut b_ids,
-                        &mut b_seq,
-                        None,
-                        "sub-reconn B",
-                    );
+                    collect_ids_and_track_seq(&ev, &mut b_ids, &mut b_seq, None, "sub-reconn B");
                 },
                 _ => {},
             }

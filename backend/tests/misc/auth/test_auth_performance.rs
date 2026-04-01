@@ -272,8 +272,7 @@ async fn test_auth_cache_effectiveness() {
 /// Test concurrent authentication load
 #[tokio::test]
 async fn test_concurrent_auth_load() {
-    use kalamdb_api::repositories::CachedUsersRepo;
-    use kalamdb_auth::{authenticate, AuthRequest, UserRepository};
+    use kalamdb_auth::{authenticate, AuthRequest, CachedUsersRepo, UserRepository};
     use std::sync::Arc;
 
     let server = TestServer::new_shared().await;

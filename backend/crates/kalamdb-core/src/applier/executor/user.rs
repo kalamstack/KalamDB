@@ -10,6 +10,7 @@ use kalamdb_commons::models::UserId;
 use kalamdb_system::User;
 
 use crate::app_context::AppContext;
+use crate::applier::executor::utils::run_blocking_applier;
 use crate::applier::ApplierError;
 
 /// Executor for user management operations
@@ -27,7 +28,7 @@ impl UserExecutor {
         log::debug!("CommandExecutorImpl: Creating user {}", user.user_id);
         let app_context = self.app_context.clone();
         let user = user.clone();
-        tokio::task::spawn_blocking(move || {
+        run_blocking_applier(move || {
             let user_id = user.user_id.clone();
             app_context
                 .system_tables()
@@ -37,7 +38,6 @@ impl UserExecutor {
             Ok(format!("User {} created successfully", user_id))
         })
         .await
-        .map_err(|e| ApplierError::Execution(format!("Task join error: {}", e)))?
     }
 
     /// Execute ALTER USER (update)
@@ -45,7 +45,7 @@ impl UserExecutor {
         log::debug!("CommandExecutorImpl: Updating user {}", user.user_id);
         let app_context = self.app_context.clone();
         let user = user.clone();
-        tokio::task::spawn_blocking(move || {
+        run_blocking_applier(move || {
             let user_id = user.user_id.clone();
             app_context
                 .system_tables()
@@ -55,7 +55,6 @@ impl UserExecutor {
             Ok(format!("User {} updated successfully", user_id))
         })
         .await
-        .map_err(|e| ApplierError::Execution(format!("Task join error: {}", e)))?
     }
 
     /// Execute DROP USER (soft delete)
@@ -65,7 +64,7 @@ impl UserExecutor {
         log::debug!("CommandExecutorImpl: Deleting user {}", user_id);
         let app_context = self.app_context.clone();
         let user_id = user_id.clone();
-        tokio::task::spawn_blocking(move || {
+        run_blocking_applier(move || {
             app_context
                 .system_tables()
                 .users()
@@ -74,7 +73,6 @@ impl UserExecutor {
             Ok(format!("User {} deleted successfully", user_id))
         })
         .await
-        .map_err(|e| ApplierError::Execution(format!("Task join error: {}", e)))?
     }
 
     /// Record user login timestamp
@@ -86,7 +84,7 @@ impl UserExecutor {
         log::debug!("CommandExecutorImpl: Recording login for user {}", user_id);
         let app_context = self.app_context.clone();
         let user_id = user_id.clone();
-        tokio::task::spawn_blocking(move || {
+        run_blocking_applier(move || {
             if let Some(mut user) = app_context
                 .system_tables()
                 .users()
@@ -102,7 +100,6 @@ impl UserExecutor {
             Ok(format!("User {} not found for login recording", user_id))
         })
         .await
-        .map_err(|e| ApplierError::Execution(format!("Task join error: {}", e)))?
     }
 
     /// Set user lock status
@@ -118,7 +115,7 @@ impl UserExecutor {
         );
         let app_context = self.app_context.clone();
         let user_id = user_id.clone();
-        tokio::task::spawn_blocking(move || {
+        run_blocking_applier(move || {
             if let Some(mut user) = app_context
                 .system_tables()
                 .users()
@@ -138,6 +135,5 @@ impl UserExecutor {
             Ok(format!("User {} not found for lock update", user_id))
         })
         .await
-        .map_err(|e| ApplierError::Execution(format!("Task join error: {}", e)))?
     }
 }

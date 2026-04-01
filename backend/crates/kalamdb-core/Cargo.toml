@@ -17,6 +17,7 @@ kalamdb-observability = { path = "../kalamdb-observability" }
 kalamdb-pg = { path = "../kalamdb-pg" }
 kalamdb-raft = { path = "../kalamdb-raft" }
 kalamdb-session = { path = "../kalamdb-session" }
+kalamdb-session-datafusion = { path = "../kalamdb-session-datafusion" }
 kalamdb-sharding = { path = "../kalamdb-sharding" }
 kalamdb-sql = { path = "../kalamdb-sql" }
 kalamdb-store = { path = "../kalamdb-store" }

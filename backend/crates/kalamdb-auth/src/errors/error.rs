@@ -1,5 +1,7 @@
 // Authentication error types for KalamDB
 
+use crate::oidc::OidcError;
+
 use thiserror::Error;
 
 /// Errors that can occur during authentication and authorization.
@@ -80,16 +82,15 @@ pub type AuthResult<T> = Result<T, AuthError>;
 
 /// Convert an `OidcError` into an `AuthError`.
 ///
-/// Used by the `?` operator in `bearer.rs` when calling re-exported JWT utility
-/// functions (`extract_issuer_unverified`, `extract_algorithm_unverified`) that
-/// now originate from `kalamdb-oidc`.
-impl From<kalamdb_oidc::OidcError> for AuthError {
-    fn from(e: kalamdb_oidc::OidcError) -> Self {
+/// Used by the `?` operator in bearer authentication when OIDC discovery,
+/// JWKS lookup, or external token validation fails.
+impl From<OidcError> for AuthError {
+    fn from(e: OidcError) -> Self {
         match e {
-            kalamdb_oidc::OidcError::JwtValidationFailed(ref msg) if msg.contains("expired") => {
+            OidcError::JwtValidationFailed(ref msg) if msg.contains("expired") => {
                 AuthError::TokenExpired
             },
-            kalamdb_oidc::OidcError::JwtValidationFailed(ref msg) if msg.contains("signature") => {
+            OidcError::JwtValidationFailed(ref msg) if msg.contains("signature") => {
                 AuthError::InvalidSignature
             },
             _ => AuthError::MalformedAuthorization(e.to_string()),

@@ -1,10 +1,10 @@
 //! Typed DDL handler for DROP STORAGE statements
 
+use crate::helpers::guards::require_admin;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::error::KalamDbError;
 use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
 use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
-use crate::helpers::guards::require_admin;
 use kalamdb_sql::ddl::DropStorageStatement;
 use std::sync::Arc;
 
@@ -114,9 +114,9 @@ impl TypedStatementHandler<DropStorageStatement> for DropStorageHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
     use kalamdb_commons::models::UserId;
     use kalamdb_commons::{Role, StorageId};
+    use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
     use std::sync::Arc;
 
     fn init_app_context() -> Arc<AppContext> {

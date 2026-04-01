@@ -31,6 +31,16 @@ impl ProviderUserDataApplier {
             executor: CommandExecutorImpl::new(app_context),
         }
     }
+
+    async fn run_blocking<T, F>(&self, operation: F) -> Result<T, RaftError>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> Result<T, RaftError> + Send + 'static,
+    {
+        tokio::task::spawn_blocking(operation)
+            .await
+            .map_err(|e| RaftError::Internal(format!("Task join error: {}", e)))?
+    }
 }
 
 #[async_trait]
@@ -105,7 +115,7 @@ impl UserDataApplier for ProviderUserDataApplier {
 
         let app_context = self.executor.app_context().clone();
         let live_query = live_query.clone();
-        tokio::task::spawn_blocking(move || {
+        self.run_blocking(move || {
             app_context
                 .system_tables()
                 .live_queries()
@@ -118,7 +128,6 @@ impl UserDataApplier for ProviderUserDataApplier {
             ))
         })
         .await
-        .map_err(|e| RaftError::Internal(format!("Task join error: {}", e)))?
     }
 
     async fn update_live_query_stats(
@@ -135,7 +144,7 @@ impl UserDataApplier for ProviderUserDataApplier {
 
         let app_context = self.executor.app_context().clone();
         let live_id = live_id.clone();
-        tokio::task::spawn_blocking(move || {
+        self.run_blocking(move || {
             if let Some(mut lq) = app_context
                 .system_tables()
                 .live_queries()
@@ -152,7 +161,6 @@ impl UserDataApplier for ProviderUserDataApplier {
             Ok(())
         })
         .await
-        .map_err(|e| RaftError::Internal(format!("Task join error: {}", e)))?
     }
 
     async fn delete_live_query(
@@ -164,7 +172,7 @@ impl UserDataApplier for ProviderUserDataApplier {
 
         let app_context = self.executor.app_context().clone();
         let live_id = live_id.clone();
-        tokio::task::spawn_blocking(move || {
+        self.run_blocking(move || {
             app_context
                 .system_tables()
                 .live_queries()
@@ -173,7 +181,6 @@ impl UserDataApplier for ProviderUserDataApplier {
             Ok(())
         })
         .await
-        .map_err(|e| RaftError::Internal(format!("Task join error: {}", e)))?
     }
 
     async fn delete_live_queries_by_connection(
@@ -188,7 +195,7 @@ impl UserDataApplier for ProviderUserDataApplier {
 
         let app_context = self.executor.app_context().clone();
         let connection_id = connection_id.clone();
-        tokio::task::spawn_blocking(move || {
+        self.run_blocking(move || {
             // Get all live queries for this connection and delete them
             let live_queries =
                 app_context.system_tables().live_queries().list_live_queries().map_err(|e| {
@@ -215,7 +222,6 @@ impl UserDataApplier for ProviderUserDataApplier {
             Ok(deleted_count)
         })
         .await
-        .map_err(|e| RaftError::Internal(format!("Task join error: {}", e)))?
     }
 
     async fn cleanup_node_subscriptions(&self, failed_node_id: NodeId) -> Result<usize, RaftError> {
@@ -225,7 +231,7 @@ impl UserDataApplier for ProviderUserDataApplier {
         );
 
         let app_context = self.executor.app_context().clone();
-        tokio::task::spawn_blocking(move || {
+        self.run_blocking(move || {
             // Get all live queries and delete those on the failed node
             let live_queries =
                 app_context.system_tables().live_queries().list_live_queries().map_err(|e| {
@@ -252,6 +258,5 @@ impl UserDataApplier for ProviderUserDataApplier {
             Ok(removed_count)
         })
         .await
-        .map_err(|e| RaftError::Internal(format!("Task join error: {}", e)))?
     }
 }

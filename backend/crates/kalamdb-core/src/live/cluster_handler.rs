@@ -5,14 +5,13 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use kalamdb_auth::{authenticate, AuthMethod, AuthRequest, UserRepository};
+use kalamdb_auth::{authenticate, AuthRequest, CoreUsersRepo, UserRepository};
 use kalamdb_commons::models::{ConnectionInfo, NamespaceId, TableId, UserId};
 use kalamdb_raft::{
     ClusterMessageHandler, ForwardSqlRequest, ForwardSqlResponsePayload, GetNodeInfoRequest,
     GetNodeInfoResponse, NotifyFollowersRequest, PingRequest, RaftExecutor,
 };
-use kalamdb_session::{AuthMethod as SessionAuthMethod, AuthSession};
-use kalamdb_system::{User, UsersTableProvider};
+use kalamdb_session::{AuthMethod, AuthSession};
 use serde_json::Value as JsonValue;
 
 use crate::app_context::AppContext;
@@ -21,55 +20,6 @@ use crate::sql::context::ExecutionContext;
 use crate::sql::ExecutionResult;
 
 use super::notification::NotificationService;
-
-/// Users repository adapter for auth in forwarded SQL requests.
-struct CoreUsersRepo {
-    provider: Arc<UsersTableProvider>,
-}
-
-impl CoreUsersRepo {
-    fn new(provider: Arc<UsersTableProvider>) -> Self {
-        Self { provider }
-    }
-}
-
-#[async_trait::async_trait]
-impl UserRepository for CoreUsersRepo {
-    async fn get_user_by_username(
-        &self,
-        username: &kalamdb_commons::models::UserName,
-    ) -> kalamdb_auth::AuthResult<User> {
-        let provider = Arc::clone(&self.provider);
-        let username = username.to_string();
-        tokio::task::spawn_blocking(move || {
-            provider
-                .get_user_by_username(&username)
-                .map_err(|e| kalamdb_auth::AuthError::DatabaseError(e.to_string()))?
-                .ok_or_else(|| {
-                    kalamdb_auth::AuthError::UserNotFound(format!("User '{}' not found", username))
-                })
-        })
-        .await
-        .map_err(|e| kalamdb_auth::AuthError::DatabaseError(e.to_string()))?
-    }
-
-    async fn update_user(&self, user: &User) -> kalamdb_auth::AuthResult<()> {
-        let provider = Arc::clone(&self.provider);
-        let user = user.clone();
-        tokio::task::spawn_blocking(move || provider.update_user(user))
-            .await
-            .map_err(|e| kalamdb_auth::AuthError::DatabaseError(e.to_string()))?
-            .map_err(|e| kalamdb_auth::AuthError::DatabaseError(e.to_string()))
-    }
-
-    async fn create_user(&self, user: User) -> kalamdb_auth::AuthResult<()> {
-        let provider = Arc::clone(&self.provider);
-        tokio::task::spawn_blocking(move || provider.create_user(user))
-            .await
-            .map_err(|e| kalamdb_auth::AuthError::DatabaseError(e.to_string()))?
-            .map_err(|e| kalamdb_auth::AuthError::DatabaseError(e.to_string()))
-    }
-}
 
 /// Core implementation of cluster message handling.
 pub struct CoreClusterHandler {
@@ -229,17 +179,12 @@ impl ClusterMessageHandler for CoreClusterHandler {
             ));
         }
 
-        let auth_method = match auth_result.method {
-            AuthMethod::Bearer => SessionAuthMethod::Bearer,
-            AuthMethod::Basic => SessionAuthMethod::Basic,
-            AuthMethod::Direct => SessionAuthMethod::Direct,
-        };
         let mut session = AuthSession::with_username_and_auth_details(
             auth_result.user.user_id,
             auth_result.user.username,
             auth_result.user.role,
             connection_info,
-            auth_method,
+            auth_result.method,
         );
         if let Some(request_id) = req.request_id {
             session = session.with_request_id(request_id);

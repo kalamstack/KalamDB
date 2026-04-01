@@ -35,6 +35,10 @@ tokio = { workspace = true }
 actix-web = { workspace = true }
 actix-cors = { workspace = true }
 
+# Concurrency / caching
+moka = { workspace = true }
+parking_lot = { workspace = true }
+
 # Async futures utilities
 futures-util = { workspace = true }
 

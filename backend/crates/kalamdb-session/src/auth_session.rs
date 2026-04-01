@@ -26,6 +26,7 @@
 
 use crate::UserContext;
 use kalamdb_commons::models::{ConnectionInfo, ReadContext, Role, UserId};
+use std::sync::Arc;
 use std::time::SystemTime;
 
 /// Authentication method used for the session
@@ -48,7 +49,6 @@ pub enum AuthMethod {
 /// # Fields
 /// - `user_context`: Core user identity (user_id, role, read_context)
 /// - `request_id`: Request tracking ID (optional, for audit logging)
-/// - `ip_address`: Client IP address (optional, for audit logging)
 /// - `connection_info`: Connection information (IP address, localhost check)
 /// - `auth_method`: Authentication method used (Bearer, Basic, Direct)
 /// - `timestamp`: Session creation timestamp
@@ -56,10 +56,8 @@ pub enum AuthMethod {
 pub struct AuthSession {
     /// Core user identity and read context
     pub user_context: UserContext,
-    /// Request tracking ID (optional)
-    pub request_id: Option<String>,
-    /// Client IP address (optional)
-    pub ip_address: Option<String>,
+    /// Request tracking ID (optional) — Arc<str> so clone is O(1).
+    pub request_id: Option<Arc<str>>,
     /// Connection information (IP address, localhost check)
     pub connection_info: ConnectionInfo,
     /// Authentication method used
@@ -85,7 +83,6 @@ impl AuthSession {
         Self {
             user_context: UserContext::client(user_id, role),
             request_id: None,
-            ip_address: None,
             connection_info: ConnectionInfo::new(None),
             auth_method: AuthMethod::Bearer,
             timestamp: SystemTime::now(),
@@ -102,7 +99,6 @@ impl AuthSession {
         Self {
             user_context: UserContext::client(user_id, role),
             request_id: None,
-            ip_address: connection_info.remote_addr.clone(),
             connection_info,
             auth_method,
             timestamp: SystemTime::now(),
@@ -120,7 +116,6 @@ impl AuthSession {
         Self {
             user_context: UserContext::client_with_username(user_id, username, role),
             request_id: None,
-            ip_address: connection_info.remote_addr.clone(),
             connection_info,
             auth_method,
             timestamp: SystemTime::now(),
@@ -135,7 +130,6 @@ impl AuthSession {
         Self {
             user_context: UserContext::new(user_id, role, read_context),
             request_id: None,
-            ip_address: None,
             connection_info: ConnectionInfo::new(None),
             auth_method: AuthMethod::Bearer,
             timestamp: SystemTime::now(),
@@ -152,7 +146,6 @@ impl AuthSession {
         Self {
             user_context: UserContext::client(UserId::anonymous(), Role::Anonymous),
             request_id: None,
-            ip_address: None,
             connection_info: ConnectionInfo::new(None),
             auth_method: AuthMethod::Bearer,
             timestamp: SystemTime::now(),
@@ -169,8 +162,7 @@ impl AuthSession {
         let connection_info = ConnectionInfo::new(ip_address.clone());
         Self {
             user_context: UserContext::client(user_id, role),
-            request_id,
-            ip_address,
+            request_id: request_id.map(Arc::<str>::from),
             connection_info,
             auth_method: AuthMethod::Bearer,
             timestamp: SystemTime::now(),
@@ -181,13 +173,13 @@ impl AuthSession {
 
     /// Set the request tracking ID
     pub fn with_request_id(mut self, request_id: String) -> Self {
-        self.request_id = Some(request_id);
+        self.request_id = Some(Arc::<str>::from(request_id));
         self
     }
 
     /// Set the client IP address
     pub fn with_ip(mut self, ip_address: String) -> Self {
-        self.ip_address = Some(ip_address);
+        self.connection_info.remote_addr = Some(Arc::<str>::from(ip_address));
         self
     }
 
@@ -221,7 +213,7 @@ impl AuthSession {
 
     #[inline]
     pub fn ip_address(&self) -> Option<&str> {
-        self.ip_address.as_deref()
+        self.connection_info.remote_addr.as_deref()
     }
 
     #[inline]

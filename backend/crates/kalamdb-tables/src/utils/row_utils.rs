@@ -10,7 +10,7 @@ use kalamdb_commons::conversions::arrow_json_conversion::json_rows_to_arrow_batc
 use kalamdb_commons::ids::SeqId;
 use kalamdb_commons::models::rows::Row;
 use kalamdb_commons::models::{ReadContext, Role, UserId};
-use kalamdb_session::{
+use kalamdb_session_datafusion::{
     extract_full_user_context as extract_full_user_context_session,
     extract_user_context as extract_user_context_session,
 };

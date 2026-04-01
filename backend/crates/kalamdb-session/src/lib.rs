@@ -1,29 +1,17 @@
 //! # kalamdb-session
 //!
-//! Session context, permissions, and secured table provider abstraction for KalamDB.
+//! Session context and pure authorization helpers for KalamDB.
 //!
 //! This crate provides:
-//! - [`UserContext`]: User identity passed through DataFusion sessions
-//! - [`permissions`]: Centralized permission checking for table access
-//! - [`SecuredSystemTableProvider`]: Wrapper that enforces permissions on system tables
+//! - [`AuthSession`]: Lightweight authenticated request/session identity
+//! - [`UserContext`]: Shared user identity and read-routing metadata
+//! - [`permissions`]: Pure role and table-policy helpers
 //!
 //! ## Security Philosophy
 //!
-//! - **Defense in Depth**: Permissions are checked at multiple layers:
-//!   1. SQL Classifier (statement-level authorization)
-//!   2. TableProvider.scan() (final security gate via SecuredSystemTableProvider)
-//!
 //! - **Fail Closed**: When in doubt, deny access. Default to least privileged role.
-//!
-//! ## Architecture
-//!
-//! ```text
-//! HTTP Handler → ExecutionContext → SessionState.extensions → SecuredSystemTableProvider.scan()
-//!                                                                      ↓
-//!                                                              Permission Check
-//!                                                                      ↓
-//!                                                              Inner Provider.scan()
-//! ```
+//! - **Lightweight by Default**: DataFusion-specific session extensions live in
+//!   `kalamdb-session-datafusion` so auth and API paths do not pull query-engine deps.
 //!
 //! ## Permission Check Locations
 //!
@@ -37,7 +25,6 @@
 pub mod auth_session;
 pub mod error;
 pub mod permissions;
-pub mod secured_provider;
 pub mod user_context;
 
 // Re-export main types
@@ -48,15 +35,8 @@ pub use permissions::{
     can_alter_table, can_create_table, can_create_view, can_delete_table,
     can_downgrade_shared_to_user, can_execute_dml, can_execute_maintenance, can_impersonate_role,
     can_impersonate_user, can_manage_users, can_read_all_users, can_write_shared_table,
-    can_write_stream_table, can_write_user_table, check_shared_table_access,
-    check_shared_table_write_access, check_shared_table_write_access_level,
-    check_stream_table_write_access_level, check_system_table_access, check_user_table_access,
-    check_user_table_write_access, check_user_table_write_access_level, extract_full_user_context,
-    extract_session_context, extract_user_context, extract_user_id, extract_user_role,
-    is_admin_role, is_system_role, shared_table_access_level, PermissionChecker,
+    can_write_stream_table, can_write_user_table, check_shared_table_write_access_level,
+    check_stream_table_write_access_level, check_user_table_write_access_level, is_admin_role,
+    is_system_role, shared_table_access_level,
 };
-pub use secured_provider::{secure_provider, SecuredSystemTableProvider};
 pub use user_context::UserContext;
-
-/// Type alias for `UserContext` used in session extensions.
-pub type SessionUserContext = UserContext;

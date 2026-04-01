@@ -1,15 +1,5 @@
 use crate::models::context::AuthenticatedUser;
-
-/// Authentication method detected from request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AuthMethod {
-    /// HTTP Basic Authentication (username:password base64 encoded)
-    Basic,
-    /// JWT Bearer token
-    Bearer,
-    /// Direct username/password (for WebSocket)
-    Direct,
-}
+pub use kalamdb_session::AuthMethod;
 
 /// Authentication request that can come from HTTP or WebSocket.
 #[derive(Debug, Clone)]

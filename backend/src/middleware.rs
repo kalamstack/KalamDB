@@ -16,13 +16,13 @@
 //! - Request body size limits
 //! - Automatic IP banning for persistent abusers
 
+use crate::connection_guard::{ConnectionGuard, ConnectionGuardResult};
 use actix_cors::Cors;
 use actix_web::body::{BoxBody, EitherBody};
 use actix_web::dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform};
 use actix_web::http::{header::HeaderName, Method, StatusCode};
 use actix_web::{Error, HttpResponse};
 use futures_util::future::LocalBoxFuture;
-use kalamdb_api::limiter::{ConnectionGuard, ConnectionGuardResult};
 use kalamdb_auth::extract_client_ip_addr_secure;
 use kalamdb_configs::{RateLimitSettings, ServerConfig};
 use log::warn;

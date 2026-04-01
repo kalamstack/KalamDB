@@ -3,17 +3,19 @@
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::sync::{Arc, OnceLock};
 
 use crate::models::oauth_provider::OAuthProvider;
 use crate::StorageKey;
 
+/// Static for cheap root username singleton.
+static ROOT_USERNAME: OnceLock<Arc<str>> = OnceLock::new();
+
 /// Type-safe wrapper for usernames used as secondary index keys.
 ///
-/// This newtype ensures usernames cannot be confused with user IDs
-/// or other string identifiers, providing compile-time safety for
-/// username-to-UserId lookups in the secondary index.
+/// Stored as `Arc<str>` so `clone()` is a cheap atomic refcount increment.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct UserName(String);
+pub struct UserName(Arc<str>);
 
 /// Error type for UserName validation failures
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,7 +71,7 @@ impl UserName {
     pub fn try_new(name: impl Into<String>) -> Result<Self, UserNameValidationError> {
         let name = name.into();
         Self::validate(&name)?;
-        Ok(Self(name))
+        Ok(Self(Arc::<str>::from(name)))
     }
 
     /// Returns the username as a string slice.
@@ -79,7 +81,7 @@ impl UserName {
 
     /// Consumes the wrapper and returns the inner String.
     pub fn into_string(self) -> String {
-        self.0
+        String::from(&*self.0)
     }
 
     /// Get the username as bytes for storage
@@ -89,12 +91,12 @@ impl UserName {
 
     /// Convert to lowercase for case-insensitive comparisons
     pub fn to_lowercase(&self) -> UserName {
-        UserName(self.0.to_lowercase())
+        UserName(Arc::<str>::from(self.as_str().to_lowercase()))
     }
 
-    /// Root username helper
+    /// Root username helper — cached singleton.
     pub fn root() -> UserName {
-        UserName("root".to_string())
+        UserName(ROOT_USERNAME.get_or_init(|| Arc::from("root")).clone())
     }
 
     // ----- Provider username helpers -----
@@ -156,13 +158,13 @@ impl fmt::Display for UserName {
 
 impl From<String> for UserName {
     fn from(s: String) -> Self {
-        Self(s)
+        Self(Arc::<str>::from(s))
     }
 }
 
 impl From<&str> for UserName {
     fn from(s: &str) -> Self {
-        Self(s.to_string())
+        Self(Arc::<str>::from(s))
     }
 }
 
@@ -184,7 +186,9 @@ impl StorageKey for UserName {
     }
 
     fn from_storage_key(bytes: &[u8]) -> Result<Self, String> {
-        String::from_utf8(bytes.to_vec()).map(UserName).map_err(|e| e.to_string())
+        String::from_utf8(bytes.to_vec())
+            .map(|s| UserName(Arc::<str>::from(s)))
+            .map_err(|e| e.to_string())
     }
 }
 

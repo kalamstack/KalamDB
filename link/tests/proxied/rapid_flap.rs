@@ -107,10 +107,7 @@ async fn test_rapid_flapping_connection_stabilises_and_resumes() {
         // Insert a final row that MUST arrive.
         writer
             .execute_query(
-                &format!(
-                    "INSERT INTO {} (id, value) VALUES ('post-flap', 'stable')",
-                    table
-                ),
+                &format!("INSERT INTO {} (id, value) VALUES ('post-flap', 'stable')", table),
                 None,
                 None,
                 None,

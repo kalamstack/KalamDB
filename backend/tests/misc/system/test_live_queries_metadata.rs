@@ -1,7 +1,7 @@
 use super::test_support::{consolidated_helpers, TestServer};
 use kalam_link::models::ResponseStatus;
-use kalamdb_api::handlers::ws::events::cleanup::cleanup_connection;
 use kalamdb_api::limiter::RateLimiter;
+use kalamdb_api::ws::events::cleanup::cleanup_connection;
 use kalamdb_commons::models::{ConnectionId, ConnectionInfo, Role, UserId};
 use kalamdb_commons::websocket::{SubscriptionOptions, SubscriptionRequest};
 use std::sync::Arc;

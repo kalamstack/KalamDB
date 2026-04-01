@@ -53,9 +53,7 @@ pub(crate) fn validate_row_id(row_id: &str) -> Result<(), JsValue> {
 
     // Check for SQL injection patterns using case-insensitive matching
     // without allocating a new uppercase string.
-    let dangerous_patterns: &[&[u8]] = &[
-        b";", b"--", b"/*", b"*/", b"'", b"\"",
-    ];
+    let dangerous_patterns: &[&[u8]] = &[b";", b"--", b"/*", b"*/", b"'", b"\""];
     let dangerous_keywords: &[&[u8]] = &[
         b"DROP", b"DELETE", b"UPDATE", b"INSERT", b"UNION", b"SELECT",
     ];
@@ -102,9 +100,9 @@ fn contains_bytes_case_insensitive(haystack: &[u8], needle: &[u8]) -> bool {
     if needle.len() > haystack.len() {
         return false;
     }
-    haystack.windows(needle.len()).any(|w| {
-        w.iter().zip(needle.iter()).all(|(h, n)| h.to_ascii_uppercase() == *n)
-    })
+    haystack
+        .windows(needle.len())
+        .any(|w| w.iter().zip(needle.iter()).all(|(h, n)| h.to_ascii_uppercase() == *n))
 }
 
 /// Validate a column name for INSERT operations

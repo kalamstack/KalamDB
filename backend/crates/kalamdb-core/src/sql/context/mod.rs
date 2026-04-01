@@ -21,8 +21,8 @@ pub use execution_context::ExecutionContext;
 pub use execution_metadata::ExecutionMetadata;
 pub use execution_result::ExecutionResult;
 
-// Re-export SessionUserContext from kalamdb_session for TableProviders to read user_id and role
-pub use kalamdb_session::SessionUserContext;
+// Re-export SessionUserContext from kalamdb-session-datafusion for TableProviders.
+pub use kalamdb_session_datafusion::SessionUserContext;
 
 // Re-export DataFusion's ScalarValue for convenience
 pub use datafusion::scalar::ScalarValue;

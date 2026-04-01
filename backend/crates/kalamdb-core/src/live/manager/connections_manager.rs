@@ -25,7 +25,9 @@ use super::super::models::{
 };
 use dashmap::DashMap;
 use kalamdb_commons::models::{ConnectionId, ConnectionInfo, LiveQueryId, TableId, UserId};
-use kalamdb_commons::{NodeId, Notification};
+use kalamdb_commons::NodeId;
+#[cfg(test)]
+use kalamdb_commons::Notification;
 use log::{debug, info, warn};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -429,7 +431,11 @@ impl ConnectionsManager {
             .unwrap_or_else(|| Arc::clone(&self.empty_subscriptions))
     }
 
-    /// Check if any subscriptions exist for a table (across all users and shared)
+    // ==================== Test-Only Methods ====================
+
+    /// Check if any subscriptions exist for a table (across all users and shared).
+    /// O(N) scan — only used in tests.
+    #[cfg(test)]
     pub fn has_subscriptions_for_table(&self, table_ref: &str) -> bool {
         let mut parts = table_ref.splitn(2, '.');
         let first = parts.next().unwrap_or("");
@@ -467,18 +473,11 @@ impl ConnectionsManager {
         }
     }
 
-    // ==================== Notification Delivery ====================
+    // ==================== Notification Delivery (test-only) ====================
 
-    /// Send notification to a specific subscription
+    /// Send notification to a specific subscription (bypasses filter/flow control).
+    #[cfg(test)]
     pub fn notify_subscription(&self, live_id: &LiveQueryId, notification: Notification) {
-        // let span = tracing::debug_span!(
-        //     "live_query.push",
-        //     live_id = %live_id,
-        //     delivered = Empty
-        // );
-        // let _span_guard = span.entered();
-        // let mut delivered = false;
-
         if let Some(conn_id) = self.live_id_to_connection.get(live_id) {
             if let Some(shared_state) = self.connections.get(conn_id.value()) {
                 let notification = Arc::new(notification);
@@ -487,17 +486,12 @@ impl ConnectionsManager {
                         warn!("Notification channel full for {}, dropping notification", live_id);
                     }
                 }
-                //else {
-                //    delivered = true;
-                //}
             }
         }
-
-        // tracing::Span::current().record("delivered", delivered);
     }
 
-    /// Send notification to all shared table subscriptions for a table
-    #[inline]
+    /// Send notification to all shared table subscriptions for a table (bypasses filter/flow control).
+    #[cfg(test)]
     pub fn notify_shared_table(&self, table_id: &TableId, notification: Notification) {
         if let Some(handles) = self.shared_table_subscriptions.get(table_id) {
             let notification = Arc::new(notification);
@@ -512,23 +506,14 @@ impl ConnectionsManager {
         }
     }
 
-    /// Send notification to all subscriptions for a table (for a specific user)
-    #[inline]
+    /// Send notification to all subscriptions for a table for a specific user (bypasses filter/flow control).
+    #[cfg(test)]
     pub fn notify_table_for_user(
         &self,
         user_id: &UserId,
         table_id: &TableId,
         notification: Notification,
     ) {
-        // let span = tracing::debug_span!(
-        //     "live_query.push",
-        //     user_id = %user_id,
-        //     table_id = %table_id,
-        //     delivered_count = Empty,
-        //     dropped_count = Empty
-        // );
-        // let _span_guard = span.entered();
-
         if let Some(handles) =
             self.user_table_subscriptions.get(&(user_id.clone(), table_id.clone()))
         {
@@ -610,14 +595,6 @@ impl ConnectionsManager {
 
     pub fn node_id(&self) -> &NodeId {
         &self.node_id
-    }
-
-    pub fn total_connections(&self) -> usize {
-        self.connection_count()
-    }
-
-    pub fn total_subscriptions(&self) -> usize {
-        self.subscription_count()
     }
 
     // ==================== Background Tasks ====================

@@ -5,7 +5,7 @@ use datafusion::prelude::SessionContext;
 use kalamdb_commons::models::{ReadContext, Role, UserId};
 use kalamdb_commons::{NamespaceId, TableType};
 use kalamdb_pg::OperationExecutor;
-use kalamdb_session::SessionUserContext;
+use kalamdb_session_datafusion::SessionUserContext;
 use tonic::Status;
 
 use super::scan;

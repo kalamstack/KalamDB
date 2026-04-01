@@ -10,7 +10,7 @@ use datafusion::logical_expr::{
 };
 use kalamdb_commons::arrow_utils::{arrow_utf8, ArrowDataType};
 use kalamdb_commons::{Role, UserId};
-use kalamdb_session::SessionUserContext;
+use kalamdb_session_datafusion::SessionUserContext;
 use std::any::Any;
 use std::sync::Arc;
 

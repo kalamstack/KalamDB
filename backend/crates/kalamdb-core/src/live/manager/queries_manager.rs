@@ -544,12 +544,12 @@ impl LiveQueryManager {
     // These methods support older interfaces that use connection_id instead of SharedConnectionState
 
     /// Get the total number of connections
-    pub fn total_connections(&self) -> usize {
+    pub fn connection_count(&self) -> usize {
         self.registry.connection_count()
     }
 
     /// Get the total number of subscriptions
-    pub fn total_subscriptions(&self) -> usize {
+    pub fn subscription_count(&self) -> usize {
         self.registry.subscription_count()
     }
 }

@@ -86,9 +86,9 @@ impl TypedStatementHandler<UseNamespaceStatement> for UseNamespaceHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
     use kalamdb_commons::models::UserId;
     use kalamdb_commons::Role;
+    use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
 
     fn test_context() -> ExecutionContext {
         ExecutionContext::new(UserId::from("test_user"), Role::User, create_test_session_simple())

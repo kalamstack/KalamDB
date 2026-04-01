@@ -17,8 +17,7 @@ use base64::Engine;
 use super::auth::WasmAuthProvider;
 use super::console_log;
 use super::helpers::{
-    create_promise, decode_ws_binary_payload, decode_ws_message, send_ws_message,
-    subscription_hash,
+    create_promise, decode_ws_binary_payload, decode_ws_message, send_ws_message, subscription_hash,
 };
 use super::reconnect::{self, reconnect_internal_with_auth, resubscribe_all};
 use super::state::{
@@ -1076,7 +1075,11 @@ impl KalamClient {
             // Check for authentication response first
             if !*auth_handled_clone.borrow() {
                 match &event {
-                    ServerMessage::AuthSuccess { user_id, role, protocol } => {
+                    ServerMessage::AuthSuccess {
+                        user_id,
+                        role,
+                        protocol,
+                    } => {
                         console_log(&format!(
                             "KalamClient: Authentication successful - user_id: {}, role: {}",
                             user_id, role
@@ -1091,10 +1094,7 @@ impl KalamClient {
                         return;
                     },
                     ServerMessage::AuthError { message: error_msg } => {
-                        console_log(&format!(
-                            "KalamClient: Authentication failed - {}",
-                            error_msg
-                        ));
+                        console_log(&format!("KalamClient: Authentication failed - {}", error_msg));
                         *auth_handled_clone.borrow_mut() = true;
                         if let Some(cb) = on_error_for_msg.borrow().as_ref() {
                             let err_obj = js_sys::Object::new();
@@ -1122,8 +1122,7 @@ impl KalamClient {
                 }
             }
 
-            if let Some(dispatch) = dispatch_subscription_server_message(&subscriptions, &event)
-            {
+            if let Some(dispatch) = dispatch_subscription_server_message(&subscriptions, &event) {
                 dispatch.invoke();
             }
         }) as Box<dyn FnMut(MessageEvent)>);
@@ -1227,7 +1226,8 @@ impl KalamClient {
         let ping_cb = Closure::wrap(Box::new(move || {
             if let Some(ws) = ws_ref.borrow().as_ref() {
                 if ws.ready_state() == WebSocket::OPEN {
-                    let _ = send_ws_message(ws, &ClientMessage::Ping, negotiated_ser_for_ping.get());
+                    let _ =
+                        send_ws_message(ws, &ClientMessage::Ping, negotiated_ser_for_ping.get());
                 }
             }
         }) as Box<dyn FnMut()>);
@@ -2139,8 +2139,18 @@ fn install_auto_reconnect_listener(
                             Rc::clone(&on_receive),
                             Rc::clone(&negotiated_ser_next),
                         );
-                        resubscribe_all(ws_ref.clone(), subscription_state, negotiated_ser_inner.get()).await;
-                        reconnect::restart_ping_timer(&ws_ref, &conn_opts, &ping_id, &negotiated_ser_inner);
+                        resubscribe_all(
+                            ws_ref.clone(),
+                            subscription_state,
+                            negotiated_ser_inner.get(),
+                        )
+                        .await;
+                        reconnect::restart_ping_timer(
+                            &ws_ref,
+                            &conn_opts,
+                            &ping_id,
+                            &negotiated_ser_inner,
+                        );
                     },
                     Err(e) => {
                         console_log(&format!("KalamClient: Reconnection failed: {:?}", e));

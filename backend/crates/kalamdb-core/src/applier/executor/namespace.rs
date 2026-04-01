@@ -10,6 +10,7 @@ use kalamdb_commons::models::NamespaceId;
 use kalamdb_system::Namespace;
 
 use crate::app_context::AppContext;
+use crate::applier::executor::utils::run_blocking_applier;
 use crate::applier::ApplierError;
 
 /// Executor for namespace operations
@@ -30,7 +31,7 @@ impl NamespaceExecutor {
         log::debug!("CommandExecutorImpl: Creating namespace {}", namespace_id);
         let app_context = self.app_context.clone();
         let namespace_id = namespace_id.clone();
-        tokio::task::spawn_blocking(move || {
+        run_blocking_applier(move || {
             let namespace = Namespace::new(namespace_id.as_str());
             app_context
                 .system_tables()
@@ -42,7 +43,6 @@ impl NamespaceExecutor {
             Ok(format!("Namespace {} created successfully", namespace_id))
         })
         .await
-        .map_err(|e| ApplierError::Execution(format!("Task join error: {}", e)))?
     }
 
     /// Execute DROP NAMESPACE
@@ -50,7 +50,7 @@ impl NamespaceExecutor {
         log::debug!("CommandExecutorImpl: Dropping namespace {}", namespace_id);
         let app_context = self.app_context.clone();
         let namespace_id = namespace_id.clone();
-        tokio::task::spawn_blocking(move || {
+        run_blocking_applier(move || {
             app_context
                 .system_tables()
                 .namespaces()
@@ -59,6 +59,5 @@ impl NamespaceExecutor {
             Ok(format!("Namespace {} dropped successfully", namespace_id))
         })
         .await
-        .map_err(|e| ApplierError::Execution(format!("Task join error: {}", e)))?
     }
 }

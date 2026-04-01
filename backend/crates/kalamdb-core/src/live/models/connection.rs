@@ -151,14 +151,15 @@ impl SubscriptionFlowControl {
 
     pub fn drain_buffered_notifications(&self) -> Vec<BufferedNotification> {
         let mut buffer = self.buffer.lock();
-        let mut drained: Vec<_> = buffer.drain(..).collect();
-        drained.sort_by(|a, b| match (a.seq, b.seq) {
+        // Sort in-place via contiguous slice, then drain — avoids a second Vec allocation
+        let slice = buffer.make_contiguous();
+        slice.sort_by(|a, b| match (a.seq, b.seq) {
             (Some(a_seq), Some(b_seq)) => a_seq.as_i64().cmp(&b_seq.as_i64()),
             (Some(_), None) => std::cmp::Ordering::Less,
             (None, Some(_)) => std::cmp::Ordering::Greater,
             (None, None) => std::cmp::Ordering::Equal,
         });
-        drained
+        buffer.drain(..).collect()
     }
 }
 

@@ -3,11 +3,11 @@
 //! Helper functions for creating and managing audit log entries.
 //! **Phase 2 Task T018**: Centralized audit logging for SQL operations.
 
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::context::ExecutionContext;
 use chrono::Utc;
 use kalamdb_commons::models::AuditLogId;
 use kalamdb_commons::{UserId, UserName};
+use kalamdb_core::error::KalamDbError;
+use kalamdb_core::sql::context::ExecutionContext;
 use kalamdb_system::AuditLogEntry;
 
 /// Create an audit log entry for a SQL operation

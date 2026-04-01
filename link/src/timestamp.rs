@@ -598,10 +598,7 @@ mod tests {
     #[test]
     fn test_format_iso8601_exact_output() {
         let formatter = TimestampFormatter::new(TimestampFormat::Iso8601);
-        assert_eq!(
-            formatter.format(Some(1734211234567)),
-            "2024-12-14T21:20:34.567Z"
-        );
+        assert_eq!(formatter.format(Some(1734211234567)), "2024-12-14T21:20:34.567Z");
     }
 
     #[test]
@@ -617,28 +614,19 @@ mod tests {
     fn test_format_rfc2822_exact() {
         let formatter = TimestampFormatter::new(TimestampFormat::Rfc2822);
         // Mon, 01 Jan 2024 00:00:00 +0000
-        assert_eq!(
-            formatter.format(Some(1704067200000)),
-            "Mon, 01 Jan 2024 00:00:00 +0000"
-        );
+        assert_eq!(formatter.format(Some(1704067200000)), "Mon, 01 Jan 2024 00:00:00 +0000");
     }
 
     #[test]
     fn test_format_rfc3339_exact() {
         let formatter = TimestampFormatter::new(TimestampFormat::Rfc3339);
-        assert_eq!(
-            formatter.format(Some(1734211234567)),
-            "2024-12-14T21:20:34.567+00:00"
-        );
+        assert_eq!(formatter.format(Some(1734211234567)), "2024-12-14T21:20:34.567+00:00");
     }
 
     #[test]
     fn test_format_iso8601_datetime_no_millis() {
         let formatter = TimestampFormatter::new(TimestampFormat::Iso8601DateTime);
-        assert_eq!(
-            formatter.format(Some(1734211234567)),
-            "2024-12-14T21:20:34Z"
-        );
+        assert_eq!(formatter.format(Some(1734211234567)), "2024-12-14T21:20:34Z");
     }
 
     #[test]

@@ -2,12 +2,12 @@
 //!
 //! Handlers for CREATE STORAGE statements.
 
+use datafusion::execution::context::SessionContext;
+use kalamdb_commons::models::StorageId;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::error::KalamDbError;
 use kalamdb_core::error_extensions::KalamDbResultExt;
 use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult};
-use datafusion::execution::context::SessionContext;
-use kalamdb_commons::models::StorageId;
 use kalamdb_filestore::StorageHealthService;
 use kalamdb_sql::CreateStorageStatement;
 use kalamdb_system::StorageType;
@@ -227,10 +227,10 @@ pub fn ensure_filesystem_directory(path: &str) -> Result<(), KalamDbError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
     use datafusion::prelude::SessionContext;
     use kalamdb_commons::models::UserId;
     use kalamdb_commons::Role;
+    use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
     use std::sync::Arc;
 
     fn init_app_context() -> Arc<AppContext> {

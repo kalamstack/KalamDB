@@ -212,13 +212,10 @@ async fn test_unsubscribe_during_outage_prevents_resubscribe() {
 
         // Verify the dropped subscription is NOT listed as active.
         let subs = client.subscriptions().await;
-        let drop_sub_active = subs.iter().any(|entry| {
-            entry.query == format!("SELECT id, value FROM {}", table_drop)
-        });
-        assert!(
-            !drop_sub_active,
-            "dropped subscription must NOT be re-subscribed on reconnect"
-        );
+        let drop_sub_active = subs
+            .iter()
+            .any(|entry| entry.query == format!("SELECT id, value FROM {}", table_drop));
+        assert!(!drop_sub_active, "dropped subscription must NOT be re-subscribed on reconnect");
 
         sub_keep.close().await.ok();
         client.disconnect().await;

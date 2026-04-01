@@ -184,13 +184,7 @@ async fn test_event_counter_integrity_through_multiple_outages() {
             }
             match timeout(Duration::from_millis(2000), sub.next()).await {
                 Ok(Some(Ok(ev))) => {
-                    collect_ids_and_track_seq(
-                        &ev,
-                        &mut ids,
-                        &mut seq,
-                        None,
-                        "counter verify live",
-                    );
+                    collect_ids_and_track_seq(&ev, &mut ids, &mut seq, None, "counter verify live");
                 },
                 _ => {},
             }

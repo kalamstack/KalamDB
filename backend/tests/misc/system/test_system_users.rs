@@ -14,8 +14,7 @@
 
 use super::test_support::{auth_helper, TestServer};
 use actix_web::{test, web, App};
-use kalamdb_api::repositories::CoreUsersRepo;
-use kalamdb_auth::UserRepository;
+use kalamdb_auth::{CoreUsersRepo, UserRepository};
 use kalamdb_commons::models::UserName;
 use kalamdb_commons::{AuthType, Role, StorageId, UserId};
 use kalamdb_system::providers::storages::models::StorageMode;

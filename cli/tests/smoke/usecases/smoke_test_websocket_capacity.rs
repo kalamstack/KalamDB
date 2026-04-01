@@ -249,7 +249,9 @@ async fn open_authenticated_connection(
             stream
                 .send(Message::Text(auth_payload.to_string().into()))
                 .await
-                .unwrap_or_else(|e| panic!("Failed to send auth message on websocket #{}: {}", idx, e));
+                .unwrap_or_else(|e| {
+                    panic!("Failed to send auth message on websocket #{}: {}", idx, e)
+                });
 
             tokio::time::timeout(
                 Duration::from_secs(5),

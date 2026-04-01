@@ -53,6 +53,7 @@
 //! let retrieved = store.get(&user_id).unwrap().unwrap();
 //! ```
 
+use crate::async_utils::run_blocking_result;
 use crate::storage_trait::{Partition, Result, StorageBackend, StorageError};
 use kalamdb_commons::{next_storage_key_bytes, KSerializable, StorageKey};
 use std::collections::VecDeque;
@@ -779,9 +780,7 @@ where
     async fn get_async(&self, key: &K) -> Result<Option<V>> {
         let store = self.clone();
         let key = key.clone();
-        tokio::task::spawn_blocking(move || store.get(&key))
-            .await
-            .map_err(|e| StorageError::Other(format!("spawn_blocking join error: {}", e)))?
+        run_blocking_result(move || store.get(&key)).await
     }
 
     /// Async version of `put()` - stores an entity by key.
@@ -791,9 +790,7 @@ where
         let store = self.clone();
         let key = key.clone();
         let entity = entity.clone();
-        tokio::task::spawn_blocking(move || store.put(&key, &entity))
-            .await
-            .map_err(|e| StorageError::Other(format!("spawn_blocking join error: {}", e)))?
+        run_blocking_result(move || store.put(&key, &entity)).await
     }
 
     /// Async version of `delete()` - removes an entity by key.
@@ -802,9 +799,7 @@ where
     async fn delete_async(&self, key: &K) -> Result<()> {
         let store = self.clone();
         let key = key.clone();
-        tokio::task::spawn_blocking(move || store.delete(&key))
-            .await
-            .map_err(|e| StorageError::Other(format!("spawn_blocking join error: {}", e)))?
+        run_blocking_result(move || store.delete(&key)).await
     }
 
     /// Async version of `batch_put()` - stores multiple entities atomically.
@@ -812,9 +807,7 @@ where
     /// Uses `spawn_blocking` internally to prevent blocking the async runtime.
     async fn batch_put_async(&self, entries: Vec<(K, V)>) -> Result<()> {
         let store = self.clone();
-        tokio::task::spawn_blocking(move || store.batch_put(&entries))
-            .await
-            .map_err(|e| StorageError::Other(format!("spawn_blocking join error: {}", e)))?
+        run_blocking_result(move || store.batch_put(&entries)).await
     }
 
     /// Async version of `scan_all()` - scans all entities in partition.
@@ -827,12 +820,11 @@ where
         start_key: Option<K>,
     ) -> Result<Vec<(Vec<u8>, V)>> {
         let store = self.clone();
-        tokio::task::spawn_blocking(move || {
+        run_blocking_result(move || {
             let typed_results = store.scan_all_typed(limit, prefix.as_ref(), start_key.as_ref())?;
             Ok(typed_results.into_iter().map(|(k, v)| (k.storage_key(), v)).collect())
         })
         .await
-        .map_err(|e| StorageError::Other(format!("spawn_blocking join error: {}", e)))?
     }
 
     /// Async version of `scan_prefix()` - scans entities with a key prefix.
@@ -841,12 +833,11 @@ where
     async fn scan_prefix_async(&self, prefix: &K) -> Result<Vec<(Vec<u8>, V)>> {
         let store = self.clone();
         let prefix = prefix.clone();
-        tokio::task::spawn_blocking(move || {
+        run_blocking_result(move || {
             let typed_results = store.scan_prefix_typed(&prefix, None)?;
             Ok(typed_results.into_iter().map(|(k, v)| (k.storage_key(), v)).collect())
         })
         .await
-        .map_err(|e| StorageError::Other(format!("spawn_blocking join error: {}", e)))?
     }
 
     /// Async version of `scan_directional()` - scans relative to a starting key.
@@ -859,12 +850,11 @@ where
         limit: usize,
     ) -> Result<Vec<(K, V)>> {
         let store = self.clone();
-        tokio::task::spawn_blocking(move || {
+        run_blocking_result(move || {
             let iter = store.scan_directional(start_key.as_ref(), direction, limit)?;
             iter.collect::<Result<Vec<_>>>()
         })
         .await
-        .map_err(|e| StorageError::Other(format!("spawn_blocking join error: {}", e)))?
     }
 
     /// Async version of `scan_with_raw_prefix()` - scans entities by raw byte prefix.
@@ -880,11 +870,8 @@ where
         let store = self.clone();
         let prefix = prefix.to_vec();
         let start_key = start_key.map(|s| s.to_vec());
-        tokio::task::spawn_blocking(move || {
-            store.scan_with_raw_prefix(&prefix, start_key.as_deref(), limit)
-        })
-        .await
-        .map_err(|e| StorageError::Other(format!("spawn_blocking join error: {}", e)))?
+        run_blocking_result(move || store.scan_with_raw_prefix(&prefix, start_key.as_deref(), limit))
+            .await
     }
 
     /// Async version of `scan_typed_with_prefix_and_start()` - scans entities with typed prefix and start key.
@@ -899,11 +886,10 @@ where
         let store = self.clone();
         let prefix = prefix.cloned();
         let start_key = start_key.cloned();
-        tokio::task::spawn_blocking(move || {
+        run_blocking_result(move || {
             store.scan_typed_with_prefix_and_start(prefix.as_ref(), start_key.as_ref(), limit)
         })
         .await
-        .map_err(|e| StorageError::Other(format!("spawn_blocking join error: {}", e)))?
     }
 }
 

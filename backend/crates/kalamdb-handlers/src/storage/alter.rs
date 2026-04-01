@@ -1,11 +1,11 @@
 //! Typed DDL handler for ALTER STORAGE statements
 
+use crate::helpers::guards::require_admin;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::error::KalamDbError;
 use kalamdb_core::error_extensions::KalamDbResultExt;
 use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
 use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
-use crate::helpers::guards::require_admin;
 use kalamdb_filestore::StorageHealthService;
 use kalamdb_sql::ddl::AlterStorageStatement;
 use std::sync::Arc;
@@ -154,9 +154,9 @@ impl TypedStatementHandler<AlterStorageStatement> for AlterStorageHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
     use kalamdb_commons::models::UserId;
     use kalamdb_commons::{Role, StorageId};
+    use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
     use kalamdb_system::Storage;
     use std::sync::Arc;
 

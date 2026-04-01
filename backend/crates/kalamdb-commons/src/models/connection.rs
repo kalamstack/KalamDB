@@ -1,34 +1,27 @@
 // Connection information detection for authentication
 
+use std::sync::Arc;
+
 /// Connection information for an authenticated request.
 ///
-/// Used to determine whether remote access is allowed based on IP address.
+/// `remote_addr` is stored as `Arc<str>` — cheap to clone across middleware layers.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConnectionInfo {
     /// IP address of the connecting client (as string from actix-web)
-    pub remote_addr: Option<String>,
+    pub remote_addr: Option<Arc<str>>,
 }
 
 impl ConnectionInfo {
     /// Create a new ConnectionInfo from a remote address string.
-    ///
-    /// # Arguments
-    /// * `remote_addr` - The client's remote address (IP:port or just IP)
-    ///
-    /// # Returns
-    /// A new ConnectionInfo instance
     pub fn new(remote_addr: Option<String>) -> Self {
-        Self { remote_addr }
+        Self { remote_addr: remote_addr.map(Arc::<str>::from) }
     }
 
     /// Check if the connection is from localhost.
     ///
     /// Handles both IPv4 (127.0.0.1) and IPv6 (::1) loopback addresses.
-    ///
-    /// # Returns
-    /// True if the connection is from localhost, false otherwise
     pub fn is_localhost(&self) -> bool {
-        match &self.remote_addr {
+        match self.remote_addr.as_deref() {
             Some(addr) => {
                 addr == "127.0.0.1"
                     || addr.starts_with("127.0.0.1:")

@@ -1,15 +1,15 @@
 //! ACK statement handler for committing consumer group offsets
 
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
-use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
 use datafusion::arrow::{
     array::{ArrayRef, Int32Array, Int64Array, StringBuilder},
     datatypes::{DataType, Field, Schema},
     record_batch::RecordBatch,
 };
 use kalamdb_commons::models::{ConsumerGroupId, TopicId};
+use kalamdb_core::app_context::AppContext;
+use kalamdb_core::error::KalamDbError;
+use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
+use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
 use kalamdb_sql::ddl::AckStatement;
 use std::sync::Arc;
 

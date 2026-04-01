@@ -33,10 +33,7 @@ impl WasmAuthProvider {
     }
 
     /// Get the WebSocket authentication message using unified WsAuthCredentials
-    pub(crate) fn to_ws_auth_message(
-        &self,
-        protocol: ProtocolOptions,
-    ) -> Option<ClientMessage> {
+    pub(crate) fn to_ws_auth_message(&self, protocol: ProtocolOptions) -> Option<ClientMessage> {
         match self {
             WasmAuthProvider::Basic { .. } => None,
             WasmAuthProvider::Jwt { token } => Some(ClientMessage::Authenticate {

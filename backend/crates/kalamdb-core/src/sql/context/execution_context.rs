@@ -1,7 +1,8 @@
 use datafusion::prelude::SessionContext;
 use kalamdb_commons::models::ReadContext;
 use kalamdb_commons::{NamespaceId, Role, UserId};
-use kalamdb_session::{AuthSession, SessionUserContext};
+use kalamdb_session::AuthSession;
+use kalamdb_session_datafusion::SessionUserContext;
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
 use std::time::SystemTime;

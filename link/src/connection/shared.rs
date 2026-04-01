@@ -15,8 +15,7 @@ use crate::{
     connection::{
         apply_ws_auth_headers, authenticate_ws, connect_with_optional_local_bind,
         decode_ws_payload, jitter_keepalive_interval, parse_message, parse_message_msgpack,
-        resolve_ws_url, send_client_message, send_next_batch_request_with_format,
-        WebSocketStream,
+        resolve_ws_url, send_client_message, send_next_batch_request_with_format, WebSocketStream,
         DEFAULT_EVENT_CHANNEL_CAPACITY, FAR_FUTURE, MAX_WS_TEXT_MESSAGE_BYTES,
     },
     error::{KalamLinkError, Result},
@@ -557,12 +556,29 @@ async fn establish_ws(
         // Authorization header. The server validates it during the HTTP
         // upgrade and sends AuthSuccess proactively — no explicit
         // Authenticate message needed, saving a full round-trip.
-        authenticate_ws(&mut ws_stream, &auth, timeouts.auth_timeout, connection_options.protocol, false).await?
+        authenticate_ws(
+            &mut ws_stream,
+            &auth,
+            timeouts.auth_timeout,
+            connection_options.protocol,
+            false,
+        )
+        .await?
     } else {
         // Fallback: send an explicit Authenticate message and wait.
-        authenticate_ws(&mut ws_stream, &auth, timeouts.auth_timeout, connection_options.protocol, true).await?
+        authenticate_ws(
+            &mut ws_stream,
+            &auth,
+            timeouts.auth_timeout,
+            connection_options.protocol,
+            true,
+        )
+        .await?
     };
-    log::info!("[kalam-link] WebSocket authenticated successfully (header_auth={})", uses_header_auth);
+    log::info!(
+        "[kalam-link] WebSocket authenticated successfully (header_auth={})",
+        uses_header_auth
+    );
 
     Ok((ws_stream, auth, ser))
 }
@@ -639,7 +655,10 @@ async fn route_event(
                 .as_ref()
                 .and_then(|key| subs.get(key))
                 .and_then(|entry| entry.batch_seq_id.or(entry.last_seq_id));
-            if let Err(e) = send_next_batch_request_with_format(ws, &incoming_sub_id, last_seq, serialization).await {
+            if let Err(e) =
+                send_next_batch_request_with_format(ws, &incoming_sub_id, last_seq, serialization)
+                    .await
+            {
                 log::warn!("Failed to send NextBatch for {}: {}", incoming_sub_id, e);
             }
         }
@@ -1320,7 +1339,14 @@ async fn connection_task(
                     reconnect_attempts.store(0, Ordering::SeqCst);
                     connected.store(true, Ordering::SeqCst);
                     event_handlers.emit_connect();
-                    resubscribe_all(&mut stream, &mut subs, &timeouts, &event_handlers, negotiated_ser).await;
+                    resubscribe_all(
+                        &mut stream,
+                        &mut subs,
+                        &timeouts,
+                        &event_handlers,
+                        negotiated_ser,
+                    )
+                    .await;
                     ws_stream = Some(stream);
                     ping_deadline = TokioInstant::now() + keepalive_dur;
                     awaiting_pong = false;

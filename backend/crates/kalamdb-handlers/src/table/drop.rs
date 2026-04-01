@@ -3,16 +3,16 @@
 //! This module provides both the DROP TABLE handler and reusable cleanup functions
 //! for table deletion operations (used by both DDL handler and CleanupExecutor).
 
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_jobs::executors::cleanup::{CleanupOperation, CleanupParams, StorageCleanupDetails};
-use kalamdb_jobs::AppContextJobsExt;
-use kalamdb_core::operations::table_cleanup::cleanup_table_data_internal;
-use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
-use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
 use crate::helpers::guards::block_system_namespace_modification;
 use kalamdb_commons::models::TableId;
 use kalamdb_commons::schemas::TableType;
+use kalamdb_core::app_context::AppContext;
+use kalamdb_core::error::KalamDbError;
+use kalamdb_core::operations::table_cleanup::cleanup_table_data_internal;
+use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
+use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
+use kalamdb_jobs::executors::cleanup::{CleanupOperation, CleanupParams, StorageCleanupDetails};
+use kalamdb_jobs::AppContextJobsExt;
 use kalamdb_sql::ddl::DropTableStatement;
 use kalamdb_system::JobType;
 use std::sync::Arc;
@@ -341,16 +341,16 @@ impl TypedStatementHandler<DropTableStatement> for DropTableHandler {
 #[cfg(test)]
 mod tests {
     use super::{cleanup_table_data_internal, DropTableHandler};
-    use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult};
     use crate::table::create::CreateTableHandler;
-    use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
-    use kalamdb_core::test_helpers::{
-        create_test_session_simple, test_app_context, test_app_context_simple,
-    };
     use arrow::datatypes::{DataType, Field, Schema};
     use kalamdb_commons::models::{NamespaceId, TableName, UserId};
     use kalamdb_commons::schemas::TableType;
     use kalamdb_commons::Role;
+    use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult};
+    use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
+    use kalamdb_core::test_helpers::{
+        create_test_session_simple, test_app_context, test_app_context_simple,
+    };
     use kalamdb_sql::ddl::{CreateTableStatement, DropTableStatement, TableKind};
     use kalamdb_store::EntityStore;
     use std::collections::HashMap;

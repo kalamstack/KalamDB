@@ -7,7 +7,10 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{ErrorEvent, MessageEvent, WebSocket};
 
-use crate::models::{ClientMessage, ConnectionOptions, ProtocolOptions, SerializationType, ServerMessage, SubscriptionRequest};
+use crate::models::{
+    ClientMessage, ConnectionOptions, ProtocolOptions, SerializationType, ServerMessage,
+    SubscriptionRequest,
+};
 
 use super::auth::WasmAuthProvider;
 use super::console_log;

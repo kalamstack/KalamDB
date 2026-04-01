@@ -135,10 +135,7 @@ async fn test_gradual_latency_ramp_forces_reconnect_then_recovers() {
         // Insert a post-recovery marker.
         writer
             .execute_query(
-                &format!(
-                    "INSERT INTO {} (id, value) VALUES ('post-ramp', 'recovered')",
-                    table
-                ),
+                &format!("INSERT INTO {} (id, value) VALUES ('post-ramp', 'recovered')", table),
                 None,
                 None,
                 None,

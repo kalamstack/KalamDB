@@ -3,12 +3,12 @@
 //! Common utilities for DDL operations including schema transformations,
 //! table validation, and metadata storage.
 
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::error_extensions::KalamDbResultExt;
 use arrow::datatypes::Schema;
 use kalamdb_commons::schemas::{ColumnDefault, TableType};
 use kalamdb_commons::StorageId;
+use kalamdb_core::app_context::AppContext;
+use kalamdb_core::error::KalamDbError;
+use kalamdb_core::error_extensions::KalamDbResultExt;
 use kalamdb_sql::ddl::CreateTableStatement;
 use std::sync::Arc;
 

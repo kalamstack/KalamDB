@@ -20,6 +20,7 @@
 //! - **Shared Tables**: Global data with key format `{row_id}`
 //! - **Stream Tables**: Ephemeral events with key format `{timestamp_ms}:{row_id}`
 
+mod async_utils;
 mod cf_tuning;
 pub mod entity_store; // Phase 14: Type-safe EntityStore<K, V> with generic keys
 pub mod index; // Generic secondary index support

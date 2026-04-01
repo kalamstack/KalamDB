@@ -33,11 +33,11 @@ cookie = { workspace = true, optional = true }
 # Internal dependencies
 kalamdb-commons = { path = "../kalamdb-commons", default-features = false, features = ["serde"] }
 kalamdb-configs = { path = "../kalamdb-configs" }
-kalamdb-oidc = { path = "../kalamdb-oidc" }
 kalamdb-session = { path = "../kalamdb-session" }
 kalamdb-system = { path = "../kalamdb-system" }
 
 # Serialization
+serde = { workspace = true }
 serde_json = { workspace = true }
 
 # Error handling
@@ -50,7 +50,9 @@ tracing = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true }
+reqwest = { workspace = true }
 ipnet = { workspace = true }
+moka = { workspace = true }
 
 # Time handling
 chrono = { workspace = true }

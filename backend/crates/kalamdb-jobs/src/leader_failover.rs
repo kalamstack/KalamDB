@@ -28,8 +28,8 @@ use kalamdb_system::{JobFilter, JobSortField, JobStatus, JobType, SortOrder};
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use kalamdb_core::error::KalamDbError;
 use crate::leader_guard::LeaderOnlyJobGuard;
+use kalamdb_core::error::KalamDbError;
 use kalamdb_system::JobsTableProvider;
 
 /// How long to wait before considering a job orphaned (in seconds)

@@ -27,15 +27,15 @@
 //! }
 //! ```
 
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::error_extensions::KalamDbResultExt;
 use crate::executors::shared_table_cleanup::cleanup_empty_shared_scope_if_needed;
 use crate::executors::{JobContext, JobDecision, JobExecutor, JobParams};
-use kalamdb_core::manifest::flush::{SharedTableFlushJob, TableFlush, UserTableFlushJob};
 use async_trait::async_trait;
 use kalamdb_commons::schemas::TableType;
 use kalamdb_commons::TableId;
+use kalamdb_core::app_context::AppContext;
+use kalamdb_core::error::KalamDbError;
+use kalamdb_core::error_extensions::KalamDbResultExt;
+use kalamdb_core::manifest::flush::{SharedTableFlushJob, TableFlush, UserTableFlushJob};
 use kalamdb_store::EntityStore;
 use kalamdb_system::JobType;
 use serde::{Deserialize, Serialize};
@@ -348,9 +348,10 @@ impl JobExecutor for FlushExecutor {
         match table_def.table_type {
             TableType::User => {
                 if let Some(provider_arc) = schema_registry.get_provider(&params.table_id) {
-                    if let Some(provider) =
-                        provider_arc.as_any().downcast_ref::<kalamdb_core::providers::UserTableProvider>()
-                    {
+                    if let Some(provider) = provider_arc
+                        .as_any()
+                        .downcast_ref::<kalamdb_core::providers::UserTableProvider>(
+                    ) {
                         let store = provider.store();
                         let partition = store.partition();
                         let has_enough = store
@@ -367,8 +368,8 @@ impl JobExecutor for FlushExecutor {
                 if let Some(provider_arc) = schema_registry.get_provider(&params.table_id) {
                     if let Some(provider) = provider_arc
                         .as_any()
-                        .downcast_ref::<kalamdb_core::providers::SharedTableProvider>()
-                    {
+                        .downcast_ref::<kalamdb_core::providers::SharedTableProvider>(
+                    ) {
                         let store = provider.store();
                         let partition = store.partition();
                         let has_enough = store

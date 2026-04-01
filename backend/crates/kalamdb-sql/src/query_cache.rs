@@ -188,15 +188,15 @@ impl QueryCache {
         self.cache.insert(key, arc);
     }
 
-    /// Invalidate all tables-related queries
-    pub fn invalidate_tables(&self) {
-        self.cache.invalidate(&QueryCacheKey::AllTables);
-        // Also remove individual table entries by iterating
-        // Note: moka iterator returns Arc-wrapped keys
+    fn invalidate_matching<F>(&self, broad_key: QueryCacheKey, predicate: F)
+    where
+        F: Fn(&QueryCacheKey) -> bool,
+    {
+        self.cache.invalidate(&broad_key);
         let keys_to_remove: Vec<_> = self
             .cache
             .iter()
-            .filter(|(k, _)| matches!(&**k, QueryCacheKey::Table(_)))
+            .filter(|(k, _)| predicate(k))
             .map(|(k, _)| (*k).clone())
             .collect();
         for key in keys_to_remove {
@@ -204,19 +204,18 @@ impl QueryCache {
         }
     }
 
+    /// Invalidate all tables-related queries
+    pub fn invalidate_tables(&self) {
+        self.invalidate_matching(QueryCacheKey::AllTables, |key| {
+            matches!(key, QueryCacheKey::Table(_))
+        });
+    }
+
     /// Invalidate all namespaces-related queries
     pub fn invalidate_namespaces(&self) {
-        self.cache.invalidate(&QueryCacheKey::AllNamespaces);
-        // Also remove individual namespace entries
-        let keys_to_remove: Vec<_> = self
-            .cache
-            .iter()
-            .filter(|(k, _)| matches!(&**k, QueryCacheKey::Namespace(_)))
-            .map(|(k, _)| (*k).clone())
-            .collect();
-        for key in keys_to_remove {
-            self.cache.invalidate(&key);
-        }
+        self.invalidate_matching(QueryCacheKey::AllNamespaces, |key| {
+            matches!(key, QueryCacheKey::Namespace(_))
+        });
     }
 
     /// Invalidate all live queries-related queries

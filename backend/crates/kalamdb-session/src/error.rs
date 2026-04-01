@@ -51,9 +51,3 @@ impl fmt::Display for SessionError {
 }
 
 impl std::error::Error for SessionError {}
-
-impl From<SessionError> for datafusion::error::DataFusionError {
-    fn from(err: SessionError) -> Self {
-        datafusion::error::DataFusionError::Plan(err.to_string())
-    }
-}

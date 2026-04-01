@@ -134,10 +134,8 @@ fn create_client_inner(
         builder = builder.max_retries(r as u32);
     }
 
-    builder = builder.connection_options(build_dart_connection_options(
-        disable_compression,
-        ws_lazy_connect,
-    ));
+    builder = builder
+        .connection_options(build_dart_connection_options(disable_compression, ws_lazy_connect));
 
     if let Some(ms) = keepalive_interval_ms {
         let mut timeouts = kalam_link::KalamLinkTimeouts::default();
@@ -221,10 +219,7 @@ mod tests {
         assert!(options.ws_lazy_connect);
         assert!(!options.disable_compression);
         assert_eq!(options.reconnect_delay_ms, DART_INITIAL_RECONNECT_DELAY_MS);
-        assert_eq!(
-            options.max_reconnect_delay_ms,
-            DART_MAX_RECONNECT_DELAY_MS
-        );
+        assert_eq!(options.max_reconnect_delay_ms, DART_MAX_RECONNECT_DELAY_MS);
     }
 
     #[test]
@@ -235,10 +230,7 @@ mod tests {
         assert!(!options.ws_lazy_connect);
         assert!(options.disable_compression);
         assert_eq!(options.reconnect_delay_ms, DART_INITIAL_RECONNECT_DELAY_MS);
-        assert_eq!(
-            options.max_reconnect_delay_ms,
-            DART_MAX_RECONNECT_DELAY_MS
-        );
+        assert_eq!(options.max_reconnect_delay_ms, DART_MAX_RECONNECT_DELAY_MS);
     }
 }
 

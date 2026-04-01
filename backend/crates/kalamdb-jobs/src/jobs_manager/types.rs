@@ -1,6 +1,6 @@
-use kalamdb_core::app_context::AppContext;
 use crate::executors::JobRegistry;
 use kalamdb_commons::{JobId, NodeId};
+use kalamdb_core::app_context::AppContext;
 use kalamdb_system::{JobNodesTableProvider, JobsTableProvider};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};

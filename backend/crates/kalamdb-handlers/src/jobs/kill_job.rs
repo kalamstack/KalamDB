@@ -1,10 +1,10 @@
 //! Typed handler for KILL JOB statement
 
+use kalamdb_commons::JobId;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::error::KalamDbError;
 use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
 use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
-use kalamdb_commons::JobId;
 use kalamdb_jobs::AppContextJobsExt;
 use kalamdb_sql::ddl::JobCommand;
 use std::sync::Arc;

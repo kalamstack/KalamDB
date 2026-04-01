@@ -1,11 +1,11 @@
 //! Typed DDL handler for DESCRIBE TABLE statements
 
+use kalamdb_commons::models::{NamespaceId, TableId};
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::error::KalamDbError;
 use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
 use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
 use kalamdb_core::views::DescribeView;
-use kalamdb_commons::models::{NamespaceId, TableId};
 use kalamdb_sql::ddl::DescribeTableStatement;
 use std::sync::Arc;
 

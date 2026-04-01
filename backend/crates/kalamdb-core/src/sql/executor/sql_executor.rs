@@ -714,10 +714,6 @@ impl SqlExecutor {
             }
         };
 
-        // Check permissions on the logical plan
-        //FIXME: Check do we still need this?? now we have a permission check in each tableprovider
-        //self.check_select_permissions(df.logical_plan(), exec_ctx)?;
-
         let df = self.apply_select_limits(df)?;
 
         // Capture schema before collecting (needed for 0 row results)
@@ -950,11 +946,5 @@ impl SqlExecutor {
         let app_context = &self.app_context;
         // Delegate to unified SchemaRegistry initialization
         app_context.schema_registry().initialize_tables()
-    }
-
-    /// Expose the shared `AppContext` for upcoming migrations.
-    /// TODO: Remove this since everyone has appcontext access now from the executor
-    pub fn app_context(&self) -> &std::sync::Arc<crate::app_context::AppContext> {
-        &self.app_context
     }
 }

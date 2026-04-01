@@ -6,7 +6,7 @@ use datafusion::common::DFSchema;
 use datafusion::datasource::memory::MemTable;
 use datafusion::datasource::TableProvider;
 use datafusion::error::{DataFusionError, Result as DataFusionResult};
-use datafusion::logical_expr::Expr;
+use datafusion::logical_expr::{utils::expr_to_columns, Expr};
 use datafusion::physical_plan::filter::FilterExec;
 use datafusion::physical_plan::{collect, ExecutionPlan};
 use datafusion::scalar::ScalarValue;
@@ -15,7 +15,7 @@ use kalamdb_commons::conversions::arrow_json_conversion::{
 };
 use kalamdb_commons::conversions::scalar_to_pk_string;
 use kalamdb_commons::models::rows::Row;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 /// DataFusion requires DML providers to return an execution plan that yields one row
@@ -68,12 +68,21 @@ pub async fn collect_matching_rows(
     state: &dyn Session,
     filters: &[Expr],
 ) -> DataFusionResult<Vec<Row>> {
+    collect_matching_rows_with_projection(provider, state, filters, None).await
+}
+
+pub async fn collect_matching_rows_with_projection(
+    provider: &dyn TableProvider,
+    state: &dyn Session,
+    filters: &[Expr],
+    projection: Option<&Vec<usize>>,
+) -> DataFusionResult<Vec<Row>> {
     // Pass filters to scan() which may apply partial or full filtering.
     // However, when called directly (not through the SQL planner), DataFusion does NOT
     // automatically add a FilterExec for Inexact pushdown — the planner does that.
     // We explicitly wrap with FilterExec to guarantee correct row-level filtering
     // regardless of whether the underlying scan implementation applied the filter.
-    let scan_plan = provider.scan(state, None, filters, None).await?;
+    let scan_plan = provider.scan(state, projection, filters, None).await?;
 
     let plan: Arc<dyn ExecutionPlan> = if !filters.is_empty() {
         let schema = scan_plan.schema();
@@ -90,14 +99,47 @@ pub async fn collect_matching_rows(
     record_batches_to_rows(&batches)
 }
 
+pub fn dml_scan_projection(
+    schema: &SchemaRef,
+    filters: &[Expr],
+    assignments: &[(String, Expr)],
+    required_columns: &[&str],
+) -> DataFusionResult<Option<Vec<usize>>> {
+    let mut referenced_columns = HashSet::new();
+
+    for filter in filters {
+        collect_expr_columns(filter, &mut referenced_columns)?;
+    }
+    for (_, expr) in assignments {
+        collect_expr_columns(expr, &mut referenced_columns)?;
+    }
+    referenced_columns.extend(required_columns.iter().copied().map(str::to_owned));
+
+    let projection: Vec<usize> = schema
+        .fields()
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, field)| referenced_columns.contains(field.name()).then_some(idx))
+        .collect();
+
+    if projection.is_empty() || projection.len() == schema.fields().len() {
+        Ok(None)
+    } else {
+        Ok(Some(projection))
+    }
+}
+
 pub fn row_matches_filters(
     state: &dyn Session,
     schema: &SchemaRef,
     row: &Row,
     filters: &[Expr],
 ) -> DataFusionResult<bool> {
+    let batch = build_row_batch(schema, row)?;
+    let df_schema = DFSchema::try_from(Arc::clone(schema))?;
+
     for filter in filters {
-        let predicate = evaluate_assignment_expr(state, schema, row, filter)?;
+        let predicate = evaluate_expr_against_batch(state, &df_schema, &batch, filter)?;
         if !predicate_to_bool(predicate)? {
             return Ok(false);
         }
@@ -150,12 +192,50 @@ pub fn evaluate_assignment_expr(
     row: &Row,
     expr: &Expr,
 ) -> DataFusionResult<ScalarValue> {
-    let batch =
-        json_rows_to_arrow_batch(schema, vec![row.clone()]).map_err(DataFusionError::Execution)?;
-
     let df_schema = DFSchema::try_from(Arc::clone(schema))?;
-    let physical_expr = state.create_physical_expr(expr.clone(), &df_schema)?;
-    let value = physical_expr.evaluate(&batch)?;
+    let batch = build_row_batch(schema, row)?;
+
+    evaluate_expr_against_batch(state, &df_schema, &batch, expr)
+}
+
+pub fn evaluate_assignment_values(
+    state: &dyn Session,
+    schema: &SchemaRef,
+    row: &Row,
+    assignments: &[(String, Expr)],
+) -> DataFusionResult<Row> {
+    let df_schema = DFSchema::try_from(Arc::clone(schema))?;
+    let batch = build_row_batch(schema, row)?;
+    let mut values = BTreeMap::new();
+
+    for (column, expr) in assignments {
+        let value = evaluate_expr_against_batch(state, &df_schema, &batch, expr)?;
+        values.insert(column.clone(), value);
+    }
+
+    Ok(Row::new(values))
+}
+
+fn build_row_batch(schema: &SchemaRef, row: &Row) -> DataFusionResult<RecordBatch> {
+    json_rows_to_arrow_batch(schema, vec![row.clone()]).map_err(DataFusionError::Execution)
+}
+
+fn collect_expr_columns(expr: &Expr, columns: &mut HashSet<String>) -> DataFusionResult<()> {
+    let mut referenced = HashSet::new();
+    expr_to_columns(expr, &mut referenced)
+        .map_err(|e| DataFusionError::Execution(format!("Failed to inspect expression: {}", e)))?;
+    columns.extend(referenced.into_iter().map(|column| column.name));
+    Ok(())
+}
+
+fn evaluate_expr_against_batch(
+    state: &dyn Session,
+    df_schema: &DFSchema,
+    batch: &RecordBatch,
+    expr: &Expr,
+) -> DataFusionResult<ScalarValue> {
+    let physical_expr = state.create_physical_expr(expr.clone(), df_schema)?;
+    let value = physical_expr.evaluate(batch)?;
 
     match value {
         datafusion::logical_expr::ColumnarValue::Scalar(scalar) => Ok(scalar),
@@ -297,4 +377,85 @@ pub fn validate_not_null_with_set(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{dml_scan_projection, evaluate_assignment_values, row_matches_filters};
+    use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
+    use datafusion::logical_expr::{col, lit};
+    use datafusion::prelude::SessionContext;
+    use datafusion::scalar::ScalarValue;
+    use kalamdb_commons::models::rows::Row;
+    use std::sync::Arc;
+
+    fn test_schema() -> SchemaRef {
+        Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Utf8, false),
+            Field::new("value", DataType::Int64, false),
+            Field::new("name", DataType::Utf8, false),
+        ]))
+    }
+
+    fn test_row() -> Row {
+        Row::from_vec(vec![
+            ("id".to_string(), ScalarValue::Utf8(Some("row-1".to_string()))),
+            ("value".to_string(), ScalarValue::Int64(Some(10))),
+            ("name".to_string(), ScalarValue::Utf8(Some("alice".to_string()))),
+        ])
+    }
+
+    #[test]
+    fn evaluate_assignment_values_returns_all_assignment_results() {
+        let ctx = SessionContext::new();
+        let schema = test_schema();
+        let row = test_row();
+        let assignments = vec![
+            ("value".to_string(), col("value") + lit(5_i64)),
+            ("name".to_string(), lit("ALICE")),
+        ];
+
+        let values = evaluate_assignment_values(&ctx.state(), &schema, &row, &assignments).unwrap();
+
+        assert_eq!(values.get("value"), Some(&ScalarValue::Int64(Some(15))));
+        assert_eq!(values.get("name"), Some(&ScalarValue::Utf8(Some("ALICE".to_string()))));
+    }
+
+    #[test]
+    fn row_matches_filters_evaluates_multiple_predicates_for_one_row() {
+        let ctx = SessionContext::new();
+        let schema = test_schema();
+        let row = test_row();
+        let filters = vec![col("value").gt(lit(5_i64)), col("name").eq(lit("alice"))];
+
+        let matches = row_matches_filters(&ctx.state(), &schema, &row, &filters).unwrap();
+
+        assert!(matches);
+    }
+
+    #[test]
+    fn dml_scan_projection_only_keeps_columns_needed_for_delete() {
+        let schema = test_schema();
+        let filters = vec![col("name").eq(lit("alice"))];
+
+        let projection = dml_scan_projection(&schema, &filters, &[], &["id"]).unwrap();
+
+        assert_eq!(projection, Some(vec![0, 2]));
+    }
+
+    #[test]
+    fn dml_scan_projection_includes_assignment_source_columns_but_not_targets() {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Utf8, false),
+            Field::new("value", DataType::Int64, false),
+            Field::new("name", DataType::Utf8, false),
+            Field::new("score", DataType::Int64, false),
+        ]));
+        let filters = vec![col("name").eq(lit("alice"))];
+        let assignments = vec![("score".to_string(), col("value") + lit(5_i64))];
+
+        let projection = dml_scan_projection(&schema, &filters, &assignments, &["id"]).unwrap();
+
+        assert_eq!(projection, Some(vec![0, 1, 2]));
+    }
 }

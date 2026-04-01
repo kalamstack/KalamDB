@@ -32,7 +32,7 @@ use kalamdb_commons::constants::SystemColumnNames;
 use kalamdb_commons::ids::{SeqId, StreamTableRowId};
 use kalamdb_commons::models::UserId;
 use kalamdb_commons::NotLeaderError;
-use kalamdb_session::check_user_table_write_access;
+use kalamdb_session_datafusion::{check_user_table_write_access, session_error_to_datafusion};
 use std::any::Any;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -498,7 +498,7 @@ impl TableProvider for StreamTableProvider {
         insert_op: InsertOp,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
         check_user_table_write_access(state, self.core.table_id())
-            .map_err(DataFusionError::from)?;
+            .map_err(session_error_to_datafusion)?;
 
         if insert_op != InsertOp::Append {
             return Err(DataFusionError::Plan(format!(
@@ -525,19 +525,31 @@ impl TableProvider for StreamTableProvider {
         filters: Vec<Expr>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
         check_user_table_write_access(state, self.core.table_id())
-            .map_err(DataFusionError::from)?;
+            .map_err(session_error_to_datafusion)?;
         crate::utils::datafusion_dml::validate_where_clause(&filters, "DELETE")?;
 
         let (user_id, _role) =
             extract_user_context(state).map_err(|e| DataFusionError::Execution(e.to_string()))?;
 
-        let rows =
-            crate::utils::datafusion_dml::collect_matching_rows(self, state, &filters).await?;
+        let pk_column = self.primary_key_field_name().to_string();
+        let schema = self.schema_ref();
+        let projection = crate::utils::datafusion_dml::dml_scan_projection(
+            &schema,
+            &filters,
+            &[],
+            &[&pk_column],
+        )?;
+        let rows = crate::utils::datafusion_dml::collect_matching_rows_with_projection(
+            self,
+            state,
+            &filters,
+            projection.as_ref(),
+        )
+        .await?;
         if rows.is_empty() {
             return crate::utils::datafusion_dml::rows_affected_plan(state, 0).await;
         }
 
-        let pk_column = self.primary_key_field_name().to_string();
         let mut seen = HashSet::new();
         let mut deleted: u64 = 0;
 

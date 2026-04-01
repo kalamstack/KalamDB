@@ -14,7 +14,7 @@ kalamdb-commons = { path = "../kalamdb-commons", features = ["full"] }
 kalamdb-filestore = { path = "../kalamdb-filestore" }
 kalamdb-store = { path = "../kalamdb-store" }
 kalamdb-system = { path = "../kalamdb-system" }
-kalamdb-session = { path = "../kalamdb-session" }
+kalamdb-session-datafusion = { path = "../kalamdb-session-datafusion" }
 
 # Apache Arrow/DataFusion
 datafusion = { workspace = true }

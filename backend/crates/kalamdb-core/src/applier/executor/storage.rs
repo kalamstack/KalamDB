@@ -10,6 +10,7 @@ use kalamdb_commons::models::StorageId;
 use kalamdb_system::Storage;
 
 use crate::app_context::AppContext;
+use crate::applier::executor::utils::run_blocking_applier;
 use crate::applier::ApplierError;
 
 /// Executor for storage operations
@@ -27,7 +28,7 @@ impl StorageExecutor {
         log::info!("CommandExecutorImpl: Creating storage {}", storage.storage_id);
         let app_context = self.app_context.clone();
         let storage = storage.clone();
-        tokio::task::spawn_blocking(move || {
+        run_blocking_applier(move || {
             let storage_id = storage.storage_id.clone();
             app_context
                 .system_tables()
@@ -37,7 +38,6 @@ impl StorageExecutor {
             Ok(format!("Storage {} created successfully", storage_id))
         })
         .await
-        .map_err(|e| ApplierError::Execution(format!("Task join error: {}", e)))?
     }
 
     /// Execute DROP STORAGE
@@ -45,7 +45,7 @@ impl StorageExecutor {
         log::info!("CommandExecutorImpl: Dropping storage {}", storage_id);
         let app_context = self.app_context.clone();
         let storage_id = storage_id.clone();
-        tokio::task::spawn_blocking(move || {
+        run_blocking_applier(move || {
             app_context
                 .system_tables()
                 .storages()
@@ -54,6 +54,5 @@ impl StorageExecutor {
             Ok(format!("Storage {} dropped successfully", storage_id))
         })
         .await
-        .map_err(|e| ApplierError::Execution(format!("Task join error: {}", e)))?
     }
 }

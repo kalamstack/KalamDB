@@ -3,12 +3,12 @@
 //! Flushes per-column vector hot staging into cold snapshot artifacts and updates
 //! vector metadata embedded in manifest.json.
 
-use kalamdb_core::error::KalamDbError;
 use crate::executors::{JobContext, JobDecision, JobExecutor, JobParams};
-use kalamdb_core::vector::{flush_shared_scope_vectors, flush_user_scope_vectors};
 use async_trait::async_trait;
 use kalamdb_commons::models::{TableId, UserId};
 use kalamdb_commons::schemas::TableType;
+use kalamdb_core::error::KalamDbError;
+use kalamdb_core::vector::{flush_shared_scope_vectors, flush_user_scope_vectors};
 use kalamdb_system::JobType;
 use serde::{Deserialize, Serialize};
 

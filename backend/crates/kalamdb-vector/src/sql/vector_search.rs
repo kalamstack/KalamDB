@@ -19,7 +19,7 @@ use kalamdb_commons::ids::SeqId;
 use kalamdb_commons::models::{TableId, UserId};
 use kalamdb_commons::schemas::TableType;
 use kalamdb_filestore::{FilestoreError, StorageCached};
-use kalamdb_session::extract_user_id;
+use kalamdb_session_datafusion::extract_user_id;
 use kalamdb_store::StorageBackend;
 use kalamdb_system::VectorMetric;
 use std::any::Any;

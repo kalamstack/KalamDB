@@ -18,7 +18,7 @@ pub extern "C-unwind" fn _PG_init() {
         c"KalamDB session user id",
         c"Session-scoped tenant identifier used by the KalamDB PostgreSQL extension.",
         &KALAM_USER_ID_SETTING,
-        GucContext::Userset,
+        GucContext::Suset,
         GucFlags::default(),
     );
 
@@ -143,9 +143,19 @@ pub fn kalam_exec(sql: &str) -> String {
             // DDL/DML or empty SELECT — return status as JSON string
             serde_json::json!(message).to_string()
         }
-        Err(e) => {
-            pgrx::error!("kalam_exec: {}", e);
+        Err(_e) => {
+            pgrx::error!("kalam_exec: remote query failed");
         }
     }
 }
+
+// Revoke PUBLIC access to kalam_exec — only superusers / explicitly granted
+// roles should be able to send arbitrary SQL to a KalamDB server.
+pgrx::extension_sql!(
+    r#"
+REVOKE EXECUTE ON FUNCTION kalam_exec(text) FROM PUBLIC;
+"#,
+    name = "kalam_exec_revoke",
+    requires = ["kalam_exec"],
+);
 

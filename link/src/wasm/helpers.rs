@@ -156,10 +156,7 @@ pub(crate) fn decode_ws_message(e: &MessageEvent) -> Option<String> {
         return match std::str::from_utf8(&decompressed) {
             Ok(s) => Some(s.to_owned()),
             Err(e) => {
-                console_log(&format!(
-                    "KalamClient: Invalid UTF-8 in message: {}",
-                    e
-                ));
+                console_log(&format!("KalamClient: Invalid UTF-8 in message: {}", e));
                 None
             },
         };
@@ -226,8 +223,9 @@ pub(crate) fn send_ws_message(
             ws.send_with_str(&json)
         },
         SerializationType::MessagePack => {
-            let bytes = rmp_serde::to_vec_named(msg)
-                .map_err(|e| JsValue::from_str(&format!("MessagePack serialization error: {}", e)))?;
+            let bytes = rmp_serde::to_vec_named(msg).map_err(|e| {
+                JsValue::from_str(&format!("MessagePack serialization error: {}", e))
+            })?;
             ws.send_with_u8_array(&bytes)
         },
     }

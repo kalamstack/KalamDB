@@ -41,7 +41,7 @@ use std::sync::Arc;
 use crate::errors::error::AuthError;
 use crate::helpers::ip_extractor::extract_client_ip_secure;
 use crate::repository::user_repo::UserRepository;
-use crate::services::unified::{authenticate, AuthMethod, AuthRequest};
+use crate::services::unified::{authenticate, AuthRequest};
 
 /// Error type for authentication extraction.
 ///
@@ -277,7 +277,7 @@ impl FromRequest for AuthSessionExtractor {
             match authenticate(auth_request, &connection_info, &repo).await {
                 Ok(result) => {
                     // Only Bearer tokens are accepted for SQL/API endpoints
-                    if !matches!(result.method, AuthMethod::Bearer) {
+                    if !matches!(result.method, kalamdb_session::AuthMethod::Bearer) {
                         let took = start_time.elapsed().as_secs_f64() * 1000.0;
                         return Err(AuthExtractError::new(
                             AuthError::InvalidCredentials(
@@ -287,20 +287,13 @@ impl FromRequest for AuthSessionExtractor {
                         ));
                     }
 
-                    // Convert AuthMethod to kalamdb_session::AuthMethod
-                    let auth_method = match result.method {
-                        AuthMethod::Bearer => kalamdb_session::AuthMethod::Bearer,
-                        AuthMethod::Basic => kalamdb_session::AuthMethod::Basic,
-                        AuthMethod::Direct => kalamdb_session::AuthMethod::Direct,
-                    };
-
                     // Construct AuthSession with all extracted information
                     let mut session = kalamdb_session::AuthSession::with_username_and_auth_details(
                         result.user.user_id,
                         result.user.username,
                         result.user.role,
                         connection_info,
-                        auth_method,
+                        result.method,
                     );
 
                     // Add request_id if present

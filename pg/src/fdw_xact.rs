@@ -102,10 +102,19 @@ unsafe extern "C-unwind" fn xact_callback(
 ) {
     // Flush write buffer at PRE_COMMIT (before the transaction commit RPC).
     if matches!(event, pg_sys::XactEvent::XACT_EVENT_PRE_COMMIT) {
-        if let Err(e) = crate::write_buffer::flush_all() {
-            eprintln!("pg_kalam: failed to flush write buffer at PRE_COMMIT: {}", e);
-            // Discard unflushed rows so commit doesn't proceed with partial data
-            crate::write_buffer::discard_all();
+        let flush_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crate::write_buffer::flush_all()
+        }));
+        match flush_result {
+            Ok(Ok(())) => {},
+            Ok(Err(e)) => {
+                crate::write_buffer::discard_all();
+                pgrx::error!("pg_kalam: failed to flush writes, aborting transaction: {}", e);
+            },
+            Err(_panic) => {
+                crate::write_buffer::discard_all();
+                pgrx::error!("pg_kalam: panic during write flush, aborting transaction");
+            },
         }
         return;
     }

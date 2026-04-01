@@ -3,11 +3,11 @@
 //! Returns all manifest cache entries with their metadata.
 //! Uses ManifestTableProvider from kalamdb-system for consistent schema.
 
+use async_trait::async_trait;
 use kalamdb_core::error::KalamDbError;
 use kalamdb_core::error_extensions::KalamDbResultExt;
 use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
 use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
-use async_trait::async_trait;
 use kalamdb_sql::ShowManifestStatement;
 use kalamdb_system::providers::ManifestTableProvider;
 use std::sync::Arc;
@@ -68,9 +68,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_manifest_cache_empty() {
-        use kalamdb_core::sql::context::ExecutionContext;
         use datafusion::prelude::SessionContext;
         use kalamdb_commons::models::{Role, UserId};
+        use kalamdb_core::sql::context::ExecutionContext;
         use std::sync::Arc;
 
         let app_context = AppContext::new_test();

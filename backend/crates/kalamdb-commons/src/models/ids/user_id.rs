@@ -1,6 +1,7 @@
 //! Type-safe wrapper for user identifiers.
 
 use std::fmt;
+use std::sync::{Arc, OnceLock};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -11,9 +12,18 @@ use crate::{constants::AuthConstants, StorageKey};
 ///
 /// Ensures user IDs cannot be accidentally used where namespace IDs or table names
 /// are expected.
+/// Statics for cheap singleton construction.
+static ANON_USER_ID: OnceLock<Arc<str>> = OnceLock::new();
+static ROOT_USER_ID: OnceLock<Arc<str>> = OnceLock::new();
+static SYSTEM_USER_ID_STATIC: OnceLock<Arc<str>> = OnceLock::new();
+
+/// Type-safe wrapper for user identifiers.
+///
+/// Stored as `Arc<str>` so `clone()` is a cheap atomic refcount increment
+/// rather than a heap allocation — critical for high-concurrency hot paths.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct UserId(String);
+pub struct UserId(Arc<str>);
 
 /// Error type for UserId validation failures
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,10 +47,10 @@ impl UserId {
         Self::try_new(id).expect("UserId contains invalid characters")
     }
 
-    ///New anonymous UserId
+    /// New anonymous UserId — cached singleton, clone is a free atomic increment.
     #[inline]
     pub fn anonymous() -> Self {
-        Self(AuthConstants::ANONYMOUS_USER_ID.to_string())
+        Self(ANON_USER_ID.get_or_init(|| Arc::from(AuthConstants::ANONYMOUS_USER_ID)).clone())
     }
 
     /// Creates a new UserId from a string, returning an error if validation fails.
@@ -55,7 +65,7 @@ impl UserId {
     pub fn try_new(id: impl Into<String>) -> Result<Self, UserIdValidationError> {
         let id = id.into();
         Self::validate_id(&id)?;
-        Ok(Self(id))
+        Ok(Self(Arc::<str>::from(id)))
     }
 
     /// Validates a user ID string for security.
@@ -93,7 +103,7 @@ impl UserId {
     #[inline]
     #[cfg(feature = "full")]
     pub fn generate() -> Self {
-        Self(nanoid::nanoid!())
+        Self(Arc::<str>::from(nanoid::nanoid!()))
     }
 
     /// Creates a UserId without validation (for internal use only).
@@ -104,7 +114,8 @@ impl UserId {
     #[inline]
     #[allow(dead_code)] // Reserved for internal use when loading from trusted sources
     pub(crate) fn new_unchecked(id: impl Into<String>) -> Self {
-        Self(id.into())
+        let s: String = id.into();
+        Self(Arc::<str>::from(s))
     }
 
     /// Returns the user ID as a string slice.
@@ -116,19 +127,19 @@ impl UserId {
     /// Consumes the wrapper and returns the inner String.
     #[inline]
     pub fn into_string(self) -> String {
-        self.0
+        String::from(&*self.0)
     }
 
-    /// Creates a default 'root' user ID.
+    /// Creates a default 'root' user ID — cached singleton.
     #[inline]
     pub fn root() -> Self {
-        Self(AuthConstants::DEFAULT_ROOT_USER_ID.to_string())
+        Self(ROOT_USER_ID.get_or_init(|| Arc::from(AuthConstants::DEFAULT_ROOT_USER_ID)).clone())
     }
 
-    /// Creates a default 'system' user ID.\
+    /// Creates a default 'system' user ID — cached singleton.
     #[inline]
     pub fn system() -> Self {
-        Self(AuthConstants::DEFAULT_SYSTEM_USER_ID.to_string())
+        Self(SYSTEM_USER_ID_STATIC.get_or_init(|| Arc::from(AuthConstants::DEFAULT_SYSTEM_USER_ID)).clone())
     }
 
     /// Is admin user?
@@ -188,7 +199,9 @@ impl StorageKey for UserId {
     }
 
     fn from_storage_key(bytes: &[u8]) -> Result<Self, String> {
-        String::from_utf8(bytes.to_vec()).map(UserId).map_err(|e| e.to_string())
+        String::from_utf8(bytes.to_vec())
+            .map(|s| UserId(Arc::<str>::from(s)))
+            .map_err(|e| e.to_string())
     }
 }
 

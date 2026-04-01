@@ -1,5 +1,6 @@
 use crate::errors::error::{AuthError, AuthResult};
 use crate::models::context::AuthenticatedUser;
+use crate::oidc::OidcError;
 use crate::providers::jwt_auth;
 use crate::providers::jwt_config;
 use crate::providers::jwt_config::JwtConfig;
@@ -300,14 +301,10 @@ async fn validate_bearer_token(
 
             let claims: jwt_auth::JwtClaims =
                 validator.validate(token).await.map_err(|e| match e {
-                    kalamdb_oidc::OidcError::JwtValidationFailed(ref msg)
-                        if msg.contains("expired") =>
-                    {
+                    OidcError::JwtValidationFailed(ref msg) if msg.contains("expired") => {
                         AuthError::TokenExpired
                     },
-                    kalamdb_oidc::OidcError::JwtValidationFailed(ref msg)
-                        if msg.contains("signature") =>
-                    {
+                    OidcError::JwtValidationFailed(ref msg) if msg.contains("signature") => {
                         AuthError::InvalidSignature
                     },
                     _ => AuthError::MalformedAuthorization(format!(

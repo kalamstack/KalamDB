@@ -301,7 +301,9 @@ mod tests {
                 _params: Vec<ScalarValue>,
                 _context: &ExecutionContext,
             ) -> Result<ExecutionResult, KalamDbError> {
-                Ok(ExecutionResult::Success { message: "ok".to_string() })
+                Ok(ExecutionResult::Success {
+                    message: "ok".to_string(),
+                })
             }
 
             async fn check_authorization(
@@ -309,10 +311,11 @@ mod tests {
                 _statement: &SqlStatement,
                 context: &ExecutionContext,
             ) -> Result<(), KalamDbError> {
-                if !matches!(context.user_role(), kalamdb_commons::Role::Dba | kalamdb_commons::Role::System) {
-                    Err(KalamDbError::Unauthorized(
-                        "Requires DBA role".to_string(),
-                    ))
+                if !matches!(
+                    context.user_role(),
+                    kalamdb_commons::Role::Dba | kalamdb_commons::Role::System
+                ) {
+                    Err(KalamDbError::Unauthorized("Requires DBA role".to_string()))
                 } else {
                     Ok(())
                 }

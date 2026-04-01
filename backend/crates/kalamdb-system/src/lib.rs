@@ -14,7 +14,7 @@
 //!
 //! ## Architecture
 //!
-//! System tables use `SecuredSystemTableProvider` from `kalamdb-session` to
+//! System tables use `SecuredSystemTableProvider` from `kalamdb-session-datafusion` to
 //! enforce permission checks at scan time. This provides defense-in-depth
 //! security even for nested queries or subqueries.
 //!
@@ -54,8 +54,8 @@ pub use services::SystemColumnsService;
 // Re-export SystemTable and StoragePartition from kalamdb_commons for consistent usage
 pub use kalamdb_commons::{schemas, NamespaceId, StoragePartition, SystemTable, TableName};
 
-// Re-export session types for convenience
-pub use kalamdb_session::{
+// Re-export DataFusion session security adapters for convenience
+pub use kalamdb_session_datafusion::{
     check_system_table_access, secure_provider, SecuredSystemTableProvider, SessionUserContext,
 };
 

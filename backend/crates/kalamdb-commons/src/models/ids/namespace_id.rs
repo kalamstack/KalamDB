@@ -1,6 +1,7 @@
 //! Type-safe wrapper for namespace identifiers.
 
 use std::fmt;
+use std::sync::{Arc, OnceLock};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -36,9 +37,17 @@ impl std::error::Error for NamespaceIdValidationError {}
 /// - Names containing `..` (parent directory traversal)
 /// - Names containing `/` or `\` (path separators)
 /// - Names containing null bytes
+/// Statics for cheap singleton construction.
+static SYSTEM_NS: OnceLock<Arc<str>> = OnceLock::new();
+static DEFAULT_NS: OnceLock<Arc<str>> = OnceLock::new();
+
+/// Type-safe wrapper for namespace identifiers.
+///
+/// Stored as `Arc<str>` so `clone()` is a cheap atomic refcount increment
+/// rather than a heap allocation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct NamespaceId(String);
+pub struct NamespaceId(Arc<str>);
 
 impl NamespaceId {
     /// Validates a namespace ID for security issues.
@@ -88,7 +97,7 @@ impl NamespaceId {
     pub fn try_new(id: impl Into<String>) -> Result<Self, NamespaceIdValidationError> {
         let id = id.into();
         Self::validate(&id)?;
-        Ok(Self(id.to_lowercase()))
+        Ok(Self(Arc::<str>::from(id.to_lowercase())))
     }
 
     /// Creates a new NamespaceId from a string.
@@ -103,7 +112,7 @@ impl NamespaceId {
     pub fn new(id: impl Into<String>) -> Self {
         let id = id.into();
         Self::validate(&id).expect("Invalid namespace ID");
-        Self(id.to_lowercase())
+        Self(Arc::<str>::from(id.to_lowercase()))
     }
 
     /// Returns the namespace ID as a string slice.
@@ -115,19 +124,19 @@ impl NamespaceId {
     /// Consumes the wrapper and returns the inner String.
     #[inline]
     pub fn into_string(self) -> String {
-        self.0
+        String::from(&*self.0)
     }
 
-    /// Create system namespace ID
+    /// Create system namespace ID — cached singleton.
     #[inline]
     pub fn system() -> Self {
-        Self(SYSTEM_NAMESPACE.to_string())
+        Self(SYSTEM_NS.get_or_init(|| Arc::from(SYSTEM_NAMESPACE)).clone())
     }
 
-    /// Create default namespace ID
+    /// Create default namespace ID — cached singleton.
     #[inline]
     pub fn default_ns() -> Self {
-        Self::default()
+        Self(DEFAULT_NS.get_or_init(|| Arc::from("default")).clone())
     }
 
     /// Check if this is a system namespace (internal DataFusion/KalamDB namespaces).
@@ -165,10 +174,10 @@ impl NamespaceId {
     /// assert!(NamespaceId::new("kalamdb").is_reserved());
     /// assert!(!NamespaceId::new("my_app").is_reserved());
     /// ```
+    /// Values are already stored lowercase, so no allocation needed.
     #[inline]
     pub fn is_reserved(&self) -> bool {
-        let lowercase = self.0.to_lowercase();
-        RESERVED_NAMESPACE_NAMES.iter().any(|&reserved| reserved == lowercase)
+        RESERVED_NAMESPACE_NAMES.iter().any(|&reserved| reserved == self.as_str())
     }
 }
 
@@ -180,21 +189,21 @@ impl fmt::Display for NamespaceId {
 
 impl Default for NamespaceId {
     fn default() -> Self {
-        Self("default".to_string())
+        Self::default_ns()
     }
 }
 
 impl From<String> for NamespaceId {
     fn from(s: String) -> Self {
         Self::validate(&s).expect("Invalid namespace ID");
-        Self(s.to_lowercase())
+        Self(Arc::<str>::from(s.to_lowercase()))
     }
 }
 
 impl From<&str> for NamespaceId {
     fn from(s: &str) -> Self {
         Self::validate(s).expect("Invalid namespace ID");
-        Self(s.to_lowercase())
+        Self(Arc::<str>::from(s.to_lowercase()))
     }
 }
 
@@ -216,7 +225,9 @@ impl StorageKey for NamespaceId {
     }
 
     fn from_storage_key(bytes: &[u8]) -> Result<Self, String> {
-        String::from_utf8(bytes.to_vec()).map(NamespaceId).map_err(|e| e.to_string())
+        String::from_utf8(bytes.to_vec())
+            .map(|s| NamespaceId(Arc::<str>::from(s)))
+            .map_err(|e| e.to_string())
     }
 }
 

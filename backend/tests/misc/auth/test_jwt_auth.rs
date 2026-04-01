@@ -16,9 +16,8 @@
 use super::test_support::{auth_helper, TestServer};
 use actix_web::{test, web, App};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
-use kalamdb_api::repositories::user_repo::CoreUsersRepo;
 use kalamdb_auth::providers::jwt_auth::{JwtClaims as AuthJwtClaims, KALAMDB_ISSUER};
-use kalamdb_auth::UserRepository;
+use kalamdb_auth::{CoreUsersRepo, UserRepository};
 use kalamdb_commons::{Role, UserId, UserName};
 use serde::Serialize;
 use std::sync::Arc;

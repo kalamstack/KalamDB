@@ -6,8 +6,7 @@
 use super::http_server::{self, HttpTestServer};
 use datafusion::prelude::SessionContext;
 use kalam_link::models::{ErrorDetail, QueryResponse, ResponseStatus};
-use kalamdb_api::repositories::CoreUsersRepo;
-use kalamdb_auth::UserRepository;
+use kalamdb_auth::{CoreUsersRepo, UserRepository};
 use kalamdb_commons::constants::AuthConstants;
 use kalamdb_commons::{AuthType, Role, StorageId, UserId, UserName};
 use kalamdb_core::app_context::AppContext;

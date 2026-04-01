@@ -120,10 +120,7 @@ async fn test_blackhole_during_subscribe_handshake_recovers() {
         // Insert a row after recovery.
         writer
             .execute_query(
-                &format!(
-                    "INSERT INTO {} (id, value) VALUES ('post-blackhole', 'live')",
-                    table
-                ),
+                &format!("INSERT INTO {} (id, value) VALUES ('post-blackhole', 'live')", table),
                 None,
                 None,
                 None,

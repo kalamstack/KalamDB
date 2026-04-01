@@ -64,9 +64,9 @@ impl TypedStatementHandler<ShowNamespacesStatement> for ShowNamespacesHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
     use kalamdb_commons::models::UserId;
     use kalamdb_commons::Role;
+    use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
     use std::sync::Arc;
 
     fn init_app_context() -> Arc<AppContext> {

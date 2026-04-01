@@ -12,10 +12,10 @@
 //! while preserving type safety at execution time through runtime deserialization.
 
 use super::executor_trait::{JobContext, JobDecision, JobExecutor, JobParams};
+use async_trait::async_trait;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::error::KalamDbError;
 use kalamdb_core::error_extensions::SerdeJsonResultExt;
-use async_trait::async_trait;
 use kalamdb_system::Job;
 use kalamdb_system::JobType;
 use parking_lot::RwLock;
@@ -468,8 +468,8 @@ impl Default for JobRegistry {
 mod tests {
     use super::*;
     use crate::executors::JobParams;
-    use kalamdb_core::test_helpers::test_app_context_simple;
     use kalamdb_commons::models::{JobId, NodeId};
+    use kalamdb_core::test_helpers::test_app_context_simple;
     use kalamdb_system::JobStatus;
     use serde::{Deserialize, Serialize};
 

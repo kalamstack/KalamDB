@@ -9,6 +9,7 @@ use kalamdb_commons::models::TableId;
 use kalamdb_commons::schemas::TableType;
 
 use crate::app_context::AppContext;
+use crate::applier::executor::utils::{run_blocking_applier, with_plan_cache_invalidation};
 use crate::applier::ApplierError;
 
 /// Executor for DDL (Data Definition Language) operations
@@ -38,23 +39,17 @@ impl DdlExecutor {
         let app_context = self.app_context.clone();
         let table_id = table_id.clone();
         let table_def = table_def.clone();
-        tokio::task::spawn_blocking(move || {
-            // Refactored: Use SchemaRegistry to handle registration/persistence central logic
-            app_context
-                .schema_registry()
-                .register_table(table_def)
-                .map_err(|e| ApplierError::Execution(format!("Failed to register table: {}", e)))?;
+        with_plan_cache_invalidation(app_context, move |app_context: Arc<AppContext>| async move {
+            run_blocking_applier(move || {
+                app_context.schema_registry().register_table(table_def).map_err(|e| {
+                    ApplierError::Execution(format!("Failed to register table: {}", e))
+                })?;
 
-            // 3. Invalidate cached plans across this node
-            if let Some(sql_executor) = app_context.try_sql_executor() {
-                sql_executor.clear_plan_cache();
-                log::debug!("DdlExecutor: Cleared SQL plan cache after DDL");
-            }
-
-            Ok(format!("{} table {} created successfully", table_type, table_id.full_name(),))
+                Ok(format!("{} table {} created successfully", table_type, table_id.full_name(),))
+            })
+            .await
         })
         .await
-        .map_err(|e| ApplierError::Execution(format!("Task join error: {}", e)))?
     }
 
     /// Execute ALTER TABLE
@@ -77,47 +72,41 @@ impl DdlExecutor {
         let app_context = self.app_context.clone();
         let table_id = table_id.clone();
         let table_def = table_def.clone();
-        tokio::task::spawn_blocking(move || {
-            // Use SchemaRegistry to handle registration/persistence central logic
-            app_context
-                .schema_registry()
-                .register_table(table_def.clone())
-                .map_err(|e| {
-                    ApplierError::Execution(format!("Failed to register altered table: {}", e))
-                })?;
+        with_plan_cache_invalidation(app_context, move |app_context: Arc<AppContext>| async move {
+            run_blocking_applier(move || {
+                app_context
+                    .schema_registry()
+                    .register_table(table_def.clone())
+                    .map_err(|e| {
+                        ApplierError::Execution(format!("Failed to register altered table: {}", e))
+                    })?;
 
-            log::debug!(
-                "CommandExecutorImpl: Updated schema cache and provider for {}",
-                table_id.full_name()
-            );
+                log::debug!(
+                    "CommandExecutorImpl: Updated schema cache and provider for {}",
+                    table_id.full_name()
+                );
 
-            // 3. Invalidate cached plans across this node
-            if let Some(sql_executor) = app_context.try_sql_executor() {
-                sql_executor.clear_plan_cache();
-                log::debug!("DdlExecutor: Cleared SQL plan cache after DDL");
-            }
-
-            // 4. Verify the schema was updated correctly
-            if let Some(cached) = app_context.schema_registry().get(&table_id) {
-                if let Ok(schema) = cached.arrow_schema() {
-                    log::debug!(
-                        "CommandExecutorImpl: ALTER TABLE {} complete - Arrow schema now has {} fields: {:?}",
-                        table_id.full_name(),
-                        schema.fields().len(),
-                        schema.fields().iter().map(|f| f.name()).collect::<Vec<_>>()
-                    );
+                if let Some(cached) = app_context.schema_registry().get(&table_id) {
+                    if let Ok(schema) = cached.arrow_schema() {
+                        log::debug!(
+                            "CommandExecutorImpl: ALTER TABLE {} complete - Arrow schema now has {} fields: {:?}",
+                            table_id.full_name(),
+                            schema.fields().len(),
+                            schema.fields().iter().map(|f| f.name()).collect::<Vec<_>>()
+                        );
+                    }
                 }
-            }
 
-            Ok(format!(
-                "Table {} altered successfully (version {} -> {})",
-                table_id.full_name(),
-                old_version,
-                table_def.schema_version
-            ))
+                Ok(format!(
+                    "Table {} altered successfully (version {} -> {})",
+                    table_id.full_name(),
+                    old_version,
+                    table_def.schema_version
+                ))
+            })
+            .await
         })
         .await
-        .map_err(|e| ApplierError::Execution(format!("Task join error: {}", e)))?
     }
 
     /// Execute DROP TABLE
@@ -126,23 +115,18 @@ impl DdlExecutor {
 
         let app_context = self.app_context.clone();
         let table_id = table_id.clone();
-        tokio::task::spawn_blocking(move || {
-            // Delegate to SchemaRegistry (delete-through)
-            app_context
-                .schema_registry()
-                .delete_table_definition(&table_id)
-                .map_err(|e| ApplierError::Execution(format!("Failed to drop table: {}", e)))?;
+        with_plan_cache_invalidation(app_context, move |app_context: Arc<AppContext>| async move {
+            run_blocking_applier(move || {
+                app_context
+                    .schema_registry()
+                    .delete_table_definition(&table_id)
+                    .map_err(|e| ApplierError::Execution(format!("Failed to drop table: {}", e)))?;
 
-            // 3. Invalidate cached plans across this node
-            if let Some(sql_executor) = app_context.try_sql_executor() {
-                sql_executor.clear_plan_cache();
-                log::debug!("DdlExecutor: Cleared SQL plan cache after DDL");
-            }
-
-            Ok(format!("Table {} dropped successfully", table_id.full_name()))
+                Ok(format!("Table {} dropped successfully", table_id.full_name()))
+            })
+            .await
         })
         .await
-        .map_err(|e| ApplierError::Execution(format!("Task join error: {}", e)))?
     }
 }
 

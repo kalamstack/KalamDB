@@ -55,9 +55,6 @@ tracing = { workspace = true }
 tokio = { workspace = true }
 futures-util = { workspace = true }
 
-# Async trait support
-async-trait = { workspace = true }
-
 # Base64 encoding/decoding
 base64 = { workspace = true }
 

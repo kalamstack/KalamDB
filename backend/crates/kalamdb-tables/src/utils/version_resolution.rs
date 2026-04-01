@@ -191,6 +191,7 @@ fn create_empty_batch(schema: &Arc<Schema>) -> Result<RecordBatch, KalamDbError>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     #[tokio::test]
     async fn test_empty() {
         let s = Arc::new(Schema::new(vec![
@@ -269,6 +270,92 @@ mod tests {
         let r = resolve_latest_version(f, l, s).await.unwrap();
         assert_eq!(r.num_rows(), 1);
         assert_eq!(r.column(2).as_any().downcast_ref::<StringArray>().unwrap().value(0), "Fast");
+    }
+
+    #[derive(Debug, Clone)]
+    struct TestVersionedRow {
+        seq: SeqId,
+        deleted: bool,
+        pk: String,
+        value: String,
+    }
+
+    impl VersionedRow for TestVersionedRow {
+        fn seq_id(&self) -> SeqId {
+            self.seq
+        }
+
+        fn deleted(&self) -> bool {
+            self.deleted
+        }
+
+        fn pk_value(&self, _pk_name: &str) -> Option<String> {
+            Some(self.pk.clone())
+        }
+    }
+
+    #[test]
+    fn resolve_latest_kvs_from_cold_batch_only_builds_winning_cold_rows() {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Utf8, false),
+            Field::new(SystemColumnNames::SEQ, DataType::Int64, false),
+            Field::new(SystemColumnNames::DELETED, DataType::Boolean, false),
+            Field::new("name", DataType::Utf8, true),
+        ]));
+        let cold_batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(StringArray::from(vec!["a", "b", "c"])),
+                Arc::new(Int64Array::from(vec![1, 3, 2])),
+                Arc::new(BooleanArray::from(vec![false, false, false])),
+                Arc::new(StringArray::from(vec!["cold-a", "cold-b", "cold-c"])),
+            ],
+        )
+        .unwrap();
+
+        let hot_rows = vec![(
+            "hot-a".to_string(),
+            TestVersionedRow {
+                seq: SeqId::from_i64(2),
+                deleted: false,
+                pk: "a".to_string(),
+                value: "hot-a".to_string(),
+            },
+        )];
+        let build_calls = AtomicUsize::new(0);
+
+        let resolved =
+            resolve_latest_kvs_from_cold_batch("id", hot_rows, &cold_batch, false, |row_data| {
+                build_calls.fetch_add(1, Ordering::SeqCst);
+                let pk = match row_data.fields.get("id").unwrap() {
+                    ScalarValue::Utf8(Some(value)) | ScalarValue::LargeUtf8(Some(value)) => {
+                        value.clone()
+                    },
+                    value => value.to_string(),
+                };
+                let name = match row_data.fields.get("name").unwrap() {
+                    ScalarValue::Utf8(Some(value)) | ScalarValue::LargeUtf8(Some(value)) => {
+                        value.clone()
+                    },
+                    value => value.to_string(),
+                };
+                Ok((
+                    pk.clone(),
+                    TestVersionedRow {
+                        seq: row_data.seq_id,
+                        deleted: false,
+                        pk,
+                        value: name,
+                    },
+                ))
+            })
+            .unwrap();
+
+        assert_eq!(build_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(resolved.len(), 3);
+        assert!(resolved.iter().any(|(_, row)| row.pk == "a" && row.value == "hot-a"));
+        assert!(resolved.iter().any(|(_, row)| row.pk == "b" && row.value == "cold-b"));
+        assert!(resolved.iter().any(|(_, row)| row.pk == "c" && row.value == "cold-c"));
     }
 }
 
@@ -388,65 +475,14 @@ pub struct ParquetRowData {
 
 /// Convert Parquet RecordBatch rows into SeqId + JSON field maps
 pub fn parquet_batch_to_rows(batch: &RecordBatch) -> Result<Vec<ParquetRowData>, KalamDbError> {
-    use datafusion::arrow::array::{Array, BooleanArray, Int64Array};
-
     if batch.num_rows() == 0 {
         return Ok(Vec::new());
     }
 
-    let schema = batch.schema();
-    let seq_idx = schema
-        .fields()
-        .iter()
-        .position(|f| f.name() == SystemColumnNames::SEQ)
-        .ok_or_else(|| KalamDbError::Other("Missing _seq column in Parquet batch".to_string()))?;
-    let deleted_idx = schema.fields().iter().position(|f| f.name() == SystemColumnNames::DELETED);
-
-    let seq_array = batch
-        .column(seq_idx)
-        .as_any()
-        .downcast_ref::<Int64Array>()
-        .ok_or_else(|| KalamDbError::Other("_seq column is not Int64Array".to_string()))?;
-    let deleted_array =
-        deleted_idx.and_then(|idx| batch.column(idx).as_any().downcast_ref::<BooleanArray>());
-
+    let decoder = ParquetBatchDecoder::new(batch, None)?;
     let mut rows = Vec::with_capacity(batch.num_rows());
     for row_idx in 0..batch.num_rows() {
-        let seq_val = seq_array.value(row_idx);
-        let seq_id = SeqId::from_i64(seq_val);
-        let deleted = deleted_array
-            .and_then(|arr| {
-                if !arr.is_null(row_idx) {
-                    Some(arr.value(row_idx))
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(false);
-
-        let mut values = BTreeMap::new();
-        for (col_idx, field) in schema.fields().iter().enumerate() {
-            let col_name = field.name();
-            if col_name == SystemColumnNames::SEQ || col_name == SystemColumnNames::DELETED {
-                continue;
-            }
-
-            let array = batch.column(col_idx);
-            match arrow_value_to_scalar(array.as_ref(), row_idx) {
-                Ok(val) => {
-                    values.insert(col_name.clone(), val);
-                },
-                Err(e) => {
-                    log::warn!("Failed to convert column {} for row {}: {}", col_name, row_idx, e);
-                },
-            }
-        }
-
-        rows.push(ParquetRowData {
-            seq_id,
-            deleted,
-            fields: Row::new(values),
-        });
+        rows.push(decoder.row_at(row_idx)?);
     }
 
     Ok(rows)
@@ -525,45 +561,79 @@ pub fn parquet_batch_to_metadata(
     batch: &RecordBatch,
     pk_name: &str,
 ) -> Result<Vec<(SeqId, RowMetadata)>, KalamDbError> {
-    use datafusion::arrow::array::{Array, BooleanArray, Int64Array};
-
     if batch.num_rows() == 0 {
         return Ok(Vec::new());
     }
 
-    let schema = batch.schema();
-    let seq_idx = schema
-        .fields()
-        .iter()
-        .position(|f| f.name() == SystemColumnNames::SEQ)
-        .ok_or_else(|| KalamDbError::Other("Missing _seq column in Parquet batch".to_string()))?;
-    let deleted_idx = schema.fields().iter().position(|f| f.name() == SystemColumnNames::DELETED);
-    let pk_idx = schema.fields().iter().position(|f| f.name() == pk_name);
-
-    let seq_array = batch
-        .column(seq_idx)
-        .as_any()
-        .downcast_ref::<Int64Array>()
-        .ok_or_else(|| KalamDbError::Other("_seq column is not Int64Array".to_string()))?;
-    let deleted_array =
-        deleted_idx.and_then(|idx| batch.column(idx).as_any().downcast_ref::<BooleanArray>());
-
+    let decoder = ParquetBatchDecoder::new(batch, Some(pk_name))?;
     let mut rows = Vec::with_capacity(batch.num_rows());
     for row_idx in 0..batch.num_rows() {
-        let seq_val = seq_array.value(row_idx);
-        let seq_id = SeqId::from_i64(seq_val);
-        let deleted = deleted_array
-            .and_then(|arr| {
-                if !arr.is_null(row_idx) {
-                    Some(arr.value(row_idx))
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(false);
+        let metadata = decoder.metadata_at(row_idx);
+        rows.push((metadata.seq, metadata));
+    }
 
-        let pk_value = pk_idx.and_then(|idx| {
-            let array = batch.column(idx);
+    Ok(rows)
+}
+
+#[derive(Debug)]
+struct ParquetBatchDecoder<'a> {
+    batch: &'a RecordBatch,
+    seq_array: &'a Int64Array,
+    deleted_array: Option<&'a BooleanArray>,
+    pk_idx: Option<usize>,
+    value_columns: Vec<(usize, String)>,
+}
+
+impl<'a> ParquetBatchDecoder<'a> {
+    fn new(batch: &'a RecordBatch, pk_name: Option<&str>) -> Result<Self, KalamDbError> {
+        use datafusion::arrow::array::{Array, BooleanArray, Int64Array};
+
+        let schema = batch.schema();
+        let seq_idx = schema
+            .fields()
+            .iter()
+            .position(|f| f.name() == SystemColumnNames::SEQ)
+            .ok_or_else(|| {
+                KalamDbError::Other("Missing _seq column in Parquet batch".to_string())
+            })?;
+        let deleted_idx =
+            schema.fields().iter().position(|f| f.name() == SystemColumnNames::DELETED);
+        let pk_idx = pk_name.and_then(|name| schema.fields().iter().position(|f| f.name() == name));
+
+        let seq_array = batch
+            .column(seq_idx)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .ok_or_else(|| KalamDbError::Other("_seq column is not Int64Array".to_string()))?;
+        let deleted_array =
+            deleted_idx.and_then(|idx| batch.column(idx).as_any().downcast_ref::<BooleanArray>());
+        let value_columns = schema
+            .fields()
+            .iter()
+            .enumerate()
+            .filter(|(_, field)| {
+                field.name() != SystemColumnNames::SEQ && field.name() != SystemColumnNames::DELETED
+            })
+            .map(|(idx, field)| (idx, field.name().clone()))
+            .collect();
+
+        Ok(Self {
+            batch,
+            seq_array,
+            deleted_array,
+            pk_idx,
+            value_columns,
+        })
+    }
+
+    fn metadata_at(&self, row_idx: usize) -> RowMetadata {
+        let seq = SeqId::from_i64(self.seq_array.value(row_idx));
+        let deleted = self
+            .deleted_array
+            .and_then(|arr| (!arr.is_null(row_idx)).then(|| arr.value(row_idx)))
+            .unwrap_or(false);
+        let pk_value = self.pk_idx.and_then(|idx| {
+            let array = self.batch.column(idx);
             arrow_value_to_scalar(array.as_ref(), row_idx).ok().and_then(|sv| match &sv {
                 ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)) => Some(s.clone()),
                 other if other.is_null() => None,
@@ -571,17 +641,35 @@ pub fn parquet_batch_to_metadata(
             })
         });
 
-        rows.push((
-            seq_id,
-            RowMetadata {
-                seq: seq_id,
-                deleted,
-                pk_value,
-            },
-        ));
+        RowMetadata {
+            seq,
+            deleted,
+            pk_value,
+        }
     }
 
-    Ok(rows)
+    fn row_at(&self, row_idx: usize) -> Result<ParquetRowData, KalamDbError> {
+        let metadata = self.metadata_at(row_idx);
+        let mut values = BTreeMap::new();
+
+        for (col_idx, col_name) in &self.value_columns {
+            let array = self.batch.column(*col_idx);
+            match arrow_value_to_scalar(array.as_ref(), row_idx) {
+                Ok(val) => {
+                    values.insert(col_name.clone(), val);
+                },
+                Err(e) => {
+                    log::warn!("Failed to convert column {} for row {}: {}", col_name, row_idx, e);
+                },
+            }
+        }
+
+        Ok(ParquetRowData {
+            seq_id: metadata.seq,
+            deleted: metadata.deleted,
+            fields: Row::new(values),
+        })
+    }
 }
 
 /// Count unique non-deleted rows after version resolution (hot + cold merge).
@@ -674,4 +762,107 @@ where
     }
 
     best.into_values().filter(|(_, row)| keep_deleted || !row.deleted()).collect()
+}
+
+/// Resolve latest rows by merging fully decoded hot rows with metadata-first cold rows.
+///
+/// Cold Parquet rows are only materialized if they win version resolution for a PK.
+pub fn resolve_latest_kvs_from_cold_batch<K, R, I, F>(
+    pk_name: &str,
+    hot_rows: I,
+    cold_batch: &RecordBatch,
+    keep_deleted: bool,
+    build_cold_row: F,
+) -> Result<Vec<(K, R)>, KalamDbError>
+where
+    I: IntoIterator<Item = (K, R)>,
+    F: Fn(ParquetRowData) -> Result<(K, R), KalamDbError>,
+    K: Clone,
+    R: VersionedRow,
+{
+    use std::collections::hash_map::Entry;
+
+    enum Winner<K, R> {
+        Hot((K, R)),
+        Cold {
+            row_idx: usize,
+            metadata: RowMetadata,
+        },
+    }
+
+    impl<K, R> Winner<K, R>
+    where
+        R: VersionedRow,
+    {
+        fn seq_id(&self) -> SeqId {
+            match self {
+                Winner::Hot((_, row)) => row.seq_id(),
+                Winner::Cold { metadata, .. } => metadata.seq,
+            }
+        }
+
+        fn deleted(&self) -> bool {
+            match self {
+                Winner::Hot((_, row)) => row.deleted(),
+                Winner::Cold { metadata, .. } => metadata.deleted,
+            }
+        }
+    }
+
+    let mut best: HashMap<String, Winner<K, R>> = HashMap::new();
+
+    for (key, row) in hot_rows {
+        let pk_key = row
+            .pk_value(pk_name)
+            .filter(|val| !val.is_empty())
+            .unwrap_or_else(|| format!("_seq:{}", row.seq_id().as_i64()));
+
+        match best.entry(pk_key) {
+            Entry::Occupied(mut entry) => {
+                if row.seq_id() > entry.get().seq_id() {
+                    entry.insert(Winner::Hot((key, row)));
+                }
+            },
+            Entry::Vacant(entry) => {
+                entry.insert(Winner::Hot((key, row)));
+            },
+        }
+    }
+
+    let decoder = ParquetBatchDecoder::new(cold_batch, Some(pk_name))?;
+    for row_idx in 0..cold_batch.num_rows() {
+        let metadata = decoder.metadata_at(row_idx);
+        let pk_key = metadata
+            .pk_value
+            .clone()
+            .filter(|val| !val.is_empty())
+            .unwrap_or_else(|| format!("_seq:{}", metadata.seq.as_i64()));
+
+        match best.entry(pk_key) {
+            Entry::Occupied(mut entry) => {
+                if metadata.seq > entry.get().seq_id() {
+                    entry.insert(Winner::Cold { row_idx, metadata });
+                }
+            },
+            Entry::Vacant(entry) => {
+                entry.insert(Winner::Cold { row_idx, metadata });
+            },
+        }
+    }
+
+    let mut resolved = Vec::with_capacity(best.len());
+    for winner in best.into_values() {
+        if !keep_deleted && winner.deleted() {
+            continue;
+        }
+
+        match winner {
+            Winner::Hot(row) => resolved.push(row),
+            Winner::Cold { row_idx, .. } => {
+                resolved.push(build_cold_row(decoder.row_at(row_idx)?)?)
+            },
+        }
+    }
+
+    Ok(resolved)
 }

@@ -4,25 +4,22 @@
 // - HS256 internal token generation, signing, and validation
 // - Internal issuer trust verification (`KALAMDB_ISSUER`, `is_internal_issuer`, `verify_issuer`)
 //
-// The following types are defined in `kalamdb-oidc` and re-exported here so
+// The following token and claim types live in the auth crate's internal OIDC module and are
 // existing call-sites continue to work unchanged:
 //   `JwtClaims`, `TokenType`, `DEFAULT_JWT_EXPIRY_HOURS`
 //   `extract_issuer_unverified`, `extract_algorithm_unverified`
 //
-// External OIDC token validation (RS256/ES256 via JWKS) is handled by
-// `kalamdb-oidc` and orchestrated in `bearer.rs`.
+// External OIDC token validation (RS256/ES256 via JWKS) is handled by the auth crate's internal
+// OIDC validator and orchestrated in `bearer.rs`.
 
 use crate::errors::error::{AuthError, AuthResult};
+pub(crate) use crate::oidc::{extract_algorithm_unverified, extract_issuer_unverified};
+pub use crate::oidc::{JwtClaims, TokenType, DEFAULT_JWT_EXPIRY_HOURS};
 use jsonwebtoken::errors::ErrorKind;
 use jsonwebtoken::{
     decode, decode_header, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation,
 };
 use kalamdb_commons::{Role, UserId, UserName};
-
-// ── Types and utilities that live in kalamdb-oidc ───────────────────────────
-// Re-exported here so callers using `jwt_auth::JwtClaims` etc. need no changes.
-pub use kalamdb_oidc::{extract_algorithm_unverified, extract_issuer_unverified};
-pub use kalamdb_oidc::{JwtClaims, TokenType, DEFAULT_JWT_EXPIRY_HOURS};
 
 /// Default issuer for KalamDB-issued tokens.
 pub const KALAMDB_ISSUER: &str = "kalamdb";

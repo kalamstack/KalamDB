@@ -18,13 +18,13 @@
 //! }
 //! ```
 
-use kalamdb_core::error::KalamDbError;
 use crate::executors::shared_table_cleanup::cleanup_empty_shared_scope_if_needed;
 use crate::executors::{JobContext, JobDecision, JobExecutor, JobParams};
 use async_trait::async_trait;
 use kalamdb_commons::constants::ColumnFamilyNames;
 use kalamdb_commons::schemas::TableType;
 use kalamdb_commons::TableId;
+use kalamdb_core::error::KalamDbError;
 use kalamdb_store::storage_trait::{Partition, StorageBackendAsync};
 use kalamdb_system::JobType;
 use serde::{Deserialize, Serialize};

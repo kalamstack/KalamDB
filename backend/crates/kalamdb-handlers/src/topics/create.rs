@@ -1,10 +1,10 @@
 //! CREATE TOPIC handler
 
+use kalamdb_commons::models::{NamespaceId, TopicId};
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::error::KalamDbError;
 use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
 use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
-use kalamdb_commons::models::{NamespaceId, TopicId};
 use kalamdb_sql::ddl::CreateTopicStatement;
 use kalamdb_system::providers::topics::models::Topic;
 use std::sync::Arc;
@@ -106,9 +106,9 @@ impl TypedStatementHandler<CreateTopicStatement> for CreateTopicHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
     use kalamdb_commons::models::UserId;
     use kalamdb_commons::Role;
+    use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
     use kalamdb_system::Namespace;
 
     fn test_context() -> ExecutionContext {

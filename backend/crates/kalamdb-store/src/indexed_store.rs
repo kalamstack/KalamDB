@@ -97,6 +97,7 @@
 //! ```
 
 use crate::entity_store::{EntityIterator, EntityStore};
+use crate::async_utils::run_blocking_result;
 use crate::storage_trait::{Operation, Partition, Result, StorageBackend, StorageError};
 use kalamdb_commons::{KSerializable, StorageKey};
 use std::collections::{HashMap, HashSet};
@@ -1069,9 +1070,7 @@ where
     /// Uses `spawn_blocking` to avoid blocking the async runtime.
     pub async fn insert_async(&self, key: K, entity: V) -> Result<()> {
         let store = self.clone();
-        tokio::task::spawn_blocking(move || store.insert(&key, &entity))
-            .await
-            .map_err(|e| StorageError::Other(format!("spawn_blocking error: {}", e)))?
+        run_blocking_result(move || store.insert(&key, &entity)).await
     }
 
     /// Async version of `insert_batch()`.
@@ -1079,9 +1078,7 @@ where
     /// Uses `spawn_blocking` to avoid blocking the async runtime.
     pub async fn insert_batch_async(&self, entries: Vec<(K, V)>) -> Result<()> {
         let store = self.clone();
-        tokio::task::spawn_blocking(move || store.insert_batch(&entries))
-            .await
-            .map_err(|e| StorageError::Other(format!("spawn_blocking error: {}", e)))?
+        run_blocking_result(move || store.insert_batch(&entries)).await
     }
 
     /// Async version of `update()`.
@@ -1089,9 +1086,7 @@ where
     /// Uses `spawn_blocking` to avoid blocking the async runtime.
     pub async fn update_async(&self, key: K, entity: V) -> Result<()> {
         let store = self.clone();
-        tokio::task::spawn_blocking(move || store.update(&key, &entity))
-            .await
-            .map_err(|e| StorageError::Other(format!("spawn_blocking error: {}", e)))?
+        run_blocking_result(move || store.update(&key, &entity)).await
     }
 
     /// Async version of `delete()`.
@@ -1099,9 +1094,7 @@ where
     /// Uses `spawn_blocking` to avoid blocking the async runtime.
     pub async fn delete_async(&self, key: K) -> Result<()> {
         let store = self.clone();
-        tokio::task::spawn_blocking(move || store.delete(&key))
-            .await
-            .map_err(|e| StorageError::Other(format!("spawn_blocking error: {}", e)))?
+        run_blocking_result(move || store.delete(&key)).await
     }
 
     /// Async version of `scan_by_index()`.
@@ -1114,11 +1107,7 @@ where
         limit: Option<usize>,
     ) -> Result<Vec<(K, V)>> {
         let store = self.clone();
-        tokio::task::spawn_blocking(move || {
-            store.scan_by_index(index_idx, prefix.as_deref(), limit)
-        })
-        .await
-        .map_err(|e| StorageError::Other(format!("spawn_blocking error: {}", e)))?
+        run_blocking_result(move || store.scan_by_index(index_idx, prefix.as_deref(), limit)).await
     }
 
     /// Async version of `get_latest_by_index_prefix()`.
@@ -1130,9 +1119,7 @@ where
         prefix: Vec<u8>,
     ) -> Result<Option<(K, V)>> {
         let store = self.clone();
-        tokio::task::spawn_blocking(move || store.get_latest_by_index_prefix(index_idx, &prefix))
-            .await
-            .map_err(|e| StorageError::Other(format!("spawn_blocking error: {}", e)))?
+        run_blocking_result(move || store.get_latest_by_index_prefix(index_idx, &prefix)).await
     }
 
     /// Async version of `insert_batch_preencoded()`.
@@ -1144,9 +1131,7 @@ where
         encoded_values: Vec<Vec<u8>>,
     ) -> Result<()> {
         let store = self.clone();
-        tokio::task::spawn_blocking(move || store.insert_batch_preencoded(&entries, encoded_values))
-            .await
-            .map_err(|e| StorageError::Other(format!("spawn_blocking error: {}", e)))?
+        run_blocking_result(move || store.insert_batch_preencoded(&entries, encoded_values)).await
     }
 
     /// Async version of `get()` from EntityStore.
@@ -1154,9 +1139,7 @@ where
     /// Uses `spawn_blocking` to avoid blocking the async runtime.
     pub async fn get_async(&self, key: K) -> Result<Option<V>> {
         let store = self.clone();
-        tokio::task::spawn_blocking(move || store.get(&key))
-            .await
-            .map_err(|e| StorageError::Other(format!("spawn_blocking error: {}", e)))?
+        run_blocking_result(move || store.get(&key)).await
     }
 
     /// Async version of `scan_all()` from EntityStore.
@@ -1169,12 +1152,11 @@ where
         start_key: Option<K>,
     ) -> Result<Vec<(Vec<u8>, V)>> {
         let store = self.clone();
-        tokio::task::spawn_blocking(move || {
+        run_blocking_result(move || {
             let typed_results = store.scan_all_typed(limit, prefix.as_ref(), start_key.as_ref())?;
             Ok(typed_results.into_iter().map(|(k, v)| (k.storage_key(), v)).collect())
         })
         .await
-        .map_err(|e| StorageError::Other(format!("spawn_blocking error: {}", e)))?
     }
 }
 

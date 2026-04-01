@@ -109,6 +109,26 @@ pub enum ExtensionStatement {
 }
 
 impl ExtensionStatement {
+    fn parse_with_prefix<T, E, F, G>(
+        sql: &str,
+        sql_upper: &str,
+        prefixes: &[&str],
+        parser: F,
+        map: G,
+        label: &str,
+    ) -> Option<Result<Self, String>>
+    where
+        E: std::fmt::Display,
+        F: FnOnce(&str) -> Result<T, E>,
+        G: FnOnce(T) -> Self,
+    {
+        if prefixes.iter().any(|prefix| sql_upper.starts_with(prefix)) {
+            Some(parser(sql).map(map).map_err(|e| format!("{} parsing failed: {}", label, e)))
+        } else {
+            None
+        }
+    }
+
     /// Parse a KalamDB-specific extension statement.
     ///
     /// Attempts to parse the SQL as one of the supported extension commands.
@@ -123,137 +143,195 @@ impl ExtensionStatement {
     pub fn parse(sql: &str) -> Result<Self, String> {
         let sql_upper = sql.trim().to_uppercase();
 
-        // Try CREATE STORAGE
-        if sql_upper.starts_with("CREATE STORAGE") {
-            return CreateStorageStatement::parse(sql)
-                .map(ExtensionStatement::CreateStorage)
-                .map_err(|e| format!("CREATE STORAGE parsing failed: {}", e));
+        if let Some(result) = Self::parse_with_prefix(
+            sql,
+            &sql_upper,
+            &["CREATE STORAGE"],
+            CreateStorageStatement::parse,
+            ExtensionStatement::CreateStorage,
+            "CREATE STORAGE",
+        ) {
+            return result;
         }
-
-        // Try ALTER STORAGE
-        if sql_upper.starts_with("ALTER STORAGE") {
-            return AlterStorageStatement::parse(sql)
-                .map(ExtensionStatement::AlterStorage)
-                .map_err(|e| format!("ALTER STORAGE parsing failed: {}", e));
+        if let Some(result) = Self::parse_with_prefix(
+            sql,
+            &sql_upper,
+            &["ALTER STORAGE"],
+            AlterStorageStatement::parse,
+            ExtensionStatement::AlterStorage,
+            "ALTER STORAGE",
+        ) {
+            return result;
         }
-
-        // Try DROP STORAGE
-        if sql_upper.starts_with("DROP STORAGE") {
-            return DropStorageStatement::parse(sql)
-                .map(ExtensionStatement::DropStorage)
-                .map_err(|e| format!("DROP STORAGE parsing failed: {}", e));
+        if let Some(result) = Self::parse_with_prefix(
+            sql,
+            &sql_upper,
+            &["DROP STORAGE"],
+            DropStorageStatement::parse,
+            ExtensionStatement::DropStorage,
+            "DROP STORAGE",
+        ) {
+            return result;
         }
-
-        // Try SHOW STORAGES
-        if sql_upper.starts_with("SHOW STORAGES") || sql_upper.starts_with("SHOW STORAGE") {
-            return ShowStoragesStatement::parse(sql)
-                .map(ExtensionStatement::ShowStorages)
-                .map_err(|e| format!("SHOW STORAGES parsing failed: {}", e));
+        if let Some(result) = Self::parse_with_prefix(
+            sql,
+            &sql_upper,
+            &["SHOW STORAGES", "SHOW STORAGE"],
+            ShowStoragesStatement::parse,
+            ExtensionStatement::ShowStorages,
+            "SHOW STORAGES",
+        ) {
+            return result;
         }
-
-        // Try STORAGE FLUSH TABLE
-        if sql_upper.starts_with("STORAGE FLUSH TABLE") {
-            return FlushTableStatement::parse(sql)
-                .map(ExtensionStatement::FlushTable)
-                .map_err(|e| format!("STORAGE FLUSH TABLE parsing failed: {}", e));
+        if let Some(result) = Self::parse_with_prefix(
+            sql,
+            &sql_upper,
+            &["STORAGE FLUSH TABLE"],
+            FlushTableStatement::parse,
+            ExtensionStatement::FlushTable,
+            "STORAGE FLUSH TABLE",
+        ) {
+            return result;
         }
-
-        // Try STORAGE FLUSH ALL
-        if sql_upper.starts_with("STORAGE FLUSH ALL") {
-            return FlushAllTablesStatement::parse(sql)
-                .map(ExtensionStatement::FlushAllTables)
-                .map_err(|e| format!("STORAGE FLUSH ALL parsing failed: {}", e));
+        if let Some(result) = Self::parse_with_prefix(
+            sql,
+            &sql_upper,
+            &["STORAGE FLUSH ALL"],
+            FlushAllTablesStatement::parse,
+            ExtensionStatement::FlushAllTables,
+            "STORAGE FLUSH ALL",
+        ) {
+            return result;
         }
-
-        // Try STORAGE COMPACT TABLE
-        if sql_upper.starts_with("STORAGE COMPACT TABLE") {
-            return CompactTableStatement::parse(sql)
-                .map(ExtensionStatement::CompactTable)
-                .map_err(|e| format!("STORAGE COMPACT TABLE parsing failed: {}", e));
+        if let Some(result) = Self::parse_with_prefix(
+            sql,
+            &sql_upper,
+            &["STORAGE COMPACT TABLE"],
+            CompactTableStatement::parse,
+            ExtensionStatement::CompactTable,
+            "STORAGE COMPACT TABLE",
+        ) {
+            return result;
         }
-
-        // Try STORAGE COMPACT ALL
-        if sql_upper.starts_with("STORAGE COMPACT ALL") {
-            return CompactAllTablesStatement::parse(sql)
-                .map(ExtensionStatement::CompactAllTables)
-                .map_err(|e| format!("STORAGE COMPACT ALL parsing failed: {}", e));
+        if let Some(result) = Self::parse_with_prefix(
+            sql,
+            &sql_upper,
+            &["STORAGE COMPACT ALL"],
+            CompactAllTablesStatement::parse,
+            ExtensionStatement::CompactAllTables,
+            "STORAGE COMPACT ALL",
+        ) {
+            return result;
         }
-
-        // Try KILL JOB
-        if sql_upper.starts_with("KILL JOB") {
-            return parse_job_command(sql)
-                .map(ExtensionStatement::KillJob)
-                .map_err(|e| format!("KILL JOB parsing failed: {}", e));
+        if let Some(result) = Self::parse_with_prefix(
+            sql,
+            &sql_upper,
+            &["KILL JOB"],
+            parse_job_command,
+            ExtensionStatement::KillJob,
+            "KILL JOB",
+        ) {
+            return result;
         }
-
-        // Try SUBSCRIBE TO
-        if sql_upper.starts_with("SUBSCRIBE TO") {
-            return SubscribeStatement::parse(sql)
-                .map(ExtensionStatement::Subscribe)
-                .map_err(|e| format!("SUBSCRIBE TO parsing failed: {}", e));
+        if let Some(result) = Self::parse_with_prefix(
+            sql,
+            &sql_upper,
+            &["SUBSCRIBE TO"],
+            SubscribeStatement::parse,
+            ExtensionStatement::Subscribe,
+            "SUBSCRIBE TO",
+        ) {
+            return result;
         }
-
-        // Try CREATE TOPIC
-        if sql_upper.starts_with("CREATE TOPIC") {
-            return crate::ddl::topic_commands::parse_create_topic(sql)
-                .map(ExtensionStatement::CreateTopic)
-                .map_err(|e| format!("CREATE TOPIC parsing failed: {}", e));
+        if let Some(result) = Self::parse_with_prefix(
+            sql,
+            &sql_upper,
+            &["CREATE TOPIC"],
+            crate::ddl::topic_commands::parse_create_topic,
+            ExtensionStatement::CreateTopic,
+            "CREATE TOPIC",
+        ) {
+            return result;
         }
-
-        // Try DROP TOPIC
-        if sql_upper.starts_with("DROP TOPIC") {
-            return crate::ddl::topic_commands::parse_drop_topic(sql)
-                .map(ExtensionStatement::DropTopic)
-                .map_err(|e| format!("DROP TOPIC parsing failed: {}", e));
+        if let Some(result) = Self::parse_with_prefix(
+            sql,
+            &sql_upper,
+            &["DROP TOPIC"],
+            crate::ddl::topic_commands::parse_drop_topic,
+            ExtensionStatement::DropTopic,
+            "DROP TOPIC",
+        ) {
+            return result;
         }
-
-        // Try CLEAR TOPIC
-        if sql_upper.starts_with("CLEAR TOPIC") {
-            return crate::ddl::topic_commands::parse_clear_topic(sql)
-                .map(ExtensionStatement::ClearTopic)
-                .map_err(|e| format!("CLEAR TOPIC parsing failed: {}", e));
+        if let Some(result) = Self::parse_with_prefix(
+            sql,
+            &sql_upper,
+            &["CLEAR TOPIC"],
+            crate::ddl::topic_commands::parse_clear_topic,
+            ExtensionStatement::ClearTopic,
+            "CLEAR TOPIC",
+        ) {
+            return result;
         }
-
-        // Try ALTER TOPIC (must check before CREATE/DROP)
-        if sql_upper.starts_with("ALTER TOPIC") {
-            return crate::ddl::topic_commands::parse_alter_topic_add_source(sql)
-                .map(ExtensionStatement::AddTopicSource)
-                .map_err(|e| format!("ALTER TOPIC ADD SOURCE parsing failed: {}", e));
+        if let Some(result) = Self::parse_with_prefix(
+            sql,
+            &sql_upper,
+            &["ALTER TOPIC"],
+            crate::ddl::topic_commands::parse_alter_topic_add_source,
+            ExtensionStatement::AddTopicSource,
+            "ALTER TOPIC ADD SOURCE",
+        ) {
+            return result;
         }
-
-        // Try CONSUME FROM
-        if sql_upper.starts_with("CONSUME FROM") || sql_upper.starts_with("CONSUME ") {
-            return crate::ddl::topic_commands::parse_consume(sql)
-                .map(ExtensionStatement::ConsumeTopic)
-                .map_err(|e| format!("CONSUME FROM parsing failed: {}", e));
+        if let Some(result) = Self::parse_with_prefix(
+            sql,
+            &sql_upper,
+            &["CONSUME FROM", "CONSUME "],
+            crate::ddl::topic_commands::parse_consume,
+            ExtensionStatement::ConsumeTopic,
+            "CONSUME FROM",
+        ) {
+            return result;
         }
-
-        // Try CREATE USER
-        if sql_upper.starts_with("CREATE USER") {
-            return CreateUserStatement::parse(sql)
-                .map(ExtensionStatement::CreateUser)
-                .map_err(|e| format!("CREATE USER parsing failed: {}", e));
+        if let Some(result) = Self::parse_with_prefix(
+            sql,
+            &sql_upper,
+            &["CREATE USER"],
+            CreateUserStatement::parse,
+            ExtensionStatement::CreateUser,
+            "CREATE USER",
+        ) {
+            return result;
         }
-
-        // Try ALTER USER
-        if sql_upper.starts_with("ALTER USER") {
-            return AlterUserStatement::parse(sql)
-                .map(ExtensionStatement::AlterUser)
-                .map_err(|e| format!("ALTER USER parsing failed: {}", e));
+        if let Some(result) = Self::parse_with_prefix(
+            sql,
+            &sql_upper,
+            &["ALTER USER"],
+            AlterUserStatement::parse,
+            ExtensionStatement::AlterUser,
+            "ALTER USER",
+        ) {
+            return result;
         }
-
-        // Try DROP USER
-        if sql_upper.starts_with("DROP USER") {
-            return DropUserStatement::parse(sql)
-                .map(ExtensionStatement::DropUser)
-                .map_err(|e| format!("DROP USER parsing failed: {}", e));
+        if let Some(result) = Self::parse_with_prefix(
+            sql,
+            &sql_upper,
+            &["DROP USER"],
+            DropUserStatement::parse,
+            ExtensionStatement::DropUser,
+            "DROP USER",
+        ) {
+            return result;
         }
-
-        // Try SHOW MANIFEST
-        if sql_upper.starts_with("SHOW MANIFEST") {
-            return ShowManifestStatement::parse(sql)
-                .map(ExtensionStatement::ShowManifest)
-                .map_err(|e| format!("SHOW MANIFEST parsing failed: {}", e));
+        if let Some(result) = Self::parse_with_prefix(
+            sql,
+            &sql_upper,
+            &["SHOW MANIFEST"],
+            ShowManifestStatement::parse,
+            ExtensionStatement::ShowManifest,
+            "SHOW MANIFEST",
+        ) {
+            return result;
         }
 
         // Try CLUSTER commands

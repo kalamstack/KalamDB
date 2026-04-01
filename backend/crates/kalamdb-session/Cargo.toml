@@ -19,16 +19,6 @@ default = []
 # Internal crates
 kalamdb-commons = { path = "../kalamdb-commons", features = ["serde"] }
 
-# Apache Arrow ecosystem
-arrow = { workspace = true }
-datafusion = { workspace = true }
-
-# Async
-async-trait = { workspace = true }
-
-# Logging
-tracing = { workspace = true }
-
 [lib]
 name = "kalamdb_session"
 path = "src/lib.rs"

@@ -126,10 +126,7 @@ async fn test_heavy_write_burst_during_outage_all_delivered() {
         // Insert one final row after reconnect to mark the end.
         writer
             .execute_query(
-                &format!(
-                    "INSERT INTO {} (id, value) VALUES ('after-burst', 'marker')",
-                    table
-                ),
+                &format!("INSERT INTO {} (id, value) VALUES ('after-burst', 'marker')", table),
                 None,
                 None,
                 None,
@@ -142,8 +139,7 @@ async fn test_heavy_write_burst_during_outage_all_delivered() {
         let mut seen_seq = None;
         for _ in 0..120 {
             if seen_ids.iter().any(|id| id == "after-burst")
-                && (0..burst_count)
-                    .all(|i| seen_ids.iter().any(|id| id == &format!("burst-{}", i)))
+                && (0..burst_count).all(|i| seen_ids.iter().any(|id| id == &format!("burst-{}", i)))
             {
                 break;
             }
@@ -175,8 +171,7 @@ async fn test_heavy_write_burst_during_outage_all_delivered() {
         );
 
         // Verify no duplicates.
-        let burst_only: Vec<_> =
-            seen_ids.iter().filter(|id| id.starts_with("burst-")).collect();
+        let burst_only: Vec<_> = seen_ids.iter().filter(|id| id.starts_with("burst-")).collect();
         let unique_count = burst_only.iter().collect::<HashSet<_>>().len();
         assert_eq!(
             burst_only.len(),

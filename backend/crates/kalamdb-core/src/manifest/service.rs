@@ -47,6 +47,14 @@ pub struct ManifestService {
 }
 
 impl ManifestService {
+    fn delete_manifest_ids(&self, keys: Vec<ManifestId>) -> Result<usize, StorageError> {
+        let deleted = keys.len();
+        if deleted > 0 {
+            self.provider.delete_manifest_ids_batch(&keys)?;
+        }
+        Ok(deleted)
+    }
+
     /// Create a new ManifestService
     pub fn new(provider: Arc<ManifestTableProvider>, config: ManifestCacheSettings) -> Self {
         Self {
@@ -353,11 +361,7 @@ impl ManifestService {
             None,
             MAX_MANIFEST_SCAN_LIMIT,
         )?;
-        let invalidated = keys.len();
-
-        if !keys.is_empty() {
-            self.provider.delete_manifest_ids_batch(&keys)?;
-        }
+        let invalidated = self.delete_manifest_ids(keys)?;
 
         debug!("Invalidated {} manifest cache entries for table {}", invalidated, table_id);
 
@@ -399,10 +403,7 @@ impl ManifestService {
             })
             .collect();
 
-        let evicted_count = delete_keys.len();
-        if !delete_keys.is_empty() {
-            self.provider.delete_manifest_ids_batch(&delete_keys)?;
-        }
+        let evicted_count = self.delete_manifest_ids(delete_keys)?;
 
         info!(
             "Manifest eviction: removed {} stale entries (ttl_seconds={}, cutoff={})",

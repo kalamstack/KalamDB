@@ -4,12 +4,12 @@
 //! registration to the shared base SessionContext so subsequent per-user
 //! sessions inherit the view definition.
 
+use kalamdb_commons::models::NamespaceId;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::error::KalamDbError;
 use kalamdb_core::error_extensions::KalamDbResultExt;
 use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
 use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
-use kalamdb_commons::models::NamespaceId;
 use kalamdb_sql::ddl::CreateViewStatement;
 use std::sync::Arc;
 
@@ -125,9 +125,9 @@ impl TypedStatementHandler<CreateViewStatement> for CreateViewHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kalamdb_core::test_helpers::test_app_context_simple;
     use arrow::array::Int64Array;
     use kalamdb_commons::models::{NamespaceId, UserId};
+    use kalamdb_core::test_helpers::test_app_context_simple;
 
     #[tokio::test]
     async fn create_view_registers_and_is_queryable() {

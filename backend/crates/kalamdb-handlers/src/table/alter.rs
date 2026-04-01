@@ -1,15 +1,15 @@
 //! Typed DDL handler for ALTER TABLE statements
 
+use crate::helpers::guards::block_system_namespace_modification;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::error::KalamDbError;
 use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
-use crate::helpers::guards::block_system_namespace_modification;
 // Note: table_registration moved to unified applier commands
-use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
 use kalamdb_commons::constants::SystemColumnNames;
 use kalamdb_commons::models::schemas::{ColumnDefinition, TableDefinition};
 use kalamdb_commons::models::{NamespaceId, TableId, UserId};
 use kalamdb_commons::schemas::{ColumnDefault, TableType};
+use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
 use kalamdb_sql::ddl::{AlterTableStatement, ColumnOperation};
 use kalamdb_store::Partition;
 use kalamdb_system::{VectorEngine, VectorIndexState, VectorMetric};

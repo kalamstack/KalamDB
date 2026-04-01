@@ -256,7 +256,7 @@ unsafe fn handle_create_foreign_table(
     let kalam_options: Vec<String> = ft_options
         .iter()
         .filter(|(k, _)| *k != "table_type" && *k != "namespace" && *k != "table")
-        .map(|(k, v)| format!("{} = '{}'", k.to_uppercase(), v))
+        .map(|(k, v)| format!("{} = '{}'", k.to_uppercase(), v.replace('\'', "''")))
         .collect();
 
     let with_clause = if kalam_options.is_empty() {
@@ -883,15 +883,35 @@ fn table_type_to_keyword(tt: TableType) -> &'static str {
     }
 }
 
-/// Format a SQL identifier for KalamDB.
+/// Validate and format a SQL identifier for KalamDB.
 ///
-/// KalamDB only accepts simple identifiers (alphanumeric + underscore).
-/// We pass them through directly without quoting; double-quoting would
-/// cause validation errors.
+/// KalamDB only accepts simple identifiers (alphanumeric + underscore, not
+/// starting with a digit). Reject anything else to prevent SQL injection.
 fn quote_ident(name: &str) -> String {
-    // KalamDB rejects double-quoted identifiers in CREATE/ALTER/DROP.
-    // Only simple alphanumeric+underscore names are valid, so pass as-is.
+    if name.is_empty()
+        || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        || name.as_bytes()[0].is_ascii_digit()
+    {
+        pgrx::error!(
+            "pg_kalam: invalid identifier '{}' – only alphanumeric and underscore allowed",
+            name
+        );
+    }
     name.to_string()
+}
+
+/// Quote an identifier for use in local PostgreSQL SPI queries.
+///
+/// Uses `pg_sys::quote_identifier` to properly double-quote identifiers that
+/// need it, preventing SQL injection into the local PG backend.
+fn quote_ident_pg(name: &str) -> String {
+    let cstr = std::ffi::CString::new(name).unwrap_or_else(|_| {
+        pgrx::error!("pg_kalam: identifier contains null byte");
+    });
+    unsafe {
+        let quoted = pg_sys::quote_identifier(cstr.as_ptr());
+        CStr::from_ptr(quoted).to_string_lossy().into_owned()
+    }
 }
 
 #[cfg(test)]
@@ -1149,7 +1169,7 @@ unsafe fn handle_create_table_using_kalamdb(
     } else {
         let pairs: Vec<String> = with_options
             .iter()
-            .map(|(k, v)| format!("{} = '{}'", k.to_uppercase(), v))
+            .map(|(k, v)| format!("{} = '{}'", k.to_uppercase(), v.replace('\'', "''")))
             .collect();
         format!(" WITH ({})", pairs.join(", "))
     };
@@ -1178,13 +1198,13 @@ unsafe fn handle_create_table_using_kalamdb(
     }
 
     // 9. Create PG schema + foreign table via SPI (with propagation suppressed)
-    let create_schema_sql = format!("CREATE SCHEMA IF NOT EXISTS {}", quote_ident(&namespace));
+    let create_schema_sql = format!("CREATE SCHEMA IF NOT EXISTS {}", quote_ident_pg(&namespace));
 
     let ft_options = format!("table_type '{}'", table_type_keyword.to_lowercase());
     let create_ft_sql = format!(
         "CREATE FOREIGN TABLE {}.{} ({}) SERVER {} OPTIONS ({})",
-        quote_ident(&namespace),
-        quote_ident(&table_name),
+        quote_ident_pg(&namespace),
+        quote_ident_pg(&table_name),
         pg_column_defs.join(", "),
         DEFAULT_KALAM_SERVER,
         ft_options

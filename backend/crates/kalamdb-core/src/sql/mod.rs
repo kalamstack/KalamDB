@@ -45,5 +45,5 @@ pub use functions::{
 pub use impersonation::SqlImpersonationService;
 pub use table_functions::VectorSearchTableFunction;
 
-// Re-export permissions from kalamdb-session for backward compatibility
-pub use kalamdb_session::{PermissionChecker, SessionError as TableAccessError};
+pub use kalamdb_session::SessionError as TableAccessError;
+pub use kalamdb_session_datafusion::PermissionChecker;

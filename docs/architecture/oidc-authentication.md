@@ -231,7 +231,7 @@ No client secret or JWKS URI needs to be configured in KalamDB — Discovery han
 
 | Crate | Owns |
 |---|---|
-| `kalamdb-oidc` | `JwtClaims`, `TokenType`, `OidcConfig` (discovery), `OidcValidator` (JWKS cache + validation), `OidcError`, `extract_algorithm_unverified`, `extract_issuer_unverified` |
+| `kalamdb-auth/oidc` | `JwtClaims`, `TokenType`, `OidcConfig` (discovery), `OidcValidator` (JWKS cache + validation), `OidcError`, algorithm and issuer extraction helpers |
 | `kalamdb-auth/jwt_auth.rs` | `KALAMDB_ISSUER`, `is_internal_issuer`, `verify_issuer`, HS256 signing/validation (`create_and_sign_token`, `validate_jwt_token`) |
 | `kalamdb-auth/jwt_config.rs` | `JwtConfig` singleton, `OidcValidator` registry (Layer 1 cache), `parse_trusted_issuers` |
 | `kalamdb-auth/bearer.rs` | Algorithm-based routing, user resolution, auto-provisioning orchestration |

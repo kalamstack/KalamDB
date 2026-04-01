@@ -1,0 +1,29 @@
+[package]
+name = "kalamdb-session-datafusion"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "DataFusion session extensions and secured provider adapters for KalamDB"
+keywords = ["kalamdb", "database", "session", "datafusion", "security"]
+categories = ["database"]
+
+[dependencies]
+kalamdb-commons = { path = "../kalamdb-commons", features = ["serde"] }
+kalamdb-session = { path = "../kalamdb-session" }
+
+arrow = { workspace = true }
+datafusion = { workspace = true }
+
+async-trait = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lib]
+name = "kalamdb_session_datafusion"
+path = "src/lib.rs"
+doctest = false

@@ -8,7 +8,7 @@
 
 use super::helpers::*;
 use kalam_link::KalamCellValue;
-use kalamdb_api::handlers::sql::models::{ResponseStatus as ApiResponseStatus, SqlResponse};
+use kalamdb_api::http::sql::models::{ResponseStatus as ApiResponseStatus, SqlResponse};
 use kalamdb_commons::models::{TableId, UserId};
 use kalamdb_commons::schemas::TableType;
 use kalamdb_commons::{Role, UserName};

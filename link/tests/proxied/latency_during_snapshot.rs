@@ -101,10 +101,7 @@ async fn test_latency_spike_during_initial_snapshot_recovers() {
 
         writer
             .execute_query(
-                &format!(
-                    "INSERT INTO {} (id, value) VALUES ('live-after-latency', 'post')",
-                    table
-                ),
+                &format!("INSERT INTO {} (id, value) VALUES ('live-after-latency', 'post')", table),
                 None,
                 None,
                 None,
