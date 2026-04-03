@@ -4,6 +4,7 @@ import {
   ChevronRight,
   Database,
   KeyRound,
+  RefreshCw,
   Radio,
   Search,
   Star,
@@ -11,6 +12,7 @@ import {
   User,
   Users,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -32,7 +34,9 @@ interface StudioExplorerPanelProps {
   expandedNamespaces: Record<string, boolean>;
   expandedTables: Record<string, boolean>;
   selectedTableKey: string | null;
+  isRefreshing: boolean;
   onFilterChange: (value: string) => void;
+  onRefresh: () => void;
   onToggleFavorites: () => void;
   onToggleNamespaceSection: () => void;
   onToggleNamespace: (namespaceName: string) => void;
@@ -84,7 +88,9 @@ const StudioExplorerPanelComponent = ({
   expandedNamespaces,
   expandedTables,
   selectedTableKey,
+  isRefreshing,
   onFilterChange,
+  onRefresh,
   onToggleFavorites,
   onToggleNamespaceSection,
   onToggleNamespace,
@@ -122,7 +128,21 @@ const StudioExplorerPanelComponent = ({
     <TooltipProvider delayDuration={250}>
       <div className="flex h-full min-h-0 flex-col overflow-hidden border-r border-border bg-muted/30 text-muted-foreground">
         <div className="shrink-0 border-b border-border px-3 py-3">
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Explorer</p>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Explorer</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="h-7 w-7 shrink-0"
+              onClick={onRefresh}
+              disabled={isRefreshing}
+              aria-label="Refresh explorer"
+              title="Refresh explorer"
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
+            </Button>
+          </div>
           <Tooltip>
             <TooltipTrigger asChild>
               <div className="relative">
@@ -157,7 +177,7 @@ const StudioExplorerPanelComponent = ({
               </button>
               {favoritesExpanded && (
                 <div className="space-y-2">
-                  <div>
+                  <div className="ml-1 border-l border-border pl-3">
                     <div className="space-y-0.5">
                       {savedQueries.length === 0 && (
                         <p className="px-2 py-1 text-xs text-muted-foreground">No saved queries yet.</p>
@@ -200,109 +220,109 @@ const StudioExplorerPanelComponent = ({
                 Namespaces
               </button>
               {namespaceSectionExpanded && (
-            <div className="space-y-0.5">
-              {filteredSchema.map((namespace) => {
-                const namespaceOpen = expandedNamespaces[namespace.name] ?? false;
-                return (
-                  <div key={namespace.name}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          onClick={() => onToggleNamespace(namespace.name)}
-                          className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[11px] text-muted-foreground hover:bg-accent"
-                        >
-                          {namespaceOpen ? (
-                            <ChevronDown className="h-3 w-3" />
-                          ) : (
-                            <ChevronRight className="h-3 w-3" />
-                          )}
-                          <Database className="h-3 w-3" />
-                          <span className="truncate font-semibold">{namespace.name}</span>
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent>Namespace: {namespace.name}</TooltipContent>
-                    </Tooltip>
-
-                    {namespaceOpen && (
-                      <div className="space-y-0.5 border-l border-border pl-3">
-                        {namespace.tables.map((table) => {
-                          const tableKey = `${table.namespace}.${table.name}`;
-                          const tableOpen = expandedTables[tableKey] ?? tableKey === selectedTableKey;
-                          const isSelected = selectedTableKey === tableKey;
-                          const tableMeta = tableTypeMeta(table.tableType);
-
-                          return (
-                            <div key={tableKey}>
-                              <div
-                                className={cn(
-                                  "group flex items-center justify-between rounded px-2 py-1.5 transition-colors",
-                                  isSelected
-                                    ? "bg-accent text-sky-300"
-                                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                                )}
-                                onContextMenu={(event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  onSelectTable(table);
-                                  onTableContextMenu(table, { x: event.clientX, y: event.clientY });
-                                }}
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => onToggleTable(tableKey)}
-                                  aria-label={tableOpen ? `Collapse ${table.name}` : `Expand ${table.name}`}
-                                  className="mr-1 text-muted-foreground hover:text-muted-foreground"
-                                >
-                                  {tableOpen ? (
-                                    <ChevronDown className="h-3 w-3" />
-                                  ) : (
-                                    <ChevronRight className="h-3 w-3" />
-                                  )}
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => onSelectTable(table)}
-                                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                                >
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <span className="inline-flex items-center">{tableMeta.icon}</span>
-                                    </TooltipTrigger>
-                                    <TooltipContent>{tableMeta.tooltip}</TooltipContent>
-                                  </Tooltip>
-                                  <span className="truncate text-sm">{table.name}</span>
-                                </button>
-                              </div>
-
-                              {tableOpen && (
-                                <div className="space-y-0.5 border-l border-border pl-4">
-                                  {table.columns.map((column) => (
-                                    <Tooltip key={`${tableKey}.${column.name}`}>
-                                      <TooltipTrigger asChild>
-                                        <div className="flex items-center gap-2 px-2 py-0.5 text-xs text-muted-foreground">
-                                          {columnIcon(column.isPrimaryKey)}
-                                          <span className="truncate">{column.name}</span>
-                                          <span className="ml-auto truncate font-mono text-[10px] lowercase">{column.dataType}</span>
-                                        </div>
-                                      </TooltipTrigger>
-                                      <TooltipContent>
-                                        {column.name} ({column.dataType})
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  ))}
-                                </div>
+                <div className="space-y-0.5">
+                  {filteredSchema.map((namespace) => {
+                    const namespaceOpen = expandedNamespaces[namespace.name] ?? false;
+                    return (
+                      <div key={namespace.name}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={() => onToggleNamespace(namespace.name)}
+                              className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[11px] text-muted-foreground hover:bg-accent"
+                            >
+                              {namespaceOpen ? (
+                                <ChevronDown className="h-3 w-3" />
+                              ) : (
+                                <ChevronRight className="h-3 w-3" />
                               )}
-                            </div>
-                          );
-                        })}
+                              <Database className="h-3 w-3" />
+                              <span className="truncate font-semibold">{namespace.name}</span>
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>Namespace: {namespace.name}</TooltipContent>
+                        </Tooltip>
+
+                        {namespaceOpen && (
+                          <div className="space-y-0.5 border-l border-border pl-3">
+                            {namespace.tables.map((table) => {
+                              const tableKey = `${table.namespace}.${table.name}`;
+                              const tableOpen = expandedTables[tableKey] ?? tableKey === selectedTableKey;
+                              const isSelected = selectedTableKey === tableKey;
+                              const tableMeta = tableTypeMeta(table.tableType);
+
+                              return (
+                                <div key={tableKey}>
+                                  <div
+                                    className={cn(
+                                      "group flex items-center justify-between rounded px-2 py-1.5 transition-colors",
+                                      isSelected
+                                        ? "bg-accent text-sky-300"
+                                        : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                                    )}
+                                    onContextMenu={(event) => {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      onSelectTable(table);
+                                      onTableContextMenu(table, { x: event.clientX, y: event.clientY });
+                                    }}
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={() => onToggleTable(tableKey)}
+                                      aria-label={tableOpen ? `Collapse ${table.name}` : `Expand ${table.name}`}
+                                      className="mr-1 text-muted-foreground hover:text-muted-foreground"
+                                    >
+                                      {tableOpen ? (
+                                        <ChevronDown className="h-3 w-3" />
+                                      ) : (
+                                        <ChevronRight className="h-3 w-3" />
+                                      )}
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => onSelectTable(table)}
+                                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                                    >
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <span className="inline-flex items-center">{tableMeta.icon}</span>
+                                        </TooltipTrigger>
+                                        <TooltipContent>{tableMeta.tooltip}</TooltipContent>
+                                      </Tooltip>
+                                      <span className="truncate text-sm">{table.name}</span>
+                                    </button>
+                                  </div>
+
+                                  {tableOpen && (
+                                    <div className="space-y-0.5 border-l border-border pl-4">
+                                      {table.columns.map((column) => (
+                                        <Tooltip key={`${tableKey}.${column.name}`}>
+                                          <TooltipTrigger asChild>
+                                            <div className="flex items-center gap-2 px-2 py-0.5 text-xs text-muted-foreground">
+                                              {columnIcon(column.isPrimaryKey)}
+                                              <span className="truncate">{column.name}</span>
+                                              <span className="ml-auto truncate font-mono text-[10px] lowercase">{column.dataType}</span>
+                                            </div>
+                                          </TooltipTrigger>
+                                          <TooltipContent>
+                                            {column.name} ({column.dataType})
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </div>

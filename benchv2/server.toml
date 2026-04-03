@@ -119,9 +119,9 @@ max_age = 3600
 allow_private_network = false
 
 [websocket]
-client_timeout_secs = 60
-auth_timeout_secs = 10
-heartbeat_interval_secs = 15
+client_timeout_secs = 120
+auth_timeout_secs = 15
+heartbeat_interval_secs = 30
 
 [authentication]
 bcrypt_cost = 4
@@ -131,6 +131,7 @@ disable_common_password_check = false
 jwt_secret = "kalamdb-bench-local-2026-04-03-jwt-secret-32-plus"
 jwt_trusted_issuers = ""
 auto_create_users_from_provider = false
+root_password = "kalamdb123"
 
 [oauth]
 enabled = false

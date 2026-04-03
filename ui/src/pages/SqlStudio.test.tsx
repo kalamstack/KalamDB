@@ -24,6 +24,7 @@ const mockUnsubscribe = vi.fn();
 const mockRemoteUnsubscribe = vi.fn();
 const mockSaveSyncedSqlStudioWorkspaceState = vi.fn();
 const mockSubscribeToSyncedSqlStudioWorkspaceState = vi.fn();
+const mockRefetchSchemaTree = vi.fn();
 
 let liveCallback: ((message: Record<string, unknown>) => void) | null = null;
 let syncedWorkspaceCallback: ((workspace: Record<string, unknown> | null) => void) | null = null;
@@ -268,6 +269,7 @@ describe("SqlStudio page", () => {
     mockRemoteUnsubscribe.mockReset();
     mockSaveSyncedSqlStudioWorkspaceState.mockReset();
     mockSubscribeToSyncedSqlStudioWorkspaceState.mockReset();
+    mockRefetchSchemaTree.mockReset();
     window.localStorage.clear();
 
     mockUseAuth.mockReturnValue({
@@ -302,7 +304,10 @@ describe("SqlStudio page", () => {
           ],
         },
       ],
+      isFetching: false,
+      refetch: mockRefetchSchemaTree,
     });
+    mockRefetchSchemaTree.mockResolvedValue({ data: [] });
 
     mockSubscribe.mockImplementation(async (_sql: string, callback: (message: Record<string, unknown>) => void) => {
       liveCallback = callback;
@@ -357,6 +362,33 @@ describe("SqlStudio page", () => {
     });
 
     expect(await screen.findByText("Ada")).toBeTruthy();
+  });
+
+  it("refreshes the Explorer when the refresh button is clicked", async () => {
+    renderSqlStudio();
+
+    fireEvent.click(screen.getByRole("button", { name: /refresh explorer/i }));
+
+    await waitFor(() => {
+      expect(mockRefetchSchemaTree).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("refetches the Explorer schema after a successful create table query", async () => {
+    renderSqlStudio();
+
+    fireEvent.change(getSqlEditor(), {
+      target: { value: "CREATE TABLE default.audit_log (id INT PRIMARY KEY)" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^execute$/i }));
+
+    await waitFor(() => {
+      expect(mockExecuteSqlStudioQuery).toHaveBeenCalledWith("CREATE TABLE default.audit_log (id INT PRIMARY KEY)");
+    });
+
+    await waitFor(() => {
+      expect(mockRefetchSchemaTree).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("executes the current selection and exposes execute options", async () => {
@@ -715,6 +747,8 @@ describe("SqlStudio page", () => {
 
     expect(screen.getByRole("button", { name: /synced query/i })).toBeTruthy();
     expect(screen.getByText("Favorite Query")).toBeTruthy();
+    const favoritesTree = screen.getByText("Favorite Query").closest("button")?.parentElement?.parentElement;
+    expect(favoritesTree?.className).toContain("border-l");
 
     await act(async () => {
       syncedWorkspaceCallback?.({

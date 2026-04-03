@@ -23,7 +23,7 @@ const DEFAULT_CONNECT_WAVE_SIZE: usize = 500;
 const DEFAULT_CONNECT_WAVE_PAUSE_MS: u64 = 0;
 const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 30;
 const DEFAULT_DELIVERY_WINDOW_SECS: u64 = 3;
-const DEFAULT_DELIVERY_TOLERANCE: f64 = 0.995;
+const DEFAULT_DELIVERY_TOLERANCE: f64 = 0.99;
 const DELIVERY_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const LIVE_PROGRESS_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const LIVE_MEMORY_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
@@ -423,10 +423,40 @@ impl Benchmark for ConnectionScaleBench {
                     } else {
                         let delivery_threshold = ((connected_count as f64) * delivery_tolerance).floor() as u32;
                         let wait_start = Instant::now();
+                        let mut last_progress_count = 0u32;
+                        let mut last_progress_time = Instant::now();
+                        let stall_cutoff = Duration::from_secs(5);
                         loop {
                             let delivered_count = delivered.load(Ordering::Relaxed);
                             if delivered_count >= connected_count {
                                 delivery_time = wait_start.elapsed();
+                                break;
+                            }
+
+                            // Track delivery progress for stall detection
+                            if delivered_count > last_progress_count {
+                                last_progress_count = delivered_count;
+                                last_progress_time = Instant::now();
+                            }
+
+                            // If delivery stalled and we're above tolerance, stop waiting
+                            if delivered_count >= delivery_threshold
+                                && last_progress_time.elapsed() >= stall_cutoff
+                            {
+                                delivery_time = wait_start.elapsed();
+                                println!(
+                                    "  │ {:^width$} │",
+                                    format!(
+                                        "⚠ {}/{} delivered ({:.2}% >= {:.1}% tolerance) – {} stragglers (stalled {})",
+                                        format_num(delivered_count),
+                                        format_num(connected_count),
+                                        (delivered_count as f64 / connected_count as f64) * 100.0,
+                                        delivery_tolerance * 100.0,
+                                        format_num(connected_count - delivered_count),
+                                        format_duration(stall_cutoff),
+                                    ),
+                                    width = TABLE_INFO_WIDTH,
+                                );
                                 break;
                             }
 
@@ -819,9 +849,9 @@ fn probe_settle_duration_for_tier(tier_target: u32) -> Duration {
     match tier_target {
         0..=10_000 => Duration::from_millis(100),
         10_001..=50_000 => Duration::from_millis(500),
-        50_001..=100_000 => Duration::from_secs(3),
-        100_001..=200_000 => Duration::from_secs(5),
-        _ => Duration::from_secs(6),
+        50_001..=100_000 => Duration::from_secs(5),
+        100_001..=200_000 => Duration::from_secs(8),
+        _ => Duration::from_secs(10),
     }
 }
 

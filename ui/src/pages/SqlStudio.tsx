@@ -164,6 +164,16 @@ function serializeSyncedWorkspaceSnapshot(state: SqlStudioSyncedWorkspaceState):
   });
 }
 
+function containsCreateTableStatement(sql: string): boolean {
+  const normalized = sql
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/--[^\n\r]*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return /(^|;)\s*create\s+(?:or\s+replace\s+)?(?:temp(?:orary)?\s+)?table\b/i.test(normalized);
+}
+
 export default function SqlStudio() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -173,7 +183,11 @@ export default function SqlStudio() {
   const tabs = useAppSelector(selectWorkspaceTabs);
   const savedQueries = useAppSelector(selectWorkspaceSavedQueries);
   const activeTabId = useAppSelector(selectWorkspaceActiveTabId);
-  const { data: schema = [] } = useGetSqlStudioSchemaTreeQuery();
+  const {
+    data: schema = [],
+    isFetching: isSchemaRefreshing,
+    refetch: refetchSchemaTree,
+  } = useGetSqlStudioSchemaTreeQuery();
   const schemaFilter = useAppSelector(selectSchemaFilter);
   const favoritesExpanded = useAppSelector(selectFavoritesExpanded);
   const namespaceSectionExpanded = useAppSelector(selectNamespaceSectionExpanded);
@@ -376,6 +390,10 @@ export default function SqlStudio() {
     updateTab(activeTab.id, updates);
   }, [activeTab, updateTab]);
 
+  const refreshExplorerSchema = useCallback(async () => {
+    await refetchSchemaTree();
+  }, [refetchSchemaTree]);
+
   const addTab = () => {
     const nextIndex = tabs.length + 1;
     const tab = createQueryTab(nextIndex);
@@ -434,6 +452,7 @@ export default function SqlStudio() {
 
     dispatch(setWorkspaceRunning(true));
     const startedAt = Date.now();
+    const shouldRefreshExplorer = containsCreateTableStatement(sql);
 
     // Safety net: always unblock the Execute button after 60 s even if the
     // underlying WASM call or network request stalls and never settles.
@@ -473,6 +492,10 @@ export default function SqlStudio() {
           resultView: resolveResultView(queryResult),
         });
       });
+
+      if (queryResult.status === "success" && shouldRefreshExplorer) {
+        void refreshExplorerSchema();
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Query execution failed";
       dispatch(setWorkspaceTabResult({ tabId, result: {
@@ -1030,7 +1053,9 @@ export default function SqlStudio() {
               expandedNamespaces={expandedNamespaces}
               expandedTables={expandedTables}
               selectedTableKey={selectedTableKey}
+              isRefreshing={isSchemaRefreshing}
               onFilterChange={(value) => dispatch(setSchemaFilter(value))}
+              onRefresh={() => void refreshExplorerSchema()}
               onToggleFavorites={() => dispatch(toggleFavoritesExpanded())}
               onToggleNamespaceSection={() => dispatch(toggleNamespaceSectionExpanded())}
               onToggleNamespace={(namespaceName) => dispatch(toggleNamespaceExpanded(namespaceName))}

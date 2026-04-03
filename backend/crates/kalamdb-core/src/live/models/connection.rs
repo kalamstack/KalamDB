@@ -105,9 +105,7 @@ impl SubscriptionFlowControl {
             snapshot_end_seq: AtomicI64::new(0),
             has_snapshot: AtomicBool::new(false),
             initial_complete: AtomicBool::new(false),
-            buffer: Mutex::new(VecDeque::with_capacity(
-                MAX_BUFFERED_NOTIFICATIONS_PER_SUBSCRIPTION,
-            )),
+            buffer: Mutex::new(VecDeque::new()),
         }
     }
 
@@ -253,7 +251,7 @@ impl ConnectionState {
             user_role: OnceLock::new(),
             protocol: OnceLock::new(),
             last_heartbeat_ms: AtomicU64::new(epoch_millis()),
-            subscriptions: DashMap::new(),
+            subscriptions: DashMap::with_shard_amount(4),
             notification_tx,
             event_tx,
         }
