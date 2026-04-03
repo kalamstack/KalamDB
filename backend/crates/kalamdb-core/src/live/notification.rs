@@ -723,7 +723,7 @@ mod tests {
 
         let delivered = rx_ok.recv().await.expect("matching subscriber gets message");
         let wire = delivered.as_ref();
-        assert_eq!(wire.subscription_id, "sub_ok");
+        assert_eq!(wire.subscription_id.as_ref(), "sub_ok");
         assert_eq!(wire.payload.change_type, kalamdb_commons::websocket::ChangeType::Insert);
         assert!(wire.payload.old_values.is_none());
         assert!(wire.payload.rows.is_some());
@@ -770,7 +770,7 @@ mod tests {
 
         let delivered = rx.recv().await.expect("projected subscriber gets message");
         let wire = delivered.as_ref();
-        assert_eq!(wire.subscription_id, "sub_user");
+        assert_eq!(wire.subscription_id.as_ref(), "sub_user");
         assert_eq!(wire.payload.change_type, kalamdb_commons::websocket::ChangeType::Insert);
         assert!(wire.payload.old_values.is_none());
         assert!(wire.payload.rows.is_some());
@@ -803,7 +803,13 @@ mod tests {
             &conn_id,
             LiveQueryId::new(UserId::new("u3"), conn_id.clone(), "sub_buffer".to_string()),
             table_id.clone(),
-            make_shared_handle(Arc::new(tx), Arc::clone(&flow), None, None),
+            make_shared_handle(
+                "sub_buffer",
+                Arc::new(tx),
+                Arc::clone(&flow),
+                None,
+                None,
+            ),
         );
 
         // seq=11 is newer than snapshot end seq=10, should be buffered (not sent yet)
@@ -836,7 +842,7 @@ mod tests {
             &conn_id,
             LiveQueryId::new(UserId::new("u4"), conn_id.clone(), "sub_async".to_string()),
             table_id.clone(),
-            make_shared_handle(Arc::new(tx), flow, None, None),
+            make_shared_handle("sub_async", Arc::new(tx), flow, None, None),
         );
 
         let change = ChangeNotification::insert(table_id.clone(), make_row(1, "async", 1));
@@ -847,7 +853,7 @@ mod tests {
             .expect("worker should dispatch within timeout")
             .expect("message should be present");
 
-        assert_eq!(delivered.subscription_id, "sub_async");
+        assert_eq!(delivered.subscription_id.as_ref(), "sub_async");
 
         assert!(NotificationServiceTrait::has_subscribers(&*service, None, &table_id));
     }

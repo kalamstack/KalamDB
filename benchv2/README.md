@@ -53,8 +53,11 @@ The KalamDB Benchmarking Tool is designed to facilitate performance testing of t
    cargo build --release
    ```
 
-3. **Start the KalamDB Server**: 
-   Ensure the KalamDB server is running before executing benchmarks.
+3. **Build the KalamDB Server**: 
+  ```bash
+  cd ../backend
+  cargo build --release --bin kalamdb-server
+  ```
 
 4. **Run Benchmarks**: 
    Use the provided scripts to run benchmarks:
@@ -66,6 +69,16 @@ The KalamDB Benchmarking Tool is designed to facilitate performance testing of t
      ```powershell
      .\run-benchmarks.ps1
      ```
+
+  By default, `run-benchmarks.sh` manages a dedicated local benchmark server for loopback runs.
+  It will:
+  - Verify a release `kalamdb-server` binary exists.
+  - Refuse to run if a local server is already listening on the target port.
+  - Clear `benchv2/data` before startup.
+  - Start the server with `benchv2/server.toml`.
+  - Wait for `/health` and then continue into the Rust benchmark pre-flight checks.
+
+  If you pass a non-loopback or multi-URL `--urls` value, the script skips managed-server startup and uses the supplied servers directly.
 
 ## Adding New Benchmarks
 To add a new benchmark test:

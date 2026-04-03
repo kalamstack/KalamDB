@@ -10,57 +10,15 @@ description = "SQL statement handler implementations for KalamDB"
 
 [dependencies]
 # Internal crates
-kalamdb-auth = { path = "../kalamdb-auth", default-features = false }
-kalamdb-commons = { path = "../kalamdb-commons", features = ["full"] }
-kalamdb-configs = { path = "../kalamdb-configs" }
+kalamdb-commons = { path = "../kalamdb-commons", default-features = false }
+kalamdb-handlers-admin = { path = "crates/admin" }
+kalamdb-handlers-ddl = { path = "crates/ddl" }
+kalamdb-handlers-support = { path = "crates/support" }
+kalamdb-handlers-stream = { path = "crates/stream" }
+kalamdb-handlers-user = { path = "crates/user" }
 kalamdb-core = { path = "../kalamdb-core" }
-kalamdb-filestore = { path = "../kalamdb-filestore" }
-kalamdb-jobs = { path = "../kalamdb-jobs" }
-kalamdb-publisher = { path = "../kalamdb-publisher" }
-kalamdb-raft = { path = "../kalamdb-raft" }
-kalamdb-session = { path = "../kalamdb-session" }
 kalamdb-sql = { path = "../kalamdb-sql" }
-kalamdb-store = { path = "../kalamdb-store" }
-kalamdb-system = { path = "../kalamdb-system" }
-kalamdb-tables = { path = "../kalamdb-tables" }
-kalamdb-views = { path = "../kalamdb-views" }
-kalamdb-vector = { path = "../kalamdb-vector" }
-
-# Apache Arrow ecosystem
-arrow = { workspace = true }
-datafusion = { workspace = true }
-
-# SQL parsing (used in handler helpers)
-sqlparser = { workspace = true }
-
-# Concurrent data structures
-dashmap = { workspace = true }
-
-# Async
-async-trait = { workspace = true }
-tokio = { workspace = true, features = ["sync", "time", "rt"] }
-
-# Serialization
-serde = { workspace = true }
-serde_json = { workspace = true }
-
-# Error handling
-thiserror = { workspace = true }
-
-# Time handling
-chrono = { workspace = true }
-
-# Logging
-log = { workspace = true }
-
-# Tracing
-tracing = { workspace = true }
-
-# UUID generation
 uuid = { workspace = true }
-
-# ZIP archive creation
-zip = { workspace = true }
 
 [lib]
 doctest = false

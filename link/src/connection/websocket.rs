@@ -241,6 +241,7 @@ fn hash_start_index(key: &str, len: usize) -> usize {
     if len == 0 {
         return 0;
     }
+
     let mut hasher = DefaultHasher::new();
     key.hash(&mut hasher);
     (hasher.finish() as usize) % len

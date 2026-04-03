@@ -4,6 +4,7 @@ use kalamdb_core::app_context::AppContext;
 use kalamdb_core::error::KalamDbError;
 use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
 use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
+use kalamdb_handlers_support::audit;
 use kalamdb_sql::ddl::SubscribeStatement;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -21,7 +22,6 @@ impl SubscribeHandler {
     }
 }
 
-#[async_trait::async_trait]
 impl TypedStatementHandler<SubscribeStatement> for SubscribeHandler {
     async fn execute(
         &self,
@@ -59,7 +59,6 @@ impl TypedStatementHandler<SubscribeStatement> for SubscribeHandler {
         };
 
         // Log query operation
-        use crate::helpers::audit;
         let audit_entry = audit::log_query_operation(
             context,
             "SUBSCRIBE",

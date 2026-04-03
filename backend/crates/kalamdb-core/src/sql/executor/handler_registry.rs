@@ -17,13 +17,16 @@ use crate::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
 use crate::sql::executor::handler_adapter::{DynamicHandlerAdapter, TypedHandlerAdapter};
 use dashmap::DashMap;
 use kalamdb_sql::classifier::SqlStatement;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use tracing::Instrument;
+
+pub type SqlHandlerFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// Trait for handlers that can process any SqlStatement variant
 ///
 /// This allows polymorphic handler dispatch without boxing every handler.
-#[async_trait::async_trait]
 pub trait SqlStatementHandler: Send + Sync {
     /// Execute the statement with authorization pre-checked
     ///
@@ -35,19 +38,19 @@ pub trait SqlStatementHandler: Send + Sync {
     ///
     /// # Note
     /// SessionContext is available via `context.session` - no need to pass separately
-    async fn execute(
-        &self,
+    fn execute<'a>(
+        &'a self,
         statement: SqlStatement,
         params: Vec<ScalarValue>,
-        context: &ExecutionContext,
-    ) -> Result<ExecutionResult, KalamDbError>;
+        context: &'a ExecutionContext,
+    ) -> SqlHandlerFuture<'a, Result<ExecutionResult, KalamDbError>>;
 
     /// Check authorization before execution (called by registry)
-    async fn check_authorization(
-        &self,
-        statement: &SqlStatement,
-        context: &ExecutionContext,
-    ) -> Result<(), KalamDbError>;
+    fn check_authorization<'a>(
+        &'a self,
+        statement: &'a SqlStatement,
+        context: &'a ExecutionContext,
+    ) -> SqlHandlerFuture<'a, Result<(), KalamDbError>>;
 }
 
 /// Registry key type for handler lookup
@@ -293,32 +296,36 @@ mod tests {
         // A minimal handler stub that requires DBA role (simulates DDL handler auth).
         struct DbaOnlyStub;
 
-        #[async_trait::async_trait]
         impl SqlStatementHandler for DbaOnlyStub {
-            async fn execute(
-                &self,
+            fn execute<'a>(
+                &'a self,
                 _statement: SqlStatement,
                 _params: Vec<ScalarValue>,
-                _context: &ExecutionContext,
-            ) -> Result<ExecutionResult, KalamDbError> {
-                Ok(ExecutionResult::Success {
-                    message: "ok".to_string(),
+                _context: &'a ExecutionContext,
+            ) -> SqlHandlerFuture<'a, Result<ExecutionResult, KalamDbError>> {
+                Box::pin(async {
+                    Ok(ExecutionResult::Success {
+                        message: "ok".to_string(),
+                    })
                 })
             }
 
-            async fn check_authorization(
-                &self,
-                _statement: &SqlStatement,
-                context: &ExecutionContext,
-            ) -> Result<(), KalamDbError> {
-                if !matches!(
+            fn check_authorization<'a>(
+                &'a self,
+                _statement: &'a SqlStatement,
+                context: &'a ExecutionContext,
+            ) -> SqlHandlerFuture<'a, Result<(), KalamDbError>> {
+                let allowed = matches!(
                     context.user_role(),
                     kalamdb_commons::Role::Dba | kalamdb_commons::Role::System
-                ) {
-                    Err(KalamDbError::Unauthorized("Requires DBA role".to_string()))
-                } else {
-                    Ok(())
-                }
+                );
+                Box::pin(async move {
+                    if !allowed {
+                        Err(KalamDbError::Unauthorized("Requires DBA role".to_string()))
+                    } else {
+                        Ok(())
+                    }
+                })
             }
         }
 

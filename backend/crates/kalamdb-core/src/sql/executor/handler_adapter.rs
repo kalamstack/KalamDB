@@ -5,7 +5,7 @@
 
 use crate::error::KalamDbError;
 use crate::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
-use crate::sql::executor::handler_registry::SqlStatementHandler;
+use crate::sql::executor::handler_registry::{SqlHandlerFuture, SqlStatementHandler};
 use crate::sql::executor::handlers::typed::TypedStatementHandler;
 use kalamdb_sql::classifier::SqlStatement;
 use kalamdb_sql::DdlAst;
@@ -59,42 +59,45 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<H, T, F> SqlStatementHandler for TypedHandlerAdapter<H, T, F>
 where
     H: TypedStatementHandler<T> + Send + Sync,
     T: DdlAst + Send + 'static,
     F: Fn(SqlStatement) -> Option<T> + Send + Sync,
 {
-    async fn execute(
-        &self,
+    fn execute<'a>(
+        &'a self,
         statement: SqlStatement,
         params: Vec<ScalarValue>,
-        context: &ExecutionContext,
-    ) -> Result<ExecutionResult, KalamDbError> {
-        let stmt = (self.extractor)(statement.clone()).ok_or_else(|| {
-            KalamDbError::InvalidOperation(format!(
-                "Handler received wrong statement type: {}",
-                statement.name()
-            ))
-        })?;
+        context: &'a ExecutionContext,
+    ) -> SqlHandlerFuture<'a, Result<ExecutionResult, KalamDbError>> {
+        Box::pin(async move {
+            let stmt = (self.extractor)(statement.clone()).ok_or_else(|| {
+                KalamDbError::InvalidOperation(format!(
+                    "Handler received wrong statement type: {}",
+                    statement.name()
+                ))
+            })?;
 
-        self.handler.execute(stmt, params, context).await
+            self.handler.execute(stmt, params, context).await
+        })
     }
 
-    async fn check_authorization(
-        &self,
-        statement: &SqlStatement,
-        context: &ExecutionContext,
-    ) -> Result<(), KalamDbError> {
-        let stmt = (self.extractor)(statement.clone()).ok_or_else(|| {
-            KalamDbError::InvalidOperation(format!(
-                "Handler received wrong statement type: {}",
-                statement.name()
-            ))
-        })?;
+    fn check_authorization<'a>(
+        &'a self,
+        statement: &'a SqlStatement,
+        context: &'a ExecutionContext,
+    ) -> SqlHandlerFuture<'a, Result<(), KalamDbError>> {
+        Box::pin(async move {
+            let stmt = (self.extractor)(statement.clone()).ok_or_else(|| {
+                KalamDbError::InvalidOperation(format!(
+                    "Handler received wrong statement type: {}",
+                    statement.name()
+                ))
+            })?;
 
-        self.handler.check_authorization(&stmt, context).await
+            self.handler.check_authorization(&stmt, context).await
+        })
     }
 }
 
@@ -128,26 +131,25 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<H> SqlStatementHandler for DynamicHandlerAdapter<H>
 where
     H: crate::sql::executor::handlers::StatementHandler + Send + Sync,
 {
-    async fn execute(
-        &self,
+    fn execute<'a>(
+        &'a self,
         statement: SqlStatement,
         params: Vec<ScalarValue>,
-        context: &ExecutionContext,
-    ) -> Result<ExecutionResult, KalamDbError> {
-        self.handler.execute(statement, params, context).await
+        context: &'a ExecutionContext,
+    ) -> SqlHandlerFuture<'a, Result<ExecutionResult, KalamDbError>> {
+        Box::pin(async move { self.handler.execute(statement, params, context).await })
     }
 
-    async fn check_authorization(
-        &self,
-        statement: &SqlStatement,
-        context: &ExecutionContext,
-    ) -> Result<(), KalamDbError> {
-        self.handler.check_authorization(statement, context).await
+    fn check_authorization<'a>(
+        &'a self,
+        statement: &'a SqlStatement,
+        context: &'a ExecutionContext,
+    ) -> SqlHandlerFuture<'a, Result<(), KalamDbError>> {
+        Box::pin(async move { self.handler.check_authorization(statement, context).await })
     }
 }
 

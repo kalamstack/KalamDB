@@ -1,0 +1,33 @@
+[package]
+name = "kalamdb-handlers-ddl"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "DDL and catalog SQL handlers for KalamDB"
+
+[dependencies]
+kalamdb-commons = { path = "../../../kalamdb-commons", default-features = false, features = ["arrow-utils", "table-definition"] }
+kalamdb-core = { path = "../../../kalamdb-core" }
+kalamdb-filestore = { path = "../../../kalamdb-filestore" }
+kalamdb-handlers-support = { path = "../support" }
+kalamdb-jobs = { path = "../../../kalamdb-jobs" }
+kalamdb-raft = { path = "../../../kalamdb-raft" }
+kalamdb-session = { path = "../../../kalamdb-session" }
+kalamdb-sql = { path = "../../../kalamdb-sql" }
+kalamdb-store = { path = "../../../kalamdb-store" }
+kalamdb-system = { path = "../../../kalamdb-system" }
+kalamdb-tables = { path = "../../../kalamdb-tables" }
+kalamdb-vector = { path = "../../../kalamdb-vector" }
+
+arrow = { workspace = true }
+chrono = { workspace = true }
+datafusion = { workspace = true }
+log = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time", "rt"] }
+
+[lib]
+doctest = false

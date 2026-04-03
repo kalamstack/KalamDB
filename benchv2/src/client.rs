@@ -4,11 +4,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use kalam_link::{
-    AuthProvider, ConnectionOptions, KalamLinkClient, KalamLinkTimeouts, QueryResponse,
-    ServerSetupRequest, SubscriptionConfig, SubscriptionManager,
+    AuthProvider, ConnectionOptions, HttpVersion, KalamLinkClient, KalamLinkTimeouts,
+    QueryResponse, ServerSetupRequest, SubscriptionConfig, SubscriptionManager,
 };
 use serde::Deserialize;
 use serde_json::Value;
+
+const BENCH_HTTP_POOL_MAX_IDLE_PER_HOST: usize = 256;
+const BENCH_HTTP_MAX_RETRIES: u32 = 5;
 
 /// Thin wrapper around `KalamLinkClient` that provides convenient helpers
 /// for the benchmark suite while delegating all HTTP / WebSocket work to kalam-link.
@@ -16,11 +19,13 @@ use serde_json::Value;
 pub struct KalamClient {
     endpoints: Arc<Vec<EndpointClient>>,
     next_endpoint: Arc<AtomicUsize>,
+    ws_local_bind_addresses: Arc<Vec<String>>,
 }
 
 #[derive(Clone)]
 struct EndpointClient {
     base_url: String,
+    auth: AuthProvider,
     link: KalamLinkClient,
 }
 
@@ -59,7 +64,7 @@ impl KalamClient {
         }
 
         let timeouts = default_timeouts();
-        let ws_local_bind_addresses = derive_loopback_bind_addresses(&urls);
+        let ws_local_bind_addresses = resolve_ws_local_bind_addresses(&urls)?;
         let mut endpoints = Vec::with_capacity(urls.len());
         let mut failures = Vec::new();
 
@@ -94,6 +99,7 @@ impl KalamClient {
         Ok(Self {
             endpoints: Arc::new(endpoints),
             next_endpoint: Arc::new(AtomicUsize::new(0)),
+            ws_local_bind_addresses: Arc::new(ws_local_bind_addresses),
         })
     }
 
@@ -139,24 +145,27 @@ impl KalamClient {
         };
 
         let token = login_resp.access_token;
+        let auth = AuthProvider::jwt_token(token);
 
         // Build the authenticated client with sensible timeouts
-        let mut link_builder = KalamLinkClient::builder()
+        let connection_options = benchmark_connection_options(ws_local_bind_addresses);
+        let link_builder = KalamLinkClient::builder()
             .base_url(base_url)
-            .auth(AuthProvider::jwt_token(token))
+            .auth(auth.clone())
+            // Preserve enough keep-alive sockets for bursty load tests so
+            // repeated iterations do not churn through local ephemeral ports.
+            .http_pool_max_idle_per_host(BENCH_HTTP_POOL_MAX_IDLE_PER_HOST)
+            .max_retries(BENCH_HTTP_MAX_RETRIES)
             .timeout(Duration::from_secs(60))
-            .timeouts(timeouts.clone());
-        if !ws_local_bind_addresses.is_empty() {
-            let connection_options = ConnectionOptions::new()
-                .with_ws_local_bind_addresses(ws_local_bind_addresses.to_vec());
-            link_builder = link_builder.connection_options(connection_options);
-        }
+            .timeouts(timeouts.clone())
+            .connection_options(connection_options);
         let link = link_builder
             .build()
             .map_err(|e| format!("failed to build authenticated kalam-link client: {}", e))?;
 
         Ok(EndpointClient {
             base_url: base_url.to_string(),
+            auth,
             link,
         })
     }
@@ -307,6 +316,59 @@ impl KalamClient {
             .map_err(|e| format!("Subscribe error: {}", e))
     }
 
+    /// Create an isolated kalam-link client for a single benchmark connection bucket.
+    ///
+    /// Unlike `link()`, this does not share the inner WebSocket connection with any
+    /// other benchmark task, which lets scale tests deliberately open multiple pooled
+    /// WebSocket connections when the backend enforces per-connection subscription caps.
+    pub fn new_isolated_link_for_ws_url_with_bind_address(
+        &self,
+        ws_url: Option<&str>,
+        bind_address: Option<&str>,
+    ) -> Result<KalamLinkClient, String> {
+        let endpoint = if let Some(ws_url) = ws_url {
+            self.endpoint_for_ws_url(ws_url)
+                .ok_or_else(|| format!("WebSocket URL not configured in client: {}", ws_url))?
+        } else {
+            self.pick_endpoint()
+        };
+
+        let ws_local_bind_addresses = bind_address
+            .map(|address| vec![address.to_string()])
+            .unwrap_or_else(|| self.ws_local_bind_addresses.as_ref().clone());
+        let connection_options = benchmark_connection_options(&ws_local_bind_addresses);
+
+        KalamLinkClient::builder()
+            .base_url(endpoint.base_url)
+            .auth(endpoint.auth)
+            .http_pool_max_idle_per_host(BENCH_HTTP_POOL_MAX_IDLE_PER_HOST)
+            .max_retries(BENCH_HTTP_MAX_RETRIES)
+            .timeout(Duration::from_secs(60))
+            .timeouts(endpoint.link.timeouts().clone())
+            .connection_options(connection_options)
+            .build()
+            .map_err(|e| format!("failed to build isolated kalam-link client: {}", e))
+    }
+
+    pub fn new_isolated_link_for_ws_url(
+        &self,
+        ws_url: Option<&str>,
+    ) -> Result<KalamLinkClient, String> {
+        self.new_isolated_link_for_ws_url_with_bind_address(ws_url, None)
+    }
+
+    pub fn ws_local_bind_addresses(&self) -> &[String] {
+        self.ws_local_bind_addresses.as_ref()
+    }
+
+    pub fn ws_local_bind_address_for_index(&self, index: usize) -> Option<&str> {
+        if self.ws_local_bind_addresses.is_empty() {
+            None
+        } else {
+            Some(self.ws_local_bind_addresses[index % self.ws_local_bind_addresses.len()].as_str())
+        }
+    }
+
     /// Get a reference to one inner client for advanced use.
     /// Selection is round-robin across configured URLs.
     pub fn link(&self) -> KalamLinkClient {
@@ -329,6 +391,45 @@ impl KalamClient {
     }
 }
 
+fn resolve_ws_local_bind_addresses(urls: &[String]) -> Result<Vec<String>, String> {
+    if let Some(configured) = configured_ws_local_bind_addresses()? {
+        return Ok(configured);
+    }
+
+    Ok(derive_loopback_bind_addresses(urls))
+}
+
+fn configured_ws_local_bind_addresses() -> Result<Option<Vec<String>>, String> {
+    let Some(raw) = std::env::var("KALAMDB_BENCH_WS_LOCAL_BIND_ADDRESSES").ok() else {
+        return Ok(None);
+    };
+
+    let mut bind_addrs = Vec::new();
+    for token in raw.split(',') {
+        let candidate = token.trim();
+        if candidate.is_empty() {
+            continue;
+        }
+
+        let ip = candidate
+            .parse::<IpAddr>()
+            .map_err(|e| format!("Invalid KALAMDB_BENCH_WS_LOCAL_BIND_ADDRESSES entry '{}': {}", candidate, e))?;
+        let normalized = ip.to_string();
+        if !bind_addrs.contains(&normalized) {
+            bind_addrs.push(normalized);
+        }
+    }
+
+    if bind_addrs.is_empty() {
+        return Err(
+            "KALAMDB_BENCH_WS_LOCAL_BIND_ADDRESSES was set but no valid IP addresses were provided"
+                .to_string(),
+        );
+    }
+
+    Ok(Some(bind_addrs))
+}
+
 fn default_timeouts() -> KalamLinkTimeouts {
     KalamLinkTimeouts::builder()
         .connection_timeout(Duration::from_secs(45))
@@ -339,6 +440,17 @@ fn default_timeouts() -> KalamLinkTimeouts {
         .initial_data_timeout(Duration::from_secs(60))
         .keepalive_interval_secs(20)
         .build()
+}
+
+fn benchmark_connection_options(ws_local_bind_addresses: &[String]) -> ConnectionOptions {
+    let mut options = ConnectionOptions::new()
+        .with_ws_local_bind_addresses(ws_local_bind_addresses.to_vec());
+
+    if std::env::var("KALAMDB_BENCH_HTTP2").ok().as_deref() == Some("1") {
+        options = options.with_http_version(HttpVersion::Http2);
+    }
+
+    options
 }
 
 fn normalize_http_urls(urls: &[String]) -> Vec<String> {

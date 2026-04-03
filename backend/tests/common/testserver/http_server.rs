@@ -881,10 +881,6 @@ pub async fn start_http_test_server() -> Result<HttpTestServer> {
     // Match production behavior: initialize JWT config from server settings.
     kalamdb_auth::services::unified::init_auth_config(&config.auth, &config.oauth);
 
-    // Ensure test servers always use localhost-only root auth.
-    // This avoids leaking host env overrides into integration tests.
-    std::env::set_var("KALAMDB_ROOT_PASSWORD", "");
-
     // Use bootstrap_isolated to ensure each test gets a fresh AppContext
     // This prevents state leakage between tests (Raft logs, system tables, etc.)
     let (components, app_context) = kalamdb_server::lifecycle::bootstrap_isolated(&config).await?;
@@ -935,10 +931,6 @@ pub async fn start_http_test_server_with_config(
     let skip_raft_leader_check = false;
 
     kalamdb_auth::services::unified::init_auth_config(&config.auth, &config.oauth);
-
-    // Ensure test servers always use localhost-only root auth.
-    // This avoids leaking host env overrides into integration tests.
-    std::env::set_var("KALAMDB_ROOT_PASSWORD", "");
 
     // Use bootstrap_isolated to ensure each test gets a fresh AppContext
     let (components, app_context) = kalamdb_server::lifecycle::bootstrap_isolated(&config).await?;

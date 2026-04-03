@@ -155,28 +155,34 @@ async fn main() {
     );
     println!("════════════════════════════════════════════════\n");
 
-    // Generate reports
-    match json_reporter::write_json_report(
-        &results,
-        &config,
-        &config.output_dir,
-        &kalamdb_version,
-        &system,
-    ) {
-        Ok(path) => println!("  JSON report: {}", path),
-        Err(e) => eprintln!("  Failed to write JSON report: {}", e),
-    }
+    if failed == 0 {
+        match json_reporter::write_json_report(
+            &results,
+            &config,
+            &config.output_dir,
+            &kalamdb_version,
+            &system,
+        ) {
+            Ok(path) => println!("  JSON report: {}", path),
+            Err(e) => eprintln!("  Failed to write JSON report: {}", e),
+        }
 
-    match html_reporter::write_html_report(
-        &results,
-        &config,
-        &config.output_dir,
-        &kalamdb_version,
-        previous.as_ref(),
-        &system,
-    ) {
-        Ok(path) => println!("  HTML report: {}", path),
-        Err(e) => eprintln!("  Failed to write HTML report: {}", e),
+        match html_reporter::write_html_report(
+            &results,
+            &config,
+            &config.output_dir,
+            &kalamdb_version,
+            previous.as_ref(),
+            &system,
+        ) {
+            Ok(path) => println!("  HTML report: {}", path),
+            Err(e) => eprintln!("  Failed to write HTML report: {}", e),
+        }
+    } else {
+        println!(
+            "  Skipping report generation because {} benchmark(s) failed.",
+            failed
+        );
     }
 
     // Clean up the benchmark namespace

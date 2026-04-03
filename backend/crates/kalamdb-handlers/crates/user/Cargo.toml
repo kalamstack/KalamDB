@@ -1,0 +1,25 @@
+[package]
+name = "kalamdb-handlers-user"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "User management SQL handlers for KalamDB"
+
+[dependencies]
+kalamdb-auth = { path = "../../../kalamdb-auth", default-features = false }
+kalamdb-commons = { path = "../../../kalamdb-commons", default-features = false }
+kalamdb-core = { path = "../../../kalamdb-core" }
+kalamdb-handlers-support = { path = "../support" }
+kalamdb-sql = { path = "../../../kalamdb-sql" }
+kalamdb-system = { path = "../../../kalamdb-system" }
+
+chrono = { workspace = true }
+log = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time", "rt"] }
+
+[lib]
+doctest = false

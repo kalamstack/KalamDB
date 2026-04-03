@@ -1,0 +1,51 @@
+{
+  "version": "0.4.2-rc1",
+  "server_url": "http://127.0.0.1:48081",
+  "timestamp": "2026-04-03T16:17:00.166657+00:00",
+  "config": {
+    "iterations": 1,
+    "warmup": 0,
+    "concurrency": 10,
+    "namespace": "bench_161006"
+  },
+  "system": {
+    "hostname": "MacBookPro.home",
+    "machine_model": "MacBookPro18,3",
+    "os_name": "Darwin",
+    "os_version": "macOS 26.4",
+    "kernel_version": "25.4.0",
+    "architecture": "aarch64",
+    "cpu_model": "Apple M1 Pro",
+    "cpu_logical_cores": 10,
+    "cpu_physical_cores": 10,
+    "total_memory_bytes": 17179869184,
+    "available_memory_bytes": 4579721216,
+    "used_memory_bytes": 12600147968,
+    "used_memory_percent": 73.34251403808594
+  },
+  "results": [
+    {
+      "name": "subscriber_scale",
+      "category": "Scale",
+      "description": "Progressive subscriber scale test (up to --max-subscribers, default 100K)",
+      "iterations": 1,
+      "total_us": 248012670,
+      "mean_us": 248012670.0,
+      "median_us": 248012670.0,
+      "p95_us": 248012670.0,
+      "p99_us": 248012670.0,
+      "min_us": 248012670.0,
+      "max_us": 248012670.0,
+      "stddev_us": 0.0,
+      "ops_per_sec": 0.0040320520721784095,
+      "success": true,
+      "error": null
+    }
+  ],
+  "summary": {
+    "total_benchmarks": 1,
+    "passed": 1,
+    "failed": 0,
+    "total_duration_ms": 248012.67
+  }
+}

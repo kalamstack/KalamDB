@@ -73,8 +73,9 @@ pub async fn run_preflight_checks(client: &KalamClient, config: &Config) -> bool
     // 2. Endpoint reachability (all configured URLs)
     checks.push(check_all_urls_reachable(client, config).await);
 
-    // 2b. subscriber_scale capacity feasibility
+    // 2b. scale benchmark capacity feasibility
     checks.push(check_subscriber_scale_target_capacity(config));
+    checks.push(check_connection_scale_target_capacity(config));
 
     // 3. SQL connectivity
     checks.push(check_sql_connectivity(client).await);
@@ -127,22 +128,42 @@ fn check_subscriber_scale_target_capacity(config: &Config) -> CheckResult {
     let ws_targets = resolve_ws_targets(&config.urls);
     let allow_single = std::env::var("KALAMDB_ALLOW_SINGLE_WS_TARGET").ok().as_deref() == Some("1");
 
-    if ws_targets.len() == 1 && config.max_subscribers > 32_000 && !allow_single {
+    if ws_targets.is_empty() {
+        return CheckResult::fail(
+            "subscriber_scale target",
+            "No WebSocket targets resolved from --urls",
+        );
+    }
+
+    let subscriptions_per_connection = benchmark_ws_subscriptions_per_connection();
+    let required_ws_connections =
+        (config.max_subscribers as usize).div_ceil(subscriptions_per_connection.max(1));
+    let required_per_target = required_ws_connections.div_ceil(ws_targets.len());
+    let single_target_ws_limit = detected_single_target_ws_limit().unwrap_or(32_000);
+    let single_target_ws_limit_label = human_count(single_target_ws_limit);
+
+    if ws_targets.len() == 1 && required_ws_connections > single_target_ws_limit && !allow_single {
         return CheckResult::fail(
             "subscriber_scale target",
             format!(
-                "Single WS target ({}) with --max-subscribers={} likely hits local ephemeral-port ceiling near ~32K. Use --urls with multiple endpoints or set KALAMDB_ALLOW_SINGLE_WS_TARGET=1.",
-                ws_targets[0], config.max_subscribers
+                "Single WS target ({}) would require about {} WebSocket connections at {} subscriptions/connection, which likely hits the local ephemeral-port ceiling on this host near {}. Use --urls with multiple endpoints or set KALAMDB_ALLOW_SINGLE_WS_TARGET=1.",
+                ws_targets[0],
+                required_ws_connections,
+                subscriptions_per_connection,
+                single_target_ws_limit_label
             ),
         );
     }
 
-    if ws_targets.len() == 1 && config.max_subscribers > 32_000 && allow_single {
+    if ws_targets.len() == 1 && required_ws_connections > single_target_ws_limit && allow_single {
         return CheckResult::warn(
             "subscriber_scale target",
             format!(
-                "Forced via KALAMDB_ALLOW_SINGLE_WS_TARGET=1 on single target {} (ephemeral-port risk near ~32K).",
-                ws_targets[0]
+                "Forced via KALAMDB_ALLOW_SINGLE_WS_TARGET=1 on single target {} (estimated {} WebSocket connections at {} subscriptions/connection; ephemeral-port risk on this host near {}).",
+                ws_targets[0],
+                required_ws_connections,
+                subscriptions_per_connection,
+                single_target_ws_limit_label
             ),
         );
     }
@@ -150,8 +171,79 @@ fn check_subscriber_scale_target_capacity(config: &Config) -> CheckResult {
     CheckResult::pass(
         "subscriber_scale target",
         format!(
-            "{} WS target(s) for max_subscribers={}",
-            ws_targets.len(), config.max_subscribers
+            "{} WS target(s), client pools up to {} subscriptions per WS connection, requires about {} WS connection(s) total (~{} per target) for max_subscribers={}",
+            ws_targets.len(),
+            subscriptions_per_connection,
+            required_ws_connections,
+            required_per_target,
+            config.max_subscribers
+        ),
+    )
+}
+
+fn benchmark_ws_subscriptions_per_connection() -> usize {
+    std::env::var("KALAMDB_BENCH_WS_SUBSCRIPTIONS_PER_CONNECTION")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(100)
+}
+
+fn check_connection_scale_target_capacity(config: &Config) -> CheckResult {
+    if !will_run_connection_scale(config) {
+        return CheckResult::pass(
+            "connection_scale target",
+            "Skipped (connection_scale not selected)",
+        );
+    }
+
+    let ws_targets = resolve_ws_targets(&config.urls);
+    let allow_single = std::env::var("KALAMDB_ALLOW_SINGLE_WS_TARGET").ok().as_deref() == Some("1");
+
+    if ws_targets.is_empty() {
+        return CheckResult::fail(
+            "connection_scale target",
+            "No WebSocket targets resolved from --urls",
+        );
+    }
+
+    let required_ws_connections = config.max_subscribers as usize;
+    let required_per_target = required_ws_connections.div_ceil(ws_targets.len());
+    let single_target_ws_limit = detected_single_target_ws_limit().unwrap_or(32_000);
+    let single_target_ws_limit_label = human_count(single_target_ws_limit);
+
+    if ws_targets.len() == 1 && required_ws_connections > single_target_ws_limit && !allow_single {
+        return CheckResult::fail(
+            "connection_scale target",
+            format!(
+                "Single WS target ({}) would require about {} WebSocket connections with one subscription/connection, which likely hits the local ephemeral-port ceiling on this host near {}. Use --urls with multiple endpoints or set KALAMDB_ALLOW_SINGLE_WS_TARGET=1.",
+                ws_targets[0],
+                required_ws_connections,
+                single_target_ws_limit_label,
+            ),
+        );
+    }
+
+    if ws_targets.len() == 1 && required_ws_connections > single_target_ws_limit && allow_single {
+        return CheckResult::warn(
+            "connection_scale target",
+            format!(
+                "Forced via KALAMDB_ALLOW_SINGLE_WS_TARGET=1 on single target {} (estimated {} WebSocket connections with one subscription/connection; ephemeral-port risk on this host near {}).",
+                ws_targets[0],
+                required_ws_connections,
+                single_target_ws_limit_label,
+            ),
+        );
+    }
+
+    CheckResult::pass(
+        "connection_scale target",
+        format!(
+            "{} WS target(s), one subscription per connection, requires about {} WS connection(s) total (~{} per target) for max_subscribers={}",
+            ws_targets.len(),
+            required_ws_connections,
+            required_per_target,
+            config.max_subscribers,
         ),
     )
 }
@@ -164,6 +256,21 @@ fn will_run_subscriber_scale(config: &Config) -> bool {
     if let Some(filter) = &config.filter {
         let f = filter.to_lowercase();
         let name = "subscriber_scale";
+        let category = "scale";
+        return name.contains(&f) || category.contains(&f);
+    }
+
+    true
+}
+
+fn will_run_connection_scale(config: &Config) -> bool {
+    if !config.bench.is_empty() {
+        return config.bench.iter().any(|b| b == "connection_scale");
+    }
+
+    if let Some(filter) = &config.filter {
+        let f = filter.to_lowercase();
+        let name = "connection_scale";
         let category = "scale";
         return name.contains(&f) || category.contains(&f);
     }
@@ -207,6 +314,58 @@ fn normalize_ws_endpoint(raw: &str) -> Option<String> {
     }
 
     Some(url)
+}
+
+fn detected_single_target_ws_limit() -> Option<usize> {
+    let bind_count = configured_ws_local_bind_address_count().max(1);
+
+    #[cfg(target_os = "macos")]
+    {
+        macos_high_ephemeral_port_capacity().map(|limit| limit.saturating_mul(bind_count))
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_high_ephemeral_port_capacity() -> Option<usize> {
+    let first = read_sysctl_usize("net.inet.ip.portrange.hifirst")?;
+    let last = read_sysctl_usize("net.inet.ip.portrange.hilast")?;
+    (last >= first).then_some(last - first + 1)
+}
+
+#[cfg(target_os = "macos")]
+fn read_sysctl_usize(name: &str) -> Option<usize> {
+    let output = Command::new("sysctl").args(["-n", name]).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<usize>()
+        .ok()
+}
+
+fn human_count(value: usize) -> String {
+    let value = value as f64;
+    if value >= 1_000_000.0 {
+        format!("{:.1}M", value / 1_000_000.0)
+    } else if value >= 1_000.0 {
+        format!("{:.1}K", value / 1_000.0)
+    } else {
+        (value as usize).to_string()
+    }
+}
+
+fn configured_ws_local_bind_address_count() -> usize {
+    std::env::var("KALAMDB_BENCH_WS_LOCAL_BIND_ADDRESSES")
+        .ok()
+        .map(|raw| raw.split(',').filter(|entry| !entry.trim().is_empty()).count())
+        .unwrap_or(0)
 }
 
 /// Check the process file descriptor limit.

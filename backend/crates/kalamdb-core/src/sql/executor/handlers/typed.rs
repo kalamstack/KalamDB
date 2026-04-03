@@ -3,8 +3,9 @@
 use super::{ExecutionContext, ExecutionResult, ScalarValue};
 use crate::error::KalamDbError;
 use kalamdb_sql::DdlAst;
+use std::future::Future;
 
-#[async_trait::async_trait]
+#[allow(async_fn_in_trait)]
 pub trait TypedStatementHandler<T: DdlAst>: Send + Sync {
     /// Execute a typed parsed statement with full context
     ///
@@ -15,19 +16,19 @@ pub trait TypedStatementHandler<T: DdlAst>: Send + Sync {
     ///
     /// # Note
     /// SessionContext is available via `context.session` - no need to pass separately
-    async fn execute(
-        &self,
+    fn execute<'a>(
+        &'a self,
         statement: T,
         params: Vec<ScalarValue>,
-        context: &ExecutionContext,
-    ) -> Result<ExecutionResult, KalamDbError>;
+        context: &'a ExecutionContext,
+    ) -> impl Future<Output = Result<ExecutionResult, KalamDbError>> + Send + 'a;
 
     /// Authorization hook for typed statements (optional override)
-    async fn check_authorization(
-        &self,
-        _statement: &T,
-        _context: &ExecutionContext,
-    ) -> Result<(), KalamDbError> {
-        Ok(())
+    fn check_authorization<'a>(
+        &'a self,
+        _statement: &'a T,
+        _context: &'a ExecutionContext,
+    ) -> impl Future<Output = Result<(), KalamDbError>> + Send + 'a {
+        async move { Ok(()) }
     }
 }

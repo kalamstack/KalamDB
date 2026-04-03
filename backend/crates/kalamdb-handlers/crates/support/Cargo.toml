@@ -1,0 +1,28 @@
+[package]
+name = "kalamdb-handlers-support"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared support utilities for nested KalamDB handler crates"
+
+[dependencies]
+kalamdb-commons = { path = "../../../kalamdb-commons", default-features = false, features = ["conversions", "table-definition"] }
+kalamdb-core = { path = "../../../kalamdb-core" }
+kalamdb-filestore = { path = "../../../kalamdb-filestore" }
+kalamdb-session = { path = "../../../kalamdb-session" }
+kalamdb-sql = { path = "../../../kalamdb-sql" }
+kalamdb-system = { path = "../../../kalamdb-system" }
+
+chrono = { workspace = true }
+log = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+datafusion = { workspace = true }
+
+[lib]
+doctest = false

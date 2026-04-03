@@ -1202,7 +1202,7 @@ after that we can add a button in ui for checking storage health
 
 150) Check if we have any un-safe unwrap methods r code using and fix it
 
-152) backend/crates/kalamdb-core/src/live/manager/connections_manager.rsand livequery_manager.rs have similar code for managing connections and queries we can make the connection_manager a service or the registry inside the livequerymanager and everywhere we directly use only livequerymanager for everything there, then we can name connections manager to connection_registry
+152) backend/crates/kalamdb-core/src/live/manager/connections_manager.rs and livequery_manager.rs have similar code for managing connections and queries we can make the connection_manager a service or the registry inside the livequerymanager and everywhere we directly use only livequerymanager for everything there, then we can name connections manager to connection_registry
 
 153) ConsumerConfig shouldnt support properties only type-safe object to configure it
 

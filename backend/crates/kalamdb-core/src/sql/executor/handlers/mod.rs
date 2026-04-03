@@ -17,6 +17,7 @@
 
 use crate::error::KalamDbError;
 use kalamdb_sql::classifier::SqlStatement;
+use std::future::Future;
 
 // Typed handler trait (stays in core; handler impls are in kalamdb-handlers)
 pub mod typed;
@@ -65,7 +66,7 @@ pub use typed::TypedStatementHandler;
 ///     }
 /// }
 /// ```
-#[async_trait::async_trait]
+#[allow(async_fn_in_trait)]
 pub trait StatementHandler: Send + Sync {
     /// Execute a SQL statement with full context
     ///
@@ -80,12 +81,12 @@ pub trait StatementHandler: Send + Sync {
     ///
     /// # Note
     /// SessionContext is available via `context.session` - no need to pass separately
-    async fn execute(
-        &self,
+    fn execute<'a>(
+        &'a self,
         statement: SqlStatement,
         params: Vec<ScalarValue>,
-        context: &ExecutionContext,
-    ) -> Result<ExecutionResult, KalamDbError>;
+        context: &'a ExecutionContext,
+    ) -> impl Future<Output = Result<ExecutionResult, KalamDbError>> + Send + 'a;
 
     /// Validate authorization before execution
     ///
@@ -99,15 +100,16 @@ pub trait StatementHandler: Send + Sync {
     /// # Returns
     /// * `Ok(())` - Authorization passed
     /// * `Err(KalamDbError::PermissionDenied)` - Authorization failed
-    async fn check_authorization(
-        &self,
-        statement: &SqlStatement,
-        context: &ExecutionContext,
-    ) -> Result<(), KalamDbError> {
+    fn check_authorization<'a>(
+        &'a self,
+        statement: &'a SqlStatement,
+        context: &'a ExecutionContext,
+    ) -> impl Future<Output = Result<(), KalamDbError>> + Send + 'a {
         // Default implementation: delegate to AuthorizationHandler
         //AuthorizationHandler::check_authorization(context, statement)
-        statement
+        let result = statement
             .check_authorization(context.user_role())
-            .map_err(KalamDbError::PermissionDenied)
+            .map_err(KalamDbError::PermissionDenied);
+        async move { result }
     }
 }

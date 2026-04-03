@@ -772,6 +772,7 @@ pub struct KalamLinkClientBuilder {
     timeout: Duration,
     resolved_auth: ResolvedAuth,
     max_retries: u32,
+    http_pool_max_idle_per_host: usize,
     timeouts: KalamLinkTimeouts,
     connection_options: ConnectionOptions,
     event_handlers: EventHandlers,
@@ -785,6 +786,7 @@ impl KalamLinkClientBuilder {
             timeout: Duration::from_secs(30),
             resolved_auth: ResolvedAuth::default(),
             max_retries: 3,
+            http_pool_max_idle_per_host: 10,
             timeouts: KalamLinkTimeouts::default(),
             connection_options: ConnectionOptions::default(),
             event_handlers: EventHandlers::default(),
@@ -888,6 +890,12 @@ impl KalamLinkClientBuilder {
     /// Set maximum number of retries for failed requests
     pub fn max_retries(mut self, retries: u32) -> Self {
         self.max_retries = retries;
+        self
+    }
+
+    /// Set the maximum number of idle HTTP keep-alive connections to retain per host.
+    pub fn http_pool_max_idle_per_host(mut self, max_idle_per_host: usize) -> Self {
+        self.http_pool_max_idle_per_host = max_idle_per_host;
         self
     }
 
@@ -1028,7 +1036,7 @@ impl KalamLinkClientBuilder {
             .timeout(self.timeout)
             .connect_timeout(self.timeouts.connection_timeout)
             // Enable connection pooling for high throughput (keep-alive)
-            .pool_max_idle_per_host(10)
+            .pool_max_idle_per_host(self.http_pool_max_idle_per_host)
             // Keep idle connections for 90 seconds (slightly longer than server's 75s)
             .pool_idle_timeout(std::time::Duration::from_secs(90));
 

@@ -628,6 +628,30 @@ fn invalidate_cached_token_for_credentials(base_url: &str, username: &str, passw
     });
 }
 
+fn clear_shared_root_client_for_url(base_url: &str) {
+    if let Ok(mut guard) = shared_root_client_cache().lock() {
+        if guard.as_ref().is_some_and(|cache| cache.base_url == base_url) {
+            *guard = None;
+        }
+    }
+}
+
+fn invalidate_auth_caches_for_credentials(base_url: &str, username: &str, password: &str) {
+    invalidate_cached_token_for_credentials(base_url, username, password);
+
+    if username == default_username() && password == default_password() {
+        clear_shared_root_client_for_url(base_url);
+    }
+}
+
+fn is_refreshable_token_error(message: &str) -> bool {
+    let lowered = message.to_lowercase();
+    lowered.contains("token expired")
+        || lowered.contains("invalid token signature")
+        || lowered.contains("invalid token")
+        || lowered.contains("jwt")
+}
+
 fn test_auth_manager() -> &'static TestAuthManager {
     TEST_AUTH_MANAGER.get_or_init(TestAuthManager::new)
 }
@@ -2599,8 +2623,8 @@ fn execute_sql_via_cli_as_with_args_and_urls(
                             spawn_duration, wait_duration, total_duration_ms, stderr
                         );
                         let err_msg = format!("CLI command failed: {}", stderr);
-                        if err_msg.to_lowercase().contains("token expired") {
-                            invalidate_cached_token_for_credentials(url, username, password);
+                        if is_refreshable_token_error(&err_msg) {
+                            invalidate_auth_caches_for_credentials(url, username, password);
                             last_err = Some(err_msg);
                             retry_after_attempt = true;
                             break;
@@ -3028,6 +3052,16 @@ fn execute_sql_via_client_internal(
                                             error: None,
                                         });
                                     }
+                                    if is_refreshable_token_error(&msg) {
+                                        invalidate_auth_caches_for_credentials(
+                                            url,
+                                            &username_owned,
+                                            &password_owned,
+                                        );
+                                        last_err = Some(e);
+                                        retry_after_attempt = true;
+                                        break;
+                                    }
                                     if is_retryable_cluster_error_for_sql(&sql, &msg) {
                                         last_err = Some(e);
                                         if idx + 1 < urls.len() {
@@ -3063,6 +3097,14 @@ fn execute_sql_via_client_internal(
                         Ok(response) => response,
                         Err(err) => {
                             let err_msg = err.to_string();
+                            if is_refreshable_token_error(&err_msg) && attempt + 1 < max_attempts {
+                                invalidate_auth_caches_for_credentials(
+                                    &base_url,
+                                    &username_owned,
+                                    &password_owned,
+                                );
+                                continue;
+                            }
                             if is_rate_limited_error(&err_msg) && attempt + 1 < max_attempts {
                                 let delay_ms = 250 + attempt * 250;
                                 tokio::time::sleep(Duration::from_millis(delay_ms as u64)).await;
@@ -3084,6 +3126,15 @@ fn execute_sql_via_client_internal(
                     if is_retryable_cluster_error_for_sql(&sql, &err_msg) {
                         let delay_ms = 200 + attempt * 200;
                         tokio::time::sleep(Duration::from_millis(delay_ms as u64)).await;
+                        continue;
+                    }
+
+                    if is_refreshable_token_error(&err_msg) && attempt + 1 < max_attempts {
+                        invalidate_auth_caches_for_credentials(
+                            &base_url,
+                            &username_owned,
+                            &password_owned,
+                        );
                         continue;
                     }
 

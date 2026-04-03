@@ -4113,18 +4113,49 @@ dependencies = [
 name = "kalamdb-handlers"
 version = "0.4.2-rc1"
 dependencies = [
- "arrow",
- "async-trait",
- "chrono",
- "dashmap 6.1.0",
- "datafusion",
- "kalamdb-auth",
  "kalamdb-commons",
- "kalamdb-configs",
+ "kalamdb-core",
+ "kalamdb-handlers-admin",
+ "kalamdb-handlers-ddl",
+ "kalamdb-handlers-stream",
+ "kalamdb-handlers-support",
+ "kalamdb-handlers-user",
+ "kalamdb-sql",
+ "uuid",
+]
+
+[[package]]
+name = "kalamdb-handlers-admin"
+version = "0.4.2-rc1"
+dependencies = [
+ "arrow",
+ "chrono",
+ "datafusion",
+ "kalamdb-commons",
+ "kalamdb-core",
+ "kalamdb-handlers-support",
+ "kalamdb-jobs",
+ "kalamdb-raft",
+ "kalamdb-session",
+ "kalamdb-sql",
+ "kalamdb-system",
+ "log",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "kalamdb-handlers-ddl"
+version = "0.4.2-rc1"
+dependencies = [
+ "arrow",
+ "chrono",
+ "datafusion",
+ "kalamdb-commons",
  "kalamdb-core",
  "kalamdb-filestore",
+ "kalamdb-handlers-support",
  "kalamdb-jobs",
- "kalamdb-publisher",
  "kalamdb-raft",
  "kalamdb-session",
  "kalamdb-sql",
@@ -4132,16 +4163,59 @@ dependencies = [
  "kalamdb-system",
  "kalamdb-tables",
  "kalamdb-vector",
- "kalamdb-views",
  "log",
- "serde",
  "serde_json",
- "sqlparser",
- "thiserror 2.0.18",
  "tokio",
- "tracing",
+]
+
+[[package]]
+name = "kalamdb-handlers-stream"
+version = "0.4.2-rc1"
+dependencies = [
+ "chrono",
+ "datafusion",
+ "kalamdb-commons",
+ "kalamdb-core",
+ "kalamdb-handlers-support",
+ "kalamdb-jobs",
+ "kalamdb-sql",
+ "kalamdb-system",
+ "kalamdb-tables",
+ "log",
+ "serde_json",
+]
+
+[[package]]
+name = "kalamdb-handlers-support"
+version = "0.4.2-rc1"
+dependencies = [
+ "chrono",
+ "datafusion",
+ "kalamdb-commons",
+ "kalamdb-core",
+ "kalamdb-filestore",
+ "kalamdb-session",
+ "kalamdb-sql",
+ "kalamdb-system",
+ "log",
+ "serde_json",
  "uuid",
- "zip",
+]
+
+[[package]]
+name = "kalamdb-handlers-user"
+version = "0.4.2-rc1"
+dependencies = [
+ "chrono",
+ "kalamdb-auth",
+ "kalamdb-commons",
+ "kalamdb-core",
+ "kalamdb-handlers-support",
+ "kalamdb-sql",
+ "kalamdb-system",
+ "log",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

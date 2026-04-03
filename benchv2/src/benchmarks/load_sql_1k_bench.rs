@@ -1,8 +1,10 @@
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use kalam_link::KalamLinkClient;
 use tokio::sync::Semaphore;
 
 use crate::benchmarks::Benchmark;
@@ -68,12 +70,13 @@ impl Benchmark for Sql1kUsersBench {
     ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
         Box::pin(async move {
             let total_queries = 1000u32;
+            let query_pool = Arc::new(build_sql_query_pool(client)?);
             let mut handles = Vec::with_capacity(total_queries as usize);
-            let max_in_flight = (client.urls().len().max(1) * 128).min(total_queries as usize);
+            let max_in_flight = sql_burst_in_flight_limit(client, total_queries);
             let semaphore = Arc::new(Semaphore::new(max_in_flight));
 
             for i in 0..total_queries {
-                let c = client.clone();
+                let query_pool = query_pool.clone();
                 let ns = config.namespace.clone();
                 let semaphore = semaphore.clone();
                 // Mix of query patterns to simulate realistic load
@@ -89,16 +92,27 @@ impl Benchmark for Sql1kUsersBench {
                 };
                 handles.push(tokio::spawn(async move {
                     let _permit = semaphore.acquire().await.map_err(|e| e.to_string())?;
-                    run_sql_with_retry(&c, &query).await
+                    let query_client = select_query_client(query_pool.as_ref(), i);
+                    run_sql_with_retry(query_client, &query).await
                 }));
             }
 
             let mut errors = 0u32;
+            let mut error_samples = BTreeMap::new();
             for h in handles {
                 match h.await {
                     Ok(Ok(_)) => {},
-                    Ok(Err(_)) => errors += 1,
-                    Err(_) => errors += 1,
+                    Ok(Err(error)) => {
+                        errors += 1;
+                        record_error_sample(&mut error_samples, &error);
+                    },
+                    Err(error) => {
+                        errors += 1;
+                        record_error_sample(
+                            &mut error_samples,
+                            &format!("Join error: {}", error),
+                        );
+                    },
                 }
             }
 
@@ -106,8 +120,11 @@ impl Benchmark for Sql1kUsersBench {
             let threshold = total_queries / 20;
             if errors > threshold {
                 return Err(format!(
-                    "{} out of {} queries failed (>{} threshold)",
-                    errors, total_queries, threshold
+                    "{} out of {} queries failed (>{} threshold); sample errors: {}",
+                    errors,
+                    total_queries,
+                    threshold,
+                    format_error_samples(&error_samples)
                 ));
             }
             Ok(())
@@ -126,11 +143,52 @@ impl Benchmark for Sql1kUsersBench {
     }
 }
 
-async fn run_sql_with_retry(client: &KalamClient, sql: &str) -> Result<(), String> {
+fn sql_burst_in_flight_limit(client: &KalamClient, total_queries: u32) -> usize {
+    if std::env::var("KALAMDB_BENCH_MANAGED_SERVER").ok().as_deref() == Some("1") {
+        return std::env::var("KALAMDB_BENCH_SQL_MAX_IN_FLIGHT")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(128)
+            .min(total_queries as usize);
+    }
+
+    (client.urls().len().max(1) * 128).min(total_queries as usize)
+}
+
+fn build_sql_query_pool(client: &KalamClient) -> Result<Vec<KalamLinkClient>, String> {
+    let pool_size = managed_sql_query_pool_size();
+    let mut pool = Vec::with_capacity(pool_size);
+
+    for _ in 0..pool_size {
+        pool.push(client.new_isolated_link_for_ws_url(None)?);
+    }
+
+    Ok(pool)
+}
+
+fn managed_sql_query_pool_size() -> usize {
+    if std::env::var("KALAMDB_BENCH_MANAGED_SERVER").ok().as_deref() != Some("1") {
+        return 1;
+    }
+
+    std::env::var("KALAMDB_BENCH_SQL_QUERY_CLIENTS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(8)
+}
+
+fn select_query_client(pool: &[KalamLinkClient], index: u32) -> &KalamLinkClient {
+    let pool_len = pool.len().max(1);
+    &pool[(index as usize) % pool_len]
+}
+
+async fn run_sql_with_retry(client: &KalamLinkClient, sql: &str) -> Result<(), String> {
     let mut delay = Duration::from_millis(100);
 
     for attempt in 0..4 {
-        match client.sql_ok(sql).await {
+        match run_sql_once(client, sql).await {
             Ok(_) => return Ok(()),
             Err(error) if attempt < 3 && is_transient_load_error(&error) => {
                 tokio::time::sleep(delay).await;
@@ -143,6 +201,25 @@ async fn run_sql_with_retry(client: &KalamClient, sql: &str) -> Result<(), Strin
     Err("SQL load benchmark exhausted retries".to_string())
 }
 
+async fn run_sql_once(client: &KalamLinkClient, sql: &str) -> Result<(), String> {
+    let response = client
+        .execute_query(sql, None, None, None)
+        .await
+        .map_err(|e| format!("SQL error: {}", e))?;
+
+    if response.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "SQL error: {}",
+            response
+                .error
+                .map(|error| error.message)
+                .unwrap_or_else(|| "unknown error".to_string())
+        ))
+    }
+}
+
 fn is_transient_load_error(error: &str) -> bool {
     let lower = error.to_ascii_lowercase();
     lower.contains("network error")
@@ -150,5 +227,38 @@ fn is_transient_load_error(error: &str) -> bool {
         || lower.contains("timed out")
         || lower.contains("timeout")
         || lower.contains("connection reset")
+        || lower.contains("cannot assign requested address")
+        || lower.contains("connection refused")
+        || lower.contains("connection closed")
+        || lower.contains("error trying to connect")
+        || lower.contains("resource temporarily unavailable")
+        || lower.contains("unexpected eof")
         || lower.contains("broken pipe")
+}
+
+fn record_error_sample(samples: &mut BTreeMap<String, u32>, error: &str) {
+    let summarized = summarize_error(error);
+    *samples.entry(summarized).or_insert(0) += 1;
+}
+
+fn summarize_error(error: &str) -> String {
+    let single_line = error.lines().next().unwrap_or(error).trim();
+    if single_line.len() > 160 {
+        format!("{}...", &single_line[..160])
+    } else {
+        single_line.to_string()
+    }
+}
+
+fn format_error_samples(samples: &BTreeMap<String, u32>) -> String {
+    if samples.is_empty() {
+        return "none captured".to_string();
+    }
+
+    samples
+        .iter()
+        .take(5)
+        .map(|(error, count)| format!("{}x {}", count, error))
+        .collect::<Vec<_>>()
+        .join(" | ")
 }
