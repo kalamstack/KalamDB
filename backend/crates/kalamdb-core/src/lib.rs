@@ -59,10 +59,6 @@ pub mod auth {
     pub use kalamdb_session::permissions;
 }
 
-pub mod live_query {
-    pub use crate::live::*;
-}
-
 pub mod system_columns {
     pub use crate::schema_registry::SystemColumnsService;
 }

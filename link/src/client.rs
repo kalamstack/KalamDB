@@ -226,9 +226,8 @@ impl KalamLinkClient {
         {
             let conn_guard = self.connection.lock().await;
             if let Some(ref conn) = *conn_guard {
-                let options = config.options.unwrap_or_default();
                 let (event_rx, generation, resume_from) =
-                    conn.subscribe(config.id.clone(), config.sql, options).await?;
+                    conn.subscribe(config.id.clone(), config.sql, config.options).await?;
                 let unsub_tx = conn.unsubscribe_tx();
                 let progress_tx = conn.progress_tx();
                 return Ok(SubscriptionManager::from_shared(

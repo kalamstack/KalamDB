@@ -2,7 +2,7 @@
 //!
 //! This crate provides a SQL-based interface for managing KalamDB's system tables:
 //! - system_users: User management
-//! - system_live_queries: Live query subscriptions  
+//! - system_live: Live subscription observability  
 //! - system_jobs: Background job tracking
 //! - system_namespaces: Namespace metadata
 //! - system_tables: Table metadata
@@ -43,7 +43,7 @@ pub mod validation;
 pub use kalamdb_system::{AuditLogEntry, Namespace, Storage, User};
 // Job and LiveQuery are now in kalamdb-system
 pub use kalamdb_system::providers::jobs::models::{Job, JobFilter, JobOptions};
-pub use kalamdb_system::providers::live_queries::models::LiveQuery;
+pub use kalamdb_system::LiveQuery;
 
 pub use batch_execution::split_statements;
 pub use compatibility::{

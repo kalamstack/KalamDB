@@ -1,4 +1,4 @@
-//! User Data Applier trait for persisting user table data and live queries
+//! User Data Applier trait for persisting user table data
 //!
 //! This trait is called by UserDataStateMachine after Raft consensus commits
 //! a command. All nodes (leader and followers) call this, ensuring that all
@@ -7,9 +7,8 @@
 //! The implementation lives in kalamdb-core using provider infrastructure.
 
 use async_trait::async_trait;
-use kalamdb_commons::models::{ConnectionId, LiveQueryId, NodeId, UserId};
+use kalamdb_commons::models::UserId;
 use kalamdb_commons::TableId;
-use kalamdb_system::providers::live_queries::models::LiveQuery;
 
 use crate::RaftError;
 
@@ -74,40 +73,6 @@ pub trait UserDataApplier: Send + Sync {
         user_id: &UserId,
         pk_values: Option<&[String]>,
     ) -> Result<usize, RaftError>;
-
-    // =========================================================================
-    // Live Query Operations (persisted to system.live_queries)
-    // =========================================================================
-
-    /// Create a live query subscription
-    ///
-    /// Persists the live query to `system.live_queries` for cluster-wide visibility.
-    async fn create_live_query(&self, live_query: &LiveQuery) -> Result<String, RaftError>;
-
-    /// Update live query statistics
-    async fn update_live_query_stats(
-        &self,
-        live_id: &LiveQueryId,
-        last_update: i64,
-        changes: i64,
-    ) -> Result<(), RaftError>;
-
-    /// Delete a single live query subscription
-    async fn delete_live_query(
-        &self,
-        live_id: &LiveQueryId,
-        deleted_at: i64,
-    ) -> Result<(), RaftError>;
-
-    /// Delete all live queries for a connection
-    async fn delete_live_queries_by_connection(
-        &self,
-        connection_id: &ConnectionId,
-        deleted_at: i64,
-    ) -> Result<usize, RaftError>;
-
-    /// Clean up all subscriptions from a failed node
-    async fn cleanup_node_subscriptions(&self, failed_node_id: NodeId) -> Result<usize, RaftError>;
 }
 
 /// No-op applier for testing or standalone scenarios
@@ -139,42 +104,6 @@ impl UserDataApplier for NoOpUserDataApplier {
         _table_id: &TableId,
         _user_id: &UserId,
         _pk_values: Option<&[String]>,
-    ) -> Result<usize, RaftError> {
-        Ok(0)
-    }
-
-    async fn create_live_query(&self, _live_query: &LiveQuery) -> Result<String, RaftError> {
-        Ok(String::new())
-    }
-
-    async fn update_live_query_stats(
-        &self,
-        _live_id: &LiveQueryId,
-        _last_update: i64,
-        _changes: i64,
-    ) -> Result<(), RaftError> {
-        Ok(())
-    }
-
-    async fn delete_live_query(
-        &self,
-        _live_id: &LiveQueryId,
-        _deleted_at: i64,
-    ) -> Result<(), RaftError> {
-        Ok(())
-    }
-
-    async fn delete_live_queries_by_connection(
-        &self,
-        _connection_id: &ConnectionId,
-        _deleted_at: i64,
-    ) -> Result<usize, RaftError> {
-        Ok(0)
-    }
-
-    async fn cleanup_node_subscriptions(
-        &self,
-        _failed_node_id: NodeId,
     ) -> Result<usize, RaftError> {
         Ok(0)
     }
@@ -243,36 +172,6 @@ mod tests {
         ) -> Result<usize, RaftError> {
             self.delete_count.fetch_add(1, Ordering::SeqCst);
             Ok(1)
-        }
-
-        // Live query operations (no-op for mock)
-        async fn create_live_query(&self, _: &LiveQuery) -> Result<String, RaftError> {
-            Ok(String::new())
-        }
-
-        async fn update_live_query_stats(
-            &self,
-            _: &LiveQueryId,
-            _: i64,
-            _: i64,
-        ) -> Result<(), RaftError> {
-            Ok(())
-        }
-
-        async fn delete_live_query(&self, _: &LiveQueryId, _: i64) -> Result<(), RaftError> {
-            Ok(())
-        }
-
-        async fn delete_live_queries_by_connection(
-            &self,
-            _: &ConnectionId,
-            _: i64,
-        ) -> Result<usize, RaftError> {
-            Ok(0)
-        }
-
-        async fn cleanup_node_subscriptions(&self, _: NodeId) -> Result<usize, RaftError> {
-            Ok(0)
         }
     }
 

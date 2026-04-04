@@ -8,7 +8,7 @@
 //! - Forged/replayed Bearer tokens
 //! - SQL injection payloads in forwarded requests
 //! - Oversized / binary-garbage payloads
-//! - Calling `NotifyFollowers`, `Ping`, and `GetNodeInfo` from outside
+//! - Calling `Ping` and `GetNodeInfo` from outside
 //!   the cluster (documents the mTLS trust boundary)
 //!
 //! # Architecture security model
@@ -23,7 +23,7 @@
 //! if a rogue peer somehow bypasses mTLS it cannot issue writes unless it
 //! holds a valid short-lived JWT.
 //!
-//! `NotifyFollowers`, `Ping`, and `GetNodeInfo` intentionally carry no
+//! `Ping` and `GetNodeInfo` intentionally carry no
 //! per-request credential – they are safe to invoke without a user token and
 //! cannot cause mutations.  Their protection is the mTLS layer alone.
 //! The tests below document this explicitly.
@@ -37,9 +37,7 @@ use kalamdb_commons::models::NodeId;
 use kalamdb_raft::{
     manager::{RaftManager, RaftManagerConfig},
     network::cluster_service::cluster_client::ClusterServiceClient,
-    network::cluster_service::{
-        ForwardSqlRequest, GetNodeInfoRequest, NotifyFollowersRequest, PingRequest,
-    },
+    network::cluster_service::{ForwardSqlRequest, GetNodeInfoRequest, PingRequest},
     ClusterMessageHandler, ForwardSqlResponsePayload, GetNodeInfoResponse, NoOpClusterHandler,
 };
 use tokio::time::sleep;
@@ -60,7 +58,6 @@ const PORT_FORWARD_SQL_REPLAY: u16 = 19709;
 // ForwardSql ports above.  Using a separate base (19720+) avoids the previous
 // conflict where +1 / +2 offsets collided with 19708 and 19709.
 const PORT_UNAUTHENTICATED_PING: u16 = 19720;
-const PORT_UNAUTHENTICATED_NOTIFY_FOLLOWERS: u16 = 19721;
 const PORT_UNAUTHENTICATED_GET_NODE_INFO: u16 = 19722;
 
 // ─── Test handler ────────────────────────────────────────────────────────────
@@ -95,16 +92,6 @@ impl SecurityStubHandler {
 
 #[async_trait]
 impl ClusterMessageHandler for SecurityStubHandler {
-    async fn handle_notify_followers(
-        &self,
-        req: kalamdb_raft::NotifyFollowersRequest,
-    ) -> Result<(), String> {
-        // No user token required – but we track the call for assertions.
-        self.unauthenticated_cluster_calls.fetch_add(1, Ordering::SeqCst);
-        let _ = req;
-        Ok(())
-    }
-
     async fn handle_forward_sql(
         &self,
         req: kalamdb_raft::ForwardSqlRequest,
@@ -568,7 +555,7 @@ async fn test_forward_sql_token_replay_is_rejected() {
 
 // ─── Unauthenticated non-SQL RPC tests ───────────────────────────────────────
 //
-// `NotifyFollowers`, `Ping`, and `GetNodeInfo` do NOT require a user Bearer
+// `Ping` and `GetNodeInfo` do NOT require a user Bearer
 // token.  They are protected solely by the mTLS layer at the transport level.
 // These tests document the *expected* behaviour: the calls succeed but must
 // not produce mutations or expose sensitive state when no mTLS is configured
@@ -591,43 +578,6 @@ async fn test_ping_reachable_without_user_token() {
     assert!(inner.success, "No-auth ping should report success (it is read-only)");
     // The response carries no sensitive authentication state.
     assert!(inner.error.is_empty(), "No error expected for ping");
-}
-
-/// `NotifyFollowers` from an external caller with a garbage payload must not
-/// panic or block the server.  The call is accepted at transport level; the
-/// handler discards the malformed notification gracefully.
-#[tokio::test]
-async fn test_notify_followers_garbage_payload_is_handled_gracefully() {
-    let (handler, _, _, unauthenticated) = SecurityStubHandler::new();
-    let handler: Arc<dyn ClusterMessageHandler> = handler;
-    let port = PORT_UNAUTHENTICATED_NOTIFY_FOLLOWERS;
-    let mut client = start_grpc_server_with_handler(handler, port).await;
-
-    let req = NotifyFollowersRequest {
-        user_id: None,
-        table_namespace: String::new(),
-        table_name: String::new(),
-        payload: vec![0xDE, 0xAD, 0xBE, 0xEF, 0xFF, 0x00], // garbage
-    };
-
-    let resp = client
-        .notify_followers(tonic::Request::new(req))
-        .await
-        .expect("gRPC transport must not fail");
-
-    // Our stub accepts all notifications and tracks them (real handler decodes
-    // the flexbuffers payload and returns an error if invalid, but must not
-    // crash).
-    let inner = resp.into_inner();
-    // Either success=true (stub) or success=false (real handler decoding error)
-    // – what matters is the server does NOT crash.
-    let _ = inner; // server stayed alive
-
-    assert_eq!(
-        unauthenticated.load(Ordering::SeqCst),
-        1,
-        "Unauthenticated cluster call counter must be incremented"
-    );
 }
 
 /// `GetNodeInfo` can be called without a user token.  The response must not

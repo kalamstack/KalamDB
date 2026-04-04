@@ -23,7 +23,7 @@ async fn e2e_ddl_create_table_using_kalamdb_basic() {
     ))
     .await
     .expect("CREATE TABLE USING kalamdb");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    env.wait_for_kalamdb_table_exists(&ns, &table).await;
 
     assert!(
         env.kalamdb_table_exists(&ns, &table).await,
@@ -123,7 +123,7 @@ async fn e2e_ddl_create_table_using_kalamdb_multiple_defaults() {
     ))
     .await
     .expect("CREATE TABLE USING kalamdb with multiple defaults");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    env.wait_for_kalamdb_table_exists(&ns, &table).await;
 
     assert!(env.kalamdb_table_exists(&ns, &table).await, "KalamDB table should exist");
 
@@ -203,7 +203,7 @@ async fn e2e_ddl_create_table_using_kalamdb_with_options() {
     ))
     .await
     .expect("CREATE TABLE USING kalamdb with options");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    env.wait_for_kalamdb_table_exists(&ns, &table).await;
 
     let table_info = env
         .kalamdb_sql(&format!(
@@ -253,7 +253,7 @@ async fn e2e_ddl_create_table_using_kalamdb_dml_roundtrip() {
     ))
     .await
     .expect("CREATE TABLE USING kalamdb");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    env.wait_for_kalamdb_table_exists(&ns, &table).await;
 
     pg.batch_execute(&format!(
         "INSERT INTO {ns}.{table} (name, score) VALUES ('Alice', 100);

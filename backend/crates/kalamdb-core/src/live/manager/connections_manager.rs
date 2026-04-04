@@ -28,6 +28,7 @@ use kalamdb_commons::models::{ConnectionId, ConnectionInfo, LiveQueryId, TableId
 use kalamdb_commons::NodeId;
 #[cfg(any(test, feature = "test-helpers"))]
 use kalamdb_commons::WireNotification;
+use kalamdb_system::{LiveQuery, LiveQueryStatus};
 use log::{debug, info, warn};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -65,6 +66,7 @@ pub struct ConnectionsManager {
     /// Shared empty map to avoid allocations on lookup misses
     empty_subscriptions: Arc<DashMap<LiveQueryId, SubscriptionHandle>>,
     /// LiveQueryId → ConnectionId reverse index
+    #[cfg(any(test, feature = "test-helpers"))]
     live_id_to_connection: DashMap<LiveQueryId, ConnectionId>,
 
     // === Configuration ===
@@ -89,6 +91,38 @@ pub struct ConnectionsManager {
 }
 
 impl ConnectionsManager {
+    #[inline]
+    fn track_live_id_connection(&self, live_id: LiveQueryId, connection_id: &ConnectionId) {
+        #[cfg(any(test, feature = "test-helpers"))]
+        {
+            self.live_id_to_connection.insert(live_id, connection_id.clone());
+        }
+        #[cfg(not(any(test, feature = "test-helpers")))]
+        {
+            let _ = (live_id, connection_id);
+        }
+    }
+
+    #[inline]
+    fn untrack_live_id_connection(&self, live_id: &LiveQueryId) {
+        #[cfg(any(test, feature = "test-helpers"))]
+        {
+            self.live_id_to_connection.remove(live_id);
+        }
+        #[cfg(not(any(test, feature = "test-helpers")))]
+        {
+            let _ = live_id;
+        }
+    }
+
+    #[inline]
+    fn clear_live_id_connections(&self) {
+        #[cfg(any(test, feature = "test-helpers"))]
+        {
+            self.live_id_to_connection.clear();
+        }
+    }
+
     /// Default maximum connections (100,000 concurrent connections)
     pub const DEFAULT_MAX_CONNECTIONS: usize = 100_000;
 
@@ -123,6 +157,7 @@ impl ConnectionsManager {
             user_table_subscriptions: DashMap::new(),
             shared_table_subscriptions: DashMap::new(),
             empty_subscriptions: Arc::new(DashMap::new()),
+            #[cfg(any(test, feature = "test-helpers"))]
             live_id_to_connection: DashMap::new(),
             node_id,
             client_timeout,
@@ -204,13 +239,6 @@ impl ConnectionsManager {
         })
     }
 
-    /// Called after successful authentication to update user index
-    ///
-    /// Must be called after `state.mark_authenticated(user_id, role)`.
-    pub fn on_authenticated(&self, _connection_id: &ConnectionId, _user_id: UserId) {
-        // User index no longer needed - subscriptions are tracked via user_table_subscriptions
-    }
-
     /// Unregister a connection and all its subscriptions
     ///
     /// Returns the list of removed LiveQueryIds for cleanup.
@@ -242,7 +270,7 @@ impl ConnectionsManager {
 
             // Collect and remove all subscriptions
             let removed = shared_state.collect_subscription_info(|sub| {
-                self.live_id_to_connection.remove(&sub.live_id);
+                self.untrack_live_id_connection(&sub.live_id);
                 sub.live_id.clone()
             });
 
@@ -300,8 +328,7 @@ impl ConnectionsManager {
                 Arc::new(handles)
             });
 
-        // Add to reverse index
-        self.live_id_to_connection.insert(live_id, connection_id.clone());
+        self.track_live_id_connection(live_id, connection_id);
 
         self.total_subscriptions.fetch_add(1, Ordering::AcqRel);
     }
@@ -334,8 +361,7 @@ impl ConnectionsManager {
                 Arc::new(handles)
             });
 
-        // Add to reverse index
-        self.live_id_to_connection.insert(live_id, connection_id.clone());
+        self.track_live_id_connection(live_id, connection_id);
 
         self.total_subscriptions.fetch_add(1, Ordering::AcqRel);
     }
@@ -347,8 +373,7 @@ impl ConnectionsManager {
         live_id: &LiveQueryId,
         table_id: &TableId,
     ) {
-        // Remove from reverse index
-        self.live_id_to_connection.remove(live_id);
+        self.untrack_live_id_connection(live_id);
 
         // Remove from user_table_subscriptions index
         let key = (user_id.clone(), table_id.clone());
@@ -365,8 +390,7 @@ impl ConnectionsManager {
 
     /// Remove shared table subscription from indices
     pub fn unindex_shared_subscription(&self, live_id: &LiveQueryId, table_id: &TableId) {
-        // Remove from reverse index
-        self.live_id_to_connection.remove(live_id);
+        self.untrack_live_id_connection(live_id);
 
         // Remove from shared_table_subscriptions index
         if let Some(handles) = self.shared_table_subscriptions.get(table_id) {
@@ -380,6 +404,7 @@ impl ConnectionsManager {
         self.total_subscriptions.fetch_sub(1, Ordering::AcqRel);
     }
 
+    #[cfg(any(test, feature = "test-helpers"))]
     /// Get connection ID for a live query (for cleanup)
     pub fn get_connection_for_live_id(&self, live_id: &LiveQueryId) -> Option<ConnectionId> {
         self.live_id_to_connection.get(live_id).map(|r| r.clone())
@@ -544,11 +569,7 @@ impl ConnectionsManager {
 
         for state in self.connections.iter() {
             if state.user_id() == Some(user_id) {
-                if state
-                    .notification_tx
-                    .try_send(Arc::clone(&notification))
-                    .is_ok()
-                {
+                if state.notification_tx.try_send(Arc::clone(&notification)).is_ok() {
                     sent = true;
                 }
             }
@@ -597,7 +618,7 @@ impl ConnectionsManager {
             self.connections.clear();
             self.user_table_subscriptions.clear();
             self.shared_table_subscriptions.clear();
-            self.live_id_to_connection.clear();
+            self.clear_live_id_connections();
             self.total_connections.store(0, Ordering::Release);
             self.total_subscriptions.store(0, Ordering::Release);
         }
@@ -623,6 +644,45 @@ impl ConnectionsManager {
 
     pub fn node_id(&self) -> &NodeId {
         &self.node_id
+    }
+
+    /// Snapshot active subscriptions into live-query rows backed by in-memory state.
+    pub fn snapshot_live_queries(&self, node_id: NodeId) -> Vec<LiveQuery> {
+        let mut live_queries = Vec::with_capacity(self.subscription_count());
+
+        for entry in self.connections.iter() {
+            let state = entry.value();
+            let Some(user_id) = state.user_id().cloned() else {
+                continue;
+            };
+
+            let connection_id = state.connection_id().as_str().to_string();
+            let last_ping_at = state.last_heartbeat_ms() as i64;
+
+            state.for_each_subscription(|subscription_id, subscription| {
+                let runtime_metadata = &subscription.runtime_metadata;
+                live_queries.push(LiveQuery {
+                    live_id: subscription.live_id.clone(),
+                    connection_id: connection_id.clone(),
+                    subscription_id: subscription_id.to_string(),
+                    namespace_id: subscription.table_id.namespace_id().clone(),
+                    table_name: subscription.table_id.table_name().clone(),
+                    user_id: user_id.clone(),
+                    query: runtime_metadata.query().to_string(),
+                    options: runtime_metadata.options_json().map(std::borrow::ToOwned::to_owned),
+                    status: LiveQueryStatus::Active,
+                    created_at: runtime_metadata.created_at_ms(),
+                    last_update: runtime_metadata.last_update_ms(),
+                    last_ping_at,
+                    changes: runtime_metadata.changes(),
+                    node_id,
+                });
+            });
+        }
+
+        live_queries
+            .sort_by(|left, right| left.live_id.to_string().cmp(&right.live_id.to_string()));
+        live_queries
     }
 
     // ==================== Background Tasks ====================
@@ -748,9 +808,6 @@ mod tests {
             state.mark_auth_started();
             state.mark_authenticated(user_id.clone(), kalamdb_commons::Role::User);
         }
-
-        // Update registry index
-        registry.on_authenticated(&conn_id, user_id.clone());
 
         let state = &reg.state;
         assert!(state.is_authenticated());
@@ -911,7 +968,7 @@ mod tests {
 
     // ==================== Shared Table Subscription Tests ====================
 
-    use super::super::super::models::SubscriptionFlowControl;
+    use super::super::super::models::{SubscriptionFlowControl, SubscriptionRuntimeMetadata};
     use kalamdb_commons::models::{NamespaceId, TableName};
 
     /// Helper: create a SubscriptionHandle with pre-completed flow control
@@ -920,12 +977,18 @@ mod tests {
     ) -> SubscriptionHandle {
         let flow_control = Arc::new(SubscriptionFlowControl::new());
         flow_control.mark_initial_complete();
+        let runtime_metadata = Arc::new(SubscriptionRuntimeMetadata::new(
+            Arc::from("SELECT * FROM shared.test"),
+            None,
+            1,
+        ));
         SubscriptionHandle {
             subscription_id: Arc::from("test-subscription"),
             filter_expr: None,
             projections: None,
             notification_tx,
-            flow_control,
+            flow_control: Some(flow_control),
+            runtime_metadata,
         }
     }
 
@@ -1006,14 +1069,20 @@ mod tests {
                 super::super::super::models::SubscriptionState {
                     live_id: live_id.clone(),
                     table_id: table_id.clone(),
-                    sql: "SELECT * FROM shared.orders".into(),
                     filter_expr: None,
                     projections: None,
-                    batch_size: 100,
-                    snapshot_end_seq: None,
-                    current_batch_num: 0,
-                    flow_control: Arc::new(SubscriptionFlowControl::new()),
+                    initial_load: Some(super::super::super::models::InitialLoadState {
+                        batch_size: 100,
+                        snapshot_end_seq: None,
+                        current_batch_num: 0,
+                        flow_control: Arc::new(SubscriptionFlowControl::new()),
+                    }),
                     is_shared: true,
+                    runtime_metadata: Arc::new(SubscriptionRuntimeMetadata::new(
+                        Arc::from("SELECT * FROM shared.orders"),
+                        None,
+                        1,
+                    )),
                 },
             );
         }

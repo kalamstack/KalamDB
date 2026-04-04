@@ -605,6 +605,12 @@ impl VirtualView for SettingsView {
                         "Maximum retry attempts per job",
                         "jobs"
                     ),
+                    (
+                        "jobs.wal_cleanup_interval_seconds",
+                        config.jobs.wal_cleanup_interval_seconds,
+                        "Interval for periodic RocksDB WAL cleanup flushes",
+                        "jobs"
+                    ),
                 ]
             );
 

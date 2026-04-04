@@ -252,13 +252,21 @@ impl JobsManager {
         };
         let flush_check_enabled = flush_check_interval.is_some();
 
-        // WAL cleanup: flush all RocksDB memtables every 5 minutes so idle
-        // column families advance their log numbers and stale WAL files are deleted.
-        let mut wal_cleanup_interval = tokio::time::interval_at(
-            Instant::now() + Duration::from_secs(300),
-            Duration::from_secs(300),
-        );
-        wal_cleanup_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        // WAL cleanup scheduler interval (configurable, default 300 seconds).
+        // Flushes all RocksDB memtables so idle column families advance their
+        // log numbers and stale WAL files can be reclaimed.
+        let wal_cleanup_secs = app_context.config().jobs.wal_cleanup_interval_seconds;
+        let mut wal_cleanup_interval = if wal_cleanup_secs > 0 {
+            let mut interval = tokio::time::interval_at(
+                Instant::now() + Duration::from_secs(wal_cleanup_secs),
+                Duration::from_secs(wal_cleanup_secs),
+            );
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            Some(interval)
+        } else {
+            None
+        };
+        let wal_cleanup_enabled = wal_cleanup_interval.is_some();
 
         // Leadership check interval (for cluster mode)
         let mut leadership_interval = tokio::time::interval_at(
@@ -326,13 +334,26 @@ impl JobsManager {
                 }
                 // Periodic WAL cleanup: flush all RocksDB memtables so idle CFs
                 // don't pin WAL files forever (prevents WAL file accumulation)
-                _ = wal_cleanup_interval.tick() => {
+                _ = async {
+                    if wal_cleanup_enabled {
+                        let interval = wal_cleanup_interval
+                            .as_mut()
+                            .expect("wal cleanup interval missing");
+                        interval.tick().await;
+                    }
+                }, if wal_cleanup_enabled => {
                     let app_ctx = self.get_attached_app_context();
                     let backend = app_ctx.storage_backend();
-                    if let Err(e) = backend.flush_all_memtables() {
-                        log::warn!("WAL cleanup flush_all_memtables failed: {}", e);
-                    } else {
-                        log::debug!("WAL cleanup: flushed all memtables");
+                    match tokio::task::spawn_blocking(move || backend.flush_all_memtables()).await {
+                        Ok(Ok(())) => {
+                            log::debug!("WAL cleanup: flushed all memtables");
+                        },
+                        Ok(Err(e)) => {
+                            log::warn!("WAL cleanup flush_all_memtables failed: {}", e);
+                        },
+                        Err(e) => {
+                            log::warn!("WAL cleanup task join failed: {}", e);
+                        },
                     }
                     continue;
                 }

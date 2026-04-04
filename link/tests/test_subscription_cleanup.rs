@@ -3,7 +3,7 @@
 //!
 //! - `close()` is idempotent and marks the subscription as closed.
 //! - `is_closed()` reflects the expected state.
-//! - Explicitly closing a subscription removes it from `system.live_queries`.
+//! - Explicitly closing a subscription removes it from `system.live`.
 //! - Dropping without an explicit `close()` also sends a cleanup frame via
 //!   the `Drop` impl, removing the subscription server-side.
 //!
@@ -91,7 +91,7 @@ async fn wait_for_ack(sub: &mut SubscriptionManager, deadline: Duration) -> bool
     )
 }
 
-/// Poll `system.live_queries` until `marker` appears or disappears.
+/// Poll `system.live` until `marker` appears or disappears.
 /// Returns `true` when the condition is met within `deadline`.
 async fn wait_live_query(marker: &str, expect_present: bool, deadline: Duration) -> bool {
     let client = match fast_client() {
@@ -101,7 +101,7 @@ async fn wait_live_query(marker: &str, expect_present: bool, deadline: Duration)
     let start = std::time::Instant::now();
     loop {
         let found = client
-            .execute_query("SELECT query FROM system.live_queries", None, None, None)
+            .execute_query("SELECT query FROM system.live", None, None, None)
             .await
             .map(|r| format!("{:?}", r).contains(marker))
             .unwrap_or(false);
@@ -197,9 +197,9 @@ async fn test_next_returns_none_after_close() {
 
 // ── server-side cleanup ───────────────────────────────────────────────────────
 
-/// Explicitly closing a subscription removes it from `system.live_queries`.
+/// Explicitly closing a subscription removes it from `system.live`.
 #[tokio::test]
-async fn test_explicit_close_removes_from_live_queries() {
+async fn test_explicit_close_removes_from_live() {
     if !common::is_server_running().await {
         eprintln!("server not running — skipping");
         return;
@@ -209,7 +209,7 @@ async fn test_explicit_close_removes_from_live_queries() {
     let tbl = unique_ident("closelq");
     let full = setup_table(&ns, &tbl).await;
 
-    // Unique query so we can search for it specifically in system.live_queries
+    // Unique query so we can search for it specifically in system.live
     let unique_comment = unique_ident("close_marker");
     let query_sql = format!("SELECT * FROM {} -- {}", full, unique_comment);
 
@@ -222,7 +222,7 @@ async fn test_explicit_close_removes_from_live_queries() {
     if !appeared {
         // Some server configs may not expose this; soft-fail with a note
         eprintln!(
-            "WARN: subscription did not appear in system.live_queries within 5s — \
+            "WARN: subscription did not appear in system.live within 5s — \
              server may not expose this table; skipping assertion"
         );
     }
@@ -234,7 +234,7 @@ async fn test_explicit_close_removes_from_live_queries() {
     let removed = wait_live_query(&unique_comment, false, Duration::from_secs(5)).await;
     assert!(
         removed,
-        "subscription should be removed from system.live_queries after explicit close()"
+        "subscription should be removed from system.live after explicit close()"
     );
 
     sql(&format!("DROP NAMESPACE IF EXISTS {} CASCADE", ns)).await;
@@ -242,9 +242,9 @@ async fn test_explicit_close_removes_from_live_queries() {
 
 /// Dropping a subscription without calling `close()` triggers the Drop impl,
 /// which spawns a background task that sends an Unsubscribe + WS close frame.
-/// The subscription should be gone from `system.live_queries` within a few seconds.
+/// The subscription should be gone from `system.live` within a few seconds.
 #[tokio::test]
-async fn test_drop_without_close_removes_from_live_queries() {
+async fn test_drop_without_close_removes_from_live() {
     if !common::is_server_running().await {
         eprintln!("server not running — skipping");
         return;
@@ -264,9 +264,7 @@ async fn test_drop_without_close_removes_from_live_queries() {
     // Wait for it to appear
     let appeared = wait_live_query(&unique_comment, true, Duration::from_secs(5)).await;
     if !appeared {
-        eprintln!(
-            "WARN: subscription did not appear in system.live_queries — skipping drop assertion"
-        );
+        eprintln!("WARN: subscription did not appear in system.live — skipping drop assertion");
         drop(sub);
         sql(&format!("DROP NAMESPACE IF EXISTS {} CASCADE", ns)).await;
         return;
@@ -279,7 +277,7 @@ async fn test_drop_without_close_removes_from_live_queries() {
     let removed = wait_live_query(&unique_comment, false, Duration::from_secs(6)).await;
     assert!(
         removed,
-        "subscription should be removed from system.live_queries after drop (Drop impl)"
+        "subscription should be removed from system.live after drop (Drop impl)"
     );
 
     sql(&format!("DROP NAMESPACE IF EXISTS {} CASCADE", ns)).await;

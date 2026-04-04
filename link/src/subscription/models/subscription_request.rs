@@ -11,5 +11,5 @@ pub struct SubscriptionRequest {
     pub sql: String,
     /// Optional subscription options
     #[serde(default)]
-    pub options: SubscriptionOptions,
+    pub options: Option<SubscriptionOptions>,
 }

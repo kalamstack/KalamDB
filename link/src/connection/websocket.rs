@@ -709,7 +709,7 @@ mod tests {
             subscription: SubscriptionRequest {
                 id: "sub-1".to_string(),
                 sql: "SELECT * FROM test".to_string(),
-                options: SubscriptionOptions::default(),
+                options: Some(SubscriptionOptions::default()),
             },
         };
         let bytes = rmp_serde::to_vec_named(&msg).unwrap();

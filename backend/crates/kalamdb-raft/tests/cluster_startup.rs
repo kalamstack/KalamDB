@@ -130,14 +130,14 @@ async fn test_three_node_cluster_config() {
 /// Test configurable shards
 #[tokio::test]
 async fn test_configurable_shards() {
-    // Create configuration with custom shard counts
+    // Create configuration with custom user shard count.
     let config = RaftManagerConfig {
         node_id: NodeId::new(1),
         rpc_addr: "127.0.0.1:9020".to_string(),
         api_addr: "127.0.0.1:8095".to_string(),
         peers: vec![],
-        user_shards: 8,   // Custom: 8 user shards instead of 32
-        shared_shards: 2, // Custom: 2 shared shards instead of 1
+        user_shards: 8,
+        shared_shards: 1,
         ..Default::default()
     };
 
@@ -145,7 +145,7 @@ async fn test_configurable_shards() {
 
     // Verify shard counts
     assert_eq!(manager.user_shards(), 8);
-    assert_eq!(manager.shared_shards(), 2);
+    assert_eq!(manager.shared_shards(), 1);
     assert_eq!(
         manager.group_count(),
         GroupId::all_groups(manager.user_shards(), manager.shared_shards()).len()

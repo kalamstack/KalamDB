@@ -5,9 +5,7 @@
 
 use crate::helpers::audit;
 use crate::helpers::guards::{block_anonymous_write, require_admin};
-use crate::table::drop::{
-    capture_storage_cleanup_details, schedule_drop_table_cleanup,
-};
+use crate::table::drop::{capture_storage_cleanup_details, schedule_drop_table_cleanup};
 use kalamdb_commons::models::{NamespaceId, TableId};
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::error::KalamDbError;
@@ -167,8 +165,8 @@ mod tests {
     use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
     use kalamdb_store::EntityStore;
     use kalamdb_system::Namespace;
-    use std::time::{SystemTime, UNIX_EPOCH};
     use std::sync::Arc;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn init_app_context() -> Arc<AppContext> {
         test_app_context_simple()
@@ -280,13 +278,13 @@ mod tests {
             .system_columns_service()
             .add_system_columns(&mut table_def)
             .expect("add system columns");
-        app_ctx
-            .schema_registry()
-            .register_table(table_def)
-            .expect("register table");
+        app_ctx.schema_registry().register_table(table_def).expect("register table");
 
-        let store =
-            kalamdb_tables::new_indexed_user_table_store(app_ctx.storage_backend(), &table_id, "id");
+        let store = kalamdb_tables::new_indexed_user_table_store(
+            app_ctx.storage_backend(),
+            &table_id,
+            "id",
+        );
         let main_partition = store.partition();
         let pk_partition = store.indexes()[0].partition();
         assert!(app_ctx.storage_backend().partition_exists(&main_partition));

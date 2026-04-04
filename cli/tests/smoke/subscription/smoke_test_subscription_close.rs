@@ -2,10 +2,10 @@
 //
 // Verifies that:
 //   1. Explicitly calling `close()` on a SubscriptionManager sends an Unsubscribe
-//      frame and removes the subscription from `system.live_queries`.
+//      frame and removes the subscription from `system.live`.
 //   2. Dropping a SubscriptionManager without calling `close()` triggers the
 //      Drop impl, which spawns a background cleanup task that also removes
-//      the entry from `system.live_queries`.
+//      the entry from `system.live`.
 //   3. `SubscriptionManager::is_closed()` returns the correct state.
 //
 // These tests use short `#[ntest::timeout]` values; individual WebSocket
@@ -30,12 +30,12 @@ fn fast_link_client() -> Result<KalamLinkClient, Box<dyn std::error::Error + Sen
     )
 }
 
-/// Poll `system.live_queries` (synchronously) until `marker` appears or
+/// Poll `system.live` (synchronously) until `marker` appears or
 /// disappears match `expect_present`.  Returns `true` on success.
 fn wait_live_query(marker: &str, expect_present: bool, deadline: Duration) -> bool {
     let start = std::time::Instant::now();
     loop {
-        let output = execute_sql_as_root_via_client("SELECT query FROM system.live_queries")
+        let output = execute_sql_as_root_via_client("SELECT query FROM system.live")
             .unwrap_or_default();
         let found = output.contains(marker);
         if found == expect_present {
@@ -51,7 +51,7 @@ fn wait_live_query(marker: &str, expect_present: bool, deadline: Duration) -> bo
 // ── test 1: explicit close() ──────────────────────────────────────────────────
 
 /// Explicit `close()` sends an Unsubscribe frame and removes the subscription
-/// from `system.live_queries` within a few seconds.
+/// from `system.live` within a few seconds.
 ///
 /// Also verifies that `is_closed()` returns `false` before and `true` after.
 #[ntest::timeout(25000)]
@@ -140,16 +140,16 @@ fn smoke_subscription_explicit_close_removes_live_query() {
     handle.join().ok();
 
     if !closed {
-        eprintln!("WARN: subscription setup/close failed; skipping live_query check");
+        eprintln!("WARN: subscription setup/close failed; skipping system.live check");
         let _ = execute_sql_as_root_via_client(&format!("DROP NAMESPACE IF EXISTS {} CASCADE", ns));
         return;
     }
 
-    // Verify the subscription was removed from system.live_queries
+    // Verify the subscription was removed from system.live
     let removed = wait_live_query(&marker, false, Duration::from_secs(5));
     assert!(
         removed,
-        "subscription '{}' should not be in system.live_queries after explicit close()",
+        "subscription '{}' should not be in system.live after explicit close()",
         marker
     );
 
@@ -160,7 +160,7 @@ fn smoke_subscription_explicit_close_removes_live_query() {
 
 /// Dropping a SubscriptionManager without calling `close()` triggers the Drop
 /// impl, which spawns a background cleanup task.  The subscription should
-/// disappear from `system.live_queries` within a few seconds.
+/// disappear from `system.live` within a few seconds.
 #[ntest::timeout(25000)]
 #[test]
 fn smoke_subscription_drop_removes_live_query() {
@@ -246,7 +246,7 @@ fn smoke_subscription_drop_removes_live_query() {
     handle.join().ok();
 
     if !dropped {
-        eprintln!("WARN: subscription setup failed; skipping live_query check");
+        eprintln!("WARN: subscription setup failed; skipping system.live check");
         let _ = execute_sql_as_root_via_client(&format!("DROP NAMESPACE IF EXISTS {} CASCADE", ns));
         return;
     }
@@ -257,7 +257,7 @@ fn smoke_subscription_drop_removes_live_query() {
     let removed = wait_live_query(&marker, false, Duration::from_secs(6));
     assert!(
         removed,
-        "subscription '{}' should not be in system.live_queries after drop (Drop impl cleanup)",
+        "subscription '{}' should not be in system.live after drop (Drop impl cleanup)",
         marker
     );
 

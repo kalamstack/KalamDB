@@ -1,11 +1,9 @@
-// File: backend/crates/kalamdb-system/src/providers/live_queries/models/live_query_status.rs
-
 use std::fmt;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-/// Status of a live query subscription
+/// Status of a live query subscription.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum LiveQueryStatus {
     /// Active and receiving updates
@@ -88,14 +86,15 @@ mod tests {
     fn test_status_from_str() {
         assert_eq!("active".parse::<LiveQueryStatus>().unwrap(), LiveQueryStatus::Active);
         assert_eq!("paused".parse::<LiveQueryStatus>().unwrap(), LiveQueryStatus::Paused);
-        assert_eq!("completed".parse::<LiveQueryStatus>().unwrap(), LiveQueryStatus::Completed);
+        assert_eq!(
+            "completed".parse::<LiveQueryStatus>().unwrap(),
+            LiveQueryStatus::Completed
+        );
         assert_eq!("error".parse::<LiveQueryStatus>().unwrap(), LiveQueryStatus::Error);
 
-        // Case insensitive
         assert_eq!("ACTIVE".parse::<LiveQueryStatus>().unwrap(), LiveQueryStatus::Active);
         assert_eq!("Paused".parse::<LiveQueryStatus>().unwrap(), LiveQueryStatus::Paused);
 
-        // Invalid
         assert!("invalid".parse::<LiveQueryStatus>().is_err());
     }
 

@@ -131,7 +131,6 @@ disable_common_password_check = false
 jwt_secret = "kalamdb-bench-local-2026-04-03-jwt-secret-32-plus"
 jwt_trusted_issuers = ""
 auto_create_users_from_provider = false
-root_password = "kalamdb123"
 
 [oauth]
 enabled = false
@@ -140,9 +139,12 @@ default_role = "user"
 
 [shutdown.flush]
 timeout = 300
+
+[jobs]
 max_concurrent = 10
 max_retries = 3
 retry_backoff_ms = 100
+wal_cleanup_interval_seconds = 300
 
 [execution]
 handler_timeout_seconds = 30

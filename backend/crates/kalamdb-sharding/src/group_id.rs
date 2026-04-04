@@ -2,7 +2,7 @@
 //!
 //! KalamDB uses Multi-Raft with 34 groups:
 //! - 1 unified metadata group (Meta)
-//! - 32 user data shards (user tables + live_queries)
+//! - 32 user data shards (user tables)
 //! - 1 shared data shard (shared tables)
 
 use std::fmt;

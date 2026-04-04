@@ -11,9 +11,7 @@
 //! When data is applied on any node (leader or follower), the provider's methods
 //! fire local notifications - no need for separate HTTP cluster broadcast.
 
-use crate::app_context::AppContext;
 use crate::error::KalamDbError;
-use crate::error_extensions::KalamDbResultExt;
 use crate::live::helpers::filter_eval::parse_where_clause;
 use crate::live::helpers::initial_data::{
     InitialDataFetcher, InitialDataOptions, InitialDataResult,
@@ -30,15 +28,13 @@ use kalamdb_commons::models::{ConnectionId, LiveQueryId, NamespaceId, TableId, T
 use kalamdb_commons::schemas::{SchemaField, TableDefinition};
 use kalamdb_commons::websocket::SubscriptionRequest;
 use kalamdb_commons::{NodeId, Role};
-use kalamdb_system::providers::live_queries::models::LiveQuery as SystemLiveQuery;
-use kalamdb_system::LiveQueriesTableProvider;
+use kalamdb_system::LiveQuery as SystemLiveQuery;
 use std::sync::Arc;
 
 /// Live query manager
 pub struct LiveQueryManager {
     /// Unified connections manager using DashMap for lock-free concurrent access
     registry: Arc<ConnectionsManager>,
-    live_queries_provider: Arc<LiveQueriesTableProvider>,
     initial_data_fetcher: Arc<InitialDataFetcher>,
     schema_registry: Arc<crate::schema_registry::SchemaRegistry>,
     node_id: NodeId,
@@ -112,22 +108,18 @@ impl LiveQueryManager {
     /// The ConnectionsManager is shared across all WebSocket handlers for
     /// centralized connection/subscription management.
     pub fn new(
-        live_queries_provider: Arc<LiveQueriesTableProvider>,
         schema_registry: Arc<crate::schema_registry::SchemaRegistry>,
         registry: Arc<ConnectionsManager>,
         base_session_context: Arc<SessionContext>,
-        app_context: Arc<AppContext>,
     ) -> Self {
         let node_id = *registry.node_id();
         let initial_data_fetcher =
             Arc::new(InitialDataFetcher::new(base_session_context, schema_registry.clone()));
 
-        let subscription_service =
-            Arc::new(SubscriptionService::new(registry.clone(), node_id, app_context));
+        let subscription_service = Arc::new(SubscriptionService::new(registry.clone()));
 
         Self {
             registry,
-            live_queries_provider,
             initial_data_fetcher,
             schema_registry,
             node_id,
@@ -163,6 +155,7 @@ impl LiveQueryManager {
         filter_expr: Option<Expr>,
         projections: Option<Vec<String>>,
         batch_size: usize,
+        enable_initial_load: bool,
         table_type: kalamdb_commons::TableType,
     ) -> Result<LiveQueryId, KalamDbError> {
         self.subscription_service
@@ -173,6 +166,7 @@ impl LiveQueryManager {
                 filter_expr,
                 projections,
                 batch_size,
+                enable_initial_load,
                 table_type,
             )
             .await
@@ -245,7 +239,8 @@ impl LiveQueryManager {
         // Determine batch size
         let batch_size = request
             .options
-            .batch_size
+            .as_ref()
+            .and_then(|options| options.batch_size)
             .unwrap_or(kalamdb_commons::websocket::MAX_ROWS_PER_BATCH);
 
         // Parse filter expression from WHERE clause (if present)
@@ -269,10 +264,6 @@ impl LiveQueryManager {
         // Extract column projections from SELECT clause (None = SELECT *, all columns)
         let projections = parsed_query.projections.clone();
 
-        // if let Some(ref cols) = projections {
-        //     log::info!("Subscription projections: {:?}", cols);
-        // }
-
         // Register the subscription
         let live_id = self
             .register_subscription(
@@ -282,6 +273,7 @@ impl LiveQueryManager {
                 filter_expr,
                 projections.clone(),
                 batch_size,
+                initial_data_options.is_some(),
                 table_def.table_type,
             )
             .await?;
@@ -289,7 +281,7 @@ impl LiveQueryManager {
         // Fetch initial data if requested.
         // IMPORTANT: If anything fails after register_subscription succeeded,
         // we must unregister the subscription to avoid orphaned entries in
-        // system.live_queries and the in-memory registry.
+        // system.live and the in-memory registry.
         let initial_data = if let Some(mut fetch_options) = initial_data_options {
             let fetch_result: Result<InitialDataResult, KalamDbError> = async {
                 // Compute snapshot boundary (MAX(_seq)) before initial load unless a
@@ -381,6 +373,12 @@ impl LiveQueryManager {
         let sub_state = connection_state.get_subscription(subscription_id).ok_or_else(|| {
             KalamDbError::NotFound(format!("Subscription not found: {}", subscription_id))
         })?;
+        let initial_load = sub_state.initial_load.as_ref().ok_or_else(|| {
+            KalamDbError::InvalidOperation(format!(
+                "Subscription {} was created without initial data loading",
+                subscription_id
+            ))
+        })?;
 
         let user_role = connection_state.user_role().ok_or_else(|| {
             KalamDbError::InvalidOperation(
@@ -399,15 +397,18 @@ impl LiveQueryManager {
                 ))
             })?;
 
-        // Extract WHERE clause from stored SQL
-        let where_clause = QueryParser::extract_where_clause(&sub_state.sql);
+        // Extract WHERE clause from the stored query in runtime metadata
+        let where_clause = QueryParser::extract_where_clause(sub_state.runtime_metadata.query());
 
         // Get projections from subscription state (Arc<Vec<String>> -> Option<&[String]>)
         let projections_ref = sub_state.projections.as_deref().map(|v| v.as_slice());
 
         // Create batch options with metadata from subscription state
-        let fetch_options =
-            InitialDataOptions::batch(since_seq, sub_state.snapshot_end_seq, sub_state.batch_size);
+        let fetch_options = InitialDataOptions::batch(
+            since_seq,
+            initial_load.snapshot_end_seq,
+            initial_load.batch_size,
+        );
 
         self.initial_data_fetcher
             .fetch_initial_data(
@@ -470,15 +471,21 @@ impl LiveQueryManager {
             .await
     }
 
+    /// Snapshot active live queries from in-memory connection state.
+    pub fn snapshot_live_queries(&self) -> Vec<SystemLiveQuery> {
+        self.registry.snapshot_live_queries(self.node_id)
+    }
+
     /// Get all subscriptions for a user
     pub async fn get_user_subscriptions(
         &self,
         user_id: &UserId,
     ) -> Result<Vec<SystemLiveQuery>, KalamDbError> {
-        self.live_queries_provider
-            .get_by_user_id_async(user_id)
-            .await
-            .into_kalamdb_error("Failed to get user subscriptions")
+        Ok(self
+            .snapshot_live_queries()
+            .into_iter()
+            .filter(|live_query| &live_query.user_id == user_id)
+            .collect())
     }
 
     /// Get a specific live query
@@ -486,10 +493,14 @@ impl LiveQueryManager {
         &self,
         live_id: &str,
     ) -> Result<Option<SystemLiveQuery>, KalamDbError> {
-        self.live_queries_provider
-            .get_live_query_async(live_id)
-            .await
-            .into_kalamdb_error("Failed to get live query")
+        let live_query_id = LiveQueryId::from_string(live_id).map_err(|e| {
+            KalamDbError::InvalidOperation(format!("Invalid live query ID '{}': {}", live_id, e))
+        })?;
+
+        Ok(self
+            .snapshot_live_queries()
+            .into_iter()
+            .find(|live_query| live_query.live_id == live_query_id))
     }
 
     /// Get registry statistics
@@ -506,18 +517,6 @@ impl LiveQueryManager {
         Arc::clone(&self.registry)
     }
 
-    // /// Notify live query subscribers of a table change
-    // pub async fn notify_table_change(
-    //     &self,
-    //     user_id: &UserId,
-    //     table_id: &TableId,
-    //     change_notification: ChangeNotification,
-    // ) -> Result<usize, KalamDbError> {
-    //     self.notification_service
-    //         .notify_table_change(user_id, table_id, change_notification)
-    //         .await
-    // }
-
     /// Handle auth expiry for a connection
     pub async fn handle_auth_expiry(
         &self,
@@ -531,11 +530,7 @@ impl LiveQueryManager {
             KalamDbError::NotFound(format!("User not found for connection: {}", connection_id))
         })?;
 
-        let removed_ids = self.unregister_connection(&user_id, connection_id).await?;
-
-        for live_id in removed_ids {
-            let _ = self.live_queries_provider.delete_live_query_async(&live_id).await;
-        }
+        let _removed_ids = self.unregister_connection(&user_id, connection_id).await?;
 
         Ok(())
     }

@@ -1,6 +1,6 @@
 // Snowflake ID generator
 use parking_lot::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Snowflake ID generator for time-ordered unique identifiers
 ///
@@ -38,6 +38,10 @@ impl SnowflakeGenerator {
     /// Maximum sequence number
     const MAX_SEQUENCE: u16 = 4095;
 
+    /// Small clock regressions can happen under virtualization or NTP adjustment.
+    /// Wait through short drift instead of failing the write path immediately.
+    const MAX_BACKWARD_DRIFT_MS: u64 = 50;
+
     /// Create a new Snowflake ID generator
     pub fn new(worker_id: u16) -> Self {
         Self::with_epoch(worker_id, Self::DEFAULT_EPOCH)
@@ -61,15 +65,7 @@ impl SnowflakeGenerator {
     pub fn next_id(&self) -> Result<i64, String> {
         let mut state = self.state.lock();
 
-        let mut timestamp = self.current_timestamp()?;
-
-        // Handle clock going backwards
-        if timestamp < state.last_timestamp {
-            return Err(format!(
-                "Clock moved backwards. Refusing to generate id for {} milliseconds",
-                state.last_timestamp - timestamp
-            ));
-        }
+        let mut timestamp = self.reconcile_timestamp(&state)?;
 
         if timestamp == state.last_timestamp {
             // Same millisecond - increment sequence
@@ -173,15 +169,7 @@ impl SnowflakeGenerator {
         let mut ids = Vec::with_capacity(count);
 
         for _ in 0..count {
-            let mut timestamp = self.current_timestamp()?;
-
-            // Handle clock going backwards
-            if timestamp < state.last_timestamp {
-                return Err(format!(
-                    "Clock moved backwards. Refusing to generate id for {} milliseconds",
-                    state.last_timestamp - timestamp
-                ));
-            }
+            let mut timestamp = self.reconcile_timestamp(&state)?;
 
             if timestamp == state.last_timestamp {
                 // Same millisecond - increment sequence
@@ -207,6 +195,24 @@ impl SnowflakeGenerator {
         }
 
         Ok(ids)
+    }
+
+    fn reconcile_timestamp(&self, state: &GeneratorState) -> Result<u64, String> {
+        let timestamp = self.current_timestamp()?;
+        if timestamp >= state.last_timestamp {
+            return Ok(timestamp);
+        }
+
+        let drift_ms = state.last_timestamp - timestamp;
+        if drift_ms > Self::MAX_BACKWARD_DRIFT_MS {
+            return Err(format!(
+                "Clock moved backwards. Refusing to generate id for {} milliseconds",
+                drift_ms
+            ));
+        }
+
+        std::thread::sleep(Duration::from_millis(drift_ms));
+        self.wait_next_millis(state.last_timestamp)
     }
 }
 
@@ -249,6 +255,38 @@ mod tests {
             assert!(id > last_id, "IDs not in order: {} <= {}", id, last_id);
             last_id = id;
         }
+    }
+
+    #[test]
+    fn test_small_clock_regression_waits_for_recovery() {
+        let gen = SnowflakeGenerator::new(1);
+        let current = gen.current_timestamp().unwrap();
+
+        {
+            let mut state = gen.state.lock();
+            state.last_timestamp = current + 2;
+            state.sequence = 0;
+        }
+
+        let ids = gen.next_ids(3).unwrap();
+        assert_eq!(ids.len(), 3);
+        assert!(ids.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(gen.extract_timestamp(ids[0]) >= current + 2);
+    }
+
+    #[test]
+    fn test_large_clock_regression_still_errors() {
+        let gen = SnowflakeGenerator::new(1);
+        let current = gen.current_timestamp().unwrap();
+
+        {
+            let mut state = gen.state.lock();
+            state.last_timestamp = current + SnowflakeGenerator::MAX_BACKWARD_DRIFT_MS + 5;
+            state.sequence = 0;
+        }
+
+        let err = gen.next_id().unwrap_err();
+        assert!(err.contains("Clock moved backwards"));
     }
 
     #[test]

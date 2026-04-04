@@ -28,12 +28,12 @@ fn create_test_subscription_request(
     SubscriptionRequest {
         id,
         sql,
-        options: SubscriptionOptions {
+        options: Some(SubscriptionOptions {
             batch_size: None,
             last_rows,
             from: None,
             snapshot_end_seq: None,
-        },
+        }),
     }
 }
 
@@ -42,7 +42,6 @@ async fn create_test_manager() -> (Arc<ConnectionsManager>, LiveQueryManager, Te
     let test_db = TestDb::new(&[]).unwrap();
     let backend: Arc<dyn kalamdb_store::StorageBackend> = test_db.backend();
 
-    let live_queries_provider = app_ctx.system_tables().live_queries();
     let schema_registry = app_ctx.schema_registry();
     let base_session_context = app_ctx.base_session_context();
 
@@ -148,13 +147,8 @@ async fn create_test_manager() -> (Arc<ConnectionsManager>, LiveQueryManager, Te
         Duration::from_secs(5),
     );
 
-    let manager = LiveQueryManager::new(
-        live_queries_provider,
-        schema_registry,
-        connection_registry.clone(),
-        base_session_context,
-        Arc::clone(&app_ctx),
-    );
+    let manager =
+        LiveQueryManager::new(schema_registry, connection_registry.clone(), base_session_context);
     let sql_executor = Arc::new(SqlExecutor::new(
         app_ctx.clone(),
         Arc::new(crate::sql::executor::handler_registry::HandlerRegistry::new(app_ctx.clone())),
@@ -175,7 +169,6 @@ fn register_and_auth_connection(
         .unwrap();
     let connection_state = registration.state;
     connection_state.mark_authenticated(user_id.clone(), kalamdb_commons::models::Role::User);
-    registry.on_authenticated(&connection_id, user_id);
     connection_state
 }
 

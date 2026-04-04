@@ -104,7 +104,7 @@ async fn test_observability_system_tables_and_jobs_over_http() -> anyhow::Result
         "system.schemas",
         "system.storages",
         "system.jobs",
-        "system.live_queries",
+        "system.live",
     ] {
         let resp = server.execute_sql(&format!("SELECT * FROM {} LIMIT 1", table)).await?;
         assert_eq!(resp.status, ResponseStatus::Success);

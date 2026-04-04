@@ -4,7 +4,7 @@ use flate2::read::GzDecoder;
 use kalamdb_auth::UserRepository;
 use kalamdb_commons::models::ConnectionInfo;
 use kalamdb_commons::websocket::{ClientMessage, SerializationType};
-use kalamdb_core::live::{ConnectionsManager, SharedConnectionState};
+use kalamdb_core::live::SharedConnectionState;
 use std::io::Read;
 use std::sync::Arc;
 
@@ -24,7 +24,6 @@ pub(super) async fn handle_text_message(
     client_ip: &ConnectionInfo,
     text: &str,
     session: &mut Session,
-    registry: &Arc<ConnectionsManager>,
     app_context: &Arc<kalamdb_core::app_context::AppContext>,
     rate_limiter: &Arc<RateLimiter>,
     live_query_manager: &Arc<kalamdb_core::live::LiveQueryManager>,
@@ -39,7 +38,6 @@ pub(super) async fn handle_text_message(
         connection_state,
         client_ip,
         session,
-        registry,
         app_context,
         rate_limiter,
         live_query_manager,
@@ -55,7 +53,6 @@ pub(super) async fn handle_binary_message(
     client_ip: &ConnectionInfo,
     data: Bytes,
     session: &mut Session,
-    registry: &Arc<ConnectionsManager>,
     app_context: &Arc<kalamdb_core::app_context::AppContext>,
     rate_limiter: &Arc<RateLimiter>,
     live_query_manager: &Arc<kalamdb_core::live::LiveQueryManager>,
@@ -83,7 +80,6 @@ pub(super) async fn handle_binary_message(
                 connection_state,
                 client_ip,
                 session,
-                registry,
                 app_context,
                 rate_limiter,
                 live_query_manager,
@@ -112,7 +108,6 @@ async fn handle_client_message(
     connection_state: &SharedConnectionState,
     client_ip: &ConnectionInfo,
     session: &mut Session,
-    registry: &Arc<ConnectionsManager>,
     app_context: &Arc<kalamdb_core::app_context::AppContext>,
     rate_limiter: &Arc<RateLimiter>,
     live_query_manager: &Arc<kalamdb_core::live::LiveQueryManager>,
@@ -136,7 +131,6 @@ async fn handle_client_message(
                 credentials,
                 protocol,
                 session,
-                registry,
                 app_context,
                 rate_limiter,
                 user_repo,

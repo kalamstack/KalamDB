@@ -108,3 +108,4 @@ ui/package-lock.json
 /link/sdks/typescript/.wasm-cargo-home-test2
 ts-sdk-repro/server.toml
 /benchv2/logs
+/benchv2/logs

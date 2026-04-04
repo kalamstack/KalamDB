@@ -1,4 +1,4 @@
-//! Live query subscription entity for system.live_queries table.
+//! Live query subscription row model for the system.live view.
 
 use super::LiveQueryStatus;
 use kalamdb_commons::datatypes::KalamDataType;
@@ -9,7 +9,7 @@ use kalamdb_commons::models::{
 use kalamdb_macros::table;
 use serde::{Deserialize, Serialize};
 
-/// Live query subscription entity for system.live_queries.
+/// Live query subscription row model for `system.live`.
 ///
 /// Represents an active live query subscription (WebSocket connection).
 ///
@@ -29,11 +29,11 @@ use serde::{Deserialize, Serialize};
 /// - `node_id`: Node/server handling this subscription
 ///
 /// **Note**: `last_seq_id` is tracked in-memory only (in WebSocketSession.subscription_metadata),
-/// not persisted to system.live_queries table.
+/// not stored in the `system.live` view row.
 ///
 /// ## Serialization
-/// - **RocksDB**: FlatBuffers envelope + FlexBuffers payload
-/// - **API**: JSON via Serde
+/// - **Command payloads / tests**: JSON via Serde
+/// - **View schema**: generated from this type via `#[table]`
 ///
 /// ## Example
 ///
@@ -65,10 +65,7 @@ use serde::{Deserialize, Serialize};
 /// ```
 /// LiveQuery struct with fields ordered for optimal memory alignment.
 /// 8-byte aligned fields first, then smaller types.
-#[table(
-    name = "live_queries",
-    comment = "Active WebSocket live query subscriptions"
-)]
+#[table(name = "live", comment = "Active in-memory live subscriptions")]
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct LiveQuery {
     // 8-byte aligned fields first (i64, String/pointer types)
@@ -81,7 +78,7 @@ pub struct LiveQuery {
         default = "None",
         comment = "Live query creation timestamp"
     )]
-    pub created_at: i64, // Unix timestamp in milliseconds
+    pub created_at: i64,
     #[column(
         id = 11,
         ordinal = 11,
@@ -91,7 +88,7 @@ pub struct LiveQuery {
         default = "None",
         comment = "Last update sent to client"
     )]
-    pub last_update: i64, // Unix timestamp in milliseconds
+    pub last_update: i64,
     #[column(
         id = 14,
         ordinal = 14,
@@ -101,7 +98,7 @@ pub struct LiveQuery {
         default = "None",
         comment = "Last ping timestamp for stale detection"
     )]
-    pub last_ping_at: i64, // Unix timestamp in milliseconds (for heartbeat/failover)
+    pub last_ping_at: i64,
     #[column(
         id = 12,
         ordinal = 12,
@@ -121,7 +118,7 @@ pub struct LiveQuery {
         default = "None",
         comment = "Live query identifier (format: {user_id}-{conn_id}-{table}-{subscription_id})"
     )]
-    pub live_id: LiveQueryId, // Format: {user_id}-{unique_conn_id}-{table_name}-{subscription_id}
+    pub live_id: LiveQueryId,
     #[column(
         id = 2,
         ordinal = 2,
@@ -142,7 +139,6 @@ pub struct LiveQuery {
         comment = "Client-provided subscription identifier"
     )]
     pub subscription_id: String,
-    //TODO: Use TableId type INSTEAD OF BOTH table_name AND namespace_id
     #[column(
         id = 4,
         ordinal = 4,
@@ -192,7 +188,7 @@ pub struct LiveQuery {
         default = "None",
         comment = "Query options (JSON)"
     )]
-    pub options: Option<String>, // TODO: Switch to: JSON
+    pub options: Option<String>,
     /// Node identifier that holds this subscription's WebSocket connection
     #[column(
         id = 13,
@@ -204,7 +200,6 @@ pub struct LiveQuery {
         comment = "Server node ID handling this live query"
     )]
     pub node_id: NodeId,
-    // Enum (typically 1-4 bytes depending on variant count)
     #[column(
         id = 9,
         ordinal = 9,
@@ -214,7 +209,7 @@ pub struct LiveQuery {
         default = "None",
         comment = "Current status (active, paused, etc.)"
     )]
-    pub status: LiveQueryStatus, // Active, Paused, Completed, Error
+    pub status: LiveQueryStatus,
 }
 
 #[cfg(test)]

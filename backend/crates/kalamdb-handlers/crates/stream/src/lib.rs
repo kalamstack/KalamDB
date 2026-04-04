@@ -6,8 +6,8 @@ use kalamdb_core::sql::executor::handler_registry::HandlerRegistry;
 use kalamdb_handlers_support::register_typed_handler;
 use kalamdb_sql::classifier::SqlStatementKind;
 use kalamdb_sql::ddl::{
-    AckStatement, AddTopicSourceStatement, ClearTopicStatement, ConsumePosition,
-    ConsumeStatement, CreateTopicStatement, DropTopicStatement,
+    AckStatement, AddTopicSourceStatement, ClearTopicStatement, ConsumePosition, ConsumeStatement,
+    CreateTopicStatement, DropTopicStatement,
 };
 use std::sync::Arc;
 

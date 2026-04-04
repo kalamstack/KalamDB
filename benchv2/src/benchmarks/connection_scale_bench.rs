@@ -555,6 +555,13 @@ impl Benchmark for ConnectionScaleBench {
                 } else {
                     println!("{}", final_row);
                 }
+                if let Some(memory_delta_info) = render_memory_delta_info(
+                    benchmark_start_memory,
+                    memory_after,
+                    connected_count,
+                ) {
+                    println!("  │ {:<width$} │", memory_delta_info, width = TABLE_INFO_WIDTH);
+                }
 
                 if let Some(err) = checkpoint_error {
                     let _ = stop_tx.send(true);
@@ -634,7 +641,7 @@ impl Benchmark for ConnectionScaleBench {
             let drain_deadline = tokio::time::Instant::now() + Duration::from_secs(45);
             loop {
                 let count_sql = format!(
-                    "SELECT COUNT(*) AS c FROM system.live_queries WHERE namespace_id = '{}' AND table_name = 'conn_scale'",
+                    "SELECT COUNT(*) AS c FROM system.live WHERE namespace_id = '{}' AND table_name = 'conn_scale'",
                     config.namespace
                 );
 
@@ -714,6 +721,28 @@ fn format_memory(memory_bytes: Option<u64>) -> String {
     } else {
         format!("{} B", bytes)
     }
+}
+
+fn render_memory_delta_info(
+    start_memory: Option<u64>,
+    end_memory: Option<u64>,
+    connected_count: u32,
+) -> Option<String> {
+    let (Some(start), Some(end)) = (start_memory, end_memory) else {
+        return None;
+    };
+
+    let delta = end.saturating_sub(start);
+    if connected_count == 0 {
+        return Some(format!("ΔRSS={} | approx/conn=n/a", format_memory(Some(delta))));
+    }
+
+    let per_connection = delta / connected_count as u64;
+    Some(format!(
+        "ΔRSS={} | approx/conn={}",
+        format_memory(Some(delta)),
+        format_memory(Some(per_connection))
+    ))
 }
 
 fn summarize_bind_pool(bind_addresses: &[String]) -> String {

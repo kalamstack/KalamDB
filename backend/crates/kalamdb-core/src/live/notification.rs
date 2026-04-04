@@ -6,9 +6,6 @@
 //! Topic pub/sub publishing is now handled synchronously in table providers
 //! via the TopicPublisher trait — see kalamdb-publisher crate.
 //!
-//! In cluster mode, the leader broadcasts notifications to follower nodes
-//! via the gRPC ClusterService (see `kalamdb_raft::ClusterClient`).
-//!
 //! Used by:
 //! - WebSocket live query subscribers
 
@@ -22,13 +19,11 @@ use kalamdb_commons::ids::SeqId;
 use kalamdb_commons::models::rows::Row;
 use kalamdb_commons::models::{LiveQueryId, TableId, UserId};
 use kalamdb_commons::websocket::{RowData, SharedChangePayload, WireNotification};
-use kalamdb_raft::ClusterClient;
-use kalamdb_raft::NotifyFollowersRequest;
 use kalamdb_system::NotificationService as NotificationServiceTrait;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use tokio::sync::{mpsc, OnceCell};
+use tokio::sync::mpsc;
 
 /// Number of sharded notification workers.
 /// Deterministic routing by table_id hash preserves per-table ordering
@@ -64,10 +59,7 @@ fn extract_seq(change_notification: &ChangeNotification) -> Option<SeqId> {
 
 /// Convert a Row to a projected RowData map (`HashMap<String, KalamCellValue>`).
 /// Includes `_seq` always. When `projections` is `None`, includes all columns.
-fn project_row(
-    row: &Row,
-    projections: &Option<Arc<Vec<String>>>,
-) -> Result<RowData, KalamDbError> {
+fn project_row(row: &Row, projections: &Option<Arc<Vec<String>>>) -> Result<RowData, KalamDbError> {
     let mut map = HashMap::new();
     for (col, sv) in &row.values {
         let include = match projections {
@@ -96,17 +88,20 @@ fn project_update_delta(
     let mut old_map = HashMap::new();
 
     // Always include _seq and PK columns
-    for key in std::iter::once(SystemColumnNames::SEQ).chain(pk_columns.iter().map(String::as_str)) {
+    for key in std::iter::once(SystemColumnNames::SEQ).chain(pk_columns.iter().map(String::as_str))
+    {
         if let Some(sv) = new_row.values.get(key) {
             new_map.insert(
                 key.to_string(),
-                scalar_value_to_json(sv).map_err(|e| KalamDbError::SerializationError(e.to_string()))?,
+                scalar_value_to_json(sv)
+                    .map_err(|e| KalamDbError::SerializationError(e.to_string()))?,
             );
         }
         if let Some(sv) = old_row.values.get(key) {
             old_map.insert(
                 key.to_string(),
-                scalar_value_to_json(sv).map_err(|e| KalamDbError::SerializationError(e.to_string()))?,
+                scalar_value_to_json(sv)
+                    .map_err(|e| KalamDbError::SerializationError(e.to_string()))?,
             );
         }
     }
@@ -130,7 +125,8 @@ fn project_update_delta(
             if !nv.is_null() {
                 new_map.insert(
                     col.to_string(),
-                    scalar_value_to_json(nv).map_err(|e| KalamDbError::SerializationError(e.to_string()))?,
+                    scalar_value_to_json(nv)
+                        .map_err(|e| KalamDbError::SerializationError(e.to_string()))?,
                 );
             }
         }
@@ -143,7 +139,8 @@ fn project_update_delta(
             if let Some(ov) = old_sv {
                 old_map.insert(
                     col.to_string(),
-                    scalar_value_to_json(ov).map_err(|e| KalamDbError::SerializationError(e.to_string()))?,
+                    scalar_value_to_json(ov)
+                        .map_err(|e| KalamDbError::SerializationError(e.to_string()))?,
                 );
             }
         }
@@ -185,7 +182,6 @@ fn build_shared_payload(
     }
 }
 
-
 /// Try to deliver a notification to a subscriber, handling flow control.
 /// Returns `true` if the notification was sent to the channel.
 #[inline]
@@ -194,22 +190,25 @@ fn try_deliver(
     notification: Arc<WireNotification>,
     seq_value: Option<SeqId>,
 ) -> bool {
-    let flow_control = &handle.flow_control;
-
-    if !flow_control.is_initial_complete() {
-        if let Some(snapshot_seq) = flow_control.snapshot_end_seq() {
-            if let Some(seq) = seq_value {
-                if seq.as_i64() <= snapshot_seq {
-                    return false;
+    if let Some(flow_control) = handle.flow_control.as_ref() {
+        if !flow_control.is_initial_complete() {
+            if let Some(snapshot_seq) = flow_control.snapshot_end_seq() {
+                if let Some(seq) = seq_value {
+                    if seq.as_i64() <= snapshot_seq {
+                        return false;
+                    }
                 }
             }
+            flow_control.buffer_notification(Arc::clone(&notification), seq_value);
+            return false;
         }
-        flow_control.buffer_notification(Arc::clone(&notification), seq_value);
-        return false;
     }
 
     match handle.notification_tx.try_send(notification) {
-        Ok(()) => true,
+        Ok(()) => {
+            handle.runtime_metadata.record_delivery();
+            true
+        },
         Err(e) => {
             use tokio::sync::mpsc::error::TrySendError;
             match e {
@@ -238,46 +237,21 @@ fn try_deliver(
 ///
 /// Also handles topic pub/sub routing via TopicPublisherService.
 ///
-/// In cluster mode, the leader node broadcasts notifications to follower nodes
-/// via cluster gRPC so followers can dispatch to their locally-connected
-/// WebSocket subscribers.
+/// Notifications are delivered from the local table-apply path only.
+/// In cluster mode, each node dispatches to its own locally-connected
+/// subscribers when the committed Raft entry is applied on that node.
 pub struct NotificationService {
     /// Manager uses DashMap internally for lock-free access
     registry: Arc<ConnectionsManager>,
     /// Sharded notification channels — deterministic routing by table_id hash
     /// preserves per-table ordering while achieving parallelism across tables.
     worker_txs: Vec<mpsc::Sender<NotificationTask>>,
-    /// AppContext for leadership checks (set after initialization to avoid circular dependency)
-    /// Required for Raft cluster mode to ensure only leader fires notifications
-    app_context: OnceCell<std::sync::Weak<crate::app_context::AppContext>>,
-    /// gRPC cluster client for broadcasting notifications to follower nodes.
-    /// Set after initialization when Raft cluster mode is active.
-    cluster_client: OnceCell<Arc<ClusterClient>>,
 }
 
 impl NotificationService {
     /// Check if there are any subscribers for a given user and table
     pub fn has_subscribers(&self, user_id: &UserId, table_id: &TableId) -> bool {
         self.registry.has_subscriptions(user_id, table_id)
-    }
-
-    /// Set the app context for leadership checks
-    ///
-    /// Called after AppContext creation to enable Raft-aware notification filtering.
-    /// Uses Weak reference to avoid circular Arc dependency.
-    pub fn set_app_context(&self, app_context: std::sync::Weak<crate::app_context::AppContext>) {
-        if self.app_context.set(app_context).is_err() {
-            log::warn!("AppContext already set in NotificationService");
-        }
-    }
-
-    /// Set the gRPC cluster client for cross-node notification broadcasting.
-    ///
-    /// Called after Raft initialization when cluster mode is active.
-    pub fn set_cluster_client(&self, client: Arc<ClusterClient>) {
-        if self.cluster_client.set(client).is_err() {
-            log::warn!("ClusterClient already set in NotificationService");
-        }
     }
 
     pub fn new(registry: Arc<ConnectionsManager>) -> Arc<Self> {
@@ -293,8 +267,6 @@ impl NotificationService {
         let service = Arc::new(Self {
             registry,
             worker_txs,
-            app_context: OnceCell::new(),
-            cluster_client: OnceCell::new(),
         });
 
         // Spawn sharded notification workers
@@ -327,34 +299,11 @@ impl NotificationService {
         log::debug!("Notification worker {} shutting down", worker_idx);
     }
 
-    /// Process a single notification task (leadership check + fan-out).
+    /// Process a single notification task by dispatching it to local subscribers.
+    ///
+    /// In cluster mode, this method is called only after the local Raft state
+    /// machine has applied the committed mutation on this node.
     async fn process_notification(&self, task: NotificationTask, worker_idx: usize) {
-        // Leadership check (Raft cluster mode)
-        if let Some(weak_ctx) = self.app_context.get() {
-            if let Some(ctx) = weak_ctx.upgrade() {
-                let is_leader = match task.user_id.as_ref() {
-                    Some(uid) => ctx.is_leader_for_user(uid).await,
-                    None => ctx.is_leader_for_shared().await,
-                };
-
-                if !is_leader {
-                    return;
-                }
-
-                if ctx.is_cluster_mode() {
-                    if let Some(cluster_client) = self.cluster_client.get() {
-                        Self::broadcast_to_followers(
-                            cluster_client,
-                            task.user_id.as_ref(),
-                            &task.table_id,
-                            &task.notification,
-                        )
-                        .await;
-                    }
-                }
-            }
-        }
-
         // Route to subscriptions
         let handles = if let Some(ref user_id) = task.user_id {
             self.registry.get_subscriptions_for_table(user_id, &task.table_id)
@@ -378,75 +327,10 @@ impl NotificationService {
         }
     }
 
-    /// Handle a notification forwarded from the leader node.
-    pub async fn notify_forwarded(
-        &self,
-        user_id: UserId,
-        table_id: TableId,
-        notification: ChangeNotification,
-    ) {
-        let handles = self.registry.get_subscriptions_for_table(&user_id, &table_id);
-        if handles.is_empty() {
-            return;
-        }
-        if let Err(e) = Self::dispatch_to_subscribers(&table_id, notification, handles).await {
-            log::warn!("Failed to dispatch forwarded notification for table {}: {}", table_id, e);
-        }
-    }
-
-    /// Handle a shared table notification forwarded from the leader node.
-    pub async fn notify_forwarded_shared(
-        &self,
-        table_id: TableId,
-        notification: ChangeNotification,
-    ) {
-        let handles = self.registry.get_shared_subscriptions_for_table(&table_id);
-        if handles.is_empty() {
-            return;
-        }
-        if let Err(e) = Self::dispatch_to_subscribers(&table_id, notification, handles).await {
-            log::warn!(
-                "Failed to dispatch forwarded shared notification for table {}: {}",
-                table_id,
-                e
-            );
-        }
-    }
-
-    /// Broadcast a notification to all other cluster nodes via gRPC.
-    ///
-    /// Called on the leader after local notification dispatch.  Uses
-    /// fire-and-forget semantics — errors are logged but don't fail the
-    /// local notification path.
-    async fn broadcast_to_followers(
-        cluster_client: &ClusterClient,
-        user_id: Option<&UserId>,
-        table_id: &TableId,
-        notification: &ChangeNotification,
-    ) {
-        let payload = match kalamdb_raft::network::cluster_serde::serialize(notification) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                log::warn!("Failed to serialize notification for forwarding: {}", e);
-                return;
-            },
-        };
-
-        let request = NotifyFollowersRequest {
-            user_id: user_id.map(|u| u.to_string()),
-            table_namespace: table_id.namespace_id().to_string(),
-            table_name: table_id.table_name().to_string(),
-            payload,
-        };
-
-        cluster_client.broadcast_notify(request).await;
-    }
-
     /// Notify subscribers about a table change (fire-and-forget async)
     ///
-    /// In Raft cluster mode, only the leader node fires notifications to prevent
-    /// duplicate messages. Followers silently drop notifications since they
-    /// already persist data via the Raft applier.
+    /// In cluster mode, this is called from the local apply path on every node,
+    /// so each replica notifies only its own local subscribers.
     pub fn notify_async(
         &self,
         user_id: Option<UserId>,
@@ -633,7 +517,9 @@ impl NotificationServiceTrait for NotificationService {
 mod tests {
     use super::*;
     use crate::live::helpers::filter_eval::parse_where_clause;
-    use crate::live::models::{SubscriptionFlowControl, SubscriptionHandle};
+    use crate::live::models::{
+        SubscriptionFlowControl, SubscriptionHandle, SubscriptionRuntimeMetadata,
+    };
     use datafusion::scalar::ScalarValue;
     use kalamdb_commons::models::rows::Row;
     use kalamdb_commons::models::{ConnectionId, NamespaceId, TableName};
@@ -669,12 +555,17 @@ mod tests {
                 Arc::new(cols.into_iter().map(std::string::ToString::to_string).collect())
             }),
             notification_tx: tx,
-            flow_control,
+            flow_control: Some(flow_control),
+            runtime_metadata: Arc::new(SubscriptionRuntimeMetadata::new(
+                Arc::from("SELECT * FROM shared.events"),
+                None,
+                1,
+            )),
         }
     }
 
     #[tokio::test]
-    async fn test_notify_forwarded_shared_applies_filter_and_projection() {
+    async fn test_notify_async_shared_applies_filter_and_projection() {
         let registry = ConnectionsManager::new(
             NodeId::new(1),
             Duration::from_secs(30),
@@ -719,9 +610,12 @@ mod tests {
         );
 
         let change = ChangeNotification::insert(table_id.clone(), make_row(42, "hello", 42));
-        service.notify_forwarded_shared(table_id, change).await;
+        service.notify_async(None, table_id, change);
 
-        let delivered = rx_ok.recv().await.expect("matching subscriber gets message");
+        let delivered = tokio::time::timeout(Duration::from_secs(1), rx_ok.recv())
+            .await
+            .expect("matching subscriber gets message within timeout")
+            .expect("matching subscriber gets message");
         let wire = delivered.as_ref();
         assert_eq!(wire.subscription_id.as_ref(), "sub_ok");
         assert_eq!(wire.payload.change_type, kalamdb_commons::websocket::ChangeType::Insert);
@@ -739,7 +633,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_notify_forwarded_user_table_projection_keeps_seq() {
+    async fn test_notify_async_user_table_projection_keeps_seq() {
         let registry = ConnectionsManager::new(
             NodeId::new(1),
             Duration::from_secs(30),
@@ -766,9 +660,12 @@ mod tests {
         );
 
         let change = ChangeNotification::insert(table_id.clone(), make_row(42, "hello", 42));
-        service.notify_forwarded(user_id, table_id, change).await;
+        service.notify_async(Some(user_id), table_id, change);
 
-        let delivered = rx.recv().await.expect("projected subscriber gets message");
+        let delivered = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .expect("projected subscriber gets message within timeout")
+            .expect("projected subscriber gets message");
         let wire = delivered.as_ref();
         assert_eq!(wire.subscription_id.as_ref(), "sub_user");
         assert_eq!(wire.payload.change_type, kalamdb_commons::websocket::ChangeType::Insert);
@@ -783,7 +680,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_notify_forwarded_shared_buffers_when_initial_load_incomplete() {
+    async fn test_notify_async_shared_buffers_when_initial_load_incomplete() {
         let registry = ConnectionsManager::new(
             NodeId::new(1),
             Duration::from_secs(30),
@@ -803,18 +700,14 @@ mod tests {
             &conn_id,
             LiveQueryId::new(UserId::new("u3"), conn_id.clone(), "sub_buffer".to_string()),
             table_id.clone(),
-            make_shared_handle(
-                "sub_buffer",
-                Arc::new(tx),
-                Arc::clone(&flow),
-                None,
-                None,
-            ),
+            make_shared_handle("sub_buffer", Arc::new(tx), Arc::clone(&flow), None, None),
         );
 
         // seq=11 is newer than snapshot end seq=10, should be buffered (not sent yet)
         let change = ChangeNotification::insert(table_id, make_row(7, "buffer-me", 11));
-        service.notify_forwarded_shared(make_table_id("shared", "logs"), change).await;
+        service.notify_async(None, make_table_id("shared", "logs"), change);
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
 
         assert!(rx.try_recv().is_err(), "should not send while initial load incomplete");
         let buffered = flow.drain_buffered_notifications();

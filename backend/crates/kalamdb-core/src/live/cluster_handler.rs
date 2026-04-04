@@ -6,10 +6,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use kalamdb_auth::{authenticate, AuthRequest, CoreUsersRepo, UserRepository};
-use kalamdb_commons::models::{ConnectionInfo, NamespaceId, TableId, UserId};
+use kalamdb_commons::models::{ConnectionInfo, NamespaceId};
 use kalamdb_raft::{
     ClusterMessageHandler, ForwardSqlRequest, ForwardSqlResponsePayload, GetNodeInfoRequest,
-    GetNodeInfoResponse, NotifyFollowersRequest, PingRequest, RaftExecutor,
+    GetNodeInfoResponse, PingRequest, RaftExecutor,
 };
 use kalamdb_session::{AuthMethod, AuthSession};
 use serde_json::Value as JsonValue;
@@ -19,23 +19,14 @@ use crate::providers::arrow_json_conversion::json_value_to_scalar_strict;
 use crate::sql::context::ExecutionContext;
 use crate::sql::ExecutionResult;
 
-use super::notification::NotificationService;
-
 /// Core implementation of cluster message handling.
 pub struct CoreClusterHandler {
     app_context: Arc<AppContext>,
-    notification_service: Arc<NotificationService>,
 }
 
 impl CoreClusterHandler {
-    pub fn new(
-        app_context: Arc<AppContext>,
-        notification_service: Arc<NotificationService>,
-    ) -> Self {
-        Self {
-            app_context,
-            notification_service,
-        }
+    pub fn new(app_context: Arc<AppContext>) -> Self {
+        Self { app_context }
     }
 
     fn error_payload(
@@ -107,32 +98,6 @@ impl CoreClusterHandler {
 
 #[async_trait::async_trait]
 impl ClusterMessageHandler for CoreClusterHandler {
-    async fn handle_notify_followers(&self, req: NotifyFollowersRequest) -> Result<(), String> {
-        let notification: super::models::ChangeNotification =
-            kalamdb_raft::network::cluster_serde::deserialize(&req.payload)?;
-
-        let table_id = TableId::try_from_strings(&req.table_namespace, &req.table_name)
-            .map_err(|e| format!("Invalid table_id in notify_followers: {}", e))?;
-
-        match req.user_id.as_deref() {
-            Some(user_id_raw) => {
-                // User table notification — dispatch to the specific user's subscribers
-                let user_id = UserId::try_new(user_id_raw)
-                    .map_err(|e| format!("Invalid user_id in notify_followers: {}", e))?;
-
-                self.notification_service
-                    .notify_forwarded(user_id, table_id, notification)
-                    .await;
-            },
-            None => {
-                // Shared table notification — dispatch to all local shared-table subscribers
-                self.notification_service.notify_forwarded_shared(table_id, notification).await;
-            },
-        }
-
-        Ok(())
-    }
-
     async fn handle_forward_sql(
         &self,
         req: ForwardSqlRequest,

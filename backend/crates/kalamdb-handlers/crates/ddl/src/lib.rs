@@ -4,6 +4,7 @@ pub mod storage;
 pub mod table;
 pub mod view;
 
+use datafusion::arrow::datatypes::Schema as ArrowSchema;
 use kalamdb_commons::models::{NamespaceId, StorageId, TableName};
 use kalamdb_commons::TableType;
 use kalamdb_core::app_context::AppContext;
@@ -14,7 +15,6 @@ use kalamdb_sql::ddl::{
     AlterTableStatement, CreateTableStatement, CreateViewStatement, DescribeTableStatement,
     DropTableStatement, ShowTableStatsStatement, ShowTablesStatement,
 };
-use datafusion::arrow::datatypes::Schema as ArrowSchema;
 use std::collections::HashMap;
 use std::sync::Arc;
 

@@ -44,7 +44,7 @@ async fn test_schema_store_persistence() {
         "jobs",
         "namespaces",
         "storages",
-        "live_queries",
+        "live",
         "tables",
         "table_schemas",
     ];
@@ -160,7 +160,7 @@ async fn test_all_system_tables_have_schemas() {
         "jobs",
         "namespaces",
         "storages",
-        "live_queries",
+        "live",
         "tables",
         "table_schemas",
     ];

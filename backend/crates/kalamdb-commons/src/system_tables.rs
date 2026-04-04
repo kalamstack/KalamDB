@@ -42,8 +42,6 @@ pub enum SystemTable {
     TableSchemas,
     /// system.storages - Storage configurations (persisted)
     Storages,
-    /// system.live_queries - Active live query subscriptions (persisted)
-    LiveQueries,
     /// system.jobs - Background job tracking (persisted)
     Jobs,
     /// system.job_nodes - Per-node job execution state (persisted)
@@ -60,6 +58,8 @@ pub enum SystemTable {
     // ==================== VIRTUAL VIEWS ====================
     /// system.stats - Runtime metrics (computed on-demand)
     Stats,
+    /// system.live - Active in-memory live subscriptions (computed on-demand)
+    Live,
     /// system.settings - Server configuration settings (computed on-demand)
     Settings,
     /// system.server_logs - Server log entries (computed from log files)
@@ -87,7 +87,6 @@ impl SystemTable {
             SystemTable::Schemas => "schemas",
             SystemTable::TableSchemas => "table_schemas",
             SystemTable::Storages => "storages",
-            SystemTable::LiveQueries => "live_queries",
             SystemTable::Jobs => "jobs",
             SystemTable::JobNodes => "job_nodes",
             SystemTable::AuditLog => "audit_log",
@@ -96,6 +95,7 @@ impl SystemTable {
             SystemTable::TopicOffsets => "topic_offsets",
             // Views
             SystemTable::Stats => "stats",
+            SystemTable::Live => "live",
             SystemTable::Settings => "settings",
             SystemTable::ServerLogs => "server_logs",
             SystemTable::Cluster => "cluster",
@@ -117,6 +117,7 @@ impl SystemTable {
         matches!(
             self,
             SystemTable::Stats
+                | SystemTable::Live
                 | SystemTable::Settings
                 | SystemTable::ServerLogs
                 | SystemTable::Cluster
@@ -137,7 +138,6 @@ impl SystemTable {
             SystemTable::Schemas => Some("system_schemas"),
             SystemTable::TableSchemas => Some("system_table_schemas"),
             SystemTable::Storages => Some("system_storages"),
-            SystemTable::LiveQueries => Some("system_live_queries"),
             SystemTable::Jobs => Some("system_jobs"),
             SystemTable::JobNodes => Some("system_job_nodes"),
             SystemTable::AuditLog => Some("system_audit_log"),
@@ -146,6 +146,7 @@ impl SystemTable {
             SystemTable::TopicOffsets => Some("system_topic_offsets"),
             // Views have no column family
             SystemTable::Stats
+            | SystemTable::Live
             | SystemTable::Settings
             | SystemTable::ServerLogs
             | SystemTable::Cluster
@@ -174,7 +175,7 @@ impl SystemTable {
             "schemas" | "system_schemas" => Ok(SystemTable::Schemas),
             "table_schemas" | "system_table_schemas" => Ok(SystemTable::TableSchemas),
             "storages" | "system_storages" => Ok(SystemTable::Storages),
-            "live_queries" | "system_live_queries" => Ok(SystemTable::LiveQueries),
+            "live" => Ok(SystemTable::Live),
             "jobs" | "system_jobs" => Ok(SystemTable::Jobs),
             "job_nodes" | "system_job_nodes" => Ok(SystemTable::JobNodes),
             "audit_log" | "system_audit_log" => Ok(SystemTable::AuditLog),
@@ -203,7 +204,6 @@ impl SystemTable {
             SystemTable::Schemas,
             SystemTable::TableSchemas,
             SystemTable::Storages,
-            SystemTable::LiveQueries,
             SystemTable::Jobs,
             SystemTable::JobNodes,
             SystemTable::AuditLog,
@@ -217,6 +217,7 @@ impl SystemTable {
     pub fn all_views() -> &'static [SystemTable] {
         &[
             SystemTable::Stats,
+            SystemTable::Live,
             SystemTable::Settings,
             SystemTable::ServerLogs,
             SystemTable::Cluster,
@@ -237,7 +238,6 @@ impl SystemTable {
             SystemTable::Schemas,
             SystemTable::TableSchemas,
             SystemTable::Storages,
-            SystemTable::LiveQueries,
             SystemTable::Jobs,
             SystemTable::JobNodes,
             SystemTable::AuditLog,
@@ -246,6 +246,7 @@ impl SystemTable {
             SystemTable::TopicOffsets,
             // Views
             SystemTable::Stats,
+            SystemTable::Live,
             SystemTable::Settings,
             SystemTable::ServerLogs,
             SystemTable::Cluster,
@@ -277,7 +278,6 @@ impl SystemTable {
         static TABLE_SCHEMAS: Lazy<Partition> =
             Lazy::new(|| Partition::new("system_table_schemas"));
         static STORAGES: Lazy<Partition> = Lazy::new(|| Partition::new("system_storages"));
-        static LIVE_QUERIES: Lazy<Partition> = Lazy::new(|| Partition::new("system_live_queries"));
         static JOBS: Lazy<Partition> = Lazy::new(|| Partition::new("system_jobs"));
         static JOB_NODES: Lazy<Partition> = Lazy::new(|| Partition::new("system_job_nodes"));
         static AUDIT_LOG: Lazy<Partition> = Lazy::new(|| Partition::new("system_audit_log"));
@@ -292,7 +292,6 @@ impl SystemTable {
             SystemTable::Schemas => Some(&SCHEMAS),
             SystemTable::TableSchemas => Some(&TABLE_SCHEMAS),
             SystemTable::Storages => Some(&STORAGES),
-            SystemTable::LiveQueries => Some(&LIVE_QUERIES),
             SystemTable::Jobs => Some(&JOBS),
             SystemTable::JobNodes => Some(&JOB_NODES),
             SystemTable::AuditLog => Some(&AUDIT_LOG),
@@ -301,6 +300,7 @@ impl SystemTable {
             SystemTable::TopicOffsets => Some(&TOPIC_OFFSETS),
             // Views have no partition
             SystemTable::Stats
+            | SystemTable::Live
             | SystemTable::Settings
             | SystemTable::ServerLogs
             | SystemTable::Cluster
@@ -333,8 +333,6 @@ pub enum StoragePartition {
     SystemJobsStatusIdx,
     /// Idempotency key index for system.jobs (unique-ish)
     SystemJobsIdempotencyIdx,
-    /// TableId index for system.live_queries (non-unique index)
-    SystemLiveQueriesTableIdx,
 }
 
 impl StoragePartition {
@@ -349,7 +347,6 @@ impl StoragePartition {
             StoragePartition::ManifestPendingWriteIdx => "manifest_pending_write_idx",
             StoragePartition::SystemJobsStatusIdx => "system_jobs_status_idx",
             StoragePartition::SystemJobsIdempotencyIdx => "system_jobs_idempotency_idx",
-            StoragePartition::SystemLiveQueriesTableIdx => "system_live_queries_table_idx",
         }
     }
 
@@ -361,8 +358,7 @@ impl StoragePartition {
             | StoragePartition::SystemUsersDeletedAtIdx
             | StoragePartition::ManifestPendingWriteIdx
             | StoragePartition::SystemJobsStatusIdx
-            | StoragePartition::SystemJobsIdempotencyIdx
-            | StoragePartition::SystemLiveQueriesTableIdx => ColumnFamilyProfile::SystemIndex,
+            | StoragePartition::SystemJobsIdempotencyIdx => ColumnFamilyProfile::SystemIndex,
             StoragePartition::InformationSchemaTables | StoragePartition::ManifestCache => {
                 ColumnFamilyProfile::SystemMeta
             },
@@ -380,7 +376,6 @@ impl StoragePartition {
             "manifest_pending_write_idx" => Some(StoragePartition::ManifestPendingWriteIdx),
             "system_jobs_status_idx" => Some(StoragePartition::SystemJobsStatusIdx),
             "system_jobs_idempotency_idx" => Some(StoragePartition::SystemJobsIdempotencyIdx),
-            "system_live_queries_table_idx" => Some(StoragePartition::SystemLiveQueriesTableIdx),
             _ => None,
         }
     }
@@ -404,8 +399,6 @@ impl StoragePartition {
             Lazy::new(|| Partition::new(StoragePartition::SystemJobsStatusIdx.name()));
         static JOBS_IDEMPOTENCY_IDX: Lazy<Partition> =
             Lazy::new(|| Partition::new(StoragePartition::SystemJobsIdempotencyIdx.name()));
-        static LIVE_QUERIES_TABLE_IDX: Lazy<Partition> =
-            Lazy::new(|| Partition::new(StoragePartition::SystemLiveQueriesTableIdx.name()));
         static MANIFEST_PENDING_WRITE_IDX: Lazy<Partition> =
             Lazy::new(|| Partition::new(StoragePartition::ManifestPendingWriteIdx.name()));
 
@@ -417,7 +410,6 @@ impl StoragePartition {
             StoragePartition::ManifestCache => &MANIFEST_CACHE,
             StoragePartition::SystemJobsStatusIdx => &JOBS_STATUS_IDX,
             StoragePartition::SystemJobsIdempotencyIdx => &JOBS_IDEMPOTENCY_IDX,
-            StoragePartition::SystemLiveQueriesTableIdx => &LIVE_QUERIES_TABLE_IDX,
             StoragePartition::ManifestPendingWriteIdx => &MANIFEST_PENDING_WRITE_IDX,
         }
     }
@@ -593,12 +585,13 @@ mod tests {
     #[test]
     fn test_all() {
         let all = SystemTable::all();
-        assert_eq!(all.len(), 21); // 12 tables + 9 views (including TopicOffsets)
+        assert_eq!(all.len(), 21); // 11 tables + 10 views
         assert!(all.contains(&SystemTable::Users));
         assert!(all.contains(&SystemTable::Storages));
         assert!(all.contains(&SystemTable::AuditLog));
         assert!(all.contains(&SystemTable::TopicOffsets));
         assert!(all.contains(&SystemTable::Stats));
+        assert!(all.contains(&SystemTable::Live));
         assert!(all.contains(&SystemTable::Cluster));
         assert!(all.contains(&SystemTable::ClusterGroups));
         assert!(all.contains(&SystemTable::Tables));
@@ -608,14 +601,14 @@ mod tests {
     #[test]
     fn test_all_tables() {
         let tables = SystemTable::all_tables();
-        assert_eq!(tables.len(), 12); // Including TopicOffsets
+        assert_eq!(tables.len(), 11);
         assert!(tables.iter().all(|t| !t.is_view()));
     }
 
     #[test]
     fn test_all_views() {
         let views = SystemTable::all_views();
-        assert_eq!(views.len(), 9); // 7 original + Tables + Columns
+        assert_eq!(views.len(), 10);
         assert!(views.iter().all(|v| v.is_view()));
     }
 

@@ -18,7 +18,7 @@ fn smoke_system_tables_and_user_lifecycle() {
     let system_queries = [
         "SELECT * FROM system.jobs LIMIT 1",
         "SELECT * FROM system.users LIMIT 1",
-        "SELECT * FROM system.live_queries LIMIT 1",
+        "SELECT * FROM system.live LIMIT 1",
         "SELECT * FROM system.schemas LIMIT 1",
         "SELECT * FROM system.namespaces LIMIT 1",
     ];

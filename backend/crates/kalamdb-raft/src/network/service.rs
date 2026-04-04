@@ -429,7 +429,7 @@ pub async fn start_rpc_server(
     let raft_service = RaftService::new(Arc::clone(&manager));
     let raft_server = raft_server::RaftServer::new(raft_service);
 
-    // Cluster messaging service (notify_followers, forward_sql, ping)
+    // Cluster messaging service (forward_sql, ping, get_node_info)
     let cluster_service =
         super::cluster_handler::ClusterServiceImpl::new(cluster_handler, Arc::clone(&manager));
     let cluster_server =

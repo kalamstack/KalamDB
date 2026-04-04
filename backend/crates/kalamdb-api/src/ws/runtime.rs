@@ -37,7 +37,6 @@ pub(super) async fn run_websocket(
             connection_state.mark_auth_started();
             let _ = complete_ws_auth(
                 &connection_state,
-                &handler_context.connection_registry,
                 auth.user_id,
                 auth.role,
                 auth.protocol,
@@ -142,7 +141,6 @@ pub(super) async fn run_websocket(
                                 &client_ip,
                                 &text,
                                 &mut session,
-                                &handler_context.connection_registry,
                                 &handler_context.app_context,
                                 &handler_context.rate_limiter,
                                 &handler_context.live_query_manager,
@@ -167,7 +165,6 @@ pub(super) async fn run_websocket(
                                 &client_ip,
                                 data,
                                 &mut session,
-                                &handler_context.connection_registry,
                                 &handler_context.app_context,
                                 &handler_context.rate_limiter,
                                 &handler_context.live_query_manager,

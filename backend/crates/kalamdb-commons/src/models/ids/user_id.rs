@@ -133,13 +133,21 @@ impl UserId {
     /// Creates a default 'root' user ID — cached singleton.
     #[inline]
     pub fn root() -> Self {
-        Self(ROOT_USER_ID.get_or_init(|| Arc::from(AuthConstants::DEFAULT_ROOT_USER_ID)).clone())
+        Self(
+            ROOT_USER_ID
+                .get_or_init(|| Arc::from(AuthConstants::DEFAULT_ROOT_USER_ID))
+                .clone(),
+        )
     }
 
     /// Creates a default 'system' user ID — cached singleton.
     #[inline]
     pub fn system() -> Self {
-        Self(SYSTEM_USER_ID_STATIC.get_or_init(|| Arc::from(AuthConstants::DEFAULT_SYSTEM_USER_ID)).clone())
+        Self(
+            SYSTEM_USER_ID_STATIC
+                .get_or_init(|| Arc::from(AuthConstants::DEFAULT_SYSTEM_USER_ID))
+                .clone(),
+        )
     }
 
     /// Is admin user?

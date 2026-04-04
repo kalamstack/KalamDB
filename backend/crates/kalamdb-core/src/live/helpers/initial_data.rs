@@ -106,7 +106,7 @@ impl InitialDataOptions {
 }
 
 /// Result of an initial data fetch
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct InitialDataResult {
     /// The fetched rows (as Row objects)
     pub rows: Vec<Row>,
@@ -172,19 +172,8 @@ impl InitialDataFetcher {
         where_clause: Option<&str>,
         projections: Option<&[String]>,
     ) -> Result<InitialDataResult, KalamDbError> {
-        // log::info!(
-        //     "fetch_initial_data called: table={}, type={:?}, limit={}, since={:?}, fetch_last={}, projections={:?}",
-        //     table_id,
-        //     table_type,
-        //     options.limit,
-        //     options.since_seq,
-        //     options.fetch_last,
-        //     projections
-        // );
-
         let limit = options.limit;
         if limit == 0 {
-            // log::debug!("Limit is 0, returning empty result");
             return Ok(InitialDataResult {
                 rows: Vec::new(),
                 last_seq: None,
@@ -244,8 +233,6 @@ impl InitialDataFetcher {
 
         // Add LIMIT (fetch limit + 1 to check has_more)
         sql.push_str(&format!(" LIMIT {}", limit + 1));
-
-        // log::debug!("Executing initial data SQL via SqlExecutor: {}", sql);
 
         let execution_result =
             sql_executor.execute(&sql, &exec_ctx, Vec::<ScalarValue>::new()).await?;
@@ -322,14 +309,6 @@ impl InitialDataFetcher {
         let snapshot_end_seq = options.until_seq.or(last_seq);
 
         let rows: Vec<Row> = batch_rows.into_iter().map(|(_, row)| row).collect();
-
-        // log::info!(
-        //     "fetch_initial_data complete: table={}, returned {} rows (has_more: {}, last_seq: {:?})",
-        //     table_id,
-        //     rows.len(),
-        //     has_more,
-        //     last_seq
-        // );
 
         Ok(InitialDataResult {
             rows,

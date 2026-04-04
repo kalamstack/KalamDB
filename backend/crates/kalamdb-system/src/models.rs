@@ -23,8 +23,8 @@ pub mod job_nodes {
     pub use crate::providers::job_nodes::models::JobNode;
 }
 
-pub mod live_queries {
-    pub use crate::providers::live_queries::models::{LiveQuery, LiveQueryStatus};
+pub mod live {
+    pub use crate::providers::live::models::{LiveQuery, LiveQueryStatus};
 }
 
 pub mod manifest {

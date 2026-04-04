@@ -223,7 +223,7 @@ pub(crate) async fn resubscribe_all(
             subscription: SubscriptionRequest {
                 id: subscription_id.clone(),
                 sql: state.sql.clone(),
-                options,
+                options: Some(options),
             },
         };
 

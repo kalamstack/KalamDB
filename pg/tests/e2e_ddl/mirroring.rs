@@ -22,7 +22,6 @@ async fn e2e_ddl_create_table_mirrors_columns_identically() {
     pg.batch_execute(&sql)
         .await
         .expect("CREATE FOREIGN TABLE for mirror comparison");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     let pg_rows = pg
         .query(
@@ -36,7 +35,14 @@ async fn e2e_ddl_create_table_mirrors_columns_identically() {
         .expect("query postgres mirrored columns");
 
     let pg_columns: Vec<String> = pg_rows.into_iter().map(|row| row.get(0)).collect();
-    let kalam_columns = env.kalamdb_columns(ns, &table).await;
+    let kalam_columns = env
+        .wait_for_kalamdb_columns(ns, &table, "mirrored columns to appear", |columns| {
+            columns.iter().any(|column| column == "id")
+                && columns.iter().any(|column| column == "title")
+                && columns.iter().any(|column| column == "value")
+                && columns.iter().any(|column| column == "active")
+        })
+        .await;
     let kalam_user_columns: Vec<String> = kalam_columns
         .iter()
         .filter(|name| {
@@ -82,7 +88,7 @@ async fn e2e_ddl_preserves_primary_key_not_null_and_defaults() {
     ))
     .await
     .expect("create mirrored constrained foreign table");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    env.wait_for_kalamdb_table_exists(&ns, &table).await;
 
     let columns = env
         .kalamdb_sql(&format!(
@@ -156,7 +162,7 @@ async fn e2e_ddl_current_schema_maps_to_namespace_without_namespace_option() {
     ))
     .await
     .expect("create foreign table using current schema");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    env.wait_for_kalamdb_table_exists(&ns, &table).await;
 
     assert!(
         env.kalamdb_table_exists(&ns, &table).await,
@@ -208,7 +214,10 @@ async fn e2e_ddl_alter_add_column_preserves_not_null_and_default() {
     ))
     .await
     .expect("alter add column with default and not null");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    env.wait_for_kalamdb_columns(&ns, &table, "added columns to include status", |columns| {
+        columns.iter().any(|column| column == "status")
+    })
+    .await;
 
     env.kalamdb_sql(&format!(
         "INSERT INTO {ns}.{table} (id, title) VALUES (SNOWFLAKE_ID(), 'hello add column')"
@@ -253,7 +262,7 @@ async fn e2e_ddl_alter_column_set_and_drop_not_null() {
     pg.batch_execute(&format!("ALTER FOREIGN TABLE {ns}.{table} ALTER COLUMN title SET NOT NULL;"))
         .await
         .expect("set not null");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    env.wait_for_kalamdb_table_exists(&ns, &table).await;
 
     let insert_error = env
         .kalamdb_sql_maybe(&format!(
@@ -271,7 +280,7 @@ async fn e2e_ddl_alter_column_set_and_drop_not_null() {
     ))
     .await
     .expect("drop not null");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    env.wait_for_kalamdb_table_exists(&ns, &table).await;
 
     env.kalamdb_sql(&format!("INSERT INTO {ns}.{table} (id, title) VALUES (SNOWFLAKE_ID(), NULL)"))
         .await;
@@ -307,7 +316,7 @@ async fn e2e_ddl_alter_column_set_and_drop_default() {
     ))
     .await
     .expect("set default");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    env.wait_for_kalamdb_table_exists(&ns, &table).await;
 
     env.kalamdb_sql(&format!("INSERT INTO {ns}.{table} (id) VALUES (SNOWFLAKE_ID())"))
         .await;
@@ -326,7 +335,7 @@ async fn e2e_ddl_alter_column_set_and_drop_default() {
     ))
     .await
     .expect("drop default");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    env.wait_for_kalamdb_table_exists(&ns, &table).await;
 
     env.kalamdb_sql(&format!("INSERT INTO {ns}.{table} (id) VALUES (SNOWFLAKE_ID())"))
         .await;

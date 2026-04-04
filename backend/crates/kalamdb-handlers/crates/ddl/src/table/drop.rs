@@ -101,11 +101,8 @@ async fn enqueue_drop_table_cleanup_job(
         storage: storage_details,
     };
 
-    let idempotency_key = format!(
-        "drop-{}-{}",
-        table_id.namespace_id().as_str(),
-        table_id.table_name().as_str()
-    );
+    let idempotency_key =
+        format!("drop-{}-{}", table_id.namespace_id().as_str(), table_id.table_name().as_str());
 
     let job_manager = app_context.job_manager();
     let job_id = job_manager
@@ -304,13 +301,9 @@ impl TypedStatementHandler<DropTableStatement> for DropTableHandler {
             .await
             .map_err(|e| KalamDbError::ExecutionError(format!("DROP TABLE failed: {}", e)))?;
 
-        let job_id = schedule_drop_table_cleanup(
-            &self.app_context,
-            &table_id,
-            actual_type,
-            storage_details,
-        )
-        .await?;
+        let job_id =
+            schedule_drop_table_cleanup(&self.app_context, &table_id, actual_type, storage_details)
+                .await?;
 
         let audit_entry = audit::log_ddl_operation(
             context,

@@ -58,42 +58,35 @@ pub async fn handle_subscribe(
     }
 
     let subscription_id = subscription.id.clone();
+    let subscription_options = subscription.options.clone();
 
     // Determine batch size for initial data options
-    let batch_size = subscription.options.batch_size.unwrap_or(MAX_ROWS_PER_BATCH);
+    let batch_size = subscription_options
+        .as_ref()
+        .and_then(|options| options.batch_size)
+        .unwrap_or(MAX_ROWS_PER_BATCH);
 
     // Create initial data options respecting all three options:
     // - from: Resume from a specific sequence ID
     // - last_rows: Fetch the last N rows
     // - batch_size: Hint for server-side batch sizing
-    let initial_opts = if let Some(from_seq) = subscription.options.from {
-        // Resume from specific sequence ID - use since_seq for filtering
-        InitialDataOptions::batch(Some(from_seq), subscription.options.snapshot_end_seq, batch_size)
-    } else if let Some(n) = subscription.options.last_rows {
-        // Fetch last N rows
-        InitialDataOptions::last(n as usize)
-    } else {
-        // Default batch fetch
-        InitialDataOptions::batch(None, None, batch_size)
-    };
+    let initial_opts = subscription_options.map(|options| {
+        if let Some(from_seq) = options.from {
+            InitialDataOptions::batch(Some(from_seq), options.snapshot_end_seq, batch_size)
+        } else if let Some(n) = options.last_rows {
+            InitialDataOptions::last(n as usize)
+        } else {
+            InitialDataOptions::batch(None, None, batch_size)
+        }
+    });
 
     // Register subscription with initial data fetch
     // LiveQueryManager handles all SQL parsing, permission checks, and registration internally
     match live_query_manager
-        .register_subscription_with_initial_data(
-            connection_state,
-            &subscription,
-            Some(initial_opts),
-        )
+        .register_subscription_with_initial_data(connection_state, &subscription, initial_opts)
         .await
     {
         Ok(result) => {
-            // info!(
-            //     "Subscription registered: id={}, user_id={}, has_initial_data={}",
-            //     subscription_id,
-            //     user_id.as_str(),
-            //     result.initial_data.is_some()
-            // );
             if let Some(ref initial) = result.initial_data {
                 debug!("Initial data: {} rows, has_more={}", initial.rows.len(), initial.has_more);
             }
@@ -178,7 +171,6 @@ pub async fn handle_subscribe(
                     }
                 }
             } else {
-                // info!("No initial data to send for {}", subscription_id);
                 let flushed = connection_state.complete_initial_load(&subscription_id.clone());
                 if flushed > 0 {
                     debug!(

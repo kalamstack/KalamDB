@@ -54,9 +54,11 @@ System Column Families:
 ├── system_table_schemas      # Schema versions per table
 ├── system_storage_locations  # Storage location registry
 ├── system_jobs               # Background job tracking
-├── system_live_queries       # Active WebSocket subscriptions
 └── system_users              # User authentication and permissions
 ```
+
+Active WebSocket subscriptions are now exposed through the in-memory
+`system.live` view rather than a dedicated RocksDB column family.
 
 ### Unified kalamdb-sql API
 

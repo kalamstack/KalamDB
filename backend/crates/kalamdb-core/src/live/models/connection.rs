@@ -6,8 +6,8 @@ use dashmap::DashMap;
 use datafusion::sql::sqlparser::ast::Expr;
 use kalamdb_commons::ids::SeqId;
 use kalamdb_commons::models::{ConnectionId, ConnectionInfo, LiveQueryId, TableId, UserId};
-use kalamdb_commons::websocket::{CompressionType, ProtocolOptions, SerializationType};
 use kalamdb_commons::websocket::WireNotification;
+use kalamdb_commons::websocket::{CompressionType, ProtocolOptions, SerializationType};
 use kalamdb_commons::Role;
 use parking_lot::Mutex;
 use std::collections::VecDeque;
@@ -79,8 +79,64 @@ pub struct SubscriptionHandle {
     pub projections: Option<Arc<Vec<String>>>,
     /// Shared notification channel
     pub notification_tx: Arc<NotificationSender>,
-    /// Flow control for initial load buffering and snapshot gating
-    pub flow_control: Arc<SubscriptionFlowControl>,
+    /// Flow control for initial load buffering and snapshot gating.
+    /// None means the subscription was created without initial data.
+    pub flow_control: Option<Arc<SubscriptionFlowControl>>,
+    /// Runtime metadata shared with the full subscription state.
+    pub runtime_metadata: Arc<SubscriptionRuntimeMetadata>,
+}
+
+/// In-memory metadata tracked for active subscriptions only.
+#[derive(Debug)]
+pub struct SubscriptionRuntimeMetadata {
+    query: Arc<str>,
+    options_json: Option<Arc<str>>,
+    created_at_ms: i64,
+    last_update_ms: AtomicI64,
+    changes: AtomicI64,
+}
+
+impl SubscriptionRuntimeMetadata {
+    pub fn new(query: Arc<str>, options_json: Option<Arc<str>>, created_at_ms: i64) -> Self {
+        Self {
+            query,
+            options_json,
+            created_at_ms,
+            last_update_ms: AtomicI64::new(created_at_ms),
+            changes: AtomicI64::new(0),
+        }
+    }
+
+    #[inline]
+    pub fn query(&self) -> &str {
+        &self.query
+    }
+
+    #[inline]
+    pub fn options_json(&self) -> Option<&str> {
+        self.options_json.as_deref()
+    }
+
+    #[inline]
+    pub fn created_at_ms(&self) -> i64 {
+        self.created_at_ms
+    }
+
+    #[inline]
+    pub fn last_update_ms(&self) -> i64 {
+        self.last_update_ms.load(Ordering::Acquire)
+    }
+
+    #[inline]
+    pub fn changes(&self) -> i64 {
+        self.changes.load(Ordering::Acquire)
+    }
+
+    #[inline]
+    pub fn record_delivery(&self) {
+        self.last_update_ms.store(epoch_millis() as i64, Ordering::Release);
+        self.changes.fetch_add(1, Ordering::AcqRel);
+    }
 }
 
 /// Buffered notification with optional SeqId ordering key
@@ -163,29 +219,9 @@ impl SubscriptionFlowControl {
     }
 }
 
-/// Subscription state - stored only in ConnectionState.subscriptions
-///
-/// Contains all metadata needed for:
-/// - Notification filtering (filter_expr)
-/// - Column projections (projections)
-/// - Initial data batch fetching (sql, batch_size, snapshot_end_seq)
-/// - Batch pagination tracking (current_batch_num)
-///
-/// Memory optimization: Uses Arc<str> for SQL and Arc<Expr> for filter
-/// to share data with SubscriptionHandle indices.
+/// Optional initial-load state for subscriptions that fetch a snapshot.
 #[derive(Debug, Clone)]
-pub struct SubscriptionState {
-    pub live_id: LiveQueryId,
-    pub table_id: TableId,
-    /// Original SQL query for batch fetching (Arc for zero-copy)
-    pub sql: Arc<str>,
-    /// Compiled filter expression from WHERE clause (parsed once at subscription time)
-    /// None means no filter (SELECT * without WHERE)
-    /// Arc-wrapped for sharing with SubscriptionHandle
-    pub filter_expr: Option<Arc<Expr>>,
-    /// Column projections from SELECT clause (None = SELECT *, i.e., all columns)
-    /// Arc-wrapped for sharing with SubscriptionHandle
-    pub projections: Option<Arc<Vec<String>>>,
+pub struct InitialLoadState {
     /// Batch size for initial data loading
     pub batch_size: usize,
     /// Snapshot boundary SeqId for consistent batch loading
@@ -195,8 +231,34 @@ pub struct SubscriptionState {
     pub current_batch_num: u32,
     /// Flow control for initial load buffering and snapshot gating
     pub flow_control: Arc<SubscriptionFlowControl>,
+}
+
+/// Subscription state - stored only in ConnectionState.subscriptions
+///
+/// Contains all metadata needed for:
+/// - Notification filtering (filter_expr)
+/// - Column projections (projections)
+/// - Optional initial data batch fetching and pagination
+///
+/// Memory optimization: Uses Arc<Expr> for filter sharing and allocates
+/// snapshot/batch state only when the subscription actually requests it.
+#[derive(Debug, Clone)]
+pub struct SubscriptionState {
+    pub live_id: LiveQueryId,
+    pub table_id: TableId,
+    /// Compiled filter expression from WHERE clause (parsed once at subscription time)
+    /// None means no filter (SELECT * without WHERE)
+    /// Arc-wrapped for sharing with SubscriptionHandle
+    pub filter_expr: Option<Arc<Expr>>,
+    /// Column projections from SELECT clause (None = SELECT *, i.e., all columns)
+    /// Arc-wrapped for sharing with SubscriptionHandle
+    pub projections: Option<Arc<Vec<String>>>,
+    /// Optional initial-load state. None means the subscription streams live changes only.
+    pub initial_load: Option<InitialLoadState>,
     /// Whether this subscription is for a shared table (affects index cleanup)
     pub is_shared: bool,
+    /// Runtime metadata exposed by the in-memory live views.
+    pub runtime_metadata: Arc<SubscriptionRuntimeMetadata>,
 }
 
 /// Connection state — lock-free interior mutability for 100k+ concurrent connections.
@@ -351,6 +413,12 @@ impl ConnectionState {
         epoch_millis().saturating_sub(self.last_heartbeat_ms.load(Ordering::Acquire))
     }
 
+    /// Last observed heartbeat epoch timestamp in milliseconds.
+    #[inline]
+    pub fn last_heartbeat_ms(&self) -> u64 {
+        self.last_heartbeat_ms.load(Ordering::Acquire)
+    }
+
     // === Subscription management ===
 
     /// Number of active subscriptions.
@@ -416,8 +484,10 @@ impl ConnectionState {
     /// Update snapshot_end_seq for a subscription.
     pub fn update_snapshot_end_seq(&self, subscription_id: &str, snapshot_end_seq: Option<SeqId>) {
         if let Some(mut sub) = self.subscriptions.get_mut(subscription_id) {
-            sub.snapshot_end_seq = snapshot_end_seq;
-            sub.flow_control.set_snapshot_end_seq(snapshot_end_seq);
+            if let Some(initial_load) = sub.initial_load.as_mut() {
+                initial_load.snapshot_end_seq = snapshot_end_seq;
+                initial_load.flow_control.set_snapshot_end_seq(snapshot_end_seq);
+            }
         }
     }
 
@@ -426,9 +496,17 @@ impl ConnectionState {
     /// Clones the flow_control Arc and drops the DashMap ref before flushing
     /// to avoid holding the shard lock during channel sends.
     pub fn complete_initial_load(&self, subscription_id: &str) -> usize {
-        let flow_control = match self.subscriptions.get(subscription_id) {
-            Some(sub) => Arc::clone(&sub.flow_control),
+        let (flow_control, runtime_metadata) = match self.subscriptions.get(subscription_id) {
+            Some(sub) => (
+                sub.initial_load
+                    .as_ref()
+                    .map(|initial_load| Arc::clone(&initial_load.flow_control)),
+                Arc::clone(&sub.runtime_metadata),
+            ),
             None => return 0,
+        };
+        let Some(flow_control) = flow_control else {
+            return 0;
         };
         // DashMap ref dropped — shard lock released before sending.
 
@@ -446,6 +524,7 @@ impl ConnectionState {
                     break;
                 }
             } else {
+                runtime_metadata.record_delivery();
                 sent += 1;
             }
         }
@@ -455,8 +534,12 @@ impl ConnectionState {
     /// Increment current batch number for a subscription and return the new value.
     pub fn increment_batch_num(&self, subscription_id: &str) -> Option<u32> {
         if let Some(mut sub) = self.subscriptions.get_mut(subscription_id) {
-            sub.current_batch_num += 1;
-            Some(sub.current_batch_num)
+            if let Some(initial_load) = sub.initial_load.as_mut() {
+                initial_load.current_batch_num += 1;
+                Some(initial_load.current_batch_num)
+            } else {
+                None
+            }
         } else {
             None
         }
@@ -479,11 +562,7 @@ mod tests {
     fn make_notification(subscription_id: &str) -> Arc<WireNotification> {
         Arc::new(WireNotification {
             subscription_id: Arc::from(subscription_id),
-            payload: Arc::new(SharedChangePayload::new(
-                ChangeType::Insert,
-                Some(Vec::new()),
-                None,
-            )),
+            payload: Arc::new(SharedChangePayload::new(ChangeType::Insert, Some(Vec::new()), None)),
         })
     }
 

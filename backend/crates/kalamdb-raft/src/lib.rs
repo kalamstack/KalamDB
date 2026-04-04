@@ -71,7 +71,7 @@ pub use network::{start_rpc_server, RaftNetwork, RaftNetworkFactory, RaftService
 pub use network::{
     ClusterClient, ClusterMessageHandler, ClusterServiceImpl, ForwardSqlRequest,
     ForwardSqlResponse, ForwardSqlResponsePayload, GetNodeInfoRequest, GetNodeInfoResponse,
-    NoOpClusterHandler, NotifyFollowersRequest, NotifyFollowersResponse, PingRequest, PingResponse,
+    NoOpClusterHandler, PingRequest, PingResponse,
 };
 pub use state_machine::{serde_helpers, ApplyResult, KalamStateMachine, StateMachineSnapshot};
 pub use storage::{KalamNode, KalamRaftStorage, KalamTypeConfig};

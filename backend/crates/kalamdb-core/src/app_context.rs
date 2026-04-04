@@ -8,8 +8,8 @@ use crate::error_extensions::KalamDbResultExt;
 use crate::job_waker::JobWaker;
 use crate::live::notification::NotificationService;
 use crate::live::ConnectionsManager;
+use crate::live::LiveQueryManager;
 use crate::live::TopicPublisherService;
-use crate::live_query::LiveQueryManager;
 use crate::schema_registry::SchemaRegistry;
 use crate::sql::datafusion_session::DataFusionSessionFactory;
 use crate::sql::executor::SqlExecutor;
@@ -246,8 +246,9 @@ impl AppContext {
                 std::path::PathBuf::from(&config.logging.logs_path),
             ));
 
-            // Get stats_view reference for callback wiring later
+            // Get virtual view references for callback wiring later
             let stats_view = system_schema.stats_view();
+            let live_view = system_schema.live_view();
 
             // Register all system tables in DataFusion
             // Use config-driven DataFusion settings for parallelism
@@ -470,23 +471,12 @@ impl AppContext {
                 },
             }
 
-            // Wire AppContext into notification service for Raft leadership checks
-            // This ensures only the leader fires notifications, preventing duplicates
-            notification_service.set_app_context(Arc::downgrade(&app_ctx));
-
-            // Wire gRPC cluster client + handler for cross-node notification broadcasting.
-            // Only effective in cluster mode (RaftExecutor); single-node mode skips this.
+            // Wire the cluster message handler for non-live cluster RPCs.
             if let Some(raft_executor) =
                 app_ctx.executor().as_any().downcast_ref::<kalamdb_raft::RaftExecutor>()
             {
-                let cluster_client =
-                    Arc::new(kalamdb_raft::ClusterClient::new(raft_executor.manager().clone()));
-                notification_service.set_cluster_client(cluster_client);
-
-                let cluster_handler = Arc::new(crate::live::CoreClusterHandler::new(
-                    Arc::clone(&app_ctx),
-                    Arc::clone(&notification_service),
-                ));
+                let cluster_handler =
+                    Arc::new(crate::live::CoreClusterHandler::new(Arc::clone(&app_ctx)));
                 raft_executor.set_cluster_handler(cluster_handler);
                 let pg_executor =
                     Arc::new(crate::operations::OperationService::new(Arc::clone(&app_ctx)));
@@ -508,11 +498,9 @@ impl AppContext {
             }
 
             let live_query_manager = Arc::new(LiveQueryManager::new(
-                app_ctx.system_tables().live_queries(),
                 app_ctx.schema_registry(),
                 app_ctx.connection_registry(),
                 Arc::clone(&app_ctx.base_session_context),
-                Arc::clone(&app_ctx),
             ));
             if app_ctx.live_query_manager.set(live_query_manager).is_err() {
                 panic!("LiveQueryManager already initialized");
@@ -522,24 +510,17 @@ impl AppContext {
             let app_ctx_for_stats = Arc::clone(&app_ctx);
             stats_view.set_metrics_callback(Arc::new(move || app_ctx_for_stats.compute_metrics()));
 
+            let app_ctx_for_live = Arc::clone(&app_ctx);
+            let live_snapshot_callback: kalamdb_views::live::LiveSnapshotCallback =
+                Arc::new(move || app_ctx_for_live.live_query_manager().snapshot_live_queries());
+            live_view.set_snapshot_callback(Arc::clone(&live_snapshot_callback));
+
             // Wire up ManifestTableProvider in_memory_checker callback
             // This allows system.manifest to show if a cache entry is in hot memory
             let manifest_for_checker = Arc::clone(&app_ctx.manifest_service);
             app_ctx.system_tables().manifest().set_in_memory_checker(Arc::new(
                 move |cache_key: &str| manifest_for_checker.is_in_hot_cache_by_string(cache_key),
             ));
-
-            // Cleanup orphan live queries from previous server run
-            // Live queries don't persist across restarts (WebSocket connections are lost)
-            match app_ctx.system_tables().live_queries().clear_all() {
-                Ok(count) if count > 0 => {
-                    log::info!("Cleared {} orphan live queries from previous server run", count);
-                },
-                Ok(_) => {}, // No orphans to clear
-                Err(e) => {
-                    log::warn!("Failed to clear orphan live queries: {}", e);
-                },
-            }
 
             app_ctx
         }
@@ -771,9 +752,6 @@ impl AppContext {
         // Topic publishing is now synchronous in table providers — no need to wire
         // into notification service.
 
-        // Wire AppContext into notification service for leadership checks (tests)
-        notification_service.set_app_context(Arc::downgrade(&app_ctx));
-
         // Job manager is initialized externally by kalamdb-jobs (via set_job_manager)
 
         let applier = crate::applier::create_applier(Arc::clone(&app_ctx));
@@ -782,11 +760,9 @@ impl AppContext {
         }
 
         let live_query_manager = Arc::new(LiveQueryManager::new(
-            app_ctx.system_tables().live_queries(),
             app_ctx.schema_registry(),
             app_ctx.connection_registry(),
             Arc::clone(&app_ctx.base_session_context),
-            Arc::clone(&app_ctx),
         ));
         if app_ctx.live_query_manager.set(live_query_manager).is_err() {
             panic!("LiveQueryManager already initialized");

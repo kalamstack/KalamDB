@@ -494,6 +494,7 @@ auto_create_users_from_provider = false
 # Timeout in seconds to wait for flush jobs to complete during graceful shutdown (default: 300)
 timeout = 300
 
+[jobs]
 # Maximum number of concurrent jobs (default: 10)
 # Controls how many jobs can execute simultaneously
 max_concurrent = 10
@@ -505,6 +506,10 @@ max_retries = 3
 # Initial retry backoff delay in milliseconds (default: 100ms)
 # Delay increases exponentially with each retry (100ms, 200ms, 400ms, etc.)
 retry_backoff_ms = 100
+
+# How often the jobs runner flushes all RocksDB memtables so stale WAL files
+# can be reclaimed (default: 300 seconds). Set to 0 to disable.
+wal_cleanup_interval_seconds = 300
 
 # Phase 11, T026: SQL Handler Execution Configuration
 [execution]

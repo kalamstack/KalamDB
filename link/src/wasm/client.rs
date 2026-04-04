@@ -146,7 +146,7 @@ impl KalamClient {
                 subscription: SubscriptionRequest {
                     id: subscription_id.clone(),
                     sql: sql.clone(),
-                    options: subscription_options,
+                    options: Some(subscription_options),
                 },
             };
             console_log(&format!(

@@ -274,7 +274,7 @@ fn test_subscription_request_with_options() {
     let request = SubscriptionRequest {
         id: "sub-123".to_string(),
         sql: "SELECT * FROM messages".to_string(),
-        options: opts,
+        options: Some(opts),
     };
 
     let json = serde_json::to_string(&request).unwrap();
@@ -289,7 +289,7 @@ fn test_subscription_request_with_default_options() {
     let request = SubscriptionRequest {
         id: "sub-456".to_string(),
         sql: "SELECT * FROM users".to_string(),
-        options: SubscriptionOptions::default(),
+        options: None,
     };
 
     let json = serde_json::to_string(&request).unwrap();
@@ -320,7 +320,7 @@ fn test_client_message_subscribe_serialization() {
         subscription: SubscriptionRequest {
             id: "test-sub".to_string(),
             sql: "SELECT * FROM chat.messages".to_string(),
-            options: SubscriptionOptions::new().with_batch_size(50),
+            options: Some(SubscriptionOptions::new().with_batch_size(50)),
         },
     };
 
@@ -338,7 +338,7 @@ fn test_client_message_subscribe_with_resume() {
         subscription: SubscriptionRequest {
             id: "resume-sub".to_string(),
             sql: "SELECT * FROM events".to_string(),
-            options: SubscriptionOptions::new().with_from(seq_id),
+            options: Some(SubscriptionOptions::new().with_from(seq_id)),
         },
     };
 

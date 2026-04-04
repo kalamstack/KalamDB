@@ -67,8 +67,8 @@ pub struct ClusterConfig {
     #[serde(default = "default_user_shards")]
     pub user_shards: u32,
 
-    /// Number of shared data shards (default: 1)
-    /// Each shard is a separate Raft group for shared table data.
+    /// Number of shared data shards (must be 1)
+    /// Shared tables currently run in a single Raft group.
     #[serde(default = "default_shared_shards")]
     pub shared_shards: u32,
 
@@ -263,8 +263,8 @@ impl ClusterConfig {
             return Err("user_shards must be > 0".to_string());
         }
 
-        if self.shared_shards == 0 {
-            return Err("shared_shards must be > 0".to_string());
+        if self.shared_shards != 1 {
+            return Err("shared_shards must be exactly 1".to_string());
         }
 
         if self.reconnect_interval_ms == 0 {
@@ -370,6 +370,16 @@ mod tests {
         let mut config = valid_config();
         config.election_timeout_ms = (200, 100);
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_rejects_multiple_shared_shards() {
+        let mut config = valid_config();
+        config.shared_shards = 2;
+        assert_eq!(
+            config.validate().expect_err("shared shards > 1 must be rejected"),
+            "shared_shards must be exactly 1"
+        );
     }
 
     #[test]

@@ -10,7 +10,7 @@ use kalamdb_commons::models::NodeId;
 use super::cluster_service::cluster_client::ClusterServiceClient;
 use super::models::{
     ForwardSqlRequest, ForwardSqlResponse, GetNodeInfoRequest, GetNodeInfoResponse,
-    NotifyFollowersRequest, NotifyFollowersResponse, PingRequest, PingResponse,
+    PingRequest, PingResponse,
 };
 use crate::manager::RaftManager;
 use crate::{GroupId, RaftError};
@@ -25,67 +25,6 @@ impl ClusterClient {
     /// Create a new cluster client.
     pub fn new(manager: Arc<RaftManager>) -> Self {
         Self { manager }
-    }
-
-    /// Send a notification to a specific follower.
-    pub async fn notify_follower(
-        &self,
-        target_node_id: NodeId,
-        request: NotifyFollowersRequest,
-    ) -> Result<NotifyFollowersResponse, RaftError> {
-        let channel = self
-            .manager
-            .get_peer_channel(target_node_id)
-            .ok_or_else(|| RaftError::Network(format!("No channel for node {}", target_node_id)))?;
-
-        let mut client = ClusterServiceClient::new(channel);
-        let mut grpc_request = tonic::Request::new(request);
-        self.manager.add_outgoing_rpc_metadata(&mut grpc_request)?;
-
-        let response = client.notify_followers(grpc_request).await.map_err(|e| {
-            RaftError::Network(format!(
-                "gRPC notify_followers to node {} failed: {}",
-                target_node_id, e
-            ))
-        })?;
-
-        Ok(response.into_inner())
-    }
-
-    /// Broadcast a notification to all peers except self.
-    ///
-    /// This uses fire-and-forget behavior: per-peer errors are logged and do
-    /// not fail the overall broadcast.
-    pub async fn broadcast_notify(&self, request: NotifyFollowersRequest) {
-        let self_node_id = self.manager.config().node_id;
-        let peers = self.manager.get_all_peers();
-
-        for (node_id, _) in peers {
-            if node_id == self_node_id {
-                continue;
-            }
-
-            match self.notify_follower(node_id, request.clone()).await {
-                Ok(resp) if resp.success => {
-                    let table_id = format!("{}.{}", request.table_namespace, request.table_name);
-                    log::trace!(
-                        "Forwarded notification to node {} for table_id={}",
-                        node_id,
-                        table_id
-                    );
-                },
-                Ok(resp) => {
-                    log::debug!(
-                        "Notification forward to node {} returned error: {}",
-                        node_id,
-                        resp.error
-                    );
-                },
-                Err(e) => {
-                    log::debug!("Failed to forward notification to node {}: {}", node_id, e);
-                },
-            }
-        }
     }
 
     /// Forward SQL to the current Meta leader.

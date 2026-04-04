@@ -721,6 +721,11 @@ pub struct JobsSettings {
     /// Initial retry backoff delay in milliseconds (default: 100ms)
     #[serde(default = "default_jobs_retry_backoff_ms")]
     pub retry_backoff_ms: u64,
+
+    /// How often the jobs runner flushes all RocksDB memtables so stale WAL
+    /// files can be reclaimed (default: 300s = 5 minutes). Set to 0 to disable.
+    #[serde(default = "default_jobs_wal_cleanup_interval")]
+    pub wal_cleanup_interval_seconds: u64,
 }
 
 /// SQL execution settings (Phase 11, T026)
@@ -1048,6 +1053,7 @@ impl Default for JobsSettings {
             max_concurrent: default_jobs_max_concurrent(),
             max_retries: default_jobs_max_retries(),
             retry_backoff_ms: default_jobs_retry_backoff_ms(),
+            wal_cleanup_interval_seconds: default_jobs_wal_cleanup_interval(),
         }
     }
 }

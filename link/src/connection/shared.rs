@@ -115,6 +115,17 @@ fn merge_resume_from(
     effective_from
 }
 
+fn should_send_subscription_options(
+    request_initial_data: bool,
+    options: &SubscriptionOptions,
+) -> bool {
+    request_initial_data
+        || options.batch_size.is_some()
+        || options.last_rows.is_some()
+        || options.from.is_some()
+        || options.snapshot_end_seq.is_some()
+}
+
 fn register_subscription_entry(
     subs: &mut HashMap<String, SubEntry>,
     seq_id_cache: &mut HashMap<String, SeqId>,
@@ -123,6 +134,7 @@ fn register_subscription_entry(
     id: String,
     sql: String,
     mut options: SubscriptionOptions,
+    request_initial_data: bool,
     event_tx: mpsc::Sender<Result<ChangeEvent>>,
     result_tx: oneshot::Sender<Result<(u64, Option<SeqId>)>>,
 ) -> (u64, Option<SeqId>) {
@@ -135,6 +147,7 @@ fn register_subscription_entry(
         SubEntry {
             sql,
             options,
+            request_initial_data,
             event_tx,
             last_seq_id: effective_from,
             consumed_seq_id: effective_from,
@@ -237,6 +250,7 @@ enum ConnCmd {
         id: String,
         sql: String,
         options: SubscriptionOptions,
+        request_initial_data: bool,
         event_tx: mpsc::Sender<Result<ChangeEvent>>,
         result_tx: oneshot::Sender<Result<(u64, Option<SeqId>)>>,
     },
@@ -261,6 +275,7 @@ enum ConnCmd {
 struct SubEntry {
     sql: String,
     options: SubscriptionOptions,
+    request_initial_data: bool,
     event_tx: mpsc::Sender<Result<ChangeEvent>>,
     last_seq_id: Option<SeqId>,
     consumed_seq_id: Option<SeqId>,
@@ -374,16 +389,19 @@ impl SharedConnection {
         &self,
         id: String,
         sql: String,
-        options: SubscriptionOptions,
+        options: Option<SubscriptionOptions>,
     ) -> Result<(mpsc::Receiver<Result<ChangeEvent>>, u64, Option<SeqId>)> {
         let (event_tx, event_rx) = mpsc::channel(DEFAULT_EVENT_CHANNEL_CAPACITY);
         let (result_tx, result_rx) = oneshot::channel();
+        let request_initial_data = options.is_some();
+        let options = options.unwrap_or_default();
 
         self.cmd_tx
             .send(ConnCmd::Subscribe {
                 id: id.clone(),
                 sql,
                 options,
+                request_initial_data,
                 event_tx,
                 result_tx,
             })
@@ -587,7 +605,7 @@ async fn send_subscribe(
     ws: &mut WebSocketStream,
     id: &str,
     sql: &str,
-    options: SubscriptionOptions,
+    options: Option<SubscriptionOptions>,
     serialization: SerializationType,
 ) -> Result<()> {
     let msg = ClientMessage::Subscribe {
@@ -770,7 +788,9 @@ async fn resubscribe_all(
             options.snapshot_end_seq.map(|s| s.to_string())
         );
 
-        if let Err(e) = send_subscribe(ws, id, &entry.sql, options, serialization).await {
+        let send_options = should_send_subscription_options(entry.request_initial_data, &options)
+            .then_some(options);
+        if let Err(e) = send_subscribe(ws, id, &entry.sql, send_options, serialization).await {
             log::warn!("Failed to re-subscribe {}: {}", id, e);
             event_handlers.emit_error(ConnectionError::new(
                 format!("Failed to re-subscribe {}: {}", id, e),
@@ -963,7 +983,7 @@ async fn connection_task(
 
                 cmd = cmd_rx.recv() => {
                     match cmd {
-                        Some(ConnCmd::Subscribe { id, sql, options, event_tx, result_tx }) => {
+                        Some(ConnCmd::Subscribe { id, sql, options, request_initial_data, event_tx, result_tx }) => {
                             if subs.contains_key(&id) {
                                 log::debug!(
                                     "[kalam-link] Replacing existing subscription '{}'",
@@ -981,7 +1001,12 @@ async fn connection_task(
                             let inherited_seq = seq_id_cache.get(&id).copied();
                             let mut send_options = options.clone();
                             let effective_from = merge_resume_from(&mut send_options, inherited_seq);
-                            let result = send_subscribe(ws, &id, &sql, send_options, negotiated_ser).await;
+                            let wire_options = should_send_subscription_options(
+                                request_initial_data,
+                                &send_options,
+                            )
+                            .then_some(send_options);
+                            let result = send_subscribe(ws, &id, &sql, wire_options, negotiated_ser).await;
                             if result.is_ok() {
                                 register_subscription_entry(
                                     &mut subs,
@@ -991,6 +1016,7 @@ async fn connection_task(
                                     id.clone(),
                                     sql,
                                     options,
+                                    request_initial_data,
                                     event_tx,
                                     result_tx,
                                 );
@@ -1270,7 +1296,7 @@ async fn connection_task(
                     biased;
                     cmd = cmd_rx.recv() => {
                         match cmd {
-                            Some(ConnCmd::Subscribe { id, sql, options, event_tx, result_tx }) => {
+                            Some(ConnCmd::Subscribe { id, sql, options, request_initial_data, event_tx, result_tx }) => {
                                 if subs.contains_key(&id) {
                                     if let Some(mut old_entry) =
                                         remove_subscription_entry(&mut subs, &mut seq_id_cache, &id, None)
@@ -1288,6 +1314,7 @@ async fn connection_task(
                                     id,
                                     sql,
                                     options,
+                                    request_initial_data,
                                     event_tx,
                                     result_tx,
                                 );
@@ -1379,6 +1406,7 @@ mod tests {
         let mut entry = SubEntry {
             sql: "SELECT 1".to_string(),
             options: SubscriptionOptions::default(),
+            request_initial_data: true,
             event_tx,
             last_seq_id: None,
             consumed_seq_id: None,
