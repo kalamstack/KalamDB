@@ -1334,3 +1334,4 @@ Postgres Extension:
 - in kalam-link we need to add features, so when using with cli we add more features like ddls/healthcheck and cluster and for sdk's we dont need these included so we exclude them, i think there is more things we can exclude here
 - Check have anonymous accss works in kalam-link
 - Make an option for streams table to not-wait-for-ack, fire and forget
+- make the examples/ use the cli instead of api calls directly in this way we can make sure the cli covers everything we need

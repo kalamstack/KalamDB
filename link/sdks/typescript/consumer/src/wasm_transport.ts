@@ -26,6 +26,25 @@ const dynamicImport = new Function(
   'return import(specifier)',
 ) as DynamicImport;
 
+let sharedConsumerWasmInit: Promise<void> | null = null;
+
+async function initializeConsumerWasmModule(wasmUrl?: string | BufferSource): Promise<void> {
+  if (!sharedConsumerWasmInit) {
+    sharedConsumerWasmInit = (async () => {
+      if (wasmUrl) {
+        await initConsumerWasm({ module_or_path: wasmUrl });
+      } else {
+        await initConsumerWasm();
+      }
+    })().catch((error) => {
+      sharedConsumerWasmInit = null;
+      throw error;
+    });
+  }
+
+  await sharedConsumerWasmInit;
+}
+
 function getNodeProcess(): NodeProcessShim | undefined {
   const runtime = globalThis as typeof globalThis & {
     process?: NodeProcessShim;
@@ -36,6 +55,7 @@ function getNodeProcess(): NodeProcessShim | undefined {
 export class ConsumerWasmTransport {
   private wasmClient: WasmConsumerClient | null = null;
   private initialized = false;
+  private initializing: Promise<void> | null = null;
   private wasmUrl?: string | BufferSource;
 
   constructor(
@@ -66,16 +86,22 @@ export class ConsumerWasmTransport {
       return;
     }
 
-    await this.ensureNodeRuntimeCompat();
-
-    if (this.wasmUrl) {
-      await initConsumerWasm({ module_or_path: this.wasmUrl });
-    } else {
-      await initConsumerWasm();
+    if (this.initializing) {
+      await this.initializing;
+      return;
     }
 
-    this.wasmClient = new WasmConsumerClient(this.url);
-    this.initialized = true;
+    this.initializing = (async () => {
+      await this.ensureNodeRuntimeCompat();
+      await initializeConsumerWasmModule(this.wasmUrl);
+      this.wasmClient = new WasmConsumerClient(this.url);
+      this.initialized = true;
+    })().catch((error) => {
+      this.initializing = null;
+      throw error;
+    });
+
+    await this.initializing;
   }
 
   private async ensureNodeRuntimeCompat(): Promise<void> {

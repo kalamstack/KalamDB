@@ -23,13 +23,13 @@ type StartAgentOptions = {
 
 type AgentEventStage = 'thinking' | 'typing' | 'message_saved' | 'complete' | 'log';
 
-interface ChatRow {
+type ChatRow = Record<string, unknown> & {
   id: string;
   room: string;
   sender_username: string;
   content: string;
   role: string;
-}
+};
 
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));

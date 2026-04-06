@@ -3767,6 +3767,7 @@ dependencies = [
  "rustyline",
  "serde",
  "serde_json",
+ "sysinfo",
  "tempfile",
  "term_size",
  "thiserror 2.0.18",

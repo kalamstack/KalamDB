@@ -142,7 +142,7 @@ jobs:
         run: |
           set -euo pipefail
           cd link/sdks/typescript/client
-          npx --yes license-checker --production --json > ../../../target/license/sdk-licenses.json
+          npx --yes license-checker --production --json > "$GITHUB_WORKSPACE/target/license/sdk-licenses.json"
 
       - name: Validate and generate third-party report
         shell: bash

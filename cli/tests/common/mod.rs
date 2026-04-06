@@ -20,6 +20,7 @@ use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 use std::time::Instant;
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System};
 use tokio::runtime::{Handle, Runtime};
 use tokio::sync::Mutex as TokioMutex;
 
@@ -4426,6 +4427,114 @@ pub fn assert_flush_storage_files_exist(
 
 fn escape_sql_string(value: &str) -> String {
     value.replace('\'', "''")
+}
+
+#[derive(Debug, Clone)]
+pub struct ServerMemorySample {
+    pub pid: Option<u32>,
+    pub reported_mb: u64,
+    pub rss_mb: Option<u64>,
+}
+
+impl ServerMemorySample {
+    pub fn asserted_mb(&self) -> u64 {
+        self.rss_mb.map(|rss| rss.max(self.reported_mb)).unwrap_or(self.reported_mb)
+    }
+}
+
+fn json_value_to_string(value: &serde_json::Value) -> Option<String> {
+    let extracted = extract_arrow_value(value).unwrap_or_else(|| extract_typed_value(value));
+    match extracted {
+        serde_json::Value::String(s) => Some(s),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::Bool(b) => Some(b.to_string()),
+        serde_json::Value::Null => None,
+        other => Some(other.to_string()),
+    }
+}
+
+pub fn read_system_stats(
+    metric_names: &[&str],
+) -> Result<HashMap<String, String>, Box<dyn std::error::Error>> {
+    let filter = if metric_names.is_empty() {
+        String::new()
+    } else {
+        let joined = metric_names
+            .iter()
+            .map(|name| format!("'{}'", escape_sql_string(name)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(" WHERE metric_name IN ({})", joined)
+    };
+
+    let sql = format!(
+        "SELECT metric_name, metric_value FROM system.stats{} ORDER BY metric_name LIMIT 5000",
+        filter
+    );
+    let output = execute_sql_as_root_via_client_json(&sql)?;
+    let parsed: serde_json::Value = serde_json::from_str(&output)?;
+    let rows = get_rows_as_hashmaps(&parsed)
+        .ok_or_else(|| format!("system.stats JSON response had no row set: {}", output))?;
+
+    let mut metrics = HashMap::new();
+    for row in rows {
+        let Some(name) = row.get("metric_name").and_then(json_value_to_string) else {
+            continue;
+        };
+        let Some(value) = row.get("metric_value").and_then(json_value_to_string) else {
+            continue;
+        };
+        metrics.insert(name, value);
+    }
+
+    Ok(metrics)
+}
+
+pub fn server_target_is_local() -> bool {
+    let Some((host, _port)) = split_host_port(&server_host_port()) else {
+        return false;
+    };
+
+    matches!(host.as_str(), "127.0.0.1" | "localhost" | "::1" | "0.0.0.0")
+}
+
+fn read_local_process_rss_mb(pid: u32) -> Option<u64> {
+    static PROCESS_SYSTEM: OnceLock<Mutex<System>> = OnceLock::new();
+    let system = PROCESS_SYSTEM.get_or_init(|| {
+        Mutex::new(System::new_with_specifics(RefreshKind::nothing()))
+    });
+
+    let mut guard = system.lock().ok()?;
+    let pid = Pid::from_u32(pid);
+    let refresh = ProcessRefreshKind::nothing().with_memory();
+    guard.refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), false, refresh);
+    let process = guard.process(pid)?;
+    Some(process.memory() / 1024 / 1024)
+}
+
+pub fn capture_server_memory_sample() -> Result<ServerMemorySample, Box<dyn std::error::Error>> {
+    let metrics = read_system_stats(&["memory_usage_mb", "pid"])?;
+    let reported_mb = metrics
+        .get("memory_usage_mb")
+        .and_then(|value| value.parse::<u64>().ok())
+        .ok_or("system.stats missing memory_usage_mb")?;
+
+    let env_pid = std::env::var("KALAMDB_SERVER_PID")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok());
+    let pid = env_pid.or_else(|| metrics.get("pid").and_then(|value| value.parse::<u32>().ok()));
+
+    let rss_mb = if env_pid.is_some() || server_target_is_local() {
+        pid.and_then(read_local_process_rss_mb)
+    } else {
+        None
+    };
+
+    Ok(ServerMemorySample {
+        pid,
+        reported_mb,
+        rss_mb,
+    })
 }
 
 fn namespace_id_for_name(namespace: &str) -> Option<String> {

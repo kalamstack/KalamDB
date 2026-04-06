@@ -70,6 +70,30 @@ execute_root_sql() {
         -d "{\"sql\": $(jq -Rs . <<<"$sql")}" >/dev/null
 }
 
+execute_root_sql_allow_exists() {
+    local sql="$1"
+    local response
+    response="$(curl -sS -w "\n%{http_code}" -X POST "$KALAMDB_URL/v1/api/sql" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $ACCESS_TOKEN" \
+        -d "{\"sql\": $(jq -Rs . <<<"$sql")}")"
+    local http_code
+    http_code="$(echo "$response" | tail -1)"
+    local body
+    body="$(echo "$response" | sed '$d')"
+
+    if [[ "$http_code" -ge 200 && "$http_code" -lt 300 ]]; then
+        return 0
+    fi
+
+    if echo "$body" | grep -Eiq 'already exists|duplicate|conflict|idempotent'; then
+        return 0
+    fi
+
+    echo "$body" >&2
+    return 1
+}
+
 log "Applying schema"
 SQL_BUFFER=""
 while IFS= read -r line || [[ -n "$line" ]]; do
@@ -78,12 +102,12 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     if [[ "$line" =~ \;[[:space:]]*$ ]]; then
         statement="${SQL_BUFFER%;*}"
         SQL_BUFFER=""
-        execute_root_sql "$statement" || true
+        execute_root_sql_allow_exists "$statement"
     fi
 done < "$SQL_FILE"
 
 log "Ensuring demo-user exists"
-execute_root_sql "CREATE USER 'demo-user' WITH PASSWORD 'demo123' ROLE user" || true
+execute_root_sql_allow_exists "CREATE USER 'demo-user' WITH PASSWORD 'demo123' ROLE user"
 
 DEMO_TOKEN="$(curl -fsS -X POST "$KALAMDB_URL/v1/api/auth/login" \
     -H "Content-Type: application/json" \
