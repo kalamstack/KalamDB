@@ -13,8 +13,8 @@
 //! - T064: RocksDB range scan `_seq > threshold` → efficiently skips older versions
 
 use super::test_support::{consolidated_helpers, fixtures, TestServer};
-use kalam_link::models::ResponseStatus;
-use kalam_link::parse_i64;
+use kalam_client::models::ResponseStatus;
+use kalam_client::parse_i64;
 
 /// T051: CREATE TABLE without PK should be rejected
 #[actix_web::test]

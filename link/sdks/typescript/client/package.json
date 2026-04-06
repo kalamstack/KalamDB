@@ -1,0 +1,66 @@
+{
+  "name": "@kalamdb/client",
+  "type": "module",
+  "version": "0.4.2-rc.1",
+  "description": "WebAssembly-compatible KalamDB client library with TypeScript support",
+  "license": "Apache-2.0",
+  "author": "KalamDB Team",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jamals86/KalamDB"
+  },
+  "homepage": "https://github.com/jamals86/KalamDB#readme",
+  "bugs": {
+    "url": "https://github.com/jamals86/KalamDB/issues"
+  },
+  "main": "dist/src/index.js",
+  "module": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js",
+      "default": "./dist/src/index.js"
+    },
+    "./wasm": {
+      "types": "./dist/wasm/kalam_client.d.ts",
+      "import": "./dist/wasm/kalam_client.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "clean": "node -e \"const fs=require('fs');const p=require('path');const rm=d=>{try{fs.rmSync(d,{recursive:true,force:true})}catch{}};rm('dist');rm('wasm')\"",
+    "build:wasm": "node -e \"const {execSync,spawnSync}=require('child_process');process.chdir('../../..');const env={...process.env,CARGO_ENCODED_RUSTFLAGS:'',RUSTFLAGS:'',RUSTC_WRAPPER:'',CARGO_BUILD_RUSTC_WRAPPER:'',CARGO_TARGET_DIR:'sdks/typescript/client/.wasm-target',CARGO_HOME:'sdks/typescript/client/.wasm-cargo-home'};execSync('wasm-pack build kalam-client --target web --out-dir ../sdks/typescript/client/wasm --out-name kalam_client --no-opt --profile release-dist --features wasm --no-default-features',{stdio:'inherit',env});const wasmPath='sdks/typescript/client/wasm/kalam_client_bg.wasm';const opt=spawnSync('wasm-opt',['-Oz','--all-features','--strip-debug','--strip-dwarf','-o',wasmPath,wasmPath],{stdio:'inherit',env});if(opt.error&&opt.error.code==='ENOENT'){console.warn('wasm-opt not found; skipping post-build size optimization')}else if(opt.status!==0){process.exit(opt.status||1)}\"",
+    "build:prepare-wasm-dts": "node ../scripts/prepare-wasm-dts.mjs . --add-json-value",
+    "build:ts": "tsc",
+    "build:copy-wasm": "node ../scripts/copy-wasm.mjs .",
+    "build": "npm run clean && npm run build:wasm && npm run build:prepare-wasm-dts && npm run build:ts && npm run build:copy-wasm",
+    "test": "npm run build && NO_SERVER=true node --test tests/basic.test.mjs tests/normalize.test.mjs tests/auth-provider-retry.test.mjs tests/cell-value.test.mjs tests/single-socket-subscriptions.test.mjs tests/readme-examples.test.mjs tests/sdk-runtime-coverage.test.mjs",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "typescript": "^6.0.2"
+  },
+  "keywords": [
+    "kalamdb",
+    "database",
+    "client",
+    "websocket",
+    "wasm",
+    "realtime",
+    "live-queries"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

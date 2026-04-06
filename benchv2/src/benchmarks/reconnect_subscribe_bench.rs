@@ -2,7 +2,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 
-use kalam_link::{ChangeEvent, SubscriptionConfig};
+use kalam_client::{ChangeEvent, SubscriptionConfig};
 
 use crate::benchmarks::Benchmark;
 use crate::client::KalamClient;
@@ -81,7 +81,7 @@ impl Benchmark for ReconnectSubscribeBench {
                         Ok(Some(Ok(event))) => match &event {
                             ChangeEvent::Ack { batch_control, .. }
                             | ChangeEvent::InitialDataBatch { batch_control, .. } => {
-                                if batch_control.status == kalam_link::models::BatchStatus::Ready
+                                if batch_control.status == kalam_client::models::BatchStatus::Ready
                                     || !batch_control.has_more
                                 {
                                     break;
@@ -115,7 +115,7 @@ impl Benchmark for ReconnectSubscribeBench {
                         Ok(Some(Ok(event))) => match &event {
                             ChangeEvent::Ack { batch_control, .. } => {
                                 got_ack_or_data = true;
-                                if batch_control.status == kalam_link::models::BatchStatus::Ready
+                                if batch_control.status == kalam_client::models::BatchStatus::Ready
                                     || !batch_control.has_more
                                 {
                                     break;
@@ -123,7 +123,7 @@ impl Benchmark for ReconnectSubscribeBench {
                             },
                             ChangeEvent::InitialDataBatch { batch_control, .. } => {
                                 got_ack_or_data = true;
-                                if batch_control.status == kalam_link::models::BatchStatus::Ready
+                                if batch_control.status == kalam_client::models::BatchStatus::Ready
                                     || !batch_control.has_more
                                 {
                                     break;

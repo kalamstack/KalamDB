@@ -1,6 +1,6 @@
 //! CLI session state management
 //!
-//! **Implements T084**: CLISession state with kalam-link client integration
+//! **Implements T084**: CLISession state with kalam-client integration
 //! **Implements T091-T093**: Interactive readline loop with command execution
 //! **Implements T114a**: Loading indicator for long-running queries
 //!
@@ -12,10 +12,11 @@ use crate::CLI_VERSION;
 use clap::ValueEnum;
 use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
-use kalam_link::{
+use kalam_client::{
     credentials::{CredentialStore, Credentials},
-    AuthProvider, AuthRefreshCallback, ConnectionOptions, KalamLinkClient, KalamLinkError,
-    KalamLinkTimeouts, SubscriptionConfig, SubscriptionOptions, TimestampFormatter, UploadProgress,
+    AuthProvider, AuthRefreshCallback, ClusterHealthResponse, ClusterNodeHealth,
+    ConnectionOptions, KalamLinkClient, KalamLinkError, KalamLinkTimeouts,
+    SubscriptionConfig, SubscriptionOptions, TimestampFormatter, UploadProgress,
     UploadProgressCallback,
 };
 use rustyline::completion::Completer;
@@ -130,6 +131,10 @@ struct ClusterNodeDisplay {
     api_addr: String,
     is_self: bool,
     is_leader: bool,
+    hostname: Option<String>,
+    memory_usage_mb: Option<u64>,
+    cpu_usage_percent: Option<f32>,
+    uptime_human: Option<String>,
 }
 
 /// Cluster information for CLI display
@@ -279,7 +284,7 @@ impl CLISession {
         config_path: PathBuf,
         credentials_loaded: bool,
     ) -> Result<Self> {
-        // Build kalam-link client with authentication and timeouts
+        // Build kalam-client with authentication and timeouts
         let timeouts = timeouts.unwrap_or_default();
         let timeout = client_timeout.unwrap_or(timeouts.receive_timeout);
 
@@ -386,7 +391,7 @@ impl CLISession {
     /// Build the auth-refresh callback for TOKEN_EXPIRED recovery.
     ///
     /// Returns an `AuthRefreshCallback` that uses the credential store's
-    /// refresh token to obtain a fresh JWT.  Called by kalam-link's
+    /// refresh token to obtain a fresh JWT. Called by the kalam-client
     /// `QueryExecutor` when the server responds with TOKEN_EXPIRED.
     pub fn build_auth_refresher(
         server_url: &str,
@@ -447,7 +452,7 @@ impl CLISession {
 
     /// Execute a SQL query with loading indicator
     ///
-    /// **Implements T092**: Execute SQL via kalam-link client
+    /// **Implements T092**: Execute SQL via kalam-client
     /// **Implements T114a**: Show loading indicator for queries > threshold
     /// **Enhanced**: Colored output and styled timing
     pub async fn execute(&mut self, sql: &str) -> Result<()> {
@@ -789,7 +794,7 @@ impl CLISession {
 
     /// Extract subscription configuration from a SUBSCRIBE TO response
     fn extract_subscription_config(
-        response: &kalam_link::QueryResponse,
+        response: &kalam_client::QueryResponse,
     ) -> Result<Option<(SubscriptionConfig, Option<String>)>> {
         if response.results.is_empty() {
             return Ok(None);
@@ -1689,7 +1694,7 @@ impl CLISession {
                         event_result = subscription.next() => {
                             match event_result {
                                 Some(Ok(event)) => {
-                                    if matches!(event, kalam_link::ChangeEvent::Error { .. }) {
+                                    if matches!(event, kalam_client::ChangeEvent::Error { .. }) {
                                         self.display_change_event(&sql_display, &event);
                                         println!("\nSubscription failed - returning to CLI prompt");
                                         break;
@@ -1753,7 +1758,7 @@ impl CLISession {
                     match event_result {
                         Some(Ok(event)) => {
                             // Check if it's an error event - if so, display and exit
-                            if matches!(event, kalam_link::ChangeEvent::Error { .. }) {
+                            if matches!(event, kalam_client::ChangeEvent::Error { .. }) {
                                 self.display_change_event(&sql_display, &event);
                                 println!("\nSubscription failed - returning to CLI prompt");
                                 break;
@@ -1885,19 +1890,19 @@ impl CLISession {
                         event_result = subscription.next() => {
                             match event_result {
                                 Some(Ok(event)) => {
-                                    if matches!(event, kalam_link::ChangeEvent::Error { .. }) {
+                                    if matches!(event, kalam_client::ChangeEvent::Error { .. }) {
                                         self.display_change_event(&sql_display, &event);
                                         println!("\nSubscription failed - returning to CLI prompt");
                                         break;
                                     }
 
                                     match &event {
-                                        kalam_link::ChangeEvent::InitialDataBatch { batch_control, .. } => {
+                                        kalam_client::ChangeEvent::InitialDataBatch { batch_control, .. } => {
                                             if !batch_control.has_more {
                                                 initial_data_complete = true;
                                             }
                                         }
-                                        kalam_link::ChangeEvent::Ack { batch_control, .. } => {
+                                        kalam_client::ChangeEvent::Ack { batch_control, .. } => {
                                             if !batch_control.has_more {
                                                 initial_data_complete = true;
                                             }
@@ -2000,7 +2005,7 @@ impl CLISession {
                     match event_result {
                         Some(Ok(event)) => {
                             // Check if it's an error event - if so, display and exit
-                            if matches!(event, kalam_link::ChangeEvent::Error { .. }) {
+                            if matches!(event, kalam_client::ChangeEvent::Error { .. }) {
                                 self.display_change_event(&sql_display, &event);
                                 println!("\nSubscription failed - returning to CLI prompt");
                                 break;
@@ -2008,12 +2013,12 @@ impl CLISession {
 
                             // Check if initial data is complete (batch with has_more=false)
                             match &event {
-                                kalam_link::ChangeEvent::InitialDataBatch { batch_control, .. } => {
+                                kalam_client::ChangeEvent::InitialDataBatch { batch_control, .. } => {
                                     if !batch_control.has_more {
                                         initial_data_complete = true;
                                     }
                                 }
-                                kalam_link::ChangeEvent::Ack { batch_control, .. } => {
+                                kalam_client::ChangeEvent::Ack { batch_control, .. } => {
                                     if !batch_control.has_more {
                                         initial_data_complete = true;
                                     }
@@ -2042,12 +2047,12 @@ impl CLISession {
     /// Display a change event with formatting
     ///
     /// **Implements T102**: Change indicators (INSERT/UPDATE/DELETE)
-    fn display_change_event(&self, _subscription_sql: &str, event: &kalam_link::ChangeEvent) {
+    fn display_change_event(&self, _subscription_sql: &str, event: &kalam_client::ChangeEvent) {
         use chrono::Local;
         let timestamp = Local::now().format("%H:%M:%S%.3f");
 
         match event {
-            kalam_link::ChangeEvent::Ack {
+            kalam_client::ChangeEvent::Ack {
                 subscription_id,
                 total_rows,
                 batch_control,
@@ -2083,7 +2088,7 @@ impl CLISession {
                     );
                 }
             },
-            kalam_link::ChangeEvent::InitialDataBatch {
+            kalam_client::ChangeEvent::InitialDataBatch {
                 subscription_id,
                 rows,
                 batch_control,
@@ -2128,7 +2133,7 @@ impl CLISession {
                 }
             },
 
-            kalam_link::ChangeEvent::Insert {
+            kalam_client::ChangeEvent::Insert {
                 subscription_id,
                 rows,
             } => {
@@ -2155,7 +2160,7 @@ impl CLISession {
                     }
                 }
             },
-            kalam_link::ChangeEvent::Update {
+            kalam_client::ChangeEvent::Update {
                 subscription_id,
                 rows,
                 old_rows,
@@ -2194,7 +2199,7 @@ impl CLISession {
                     }
                 }
             },
-            kalam_link::ChangeEvent::Delete {
+            kalam_client::ChangeEvent::Delete {
                 subscription_id,
                 old_rows,
             } => {
@@ -2221,7 +2226,7 @@ impl CLISession {
                     }
                 }
             },
-            kalam_link::ChangeEvent::Error {
+            kalam_client::ChangeEvent::Error {
                 subscription_id,
                 code,
                 message,
@@ -2235,7 +2240,7 @@ impl CLISession {
                     eprintln!("[{}] ERROR [{}] {}: {}", timestamp, subscription_id, code, message);
                 }
             },
-            kalam_link::ChangeEvent::Unknown { raw } => {
+            kalam_client::ChangeEvent::Unknown { raw } => {
                 // Log unknown payloads at debug level only - these are typically
                 // system messages that don't need user attention
                 if self.color {
@@ -2265,8 +2270,136 @@ impl CLISession {
     }
 
     /// Format a typed row (RowData) as a compact JSON string for display.
-    fn format_row(row: &kalam_link::RowData) -> String {
+    fn format_row(row: &kalam_client::RowData) -> String {
         serde_json::to_string(row).unwrap_or_else(|_| format!("{:?}", row))
+    }
+
+    fn format_cluster_memory(memory_usage_mb: Option<u64>) -> String {
+        memory_usage_mb.map_or_else(|| "memory n/a".to_string(), |mb| format!("{} MB", mb))
+    }
+
+    fn format_cluster_cpu(cpu_usage_percent: Option<f32>) -> String {
+        cpu_usage_percent
+            .map(|cpu| format!("{:.1}% CPU", cpu))
+            .unwrap_or_else(|| "CPU n/a".to_string())
+    }
+
+    fn format_cluster_uptime(uptime_human: Option<&str>) -> String {
+        uptime_human.unwrap_or("uptime n/a").to_string()
+    }
+
+    fn render_cluster_health_response(&self, health: &ClusterHealthResponse) {
+        let active_nodes = health
+            .nodes
+            .iter()
+            .filter(|node| node.status.eq_ignore_ascii_case("active"))
+            .count();
+        let offline_nodes = health
+            .nodes
+            .iter()
+            .filter(|node| node.status.eq_ignore_ascii_case("offline"))
+            .count();
+
+        println!(
+            "{} Cluster health: {}",
+            if health.status.eq_ignore_ascii_case("healthy") {
+                "✓".green()
+            } else {
+                "!".yellow()
+            },
+            health.status.green()
+        );
+        println!(
+            "  Cluster: {} | Nodes: {} total, {} active, {} offline",
+            health.cluster_id.as_str().cyan(),
+            health.nodes.len(),
+            active_nodes,
+            offline_nodes
+        );
+        println!(
+            "  Meta term: {} | Groups: {}/{}",
+            health.current_term.to_string().cyan(),
+            health.groups_leading.to_string().cyan(),
+            health.total_groups.to_string().cyan()
+        );
+        println!();
+        println!("{}", "Nodes:".yellow().bold());
+
+        for node in &health.nodes {
+            self.render_cluster_health_node(node);
+        }
+    }
+
+    fn render_cluster_health_node(&self, node: &ClusterNodeHealth) {
+        let self_marker = if node.is_self { " (connected)" } else { "" };
+        let leader_marker = if node.is_leader { " [LEADER]" } else { "" };
+        let hostname = node.hostname.as_deref().unwrap_or(node.api_addr.as_str());
+
+        println!(
+            "  Node {}: {} | {} | {}{}{}",
+            node.node_id,
+            node.role,
+            node.status,
+            node.api_addr,
+            leader_marker.yellow(),
+            self_marker.cyan()
+        );
+        println!(
+            "           host={} | {} | {} | {}",
+            hostname,
+            Self::format_cluster_memory(node.memory_usage_mb),
+            Self::format_cluster_cpu(node.cpu_usage_percent),
+            Self::format_cluster_uptime(node.uptime_human.as_deref())
+        );
+    }
+
+    fn render_cluster_health_fallback(&self, info: &ClusterInfoDisplay, note: Option<&str>) {
+        let active_nodes = info
+            .nodes
+            .iter()
+            .filter(|node| node.status.eq_ignore_ascii_case("active"))
+            .count();
+        let offline_nodes = info
+            .nodes
+            .iter()
+            .filter(|node| node.status.eq_ignore_ascii_case("offline"))
+            .count();
+
+        println!("{} Cluster health: {}", "✓".green(), "reachable".green());
+        println!(
+            "  Cluster: {} | Nodes: {} total, {} active, {} offline",
+            info.cluster_name.as_str().cyan(),
+            info.nodes.len(),
+            active_nodes,
+            offline_nodes
+        );
+        if let Some(message) = note {
+            println!("  {}", message.yellow());
+        }
+        println!();
+        println!("{}", "Nodes:".yellow().bold());
+
+        for node in &info.nodes {
+            let self_marker = if node.is_self { " (connected)" } else { "" };
+            let leader_marker = if node.is_leader { " [LEADER]" } else { "" };
+            let hostname = node.hostname.as_deref().unwrap_or(node.api_addr.as_str());
+            println!(
+                "  Node {}: {} | {} | {}{}{}",
+                node.node_id,
+                node.role,
+                node.status,
+                node.api_addr,
+                leader_marker.yellow(),
+                self_marker.cyan()
+            );
+            println!(
+                "           host={} | {} | {} | {}",
+                hostname,
+                Self::format_cluster_memory(node.memory_usage_mb),
+                Self::format_cluster_cpu(node.cpu_usage_percent),
+                Self::format_cluster_uptime(node.uptime_human.as_deref())
+            );
+        }
     }
 
     /// Fetch cluster information from system.cluster
@@ -2275,7 +2408,7 @@ impl CLISession {
         let result = self
             .client
             .execute_query(
-                "SELECT cluster_id, node_id, role, status, api_addr, is_self, is_leader FROM system.cluster",
+                "SELECT cluster_id, node_id, role, status, api_addr, is_self, is_leader, hostname, memory_usage_mb, cpu_usage_percent, uptime_human FROM system.cluster ORDER BY is_leader DESC, node_id ASC",
                 None,
                 None,
                 None,
@@ -2293,8 +2426,9 @@ impl CLISession {
                 if let Some(query_result) = response.results.first() {
                     if let Some(rows) = &query_result.rows {
                         for row in rows {
-                            // row is a Vec<JsonValue> with fields in order: cluster_id, node_id, role, status, api_addr, is_self, is_leader
-                            if row.len() >= 7 {
+                            // row fields: cluster_id, node_id, role, status, api_addr, is_self,
+                            // is_leader, hostname, memory_usage_mb, cpu_usage_percent, uptime_human
+                            if row.len() >= 11 {
                                 // Extract cluster_id from first row only
                                 if cluster_name.is_empty() {
                                     cluster_name =
@@ -2306,9 +2440,16 @@ impl CLISession {
                                 let api_addr = row[4].as_str().unwrap_or("").to_string();
                                 let is_self = row[5].as_bool().unwrap_or(false);
                                 let is_leader = row[6].as_bool().unwrap_or(false);
+                                let hostname = row[7].as_str().map(ToString::to_string);
+                                let memory_usage_mb = row[8].as_u64();
+                                let cpu_usage_percent = row[9].as_f64().map(|cpu| cpu as f32);
+                                let uptime_human = row[10].as_str().map(ToString::to_string);
 
                                 // Check if this looks like cluster mode (role is leader/follower)
-                                if role == "leader" || role == "follower" {
+                                if matches!(
+                                    role.as_str(),
+                                    "leader" | "follower" | "learner" | "candidate"
+                                ) {
                                     is_cluster_mode = true;
                                 }
 
@@ -2319,6 +2460,10 @@ impl CLISession {
                                     api_addr,
                                     is_self,
                                     is_leader,
+                                    hostname,
+                                    memory_usage_mb,
+                                    cpu_usage_percent,
+                                    uptime_human,
                                 };
 
                                 if is_self {
@@ -2348,39 +2493,79 @@ impl CLISession {
 
     /// Check server health and refresh cached server metadata
     pub async fn health_check(&mut self) -> Result<()> {
-        match self.client.health_check().await {
+        let basic_health = self.client.health_check().await;
+
+        match &basic_health {
             Ok(health) => {
                 self.connected = true;
+                self.server_version = Self::normalize_server_field(health.version.clone());
+                self.server_api_version = Self::normalize_server_field(health.api_version.clone());
+                self.server_build_date = health
+                    .build_date
+                    .clone()
+                    .and_then(Self::normalize_server_field);
+            },
+            Err(KalamLinkError::ServerError { status_code: 403, .. }) => {
+                // Localhost-only endpoint; fall back to authenticated SQL-based cluster info.
+            },
+            Err(_) => {
+                self.connected = false;
+                self.server_version = None;
+                self.server_api_version = None;
+                self.server_build_date = None;
+            },
+        }
 
-                let version = {
-                    let trimmed = health.version.trim();
-                    if trimmed.is_empty() {
-                        None
-                    } else {
-                        Some(trimmed.to_string())
-                    }
-                };
-                let api_version = {
-                    let trimmed = health.api_version.trim();
-                    if trimmed.is_empty() {
-                        None
-                    } else {
-                        Some(trimmed.to_string())
-                    }
-                };
-                let build_date = health.build_date.and_then(|value| {
-                    let trimmed = value.trim();
-                    if trimmed.is_empty() {
-                        None
-                    } else {
-                        Some(trimmed.to_string())
-                    }
-                });
+        let cluster_info = self.fetch_cluster_info().await;
+        if let Some(ref info) = cluster_info {
+            self.connected = true;
+            self.cluster_name = Some(info.cluster_name.clone());
 
-                self.server_version = version;
-                self.server_api_version = api_version;
-                self.server_build_date = build_date;
+            if info.is_cluster_mode {
+                match self.client.cluster_health_check().await {
+                    Ok(cluster_health) => {
+                        self.server_version = Self::normalize_server_field(cluster_health.version.clone());
+                        self.server_build_date = Self::normalize_server_field(cluster_health.build_date.clone());
+                        self.render_cluster_health_response(&cluster_health);
+                        return Ok(());
+                    },
+                    Err(KalamLinkError::ServerError { status_code: 403, .. }) => {
+                        self.render_cluster_health_fallback(
+                            info,
+                            Some("Cluster health endpoint is localhost-only; using system.cluster"),
+                        );
+                        return Ok(());
+                    },
+                    Err(_) => {
+                        self.render_cluster_health_fallback(
+                            info,
+                            Some("Cluster health endpoint unavailable; using system.cluster"),
+                        );
+                        return Ok(());
+                    },
+                }
+            }
 
+            match basic_health {
+                Ok(_) => {
+                    println!("✓ Server is healthy");
+                    return Ok(());
+                },
+                Err(KalamLinkError::ServerError { status_code: 403, .. }) => {
+                    println!("{} Server is reachable", "✓".green());
+                    println!("  {}", "Health endpoint is restricted to localhost".yellow());
+                    return Ok(());
+                },
+                Err(_) => {
+                    println!("{} Server is reachable", "✓".green());
+                    println!("  {}", "Using authenticated SQL fallback".yellow());
+                    return Ok(());
+                },
+            }
+        }
+
+        match basic_health {
+            Ok(_) => {
                 println!("✓ Server is healthy");
                 Ok(())
             },
@@ -2422,7 +2607,7 @@ impl CLISession {
     /// **Implements T121**: Display credentials command
     fn show_credentials(&self) {
         use colored::Colorize;
-        use kalam_link::credentials::CredentialStore;
+        use kalam_client::credentials::CredentialStore;
 
         match (&self.instance, &self.credential_store) {
             (Some(instance), Some(store)) => {
@@ -2483,7 +2668,7 @@ impl CLISession {
     /// Performs login to get JWT token and stores it
     async fn update_credentials(&mut self, username: String, password: String) -> Result<()> {
         use colored::Colorize;
-        use kalam_link::credentials::{CredentialStore, Credentials};
+        use kalam_client::credentials::{CredentialStore, Credentials};
 
         match (&self.instance, &mut self.credential_store) {
             (Some(instance), Some(store)) => {
@@ -2545,7 +2730,7 @@ impl CLISession {
     /// **Implements T122**: Delete credentials functionality
     fn delete_credentials(&mut self) -> Result<()> {
         use colored::Colorize;
-        use kalam_link::credentials::CredentialStore;
+        use kalam_client::credentials::CredentialStore;
 
         match (&self.instance, &mut self.credential_store) {
             (Some(instance), Some(store)) => {
@@ -2891,7 +3076,7 @@ impl Helper for CLIHelper {}
 mod tests {
     use super::*;
     use crate::credentials::FileCredentialStore;
-    use kalam_link::credentials::{CredentialStore, Credentials};
+    use kalam_client::credentials::{CredentialStore, Credentials};
     use ntest::timeout;
     use serde_json::json;
     use std::collections::HashMap;

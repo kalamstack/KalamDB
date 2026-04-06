@@ -1,6 +1,7 @@
 import { config as loadEnv } from 'dotenv';
 import { fileURLToPath } from 'node:url';
-import { Auth, createClient, runAgent } from 'kalam-link';
+import { Auth } from '@kalamdb/client';
+import { createConsumerClient, runAgent } from '@kalamdb/consumer';
 
 loadEnv({ path: '.env.local', quiet: true });
 loadEnv({ quiet: true });
@@ -47,7 +48,7 @@ function sqlLiteral(value: string): string {
 }
 
 async function emitEvent(
-  client: ReturnType<typeof createClient>,
+  client: ReturnType<typeof createConsumerClient>,
   room: string,
   senderUsername: string,
   responseId: string,
@@ -64,7 +65,7 @@ async function emitEvent(
 }
 
 async function insertAssistantMessage(
-  client: ReturnType<typeof createClient>,
+  client: ReturnType<typeof createConsumerClient>,
   room: string,
   senderUsername: string,
   reply: string,
@@ -94,7 +95,7 @@ export function buildReply(content: string): string {
 }
 
 export async function startChatAgent(options: StartAgentOptions = {}): Promise<void> {
-  const client = createClient({
+  const client = createConsumerClient({
     url: KALAMDB_URL,
     authProvider: async () => Auth.basic(KALAMDB_USERNAME, KALAMDB_PASSWORD),
   });

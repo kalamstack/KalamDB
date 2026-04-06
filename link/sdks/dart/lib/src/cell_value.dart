@@ -3,9 +3,9 @@ import 'package:kalam_link/src/seq_id.dart';
 
 /// Type-safe wrapper for a single cell value in a KalamDB query result row.
 ///
-/// Mirrors `KalamCellValue` in Rust (`kalam-link/src/models/cell_value.rs`).
+/// Mirrors `KalamCellValue` in Rust (`link/link-common/src/models/cell_value.rs`).
 ///
-/// Every cell in a [QueryResult] row (and subscription / consume events) is
+/// Every cell in a [QueryResult] row and subscription event is
 /// wrapped in a [KalamCellValue] so you can safely extract typed data:
 ///
 /// ```dart

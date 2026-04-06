@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Move subscription resume, replay filtering, snapshot batching, and live-row materialization ownership into `kalam-link` so the TypeScript and Dart SDKs become thin bindings over one stable core.
+**Goal:** Move subscription resume, replay filtering, snapshot batching, and live-row materialization ownership into `kalam-client` / `link-common` so the TypeScript and Dart SDKs become thin bindings over one stable core.
 
 **Architecture:** Keep the shared connection and WASM connection models, but extract the duplicated checkpoint/replay rules into shared Rust helpers used by native `SubscriptionManager`, native `SharedConnection`, and WASM subscription state. SDK wrappers should stop re-implementing reconnect or replay filtering and instead translate Rust events into language-native streams/callbacks. Verification must focus on no missed events, no replay across reconnects, and deterministic teardown behavior.
 
@@ -13,10 +13,10 @@
 ### Task 1: Freeze Current Behavior And Safety Rails
 
 **Files:**
-- Modify: `link/tests/proxied.rs`
-- Modify: `link/tests/proxied/helpers.rs`
-- Create/Adjust: `link/tests/proxied/update_delete_resume.rs`
-- Check: `link/sdks/typescript/tests/e2e/reconnect/resume.test.mjs`
+- Modify: `link/kalam-client/tests/proxied.rs`
+- Modify: `link/kalam-client/tests/proxied/helpers.rs`
+- Create/Adjust: `link/kalam-client/tests/proxied/update_delete_resume.rs`
+- Check: `link/sdks/typescript/client/tests/e2e/reconnect/resume.test.mjs`
 - Check: `link/sdks/dart/test/e2e/reconnect/resume_test.dart`
 
 **Step 1: Confirm the required guarantees**
@@ -40,7 +40,7 @@ Prefer targeted tests around:
 
 Run:
 ```bash
-cd /Users/jamal/git/KalamDB/link && cargo nextest run proxied:: --failure-output immediate > /tmp/kalam_link_proxied_before.txt 2>&1
+cd /Users/jamal/git/KalamDB && cargo nextest run -p kalam-client proxied:: --failure-output immediate > /tmp/kalam_client_proxied_before.txt 2>&1
 ```
 
 Expected: current failures or existing pass state captured before refactor.
@@ -48,10 +48,10 @@ Expected: current failures or existing pass state captured before refactor.
 ### Task 2: Extract Native Subscription Resume Core
 
 **Files:**
-- Create: `link/src/subscription/checkpoint.rs`
-- Modify: `link/src/subscription/mod.rs`
-- Modify: `link/src/subscription/manager.rs`
-- Modify: `link/src/seq_tracking.rs`
+- Create: `link/link-common/src/subscription/checkpoint.rs`
+- Modify: `link/link-common/src/subscription/mod.rs`
+- Modify: `link/link-common/src/subscription/manager.rs`
+- Modify: `link/link-common/src/seq_tracking.rs`
 
 **Step 1: Write the shared checkpoint/replay API**
 
@@ -79,7 +79,7 @@ Cover:
 ### Task 3: Simplify Shared Native Connection State Machine
 
 **Files:**
-- Modify: `link/src/connection/shared.rs`
+- Modify: `link/link-common/src/connection/shared.rs`
 
 **Step 1: Collapse duplicated command handling**
 
@@ -104,10 +104,10 @@ Keep one source of truth for:
 ### Task 4: Move WASM Resume And Live Core Fully Into Rust
 
 **Files:**
-- Modify: `link/src/wasm/state.rs`
-- Modify: `link/src/wasm/client.rs`
-- Modify: `link/src/wasm/reconnect.rs`
-- Modify: `link/src/subscription/live_rows_materializer.rs`
+- Modify: `link/link-common/src/wasm/state.rs`
+- Modify: `link/link-common/src/wasm/client.rs`
+- Modify: `link/link-common/src/wasm/reconnect.rs`
+- Modify: `link/link-common/src/subscription/live_rows_materializer.rs`
 
 **Step 1: Add replay/checkpoint helpers usable by WASM subscription state**
 
@@ -127,7 +127,7 @@ Ensure `liveQueryRowsWithSql` remains the primary path and that callback payload
 ### Task 5: Remove SDK-Level Reconnect/Replay Duplication
 
 **Files:**
-- Modify: `link/sdks/typescript/src/client.ts`
+- Modify: `link/sdks/typescript/client/src/client.ts`
 - Modify: `link/sdks/dart/lib/src/kalam_client.dart`
 - Modify: `link/kalam-link-dart/src/api.rs`
 
@@ -158,18 +158,18 @@ Ensure `dart_subscription_next` / `dart_live_query_rows_next` still unblock on c
 ### Task 6: Verify Stability And Regression Safety
 
 **Files:**
-- Check: `link/src/client.rs`
-- Check: `link/src/connection/shared.rs`
-- Check: `link/src/subscription/manager.rs`
-- Check: `link/src/wasm/client.rs`
-- Check: `link/sdks/typescript/src/client.ts`
+- Check: `link/kalam-client/src/lib.rs`
+- Check: `link/link-common/src/connection/shared.rs`
+- Check: `link/link-common/src/subscription/manager.rs`
+- Check: `link/link-common/src/wasm/client.rs`
+- Check: `link/sdks/typescript/client/src/client.ts`
 - Check: `link/sdks/dart/lib/src/kalam_client.dart`
 
 **Step 1: Run one batched Rust compile**
 
 Run:
 ```bash
-cd /Users/jamal/git/KalamDB/link && cargo check > /tmp/kalam_link_check.txt 2>&1
+cd /Users/jamal/git/KalamDB && cargo check -p kalam-client -p kalam-consumer -p kalam-consumer-wasm -p kalam-link-dart > /tmp/kalam_client_check.txt 2>&1
 ```
 
 Fix all reported issues before re-running.
@@ -178,14 +178,14 @@ Fix all reported issues before re-running.
 
 Run:
 ```bash
-cd /Users/jamal/git/KalamDB/link && cargo nextest run proxied:: socket_drop_resume live_updates_resume update_delete_resume > /tmp/kalam_link_resume_tests.txt 2>&1
+cd /Users/jamal/git/KalamDB && cargo nextest run -p kalam-client proxied:: socket_drop_resume live_updates_resume update_delete_resume > /tmp/kalam_client_resume_tests.txt 2>&1
 ```
 
 **Step 3: Run SDK reconnect suites**
 
 Run:
 ```bash
-cd /Users/jamal/git/KalamDB/link/sdks/typescript && ./test.sh tests/e2e/reconnect/resume.test.mjs
+cd /Users/jamal/git/KalamDB/link/sdks/typescript/client && node --test --test-concurrency=1 tests/e2e/reconnect/resume.test.mjs
 cd /Users/jamal/git/KalamDB/link/sdks/dart && flutter test test/e2e/reconnect/resume_test.dart
 ```
 

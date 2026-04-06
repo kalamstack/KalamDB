@@ -49,6 +49,23 @@ cargo test --test smoke -- --nocapture
 - `KALAMDB_SERVER_URL` - Server URL (default: `http://127.0.0.1:8080`)
 - `KALAMDB_ROOT_PASSWORD` - Root password (default: `""`)
 
+### Cluster Test Shortcuts
+
+```bash
+# Run only the dedicated cluster integration target
+cd cli
+./run-cluster-tests.sh
+
+# Run the follower/replication-focused cluster bundle
+./run-cluster-tests.sh --followers --nocapture
+
+# Run a single cluster test function
+./run-cluster-tests.sh --test cluster_test_ws_follower_receives_leader_changes --nocapture
+```
+
+`run-cluster-tests.sh` delegates to `run-tests.sh`, pins the test target to `cluster`,
+and keeps the same environment loading and cluster autodetection behavior.
+
 ## Quick Start
 
 ### Connect to Server

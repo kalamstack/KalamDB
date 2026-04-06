@@ -4,11 +4,11 @@
 
 use crate::cluster_common::*;
 use crate::common::*;
-use kalam_link::QueryResponse;
+use kalam_client::QueryResponse;
 use std::time::Duration;
 
 async fn execute_query_with_retry(
-    client: &kalam_link::KalamLinkClient,
+    client: &kalam_client::KalamLinkClient,
     sql: &str,
 ) -> Result<QueryResponse, String> {
     let max_attempts = 5;

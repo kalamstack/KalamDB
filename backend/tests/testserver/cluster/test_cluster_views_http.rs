@@ -1,5 +1,5 @@
 use anyhow::Result;
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 
 use super::test_support::http_server::start_http_test_server;
 
@@ -22,6 +22,22 @@ async fn test_system_cluster_views_over_http() -> Result<()> {
         anyhow::ensure!(first.contains_key("node_id"), "system.cluster missing node_id");
         anyhow::ensure!(first.contains_key("role"), "system.cluster missing role");
         anyhow::ensure!(first.contains_key("status"), "system.cluster missing status");
+        anyhow::ensure!(
+            first.contains_key("memory_usage_mb"),
+            "system.cluster missing memory_usage_mb"
+        );
+        anyhow::ensure!(
+            first.contains_key("cpu_usage_percent"),
+            "system.cluster missing cpu_usage_percent"
+        );
+        anyhow::ensure!(
+            first.contains_key("uptime_seconds"),
+            "system.cluster missing uptime_seconds"
+        );
+        anyhow::ensure!(
+            first.contains_key("uptime_human"),
+            "system.cluster missing uptime_human"
+        );
 
         let resp = server.execute_sql("SELECT * FROM system.cluster_groups").await?;
         anyhow::ensure!(

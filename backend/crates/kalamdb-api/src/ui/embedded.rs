@@ -11,13 +11,15 @@ use actix_web::{web, HttpRequest, HttpResponse};
 use log::debug;
 use rust_embed::Embed;
 
+use super::UiRuntimeConfig;
+
 /// Embedded UI assets from ui/dist directory
 /// Files are compressed at compile time using rust-embed's compression feature
 #[derive(Embed)]
 #[folder = "../../../ui/dist"]
 #[prefix = ""]
 #[exclude = "*.map"]
-#[exclude = "kalam_link_bg.wasm"]
+#[exclude = "kalam_client_bg.wasm"]
 struct UiAssets;
 
 /// Serve embedded UI assets
@@ -71,9 +73,12 @@ pub async fn serve_embedded_ui(req: HttpRequest) -> HttpResponse {
 /// Configure embedded UI routes
 ///
 /// Mounts the embedded UI at /ui with fallback for SPA routing.
-pub fn configure_embedded_ui(cfg: &mut web::ServiceConfig) {
-    cfg.service(
+pub fn configure_embedded_ui(cfg: &mut web::ServiceConfig, runtime_config: UiRuntimeConfig) {
+    let runtime_config = web::Data::new(runtime_config);
+
+    cfg.app_data(runtime_config).service(
         web::scope("/ui")
+            .route("/runtime-config.js", web::get().to(super::serve_runtime_config_script))
             // Catch-all for UI routes
             .route("", web::get().to(serve_embedded_ui))
             .route("/", web::get().to(serve_embedded_ui))

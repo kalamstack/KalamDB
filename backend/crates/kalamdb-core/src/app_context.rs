@@ -390,8 +390,9 @@ impl AppContext {
             );
 
             log::debug!("Creating RaftExecutor...");
+            let server_start_time = Instant::now();
             let executor: Arc<dyn CommandExecutor> =
-                Arc::new(kalamdb_raft::RaftExecutor::new(manager));
+                Arc::new(kalamdb_raft::RaftExecutor::new(manager, server_start_time));
 
             // Note: ClusterLiveNotifier removed - Raft replication now handles
             // data consistency across nodes, and each node notifies its own
@@ -431,7 +432,7 @@ impl AppContext {
                 file_storage_service,
                 topic_publisher: Arc::clone(&topic_publisher),
                 sql_executor: OnceCell::new(),
-                server_start_time: Instant::now(),
+                server_start_time,
             });
 
             // Register vector_search with AppContext-backed runtime.
@@ -706,7 +707,9 @@ impl AppContext {
             "127.0.0.1:8080".to_string(),
         );
         let manager = Arc::new(kalamdb_raft::manager::RaftManager::new(raft_config));
-        let executor: Arc<dyn CommandExecutor> = Arc::new(kalamdb_raft::RaftExecutor::new(manager));
+        let server_start_time = Instant::now();
+        let executor: Arc<dyn CommandExecutor> =
+            Arc::new(kalamdb_raft::RaftExecutor::new(manager, server_start_time));
 
         // Create notification service for tests (before AppContext)
         let notification_service = NotificationService::new(Arc::clone(&connection_registry));
@@ -738,7 +741,7 @@ impl AppContext {
             file_storage_service,
             topic_publisher: Arc::clone(&topic_publisher),
             sql_executor: OnceCell::new(),
-            server_start_time: Instant::now(),
+            server_start_time,
         });
 
         // Register vector_search with AppContext-backed runtime for tests.

@@ -6,7 +6,7 @@
 //! - Resume from seq_id for reconnection scenarios
 //! - Serialization aligned with backend
 
-use kalam_link::{SeqId, SubscriptionOptions};
+use kalam_client::{SeqId, SubscriptionOptions};
 
 /// Test that default SubscriptionOptions have all fields as None
 #[test]

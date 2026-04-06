@@ -36,6 +36,18 @@ function formatMemory(memoryMb: number | null): string {
   return `${memoryMb.toFixed(precision)} MB memory`;
 }
 
+function formatCpu(cpuUsagePercent: number | null): string {
+  if (cpuUsagePercent === null || !Number.isFinite(cpuUsagePercent)) {
+    return "CPU n/a";
+  }
+
+  return `${cpuUsagePercent.toFixed(1)}% CPU`;
+}
+
+function formatUptime(uptimeHuman: string | null): string {
+  return uptimeHuman ?? "Uptime n/a";
+}
+
 function getStatusBadgeClass(status: string): string {
   switch (status.toLowerCase()) {
     case "active":
@@ -182,8 +194,10 @@ export function DashboardClusterOverview({
                         </Badge>
                       </div>
                     </div>
-                    <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
-                      <span>{formatMemory(node.memory_mb)}</span>
+                    <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-4">
+                      <span>{formatMemory(node.memory_usage_mb ?? node.memory_mb)}</span>
+                      <span>{formatCpu(node.cpu_usage_percent)}</span>
+                      <span>{formatUptime(node.uptime_human)}</span>
                       <span>
                         {node.replication_lag === null
                           ? "Replication lag n/a"

@@ -86,7 +86,7 @@ required-features = ["e2e-tests"]
 
 [dependencies]
 # KalamDB connectivity
-kalam-link = { path = "../link" }
+kalam-client = { path = "../link/kalam-client", default-features = false, features = ["native-cli"] }
 
 # CLI argument parsing
 clap = { workspace = true }

@@ -168,11 +168,18 @@ run_npm_test() {
 }
 
 run_typescript_sdk_tests() {
-    step "Running TypeScript SDK tests"
+    step "Running TypeScript client SDK tests"
     (
-        cd "$ROOT_DIR/link/sdks/typescript"
+        cd "$ROOT_DIR/link/sdks/typescript/client"
         chmod +x ./test.sh
         ./test.sh
+    )
+
+    step "Running TypeScript consumer SDK tests"
+    (
+        cd "$ROOT_DIR/link/sdks/typescript/consumer"
+        npm install --no-audit --no-fund
+        npm test
     )
 }
 

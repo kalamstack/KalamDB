@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 57368503;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 624624298;
 
 // Section: executor
 
@@ -101,64 +101,6 @@ fn wire__crate__api__dart_cancel_subscription_impl(
                             api_subscription_id,
                         )
                         .await?;
-                        Ok(output_ok)
-                    })()
-                    .await,
-                )
-            }
-        },
-    )
-}
-fn wire__crate__api__dart_check_setup_status_impl(
-    port_: flutter_rust_bridge::for_generated::MessagePort,
-    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
-    rust_vec_len_: i32,
-    data_len_: i32,
-) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "dart_check_setup_status",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_client = <RustOpaqueMoi<
-                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<DartKalamClient>,
-            >>::sse_decode(&mut deserializer);
-            deserializer.end();
-            move |context| async move {
-                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
-                    (move || async move {
-                        let mut api_client_guard = None;
-                        let decode_indices_ =
-                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
-                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
-                                    &api_client,
-                                    0,
-                                    false,
-                                )],
-                            );
-                        for i in decode_indices_ {
-                            match i {
-                                0 => {
-                                    api_client_guard =
-                                        Some(api_client.lockable_decode_async_ref().await)
-                                },
-                                _ => unreachable!(),
-                            }
-                        }
-                        let api_client_guard = api_client_guard.unwrap();
-                        let output_ok =
-                            crate::api::dart_check_setup_status(&*api_client_guard).await?;
                         Ok(output_ok)
                     })()
                     .await,
@@ -440,63 +382,6 @@ fn wire__crate__api__dart_execute_query_impl(
                             api_namespace,
                         )
                         .await?;
-                        Ok(output_ok)
-                    })()
-                    .await,
-                )
-            }
-        },
-    )
-}
-fn wire__crate__api__dart_health_check_impl(
-    port_: flutter_rust_bridge::for_generated::MessagePort,
-    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
-    rust_vec_len_: i32,
-    data_len_: i32,
-) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "dart_health_check",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_client = <RustOpaqueMoi<
-                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<DartKalamClient>,
-            >>::sse_decode(&mut deserializer);
-            deserializer.end();
-            move |context| async move {
-                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
-                    (move || async move {
-                        let mut api_client_guard = None;
-                        let decode_indices_ =
-                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
-                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
-                                    &api_client,
-                                    0,
-                                    false,
-                                )],
-                            );
-                        for i in decode_indices_ {
-                            match i {
-                                0 => {
-                                    api_client_guard =
-                                        Some(api_client.lockable_decode_async_ref().await)
-                                },
-                                _ => unreachable!(),
-                            }
-                        }
-                        let api_client_guard = api_client_guard.unwrap();
-                        let output_ok = crate::api::dart_health_check(&*api_client_guard).await?;
                         Ok(output_ok)
                     })()
                     .await,
@@ -1029,66 +914,6 @@ fn wire__crate__api__dart_refresh_token_impl(
                         let output_ok =
                             crate::api::dart_refresh_token(&*api_client_guard, api_refresh_token)
                                 .await?;
-                        Ok(output_ok)
-                    })()
-                    .await,
-                )
-            }
-        },
-    )
-}
-fn wire__crate__api__dart_server_setup_impl(
-    port_: flutter_rust_bridge::for_generated::MessagePort,
-    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
-    rust_vec_len_: i32,
-    data_len_: i32,
-) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "dart_server_setup",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_client = <RustOpaqueMoi<
-                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<DartKalamClient>,
-            >>::sse_decode(&mut deserializer);
-            let api_request =
-                <crate::models::DartServerSetupRequest>::sse_decode(&mut deserializer);
-            deserializer.end();
-            move |context| async move {
-                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
-                    (move || async move {
-                        let mut api_client_guard = None;
-                        let decode_indices_ =
-                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
-                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
-                                    &api_client,
-                                    0,
-                                    false,
-                                )],
-                            );
-                        for i in decode_indices_ {
-                            match i {
-                                0 => {
-                                    api_client_guard =
-                                        Some(api_client.lockable_decode_async_ref().await)
-                                },
-                                _ => unreachable!(),
-                            }
-                        }
-                        let api_client_guard = api_client_guard.unwrap();
-                        let output_ok =
-                            crate::api::dart_server_setup(&*api_client_guard, api_request).await?;
                         Ok(output_ok)
                     })()
                     .await,
@@ -1712,22 +1537,6 @@ impl SseDecode for crate::models::DartErrorDetail {
     }
 }
 
-impl SseDecode for crate::models::DartHealthCheckResponse {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_status = <String>::sse_decode(deserializer);
-        let mut var_version = <String>::sse_decode(deserializer);
-        let mut var_apiVersion = <String>::sse_decode(deserializer);
-        let mut var_buildDate = <Option<String>>::sse_decode(deserializer);
-        return crate::models::DartHealthCheckResponse {
-            status: var_status,
-            version: var_version,
-            api_version: var_apiVersion,
-            build_date: var_buildDate,
-        };
-    }
-}
-
 impl SseDecode for crate::models::DartLiveRowsConfig {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1854,66 +1663,6 @@ impl SseDecode for crate::models::DartSchemaField {
             data_type: var_dataType,
             index: var_index,
             flags: var_flags,
-        };
-    }
-}
-
-impl SseDecode for crate::models::DartServerSetupRequest {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_username = <String>::sse_decode(deserializer);
-        let mut var_password = <String>::sse_decode(deserializer);
-        let mut var_rootPassword = <String>::sse_decode(deserializer);
-        let mut var_email = <Option<String>>::sse_decode(deserializer);
-        return crate::models::DartServerSetupRequest {
-            username: var_username,
-            password: var_password,
-            root_password: var_rootPassword,
-            email: var_email,
-        };
-    }
-}
-
-impl SseDecode for crate::models::DartServerSetupResponse {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_message = <String>::sse_decode(deserializer);
-        let mut var_user = <crate::models::DartSetupUserInfo>::sse_decode(deserializer);
-        return crate::models::DartServerSetupResponse {
-            message: var_message,
-            user: var_user,
-        };
-    }
-}
-
-impl SseDecode for crate::models::DartSetupStatusResponse {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_needsSetup = <bool>::sse_decode(deserializer);
-        let mut var_message = <String>::sse_decode(deserializer);
-        return crate::models::DartSetupStatusResponse {
-            needs_setup: var_needsSetup,
-            message: var_message,
-        };
-    }
-}
-
-impl SseDecode for crate::models::DartSetupUserInfo {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_id = <String>::sse_decode(deserializer);
-        let mut var_username = <String>::sse_decode(deserializer);
-        let mut var_role = <String>::sse_decode(deserializer);
-        let mut var_email = <Option<String>>::sse_decode(deserializer);
-        let mut var_createdAt = <String>::sse_decode(deserializer);
-        let mut var_updatedAt = <String>::sse_decode(deserializer);
-        return crate::models::DartSetupUserInfo {
-            id: var_id,
-            username: var_username,
-            role: var_role,
-            email: var_email,
-            created_at: var_createdAt,
-            updated_at: var_updatedAt,
         };
     }
 }
@@ -2198,27 +1947,24 @@ fn pde_ffi_dispatcher_primary_impl(
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
         1 => wire__crate__api__dart_cancel_subscription_impl(port, ptr, rust_vec_len, data_len),
-        2 => wire__crate__api__dart_check_setup_status_impl(port, ptr, rust_vec_len, data_len),
-        3 => wire__crate__api__dart_connect_impl(port, ptr, rust_vec_len, data_len),
-        5 => wire__crate__api__dart_create_client_impl(port, ptr, rust_vec_len, data_len),
-        6 => wire__crate__api__dart_disconnect_impl(port, ptr, rust_vec_len, data_len),
-        7 => wire__crate__api__dart_execute_query_impl(port, ptr, rust_vec_len, data_len),
-        8 => wire__crate__api__dart_health_check_impl(port, ptr, rust_vec_len, data_len),
-        9 => wire__crate__api__dart_is_connected_impl(port, ptr, rust_vec_len, data_len),
-        10 => wire__crate__api__dart_list_subscriptions_impl(port, ptr, rust_vec_len, data_len),
-        11 => wire__crate__api__dart_live_query_rows_close_impl(port, ptr, rust_vec_len, data_len),
-        13 => wire__crate__api__dart_live_query_rows_next_impl(port, ptr, rust_vec_len, data_len),
-        14 => {
+        2 => wire__crate__api__dart_connect_impl(port, ptr, rust_vec_len, data_len),
+        4 => wire__crate__api__dart_create_client_impl(port, ptr, rust_vec_len, data_len),
+        5 => wire__crate__api__dart_disconnect_impl(port, ptr, rust_vec_len, data_len),
+        6 => wire__crate__api__dart_execute_query_impl(port, ptr, rust_vec_len, data_len),
+        7 => wire__crate__api__dart_is_connected_impl(port, ptr, rust_vec_len, data_len),
+        8 => wire__crate__api__dart_list_subscriptions_impl(port, ptr, rust_vec_len, data_len),
+        9 => wire__crate__api__dart_live_query_rows_close_impl(port, ptr, rust_vec_len, data_len),
+        11 => wire__crate__api__dart_live_query_rows_next_impl(port, ptr, rust_vec_len, data_len),
+        12 => {
             wire__crate__api__dart_live_query_rows_subscribe_impl(port, ptr, rust_vec_len, data_len)
         },
-        15 => wire__crate__api__dart_login_impl(port, ptr, rust_vec_len, data_len),
-        16 => wire__crate__api__dart_next_connection_event_impl(port, ptr, rust_vec_len, data_len),
-        17 => wire__crate__api__dart_refresh_token_impl(port, ptr, rust_vec_len, data_len),
-        18 => wire__crate__api__dart_server_setup_impl(port, ptr, rust_vec_len, data_len),
-        20 => wire__crate__api__dart_subscribe_impl(port, ptr, rust_vec_len, data_len),
-        21 => wire__crate__api__dart_subscription_close_impl(port, ptr, rust_vec_len, data_len),
-        23 => wire__crate__api__dart_subscription_next_impl(port, ptr, rust_vec_len, data_len),
-        24 => wire__crate__api__dart_update_auth_impl(port, ptr, rust_vec_len, data_len),
+        13 => wire__crate__api__dart_login_impl(port, ptr, rust_vec_len, data_len),
+        14 => wire__crate__api__dart_next_connection_event_impl(port, ptr, rust_vec_len, data_len),
+        15 => wire__crate__api__dart_refresh_token_impl(port, ptr, rust_vec_len, data_len),
+        17 => wire__crate__api__dart_subscribe_impl(port, ptr, rust_vec_len, data_len),
+        18 => wire__crate__api__dart_subscription_close_impl(port, ptr, rust_vec_len, data_len),
+        20 => wire__crate__api__dart_subscription_next_impl(port, ptr, rust_vec_len, data_len),
+        21 => wire__crate__api__dart_update_auth_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -2231,10 +1977,10 @@ fn pde_ffi_dispatcher_sync_impl(
 ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
-        4 => wire__crate__api__dart_connection_events_enabled_impl(ptr, rust_vec_len, data_len),
-        12 => wire__crate__api__dart_live_query_rows_id_impl(ptr, rust_vec_len, data_len),
-        19 => wire__crate__api__dart_signal_dispose_impl(ptr, rust_vec_len, data_len),
-        22 => wire__crate__api__dart_subscription_id_impl(ptr, rust_vec_len, data_len),
+        3 => wire__crate__api__dart_connection_events_enabled_impl(ptr, rust_vec_len, data_len),
+        10 => wire__crate__api__dart_live_query_rows_id_impl(ptr, rust_vec_len, data_len),
+        16 => wire__crate__api__dart_signal_dispose_impl(ptr, rust_vec_len, data_len),
+        19 => wire__crate__api__dart_subscription_id_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -2514,29 +2260,6 @@ impl flutter_rust_bridge::IntoIntoDart<crate::models::DartErrorDetail>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::models::DartHealthCheckResponse {
-    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [
-            self.status.into_into_dart().into_dart(),
-            self.version.into_into_dart().into_dart(),
-            self.api_version.into_into_dart().into_dart(),
-            self.build_date.into_into_dart().into_dart(),
-        ]
-        .into_dart()
-    }
-}
-impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::models::DartHealthCheckResponse
-{
-}
-impl flutter_rust_bridge::IntoIntoDart<crate::models::DartHealthCheckResponse>
-    for crate::models::DartHealthCheckResponse
-{
-    fn into_into_dart(self) -> crate::models::DartHealthCheckResponse {
-        self
-    }
-}
-// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::models::DartLiveRowsConfig {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -2714,96 +2437,6 @@ impl flutter_rust_bridge::IntoIntoDart<crate::models::DartSchemaField>
     for crate::models::DartSchemaField
 {
     fn into_into_dart(self) -> crate::models::DartSchemaField {
-        self
-    }
-}
-// Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::models::DartServerSetupRequest {
-    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [
-            self.username.into_into_dart().into_dart(),
-            self.password.into_into_dart().into_dart(),
-            self.root_password.into_into_dart().into_dart(),
-            self.email.into_into_dart().into_dart(),
-        ]
-        .into_dart()
-    }
-}
-impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::models::DartServerSetupRequest
-{
-}
-impl flutter_rust_bridge::IntoIntoDart<crate::models::DartServerSetupRequest>
-    for crate::models::DartServerSetupRequest
-{
-    fn into_into_dart(self) -> crate::models::DartServerSetupRequest {
-        self
-    }
-}
-// Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::models::DartServerSetupResponse {
-    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [
-            self.message.into_into_dart().into_dart(),
-            self.user.into_into_dart().into_dart(),
-        ]
-        .into_dart()
-    }
-}
-impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::models::DartServerSetupResponse
-{
-}
-impl flutter_rust_bridge::IntoIntoDart<crate::models::DartServerSetupResponse>
-    for crate::models::DartServerSetupResponse
-{
-    fn into_into_dart(self) -> crate::models::DartServerSetupResponse {
-        self
-    }
-}
-// Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::models::DartSetupStatusResponse {
-    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [
-            self.needs_setup.into_into_dart().into_dart(),
-            self.message.into_into_dart().into_dart(),
-        ]
-        .into_dart()
-    }
-}
-impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::models::DartSetupStatusResponse
-{
-}
-impl flutter_rust_bridge::IntoIntoDart<crate::models::DartSetupStatusResponse>
-    for crate::models::DartSetupStatusResponse
-{
-    fn into_into_dart(self) -> crate::models::DartSetupStatusResponse {
-        self
-    }
-}
-// Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::models::DartSetupUserInfo {
-    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [
-            self.id.into_into_dart().into_dart(),
-            self.username.into_into_dart().into_dart(),
-            self.role.into_into_dart().into_dart(),
-            self.email.into_into_dart().into_dart(),
-            self.created_at.into_into_dart().into_dart(),
-            self.updated_at.into_into_dart().into_dart(),
-        ]
-        .into_dart()
-    }
-}
-impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::models::DartSetupUserInfo
-{
-}
-impl flutter_rust_bridge::IntoIntoDart<crate::models::DartSetupUserInfo>
-    for crate::models::DartSetupUserInfo
-{
-    fn into_into_dart(self) -> crate::models::DartSetupUserInfo {
         self
     }
 }
@@ -3094,16 +2727,6 @@ impl SseEncode for crate::models::DartErrorDetail {
     }
 }
 
-impl SseEncode for crate::models::DartHealthCheckResponse {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <String>::sse_encode(self.status, serializer);
-        <String>::sse_encode(self.version, serializer);
-        <String>::sse_encode(self.api_version, serializer);
-        <Option<String>>::sse_encode(self.build_date, serializer);
-    }
-}
-
 impl SseEncode for crate::models::DartLiveRowsConfig {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -3192,44 +2815,6 @@ impl SseEncode for crate::models::DartSchemaField {
         <String>::sse_encode(self.data_type, serializer);
         <i32>::sse_encode(self.index, serializer);
         <Option<String>>::sse_encode(self.flags, serializer);
-    }
-}
-
-impl SseEncode for crate::models::DartServerSetupRequest {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <String>::sse_encode(self.username, serializer);
-        <String>::sse_encode(self.password, serializer);
-        <String>::sse_encode(self.root_password, serializer);
-        <Option<String>>::sse_encode(self.email, serializer);
-    }
-}
-
-impl SseEncode for crate::models::DartServerSetupResponse {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <String>::sse_encode(self.message, serializer);
-        <crate::models::DartSetupUserInfo>::sse_encode(self.user, serializer);
-    }
-}
-
-impl SseEncode for crate::models::DartSetupStatusResponse {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <bool>::sse_encode(self.needs_setup, serializer);
-        <String>::sse_encode(self.message, serializer);
-    }
-}
-
-impl SseEncode for crate::models::DartSetupUserInfo {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <String>::sse_encode(self.id, serializer);
-        <String>::sse_encode(self.username, serializer);
-        <String>::sse_encode(self.role, serializer);
-        <Option<String>>::sse_encode(self.email, serializer);
-        <String>::sse_encode(self.created_at, serializer);
-        <String>::sse_encode(self.updated_at, serializer);
     }
 }
 

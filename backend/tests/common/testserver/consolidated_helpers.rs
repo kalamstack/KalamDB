@@ -2,7 +2,7 @@
 //!
 //! This module consolidates common test utilities that were previously duplicated
 //! across scenario tests, misc tests, and testserver tests. All helpers use
-//! kalam-link's QueryResponse methods where possible.
+//! kalam-client's QueryResponse methods where possible.
 //!
 //! # Organization
 //!
@@ -14,8 +14,8 @@
 //! - **Parallel Testing**: Multi-user and concurrency helpers
 
 use anyhow::Result;
-use kalam_link::models::{ChangeEvent, QueryResponse, ResponseStatus};
-use kalam_link::{KalamCellValue, SubscriptionManager};
+use kalam_client::models::{ChangeEvent, QueryResponse, ResponseStatus};
+use kalam_client::{KalamCellValue, SubscriptionManager};
 use kalamdb_commons::Role;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -59,12 +59,12 @@ pub fn get_count_value(response: &QueryResponse, default: i64) -> i64 {
     default
 }
 
-/// Get string value from first row (wrapper around kalam-link method).
+/// Get string value from first row (wrapper around kalam-client method).
 pub fn get_first_string(resp: &QueryResponse, column: &str) -> Option<String> {
     resp.get_string(column)
 }
 
-/// Get i64 value from first row (wrapper around kalam-link method).
+/// Get i64 value from first row (wrapper around kalam-client method).
 pub fn get_first_i64(resp: &QueryResponse, column: &str) -> Option<i64> {
     resp.get_i64(column)
 }
@@ -74,7 +74,7 @@ pub fn get_count(resp: &QueryResponse) -> i64 {
     resp.get_i64("cnt").unwrap_or(0)
 }
 
-/// Get all rows as HashMaps (wrapper around kalam-link method).
+/// Get all rows as HashMaps (wrapper around kalam-client method).
 pub fn get_response_rows(resp: &QueryResponse) -> Vec<HashMap<String, KalamCellValue>> {
     resp.rows_as_maps()
 }
@@ -94,7 +94,7 @@ pub fn get_rows(resp: &QueryResponse) -> Vec<Vec<KalamCellValue>> {
     resp.rows()
 }
 
-/// Get column index by name from schema (wrapper around kalam-link method).
+/// Get column index by name from schema (wrapper around kalam-client method).
 pub fn get_column_index(resp: &QueryResponse, column_name: &str) -> Option<usize> {
     resp.column_index(column_name)
 }
@@ -131,7 +131,7 @@ pub fn assert_query_success(response: &QueryResponse, context: &str) {
     );
 }
 
-/// Assert that a SQL query response succeeded (using kalam-link's success() method).
+/// Assert that a SQL query response succeeded (using kalam-client's success() method).
 pub fn assert_success(resp: &QueryResponse, context: &str) {
     assert!(resp.success(), "{}: expected success, got error: {:?}", context, resp.error);
 }
@@ -271,7 +271,7 @@ pub async fn create_user_and_client(
     server: &HttpTestServer,
     username: &str,
     role: &Role,
-) -> Result<kalam_link::KalamLinkClient> {
+) -> Result<kalam_client::KalamLinkClient> {
     let user_id = ensure_user_exists(server, username, "test123", role).await?;
     server.cache_user_password(username, "test123");
     Ok(server.link_client_with_id(&user_id, username, role))

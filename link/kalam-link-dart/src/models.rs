@@ -1,24 +1,21 @@
-//! FRB-friendly model types that mirror kalam-link models.
+//! FRB-friendly model types that mirror kalam-client models.
 //!
 //! All types here are simple structs/enums with only primitive fields
 //! and `Vec`/`Option` wrappers — fully compatible with flutter_rust_bridge codegen.
 
-use kalam_link::models::{
-    BatchStatus, ChangeEvent, ErrorDetail, HealthCheckResponse, LoginResponse, LoginUserInfo,
-    QueryResponse, QueryResult, ResponseStatus, SchemaField,
+use kalam_client::models::{
+    BatchStatus, ChangeEvent, ErrorDetail, LoginResponse, LoginUserInfo, QueryResponse,
+    QueryResult, ResponseStatus, SchemaField,
 };
-use kalam_link::models::{
-    ServerSetupRequest, ServerSetupResponse, SetupStatusResponse, SetupUserInfo,
-};
-use kalam_link::{LiveRowsConfig, LiveRowsEvent};
+use kalam_client::{LiveRowsConfig, LiveRowsEvent};
 
 // ---------------------------------------------------------------------------
-// Connection lifecycle events (mirrors kalam_link::event_handlers)
+// Connection lifecycle events (mirrors kalam_client::event_handlers)
 // ---------------------------------------------------------------------------
 
 /// Reason why a WebSocket connection was closed.
 ///
-/// Mirrors `kalam_link::DisconnectReason`.
+/// Mirrors `kalam_client::DisconnectReason`.
 pub struct DartDisconnectReason {
     /// Human-readable description of why the connection closed.
     pub message: String,
@@ -28,7 +25,7 @@ pub struct DartDisconnectReason {
 
 /// Error information from a connection or protocol error.
 ///
-/// Mirrors `kalam_link::ConnectionError`.
+/// Mirrors `kalam_client::ConnectionError`.
 pub struct DartConnectionError {
     /// Human-readable error message.
     pub message: String,
@@ -82,13 +79,13 @@ pub enum DartAuthProvider {
 }
 
 impl DartAuthProvider {
-    pub(crate) fn into_native(self) -> kalam_link::AuthProvider {
+    pub(crate) fn into_native(self) -> kalam_client::AuthProvider {
         match self {
             Self::BasicAuth { username, password } => {
-                kalam_link::AuthProvider::basic_auth(username, password)
+                kalam_client::AuthProvider::basic_auth(username, password)
             },
-            Self::JwtToken { token } => kalam_link::AuthProvider::jwt_token(token),
-            Self::None => kalam_link::AuthProvider::none(),
+            Self::JwtToken { token } => kalam_client::AuthProvider::jwt_token(token),
+            Self::None => kalam_client::AuthProvider::none(),
         }
     }
 }
@@ -172,9 +169,9 @@ impl From<SchemaField> for DartSchemaField {
             flags: f.flags.map(|fl| {
                 fl.iter()
                     .map(|flag| match flag {
-                        kalam_link::FieldFlag::PrimaryKey => "pk",
-                        kalam_link::FieldFlag::NonNull => "nn",
-                        kalam_link::FieldFlag::Unique => "uq",
+                        kalam_client::FieldFlag::PrimaryKey => "pk",
+                        kalam_client::FieldFlag::NonNull => "nn",
+                        kalam_client::FieldFlag::Unique => "uq",
                     })
                     .collect::<Vec<_>>()
                     .join(",")
@@ -195,28 +192,6 @@ impl From<ErrorDetail> for DartErrorDetail {
             code: e.code,
             message: e.message,
             details: e.details,
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Health check
-// ---------------------------------------------------------------------------
-
-pub struct DartHealthCheckResponse {
-    pub status: String,
-    pub version: String,
-    pub api_version: String,
-    pub build_date: Option<String>,
-}
-
-impl From<HealthCheckResponse> for DartHealthCheckResponse {
-    fn from(h: HealthCheckResponse) -> Self {
-        Self {
-            status: h.status,
-            version: h.version,
-            api_version: h.api_version,
-            build_date: h.build_date,
         }
     }
 }
@@ -263,78 +238,6 @@ impl From<LoginUserInfo> for DartLoginUserInfo {
             email: u.email,
             created_at: u.created_at,
             updated_at: u.updated_at,
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Server setup
-// ---------------------------------------------------------------------------
-
-pub struct DartServerSetupRequest {
-    pub username: String,
-    pub password: String,
-    pub root_password: String,
-    pub email: Option<String>,
-}
-
-impl DartServerSetupRequest {
-    pub(crate) fn into_native(self) -> ServerSetupRequest {
-        ServerSetupRequest {
-            username: self.username,
-            password: self.password,
-            root_password: self.root_password,
-            email: self.email,
-        }
-    }
-}
-
-pub struct DartServerSetupResponse {
-    pub message: String,
-    pub user: DartSetupUserInfo,
-}
-
-impl From<ServerSetupResponse> for DartServerSetupResponse {
-    fn from(r: ServerSetupResponse) -> Self {
-        Self {
-            message: r.message,
-            user: DartSetupUserInfo::from(r.user),
-        }
-    }
-}
-
-pub struct DartSetupUserInfo {
-    pub id: String,
-    pub username: String,
-    pub role: String,
-    pub email: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-impl From<SetupUserInfo> for DartSetupUserInfo {
-    fn from(u: SetupUserInfo) -> Self {
-        Self {
-            id: u.id,
-            username: u.username,
-            role: u.role,
-            email: u.email,
-            created_at: u.created_at,
-            updated_at: u.updated_at,
-        }
-    }
-}
-
-pub struct DartSetupStatusResponse {
-    pub needs_setup: bool,
-    pub message: String,
-}
-
-impl From<SetupStatusResponse> for DartSetupStatusResponse {
-    fn from(r: SetupStatusResponse) -> Self {
-        Self {
-            needs_setup: r.needs_setup,
-            message: r.message,
         }
     }
 }
@@ -433,7 +336,7 @@ fn batch_status_str(bs: &BatchStatus) -> String {
 }
 
 fn json_vec(
-    rows: Vec<std::collections::HashMap<String, kalam_link::KalamCellValue>>,
+    rows: Vec<std::collections::HashMap<String, kalam_client::KalamCellValue>>,
 ) -> Vec<String> {
     rows.into_iter()
         .map(|row| serde_json::to_string(&row).unwrap_or_default())
@@ -547,14 +450,14 @@ pub struct DartSubscriptionConfig {
 }
 
 impl DartSubscriptionConfig {
-    pub(crate) fn into_native(self) -> kalam_link::SubscriptionConfig {
-        kalam_link::SubscriptionConfig {
+    pub(crate) fn into_native(self) -> kalam_client::SubscriptionConfig {
+        kalam_client::SubscriptionConfig {
             id: self.id.unwrap_or_else(|| uuid_v4()),
             sql: self.sql,
-            options: Some(kalam_link::SubscriptionOptions {
+            options: Some(kalam_client::SubscriptionOptions {
                 batch_size: self.batch_size.map(|v| v as usize),
                 last_rows: self.last_rows.map(|v| v as u32),
-                from: self.from.map(kalam_link::SeqId::new),
+                from: self.from.map(kalam_client::SeqId::new),
                 snapshot_end_seq: None,
             }),
             ws_url: None,
@@ -586,8 +489,8 @@ pub struct DartSubscriptionInfo {
     pub closed: bool,
 }
 
-impl From<kalam_link::models::SubscriptionInfo> for DartSubscriptionInfo {
-    fn from(info: kalam_link::models::SubscriptionInfo) -> Self {
+impl From<kalam_client::models::SubscriptionInfo> for DartSubscriptionInfo {
+    fn from(info: kalam_client::models::SubscriptionInfo) -> Self {
         Self {
             id: info.id,
             query: info.query,

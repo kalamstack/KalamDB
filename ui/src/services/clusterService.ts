@@ -21,6 +21,10 @@ export interface ClusterNode {
   hostname: string | null;
   version: string | null;
   memory_mb: number | null;
+  memory_usage_mb: number | null;
+  cpu_usage_percent: number | null;
+  uptime_seconds: number | null;
+  uptime_human: string | null;
   os: string | null;
   arch: string | null;
 }
@@ -63,6 +67,10 @@ export async function fetchClusterSnapshot(): Promise<ClusterSnapshot> {
     hostname: row.hostname === null ? null : String(row.hostname),
     version: row.version === null ? null : String(row.version),
     memory_mb: row.memory_mb === null ? null : Number(row.memory_mb),
+    memory_usage_mb: row.memory_usage_mb === null ? null : Number(row.memory_usage_mb),
+    cpu_usage_percent: row.cpu_usage_percent === null ? null : Number(row.cpu_usage_percent),
+    uptime_seconds: row.uptime_seconds === null ? null : Number(row.uptime_seconds),
+    uptime_human: row.uptime_human === null ? null : String(row.uptime_human),
     os: row.os === null ? null : String(row.os),
     arch: row.arch === null ? null : String(row.arch),
   }));

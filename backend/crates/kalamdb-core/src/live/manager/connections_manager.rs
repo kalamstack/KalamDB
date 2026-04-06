@@ -9,8 +9,8 @@
 //!
 //! ## Heartbeat Design
 //!
-//! Liveness is driven by the **client** (kalam-link), not the server:
-//! - kalam-link sends a WebSocket `Ping` frame every `keepalive_interval` seconds
+//! Liveness is driven by the **client SDK**, not the server:
+//! - the KalamDB SDK sends a WebSocket `Ping` frame every `keepalive_interval` seconds
 //! - The server handler calls `update_heartbeat()` on every incoming frame (Ping, Pong, Text)
 //! - The background checker only scans for *timed-out* connections — it never initiates pings
 //!
@@ -731,7 +731,7 @@ impl ConnectionsManager {
             }
 
             // Check heartbeat timeout using lock-free atomic read.
-            // Clients (kalam-link) send their own Ping frames periodically which
+            // Clients send their own Ping frames periodically which
             // reset this timestamp, so the server never needs to initiate pings.
             // This check is the last line of defence for crashed / misbehaving clients.
             let ms_since = state.millis_since_heartbeat();

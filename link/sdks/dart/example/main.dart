@@ -6,7 +6,6 @@
 ///   3. Running SQL queries
 ///   4. Subscribing to live changes
 ///   5. Logging in and refreshing tokens
-///   6. Server health check
 // ignore_for_file: avoid_print
 library;
 
@@ -36,24 +35,13 @@ Future<void> main() async {
   );
 
   // -------------------------------------------------------------------------
-  // 3. Health check
-  // -------------------------------------------------------------------------
-  try {
-    final health = await anonClient.healthCheck();
-    print('Server: ${health.version} (${health.status})');
-  } catch (e) {
-    // Health endpoint may be localhost-only or require elevated auth.
-    print('Health check skipped: $e');
-  }
-
-  // -------------------------------------------------------------------------
-  // 4. Login to get a JWT Bearer token
+  // 3. Login to get a JWT Bearer token
   // -------------------------------------------------------------------------
   final login = await anonClient.login(adminUser, adminPass);
   print('Logged in as ${login.user.username} (${login.user.role})');
 
   // -------------------------------------------------------------------------
-  // 5. Connect authenticated client with JWT
+  // 4. Connect authenticated client with JWT
   // -------------------------------------------------------------------------
   final client = await KalamClient.connect(
     url: serverUrl,
@@ -62,22 +50,22 @@ Future<void> main() async {
   );
 
   // -------------------------------------------------------------------------
-  // 6. Run queries (JWT client)
+  // 5. Run queries (JWT client)
   // -------------------------------------------------------------------------
-    await client.query('CREATE NAMESPACE IF NOT EXISTS $namespace');
+  await client.query('CREATE NAMESPACE IF NOT EXISTS $namespace');
 
-    // Recreate the demo table so the example is safe to re-run.
-    await client.query('DROP TABLE IF EXISTS $fullTable');
-    await client.query(
+  // Recreate the demo table so the example is safe to re-run.
+  await client.query('DROP TABLE IF EXISTS $fullTable');
+  await client.query(
       'CREATE TABLE $fullTable (id INT PRIMARY KEY, title TEXT, done BOOLEAN)');
 
   // Insert rows
-    await client.query(
-      'INSERT INTO $fullTable (id, title, done) VALUES (\$1, \$2, \$3)',
+  await client.query(
+    'INSERT INTO $fullTable (id, title, done) VALUES (\$1, \$2, \$3)',
     params: [1, 'Buy groceries', false],
   );
-    await client.query(
-      'INSERT INTO $fullTable (id, title, done) VALUES (\$1, \$2, \$3)',
+  await client.query(
+    'INSERT INTO $fullTable (id, title, done) VALUES (\$1, \$2, \$3)',
     params: [2, 'Write tests', true],
   );
 
@@ -93,7 +81,7 @@ Future<void> main() async {
   }
 
   // -------------------------------------------------------------------------
-  // 7. Refresh token demo
+  // 6. Refresh token demo
   // -------------------------------------------------------------------------
   if (login.refreshToken != null) {
     final refreshed = await anonClient.refreshToken(login.refreshToken!);
@@ -101,7 +89,7 @@ Future<void> main() async {
   }
 
   // -------------------------------------------------------------------------
-  // 8. Live subscriptions (JWT client)
+  // 7. Live subscriptions (JWT client)
   // -------------------------------------------------------------------------
   final stream = client.subscribe(
     'SELECT * FROM $fullTable',

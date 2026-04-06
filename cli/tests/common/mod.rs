@@ -60,9 +60,9 @@ fn shared_token_cache_lock_path() -> PathBuf {
 
 // Re-export commonly used types for credential tests
 pub use kalam_cli::FileCredentialStore;
-pub use kalam_link::client::KalamLinkClientBuilder;
-pub use kalam_link::credentials::{CredentialStore, Credentials};
-pub use kalam_link::{AuthProvider, KalamLinkClient, KalamLinkTimeouts};
+pub use kalam_client::client::KalamLinkClientBuilder;
+pub use kalam_client::credentials::{CredentialStore, Credentials};
+pub use kalam_client::{AuthProvider, KalamLinkClient, KalamLinkTimeouts};
 pub use tempfile::TempDir;
 
 #[cfg(unix)]
@@ -1355,7 +1355,35 @@ pub fn test_context() -> &'static TestContext {
                     .cloned()
                     .collect();
                 if let Some(explicit_urls) = explicit_cluster_urls {
-                    (explicit_urls.len() > 1, explicit_urls)
+                    if healthy.is_empty() {
+                        if let Some((auto_url, storage_dir)) = ensure_auto_test_server() {
+                            std::env::set_var("KALAMDB_SERVER_URL", &auto_url);
+                            if std::env::var("KALAMDB_ROOT_PASSWORD").is_err() {
+                                std::env::set_var(
+                                    "KALAMDB_ROOT_PASSWORD",
+                                    root_password_from_env(),
+                                );
+                            }
+                            std::env::set_var(
+                                "KALAMDB_STORAGE_DIR",
+                                storage_dir.to_string_lossy().to_string(),
+                            );
+                            server_url = auto_url.clone();
+                            eprintln!(
+                                "[TEST] Cluster URLs configured but unreachable; falling back to fresh auto-started server at {}",
+                                server_url
+                            );
+                            (false, vec![auto_url])
+                        } else {
+                            eprintln!(
+                                "[TEST] Cluster URLs configured but unreachable; falling back to single-node URL {}",
+                                server_url
+                            );
+                            (false, vec![server_url.clone()])
+                        }
+                    } else {
+                        (explicit_urls.len() > 1, explicit_urls)
+                    }
                 } else if !healthy.is_empty() {
                     (true, healthy)
                 } else {
@@ -2203,7 +2231,7 @@ fn wait_for_cluster_after_sql(sql: &str) {
     std::thread::sleep(Duration::from_millis(600));
 }
 
-fn query_response_error_message(response: &kalam_link::QueryResponse) -> String {
+fn query_response_error_message(response: &kalam_client::QueryResponse) -> String {
     if let Some(error) = &response.error {
         if let Some(details) = &error.details {
             return format!("{} ({})", error.message, details);
@@ -2809,7 +2837,7 @@ pub fn wait_for_table_ready(
 }
 
 // ============================================================================
-// CLIENT-BASED QUERY EXECUTION (uses kalam-link directly, avoids CLI process spawning)
+// CLIENT-BASED QUERY EXECUTION (uses kalam-client directly, avoids CLI process spawning)
 // ============================================================================
 
 /// A shared tokio runtime for client-based query execution.
@@ -2980,7 +3008,7 @@ fn execute_sql_via_client_internal(
     let (tx, rx) = std_mpsc::channel();
 
     runtime.spawn(async move {
-        let result: Result<kalam_link::QueryResponse, Box<dyn std::error::Error + Send + Sync>> =
+        let result: Result<kalam_client::QueryResponse, Box<dyn std::error::Error + Send + Sync>> =
             async {
                 let urls = get_available_server_urls();
                 let base_url = urls.first().cloned().unwrap_or_else(|| server_url().to_string());
@@ -2991,7 +3019,7 @@ fn execute_sql_via_client_internal(
                     password: &str,
                     sql: &str,
                     params: &Option<Vec<serde_json::Value>>,
-                ) -> Result<kalam_link::QueryResponse, Box<dyn std::error::Error + Send + Sync>>
+                ) -> Result<kalam_client::QueryResponse, Box<dyn std::error::Error + Send + Sync>>
                 {
                     let timeouts = KalamLinkTimeouts::builder()
                         .connection_timeout_secs(5)
@@ -3046,8 +3074,8 @@ fn execute_sql_via_client_internal(
                                 Err(e) => {
                                     let msg = e.to_string();
                                     if is_flush_sql(&sql) && is_idempotent_conflict(&msg) {
-                                        return Ok(kalam_link::QueryResponse {
-                                            status: kalam_link::models::ResponseStatus::Success,
+                                        return Ok(kalam_client::QueryResponse {
+                                            status: kalam_client::models::ResponseStatus::Success,
                                             results: Vec::new(),
                                             took: None,
                                             error: None,
@@ -3255,12 +3283,12 @@ fn execute_sql_via_client_internal(
     }
 }
 
-/// Execute SQL as root user via kalam-link client
+/// Execute SQL as root user via kalam-client
 pub fn execute_sql_as_root_via_client(sql: &str) -> Result<String, Box<dyn std::error::Error>> {
     execute_sql_via_client_as(default_username(), default_password(), sql)
 }
 
-/// Execute SQL as root user via kalam-link client with query parameters
+/// Execute SQL as root user via kalam-client with query parameters
 pub fn execute_sql_as_root_via_client_with_params(
     sql: &str,
     params: Vec<serde_json::Value>,
@@ -3268,14 +3296,14 @@ pub fn execute_sql_as_root_via_client_with_params(
     execute_sql_via_client_as_with_params(default_username(), default_password(), sql, params)
 }
 
-/// Execute SQL as root user via kalam-link client returning JSON output
+/// Execute SQL as root user via kalam-client returning JSON output
 pub fn execute_sql_as_root_via_client_json(
     sql: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
     execute_sql_via_client_as_with_args(default_username(), default_password(), sql, true)
 }
 
-/// Execute SQL via kalam-link client returning JSON output with custom credentials
+/// Execute SQL via kalam-client returning JSON output with custom credentials
 pub fn execute_sql_via_client_as_json(
     username: &str,
     password: &str,
@@ -3284,7 +3312,7 @@ pub fn execute_sql_via_client_as_json(
     execute_sql_via_client_as_with_args(username, password, sql, true)
 }
 
-/// Execute SQL via kalam-link client without authentication (uses default/anonymous)
+/// Execute SQL via kalam-client without authentication (uses default/anonymous)
 /// This is the client equivalent of execute_sql_via_cli (no auth)
 pub fn execute_sql_via_client(sql: &str) -> Result<String, Box<dyn std::error::Error>> {
     execute_sql_via_client_as(default_username(), default_password(), sql)
@@ -3851,10 +3879,10 @@ pub fn wait_for_jobs_finished(
 }
 
 // ============================================================================
-// CLIENT-BASED SUBSCRIPTION LISTENER (uses kalam-link WebSocket, avoids CLI)
+// CLIENT-BASED SUBSCRIPTION LISTENER (uses kalam-client WebSocket, avoids CLI)
 // ============================================================================
 
-/// Subscription listener for testing real-time events via kalam-link client.
+/// Subscription listener for testing real-time events via kalam-client.
 /// Uses WebSocket connection instead of spawning CLI processes to avoid
 /// macOS TCP connection limits.
 pub struct SubscriptionListener {
@@ -3883,7 +3911,7 @@ impl SubscriptionListener {
     }
 
     /// Start a subscription listener with a specific timeout in seconds.
-    /// Uses kalam-link WebSocket client instead of spawning CLI processes.
+    /// Uses the kalam-client WebSocket path instead of spawning CLI processes.
     pub fn start_with_timeout(
         query: &str,
         _timeout_secs: u64,

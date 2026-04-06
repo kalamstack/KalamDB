@@ -4,7 +4,7 @@ use actix_web::{web, HttpRequest, HttpResponse};
 use kalamdb_auth::extract_client_ip_secure;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::metrics::{BUILD_DATE, SERVER_VERSION};
-use kalamdb_raft::NodeStatus;
+use kalamdb_raft::{NodeStatus, RaftExecutor, ServerStateExt};
 use std::sync::Arc;
 
 use super::models::{ClusterHealthResponse, NodeHealth};
@@ -30,7 +30,11 @@ pub async fn cluster_health_handler(
         }));
     }
 
-    let cluster_info = ctx.executor().get_cluster_info();
+    let executor = ctx.executor();
+    if let Some(raft_executor) = executor.as_any().downcast_ref::<RaftExecutor>() {
+        raft_executor.refresh_peer_stats().await;
+    }
+    let cluster_info = executor.get_cluster_info();
 
     // Calculate overall health status
     let status = if cluster_info.is_cluster_mode {
@@ -55,14 +59,19 @@ pub async fn cluster_health_handler(
         .nodes
         .iter()
         .map(|n| NodeHealth {
-            node_id: n.node_id,
-            role: n.role,
-            status: n.status,
+            node_id: n.node_id.as_u64(),
+            role: n.role.as_str().to_string(),
+            status: n.status.as_str().to_string(),
             api_addr: n.api_addr.clone(),
             is_self: n.is_self,
             is_leader: n.is_leader,
             replication_lag: n.replication_lag,
             catchup_progress_pct: n.catchup_progress_pct,
+            hostname: n.hostname.clone(),
+            memory_usage_mb: n.memory_usage_mb,
+            cpu_usage_percent: n.cpu_usage_percent,
+            uptime_seconds: n.uptime_seconds,
+            uptime_human: n.uptime_human.clone(),
         })
         .collect();
 

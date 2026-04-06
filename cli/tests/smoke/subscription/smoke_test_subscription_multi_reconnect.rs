@@ -13,7 +13,7 @@
 //   cargo test --test smoke smoke_subscription_multi_reconnect
 
 use crate::common::*;
-use kalam_link::{models::ChangeEvent, KalamLinkClient, KalamLinkTimeouts, SubscriptionConfig};
+use kalam_client::{models::ChangeEvent, KalamLinkClient, KalamLinkTimeouts, SubscriptionConfig};
 use std::time::Duration;
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -35,7 +35,7 @@ fn build_reconnect_client() -> Result<KalamLinkClient, Box<dyn std::error::Error
 }
 
 async fn collect_until<F>(
-    sub: &mut kalam_link::SubscriptionManager,
+    sub: &mut kalam_client::SubscriptionManager,
     timeout: Duration,
     mut predicate: F,
 ) -> Vec<ChangeEvent>

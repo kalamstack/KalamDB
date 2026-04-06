@@ -2,10 +2,10 @@ use super::CLISession;
 use crate::history::CommandHistory;
 use crate::CLI_VERSION;
 use colored::Colorize;
-use kalam_link::KalamLinkError;
+use kalam_client::KalamLinkError;
 
 impl CLISession {
-    fn normalize_server_field(value: String) -> Option<String> {
+    pub(super) fn normalize_server_field(value: String) -> Option<String> {
         let trimmed = value.trim();
         if trimmed.is_empty() {
             None

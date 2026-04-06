@@ -36,6 +36,7 @@ export function ClusterNodesList({ nodes, isLoading, onRefresh }: ClusterNodesLi
       node.node_id.toString().includes(query) ||
       node.role.toLowerCase().includes(query) ||
       node.status.toLowerCase().includes(query) ||
+      (node.hostname?.toLowerCase().includes(query) ?? false) ||
       node.api_addr.toLowerCase().includes(query) ||
       node.rpc_addr.toLowerCase().includes(query)
     );
@@ -76,6 +77,19 @@ export function ClusterNodesList({ nodes, isLoading, onRefresh }: ClusterNodesLi
     return num.toLocaleString();
   };
 
+  const formatMemory = (memoryMb: number | null) => {
+    if (memoryMb === null) return '—';
+    const precision = memoryMb >= 100 ? 0 : 1;
+    return `${memoryMb.toFixed(precision)} MB`;
+  };
+
+  const formatCpu = (cpuPercent: number | null) => {
+    if (cpuPercent === null) return '—';
+    return `${cpuPercent.toFixed(1)}%`;
+  };
+
+  const formatUptime = (uptime: string | null) => uptime ?? '—';
+
   return (
     <Card>
       <CardHeader>
@@ -113,6 +127,10 @@ export function ClusterNodesList({ nodes, isLoading, onRefresh }: ClusterNodesLi
                   <TableHead>Node</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Host</TableHead>
+                  <TableHead className="text-right">Memory</TableHead>
+                  <TableHead className="text-right">CPU</TableHead>
+                  <TableHead>Uptime</TableHead>
                   <TableHead>API Address</TableHead>
                   <TableHead>RPC Address</TableHead>
                   <TableHead className="text-center">Groups</TableHead>
@@ -127,7 +145,7 @@ export function ClusterNodesList({ nodes, isLoading, onRefresh }: ClusterNodesLi
               <TableBody>
                 {filteredNodes.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={12} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={16} className="text-center py-8 text-muted-foreground">
                       {searchQuery ? 'No nodes match your search' : 'No cluster nodes found'}
                     </TableCell>
                   </TableRow>
@@ -165,6 +183,18 @@ export function ClusterNodesList({ nodes, isLoading, onRefresh }: ClusterNodesLi
                       </TableCell>
                       <TableCell>{getRoleBadge(node.role)}</TableCell>
                       <TableCell>{getStatusBadge(node.status)}</TableCell>
+                      <TableCell className="font-mono text-sm text-muted-foreground">
+                        {node.hostname ?? '—'}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm">
+                        {formatMemory(node.memory_usage_mb)}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-sm">
+                        {formatCpu(node.cpu_usage_percent)}
+                      </TableCell>
+                      <TableCell className="font-mono text-sm text-muted-foreground">
+                        {formatUptime(node.uptime_human)}
+                      </TableCell>
                       <TableCell className="font-mono text-sm">{node.api_addr}</TableCell>
                       <TableCell className="font-mono text-sm text-muted-foreground">
                         {node.rpc_addr}

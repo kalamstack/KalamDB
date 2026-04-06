@@ -10,12 +10,12 @@
 //   cargo test --test smoke smoke_test_subscription_listing
 
 use crate::common::*;
-use kalam_link::{ChangeEvent, KalamLinkClient, KalamLinkTimeouts, SubscriptionConfig};
+use kalam_client::{ChangeEvent, KalamLinkClient, KalamLinkTimeouts, SubscriptionConfig};
 use std::time::Duration;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-/// Build a kalam-link client with fast timeouts.
+/// Build a kalam-client with fast timeouts.
 fn fast_link_client() -> Result<KalamLinkClient, Box<dyn std::error::Error + Send + Sync>> {
     client_for_user_on_url_with_timeouts(
         &leader_or_server_url(),

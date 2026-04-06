@@ -2,7 +2,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 
-use kalam_link::AutoOffsetReset;
+use kalam_client::AutoOffsetReset;
 
 use crate::benchmarks::Benchmark;
 use crate::client::KalamClient;

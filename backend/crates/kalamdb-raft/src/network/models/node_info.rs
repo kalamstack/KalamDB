@@ -17,7 +17,7 @@ pub struct GetNodeInfoRequest {
 
 /// Live per-node statistics returned by `GetNodeInfo`.
 ///
-/// Each field mirrors the corresponding column in `system.cluster_nodes`.
+/// Each field mirrors the corresponding column in `system.cluster`.
 /// Optional fields use the prost `optional` attribute so that `None` is
 /// distinguishable from a zero value (e.g., 0 applied-log vs unknown).
 #[derive(Clone, PartialEq, prost::Message)]
@@ -77,4 +77,20 @@ pub struct GetNodeInfoResponse {
     /// CPU architecture (e.g., `"x86_64"`, `"aarch64"`).
     #[prost(string, optional, tag = "13")]
     pub arch: Option<String>,
+
+    /// Current KalamDB process memory usage in megabytes.
+    #[prost(uint64, optional, tag = "14")]
+    pub memory_usage_mb: Option<u64>,
+
+    /// Current KalamDB process CPU usage percentage.
+    #[prost(float, optional, tag = "15")]
+    pub cpu_usage_percent: Option<f32>,
+
+    /// KalamDB server uptime in seconds.
+    #[prost(uint64, optional, tag = "16")]
+    pub uptime_seconds: Option<u64>,
+
+    /// KalamDB server uptime in compact human-readable form.
+    #[prost(string, optional, tag = "17")]
+    pub uptime_human: Option<String>,
 }

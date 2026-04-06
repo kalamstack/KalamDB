@@ -7,7 +7,7 @@
 //! 4. Flushed data - column statistics use column_id keys
 
 use super::test_support::{consolidated_helpers, fixtures, flush_helpers, TestServer};
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use serde_json::Value;
 use std::collections::HashMap;
 

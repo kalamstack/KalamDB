@@ -1,6 +1,7 @@
 import { config as loadEnv } from 'dotenv';
 import { fileURLToPath } from 'node:url';
-import { Auth, createClient, runAgent } from 'kalam-link';
+import { Auth } from '@kalamdb/client';
+import { createConsumerClient, runAgent } from '@kalamdb/consumer';
 
 loadEnv({ path: '.env.local', quiet: true });
 loadEnv({ quiet: true });
@@ -25,7 +26,7 @@ export function buildSummary(content: string): string {
 }
 
 export async function startSummarizerAgent(options: StartAgentOptions = {}): Promise<void> {
-  const client = createClient({
+  const client = createConsumerClient({
     url: KALAMDB_URL,
     authProvider: async () => Auth.basic(KALAMDB_USERNAME, KALAMDB_PASSWORD),
   });

@@ -17,7 +17,7 @@
 use super::helpers::*;
 
 use futures_util::StreamExt;
-use kalam_link::models::ChangeEvent;
+use kalam_client::models::ChangeEvent;
 use kalamdb_commons::{Role, UserName};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -107,9 +107,9 @@ async fn test_scenario_02_offline_sync_parallel() -> anyhow::Result<()> {
 
             tokio::spawn(async move {
                 // Create client for this user
-                let client = kalam_link::KalamLinkClient::builder()
+                let client = kalam_client::KalamLinkClient::builder()
                     .base_url(&server_base)
-                    .auth(kalam_link::AuthProvider::jwt_token(token))
+                    .auth(kalam_client::AuthProvider::jwt_token(token))
                     .build()?;
 
                 // Subscribe to items

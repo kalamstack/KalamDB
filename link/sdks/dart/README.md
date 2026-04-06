@@ -4,7 +4,9 @@ Official Dart and Flutter SDK for [KalamDB](https://kalamdb.org).
 
 > Status: **Beta**. The API is usable today, but it is still evolving and may change between releases.
 
-KalamDB is a SQL-first realtime database. The current Dart SDK focuses on the app-facing core: runtime init, authenticated queries, typed row access, live SQL subscriptions, connection lifecycle hooks, login/token refresh, and health checks.
+KalamDB is a SQL-first realtime database. The current Dart SDK focuses on the app-facing core: runtime init, authenticated queries, typed row access, live SQL subscriptions, connection lifecycle hooks, and login/token refresh.
+
+Topic consumer / ACK worker APIs and initial server bootstrap flows are intentionally outside the Dart SDK surface.
 
 → **[kalamdb.org](https://kalamdb.org)** · [Docs](https://kalamdb.org/docs) · [Dart setup](https://kalamdb.org/docs/sdk/dart/setup) · [Authentication](https://kalamdb.org/docs/sdk/dart/auth) · [Auth-aware client](https://kalamdb.org/docs/sdk/dart/auth-aware-client) · [Subscriptions](https://kalamdb.org/docs/sdk/dart/subscriptions) · [GitHub](https://github.com/jamals86/KalamDB)
 
@@ -259,7 +261,7 @@ The Dart SDK keeps this layer intentionally thin:
 - Rust owns the shared WebSocket, reconnect, checkpoint tracking, and replay filtering.
 - Dart wraps the Rust subscription handles as streams and decodes typed rows.
 
-That means reconnect and resume behavior is aligned with the core `kalam-link`
+That means reconnect and resume behavior is aligned with the shared Rust client
 logic instead of being reimplemented separately in Flutter code.
 
 ```dart
@@ -363,14 +365,9 @@ final client = await KalamClient.connect(
 );
 ```
 
-## Health and Diagnostics
+## Diagnostics
 
-```dart
-final health = await client.healthCheck();
-print('${health.status} - v${health.version} (api=${health.apiVersion})');
-```
-
-Initial server bootstrap is not currently part of the Dart SDK surface. Use the server CLI or the documented HTTP setup flow instead.
+Initial server bootstrap and server health endpoints are not currently part of the Dart SDK surface. Use the server CLI, Admin UI, or the documented HTTP flows instead.
 
 ## Disposing
 
@@ -498,7 +495,6 @@ Avoid this pattern. Build the UI first, then resolve auth and connect from a pro
 | `login(username, password)` | Exchange Basic credentials for JWT tokens |
 | `refreshToken(refreshToken)` | Refresh an access token |
 | `refreshAuth(...)` | Re-run `authProvider` and update credentials in place |
-| `healthCheck()` | Read server health/version metadata |
 | `isConnected` | Report whether the shared WebSocket is currently open |
 | `disconnectWebSocket()` | Close the shared WebSocket explicitly |
 | `reconnectWebSocket()` | Refresh auth as needed and reopen the shared WebSocket |
@@ -519,7 +515,6 @@ Apache-2.0
 - Dart subscriptions: [https://kalamdb.org/docs/sdk/dart/subscriptions](https://kalamdb.org/docs/sdk/dart/subscriptions)
 - Dart lifecycle: [https://kalamdb.org/docs/sdk/dart/client-lifecycle](https://kalamdb.org/docs/sdk/dart/client-lifecycle)
 - Dart cell values: [https://kalamdb.org/docs/sdk/dart/cell-values](https://kalamdb.org/docs/sdk/dart/cell-values)
-- Dart health: [https://kalamdb.org/docs/sdk/dart/health-setup](https://kalamdb.org/docs/sdk/dart/health-setup)
 - WebSocket protocol: [https://kalamdb.org/docs/api/websocket-protocol](https://kalamdb.org/docs/api/websocket-protocol)
 - Live query architecture: [https://kalamdb.org/docs/architecture/live-query](https://kalamdb.org/docs/architecture/live-query)
 - Getting started auth: [https://kalamdb.org/docs/getting-started/authentication](https://kalamdb.org/docs/getting-started/authentication)

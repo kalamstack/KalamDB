@@ -1,7 +1,7 @@
 //! Cluster test server for testing multiple node scenarios
 use super::http_server::HttpTestServer;
 use anyhow::Result;
-use kalam_link::models::QueryResponse;
+use kalam_client::models::QueryResponse;
 use rand::RngExt;
 use tokio::sync::Mutex;
 

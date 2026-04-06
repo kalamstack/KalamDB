@@ -1,6 +1,6 @@
 use crate::common::*;
-use kalam_link::models::ChangeEvent;
-use kalam_link::KalamLinkTimeouts;
+use kalam_client::models::ChangeEvent;
+use kalam_client::KalamLinkTimeouts;
 use std::time::Duration;
 
 const MAX_SQL_QUERY_LENGTH: usize = 1024 * 1024;
@@ -61,11 +61,11 @@ fn subscribe_as_user(username: &str, password: &str, query: &str) -> Result<(), 
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             if remaining.is_zero() {
                 // Timeout without receiving any event — treat as success (subscription is alive).
-                return Ok::<(), kalam_link::error::KalamLinkError>(());
+                return Ok::<(), kalam_client::error::KalamLinkError>(());
             }
             match tokio::time::timeout(remaining, subscription.next()).await {
                 Ok(Some(Ok(ChangeEvent::Error { code, message, .. }))) => {
-                    return Err(kalam_link::error::KalamLinkError::WebSocketError(format!(
+                    return Err(kalam_client::error::KalamLinkError::WebSocketError(format!(
                         "{}: {}",
                         code, message
                     )));
@@ -83,7 +83,7 @@ fn subscribe_as_user(username: &str, password: &str, query: &str) -> Result<(), 
                 },
                 Ok(None) => {
                     // Stream closed without ACK — treat as error.
-                    return Err(kalam_link::error::KalamLinkError::WebSocketError(
+                    return Err(kalam_client::error::KalamLinkError::WebSocketError(
                         "Stream closed before receiving ACK".to_string(),
                     ));
                 },

@@ -13,6 +13,12 @@ host = "0.0.0.0"
 # Server port (default: 8080)
 port = 8080
 
+# Public origin used by the Admin UI for both /v1/api and /v1/ws traffic.
+# Set this when browsers reach KalamDB through a public hostname or reverse proxy.
+# Example: "https://db.example.com"
+# Empty = use "http://localhost:{port}"
+public_origin = ""
+
 # Number of worker threads (0 = number of CPU cores)
 workers = 0
 

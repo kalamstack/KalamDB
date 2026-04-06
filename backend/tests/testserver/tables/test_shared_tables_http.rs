@@ -5,7 +5,7 @@ use super::test_support::flush::{flush_table_and_wait, wait_for_parquet_files_fo
 use super::test_support::jobs::{
     extract_cleanup_job_id, wait_for_job_completion, wait_for_path_absent,
 };
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use tokio::time::Duration;
 
 #[tokio::test]

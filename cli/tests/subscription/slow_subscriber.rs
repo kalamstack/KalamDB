@@ -18,7 +18,7 @@
 //   cargo test --test subscription slow_subscriber
 
 use crate::common::*;
-use kalam_link::{KalamLinkTimeouts, SubscriptionConfig, SubscriptionOptions};
+use kalam_client::{KalamLinkTimeouts, SubscriptionConfig, SubscriptionOptions};
 use std::sync::{Arc, Barrier};
 use std::time::Duration;
 
@@ -31,7 +31,7 @@ const DRAIN_IDLE_GRACE: Duration = Duration::from_secs(3);
 fn slow_client(
     receive_secs: u64,
     initial_data_secs: u64,
-) -> Result<kalam_link::KalamLinkClient, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<kalam_client::KalamLinkClient, Box<dyn std::error::Error + Send + Sync>> {
     client_for_user_on_url_with_timeouts(
         &leader_or_server_url(),
         default_username(),
@@ -57,7 +57,7 @@ fn slow_client(
 ///
 /// Returns `(events_collected, hit_error)`.
 async fn drain_with_delay(
-    sub: &mut kalam_link::SubscriptionManager,
+    sub: &mut kalam_client::SubscriptionManager,
     max_events: usize,
     per_event_delay: Duration,
     wall_timeout: Duration,

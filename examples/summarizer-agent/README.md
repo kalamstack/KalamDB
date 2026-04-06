@@ -2,7 +2,7 @@
 
 This is the worker-only example in the set.
 
-It demonstrates the smallest useful `runAgent()` flow:
+It demonstrates the smallest useful `@kalamdb/consumer` `runAgent()` flow:
 
 1. a row lands in `blog.blogs`
 2. KalamDB routes the change into `blog.summarizer`

@@ -1,5 +1,5 @@
 import { executeQuery, executeSql } from "@/lib/kalam-client";
-import type { SchemaField } from "kalam-link";
+import type { SchemaField } from "@kalamdb/client";
 import type {
   QueryLogEntry,
   QueryResultData,

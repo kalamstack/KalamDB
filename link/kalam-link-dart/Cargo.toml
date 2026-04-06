@@ -6,10 +6,10 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Flutter/Dart bridge for kalam-link via flutter_rust_bridge"
+description = "Flutter/Dart bridge for the shared KalamDB Rust client via flutter_rust_bridge"
 
 [dependencies]
-kalam-link = { path = ".." }
+kalam-client = { path = "../kalam-client", default-features = false }
 flutter_rust_bridge = { workspace = true }
 tokio = { workspace = true, optional = true }
 serde_json = { workspace = true }
@@ -18,8 +18,8 @@ anyhow = { workspace = true }
 
 [features]
 default = ["native"]
-native = ["kalam-link/tokio-runtime", "tokio"]
-wasm = ["kalam-link/wasm"]
+native = ["kalam-client/native-sdk", "tokio"]
+wasm = ["kalam-client/wasm"]
 
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]

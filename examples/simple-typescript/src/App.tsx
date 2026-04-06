@@ -3,7 +3,7 @@ import {
   Auth,
   createClient,
   type RowData,
-} from 'kalam-link';
+} from '@kalamdb/client';
 import './styles.css';
 
 type ActivityItem = {

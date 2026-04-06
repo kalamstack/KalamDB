@@ -4,7 +4,7 @@
 //! These tests ensure users get helpful feedback when things go wrong.
 
 use super::test_support::{consolidated_helpers, TestServer};
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use kalamdb_commons::Role;
 
 /// Verify syntax errors return clear, helpful messages

@@ -1,0 +1,28 @@
+[package]
+name = "kalam-consumer-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Consumer-only WebAssembly bindings for KalamDB topic workers"
+keywords = ["kalamdb", "consumer", "topics", "workers", "wasm"]
+categories = ["database", "web-programming::http-client", "wasm"]
+
+[dependencies]
+kalam-consumer = { path = "../kalam-consumer", default-features = false, features = ["wasm"] }
+base64 = { workspace = true }
+js-sys = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde-wasm-bindgen = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+web-sys = { workspace = true, features = ["Headers", "RequestInit", "RequestMode", "Response"] }
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

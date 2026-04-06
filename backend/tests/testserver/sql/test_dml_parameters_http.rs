@@ -8,7 +8,7 @@
 use super::test_support::auth_helper::create_user_auth_header;
 use super::test_support::consolidated_helpers::{unique_namespace, unique_table};
 use super::test_support::http_server::HttpTestServer;
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use kalamdb_commons::Role;
 use serde_json::json;
 use tokio::time::{sleep, Duration, Instant};

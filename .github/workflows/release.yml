@@ -132,7 +132,7 @@ jobs:
 
       - name: Install SDK dependencies
         shell: bash
-        working-directory: link/sdks/typescript
+        working-directory: link/sdks/typescript/client
         run: |
           set -euo pipefail
           npm install --no-audit --no-fund
@@ -141,7 +141,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cd link/sdks/typescript
+          cd link/sdks/typescript/client
           npx --yes license-checker --production --json > ../../../target/license/sdk-licenses.json
 
       - name: Validate and generate third-party report
@@ -207,11 +207,11 @@ jobs:
           cargo install wasm-pack --version "$WASM_PACK_VERSION" --locked
           wasm-pack --version
 
-      - name: Build SDK (kalam-link)
+      - name: Build SDK (@kalamdb/client)
         shell: bash
         run: |
           set -euo pipefail
-          cd link/sdks/typescript
+          cd link/sdks/typescript/client
           npm install
           npm run build
 

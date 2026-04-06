@@ -3752,7 +3752,7 @@ dependencies = [
  "futures-util",
  "indicatif",
  "jsonwebtoken",
- "kalam-link",
+ "kalam-client",
  "kalamdb-commons",
  "kalamdb-configs",
  "kalamdb-server",
@@ -3778,28 +3778,36 @@ dependencies = [
 ]
 
 [[package]]
-name = "kalam-link"
+name = "kalam-client"
 version = "0.4.2-rc1"
 dependencies = [
- "base64",
- "bytes",
- "futures-util",
- "http-body",
- "http-body-util",
- "js-sys",
  "kalamdb-configs",
  "kalamdb-server",
- "log",
- "miniz_oxide 0.9.1",
+ "link-common",
+ "ntest",
  "reqwest 0.13.2",
- "rmp-serde",
- "serde",
- "serde-wasm-bindgen",
  "serde_json",
  "tempfile",
  "tokio",
- "tokio-tungstenite",
- "tsify-next",
+]
+
+[[package]]
+name = "kalam-consumer"
+version = "0.4.2-rc1"
+dependencies = [
+ "kalam-client",
+]
+
+[[package]]
+name = "kalam-consumer-wasm"
+version = "0.4.2-rc1"
+dependencies = [
+ "base64",
+ "js-sys",
+ "kalam-consumer",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -3811,7 +3819,7 @@ version = "0.4.2-rc1"
 dependencies = [
  "anyhow",
  "flutter_rust_bridge",
- "kalam-link",
+ "kalam-client",
  "log",
  "serde_json",
  "tokio",
@@ -4313,6 +4321,7 @@ dependencies = [
  "kalam-pg-common",
  "kalamdb-commons",
  "kalamdb-configs",
+ "kalamdb-observability",
  "kalamdb-pg",
  "kalamdb-sharding",
  "kalamdb-store",
@@ -4350,7 +4359,7 @@ dependencies = [
  "futures-util",
  "hex",
  "jsonwebtoken",
- "kalam-link",
+ "kalam-client",
  "kalamdb-api",
  "kalamdb-auth",
  "kalamdb-commons",
@@ -4738,6 +4747,31 @@ dependencies = [
  "cc",
  "pkg-config",
  "vcpkg",
+]
+
+[[package]]
+name = "link-common"
+version = "0.4.2-rc1"
+dependencies = [
+ "base64",
+ "bytes",
+ "futures-util",
+ "http-body",
+ "http-body-util",
+ "js-sys",
+ "log",
+ "miniz_oxide 0.9.1",
+ "reqwest 0.13.2",
+ "rmp-serde",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "tsify-next",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

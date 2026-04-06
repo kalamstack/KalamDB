@@ -2,7 +2,7 @@
 
 use super::test_support::auth_helper::create_user_auth_header_default;
 use super::test_support::consolidated_helpers::{unique_namespace, unique_table};
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 
 #[tokio::test]
 #[ntest::timeout(60000)] // 60 seconds - comprehensive quickstart test

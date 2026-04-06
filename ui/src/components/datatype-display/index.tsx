@@ -5,7 +5,7 @@
  * Each component handles formatting, styling, and interaction for its specific type.
  */
 
-import { KalamCellValue } from 'kalam-link';
+import { KalamCellValue } from '@kalamdb/client';
 import { TimestampDisplay } from './TimestampDisplay';
 import { DateDisplay } from './DateDisplay';
 import { FileDisplay } from './FileDisplay';

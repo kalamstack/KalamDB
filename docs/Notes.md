@@ -1331,4 +1331,6 @@ Postgres Extension:
 - We should be able to view all pg sessions opened, learn from how postgres displays the session and add them to the cli as: \sessions which will print all the active grpc sessions between the pg-extension and our server
 - cli: \help doesnt contain all commands there add them for example \cluster commands
 - Check if we still need json between raft commands why not json is only for endpoint and never use it internaly in the server-backend code internally
-
+- in kalam-link we need to add features, so when using with cli we add more features like ddls/healthcheck and cluster and for sdk's we dont need these included so we exclude them, i think there is more things we can exclude here
+- Check have anonymous accss works in kalam-link
+- Make an option for streams table to not-wait-for-ack, fire and forget

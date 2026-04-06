@@ -1,0 +1,1 @@
+window.__KALAMDB_RUNTIME_CONFIG__ = window.__KALAMDB_RUNTIME_CONFIG__ || {};

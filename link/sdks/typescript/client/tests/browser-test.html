@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KalamDB WASM SDK - Browser Tests</title>
+  <style>
+    body {
+      font-family: 'Courier New', monospace;
+      max-width: 1200px;
+      margin: 20px auto;
+      padding: 20px;
+      background: #1e1e1e;
+      color: #d4d4d4;
+    }
+    h1 { color: #4ec9b0; }
+    h2 { color: #569cd6; margin-top: 30px; }
+    .test { 
+      margin: 10px 0; 
+      padding: 8px;
+      border-left: 3px solid #555;
+    }
+    .test.pass { 
+      background: #1e3a1e; 
+      border-left-color: #4ec9b0;
+    }
+    .test.fail { 
+      background: #3a1e1e; 
+      border-left-color: #f48771;
+    }
+    .summary {
+      margin-top: 30px;
+      padding: 20px;
+      background: #252526;
+      border-radius: 4px;
+      font-size: 18px;
+    }
+    .summary.success { border-left: 4px solid #4ec9b0; }
+    .summary.failure { border-left: 4px solid #f48771; }
+    .config {
+      background: #252526;
+      padding: 15px;
+      border-radius: 4px;
+      margin-bottom: 20px;
+    }
+    .log {
+      color: #858585;
+      font-size: 12px;
+      margin-left: 20px;
+    }
+    button {
+      background: #0e639c;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+      margin: 10px 5px;
+    }
+    button:hover { background: #1177bb; }
+    button:disabled { 
+      background: #555; 
+      cursor: not-allowed; 
+    }
+    #output { margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <h1>🧪 KalamDB WASM SDK - Browser Tests</h1>
+  
+  <div class="config">
+    <strong>Configuration:</strong><br>
+    WebSocket URL: <code id="wsUrl">ws://localhost:8080</code><br>
+    HTTP URL: <code id="httpUrl">http://localhost:8080</code><br>
+    API Key: <code id="apiKey">test-api-key-12345</code><br>
+    Test Table: <code id="testTable">app.sdk_test_todos</code>
+  </div>
+
+  <button id="runTests" onclick="runAllTests()">▶ Run All Tests</button>
+  <button id="clearLogs" onclick="clearOutput()">🗑 Clear Output</button>
+
+  <div id="output"></div>
+
+  <script type="module">
+    import init, { KalamClient } from '../kalam_client.js';
+
+    // Configuration
+    const WS_URL = 'ws://localhost:8080';
+    const HTTP_URL = 'http://localhost:8080';
+    const API_KEY = 'test-api-key-12345';
+    const TEST_NAMESPACE = 'app';
+    const TEST_TABLE = 'sdk_test_todos';
+    const FULL_TABLE_NAME = `${TEST_NAMESPACE}.${TEST_TABLE}`;
+
+    let testsPassed = 0;
+    let testsFailed = 0;
+    let client;
+
+    window.clearOutput = function() {
+      document.getElementById('output').innerHTML = '';
+    };
+
+    function log(message, type = 'log') {
+      const div = document.createElement('div');
+      div.className = `log ${type}`;
+      div.textContent = message;
+      document.getElementById('output').appendChild(div);
+    }
+
+    function testResult(name, passed, message = '') {
+      testsPassed += passed ? 1 : 0;
+      testsFailed += passed ? 0 : 1;
+      
+      const div = document.createElement('div');
+      div.className = `test ${passed ? 'pass' : 'fail'}`;
+      div.innerHTML = `
+        <strong>${passed ? '✓' : '✗'} ${name}</strong>
+        ${message ? `<br><span class="log">${message}</span>` : ''}
+      `;
+      document.getElementById('output').appendChild(div);
+    }
+
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    window.runAllTests = async function() {
+      const btn = document.getElementById('runTests');
+      btn.disabled = true;
+      btn.textContent = '⏳ Running...';
+      
+      clearOutput();
+      testsPassed = 0;
+      testsFailed = 0;
+
+      try {
+        // Initialize WASM
+        log('Initializing WASM module...');
+        await init();
+        testResult('WASM Initialization', true);
+
+        // Test 1: Server Health
+        const h2_1 = document.createElement('h2');
+        h2_1.textContent = '📋 Test Suite 1: Server Health';
+        document.getElementById('output').appendChild(h2_1);
+
+        try {
+          const response = await fetch(`${HTTP_URL}/v1/api/sql`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-API-Key': API_KEY
+            },
+            body: JSON.stringify({ sql: 'SELECT 1 as test' })
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            testResult('Server Health Check', true, `Status: ${data.status}`);
+          } else {
+            testResult('Server Health Check', false, `HTTP ${response.status}`);
+          }
+        } catch (error) {
+          testResult('Server Health Check', false, error.message);
+        }
+
+        // Test 2: Client Creation
+        const h2_2 = document.createElement('h2');
+        h2_2.textContent = '📋 Test Suite 2: Client Creation';
+        document.getElementById('output').appendChild(h2_2);
+
+        try {
+          client = new KalamClient(WS_URL, API_KEY);
+          testResult('Client Instance Created', true);
+        } catch (error) {
+          testResult('Client Instance Created', false, error.message);
+          throw new Error('Cannot continue without client');
+        }
+
+        // Test 3: WebSocket Connection
+        const h2_3 = document.createElement('h2');
+        h2_3.textContent = '📋 Test Suite 3: WebSocket Connection';
+        document.getElementById('output').appendChild(h2_3);
+
+        try {
+          await client.connect();
+          testResult('WebSocket Connect', true);
+          
+          await sleep(200);
+          
+          if (client.isConnected()) {
+            testResult('Connection Status Verified', true);
+          } else {
+            testResult('Connection Status Verified', false, 'isConnected() returned false');
+          }
+        } catch (error) {
+          testResult('WebSocket Connect', false, error.message);
+          throw new Error('Cannot continue without connection');
+        }
+
+        // Test 4: Table Setup
+        const h2_4 = document.createElement('h2');
+        h2_4.textContent = '📋 Test Suite 4: Table Setup';
+        document.getElementById('output').appendChild(h2_4);
+
+        try {
+          const createSQL = `
+            CREATE USER TABLE IF NOT EXISTS ${FULL_TABLE_NAME} (
+              id BIGINT,
+              title TEXT,
+              completed BOOLEAN
+            )
+          `;
+          const result = JSON.parse(await client.query(createSQL));
+          
+          if (result?.status === 'success') {
+            testResult('Create Test Table', true);
+          } else {
+            testResult('Create Test Table', false, result?.error?.message || 'Unknown error');
+          }
+        } catch (error) {
+          testResult('Create Test Table', false, error.message);
+        }
+
+        try {
+          const deleteSQL = `DELETE FROM ${FULL_TABLE_NAME}`;
+          const result = JSON.parse(await client.query(deleteSQL));
+          
+          if (result?.status === 'success') {
+            testResult('Clear Test Data', true);
+          } else {
+            testResult('Clear Test Data', false, result?.error?.message || 'Unknown error');
+          }
+        } catch (error) {
+          testResult('Clear Test Data', false, error.message);
+        }
+
+        // Test 5: SQL Operations
+        const h2_5 = document.createElement('h2');
+        h2_5.textContent = '📋 Test Suite 5: SQL Operations';
+        document.getElementById('output').appendChild(h2_5);
+
+        let firstId;
+
+        try {
+          const insertSQL = `
+            INSERT INTO ${FULL_TABLE_NAME} (title, completed)
+            VALUES ('Test SQL Insert', false)
+          `;
+          const result = JSON.parse(await client.query(insertSQL));
+          
+          if (result?.status === 'success') {
+            testResult('SQL INSERT', true);
+          } else {
+            testResult('SQL INSERT', false, result?.error?.message || 'Unknown error');
+          }
+        } catch (error) {
+          testResult('SQL INSERT', false, error.message);
+        }
+
+        try {
+          const selectSQL = `SELECT * FROM ${FULL_TABLE_NAME} ORDER BY id`;
+          const result = JSON.parse(await client.query(selectSQL));
+          
+          if (result?.status === 'success') {
+            const rows = result.results[0]?.rows || [];
+            
+            if (rows.length > 0) {
+              testResult('SQL SELECT', true, `Found ${rows.length} row(s)`);
+              
+              const row = rows[0];
+              firstId = row.id;
+              
+              if (row.title === 'Test SQL Insert' && row.completed === false) {
+                testResult('Row Data Integrity', true, `ID: ${firstId}`);
+              } else {
+                testResult('Row Data Integrity', false, `Data mismatch: ${JSON.stringify(row)}`);
+              }
+            } else {
+              testResult('SQL SELECT', false, 'No rows returned');
+            }
+          } else {
+            testResult('SQL SELECT', false, result?.error?.message || 'Unknown error');
+          }
+        } catch (error) {
+          testResult('SQL SELECT', false, error.message);
+        }
+
+        // Test 6: WASM Methods
+        const h2_6 = document.createElement('h2');
+        h2_6.textContent = '📋 Test Suite 6: WASM Insert/Delete Methods';
+        document.getElementById('output').appendChild(h2_6);
+
+        try {
+          const data = JSON.stringify({
+            title: 'Test WASM Insert',
+            completed: true
+          });
+          const result = JSON.parse(await client.insert(FULL_TABLE_NAME, data));
+          
+          if (result?.status === 'success') {
+            testResult('WASM insert()', true);
+          } else {
+            testResult('WASM insert()', false, result?.error?.message || 'Unknown error');
+          }
+        } catch (error) {
+          testResult('WASM insert()', false, error.message);
+        }
+
+        try {
+          const selectSQL = `SELECT * FROM ${FULL_TABLE_NAME} ORDER BY id`;
+          const result = JSON.parse(await client.query(selectSQL));
+          
+          if (result?.status === 'success') {
+            const rows = result.results[0]?.rows || [];
+            
+            if (rows.length === 2) {
+              testResult('Verify Multiple Rows', true, 'Both inserts confirmed');
+            } else {
+              testResult('Verify Multiple Rows', false, `Expected 2 rows, got ${rows.length}`);
+            }
+          }
+        } catch (error) {
+          testResult('Verify Multiple Rows', false, error.message);
+        }
+
+        if (firstId) {
+          try {
+            const result = JSON.parse(await client.delete(FULL_TABLE_NAME, firstId));
+            
+            if (result?.status === 'success') {
+              testResult('WASM delete()', true);
+              
+              // Verify deletion
+              const selectSQL = `SELECT * FROM ${FULL_TABLE_NAME} WHERE id = ${firstId}`;
+              const verifyResult = JSON.parse(await client.query(selectSQL));
+              
+              if (verifyResult?.results[0]?.rows?.length === 0) {
+                testResult('Delete Verification', true, 'Row removed successfully');
+              } else {
+                testResult('Delete Verification', false, 'Row still exists');
+              }
+            } else {
+              testResult('WASM delete()', false, result?.error?.message || 'Unknown error');
+            }
+          } catch (error) {
+            testResult('WASM delete()', false, error.message);
+          }
+        }
+
+        // Test 7: WebSocket Subscriptions
+        const h2_7 = document.createElement('h2');
+        h2_7.textContent = '📋 Test Suite 7: WebSocket Subscriptions';
+        document.getElementById('output').appendChild(h2_7);
+
+        let subscriptionReceived = false;
+        let subscriptionId;
+
+        try {
+          subscriptionId = await client.subscribe(
+            FULL_TABLE_NAME,
+            (message) => {
+              subscriptionReceived = true;
+              log(`→ Subscription message: ${JSON.stringify(message).substring(0, 100)}...`);
+            }
+          );
+          
+          if (subscriptionId) {
+            testResult('Subscribe to Table', true, `ID: ${subscriptionId}`);
+            
+            await sleep(300);
+            
+            // Trigger subscription with insert
+            const insertSQL = `
+              INSERT INTO ${FULL_TABLE_NAME} (title, completed)
+              VALUES ('Subscription Test', false)
+            `;
+            await client.query(insertSQL);
+            
+            await sleep(500);
+            
+            if (subscriptionReceived) {
+              testResult('Subscription Message Received', true);
+            } else {
+              testResult('Subscription Message Received', false, 'Timeout waiting for message');
+            }
+          } else {
+            testResult('Subscribe to Table', false, 'No subscription ID returned');
+          }
+        } catch (error) {
+          testResult('Subscribe to Table', false, error.message);
+        }
+
+        if (subscriptionId) {
+          try {
+            await client.unsubscribe(subscriptionId);
+            testResult('Unsubscribe', true);
+            
+            subscriptionReceived = false;
+            
+            const insertSQL = `
+              INSERT INTO ${FULL_TABLE_NAME} (title, completed)
+              VALUES ('After Unsubscribe', false)
+            `;
+            await client.query(insertSQL);
+            await sleep(300);
+            
+            if (!subscriptionReceived) {
+              testResult('No Message After Unsubscribe', true);
+            } else {
+              testResult('No Message After Unsubscribe', false, 'Still receiving messages');
+            }
+          } catch (error) {
+            testResult('Unsubscribe', false, error.message);
+          }
+        }
+
+        // Test 8: Connection Management
+        const h2_8 = document.createElement('h2');
+        h2_8.textContent = '📋 Test Suite 8: Connection Management';
+        document.getElementById('output').appendChild(h2_8);
+
+        try {
+          client.disconnect();
+          await sleep(100);
+          
+          if (!client.isConnected()) {
+            testResult('Disconnect', true);
+          } else {
+            testResult('Disconnect', false, 'Still connected');
+          }
+        } catch (error) {
+          testResult('Disconnect', false, error.message);
+        }
+
+        try {
+          await client.connect();
+          await sleep(200);
+          
+          if (client.isConnected()) {
+            testResult('Reconnect', true);
+            
+            const result = JSON.parse(await client.query(`SELECT 1 as test`));
+            if (result?.status === 'success') {
+              testResult('Query After Reconnect', true);
+            } else {
+              testResult('Query After Reconnect', false);
+            }
+          } else {
+            testResult('Reconnect', false);
+          }
+        } catch (error) {
+          testResult('Reconnect', false, error.message);
+        }
+
+        // Cleanup
+        try {
+          client.disconnect();
+        } catch (e) {
+          // Ignore cleanup errors
+        }
+
+      } catch (error) {
+        log(`Test suite error: ${error.message}`, 'fail');
+      }
+
+      // Summary
+      const summary = document.createElement('div');
+      summary.className = `summary ${testsFailed === 0 ? 'success' : 'failure'}`;
+      summary.innerHTML = `
+        <strong>Test Results:</strong><br>
+        ✓ ${testsPassed} passed<br>
+        ${testsFailed > 0 ? `✗ ${testsFailed} failed<br>` : ''}
+        ${testsFailed === 0 ? '✅ All tests passed!' : '❌ Some tests failed'}
+      `;
+      document.getElementById('output').appendChild(summary);
+
+      btn.disabled = false;
+      btn.textContent = '▶ Run All Tests';
+    };
+
+    // Make client available globally for debugging
+    window.KalamClient = KalamClient;
+    window.testClient = client;
+  </script>
+</body>
+</html>

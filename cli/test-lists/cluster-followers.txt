@@ -1,0 +1,11 @@
+# Follower- and replication-focused cluster coverage.
+# Used by ./run-cluster-tests.sh --followers
+
+cluster_test_subscription_follower_to_leader
+cluster_test_ws_follower_receives_leader_changes
+cluster_test_subscription_multi_node_identical
+cluster_test_subscription_initial_data_consistency
+cluster_test_subscription_user_table_any_node
+cluster_test_data_consistency
+cluster_test_read_from_any_node
+cluster_test_write_routing

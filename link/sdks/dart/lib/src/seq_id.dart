@@ -1,6 +1,6 @@
 /// Lightweight Snowflake-based sequence identifier for MVCC versioning.
 ///
-/// Mirrors the Rust `SeqId` type from `kalam-link/src/seq_id.rs`.
+/// Mirrors the Rust `SeqId` type from `link/link-common/src/seq_id.rs`.
 ///
 /// Layout: `timestamp (42 bits) | worker (10 bits) | sequence (12 bits)`
 ///

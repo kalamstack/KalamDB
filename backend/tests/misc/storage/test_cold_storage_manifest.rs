@@ -15,8 +15,8 @@
 //! - Fallback to directory scan when manifest missing
 
 use super::test_support::{fixtures, flush_helpers, TestServer};
-use kalam_link::models::ResponseStatus;
-use kalam_link::parse_i64;
+use kalam_client::models::ResponseStatus;
+use kalam_client::parse_i64;
 
 /// Test: User table cold storage query uses manifest cache
 ///

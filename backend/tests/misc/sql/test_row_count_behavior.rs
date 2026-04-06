@@ -6,7 +6,7 @@
 //! - Row counts are accurate and match expectations
 
 use super::test_support::{consolidated_helpers, fixtures, TestServer};
-use kalam_link::models::{QueryResponse, ResponseStatus};
+use kalam_client::models::{QueryResponse, ResponseStatus};
 
 fn assert_row_count(response: &QueryResponse, expected: usize, verbs: &[&str]) {
     assert_eq!(

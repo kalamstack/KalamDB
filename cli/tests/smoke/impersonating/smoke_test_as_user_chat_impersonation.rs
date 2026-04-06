@@ -1,5 +1,5 @@
 use crate::common::*;
-use kalam_link::KalamLinkTimeouts;
+use kalam_client::KalamLinkTimeouts;
 use std::sync::mpsc as std_mpsc;
 use std::thread;
 use std::time::{Duration, Instant};

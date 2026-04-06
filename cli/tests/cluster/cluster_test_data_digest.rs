@@ -4,7 +4,7 @@
 
 use crate::cluster_common::*;
 use crate::common::*;
-use kalam_link::KalamCellValue;
+use kalam_client::KalamCellValue;
 
 fn normalize_rows(rows: &[Vec<KalamCellValue>]) -> Vec<String> {
     rows.iter()

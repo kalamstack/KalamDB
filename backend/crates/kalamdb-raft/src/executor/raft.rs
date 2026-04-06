@@ -5,9 +5,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use std::time::Instant;
 
 use async_trait::async_trait;
 use dashmap::DashMap;
+use kalamdb_observability::collect_runtime_metrics;
 use kalamdb_pg::KalamPgService;
 use openraft::ServerState;
 
@@ -33,6 +35,8 @@ type Result<T> = std::result::Result<T, RaftError>;
 pub struct RaftExecutor {
     /// Reference to the Raft manager
     manager: Arc<RaftManager>,
+    /// Server start time used to compute local runtime metrics.
+    server_start_time: Instant,
     /// Cluster message handler (set before `start()`)
     cluster_handler: tokio::sync::OnceCell<Arc<dyn ClusterMessageHandler>>,
     /// PostgreSQL remote gRPC service hosted on the shared RPC port.
@@ -54,9 +58,10 @@ impl std::fmt::Debug for RaftExecutor {
 
 impl RaftExecutor {
     /// Create a new RaftExecutor with a RaftManager.
-    pub fn new(manager: Arc<RaftManager>) -> Self {
+    pub fn new(manager: Arc<RaftManager>, server_start_time: Instant) -> Self {
         Self {
             manager,
+            server_start_time,
             cluster_handler: tokio::sync::OnceCell::new(),
             pg_service: tokio::sync::OnceCell::new(),
             peer_stats_cache: Arc::new(DashMap::new()),
@@ -190,6 +195,7 @@ impl CommandExecutor for RaftExecutor {
         let config = self.manager.config();
         let all_groups = self.manager.all_group_ids();
         let total_groups = all_groups.len() as u32;
+        let local_runtime = collect_runtime_metrics(self.server_start_time);
 
         // Count how many groups this node leads
         let mut self_groups_leading = 0;
@@ -400,7 +406,31 @@ impl CommandExecutor for RaftExecutor {
                     .as_ref()
                     .and_then(|p| p.version.clone())
                     .or_else(|| node.version.clone()),
-                memory_mb: peer_cache_entry.as_ref().and_then(|p| p.memory_mb).or(node.memory_mb),
+                memory_mb: if is_self {
+                    Some(local_runtime.system_total_memory_mb)
+                } else {
+                    peer_cache_entry.as_ref().and_then(|p| p.memory_mb).or(node.memory_mb)
+                },
+                memory_usage_mb: if is_self {
+                    local_runtime.memory_mb
+                } else {
+                    peer_cache_entry.as_ref().and_then(|p| p.memory_usage_mb)
+                },
+                cpu_usage_percent: if is_self {
+                    local_runtime.cpu_usage_percent
+                } else {
+                    peer_cache_entry.as_ref().and_then(|p| p.cpu_usage_percent)
+                },
+                uptime_seconds: if is_self {
+                    Some(local_runtime.uptime_seconds)
+                } else {
+                    peer_cache_entry.as_ref().and_then(|p| p.uptime_seconds)
+                },
+                uptime_human: if is_self {
+                    Some(local_runtime.uptime_human.clone())
+                } else {
+                    peer_cache_entry.as_ref().and_then(|p| p.uptime_human.clone())
+                },
                 os: peer_cache_entry
                     .as_ref()
                     .and_then(|p| p.os.clone())

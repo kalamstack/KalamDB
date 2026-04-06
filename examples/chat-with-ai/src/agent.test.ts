@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { buildReply } from './agent.js';
-import { Auth, createClient, runAgent } from 'kalam-link';
+import { Auth, createClient } from '@kalamdb/client';
+import { createConsumerClient, runAgent } from '@kalamdb/consumer';
 
 const serverUrl = process.env.KALAMDB_URL ?? 'http://127.0.0.1:8080';
 const username = process.env.KALAMDB_USERNAME ?? 'admin';
@@ -10,6 +11,13 @@ const password = process.env.KALAMDB_PASSWORD ?? 'kalamdb123';
 
 function createAuthedClient() {
   return createClient({
+    url: serverUrl,
+    authProvider: async () => Auth.basic(username, password),
+  });
+}
+
+function createWorkerClient() {
+  return createConsumerClient({
     url: serverUrl,
     authProvider: async () => Auth.basic(username, password),
   });
@@ -183,8 +191,8 @@ test('two agents in the same group avoid duplicates and fail over to the standby
     ['agent-b', []],
   ]);
 
-  const agentAClient = createAuthedClient();
-  const agentBClient = createAuthedClient();
+  const agentAClient = createWorkerClient();
+  const agentBClient = createWorkerClient();
   const controllerA = new AbortController();
   const controllerB = new AbortController();
 
@@ -258,6 +266,9 @@ test('two agents in the same group avoid duplicates and fail over to the standby
     if (!controllerB.signal.aborted) {
       await stopAgent(controllerB, agentBTask).catch(() => {});
     }
+
+    await agentAClient.disconnect().catch(() => {});
+    await agentBClient.disconnect().catch(() => {});
 
     await adminClient.query(`DROP TOPIC ${topicName}`).catch(() => {});
     await adminClient.query(`DROP TABLE ${tableName}`).catch(() => {});

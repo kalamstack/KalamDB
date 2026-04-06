@@ -15,7 +15,7 @@
 use super::helpers::*;
 
 use futures_util::StreamExt;
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use std::time::Duration;
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(180);

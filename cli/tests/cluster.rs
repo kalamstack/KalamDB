@@ -18,7 +18,7 @@ mod common;
 /// Cluster-specific common utilities
 mod cluster_common {
     use crate::common::*;
-    use kalam_link::{KalamCellValue, KalamLinkTimeouts, QueryResponse};
+    use kalam_client::{KalamCellValue, KalamLinkTimeouts, QueryResponse};
     use serde_json::Value;
     use std::sync::OnceLock;
     use std::time::Duration;

@@ -82,7 +82,7 @@ use kalamdb_commons::models::UserId;
 - `cli/`: Kalam CLI, smoke tests, and CLI-facing integration flows.
 - `link/`: SDK bridge workspace and shared link infrastructure.
 - `link/sdks/typescript/`: TypeScript SDK.
-- `link/sdks/dart/`: Dart/Flutter SDK. `link/sdks/dart/lib/src/generated` is generated; regenerate with `link/sdks/dart/build_native_libs.sh`.
+- `link/sdks/dart/`: Dart/Flutter SDK. `link/sdks/dart/lib/src/generated` is generated; regenerate and prepare the SDK with `link/sdks/dart/build.sh`.
 - `link/kalam-link-dart/`: Rust bridge/native layer used by the Dart SDK.
 - `pg/`: PostgreSQL extension workspace for `pg_kalam`; see `pg/pg_kalam.control`, `pg/src/`, `pg/crates/`, and `pg/tests/`.
 - `benchv2/`: Benchmark harness, scenarios, templates, and results for performance work.
@@ -138,6 +138,7 @@ backend/crates/
 - Always add `#[ntest::timeout(time)]` to every async test where `time` is the **actual observed runtime** × 1.5 (to cover slower machines).
    - Example: if a test took 40s, set `#[ntest::timeout(60000)]`.
    - Recalculate and update timeouts after significant changes to test behavior or data size.
+- Timeouts are guardrails, not the fix: do not increase a test timeout just because a test started failing. Fix the hang, race, or slow path first, then set the timeout from the measured healthy runtime × 1.5.
 
 ## Workflows & Commands (Documented)
 
@@ -189,4 +190,4 @@ Suggested extra checks:
 6. WebSocket origins must be validated against config or rejected when strict mode is enabled.
 7. Admin or root password by default should be set or is set to kalamdb123 for testing or writting in tests, and the user should be admin
 
-the folder: link/sdks/dart/lib/src/generated is generated dont modify anything in it, to regenerate this run the link/sdks/dart, build_native_libs.sh file which will regenerate this folder
+the folder: link/sdks/dart/lib/src/generated is generated dont modify anything in it, to regenerate this run the link/sdks/dart/build.sh script which also prepares the SDK artefacts

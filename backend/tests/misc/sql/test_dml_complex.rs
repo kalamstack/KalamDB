@@ -7,7 +7,7 @@
 //! - Multi-row operations
 
 use super::test_support::{fixtures, flush_helpers, TestServer};
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 
 /// T017a: UPDATE with simple multi-column predicate (single equality)
 ///

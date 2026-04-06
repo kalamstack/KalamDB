@@ -63,7 +63,10 @@ RUN sed -i '/^    "pg",$/d' Cargo.toml
 # Copy all Cargo.toml files to establish workspace structure
 COPY backend/Cargo.toml ./backend/
 COPY cli/Cargo.toml ./cli/
-COPY link/Cargo.toml ./link/
+COPY link/link-common/Cargo.toml ./link/link-common/
+COPY link/kalam-client/Cargo.toml ./link/kalam-client/
+COPY link/kalam-consumer/Cargo.toml ./link/kalam-consumer/
+COPY link/kalam-consumer-wasm/Cargo.toml ./link/kalam-consumer-wasm/
 COPY link/kalam-link-dart/Cargo.toml ./link/kalam-link-dart/
 COPY pg/crates/kalam-pg-common/Cargo.toml ./pg/crates/kalam-pg-common/
 COPY pg/crates/kalam-pg-api/Cargo.toml ./pg/crates/kalam-pg-api/
@@ -155,9 +158,15 @@ RUN mkdir -p cli/src && \
     echo "fn main() {}" > cli/src/main.rs && \
     touch cli/build.rs
 
-# Create dummy link library
-RUN mkdir -p link/src && \
-    echo "pub fn lib() {}" > link/src/lib.rs && \
+# Create dummy link crates
+RUN mkdir -p link/link-common/src && \
+    echo "pub fn lib() {}" > link/link-common/src/lib.rs && \
+    mkdir -p link/kalam-client/src && \
+    echo "pub fn lib() {}" > link/kalam-client/src/lib.rs && \
+    mkdir -p link/kalam-consumer/src && \
+    echo "pub fn lib() {}" > link/kalam-consumer/src/lib.rs && \
+    mkdir -p link/kalam-consumer-wasm/src && \
+    echo "pub fn lib() {}" > link/kalam-consumer-wasm/src/lib.rs && \
     mkdir -p link/kalam-link-dart/src && \
     echo "pub fn lib() {}" > link/kalam-link-dart/src/lib.rs
 
@@ -181,7 +190,7 @@ RUN echo '# Auto-generated for Docker build' > version.toml && \
     echo "build_date = \"$(date -u '+%Y-%m-%d %H:%M:%S UTC')\"" >> version.toml
 
 # Build dependencies only (this layer is cached until Cargo.toml/Cargo.lock changes)
-RUN cargo build --profile docker --features mimalloc --bin kalamdb-server --bin kalam 2>/dev/null || true
+RUN SKIP_UI_BUILD=1 cargo build --profile docker --features mimalloc --bin kalamdb-server --bin kalam 2>/dev/null || true
 # The "|| true" handles expected errors from dummy source files
 # The important thing is that all dependencies are now compiled and cached
 
@@ -191,7 +200,7 @@ RUN cargo build --profile docker --features mimalloc --bin kalamdb-server --bin 
 FROM deps AS builder
 
 # Remove dummy source files
-RUN rm -rf backend/src backend/crates cli/src link/src link/sdks link/kalam-link-dart/src pg/crates
+RUN rm -rf backend/src backend/crates cli/src link/link-common/src link/kalam-client/src link/kalam-consumer/src link/kalam-consumer-wasm/src link/kalam-link-dart/src pg/crates
 
 # Copy actual source code
 COPY backend/src ./backend/src
@@ -200,8 +209,10 @@ COPY backend/build.rs ./backend/
 COPY backend/build ./backend/build
 COPY cli/src ./cli/src
 COPY cli/build.rs ./cli/
-COPY link/src ./link/src
-COPY link/sdks ./link/sdks
+COPY link/link-common/src ./link/link-common/src
+COPY link/kalam-client/src ./link/kalam-client/src
+COPY link/kalam-consumer/src ./link/kalam-consumer/src
+COPY link/kalam-consumer-wasm/src ./link/kalam-consumer-wasm/src
 COPY link/kalam-link-dart/src ./link/kalam-link-dart/src
 COPY pg/crates ./pg/crates
 

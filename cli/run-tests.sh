@@ -37,6 +37,7 @@ fi
 TEST_JOBS="${KALAMDB_TEST_JOBS:-}"
 TEST_FILTER=""
 TEST_LIST_FILE=""
+TEST_TARGET=""
 NOCAPTURE=""
 SHOW_HELP=false
 PACKAGE_FILTERS=()
@@ -73,6 +74,10 @@ while [[ $# -gt 0 ]]; do
             TEST_FILTER="$2"
             shift 2
             ;;
+        --test-target)
+            TEST_TARGET="$2"
+            shift 2
+            ;;
         --test-list)
             TEST_LIST_FILE="$2"
             shift 2
@@ -107,6 +112,7 @@ if [ "$SHOW_HELP" = true ]; then
     echo "  -P, --package <CRATE>    Limit the run to one package (repeatable)"
     echo "  -p, --password <PASS>    Root/admin password"
     echo "  -t, --test <FILTER>      Test filter (e.g., 'smoke', 'smoke_test_core')"
+    echo "  --test-target <TARGET>   nextest test target/binary name (e.g., 'cluster')"
     echo "  --test-list <FILE|- >    Newline-delimited test filters to rerun one by one"
     echo "  --nocapture              Pass through test stdout/stderr (--no-capture)"
     echo "  -h, --help               Show this help message"
@@ -115,6 +121,7 @@ if [ "$SHOW_HELP" = true ]; then
     echo "  $0 --test smoke --nocapture"
     echo "  $0 --url http://localhost:3000 --password mypass"
     echo "  $0 --cluster-urls http://127.0.0.1:8081,http://127.0.0.1:8082,http://127.0.0.1:8083 --server-type cluster"
+    echo "  $0 --package kalam-cli --test-target cluster"
     echo "  $0 --package kalam-cli --package kalam-link"
     echo "  $0 --test-list failed-tests.txt"
     exit 0
@@ -239,6 +246,9 @@ else
     echo "Packages:        workspace"
 fi
 echo "Root Password:   $([ -z "$ROOT_PASSWORD" ] && echo '(empty)' || echo '***')"
+if [ -n "$TEST_TARGET" ]; then
+    echo "Test Target:     $TEST_TARGET"
+fi
 echo "Test Filter:     $([ -z "$TEST_FILTER" ] && echo '(all tests)' || echo "$TEST_FILTER")"
 if [ -n "$TEST_LIST_FILE" ]; then
     echo "Test List:       $TEST_LIST_FILE"
@@ -302,6 +312,10 @@ build_test_cmd() {
         TEST_CMD+=(--features "kalam-cli/e2e-tests")
     fi
 
+    if [ -n "$TEST_TARGET" ]; then
+        TEST_CMD+=(--test "$TEST_TARGET")
+    fi
+
     # nextest.toml already serializes the stateful kalam-cli / kalam-link
     # packages. Do not force a global `-j 1` here, otherwise the entire
     # workspace becomes single-file even when only those packages need it.
@@ -310,7 +324,7 @@ build_test_cmd() {
     fi
 
     if [ -n "$test_filter" ]; then
-        if [[ "$test_filter" == smoke* ]]; then
+        if [ -z "$TEST_TARGET" ] && [[ "$test_filter" == smoke* ]]; then
             TEST_CMD+=(--test smoke)
             if [[ "$test_filter" != "smoke" ]]; then
                 TEST_CMD+=("$test_filter")

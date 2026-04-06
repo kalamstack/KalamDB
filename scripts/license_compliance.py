@@ -258,7 +258,7 @@ def main() -> int:
         rust_overrides,
     )
     ui_errors, ui_entries, ui_counts = validate_npm(ui_report_path, "kalamdb-admin-ui", allow, deny)
-    sdk_errors, sdk_entries, sdk_counts = validate_npm(sdk_report_path, "kalam-link", allow, deny)
+    sdk_errors, sdk_entries, sdk_counts = validate_npm(sdk_report_path, "@kalamdb/client", allow, deny)
 
     all_errors = rust_errors + ui_errors + sdk_errors
 

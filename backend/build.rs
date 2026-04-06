@@ -237,9 +237,11 @@ fn build_ui_if_release(repo_root: &Path) {
     }
 
     // Rerun if UI inputs change.
-    // NOTE: do NOT watch link/sdks/typescript/src. The SDK build creates/removes src/wasm and
+    // NOTE: do NOT watch link/sdks/typescript/client/src. The SDK build creates/removes wasm and
     // can self-trigger rebuild loops.
     println!("cargo:rerun-if-changed={}", repo_root.join("ui").join("src").display());
+    println!("cargo:rerun-if-changed={}", repo_root.join("ui").join("index.html").display());
+    println!("cargo:rerun-if-changed={}", repo_root.join("ui").join("public").display());
     println!("cargo:rerun-if-changed={}", repo_root.join("ui").join("package.json").display());
     println!(
         "cargo:rerun-if-changed={}",
@@ -251,6 +253,7 @@ fn build_ui_if_release(repo_root: &Path) {
             .join("link")
             .join("sdks")
             .join("typescript")
+            .join("client")
             .join("package.json")
             .display()
     );

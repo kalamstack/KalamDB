@@ -14,7 +14,7 @@
 //! These smoke tests focus on single-node behavior that must work in both modes.
 
 use crate::common::*;
-use kalam_link::KalamLinkTimeouts;
+use kalam_client::KalamLinkTimeouts;
 use std::sync::OnceLock;
 use std::time::Duration;
 

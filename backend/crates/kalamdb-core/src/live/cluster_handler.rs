@@ -9,7 +9,7 @@ use kalamdb_auth::{authenticate, AuthRequest, CoreUsersRepo, UserRepository};
 use kalamdb_commons::conversions::{
     mask_sensitive_rows_for_role, record_batch_to_json_arrays, schema_fields_from_arrow_schema,
 };
-use kalamdb_commons::models::{ConnectionInfo, KalamCellValue, NamespaceId, Username};
+use kalamdb_commons::models::{ConnectionInfo, KalamCellValue, NamespaceId, TableId, Username};
 use kalamdb_commons::schemas::SchemaField;
 use kalamdb_commons::Role;
 use kalamdb_raft::{
@@ -22,6 +22,8 @@ use serde::Serialize;
 
 use crate::app_context::AppContext;
 use crate::sql::context::ExecutionContext;
+use crate::sql::executor::PreparedExecutionStatement;
+use crate::sql::SqlImpersonationService;
 use crate::sql::ExecutionResult;
 
 // ── Response types (match SqlResponse JSON shape, no intermediate Value tree) ──
@@ -175,6 +177,68 @@ impl CoreClusterHandler {
             }),
         }
     }
+
+    fn resolve_result_username(
+        authenticated_username: &Username,
+        execute_as_username: Option<&Username>,
+    ) -> Username {
+        execute_as_username
+            .cloned()
+            .unwrap_or_else(|| authenticated_username.clone())
+    }
+
+    fn prepare_forwarded_statement(
+        &self,
+        statement: &str,
+        default_namespace: &NamespaceId,
+        actor_role: Role,
+    ) -> Result<(PreparedExecutionStatement, Option<Username>), String> {
+        let trimmed = statement.trim().trim_end_matches(';').trim();
+        if trimmed.is_empty() {
+            return Err("Empty SQL statement".to_string());
+        }
+
+        let (sql, execute_as_username) = match kalamdb_sql::execute_as::parse_execute_as(statement)? {
+            Some(envelope) => {
+                let execute_as_username = Username::try_new(&envelope.username)
+                    .map_err(|e| format!("Invalid execute-as username: {}", e))?;
+                (envelope.inner_sql, Some(execute_as_username))
+            },
+            None => (trimmed.to_string(), None),
+        };
+
+        let parsed_statement = kalamdb_sql::parse_single_statement(&sql).ok().flatten();
+        let table_id = parsed_statement.as_ref().and_then(|stmt| {
+            kalamdb_sql::extract_dml_table_id_from_statement(stmt, default_namespace.as_str())
+        });
+        let table_type = table_id
+            .as_ref()
+            .and_then(|table_id| self.table_type_for(table_id));
+        let classified_statement = kalamdb_sql::classifier::SqlStatement::classify_and_parse(
+            &sql,
+            default_namespace,
+            actor_role,
+        )
+        .map_err(|err| err.to_string())?;
+
+        Ok((
+            PreparedExecutionStatement::new(
+                sql,
+                table_id,
+                table_type,
+                parsed_statement,
+                Some(classified_statement),
+            ),
+            execute_as_username,
+        ))
+    }
+
+    fn table_type_for(&self, table_id: &TableId) -> Option<kalamdb_commons::schemas::TableType> {
+        self.app_context
+            .schema_registry()
+            .get(table_id)
+            .map(|cached| cached.table_entry().table_type)
+    }
 }
 
 #[async_trait::async_trait]
@@ -303,6 +367,7 @@ impl ClusterMessageHandler for CoreClusterHandler {
         }
 
         let sql_executor = self.app_context.sql_executor();
+        let impersonation_service = SqlImpersonationService::new(Arc::clone(&self.app_context));
         let mut results = Vec::with_capacity(statements.len());
 
         for (idx, statement) in statements.iter().enumerate() {
@@ -312,7 +377,73 @@ impl ClusterMessageHandler for CoreClusterHandler {
                 scalar_params.clone()
             };
 
-            let exec_result = match sql_executor.execute(statement, &exec_ctx, stmt_params).await {
+            let (prepared_statement, execute_as_username) = match self.prepare_forwarded_statement(
+                statement,
+                &exec_ctx.default_namespace(),
+                exec_ctx.user_role(),
+            ) {
+                Ok(prepared) => prepared,
+                Err(e) => {
+                    return Ok(Self::error_payload(
+                        400,
+                        "INVALID_INPUT",
+                        &format!("Statement {} failed: {}", idx + 1, e),
+                        started_at,
+                    ));
+                },
+            };
+
+            let execute_as_user = match execute_as_username.as_ref() {
+                Some(target_username) => match impersonation_service
+                    .resolve_execute_as_user(
+                        exec_ctx.user_id(),
+                        exec_ctx.user_role(),
+                        target_username.as_str(),
+                    )
+                    .await
+                {
+                    Ok(user_id) => Some(user_id),
+                    Err(e) => {
+                        return Ok(Self::error_payload(
+                            400,
+                            "SQL_EXECUTION_ERROR",
+                            &format!("Statement {} failed: {}", idx + 1, e),
+                            started_at,
+                        ));
+                    },
+                },
+                None => None,
+            };
+
+            if execute_as_user.is_some()
+                && prepared_statement.table_type == Some(kalamdb_commons::schemas::TableType::Shared)
+            {
+                let table_name = prepared_statement
+                    .table_id
+                    .as_ref()
+                    .map(|table_id| table_id.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                return Ok(Self::error_payload(
+                    400,
+                    "SQL_EXECUTION_ERROR",
+                    &format!(
+                        "Statement {} failed: EXECUTE AS USER is not allowed on SHARED tables (table '{}'). AS USER impersonation is only supported for USER tables.",
+                        idx + 1,
+                        table_name
+                    ),
+                    started_at,
+                ));
+            }
+
+            let effective_ctx = match execute_as_user.as_ref() {
+                Some(user_id) => exec_ctx.with_effective_identity(user_id.clone(), Role::User),
+                None => exec_ctx.clone(),
+            };
+
+            let exec_result = match sql_executor
+                .execute_with_metadata(&prepared_statement, &effective_ctx, stmt_params)
+                .await
+            {
                 Ok(v) => v,
                 Err(e) => {
                     return Ok(Self::error_payload(
@@ -323,10 +454,17 @@ impl ClusterMessageHandler for CoreClusterHandler {
                     ));
                 },
             };
+            let effective_username =
+                Self::resolve_result_username(&authenticated_username, execute_as_username.as_ref());
+            let effective_role = if execute_as_user.is_some() {
+                Role::User
+            } else {
+                authenticated_role
+            };
             let result = match Self::execution_result_to_forwarded(
                 exec_result,
-                &authenticated_username,
-                authenticated_role,
+                &effective_username,
+                effective_role,
             ) {
                 Ok(r) => r,
                 Err(err) => {
@@ -397,6 +535,10 @@ impl ClusterMessageHandler for CoreClusterHandler {
             hostname: self_node.hostname.clone(),
             version: self_node.version.clone(),
             memory_mb: self_node.memory_mb,
+            memory_usage_mb: self_node.memory_usage_mb,
+            cpu_usage_percent: self_node.cpu_usage_percent,
+            uptime_seconds: self_node.uptime_seconds,
+            uptime_human: self_node.uptime_human.clone(),
             os: self_node.os.clone(),
             arch: self_node.arch.clone(),
         })

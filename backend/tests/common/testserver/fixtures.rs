@@ -29,7 +29,7 @@
 
 use super::TestServer;
 use anyhow::Result;
-use kalam_link::models::{QueryResponse, QueryResult, ResponseStatus};
+use kalam_client::models::{QueryResponse, QueryResult, ResponseStatus};
 use kalamdb_commons::models::NamespaceId;
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};

@@ -8,7 +8,7 @@
 //! - Verifying job completion metrics
 
 use super::TestServer;
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use kalamdb_commons::models::{NamespaceId, StorageId, TableId, TableName};
 use kalamdb_core::manifest::{FlushJobResult, SharedTableFlushJob, TableFlush, UserTableFlushJob};
 use kalamdb_tables::new_indexed_user_table_store;

@@ -38,7 +38,10 @@ members = [
     "backend/crates/kalamdb-pg",
     "backend/crates/kalamdb-server-auth",
     "backend",
-    "link",
+    "link/link-common",
+    "link/kalam-client",
+    "link/kalam-consumer",
+    "link/kalam-consumer-wasm",
     "link/kalam-link-dart",
     "cli"
 ]

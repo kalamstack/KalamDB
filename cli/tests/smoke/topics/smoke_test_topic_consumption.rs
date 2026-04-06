@@ -8,13 +8,13 @@
 //! **Requirements**: Running KalamDB server with Topics feature enabled
 
 use crate::common;
-use kalam_link::consumer::{AutoOffsetReset, ConsumerRecord, TopicOp};
-use kalam_link::KalamLinkTimeouts;
+use kalam_client::consumer::{AutoOffsetReset, ConsumerRecord, TopicOp};
+use kalam_client::KalamLinkTimeouts;
 use std::collections::HashSet;
 use std::time::Duration;
 
 /// Create a test client using common infrastructure
-async fn create_test_client() -> kalam_link::KalamLinkClient {
+async fn create_test_client() -> kalam_client::KalamLinkClient {
     let base_url = common::leader_or_server_url();
     common::client_for_user_on_url_with_timeouts(
         &base_url,
@@ -79,7 +79,7 @@ async fn create_topic_with_sources(topic: &str, table: &str, operations: &[&str]
 }
 
 async fn poll_records_until(
-    consumer: &mut kalam_link::consumer::TopicConsumer,
+    consumer: &mut kalam_client::consumer::TopicConsumer,
     min_records: usize,
     timeout: Duration,
 ) -> Vec<ConsumerRecord> {

@@ -1,10 +1,10 @@
 {
-  "name": "kalam-link",
+  "name": "kalam-client",
   "type": "module",
   "collaborators": [
     "KalamDB Team"
   ],
-  "description": "WebAssembly-compatible KalamDB client library",
+  "description": "Lightweight KalamDB client library",
   "version": "0.4.2-rc1",
   "license": "Apache-2.0",
   "repository": {

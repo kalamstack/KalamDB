@@ -12,6 +12,6 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    exclude: ['kalam-link'],
+    exclude: ['@kalamdb/client'],
   },
 });

@@ -1,0 +1,76 @@
+[package]
+name = "kalam-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Lightweight KalamDB client library"
+keywords = ["kalamdb", "database", "client", "websocket", "wasm"]
+categories = ["database", "web-programming::websocket", "wasm"]
+
+[dependencies]
+link-common = { path = "../link-common", default-features = false }
+
+[features]
+default = ["native-sdk"]
+tokio-runtime = ["link-common/tokio-runtime"]
+auth-flows = ["link-common/auth-flows"]
+setup = ["link-common/setup"]
+healthcheck = ["link-common/healthcheck"]
+cluster = ["link-common/cluster"]
+consumer = ["link-common/consumer"]
+file-uploads = ["link-common/file-uploads"]
+native-sdk = ["link-common/native-sdk"]
+native-bench = ["link-common/native-bench"]
+native-cli = ["link-common/native-cli"]
+native-full = ["link-common/native-full"]
+http2 = ["link-common/http2"]
+wasm = ["link-common/wasm"]
+e2e-tests = ["native-cli", "link-common/e2e-tests"]
+
+[[test]]
+name = "integration_tests"
+path = "tests/integration_tests.rs"
+required-features = ["e2e-tests"]
+
+[[test]]
+name = "test_consumer"
+path = "tests/test_consumer.rs"
+required-features = ["e2e-tests"]
+
+[[test]]
+name = "test_user_table_subscriptions"
+path = "tests/test_user_table_subscriptions.rs"
+required-features = ["e2e-tests"]
+
+[[test]]
+name = "test_websocket_integration"
+path = "tests/test_websocket_integration.rs"
+required-features = ["e2e-tests"]
+
+[[test]]
+name = "wasm_integration"
+path = "tests/wasm_integration.rs"
+required-features = ["e2e-tests"]
+
+[[test]]
+name = "test_subscription_cleanup"
+path = "tests/test_subscription_cleanup.rs"
+required-features = ["e2e-tests"]
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }
+kalamdb-configs = { workspace = true }
+kalamdb-server = { workspace = true }
+tempfile = { workspace = true }
+ntest = { workspace = true }
+reqwest = { workspace = true }
+serde_json = { workspace = true }
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

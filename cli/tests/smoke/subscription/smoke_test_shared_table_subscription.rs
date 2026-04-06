@@ -1,9 +1,9 @@
 // Smoke Test: Shared table subscription lifecycle
 // Covers: shared table creation, inserts, subscription receiving snapshot + change events
-// Uses kalam-link client directly instead of CLI to avoid macOS TCP subprocess limits
+// Uses kalam-client directly instead of CLI to avoid macOS TCP subprocess limits
 
 use crate::common::*;
-use kalam_link::models::ChangeEvent;
+use kalam_client::models::ChangeEvent;
 
 /// Attempt to subscribe to a query as a given user and wait for ACK or error.
 /// Returns Ok(()) if subscription was accepted, Err(msg) if it was denied or failed.
@@ -19,7 +19,7 @@ fn try_subscribe_as_user(username: &str, password: &str, query: &str) -> Result<
         &base_url,
         username,
         password,
-        kalam_link::KalamLinkTimeouts::builder()
+        kalam_client::KalamLinkTimeouts::builder()
             .connection_timeout_secs(5)
             .receive_timeout_secs(30)
             .send_timeout_secs(30)
@@ -44,11 +44,11 @@ fn try_subscribe_as_user(username: &str, password: &str, query: &str) -> Result<
         loop {
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             if remaining.is_zero() {
-                return Ok::<(), kalam_link::error::KalamLinkError>(());
+                return Ok::<(), kalam_client::error::KalamLinkError>(());
             }
             match tokio::time::timeout(remaining, subscription.next()).await {
                 Ok(Some(Ok(ChangeEvent::Error { code, message, .. }))) => {
-                    return Err(kalam_link::error::KalamLinkError::WebSocketError(format!(
+                    return Err(kalam_client::error::KalamLinkError::WebSocketError(format!(
                         "{}: {}",
                         code, message
                     )));
@@ -58,7 +58,7 @@ fn try_subscribe_as_user(username: &str, password: &str, query: &str) -> Result<
                 },
                 Ok(Some(Err(e))) => return Err(e),
                 Ok(None) => {
-                    return Err(kalam_link::error::KalamLinkError::WebSocketError(
+                    return Err(kalam_client::error::KalamLinkError::WebSocketError(
                         "Stream closed before ACK".to_string(),
                     ));
                 },

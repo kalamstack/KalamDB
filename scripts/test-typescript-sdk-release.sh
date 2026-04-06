@@ -83,10 +83,16 @@ if [[ "$SKIP_AUTH_SETUP" != "true" ]]; then
 fi
 
 (
-    cd "$ROOT_DIR/link/sdks/typescript"
+    echo "Running @kalamdb/client tests..."
+    cd "$ROOT_DIR/link/sdks/typescript/client"
     chmod +x ./test.sh
     KALAMDB_URL="$SERVER_URL" \
     KALAMDB_USER="$SERVER_USER" \
     KALAMDB_PASSWORD="$SERVER_PASSWORD" \
     ./test.sh
+
+    echo "Running @kalamdb/consumer tests..."
+    cd "$ROOT_DIR/link/sdks/typescript/consumer"
+    npm install --no-audit --no-fund
+    npm test
 ) 2>&1 | tee "$TEST_OUTPUT"

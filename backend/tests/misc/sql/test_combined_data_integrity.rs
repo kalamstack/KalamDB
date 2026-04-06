@@ -17,8 +17,8 @@
 //! - Test various SQL operations (COUNT, SUM, AVG, WHERE, ORDER BY, etc.)
 
 use super::test_support::{fixtures, flush_helpers, query_helpers, TestServer};
-use kalam_link::models::ResponseStatus;
-use kalam_link::parse_i64;
+use kalam_client::models::ResponseStatus;
+use kalam_client::parse_i64;
 use std::collections::HashMap;
 use std::path::PathBuf;
 

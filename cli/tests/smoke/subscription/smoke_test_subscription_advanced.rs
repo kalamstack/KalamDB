@@ -6,7 +6,7 @@ use crate::common::*;
 use std::time::Duration;
 
 // Re-import subscription-related types for advanced tests
-use kalam_link::{SubscriptionConfig, SubscriptionOptions};
+use kalam_client::{SubscriptionConfig, SubscriptionOptions};
 
 fn is_ephemeral_port_error(message: &str) -> bool {
     message.contains("Can't assign requested address") || message.contains("os error 49")

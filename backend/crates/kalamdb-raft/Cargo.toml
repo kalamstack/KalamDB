@@ -12,6 +12,7 @@ description = "Raft consensus layer for KalamDB multi-node clustering"
 kalamdb-commons = { path = "../kalamdb-commons" }
 kalamdb-configs = { path = "../kalamdb-configs" }
 kalamdb-pg = { path = "../kalamdb-pg" }
+kalamdb-observability = { path = "../kalamdb-observability" }
 kalamdb-system = { path = "../kalamdb-system" }
 kalamdb-store = { path = "../kalamdb-store" }
 kalamdb-sharding = { path = "../kalamdb-sharding" }

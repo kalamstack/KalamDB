@@ -15,7 +15,7 @@ test-threads = 1
 retries = 3
 
 [[profile.default.overrides]]
-filter = 'package(kalam-link)'
+filter = 'package(kalam-client)'
 threads-required = 15
 test-threads = 1
 retries = 3

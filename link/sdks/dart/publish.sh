@@ -40,7 +40,7 @@ if ! $SKIP_NATIVE_CHECK; then
   if [[ ${#MISSING[@]} -gt 0 ]]; then
     echo ""
     echo "ERROR: Missing pre-built native libraries for: ${MISSING[*]}"
-    echo "Run './build_native_libs.sh' to compile them, then 'git add' and commit."
+    echo "Run './build.sh' to prepare the SDK for this host, or './build.sh all' for a full release rebuild."
     echo "Or pass --skip-native-check to bypass this validation."
     exit 1
   fi

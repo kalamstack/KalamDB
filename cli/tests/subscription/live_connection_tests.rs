@@ -10,7 +10,7 @@
 //!   cargo test --test connection live_connection_tests -- --test-threads=1
 
 use crate::common::*;
-use kalam_link::{ConnectionOptions, HttpVersion, KalamLinkTimeouts, SubscriptionOptions};
+use kalam_client::{ConnectionOptions, HttpVersion, KalamLinkTimeouts, SubscriptionOptions};
 use std::time::Duration;
 
 fn start_subscription_with_retry(query: &str) -> SubscriptionListener {
@@ -581,7 +581,7 @@ fn test_live_http2_query_execution() {
 
     // Run the async test in a blocking context
     let runtime = tokio::runtime::Runtime::new().expect("Failed to create runtime");
-    let result: Result<kalam_link::QueryResponse, kalam_link::KalamLinkError> = runtime
+    let result: Result<kalam_client::QueryResponse, kalam_client::KalamLinkError> = runtime
         .block_on(async { client.execute_query("SELECT 1 as test_value", None, None, None).await });
 
     // The query should succeed

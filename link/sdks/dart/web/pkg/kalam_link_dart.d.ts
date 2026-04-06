@@ -51,56 +51,6 @@ export interface SchemaField {
 export type KalamCellValue = JsonValue;
 
 /**
- * A single consumed message from a topic.
- *
- * Contains the message payload (decoded from base64), metadata about the
- * source operation, and positioning information for acknowledgment.
- */
-export interface ConsumeMessage {
-    /**
-     * Unique message identifier
-     */
-    message_id?: string;
-    /**
-     * Source table that produced this message
-     */
-    source_table?: string;
-    /**
-     * Operation type: \"insert\", \"update\", or \"delete\
-     */
-    op?: string;
-    /**
-     * Message timestamp in milliseconds since epoch
-     */
-    timestamp_ms?: number;
-    /**
-     * Message offset in the partition (used for acknowledgment)
-     */
-    offset: number;
-    /**
-     * Partition this message belongs to
-     */
-    partition_id: number;
-    /**
-     * Topic this message belongs to
-     */
-    topic: string;
-    /**
-     * Consumer group ID
-     */
-    group_id: string;
-    /**
-     * Username of the user who produced this message/event
-     */
-    username?: Username;
-    /**
-     * Decoded message payload as a named-column row (`column → value`).
-     * Mirrors the subscription row shape: `HashMap<String, KalamCellValue>`.
-     */
-    value: RowData;
-}
-
-/**
  * Batch control metadata for paginated initial data loading
  *
  * Note: We don\'t include total_batches because we can\'t know it upfront
@@ -128,6 +78,25 @@ export interface BatchControl {
      * Snapshot boundary SeqId captured at subscription time
      */
     snapshot_end_seq?: SeqId;
+}
+
+/**
+ * Cluster health response from the server.
+ */
+export interface ClusterHealthResponse {
+    status: string;
+    version?: string;
+    build_date?: string;
+    is_cluster_mode: boolean;
+    cluster_id?: string;
+    node_id: number;
+    is_leader: boolean;
+    total_groups: number;
+    groups_leading: number;
+    current_term: number;
+    last_applied: number | undefined;
+    millis_since_quorum_ack: number | undefined;
+    nodes?: ClusterNodeHealth[];
 }
 
 /**
@@ -247,7 +216,7 @@ export interface FileRef {
  * # Example
  *
  * ```rust
- * use kalam_link::{ConnectionOptions, HttpVersion};
+ * use kalam_client::{ConnectionOptions, HttpVersion};
  *
  * let options = ConnectionOptions::new()
  *     .with_http_version(HttpVersion::Http2);
@@ -335,56 +304,22 @@ export interface LoginResponse {
 }
 
 /**
- * Options for consuming messages from a topic.
- *
- * Controls polling behavior including batch size, partition targeting,
- * start offset, and long-poll timeout.
- *
- * # Example
- *
- * ```json
- * {
- *   \"topic\": \"orders\",
- *   \"group_id\": \"billing\",
- *   \"start\": \"latest\",
- *   \"batch_size\": 10,
- *   \"partition_id\": 0
- * }
- * ```
+ * Per-node health details from the cluster health endpoint.
  */
-export interface ConsumeRequest {
-    /**
-     * Topic to consume from (e.g., \"orders\" or \"chat.messages\")
-     */
-    topic: string;
-    /**
-     * Consumer group ID for coordinated consumption
-     */
-    group_id: string;
-    /**
-     * Where to start consuming: \"earliest\", \"latest\", or a numeric offset
-     */
-    start?: string;
-    /**
-     * Max messages to return per poll (default: 10)
-     */
-    batch_size?: number;
-    /**
-     * Partition to consume from (default: 0)
-     */
-    partition_id?: number;
-    /**
-     * Long-poll timeout in seconds (server holds connection until messages arrive)
-     */
-    timeout_seconds?: number;
-    /**
-     * Whether to automatically acknowledge messages after the handler returns
-     */
-    auto_ack?: boolean;
-    /**
-     * Max concurrent message handlers per partition (default: 1)
-     */
-    concurrency_per_partition?: number;
+export interface ClusterNodeHealth {
+    node_id: number;
+    role: string;
+    status: string;
+    api_addr: string;
+    is_self: boolean;
+    is_leader: boolean;
+    replication_lag: number | undefined;
+    catchup_progress_pct: number | undefined;
+    hostname: string | undefined;
+    memory_usage_mb: number | undefined;
+    cpu_usage_percent: number | undefined;
+    uptime_seconds: number | undefined;
+    uptime_human: string | undefined;
 }
 
 /**
@@ -409,40 +344,6 @@ export interface ProtocolOptions {
 export type ResponseStatus = "success" | "error";
 
 /**
- * Result of acknowledging consumed messages.
- */
-export interface AckResponse {
-    /**
-     * Whether the acknowledgment was successful
-     */
-    success: boolean;
-    /**
-     * The offset that was acknowledged
-     */
-    acknowledged_offset: number;
-}
-
-/**
- * Result of consuming from a topic.
- *
- * Contains the batch of messages and metadata for pagination.
- */
-export interface ConsumeResponse {
-    /**
-     * Consumed messages in this batch
-     */
-    messages: ConsumeMessage[];
-    /**
-     * Next offset to consume from (for subsequent polls)
-     */
-    next_offset: number;
-    /**
-     * Whether more messages are available beyond this batch
-     */
-    has_more: boolean;
-}
-
-/**
  * Sequence ID for MVCC versioning (Snowflake layout: timestamp | worker | seq)
  */
 export type SeqId = number;
@@ -464,7 +365,7 @@ export type BatchStatus = "loading" | "loading_batch" | "ready";
  * # Example
  *
  * ```rust
- * use kalam_link::{SeqId, SubscriptionOptions};
+ * use kalam_client::{SeqId, SubscriptionOptions};
  *
  * // Fetch last 100 rows with batch size of 50
  * let options = SubscriptionOptions::default()
@@ -515,7 +416,7 @@ export type TimestampFormat = "iso8601" | "iso8601-date" | "iso8601-datetime" | 
 export type ChangeTypeRaw = "insert" | "update" | "delete";
 
 /**
- * Type-safe wrapper for usernames in the kalam-link SDK.
+ * Type-safe wrapper for usernames in the KalamDB client SDK.
  *
  * Prevents confusion between usernames and other string identifiers
  * (user IDs, topic names, group IDs, etc.) at compile time.
@@ -624,7 +525,7 @@ export type FieldFlag = "pk" | "nn" | "uq";
  *
  * # Example (JavaScript)
  * ```js
- * import init, { KalamClient, KalamClientWithJwt, KalamClientAnonymous } from './pkg/kalam_link.js';
+ * import init, { KalamClient, KalamClientWithJwt, KalamClientAnonymous } from './pkg/kalam_client.js';
  *
  * await init();
  *
@@ -670,25 +571,6 @@ export class KalamClient {
     free(): void;
     [Symbol.dispose](): void;
     /**
-     * Acknowledge processed messages on a topic
-     *
-     * # Arguments
-     * * `topic` - Topic name
-     * * `group_id` - Consumer group ID
-     * * `partition_id` - Partition ID
-     * * `upto_offset` - Acknowledge all messages up to and including this offset
-     *
-     * # Returns
-     * A type-safe AckResponse as JsValue
-     *
-     * # Example (JavaScript)
-     * ```js
-     * const result = await client.ack("chat.new_messages", "my-group", 0, 42);
-     * console.log(result.success, result.acknowledged_offset);
-     * ```
-     */
-    ack(topic: string, group_id: string, partition_id: number, upto_offset: bigint): Promise<any>;
-    /**
      * Create a new KalamDB client with no authentication
      *
      * Useful for localhost connections where the server allows
@@ -718,29 +600,6 @@ export class KalamClient {
      * Promise that resolves when connection is established and authenticated
      */
     connect(): Promise<void>;
-    /**
-     * Consume messages from a topic via HTTP API
-     *
-     * # Arguments
-     * * `options` - Type-safe ConsumeRequest with topic, group_id, batch_size, etc.
-     *
-     * # Returns
-     * A type-safe ConsumeResponse as JsValue (includes messages, next_offset, has_more)
-     *
-     * # Example (JavaScript)
-     * ```js
-     * const result = await client.consume({
-     *   topic: "chat.new_messages",
-     *   group_id: "my-consumer-group",
-     *   batch_size: 10,
-     *   start: "latest",
-     * });
-     * for (const msg of result.messages) {
-     *   console.log(msg.value);
-     * }
-     * ```
-     */
-    consume(options: any): Promise<any>;
     /**
      * Delete a row from a table (T049, T063H)
      *
@@ -1223,11 +1082,9 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_kalamclient_free: (a: number, b: number) => void;
     readonly __wbg_wasmtimestampformatter_free: (a: number, b: number) => void;
-    readonly kalamclient_ack: (a: number, b: number, c: number, d: number, e: number, f: number, g: bigint) => number;
     readonly kalamclient_anonymous: (a: number, b: number, c: number) => void;
     readonly kalamclient_clearAuthProvider: (a: number) => void;
     readonly kalamclient_connect: (a: number) => number;
-    readonly kalamclient_consume: (a: number, b: number) => number;
     readonly kalamclient_delete: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly kalamclient_disconnect: (a: number) => number;
     readonly kalamclient_getAuthType: (a: number, b: number) => void;
@@ -1266,12 +1123,12 @@ export interface InitOutput {
     readonly wasmtimestampformatter_new: () => number;
     readonly wasmtimestampformatter_withFormat: (a: number, b: number, c: number) => void;
     readonly timestampNow: () => number;
-    readonly __wasm_bindgen_func_elem_2779: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_2789: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_1481: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_1481_2: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_1481_3: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_1480: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_629: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_639: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_3487: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_3487_2: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_3487_3: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_3486: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

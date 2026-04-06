@@ -19,14 +19,19 @@ function toWebSocketOrigin(url: string): string {
   return url;
 }
 
-// Plugin to clean up duplicate kalam-link folder after build
+// Plugin to clean up duplicate local SDK folders after build
 const cleanupPlugin = () => ({
-  name: 'cleanup-kalam-link',
+  name: 'cleanup-kalam-client',
   closeBundle() {
-    const duplicatePath = path.resolve(__dirname, 'dist/kalam-link');
-    if (fs.existsSync(duplicatePath)) {
-      fs.rmSync(duplicatePath, { recursive: true, force: true });
-      console.log('Cleaned up duplicate kalam-link folder');
+    const duplicatePaths = [
+      path.resolve(__dirname, 'dist/kalam-link'),
+      path.resolve(__dirname, 'dist/@kalam'),
+    ];
+
+    for (const duplicatePath of duplicatePaths) {
+      if (fs.existsSync(duplicatePath)) {
+        fs.rmSync(duplicatePath, { recursive: true, force: true });
+      }
     }
   }
 });
@@ -44,6 +49,10 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),
+        "@kalamdb/client": path.resolve(
+          __dirname,
+          "../link/sdks/typescript/client/dist/src/index.js",
+        ),
       },
     },
     server: {
@@ -59,13 +68,13 @@ export default defineConfig(({ mode }) => {
         },
       },
       fs: {
-        // Allow serving files from the link SDK directory for WASM
+        // Allow serving files from the local SDK directory for WASM
         allow: [
           path.resolve(__dirname, "."),
-          path.resolve(__dirname, "../link/sdks/typescript"),
+          path.resolve(__dirname, "../link/sdks/typescript/client"),
         ],
       },
-      // Disable caching for WASM and kalam-link files
+      // Disable caching for WASM and SDK files
       headers: {
         "Cache-Control": "no-store",
       },
@@ -89,9 +98,9 @@ export default defineConfig(({ mode }) => {
     optimizeDeps: {
       // Force re-bundling on every server start
       force: true,
-      // Exclude kalam-link from pre-bundling so WASM files load correctly
+      // Exclude the SDK from pre-bundling so WASM files load correctly
       // When pre-bundled, import.meta.url points to .vite/deps which breaks WASM loading
-      exclude: ["kalam-link"],
+      exclude: ["@kalamdb/client"],
     },
     // Ensure WASM files are handled correctly
     assetsInclude: ["**/*.wasm"],

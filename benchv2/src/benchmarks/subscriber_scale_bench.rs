@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use kalam_link::{ChangeEvent, KalamLinkClient, SubscriptionConfig};
+use kalam_client::{ChangeEvent, KalamLinkClient, SubscriptionConfig};
 use serde_json::Value;
 use tokio::sync::{watch, Mutex, Semaphore};
 

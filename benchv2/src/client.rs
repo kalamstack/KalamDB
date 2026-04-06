@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use kalam_link::{
+use kalam_client::{
     AuthProvider, ConnectionOptions, HttpVersion, KalamLinkClient, KalamLinkTimeouts,
     QueryResponse, ServerSetupRequest, SubscriptionConfig, SubscriptionManager,
 };
@@ -133,7 +133,7 @@ impl KalamClient {
         // Login
         let login_resp = match unauthed.login(username, password).await {
             Ok(r) => r,
-            Err(kalam_link::KalamLinkError::SetupRequired(_)) => {
+            Err(kalam_client::KalamLinkError::SetupRequired(_)) => {
                 // Try setup again + retry login
                 Self::complete_setup_if_needed(&unauthed, username, password).await;
                 unauthed

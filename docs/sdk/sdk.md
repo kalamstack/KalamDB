@@ -10,24 +10,24 @@ The official TypeScript/JavaScript SDK for KalamDB, built on top of a Rust → W
 ## Installation
 
 ```bash
-npm install kalam-link
+npm install @kalamdb/client
 # or
-yarn add kalam-link
+yarn add @kalamdb/client
 # or
-pnpm add kalam-link
+pnpm add @kalamdb/client
 ```
 
 ## Building From Source (This Repo)
 
 This repo contains two related pieces:
 
-- The Rust client crate: `link/` (crate name: `kalam-link`)
-- The npm-publishable TypeScript SDK package: `link/sdks/typescript/`
+- The Rust client crate: `link/kalam-client/` (package name: `kalam-client`)
+- The npm-publishable TypeScript SDK package: `link/sdks/typescript/client/`
 
 ### Prerequisites
 
 - Rust toolchain (workspace uses Rust stable)
-- Node.js `>=18` (see `link/sdks/typescript/package.json` engines)
+- Node.js `>=18` (see `link/sdks/typescript/client/package.json` engines)
 - `wasm-pack` (used to compile Rust → WASM)
 
 Install wasm-pack:
@@ -36,13 +36,13 @@ Install wasm-pack:
 cargo install wasm-pack
 ```
 
-### Compile the Rust client (`kalam-link`)
+### Compile the Rust client (`kalam-client`)
 
 From the repo root:
 
 ```bash
-cargo build -p kalam-link
-cargo test -p kalam-link
+cargo build -p kalam-client
+cargo test -p kalam-client
 ```
 
 ### Build the TypeScript SDK
@@ -50,12 +50,12 @@ cargo test -p kalam-link
 The SDK build compiles the Rust WASM module with `wasm-pack` and then runs `tsc`.
 
 ```bash
-cd link/sdks/typescript
+cd link/sdks/typescript/client
 npm install
 npm run build
 ```
 
-Outputs land in `link/sdks/typescript/dist/`.
+Outputs land in `link/sdks/typescript/client/dist/`.
 
 ### Using the SDK locally (monorepo)
 
@@ -64,7 +64,7 @@ In another Node project inside this repo, depend on the local package:
 ```json
 {
   "dependencies": {
-    "kalam-link": "file:../../link/sdks/typescript"
+    "@kalamdb/client": "file:../../link/sdks/typescript/client"
   }
 }
 ```
@@ -72,7 +72,7 @@ In another Node project inside this repo, depend on the local package:
 ## Quick Start
 
 ```typescript
-import { createClient, Auth } from 'kalam-link';
+import { createClient, Auth } from '@kalamdb/client';
 
 // Create and connect
 const client = createClient({
@@ -102,7 +102,7 @@ await client.disconnect();
 ### Creating a Client
 
 ```typescript
-import { KalamDBClient, createClient, Auth } from 'kalam-link';
+import { KalamDBClient, createClient, Auth } from '@kalamdb/client';
 
 // Option 1: Factory function
 const client = createClient({
@@ -382,7 +382,7 @@ import WebSocket from 'ws';
 // Add to global before importing KalamDB client
 (global as any).WebSocket = WebSocket;
 
-import { createClient, Auth } from 'kalam-link';
+import { createClient, Auth } from '@kalamdb/client';
 
 const client = createClient({
   url: 'http://localhost:8080',
@@ -397,7 +397,7 @@ await client.disconnect();
 ## Complete Example: Chat Application
 
 ```typescript
-import { createClient, Auth, ServerMessage } from 'kalam-link';
+import { createClient, Auth, ServerMessage } from '@kalamdb/client';
 
 async function main() {
   const client = createClient({
@@ -495,7 +495,7 @@ import {
   SubscriptionInfo,
   SubscribeOptions,
   Unsubscribe
-} from 'kalam-link';
+} from '@kalamdb/client';
 ```
 
 ## Architecture

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, X } from "lucide-react";
-import { KalamCellValue } from "kalam-link";
+import { KalamCellValue } from "@kalamdb/client";
 import { Button } from "@/components/ui/button";
 
 export interface InlineEditContext {

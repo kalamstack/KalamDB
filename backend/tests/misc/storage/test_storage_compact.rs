@@ -7,7 +7,7 @@
 
 use super::test_support::{fixtures, TestServer};
 use anyhow::Result;
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use kalamdb_system::Manifest;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};

@@ -1,29 +1,12 @@
 // Smoke Test: Chat + AI Example from README
-// Covers: namespace creation, user table creation, stream table creation,
-// insert/query operations, and live subscription to typing events
+// Covers: current README schema (USER messages + STREAM agent_events),
+// topic wiring, insert/query operations, and live subscription to streamed agent events
 
 use crate::common::*;
 use std::time::Duration;
 
-fn execute_sql_as_root_via_http_json(sql: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let runtime = tokio::runtime::Runtime::new()?;
-    let response = runtime.block_on(execute_sql_via_http_as("root", root_password(), sql))?;
-    let status = response.get("status").and_then(|value| value.as_str()).unwrap_or("error");
-
-    if !status.eq_ignore_ascii_case("success") {
-        let message = response
-            .get("error")
-            .and_then(|error| error.get("message"))
-            .and_then(|value| value.as_str())
-            .unwrap_or("HTTP SQL query failed");
-        return Err(message.to_string().into());
-    }
-
-    Ok(serde_json::to_string_pretty(&response)?)
-}
-
-fn execute_sql_as_root_via_http(sql: &str) -> Result<String, Box<dyn std::error::Error>> {
-    execute_sql_as_root_via_http_json(sql)
+fn sql_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
 }
 
 #[ntest::timeout(300000)]
@@ -39,118 +22,160 @@ fn smoke_chat_ai_example_from_readme() {
 
     // Use unique namespace to avoid collisions
     let namespace = generate_unique_namespace("chat");
-    let conversations_table = format!("{}.conversations", namespace);
     let messages_table = format!("{}.messages", namespace);
-    let typing_events_table = format!("{}.typing_events", namespace);
-
-    // 1. Create namespace and tables
-    let ns_sql = format!("CREATE NAMESPACE IF NOT EXISTS {}", namespace);
-    execute_sql_as_root_via_http(&ns_sql).expect("failed to create namespace");
-
-    let create_conversations = format!(
-        "CREATE TABLE IF NOT EXISTS {} (
-            id BIGINT PRIMARY KEY DEFAULT SNOWFLAKE_ID(),
-            title TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT NOW()
-        ) WITH (TYPE = 'USER', FLUSH_POLICY = 'rows:1000');",
-        conversations_table
+    let agent_events_table = format!("{}.agent_events", namespace);
+    let topic_name = format!("{}.ai_inbox", namespace);
+    let room = "main";
+    let sender_username = "root";
+    let user_message = "Hello, AI!";
+    let response_id = format!(
+        "reply-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("current time")
+            .as_micros()
     );
-    execute_sql_as_root_via_http(&create_conversations)
-        .expect("failed to create conversations table");
-    wait_for_table_ready(&conversations_table, Duration::from_secs(3))
-        .expect("conversations table should be ready");
+    let assistant_reply = format!(
+        "AI reply: KalamDB stored \"{}\" in {}, streamed the drafting state through {}, and committed the final assistant row.",
+        user_message, messages_table, agent_events_table
+    );
+    let typing_preview = assistant_reply.chars().take(48).collect::<String>();
+
+    // 1. Create namespace, tables, and topic wiring used by the README example.
+    let ns_sql = format!("CREATE NAMESPACE IF NOT EXISTS {}", namespace);
+    execute_sql_as_root_via_client(&ns_sql).expect("failed to create namespace");
 
     let create_messages = format!(
         "CREATE TABLE IF NOT EXISTS {} (
             id BIGINT PRIMARY KEY DEFAULT SNOWFLAKE_ID(),
-            conversation_id BIGINT NOT NULL,
-            message_role TEXT NOT NULL,
+            room TEXT NOT NULL DEFAULT 'main',
+            role TEXT NOT NULL,
+            author TEXT NOT NULL,
+            sender_username TEXT NOT NULL,
             content TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT NOW()
         ) WITH (TYPE = 'USER', FLUSH_POLICY = 'rows:1000');",
         messages_table
     );
-    execute_sql_as_root_via_http(&create_messages).expect("failed to create messages table");
+    execute_sql_as_root_via_client(&create_messages).expect("failed to create messages table");
     wait_for_table_ready(&messages_table, Duration::from_secs(3))
         .expect("messages table should be ready");
 
-    let create_typing = format!(
+    let create_agent_events = format!(
         "CREATE TABLE IF NOT EXISTS {} (
             id BIGINT PRIMARY KEY DEFAULT SNOWFLAKE_ID(),
-            conversation_id BIGINT NOT NULL,
-            user_id TEXT NOT NULL,
-            event_type TEXT NOT NULL,
+            response_id TEXT NOT NULL,
+            room TEXT NOT NULL DEFAULT 'main',
+            sender_username TEXT NOT NULL,
+            stage TEXT NOT NULL,
+            preview TEXT NOT NULL DEFAULT '',
+            message TEXT NOT NULL DEFAULT '',
             created_at TIMESTAMP DEFAULT NOW()
         ) WITH (TYPE = 'STREAM', TTL_SECONDS = 300);",
-        typing_events_table
+        agent_events_table
     );
-    execute_sql_as_root_via_http(&create_typing).expect("failed to create typing_events table");
-    wait_for_table_ready(&typing_events_table, Duration::from_secs(3))
-        .expect("typing_events table should be ready");
+    execute_sql_as_root_via_client(&create_agent_events)
+        .expect("failed to create agent_events table");
+    wait_for_table_ready(&agent_events_table, Duration::from_secs(3))
+        .expect("agent_events table should be ready");
 
-    // 2. Insert a conversation
-    let conversation_id = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("current time")
-        .as_micros() as i64;
-    let insert_conv_sql = format!(
-        "INSERT INTO {} (id, title) VALUES ({}, 'Chat with AI');",
-        conversations_table, conversation_id
-    );
-    execute_sql_as_root_via_http(&insert_conv_sql).expect("failed to insert conversation");
+    execute_sql_as_root_via_client(&format!("CREATE TOPIC {}", topic_name))
+        .expect("failed to create ai inbox topic");
+    execute_sql_as_root_via_client(&format!(
+        "ALTER TOPIC {} ADD SOURCE {} ON INSERT",
+        topic_name, messages_table
+    ))
+    .expect("failed to connect topic source to messages table");
 
-    // 3. Insert user + AI messages
-    let insert_msgs_sql = format!(
-        "INSERT INTO {} (id, conversation_id, message_role, content) VALUES
-            ({}, {}, 'user', 'Hello, AI!'),
-            ({}, {}, 'assistant', 'Hi! How can I help you today?');",
+    // 2. Insert a user message, as the browser app would.
+    let insert_user_message_sql = format!(
+        "INSERT INTO {} (room, role, author, sender_username, content) VALUES ({}, 'user', {}, {}, {})",
         messages_table,
-        conversation_id + 1,
-        conversation_id,
-        conversation_id + 2,
-        conversation_id
+        sql_literal(room),
+        sql_literal(sender_username),
+        sql_literal(sender_username),
+        sql_literal(user_message)
     );
-    execute_sql_as_root_via_http(&insert_msgs_sql).expect("failed to insert messages");
+    execute_sql_as_root_via_client(&insert_user_message_sql)
+        .expect("failed to insert user message");
 
-    // 4. Query back the conversation history
+    // 3. Query back the current chat history.
     let select_msgs_sql = format!(
-        "SELECT message_role, content FROM {} WHERE conversation_id = {} ORDER BY id ASC;",
-        messages_table, conversation_id
+        "SELECT role, author, content FROM {} WHERE room = {} ORDER BY id ASC;",
+        messages_table,
+        sql_literal(room)
     );
     let history = wait_for_query_contains_with(
         &select_msgs_sql,
-        "How can I help",
+        user_message,
         Duration::from_secs(12),
-        execute_sql_as_root_via_http_json,
+        execute_sql_as_root_via_client_json,
     )
     .expect("failed to observe message history");
 
-    assert!(history.contains("Hello, AI!"), "expected user message in history");
-    assert!(history.contains("How can I help"), "expected assistant message in history");
+    assert!(history.contains(user_message), "expected user message in history");
+    assert!(history.contains(sender_username), "expected sender username in history");
 
-    // 5. Test stream table with subscription
-    let typing_query = format!("SELECT * FROM {}", typing_events_table);
-    let mut listener = SubscriptionListener::start(&typing_query)
-        .expect("failed to start subscription for typing events");
+    // 4. Subscribe to the STREAM table used for live agent draft events.
+    let agent_events_query = format!(
+        "SELECT * FROM {} WHERE room = {}",
+        agent_events_table,
+        sql_literal(room)
+    );
+    let mut listener = SubscriptionListener::start(&agent_events_query)
+        .expect("failed to start subscription for agent events");
     std::thread::sleep(Duration::from_secs(2));
 
-    // 6. Insert typing events and verify subscription receives them
+    // 5. Insert streamed agent lifecycle events and the final assistant reply.
     let events = vec![
-        ("user_123", "typing"),
-        ("ai_model", "thinking"),
-        ("ai_model", "cancelled"),
+        (
+            "thinking",
+            "",
+            "Planning assistant reply",
+        ),
+        (
+            "typing",
+            typing_preview.as_str(),
+            "Streaming the first characters of the reply",
+        ),
+        (
+            "message_saved",
+            assistant_reply.as_str(),
+            "Assistant reply committed",
+        ),
+        (
+            "complete",
+            assistant_reply.as_str(),
+            "Live stream finished",
+        ),
     ];
 
-    for (user_id, event_type) in &events {
+    for (stage, preview, message) in &events {
         let insert_event_sql = format!(
-            "INSERT INTO {} (conversation_id, user_id, event_type) VALUES ({}, '{}', '{}');",
-            typing_events_table, conversation_id, user_id, event_type
+            "INSERT INTO {} (response_id, room, sender_username, stage, preview, message) VALUES ({}, {}, {}, {}, {}, {})",
+            agent_events_table,
+            sql_literal(&response_id),
+            sql_literal(room),
+            sql_literal(sender_username),
+            sql_literal(stage),
+            sql_literal(preview),
+            sql_literal(message)
         );
         execute_sql_as_root_via_client(&insert_event_sql)
-            .unwrap_or_else(|_| panic!("failed to insert typing event: {}", event_type));
+            .unwrap_or_else(|_| panic!("failed to insert agent event: {}", stage));
     }
 
-    // 7. Wait for subscription to receive at least one event (increased timeout for subscription initialization)
+    let insert_assistant_message_sql = format!(
+        "INSERT INTO {} (room, role, author, sender_username, content) VALUES ({}, 'assistant', 'KalamDB Copilot', {}, {})",
+        messages_table,
+        sql_literal(room),
+        sql_literal(sender_username),
+        sql_literal(&assistant_reply)
+    );
+    execute_sql_as_root_via_client(&insert_assistant_message_sql)
+        .expect("failed to insert assistant message");
+
+    // 6. Wait for subscription to receive at least one event.
     let mut received_event = false;
     for retry_count in 0..5 {
         let per_attempt_deadline = std::time::Instant::now() + Duration::from_secs(1);
@@ -172,31 +197,39 @@ fn smoke_chat_ai_example_from_readme() {
         }
 
         let retry_event_sql = format!(
-            "INSERT INTO {} (conversation_id, user_id, event_type) VALUES ({}, 'ai_model_retry_{}', 'typing');",
-            typing_events_table, conversation_id, retry_count
+            "INSERT INTO {} (response_id, room, sender_username, stage, preview, message) VALUES ({}, {}, {}, 'typing', {}, {})",
+            agent_events_table,
+            sql_literal(&format!("{}-retry-{}", response_id, retry_count)),
+            sql_literal(room),
+            sql_literal(sender_username),
+            sql_literal(typing_preview.as_str()),
+            sql_literal("Retrying streamed preview delivery")
         );
         execute_sql_as_root_via_client(&retry_event_sql)
-            .expect("failed to insert retry typing event");
+            .expect("failed to insert retry agent event");
     }
 
     if !received_event {
         eprintln!(
-            "⚠️  Did not receive a live typing event in the README smoke test window; continuing with persisted stream verification"
+            "⚠️  Did not receive a live agent event in the README smoke test window; continuing with persisted stream verification"
         );
     }
 
     // Stop subscription
     listener.stop().ok();
 
-    // 8. In single-node mode, or if the live subscription did not deliver an event,
-    //    verify the inserted stream rows through a regular SELECT as a fallback.
+    // 7. Verify persisted STREAM rows and final message history.
     if !is_cluster_mode() || !received_event {
-        let verify_events_sql = format!("SELECT * FROM {}", typing_events_table);
+        let verify_events_sql = format!(
+            "SELECT stage, preview, message FROM {} WHERE room = {}",
+            agent_events_table,
+            sql_literal(room)
+        );
         let events_output = wait_for_query_contains_with(
             &verify_events_sql,
             "typing",
             Duration::from_secs(12),
-            execute_sql_as_root_via_http_json,
+            execute_sql_as_root_via_client_json,
         )
         .expect("failed to observe persisted typing event");
 
@@ -208,7 +241,7 @@ fn smoke_chat_ai_example_from_readme() {
                 &verify_events_sql,
                 "thinking",
                 Duration::from_secs(12),
-                execute_sql_as_root_via_http_json,
+                execute_sql_as_root_via_client_json,
             )
             .expect("failed to observe persisted thinking event")
         };
@@ -216,6 +249,25 @@ fn smoke_chat_ai_example_from_readme() {
         assert!(events_output.contains("thinking"), "expected 'thinking' event in stream table");
     }
 
+    let final_history = wait_for_query_contains_with(
+        &select_msgs_sql,
+        "KalamDB Copilot",
+        Duration::from_secs(12),
+        execute_sql_as_root_via_client_json,
+    )
+    .expect("failed to observe final assistant reply in message history");
+    let escaped_assistant_reply = assistant_reply.replace('"', "\\\"");
+
+    assert!(
+        final_history.contains(user_message),
+        "expected user message in final history"
+    );
+    assert!(
+        final_history.contains(&assistant_reply) || final_history.contains(&escaped_assistant_reply),
+        "expected assistant reply in final history"
+    );
+
     // Cleanup
-    let _ = execute_sql_as_root_via_http(&format!("DROP NAMESPACE {} CASCADE", namespace));
+    let _ = execute_sql_as_root_via_client(&format!("DROP TOPIC {}", topic_name));
+    let _ = execute_sql_as_root_via_client(&format!("DROP NAMESPACE {} CASCADE", namespace));
 }

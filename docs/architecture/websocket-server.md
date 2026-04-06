@@ -89,7 +89,7 @@ Receives `ChangeNotification` from table providers when data changes:
 ## Heartbeat System
 
 ```
-Client (kalam-link)                         Server (ConnectionsManager)
+Client (kalam-client)                       Server (ConnectionsManager)
     │                                           │
     ├── Every keepalive_interval (6s):          ├── Every heartbeat_interval (5s):
     │   └── Send WebSocket Ping frame ──────►   │   ├── For each connection:
@@ -102,7 +102,7 @@ Client (kalam-link)                         Server (ConnectionsManager)
     └── Server Pong auto-reply ◄────────────    └── MissedTickBehavior::Skip
 ```
 
-**Client-driven keepalive**: kalam-link sends periodic WebSocket `Ping` frames (default 6s).
+**Client-driven keepalive**: kalam-client sends periodic WebSocket `Ping` frames (default 6s).
 The server never initiates pings — it only checks for stale connections by reading atomic
 timestamps. This eliminates thundering-herd effects at scale (>40K connections).
 

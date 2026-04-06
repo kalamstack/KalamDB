@@ -1,7 +1,7 @@
 //! Manifest flush behavior over the real HTTP SQL API.
 
 use super::test_support::consolidated_helpers::unique_namespace;
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use kalamdb_system::Manifest;
 use tokio::time::{sleep, Duration, Instant};
 

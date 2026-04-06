@@ -7,7 +7,7 @@
 //! - Serialization/deserialization
 //! - Exponential backoff calculations
 
-use kalam_link::{ConnectionOptions, HttpVersion};
+use kalam_client::{ConnectionOptions, HttpVersion};
 
 /// Test that default ConnectionOptions have sensible values
 #[test]

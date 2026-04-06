@@ -3,7 +3,7 @@
 use super::test_support::auth_helper::create_user_auth_header_default;
 use super::test_support::consolidated_helpers::{unique_namespace, unique_table};
 use super::test_support::flush::{flush_table_and_wait, wait_for_parquet_files_for_table};
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use tokio::time::Duration;
 
 async fn count_rows(

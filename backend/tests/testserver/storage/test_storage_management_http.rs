@@ -7,7 +7,7 @@
 //! - Prevent dropping in-use storage
 
 use super::test_support::consolidated_helpers::{unique_namespace, unique_table};
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 
 #[tokio::test]
 async fn test_storage_management_over_http() -> anyhow::Result<()> {

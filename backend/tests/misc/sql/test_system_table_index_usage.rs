@@ -15,8 +15,8 @@
 //! 4. Measure performance to ensure O(1) lookup behavior
 
 use super::test_support::{consolidated_helpers, TestServer};
-use kalam_link::models::ResponseStatus;
-use kalam_link::parse_i64;
+use kalam_client::models::ResponseStatus;
+use kalam_client::parse_i64;
 use kalamdb_commons::models::{ConnectionId, ConnectionInfo, UserName};
 use kalamdb_commons::websocket::{SubscriptionOptions, SubscriptionRequest};
 use kalamdb_commons::{AuthType, JobId, NodeId, Role, StorageId, UserId};

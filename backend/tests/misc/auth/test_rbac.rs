@@ -3,7 +3,7 @@
 //! Verifies role-based access control behavior using SQL executor paths.
 
 use super::test_support::{fixtures, TestServer};
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use kalamdb_commons::models::{Role, UserId};
 
 async fn insert_user(server: &TestServer, username: &str, role: Role) -> UserId {

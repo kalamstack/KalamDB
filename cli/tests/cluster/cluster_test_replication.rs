@@ -8,7 +8,7 @@ use serde_json::Value;
 use std::time::Duration;
 use std::time::Instant;
 
-fn parse_count(response: &kalam_link::QueryResponse) -> Result<i64, String> {
+fn parse_count(response: &kalam_client::QueryResponse) -> Result<i64, String> {
     let result = response
         .results
         .first()

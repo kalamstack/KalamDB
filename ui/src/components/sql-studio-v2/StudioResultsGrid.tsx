@@ -28,7 +28,7 @@ import { generateSqlStatements } from "./utils/sqlGenerator";
 import { extractTableContext } from "./utils/sqlParser";
 import { useSqlPreview } from "@/components/sql-preview";
 import { CellDisplay } from "@/components/datatype-display";
-import { KalamCellValue } from "kalam-link";
+import { KalamCellValue } from "@kalamdb/client";
 import { executeSql } from "@/lib/kalam-client";
 import { LIVE_META, LIVE_HIGHLIGHT_DURATION_MS } from "@/features/sql-studio/state/sqlStudioWorkspaceSlice";
 import { cn } from "@/lib/utils";

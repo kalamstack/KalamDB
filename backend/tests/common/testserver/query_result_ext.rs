@@ -1,5 +1,5 @@
-use kalam_link::models::QueryResult;
-use kalam_link::KalamCellValue;
+use kalam_client::models::QueryResult;
+use kalam_client::KalamCellValue;
 use std::collections::HashMap;
 
 /// Extension trait for `QueryResult` to provide test-friendly row access.

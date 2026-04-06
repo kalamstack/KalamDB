@@ -4,7 +4,7 @@
 //! that stream tables with TTL properly evict old events.
 
 use super::test_support::consolidated_helpers::unique_namespace;
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use tokio::time::{sleep, Duration};
 
 /// Test stream table TTL eviction using the SQL script approach

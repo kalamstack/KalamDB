@@ -2,8 +2,8 @@
 // Measures messages per second under various publisher/consumer configurations
 
 use crate::common;
-use kalam_link::consumer::AutoOffsetReset;
-use kalam_link::KalamLinkTimeouts;
+use kalam_client::consumer::AutoOffsetReset;
+use kalam_client::KalamLinkTimeouts;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -17,7 +17,7 @@ const THRESHOLD_MULTI_PUB_SINGLE_CONSUMER: f64 = 220.0; // Stable floor across l
 const THRESHOLD_MULTI_PUB_MULTI_CONSUMER: f64 = 220.0; // Stable floor across loaded CI/local runs
 
 /// Create a test client using common infrastructure
-async fn create_test_client() -> kalam_link::KalamLinkClient {
+async fn create_test_client() -> kalam_client::KalamLinkClient {
     let base_url = common::leader_or_server_url();
     common::client_for_user_on_url_with_timeouts(
         &base_url,

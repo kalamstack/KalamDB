@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Download, ExternalLink, File, FileText, Image, Link2, Music, Video } from "lucide-react";
-import { FileRef } from "kalam-link";
+import { FileRef } from "@kalamdb/client";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { getBackendOrigin } from "@/lib/backend-url";

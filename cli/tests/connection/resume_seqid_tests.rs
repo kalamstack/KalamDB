@@ -5,7 +5,7 @@
 //!
 //! NOTE: These are unit tests that don't require a running server.
 
-use kalam_link::{SeqId, SubscriptionOptions};
+use kalam_client::{SeqId, SubscriptionOptions};
 
 /// Test creating subscription options with from_seq_id
 #[test]

@@ -77,7 +77,7 @@ async fn test_raft_executor_with_cluster() {
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     // Create executor
-    let executor = RaftExecutor::new(manager.clone());
+    let executor = RaftExecutor::new(manager.clone(), std::time::Instant::now());
 
     // Verify executor state
     assert!(executor.is_cluster_mode());

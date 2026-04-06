@@ -25,12 +25,12 @@
 //! // Single-node mode (no [cluster] config):
 //! let config = RaftManagerConfig::for_single_node("127.0.0.1:8080".to_string());
 //! let manager = RaftManager::new(config);
-//! let executor = RaftExecutor::new(manager);
+//! let executor = RaftExecutor::new(manager, std::time::Instant::now());
 //!
 //! // Cluster mode:
 //! let config = RaftManagerConfig::from(cluster_config);
 //! let manager = RaftManager::new(config);
-//! let executor = RaftExecutor::new(manager);
+//! let executor = RaftExecutor::new(manager, std::time::Instant::now());
 //!
 //! // Same interface in both modes:
 //! ctx.executor().execute_meta(MetaCommand::CreateTable { ... }).await?;

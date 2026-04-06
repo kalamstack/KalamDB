@@ -186,6 +186,10 @@ impl ClusterMessageHandler for SecurityStubHandler {
             hostname: Some("test-node".to_string()),
             version: Some("test".to_string()),
             memory_mb: Some(512),
+            memory_usage_mb: Some(64),
+            cpu_usage_percent: Some(2.0),
+            uptime_seconds: Some(120),
+            uptime_human: Some("2m".to_string()),
             os: Some("linux".to_string()),
             arch: Some("x86_64".to_string()),
         })

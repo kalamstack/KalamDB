@@ -1,4 +1,4 @@
-//! Connection tests for kalam-link
+//! Connection tests for kalam-client
 //!
 //! This directory contains tests for connection-related functionality:
 //!

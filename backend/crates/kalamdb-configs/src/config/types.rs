@@ -218,6 +218,8 @@ impl Default for FileUploadSettings {
 pub struct ServerSettings {
     pub host: String,
     pub port: u16,
+    #[serde(default)]
+    pub public_origin: Option<String>,
     #[serde(default = "default_workers")]
     pub workers: usize,
     /// API version prefix for endpoints (default: "v1")
@@ -233,6 +235,17 @@ pub struct ServerSettings {
     /// Set to None/null to disable UI serving
     #[serde(default = "default_ui_path")]
     pub ui_path: Option<String>,
+}
+
+impl ServerSettings {
+    pub fn effective_public_origin(&self) -> String {
+        self.public_origin
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.trim_end_matches('/').to_string())
+            .unwrap_or_else(|| format!("http://localhost:{}", self.port))
+    }
 }
 
 /// Storage settings
@@ -1087,6 +1100,7 @@ impl Default for ServerConfig {
             server: ServerSettings {
                 host: "127.0.0.1".to_string(),
                 port: 8080,
+                public_origin: None,
                 workers: 0,
                 api_version: default_api_version(),
                 enable_http2: default_enable_http2(),

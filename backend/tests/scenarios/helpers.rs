@@ -8,8 +8,8 @@
 //! - Parallel test utilities
 
 use anyhow::Result;
-use kalam_link::models::{ChangeEvent, ResponseStatus};
-use kalam_link::{KalamCellValue, SubscriptionManager};
+use kalam_client::models::{ChangeEvent, ResponseStatus};
+use kalam_client::{KalamCellValue, SubscriptionManager};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use tokio::time::{sleep, timeout, Instant};
@@ -70,7 +70,7 @@ pub async fn assert_user_isolation(
     let resp_b = client_b.execute_query(&sql, None, None, None).await?;
 
     // Extract user_id values from each response
-    let get_user_ids = |resp: &kalam_link::models::QueryResponse| -> HashSet<String> {
+    let get_user_ids = |resp: &kalam_client::models::QueryResponse| -> HashSet<String> {
         resp.rows_as_maps()
             .iter()
             .filter_map(|row| {

@@ -1,6 +1,6 @@
 // Smoke Test 1 (revised): User table with subscription lifecycle
 // Covers: namespace creation, user table creation, inserts, subscription receiving events, flush job visibility
-// Uses kalam-link client directly instead of CLI to avoid macOS TCP subprocess limits
+// Uses kalam-client directly instead of CLI to avoid macOS TCP subprocess limits
 
 use crate::common::*;
 

@@ -11,8 +11,8 @@
 //! **Requirements**: Running KalamDB server with Topics feature enabled
 
 use crate::common;
-use kalam_link::consumer::{AutoOffsetReset, ConsumerRecord, TopicOp};
-use kalam_link::KalamLinkTimeouts;
+use kalam_client::consumer::{AutoOffsetReset, ConsumerRecord, TopicOp};
+use kalam_client::KalamLinkTimeouts;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -20,7 +20,7 @@ use std::time::Duration;
 use tokio::sync::Mutex as TokioMutex;
 
 /// Create a test client using common infrastructure
-async fn create_test_client() -> kalam_link::KalamLinkClient {
+async fn create_test_client() -> kalam_client::KalamLinkClient {
     let base_url = common::leader_or_server_url();
     common::client_for_user_on_url_with_timeouts(
         &base_url,

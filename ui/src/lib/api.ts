@@ -1,9 +1,9 @@
-import { KalamCellValue, type SchemaField } from "kalam-link";
+import { KalamCellValue, type SchemaField } from "@kalamdb/client";
 import { executeQuery, getCurrentToken } from "./kalam-client";
 import { getApiBaseUrl } from "./backend-url";
 
 // HTTP API client for auth/setup endpoints.
-// SQL calls should go through kalam-link in `kalam-client.ts`.
+// SQL calls should go through @kalamdb/client in `kalam-client.ts`.
 
 const API_BASE = getApiBaseUrl();
 const NO_AUTH_ENDPOINTS = new Set([
@@ -144,7 +144,7 @@ function wrapSqlRows(rows: unknown[][] | undefined): SqlRow[] {
 
 export async function executeSql(sql: string, namespace?: string): Promise<SqlResponse> {
   if (namespace && namespace.trim().length > 0) {
-    console.warn("[api] executeSql namespace parameter is ignored; SQL execution now routes through kalam-link");
+    console.warn("[api] executeSql namespace parameter is ignored; SQL execution now routes through @kalamdb/client");
   }
 
   const response = await executeQuery(sql);

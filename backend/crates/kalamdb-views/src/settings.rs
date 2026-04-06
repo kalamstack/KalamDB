@@ -196,6 +196,12 @@ impl VirtualView for SettingsView {
                         "server"
                     ),
                     (
+                        "server.public_origin",
+                        config.server.effective_public_origin(),
+                        "Public origin used by the Admin UI for API and WebSocket traffic",
+                        "server"
+                    ),
+                    (
                         "server.api_version",
                         config.server.api_version,
                         "API version prefix (e.g., v1)",

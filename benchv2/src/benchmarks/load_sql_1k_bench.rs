@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use kalam_link::KalamLinkClient;
+use kalam_client::KalamLinkClient;
 use tokio::sync::Semaphore;
 
 use crate::benchmarks::Benchmark;

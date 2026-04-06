@@ -9,5 +9,6 @@
 pub(super) use super::test_support;
 
 mod test_cluster_commands_http;
+mod test_cluster_health_http;
 mod test_cluster_snapshots_http;
 mod test_cluster_views_http;

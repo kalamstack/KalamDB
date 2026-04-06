@@ -4,7 +4,7 @@ This example keeps only the parts that matter for the SDK:
 
 - browser writes into a shared table
 - a topic mirrors those inserts
-- `runAgent()` consumes the topic
+- `@kalamdb/consumer` `runAgent()` consumes the topic
 - the agent writes a reply row back into the same table
 - every open browser tab updates through one live SQL subscription
 
@@ -37,8 +37,8 @@ The Playwright test starts the agent, opens two tabs, sends a message, and verif
 
 ## Files worth reading
 
-- `src/App.tsx`: browser-side query + subscription flow
-- `src/agent.ts`: `runAgent()` worker
+- `src/App.tsx`: browser-side `@kalamdb/client` query + subscription flow
+- `src/agent.ts`: `@kalamdb/consumer` `runAgent()` worker
 - `chat-app.sql`: schema and topic route
 - `tests/chat.spec.mjs`: full end-to-end verification
 

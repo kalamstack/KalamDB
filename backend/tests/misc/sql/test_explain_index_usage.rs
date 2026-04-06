@@ -6,7 +6,7 @@
 //! 3. The actual query results may vary depending on server bootstrap state
 
 use super::test_support::TestServer;
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 
 #[actix_web::test]
 async fn test_explain_username_equality() {

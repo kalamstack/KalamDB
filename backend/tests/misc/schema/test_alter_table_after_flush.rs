@@ -9,8 +9,8 @@
 //! between hot storage (RocksDB) and cold storage (Parquet files).
 
 use super::test_support::{consolidated_helpers, fixtures, flush_helpers, TestServer};
-use kalam_link::models::ResponseStatus;
-use kalam_link::parse_i64;
+use kalam_client::models::ResponseStatus;
+use kalam_client::parse_i64;
 
 /// Test ALTER TABLE ADD COLUMN after flushing data to cold storage
 ///

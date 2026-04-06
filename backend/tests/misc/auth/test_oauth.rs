@@ -8,7 +8,7 @@
 //! - Auto-provisioning disabled by default
 
 use super::test_support::TestServer;
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use kalamdb_commons::models::ConnectionInfo;
 use kalamdb_commons::{AuthType, OAuthProvider, Role};
 use std::sync::atomic::{AtomicUsize, Ordering};

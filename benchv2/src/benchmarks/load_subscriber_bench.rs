@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-use kalam_link::{ChangeEvent, SubscriptionConfig};
+use kalam_client::{ChangeEvent, SubscriptionConfig};
 
 use crate::benchmarks::Benchmark;
 use crate::client::KalamClient;

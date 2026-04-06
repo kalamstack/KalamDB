@@ -11,7 +11,7 @@
 
 use super::helpers::*;
 
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use kalamdb_commons::Role;
 use std::time::Duration;
 use tokio::time::sleep;

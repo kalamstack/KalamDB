@@ -3,7 +3,7 @@
 //! Verifies that privileged operations write entries to `system.audit_log`.
 
 use super::test_support::TestServer;
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use kalamdb_commons::models::{AuthType, Role, UserId, UserName};
 use kalamdb_system::providers::storages::models::StorageMode;
 

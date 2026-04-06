@@ -1,11 +1,11 @@
 /**
  * KalamDB Client wrapper for Admin UI
  * 
- * Uses the kalam-link SDK with JWT authentication.
+ * Uses the @kalamdb/client SDK with JWT authentication.
  * The JWT token is obtained from the cookie-based auth flow,
  * then used for all SQL queries via the WASM SDK.
  * 
- * This is modeled after the example at link/sdks/typescript/example/app.js
+ * This is modeled after the example at link/sdks/typescript/client/example/app.js
  * which demonstrates proper WASM initialization and query execution.
  */
 
@@ -29,7 +29,7 @@ import {
   type ServerMessage,
   type SubscriptionOptions,
   type Unsubscribe,
-} from 'kalam-link';
+} from '@kalamdb/client';
 import { getBackendOrigin } from "./backend-url";
 
 let client: KalamDBClient | null = null;

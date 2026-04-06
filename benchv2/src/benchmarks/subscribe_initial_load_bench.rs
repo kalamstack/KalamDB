@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use kalam_link::{ChangeEvent, SubscriptionConfig};
+use kalam_client::{ChangeEvent, SubscriptionConfig};
 
 use crate::benchmarks::Benchmark;
 use crate::client::KalamClient;
@@ -83,7 +83,7 @@ impl Benchmark for SubscribeInitialLoadBench {
             while let Some(event) = sub.next().await {
                 match event {
                     Ok(ChangeEvent::Ack { batch_control, .. }) => {
-                        if batch_control.status == kalam_link::models::BatchStatus::Ready
+                        if batch_control.status == kalam_client::models::BatchStatus::Ready
                             && !batch_control.has_more
                         {
                             got_ready = true;
@@ -92,7 +92,7 @@ impl Benchmark for SubscribeInitialLoadBench {
                     },
                     Ok(ChangeEvent::InitialDataBatch { batch_control, .. }) => {
                         batches += 1;
-                        if batch_control.status == kalam_link::models::BatchStatus::Ready
+                        if batch_control.status == kalam_client::models::BatchStatus::Ready
                             || !batch_control.has_more
                         {
                             got_ready = true;

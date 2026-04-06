@@ -1,12 +1,11 @@
 #[cfg(test)]
 mod tests {
     use crate::models::*;
-    use kalam_link::models::{
-        BatchControl, BatchStatus, ChangeEvent, ErrorDetail, HealthCheckResponse, LoginResponse,
-        LoginUserInfo, QueryResponse, QueryResult, ResponseStatus, SchemaField,
-        ServerSetupResponse, SetupStatusResponse, SetupUserInfo,
+    use kalam_client::models::{
+        BatchControl, BatchStatus, ChangeEvent, ErrorDetail, LoginResponse, LoginUserInfo,
+        QueryResponse, QueryResult, ResponseStatus, SchemaField,
     };
-    use kalam_link::{FieldFlag, KalamDataType};
+    use kalam_client::{FieldFlag, KalamDataType};
     use std::collections::BTreeSet;
 
     // -----------------------------------------------------------------------
@@ -134,7 +133,7 @@ mod tests {
                 index: 0,
                 flags: None,
             }],
-            rows: Some(vec![vec![kalam_link::KalamCellValue::text("Alice")]]),
+            rows: Some(vec![vec![kalam_client::KalamCellValue::text("Alice")]]),
             named_rows: None,
             row_count: 1,
             message: None,
@@ -193,25 +192,6 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Health check conversion
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn health_check_converts() {
-        let h = HealthCheckResponse {
-            status: "healthy".into(),
-            version: "0.4.0".into(),
-            api_version: "v1".into(),
-            build_date: Some("2026-02-25".into()),
-        };
-        let dart: DartHealthCheckResponse = h.into();
-        assert_eq!(dart.status, "healthy");
-        assert_eq!(dart.version, "0.4.0");
-        assert_eq!(dart.api_version, "v1");
-        assert_eq!(dart.build_date.unwrap(), "2026-02-25");
-    }
-
-    // -----------------------------------------------------------------------
     // Login response conversion
     // -----------------------------------------------------------------------
 
@@ -237,55 +217,6 @@ mod tests {
         assert_eq!(dart.user.username, "alice");
         assert_eq!(dart.user.role, "dba");
         assert_eq!(dart.user.email.unwrap(), "alice@example.com");
-    }
-
-    // -----------------------------------------------------------------------
-    // Setup models conversion
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn setup_request_converts_to_native() {
-        let req = DartServerSetupRequest {
-            username: "admin".into(),
-            password: "pass123".into(),
-            root_password: "rootpw".into(),
-            email: Some("admin@test.com".into()),
-        };
-        let native = req.into_native();
-        assert_eq!(native.username, "admin");
-        assert_eq!(native.password, "pass123");
-        assert_eq!(native.root_password, "rootpw");
-        assert_eq!(native.email.unwrap(), "admin@test.com");
-    }
-
-    #[test]
-    fn setup_response_converts() {
-        let r = ServerSetupResponse {
-            message: "Setup complete".into(),
-            user: SetupUserInfo {
-                id: "u-1".into(),
-                username: "admin".into(),
-                role: "system".into(),
-                email: None,
-                created_at: "2026-02-25T00:00:00Z".into(),
-                updated_at: "2026-02-25T00:00:00Z".into(),
-            },
-        };
-        let dart: DartServerSetupResponse = r.into();
-        assert_eq!(dart.message, "Setup complete");
-        assert_eq!(dart.user.username, "admin");
-        assert!(dart.user.email.is_none());
-    }
-
-    #[test]
-    fn setup_status_converts() {
-        let s = SetupStatusResponse {
-            needs_setup: true,
-            message: "Server requires initial setup".into(),
-        };
-        let dart: DartSetupStatusResponse = s.into();
-        assert!(dart.needs_setup);
-        assert!(dart.message.contains("initial setup"));
     }
 
     // -----------------------------------------------------------------------
@@ -340,7 +271,7 @@ mod tests {
     #[test]
     fn change_event_initial_data_batch_converts() {
         let mut row = std::collections::HashMap::new();
-        row.insert("name".to_string(), kalam_link::KalamCellValue::text("Alice"));
+        row.insert("name".to_string(), kalam_client::KalamCellValue::text("Alice"));
         let e = ChangeEvent::InitialDataBatch {
             subscription_id: "sub-2".into(),
             rows: vec![row],
@@ -369,8 +300,8 @@ mod tests {
     #[test]
     fn change_event_insert_converts() {
         let mut row = std::collections::HashMap::new();
-        row.insert("id".to_string(), kalam_link::KalamCellValue::int(1));
-        row.insert("name".to_string(), kalam_link::KalamCellValue::text("Bob"));
+        row.insert("id".to_string(), kalam_client::KalamCellValue::int(1));
+        row.insert("name".to_string(), kalam_client::KalamCellValue::text("Bob"));
         let e = ChangeEvent::Insert {
             subscription_id: "sub-3".into(),
             rows: vec![row],
@@ -393,11 +324,11 @@ mod tests {
     #[test]
     fn change_event_update_converts() {
         let mut new_row = std::collections::HashMap::new();
-        new_row.insert("id".to_string(), kalam_link::KalamCellValue::int(1));
-        new_row.insert("name".to_string(), kalam_link::KalamCellValue::text("Bob2"));
+        new_row.insert("id".to_string(), kalam_client::KalamCellValue::int(1));
+        new_row.insert("name".to_string(), kalam_client::KalamCellValue::text("Bob2"));
         let mut old_row = std::collections::HashMap::new();
-        old_row.insert("id".to_string(), kalam_link::KalamCellValue::int(1));
-        old_row.insert("name".to_string(), kalam_link::KalamCellValue::text("Bob"));
+        old_row.insert("id".to_string(), kalam_client::KalamCellValue::int(1));
+        old_row.insert("name".to_string(), kalam_client::KalamCellValue::text("Bob"));
         let e = ChangeEvent::Update {
             subscription_id: "sub-4".into(),
             rows: vec![new_row],
@@ -425,7 +356,7 @@ mod tests {
     #[test]
     fn change_event_delete_converts() {
         let mut row = std::collections::HashMap::new();
-        row.insert("id".to_string(), kalam_link::KalamCellValue::int(99));
+        row.insert("id".to_string(), kalam_client::KalamCellValue::int(99));
         let e = ChangeEvent::Delete {
             subscription_id: "sub-5".into(),
             old_rows: vec![row],
@@ -539,8 +470,8 @@ mod tests {
 
     #[test]
     fn subscription_info_from_native() {
-        use kalam_link::models::SubscriptionInfo;
-        use kalam_link::SeqId;
+        use kalam_client::models::SubscriptionInfo;
+        use kalam_client::SeqId;
 
         let native = SubscriptionInfo {
             id: "sub-42".to_string(),
@@ -561,7 +492,7 @@ mod tests {
 
     #[test]
     fn subscription_info_from_native_none_fields() {
-        use kalam_link::models::SubscriptionInfo;
+        use kalam_client::models::SubscriptionInfo;
 
         let native = SubscriptionInfo {
             id: "sub-0".to_string(),
