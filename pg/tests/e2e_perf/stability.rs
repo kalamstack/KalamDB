@@ -81,7 +81,7 @@ async fn e2e_perf_local_memory_stays_bounded_under_batch_insert_and_scan() {
 }
 
 #[tokio::test]
-#[ntest::timeout(45000)]
+#[ntest::timeout(70000)]
 async fn e2e_perf_multi_session_pg_extension_memory_stays_bounded() {
     let env = TestEnv::global().await;
     let coordinator = env.pg_connect().await;

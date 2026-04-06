@@ -557,7 +557,26 @@ pub fn process_rss_kb(pid: u32) -> u64 {
 }
 
 pub fn process_group_rss_kb(pids: &[u32]) -> u64 {
-    pids.iter().map(|pid| process_rss_kb(*pid)).sum()
+    if pids.is_empty() {
+        return 0;
+    }
+
+    let pid_list = pids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+    let output = Command::new("ps")
+        .args(["-o", "rss=", "-p", &pid_list])
+        .output()
+        .expect("run ps for process group rss");
+    assert!(
+        output.status.success(),
+        "failed to read rss for pids {pid_list}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("parse process group rss output");
+    stdout
+        .lines()
+        .filter_map(|line| line.trim().parse::<u64>().ok())
+        .sum()
 }
 
 pub async fn sample_process_peak_rss_kb(
