@@ -6,7 +6,7 @@
 //! ## Tests Covered
 //! - system.users: username index for `WHERE username = '...'` queries
 //! - system.jobs: status index for `WHERE status = '...'` queries
-//! - system.live_queries: table_id index (basic verification)
+//! - system.live: active subscription visibility (basic verification)
 //!
 //! ## Strategy
 //! 1. Insert multiple records
@@ -14,15 +14,14 @@
 //! 3. Verify correct results are returned
 //! 4. Measure performance to ensure O(1) lookup behavior
 
-use super::test_support::TestServer;
-use kalam_link::models::ResponseStatus;
-use kalam_link::parse_i64;
-use kalamdb_commons::models::{ConnectionId, UserName};
-use kalamdb_commons::{
-    AuthType, JobId, LiveQueryId, NamespaceId, NodeId, Role, StorageId, TableName, UserId,
-};
+use super::test_support::{consolidated_helpers, TestServer};
+use kalam_client::models::ResponseStatus;
+use kalam_client::parse_i64;
+use kalamdb_commons::models::{ConnectionId, ConnectionInfo, UserName};
+use kalamdb_commons::websocket::{SubscriptionOptions, SubscriptionRequest};
+use kalamdb_commons::{AuthType, JobId, NodeId, Role, StorageId, UserId};
 use kalamdb_system::providers::storages::models::StorageMode;
-use kalamdb_system::{Job, JobStatus, JobType, LiveQuery, User};
+use kalamdb_system::{Job, JobStatus, JobType, User};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Test: system.users uses username index for WHERE username = '...' queries
@@ -302,79 +301,81 @@ async fn test_system_jobs_status_index() {
     println!("  - Query latency: {:?}", latency_indexed);
 }
 
-/// Test: system.live_queries basic verification
+/// Test: system.live basic verification
 ///
-/// This test verifies that the live_queries table can be queried
-/// and has the table_id index available (even if filter_to_prefix returns None currently).
+/// This test verifies that active subscriptions are visible through the
+/// in-memory `system.live` view and that filtering by table name works.
 #[actix_web::test]
 #[ntest::timeout(60000)]
-async fn test_system_live_queries_basic() {
+async fn test_system_live_basic() {
     let server = TestServer::new_shared().await;
 
-    // Insert a few live queries
-    let now = chrono::Utc::now().timestamp_millis();
+    let manager = server.app_context.live_query_manager();
+    let registry = server.app_context.connection_registry();
+    let ns = consolidated_helpers::unique_namespace("system_live_basic");
+    let user_id = UserId::new("root");
+    let conn_id = ConnectionId::new("conn_live_basic");
+
+    let registration = registry
+        .register_connection(conn_id.clone(), ConnectionInfo::new(None))
+        .expect("Failed to register connection");
+    let connection_state = registration.state;
+    connection_state.mark_authenticated(user_id.clone(), Role::User);
+
+    let create_ns = format!("CREATE NAMESPACE IF NOT EXISTS {}", ns);
+    let ns_resp = server.execute_sql_as_user(&create_ns, "root").await;
+    assert_eq!(
+        ns_resp.status,
+        ResponseStatus::Success,
+        "namespace create failed: {:?}",
+        ns_resp.error
+    );
+
+    for table_idx in 0..3 {
+        let create_table = format!(
+            "CREATE TABLE {}.table{} (id INT PRIMARY KEY, value TEXT) WITH (TYPE = 'USER')",
+            ns, table_idx
+        );
+        let table_resp = server.execute_sql_as_user(&create_table, "root").await;
+        assert_eq!(
+            table_resp.status,
+            ResponseStatus::Success,
+            "table create failed: {:?}",
+            table_resp.error
+        );
+    }
 
     for i in 1..=10 {
-        let live_id = LiveQueryId::new(
-            UserId::new("test_user"),
-            ConnectionId::new(&format!("conn{}", i)),
-            &format!("sub{}", i),
-        );
-
-        let live_query = LiveQuery {
-            live_id: live_id.clone(),
-            connection_id: format!("conn{}", i),
-            subscription_id: format!("sub{}", i),
-            namespace_id: NamespaceId::default(),
-            table_name: TableName::new(&format!("table{}", i % 3)), // 3 different tables
-            user_id: UserId::new("test_user"),
-            query: format!("SELECT * FROM table{}", i % 3),
-            options: Some("{}".to_string()),
-            status: kalamdb_system::LiveQueryStatus::Active,
-            created_at: now,
-            last_update: now,
-            last_ping_at: now,
-            changes: 0,
-            node_id: NodeId::from(1u64),
+        let subscription = SubscriptionRequest {
+            id: format!("sub{}", i),
+            sql: format!("SELECT * FROM {}.table{}", ns, i % 3),
+            options: Some(SubscriptionOptions::default()),
         };
 
-        server
-            .app_context
-            .system_tables()
-            .live_queries()
-            .create_live_query(live_query)
-            .expect("Failed to insert live query");
+        manager
+            .register_subscription_with_initial_data(&connection_state, &subscription, None)
+            .await
+            .expect("Failed to register live subscription");
     }
 
-    // Test 1: Query all live queries
-    let query_all = "SELECT COUNT(*) AS lq_count FROM system.live_queries";
+    // Test 1: Query all live subscriptions
+    let query_all = "SELECT COUNT(*) AS live_count FROM system.live";
     let response = server.execute_sql(query_all).await;
 
-    if response.status != ResponseStatus::Success {
-        println!("⚠ system.live_queries query failed: {:?}", response.error);
-        println!("⚠ This may be due to schema mismatch - skipping test");
-        return;
-    }
+    assert_eq!(response.status, ResponseStatus::Success, "Query failed: {:?}", response.error);
 
     let rows = response.rows_as_maps();
-    let count = parse_i64(rows[0].get("lq_count").unwrap());
-    println!("✓ Found {} live queries", count);
+    let count = parse_i64(rows[0].get("live_count").unwrap());
+    assert_eq!(count, 10, "Expected 10 active subscriptions, got {}", count);
 
-    if count == 0 {
-        println!("⚠ No live queries found, data may not have persisted");
-        return;
-    }
-
-    assert!(count >= 10, "Expected at least 10 live queries, got {}", count);
-
-    // Test 2: Query by table name (filter may not use index yet, but verify it works)
+    // Test 2: Query by table name and verify it works
     let query_by_table =
-        "SELECT COUNT(*) AS table_lq_count FROM system.live_queries WHERE table_name = 'table0'";
+        "SELECT COUNT(*) AS table_live_count FROM system.live WHERE table_name = 'table0'";
     let response2 = server.execute_sql(query_by_table).await;
 
     assert_eq!(response2.status, ResponseStatus::Success);
     let rows2 = response2.rows_as_maps();
-    let table_count = parse_i64(rows2[0].get("table_lq_count").unwrap());
+    let table_count = parse_i64(rows2[0].get("table_live_count").unwrap());
 
     // We inserted 10 queries cycling through 3 tables (0,1,2), so ~3-4 per table
     assert!(
@@ -383,9 +384,14 @@ async fn test_system_live_queries_basic() {
         table_count
     );
 
-    println!("✓ system.live_queries basic test passed");
-    println!("  - Queried live queries successfully");
-    println!("  - Filter by table_name works (index ready for future filter_to_prefix impl)");
+    manager
+        .unregister_connection(&user_id, &conn_id)
+        .await
+        .expect("Failed to unregister connection");
+
+    println!("✓ system.live basic test passed");
+    println!("  - Queried active subscriptions successfully");
+    println!("  - Filter by table_name works on the live view");
 }
 
 /// Test: Index usage provides O(1) lookup behavior

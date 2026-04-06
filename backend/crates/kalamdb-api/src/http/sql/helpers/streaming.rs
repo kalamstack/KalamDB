@@ -1,22 +1,18 @@
-use std::collections::HashMap;
-
 use actix_web::{error::ErrorInternalServerError, HttpResponse};
 use bytes::Bytes;
 use futures_util::stream;
+use kalamdb_commons::conversions::{mask_sensitive_rows_for_role, schema_fields_from_arrow_schema};
 use kalamdb_commons::models::{KalamCellValue, Role, Username};
 use kalamdb_commons::schemas::SchemaField;
 use kalamdb_core::providers::arrow_json_conversion::record_batch_to_json_arrays;
 
-use super::converter::{
-    column_indices_from_arrow_schema, mask_sensitive_rows_for_role, resolve_arrow_schema,
-    row_result_prefix, schema_fields_from_arrow_schema, success_response_suffix,
-};
+use super::converter::{resolve_arrow_schema, row_result_prefix, success_response_suffix};
 
 struct StreamingRowsState {
     prefix: Option<Bytes>,
     batches: std::vec::IntoIter<arrow::record_batch::RecordBatch>,
     suffix: Option<Bytes>,
-    column_indices: HashMap<String, usize>,
+    schema_fields: Vec<SchemaField>,
     user_role: Option<Role>,
     row_separator_needed: bool,
 }
@@ -53,7 +49,6 @@ pub fn stream_sql_rows_response(
     let arrow_schema = resolve_arrow_schema(&batches, schema)
         .ok_or_else(|| ErrorInternalServerError("Missing schema for row response"))?;
     let schema_fields: Vec<SchemaField> = schema_fields_from_arrow_schema(&arrow_schema);
-    let column_indices = column_indices_from_arrow_schema(&arrow_schema);
 
     let prefix = row_result_prefix(&schema_fields)
         .map(Bytes::from)
@@ -65,7 +60,7 @@ pub fn stream_sql_rows_response(
             prefix: Some(prefix),
             batches: batches.into_iter(),
             suffix: Some(suffix),
-            column_indices,
+            schema_fields,
             user_role,
             row_separator_needed: false,
         },
@@ -79,7 +74,9 @@ pub fn stream_sql_rows_response(
                     Ok(rows) => rows,
                     Err(err) => return Some((Err(ErrorInternalServerError(err)), state)),
                 };
-                mask_sensitive_rows_for_role(&mut rows, &state.column_indices, state.user_role);
+                if let Some(role) = state.user_role {
+                    mask_sensitive_rows_for_role(&mut rows, &state.schema_fields, role);
+                }
 
                 match serialize_rows_chunk(&rows, &mut state.row_separator_needed) {
                     Ok(Some(chunk)) => return Some((Ok(chunk), state)),

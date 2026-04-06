@@ -88,7 +88,10 @@ COPY backend/crates/kalamdb-views/Cargo.toml         backend/crates/kalamdb-view
 COPY backend/crates/kalamdb-vector/Cargo.toml        backend/crates/kalamdb-vector/Cargo.toml
 COPY backend/crates/kalamdb-dba/Cargo.toml           backend/crates/kalamdb-dba/Cargo.toml
 COPY backend/crates/kalamdb-oidc/Cargo.toml          backend/crates/kalamdb-oidc/Cargo.toml
-COPY link/Cargo.toml              link/Cargo.toml
+COPY link/link-common/Cargo.toml       link/link-common/Cargo.toml
+COPY link/kalam-client/Cargo.toml      link/kalam-client/Cargo.toml
+COPY link/kalam-consumer/Cargo.toml    link/kalam-consumer/Cargo.toml
+COPY link/kalam-consumer-wasm/Cargo.toml link/kalam-consumer-wasm/Cargo.toml
 COPY link/kalam-link-dart/Cargo.toml link/kalam-link-dart/Cargo.toml
 COPY cli/Cargo.toml               cli/Cargo.toml
 
@@ -98,7 +101,10 @@ RUN set -e \
     && echo 'fn main(){}' > backend/build.rs \
     && mkdir -p cli/src    && echo 'fn main(){}' > cli/src/main.rs \
     && echo 'fn main(){}' > cli/build.rs \
-    && mkdir -p link/src && touch link/src/lib.rs \
+    && mkdir -p link/link-common/src && touch link/link-common/src/lib.rs \
+    && mkdir -p link/kalam-client/src && touch link/kalam-client/src/lib.rs \
+    && mkdir -p link/kalam-consumer/src && touch link/kalam-consumer/src/lib.rs \
+    && mkdir -p link/kalam-consumer-wasm/src && touch link/kalam-consumer-wasm/src/lib.rs \
     && mkdir -p link/kalam-link-dart/src && touch link/kalam-link-dart/src/lib.rs \
     && for c in kalamdb-configs kalamdb-store kalamdb-system kalamdb-filestore \
          kalamdb-core kalamdb-sql kalamdb-tables kalamdb-streams kalamdb-auth \

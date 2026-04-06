@@ -18,8 +18,11 @@
 //   cargo test --test subscription slow_subscriber
 
 use crate::common::*;
-use kalam_link::{KalamLinkTimeouts, SubscriptionConfig, SubscriptionOptions};
+use kalam_client::{KalamLinkTimeouts, SubscriptionConfig, SubscriptionOptions};
+use std::sync::{Arc, Barrier};
 use std::time::Duration;
+
+const DRAIN_IDLE_GRACE: Duration = Duration::from_secs(3);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers shared across this module
@@ -28,7 +31,7 @@ use std::time::Duration;
 fn slow_client(
     receive_secs: u64,
     initial_data_secs: u64,
-) -> Result<kalam_link::KalamLinkClient, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<kalam_client::KalamLinkClient, Box<dyn std::error::Error + Send + Sync>> {
     client_for_user_on_url_with_timeouts(
         &leader_or_server_url(),
         default_username(),
@@ -47,9 +50,14 @@ fn slow_client(
 /// Collect up to `max_events` events from a subscription with an artificial
 /// per-event processing delay that simulates a slow consumer.
 ///
+/// After at least one event has been observed, stop once the stream stays idle
+/// for a short grace window instead of always burning the full wall timeout.
+/// That keeps the slow-subscriber scenarios realistic without turning every
+/// successful drain into a timeout-length sleep.
+///
 /// Returns `(events_collected, hit_error)`.
 async fn drain_with_delay(
-    sub: &mut kalam_link::SubscriptionManager,
+    sub: &mut kalam_client::SubscriptionManager,
     max_events: usize,
     per_event_delay: Duration,
     wall_timeout: Duration,
@@ -66,7 +74,14 @@ async fn drain_with_delay(
         if remaining.is_zero() {
             break;
         }
-        match tokio::time::timeout(remaining, sub.next()).await {
+
+        let wait_budget = if events.is_empty() {
+            remaining
+        } else {
+            remaining.min(DRAIN_IDLE_GRACE)
+        };
+
+        match tokio::time::timeout(wait_budget, sub.next()).await {
             Ok(Some(Ok(ev))) => {
                 events.push(format!("{:?}", ev));
                 // Simulate 3G-like processing pause
@@ -193,8 +208,8 @@ fn subscription_slow_consumer_initial_data() {
 // very large `initial_data_timeout` and `receive_timeout` values. Verifies
 // the subscription still works correctly end-to-end.
 // ─────────────────────────────────────────────────────────────────────────────
-// actual ≈122s × 1.5 = 183s → 270000ms
-#[ntest::timeout(270000)]
+// observed ≈14.5s in cluster mode after idle-aware draining; allow 30s on slower machines
+#[ntest::timeout(30000)]
 #[test]
 fn subscription_3g_like_high_latency() {
     if !require_server_running() {
@@ -573,8 +588,8 @@ fn subscription_timeout_graceful_then_reconnect() {
 // processes events slowly. Verifies the server correctly fans out to all of
 // them without errors or missing data.
 // ─────────────────────────────────────────────────────────────────────────────
-// actual ≈91s × 1.5 = 137s → 210000ms
-#[ntest::timeout(210000)]
+// observed ≈10.7s in cluster mode after idle-aware draining; allow 20s on slower machines
+#[ntest::timeout(20000)]
 #[test]
 fn subscription_multiple_concurrent_slow_subscribers() {
     if !require_server_running() {
@@ -605,12 +620,14 @@ fn subscription_multiple_concurrent_slow_subscribers() {
     let query = format!("SELECT * FROM {}", full);
     let live_marker = format!("live_{}", std::process::id());
     const N_SUBSCRIBERS: usize = 3;
+    let ready = Arc::new(Barrier::new(N_SUBSCRIBERS + 1));
 
-    let results: Vec<(usize, bool)> = std::thread::scope(|scope| {
+    let results: Vec<(usize, bool, bool)> = std::thread::scope(|scope| {
         let handles: Vec<_> = (0..N_SUBSCRIBERS)
             .map(|idx| {
                 let q = query.clone();
                 let marker = live_marker.clone();
+                let ready = Arc::clone(&ready);
                 scope.spawn(move || {
                     let rt = tokio::runtime::Builder::new_current_thread()
                         .enable_all()
@@ -625,7 +642,7 @@ fn subscription_multiple_concurrent_slow_subscribers() {
                             Ok(c) => c,
                             Err(e) => {
                                 eprintln!("[SUB {}] client error: {}", idx, e);
-                                return (0usize, true);
+                                return (0usize, true, false);
                             },
                         };
 
@@ -633,7 +650,7 @@ fn subscription_multiple_concurrent_slow_subscribers() {
                             Ok(s) => s,
                             Err(e) => {
                                 eprintln!("[SUB {}] subscribe error: {}", idx, e);
-                                return (0usize, true);
+                                return (0usize, true, false);
                             },
                         };
 
@@ -645,6 +662,11 @@ fn subscription_multiple_concurrent_slow_subscribers() {
                             Duration::from_secs(30),
                         )
                         .await;
+
+                        // Wait until every subscriber has finished its initial drain so the
+                        // live insert is observed in the live phase instead of whichever
+                        // subscriber happened to still be draining the snapshot.
+                        ready.wait();
 
                         // All subscribers wait for the live insert
                         // (the insert is performed by the main thread after all subscribers are up)
@@ -664,14 +686,13 @@ fn subscription_multiple_concurrent_slow_subscribers() {
                             "[SUB {}] {} events, marker_found={}, error={}",
                             idx, total, found_marker, hit_error
                         );
-                        (total, hit_error)
+                        (total, hit_error, found_marker)
                     })
                 })
             })
             .collect();
 
-        // Give subscribers time to connect and reach the live-events phase
-        std::thread::sleep(Duration::from_secs(3));
+        ready.wait();
 
         // Insert the live row all subscribers must see
         let _ = execute_sql_as_root_via_client(&format!(
@@ -682,11 +703,16 @@ fn subscription_multiple_concurrent_slow_subscribers() {
         handles.into_iter().map(|h| h.join().expect("thread")).collect()
     });
 
-    for (idx, (event_count, hit_error)) in results.iter().enumerate() {
+    for (idx, (event_count, hit_error, found_marker)) in results.iter().enumerate() {
         assert!(!hit_error, "Subscriber {} should not error under concurrent slow load", idx);
         assert!(
             *event_count > 0,
             "Subscriber {} must receive at least one event under concurrent slow load",
+            idx
+        );
+        assert!(
+            *found_marker,
+            "Subscriber {} must observe the shared live marker under concurrent slow load",
             idx
         );
     }
@@ -694,7 +720,7 @@ fn subscription_multiple_concurrent_slow_subscribers() {
     let _ = execute_sql_as_root_via_client(&format!("DROP NAMESPACE {} CASCADE", ns));
     println!(
         "[TEST] multiple_concurrent_slow_subscribers passed: {:?}",
-        results.iter().map(|(c, _)| c).collect::<Vec<_>>()
+        results.iter().map(|(c, _, _)| c).collect::<Vec<_>>()
     );
 }
 
@@ -705,8 +731,8 @@ fn subscription_multiple_concurrent_slow_subscribers() {
 // multi-batch initial delivery, and consume each batch slowly. Verifies that
 // all batches are flushed and no data is lost even with a slow consumer.
 // ─────────────────────────────────────────────────────────────────────────────
-// actual ≈181s × 1.5 = 272s → 360000ms
-#[ntest::timeout(360000)]
+// observed ≈8.1s in cluster mode after idle-aware draining; allow 20s on slower machines
+#[ntest::timeout(20000)]
 #[test]
 fn subscription_large_initial_data_slow_batch_consumer() {
     if !require_server_running() {
@@ -932,8 +958,8 @@ fn subscription_stable_after_idle_pause() {
 // followed by slow consumption. Verifies the subscription never errors and
 // the consumer eventually catches up.
 // ─────────────────────────────────────────────────────────────────────────────
-// actual ≈121s × 1.5 = 182s → 270000ms
-#[ntest::timeout(270000)]
+// observed ≈8.1s in cluster mode after idle-aware draining; allow 20s on slower machines
+#[ntest::timeout(20000)]
 #[test]
 fn subscription_burst_then_slow_catchup() {
     if !require_server_running() {

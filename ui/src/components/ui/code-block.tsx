@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
-import { KalamCellValue } from "kalam-link";
+import { KalamCellValue } from "@kalamdb/client";
 
 interface CodeBlockProps {
   value: unknown;

@@ -1,7 +1,7 @@
 //! SQL Execution Handlers
 //!
 //! This module provides modular handlers for different types of SQL operations:
-//! - **models**: Core types (ExecutionContext, ScalarValue, ExecutionResult, ExecutionMetadata)
+//! - **models**: Core types (ExecutionContext, ScalarValue, ExecutionResult)
 //! - **authorization**: Authorization gateway (COMPLETE - Phase 9.3)
 //! - **transaction**: Transaction handling (COMPLETE - Phase 9.4)
 //! - **ddl**: DDL operations (future)
@@ -23,7 +23,7 @@ use std::future::Future;
 pub mod typed;
 
 // Re-export core types from executor/models for convenience
-pub use crate::sql::context::{ExecutionContext, ExecutionMetadata, ExecutionResult, ScalarValue};
+pub use crate::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
 
 // Re-export legacy placeholder handlers
 pub use typed::TypedStatementHandler;

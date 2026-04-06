@@ -24,7 +24,7 @@
 use crate::error::RegistryError;
 use crate::view_base::VirtualView;
 use datafusion::arrow::array::{
-    ArrayRef, BooleanArray, Int16Array, Int32Array, Int64Array, StringArray,
+    ArrayRef, BooleanArray, Float32Array, Int16Array, Int32Array, Int64Array, StringArray,
 };
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
@@ -71,7 +71,7 @@ pub struct ClusterView {
 impl ClusterView {
     /// Get the TableDefinition for system.cluster view
     ///
-    /// Schema (21 columns):
+    /// Schema (25 columns):
     /// - cluster_id TEXT NOT NULL
     /// - node_id BIGINT NOT NULL
     /// - role TEXT NOT NULL
@@ -91,6 +91,10 @@ impl ClusterView {
     /// - hostname TEXT (nullable - node metadata)
     /// - version TEXT (nullable)
     /// - memory_mb BIGINT (nullable)
+    /// - memory_usage_mb BIGINT (nullable - physical footprint on macOS, RSS elsewhere)
+    /// - cpu_usage_percent FLOAT (nullable)
+    /// - uptime_seconds BIGINT (nullable)
+    /// - uptime_human TEXT (nullable)
     /// - os TEXT (nullable)
     /// - arch TEXT (nullable)
     pub fn definition() -> TableDefinition {
@@ -308,8 +312,52 @@ impl ClusterView {
             ),
             ColumnDefinition::new(
                 20,
-                "os",
+                "memory_usage_mb",
                 20,
+                KalamDataType::BigInt,
+                true,
+                false,
+                false,
+                ColumnDefault::None,
+                Some("Current KalamDB process memory usage in MB".to_string()),
+            ),
+            ColumnDefinition::new(
+                21,
+                "cpu_usage_percent",
+                21,
+                KalamDataType::Float,
+                true,
+                false,
+                false,
+                ColumnDefault::None,
+                Some("Current KalamDB process CPU usage percentage".to_string()),
+            ),
+            ColumnDefinition::new(
+                22,
+                "uptime_seconds",
+                22,
+                KalamDataType::BigInt,
+                true,
+                false,
+                false,
+                ColumnDefault::None,
+                Some("KalamDB server uptime in seconds".to_string()),
+            ),
+            ColumnDefinition::new(
+                23,
+                "uptime_human",
+                23,
+                KalamDataType::Text,
+                true,
+                false,
+                false,
+                ColumnDefault::None,
+                Some("KalamDB server uptime in compact human-readable form".to_string()),
+            ),
+            ColumnDefinition::new(
+                24,
+                "os",
+                24,
                 KalamDataType::Text,
                 true,
                 false,
@@ -318,9 +366,9 @@ impl ClusterView {
                 Some("Operating system".to_string()),
             ),
             ColumnDefinition::new(
-                21,
+                25,
                 "arch",
-                21,
+                25,
                 KalamDataType::Text,
                 true,
                 false,
@@ -397,6 +445,10 @@ impl VirtualView for ClusterView {
         let mut hostnames: Vec<Option<&str>> = Vec::with_capacity(num_nodes);
         let mut versions: Vec<Option<&str>> = Vec::with_capacity(num_nodes);
         let mut memory_mbs: Vec<Option<i64>> = Vec::with_capacity(num_nodes);
+        let mut memory_usage_mbs: Vec<Option<i64>> = Vec::with_capacity(num_nodes);
+        let mut cpu_usage_percents: Vec<Option<f32>> = Vec::with_capacity(num_nodes);
+        let mut uptime_seconds: Vec<Option<i64>> = Vec::with_capacity(num_nodes);
+        let mut uptime_humans: Vec<Option<&str>> = Vec::with_capacity(num_nodes);
         let mut oses: Vec<Option<&str>> = Vec::with_capacity(num_nodes);
         let mut archs: Vec<Option<&str>> = Vec::with_capacity(num_nodes);
 
@@ -422,6 +474,10 @@ impl VirtualView for ClusterView {
             hostnames.push(node.hostname.as_deref());
             versions.push(node.version.as_deref());
             memory_mbs.push(node.memory_mb.map(|v| v as i64));
+            memory_usage_mbs.push(node.memory_usage_mb.map(|v| v as i64));
+            cpu_usage_percents.push(node.cpu_usage_percent);
+            uptime_seconds.push(node.uptime_seconds.map(|v| v as i64));
+            uptime_humans.push(node.uptime_human.as_deref());
             oses.push(node.os.as_deref());
             archs.push(node.arch.as_deref());
         }
@@ -450,6 +506,10 @@ impl VirtualView for ClusterView {
                 Arc::new(StringArray::from(hostnames)) as ArrayRef,
                 Arc::new(StringArray::from(versions)) as ArrayRef,
                 Arc::new(Int64Array::from(memory_mbs)) as ArrayRef,
+                Arc::new(Int64Array::from(memory_usage_mbs)) as ArrayRef,
+                Arc::new(Float32Array::from(cpu_usage_percents)) as ArrayRef,
+                Arc::new(Int64Array::from(uptime_seconds)) as ArrayRef,
+                Arc::new(StringArray::from(uptime_humans)) as ArrayRef,
                 Arc::new(StringArray::from(oses)) as ArrayRef,
                 Arc::new(StringArray::from(archs)) as ArrayRef,
             ],
@@ -528,7 +588,7 @@ mod tests {
     #[test]
     fn test_schema() {
         let schema = cluster_schema();
-        assert_eq!(schema.fields().len(), 21);
+        assert_eq!(schema.fields().len(), 25);
         assert_eq!(schema.field(0).name(), "cluster_id");
         assert_eq!(schema.field(1).name(), "node_id");
         assert_eq!(schema.field(2).name(), "role");
@@ -537,8 +597,12 @@ mod tests {
         assert_eq!(schema.field(16).name(), "hostname");
         assert_eq!(schema.field(17).name(), "version");
         assert_eq!(schema.field(18).name(), "memory_mb");
-        assert_eq!(schema.field(19).name(), "os");
-        assert_eq!(schema.field(20).name(), "arch");
+        assert_eq!(schema.field(19).name(), "memory_usage_mb");
+        assert_eq!(schema.field(20).name(), "cpu_usage_percent");
+        assert_eq!(schema.field(21).name(), "uptime_seconds");
+        assert_eq!(schema.field(22).name(), "uptime_human");
+        assert_eq!(schema.field(23).name(), "os");
+        assert_eq!(schema.field(24).name(), "arch");
     }
 
     #[test]

@@ -1,30 +1,53 @@
 //! Fast-path INSERT bypass for simple `INSERT INTO table (cols) VALUES (...)` statements.
 //!
 //! Bypasses DataFusion's optimizer and physical planner (~2.6ms overhead) by parsing
-//! the INSERT SQL directly with sqlparser, resolving the KalamTableProvider from the
-//! schema registry, converting values to Row objects, and calling `insert_rows()` directly.
+//! the INSERT SQL directly with sqlparser, resolving table metadata from the schema
+//! registry, converting values to Row objects, and routing the mutation through the
+//! unified applier when possible.
 //!
 //! Falls back to DataFusion for:
 //! - INSERT ... SELECT (subquery source)
 //! - ON CONFLICT / ON DUPLICATE KEY
 //! - Complex expressions in VALUES (functions, casts, subqueries)
 //! - System namespace tables
-//! - Columns with DEFAULT expressions omitted from INSERT column list
 //! - Any parse failure
 
 use crate::error::KalamDbError;
+use crate::app_context::AppContext;
 use crate::schema_registry::SchemaRegistry;
 use crate::sql::{ExecutionContext, ExecutionResult};
+use chrono::Utc;
 use datafusion::scalar::ScalarValue;
+use kalamdb_commons::conversions::json_value_to_scalar;
+use kalamdb_commons::ids::SnowflakeGenerator;
 use kalamdb_commons::models::rows::row::Row;
-use kalamdb_commons::schemas::TableType;
+use kalamdb_commons::schemas::{ColumnDefault, TableType};
 use kalamdb_commons::TableId;
 use kalamdb_tables::KalamTableProvider;
 use sqlparser::ast::{Expr, SetExpr, Statement};
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use ulid::Ulid;
+use uuid::Uuid;
 
 use super::helpers::ast_parsing;
+
+static FAST_INSERT_SNOWFLAKE_GENERATOR: OnceLock<SnowflakeGenerator> = OnceLock::new();
+
+fn fast_insert_snowflake_generator() -> &'static SnowflakeGenerator {
+    FAST_INSERT_SNOWFLAKE_GENERATOR.get_or_init(|| SnowflakeGenerator::new(0))
+}
+
+enum PreparedDefaultValue {
+    Constant(ScalarValue),
+    Volatile(VolatileDefaultFunction),
+}
+
+enum VolatileDefaultFunction {
+    SnowflakeId,
+    UuidV7,
+    Ulid,
+}
 
 /// Attempt a fast-path INSERT that bypasses DataFusion's optimizer/physical planner.
 ///
@@ -33,6 +56,7 @@ use super::helpers::ast_parsing;
 /// or `Err(e)` if the INSERT was valid for fast-path but failed during execution.
 pub async fn try_fast_insert(
     statement: &Statement,
+    app_context: &AppContext,
     exec_ctx: &ExecutionContext,
     schema_registry: &Arc<SchemaRegistry>,
     prepared_table_id: Option<&TableId>,
@@ -104,25 +128,29 @@ pub async fn try_fast_insert(
             None => return Ok(None),
         };
 
+    let cached_table = match schema_registry.get(&table_id) {
+        Some(cached) => cached,
+        None => return Ok(None),
+    };
+
     // 6b. Enforce SHARED table access control.
     //     The DataFusion path checks this in SharedTableProvider::insert_into(),
     //     but the fast path bypasses that — so we must check here.
-    let is_shared = prepared_table_type == Some(TableType::Shared);
-    if is_shared || prepared_table_type.is_none() {
-        if let Some(cached) = schema_registry.get(&table_id) {
-            let entry = cached.table_entry();
-            if entry.table_type == kalamdb_commons::schemas::TableType::Shared {
-                let access_level =
-                    entry.access_level.unwrap_or(kalamdb_commons::TableAccess::Private);
-                let role = exec_ctx.user_role();
-                kalamdb_session::permissions::check_shared_table_write_access_level(
-                    role,
-                    access_level,
-                    table_id.namespace_id(),
-                    table_id.table_name(),
-                )
-                .map_err(|e| KalamDbError::PermissionDenied(e.to_string()))?;
-            }
+    let cached_table_entry = cached_table.table_entry();
+    let resolved_table_type = prepared_table_type.or(Some(cached_table_entry.table_type));
+
+    if matches!(resolved_table_type, Some(TableType::Shared)) || prepared_table_type.is_none() {
+        if cached_table_entry.table_type == kalamdb_commons::schemas::TableType::Shared {
+            let access_level =
+                cached_table_entry.access_level.unwrap_or(kalamdb_commons::TableAccess::Private);
+            let role = exec_ctx.user_role();
+            kalamdb_session::permissions::check_shared_table_write_access_level(
+                role,
+                access_level,
+                table_id.namespace_id(),
+                table_id.table_name(),
+            )
+            .map_err(|e| KalamDbError::PermissionDenied(e.to_string()))?;
         }
     }
 
@@ -142,33 +170,55 @@ pub async fn try_fast_insert(
         insert.columns.iter().map(|ident| ident.value.clone()).collect()
     };
 
-    // 7b. If any schema column with a DEFAULT expression is missing from the
-    //     INSERT column list, fall back to DataFusion which evaluates defaults
-    //     correctly (SNOWFLAKE_ID(), UUID_V7(), ULID(), CURRENT_USER(), etc.).
-    //     Without this check, coerce_rows fills type-zero values (0, "") instead.
-    for field in schema.fields() {
-        let col_name = field.name();
+    // 7b. Materialize missing DEFAULT columns here so cluster writes still go
+    //     through the applier/Raft path instead of falling back to local
+    //     DataFusion provider.insert_into() execution.
+    let mut missing_defaults = Vec::new();
+    for column in &cached_table.table.columns {
+        let col_name = &column.column_name;
         if col_name.starts_with('_') {
             continue; // skip system columns
         }
-        if !column_names.iter().any(|c| c == col_name) {
-            // Column is missing from the INSERT — check if it has a default
-            if kalam_provider.get_column_default(col_name).is_some() {
-                return Ok(None); // fall back to DataFusion for default evaluation
-            }
+        if !column_names.iter().any(|c| c == col_name) && !column.default_value.is_none() {
+            missing_defaults.push((col_name.clone(), column.default_value.clone()));
         }
     }
 
     // 8. Convert VALUES to Row objects
-    let rows = match values_to_rows(value_rows, &column_names) {
+    let mut rows = match values_to_rows(value_rows, &column_names) {
         Ok(rows) => rows,
         Err(_) => return Ok(None),
     };
 
-    // 9. Call insert directly via KalamTableProvider, bypassing DataFusion
+    if !missing_defaults.is_empty() {
+        apply_missing_defaults(&mut rows, &missing_defaults, exec_ctx)?;
+    }
+
+    // 9. Route the mutation through the unified applier when the table type is known.
     let user_id = exec_ctx.user_id();
     let row_count = rows.len();
     tracing::debug!(table_id = %table_id, row_count = row_count, "sql.fast_insert");
+
+    if !returning_seq {
+        if let Some(table_type) = resolved_table_type {
+            tracing::debug!(table_id = %table_id, row_count = row_count, table_type = %table_type, "sql.fast_insert_applier");
+            let rows_affected = match table_type {
+                TableType::User | TableType::Stream => app_context
+                    .applier()
+                    .insert_user_data(table_id.clone(), exec_ctx.user_id().clone(), rows)
+                    .await?
+                    .rows_affected(),
+                TableType::Shared => app_context
+                    .applier()
+                    .insert_shared_data(table_id.clone(), rows)
+                    .await?
+                    .rows_affected(),
+                TableType::System => return Ok(None),
+            };
+
+            return Ok(Some(ExecutionResult::Inserted { rows_affected }));
+        }
+    }
 
     if returning_seq {
         // INSERT ... RETURNING _seq: return the generated sequence IDs as rows
@@ -222,4 +272,103 @@ fn values_to_rows(
     }
 
     Ok(rows)
+}
+
+fn apply_missing_defaults(
+    rows: &mut [Row],
+    missing_defaults: &[(String, ColumnDefault)],
+    exec_ctx: &ExecutionContext,
+) -> Result<(), KalamDbError> {
+    if rows.is_empty() || missing_defaults.is_empty() {
+        return Ok(());
+    }
+
+    let mut prepared_defaults = Vec::with_capacity(missing_defaults.len());
+    for (col_name, default_value) in missing_defaults {
+        prepared_defaults.push((
+            col_name.clone(),
+            prepare_default_value(default_value, exec_ctx)?,
+        ));
+    }
+
+    for row in rows.iter_mut() {
+        for (col_name, prepared_default) in &prepared_defaults {
+            let scalar = materialize_prepared_default(prepared_default, exec_ctx)?;
+            row.values.insert(col_name.clone(), scalar);
+        }
+    }
+
+    Ok(())
+}
+
+fn prepare_default_value(
+    default_value: &ColumnDefault,
+    exec_ctx: &ExecutionContext,
+) -> Result<PreparedDefaultValue, KalamDbError> {
+    match default_value {
+        ColumnDefault::None => Err(KalamDbError::InvalidOperation(
+            "Missing default value metadata for omitted insert column".to_string(),
+        )),
+        ColumnDefault::Literal(json) => Ok(PreparedDefaultValue::Constant(json_value_to_scalar(json))),
+        ColumnDefault::FunctionCall { name, args } => {
+            if !args.is_empty() {
+                return Err(KalamDbError::InvalidOperation(format!(
+                    "Default function '{}' with arguments is not supported in fast INSERT",
+                    name
+                )));
+            }
+
+            match name.to_uppercase().as_str() {
+                "NOW" | "CURRENT_TIMESTAMP" => Ok(PreparedDefaultValue::Constant(
+                    ScalarValue::TimestampMillisecond(Some(Utc::now().timestamp_millis()), None),
+                )),
+                "CURRENT_USER" => {
+                    let username = exec_ctx.username().ok_or_else(|| {
+                        KalamDbError::InvalidOperation(
+                            "CURRENT_USER() default requires an authenticated username"
+                                .to_string(),
+                        )
+                    })?;
+                    Ok(PreparedDefaultValue::Constant(ScalarValue::Utf8(Some(
+                        username.to_string(),
+                    ))))
+                },
+                "SNOWFLAKE_ID" => Ok(PreparedDefaultValue::Volatile(
+                    VolatileDefaultFunction::SnowflakeId,
+                )),
+                "UUID_V7" => Ok(PreparedDefaultValue::Volatile(
+                    VolatileDefaultFunction::UuidV7,
+                )),
+                "ULID" => Ok(PreparedDefaultValue::Volatile(VolatileDefaultFunction::Ulid)),
+                other => Err(KalamDbError::InvalidOperation(format!(
+                    "Unsupported default function '{}' in fast INSERT",
+                    other
+                ))),
+            }
+        },
+    }
+}
+
+fn materialize_prepared_default(
+    prepared_default: &PreparedDefaultValue,
+    _exec_ctx: &ExecutionContext,
+) -> Result<ScalarValue, KalamDbError> {
+    match prepared_default {
+        PreparedDefaultValue::Constant(value) => Ok(value.clone()),
+        PreparedDefaultValue::Volatile(VolatileDefaultFunction::SnowflakeId) => {
+            let id = fast_insert_snowflake_generator().next_id().map_err(|e| {
+                KalamDbError::InvalidOperation(format!(
+                    "Failed to generate SNOWFLAKE_ID() default value: {}",
+                    e
+                ))
+            })?;
+            Ok(ScalarValue::Int64(Some(id)))
+        },
+        PreparedDefaultValue::Volatile(VolatileDefaultFunction::UuidV7) => {
+            Ok(ScalarValue::Utf8(Some(Uuid::now_v7().to_string())))
+        },
+        PreparedDefaultValue::Volatile(VolatileDefaultFunction::Ulid) => {
+            Ok(ScalarValue::Utf8(Some(Ulid::new().to_string())))
+        },
+    }
 }

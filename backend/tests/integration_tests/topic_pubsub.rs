@@ -14,7 +14,7 @@
 //! 3. Extended timeout handling for CDC workflows
 
 use crate::test_support::*;
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use kalamdb_commons::{Role, UserName};
 use reqwest::StatusCode;
 use serde::Deserialize;

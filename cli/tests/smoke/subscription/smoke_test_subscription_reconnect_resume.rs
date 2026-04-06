@@ -2,7 +2,8 @@
 //
 // Background:
 //   All three SDK paths (native Rust, WASM/TypeScript, Dart FFI) share the
-//   same Rust connection layer in `link/src/connection.rs`.  When the WebSocket
+//   same Rust connection layer in `link/link-common/src/connection/shared.rs`.
+//   When the WebSocket
 //   drops, the SharedConnection's auto-reconnect loop calls `resubscribe_all()`,
 //   which re-sends each active subscription with
 //   `from_seq_id = last_seen_seq_id`.  These tests verify the full cycle from
@@ -24,7 +25,7 @@
 //   cargo test --test smoke smoke_subscription_resume_from_seq_id
 
 use crate::common::*;
-use kalam_link::{
+use kalam_client::{
     models::ChangeEvent, KalamLinkClient, KalamLinkTimeouts, SeqId, SubscriptionConfig,
     SubscriptionOptions,
 };
@@ -52,7 +53,7 @@ fn reconnect_client() -> Result<KalamLinkClient, Box<dyn std::error::Error + Sen
 /// Collect events from a subscription until either `predicate` is satisfied
 /// or `timeout` elapses.  Returns all collected events.
 async fn collect_until<F>(
-    sub: &mut kalam_link::SubscriptionManager,
+    sub: &mut kalam_client::SubscriptionManager,
     timeout: Duration,
     mut predicate: F,
 ) -> Vec<ChangeEvent>

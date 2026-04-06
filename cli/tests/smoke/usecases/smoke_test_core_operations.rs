@@ -40,7 +40,7 @@ fn test_system_tables_queryable() {
     let system_tables = vec![
         "system.users",
         "system.namespaces",
-        "system.live_queries",
+        "system.live",
         "system.schemas",
         "system.storages",
         // First release: no legacy data, direct query supported

@@ -1,7 +1,7 @@
 //! Cluster gRPC Service
 //!
 //! Provides the gRPC service definition for inter-node cluster communication
-//! that is *not* part of Raft consensus (notifications, cache invalidation, etc.).
+//! that is *not* part of Raft consensus (SQL forwarding, liveness, diagnostics).
 //!
 //! ## Service: `kalamdb.cluster.ClusterService`
 //!
@@ -25,8 +25,7 @@ use tonic_prost::ProstCodec;
 
 pub use super::models::{
     ForwardSqlRequest, ForwardSqlResponse, ForwardSqlResponsePayload, GetNodeInfoRequest,
-    GetNodeInfoResponse, NotifyFollowersRequest, NotifyFollowersResponse, PingRequest,
-    PingResponse,
+    GetNodeInfoResponse, PingRequest, PingResponse,
 };
 
 // ─── gRPC Client ────────────────────────────────────────────────────────────
@@ -56,25 +55,6 @@ pub mod cluster_client {
         T::ResponseBody: Body<Data = Bytes> + std::marker::Send + 'static,
         <T::ResponseBody as Body>::Error: Into<StdError> + std::marker::Send,
     {
-        /// Forward a change notification to a peer node
-        pub async fn notify_followers(
-            &mut self,
-            request: impl tonic::IntoRequest<NotifyFollowersRequest>,
-        ) -> std::result::Result<tonic::Response<NotifyFollowersResponse>, tonic::Status> {
-            self.inner.ready().await.map_err(|e| {
-                tonic::Status::new(tonic::Code::Unknown, format!("Service not ready: {:?}", e))
-            })?;
-
-            let codec = ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/kalamdb.cluster.ClusterService/NotifyFollowers",
-            );
-            let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(GrpcMethod::new("kalamdb.cluster.ClusterService", "NotifyFollowers"));
-            self.inner.unary(req, path, codec).await
-        }
-
         /// Forward SQL write request to leader node.
         pub async fn forward_sql(
             &mut self,
@@ -140,12 +120,6 @@ pub mod cluster_server {
     /// Cluster service trait — implement this to handle incoming cluster RPCs.
     #[async_trait::async_trait]
     pub trait ClusterService: std::marker::Send + std::marker::Sync + 'static {
-        /// Handle a forwarded change notification from the leader
-        async fn notify_followers(
-            &self,
-            request: tonic::Request<NotifyFollowersRequest>,
-        ) -> std::result::Result<tonic::Response<NotifyFollowersResponse>, tonic::Status>;
-
         /// Handle a follower->leader SQL forwarding request.
         async fn forward_sql(
             &self,
@@ -208,15 +182,6 @@ pub mod cluster_server {
             let inner = self.inner.clone();
 
             match req.uri().path() {
-                "/kalamdb.cluster.ClusterService/NotifyFollowers" => {
-                    let fut = async move {
-                        let mut grpc = tonic::server::Grpc::new(ProstCodec::default());
-                        let method = NotifyFollowersSvc(inner);
-                        let res = grpc.unary(method, req).await;
-                        Ok(res)
-                    };
-                    Box::pin(fut)
-                },
                 "/kalamdb.cluster.ClusterService/ForwardSql" => {
                     let fut = async move {
                         let mut grpc = tonic::server::Grpc::new(ProstCodec::default());
@@ -250,21 +215,6 @@ pub mod cluster_server {
                     Ok(builder.body(tonic::body::Body::empty()).unwrap())
                 }),
             }
-        }
-    }
-
-    struct NotifyFollowersSvc<T: ClusterService>(Arc<T>);
-
-    impl<T: ClusterService> tonic::server::UnaryService<NotifyFollowersRequest>
-        for NotifyFollowersSvc<T>
-    {
-        type Response = NotifyFollowersResponse;
-        type Future = BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
-
-        fn call(&mut self, request: tonic::Request<NotifyFollowersRequest>) -> Self::Future {
-            let inner = self.0.clone();
-            let fut = async move { inner.notify_followers(request).await };
-            Box::pin(fut)
         }
     }
 
@@ -313,26 +263,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_notify_request_message() {
-        let req = NotifyFollowersRequest {
-            user_id: Some("user-123".to_string()),
-            table_namespace: "default".to_string(),
-            table_name: "messages".to_string(),
-            payload: vec![1, 2, 3],
+    fn test_forward_sql_response_payload_roundtrip() {
+        let resp = ForwardSqlResponsePayload {
+            status_code: 200,
+            body: b"ok".to_vec(),
         };
-        assert_eq!(req.user_id.as_deref(), Some("user-123"));
-        assert_eq!(req.table_namespace, "default");
-        assert_eq!(req.table_name, "messages");
-        assert_eq!(req.payload, vec![1, 2, 3]);
-    }
-
-    #[test]
-    fn test_notify_response_message() {
-        let resp = NotifyFollowersResponse {
-            success: true,
-            error: String::new(),
-        };
-        assert!(resp.success);
-        assert!(resp.error.is_empty());
+        assert_eq!(resp.status_code, 200);
+        assert_eq!(resp.body, b"ok".to_vec());
     }
 }

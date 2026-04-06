@@ -33,30 +33,6 @@ pub enum CommandType {
     Delete,
 }
 
-impl CommandType {
-    /// Check if this command type goes to the meta Raft group
-    pub fn is_meta(&self) -> bool {
-        matches!(
-            self,
-            CommandType::CreateNamespace
-                | CommandType::DropNamespace
-                | CommandType::CreateTable
-                | CommandType::AlterTable
-                | CommandType::DropTable
-                | CommandType::CreateStorage
-                | CommandType::DropStorage
-                | CommandType::CreateUser
-                | CommandType::UpdateUser
-                | CommandType::DeleteUser
-        )
-    }
-
-    /// Check if this is a DML command
-    pub fn is_dml(&self) -> bool {
-        matches!(self, CommandType::Insert | CommandType::Update | CommandType::Delete)
-    }
-}
-
 /// Trait for command validation
 pub trait Validate {
     /// Validate the command before execution

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use kalam_link::models::{QueryResponse, ResponseStatus};
+use kalam_client::models::{QueryResponse, ResponseStatus};
 use kalamdb_commons::{NamespaceId, TableId, TableName};
 use kalamdb_jobs::executors::flush::{FlushExecutor, FlushParams};
 use kalamdb_jobs::executors::{JobContext, JobExecutor};

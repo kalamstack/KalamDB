@@ -24,10 +24,10 @@ pub use kalamdb_commons::NodeId;
 // Re-export from models (consolidated model definitions)
 pub use models::{
     BufferedNotification, ChangeNotification, ChangeType, ConnectionEvent, ConnectionRegistration,
-    ConnectionState, EventReceiver, EventSender, NotificationReceiver, NotificationSender,
-    RegisteredSubscription, RegistryStats, SharedConnectionState, SubscriptionFlowControl,
-    SubscriptionHandle, SubscriptionResult, SubscriptionState, EVENT_CHANNEL_CAPACITY,
-    NOTIFICATION_CHANNEL_CAPACITY,
+    ConnectionState, EventReceiver, EventSender, InitialLoadState, NotificationReceiver,
+    NotificationSender, SharedConnectionState,
+    SubscriptionFlowControl, SubscriptionHandle, SubscriptionResult, SubscriptionState,
+    EVENT_CHANNEL_CAPACITY, NOTIFICATION_CHANNEL_CAPACITY,
 };
 
 // Re-export from manager modules
@@ -35,11 +35,8 @@ pub use manager::{ConnectionsManager, LiveQueryManager};
 
 // Re-export from helpers
 pub use helpers::{
-    error,
-    failover::{CleanupReport as LiveQueryCleanupReport, LiveQueryFailoverHandler},
     filter_eval::{matches as filter_matches, parse_where_clause},
     initial_data::{InitialDataFetcher, InitialDataOptions, InitialDataResult},
-    query_parser::QueryParser,
 };
 
 // Re-export from other modules

@@ -9,7 +9,7 @@
 //!   cargo test --test connection concurrent_ws -- --test-threads=1
 
 use crate::common::*;
-use kalam_link::{KalamLinkTimeouts, SubscriptionConfig};
+use kalam_client::{KalamLinkTimeouts, SubscriptionConfig};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};

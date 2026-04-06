@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use kalam_link::{ChangeEvent, KalamLinkClient, SubscriptionConfig};
+use kalam_client::{ChangeEvent, KalamLinkClient, SubscriptionConfig};
 use serde_json::Value;
 use tokio::sync::{watch, Mutex, Semaphore};
 
@@ -552,7 +552,7 @@ impl Benchmark for SubscriberScaleBench {
             let drain_deadline = tokio::time::Instant::now() + Duration::from_secs(45);
             loop {
                 let count_sql = format!(
-                    "SELECT COUNT(*) AS c FROM system.live_queries WHERE namespace_id = '{}' AND table_name = 'scale_sub'",
+                    "SELECT COUNT(*) AS c FROM system.live WHERE namespace_id = '{}' AND table_name = 'scale_sub'",
                     config.namespace
                 );
 

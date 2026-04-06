@@ -106,7 +106,7 @@
 //! - `kalamdb_commons::schemas` - Table and column definitions
 //! - `kalamdb_sql::ddl` - SQL DDL parsing and type inference
 //! - `kalamdb_core::schema_cache` - Cached type lookups
-//! - `link/sdks/typescript` - Client SDK type definitions
+//! - `link/sdks/typescript/client` - Client SDK type definitions
 
 pub mod kalam_data_type;
 pub mod wire_format;

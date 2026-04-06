@@ -1,0 +1,1 @@
+tail -f ../.cluster-local/node1/logs/stdout.log

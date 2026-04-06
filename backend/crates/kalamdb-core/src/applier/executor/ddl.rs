@@ -150,7 +150,7 @@ mod tests {
         // Register SqlExecutor into AppContext so DdlExecutor can clear plan cache.
         let sql_executor = Arc::new(SqlExecutor::new(
             app_ctx.clone(),
-            Arc::new(crate::sql::executor::handler_registry::HandlerRegistry::new(app_ctx.clone())),
+            Arc::new(crate::sql::executor::handler_registry::HandlerRegistry::new()),
         ));
         app_ctx.set_sql_executor(sql_executor.clone());
 

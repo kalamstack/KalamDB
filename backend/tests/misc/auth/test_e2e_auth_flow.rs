@@ -13,7 +13,7 @@
 //! and validates user lifecycle management.
 
 use super::test_support::{auth_helper, TestServer};
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use kalamdb_commons::Role;
 
 /// End-to-end authentication flow test

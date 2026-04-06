@@ -1,6 +1,6 @@
 //! Extended smoke tests for system tables
 //!
-//! Tests system.schemas, system.live_queries, and system.stats tables
+//! Tests system.schemas, system.live, and system.stats tables
 //! with focus on validating the `options` JSON column contains
 //! correct metadata for table types.
 //!
@@ -154,10 +154,10 @@ fn smoke_test_system_tables_options_column() {
     // This requires serde_json which is not in test dependencies yet
 }
 
-/// Test system.live_queries after establishing subscription
+/// Test system.live after establishing subscription
 ///
 /// Verifies:
-/// - Active subscriptions appear in system.live_queries
+/// - Active subscriptions appear in system.live
 /// - subscription_id, sql, user_id columns populated
 /// - Subscriptions removed after WebSocket closes
 #[ntest::timeout(180000)]
@@ -172,7 +172,7 @@ fn smoke_test_system_live_queries() {
     let table = generate_unique_table("messages");
     let full_table = format!("{}.{}", namespace, table);
 
-    println!("🧪 Testing system.live_queries");
+    println!("🧪 Testing system.live");
 
     // Cleanup and setup
     let _ =
@@ -199,25 +199,25 @@ fn smoke_test_system_live_queries() {
 
     // Give subscription time to register
 
-    // Query system.live_queries
-    let query_sql = "SELECT live_id, query, user_id FROM system.live_queries";
+    // Query system.live
+    let query_sql = "SELECT live_id, query, user_id FROM system.live";
     let output = execute_sql_as_root_via_client_json(query_sql)
-        .expect("Failed to query system.live_queries");
+        .expect("Failed to query system.live");
 
-    println!("system.live_queries output:\n{}", output);
+    println!("system.live output:\n{}", output);
 
     // Verify subscription appears
     // Note: Exact verification depends on whether subscription is registered yet
     // For smoke test, we just verify the query succeeds and columns exist
     assert!(
         output.contains("\"live_id\"") || output.contains("[]"),
-        "Expected live_id column or empty array in system.live_queries"
+        "Expected live_id column or empty array in system.live"
     );
 
     // Stop subscription
     listener.stop().ok();
 
-    println!("✅ Verified system.live_queries query succeeds");
+    println!("✅ Verified system.live query succeeds");
 
     // TODO: Add more robust verification once WebSocket subscription registration is confirmed
     // This may require waiting for subscription to fully establish

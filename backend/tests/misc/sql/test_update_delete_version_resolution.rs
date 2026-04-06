@@ -12,7 +12,7 @@
 //! - T068: Performance regression test → query latency with multiple versions
 
 use super::test_support::{consolidated_helpers, fixtures, flush_helpers, TestServer};
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use std::sync::Arc;
 use tokio::task::JoinSet;
 

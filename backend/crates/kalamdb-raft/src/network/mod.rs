@@ -18,7 +18,6 @@
 //! - [`cluster_service`]: gRPC message types and service definition
 //! - [`cluster_handler`]: Handler trait for incoming cluster messages
 //! - [`cluster_client`]: Outbound client for sending cluster messages
-//! - [`cluster_serde`]: flexbuffers serialization helpers
 
 #[allow(clippy::module_inception)]
 mod network;
@@ -27,7 +26,6 @@ pub mod service;
 // Cluster messaging modules
 pub mod cluster_client;
 pub mod cluster_handler;
-pub mod cluster_serde;
 pub mod cluster_service;
 pub mod models;
 
@@ -39,7 +37,7 @@ pub use service::{start_rpc_server, ClientProposalRequest, ClientProposalRespons
 pub use cluster_client::ClusterClient;
 pub use cluster_handler::{ClusterMessageHandler, ClusterServiceImpl, NoOpClusterHandler};
 pub use models::{
-    ForwardSqlRequest, ForwardSqlResponse, ForwardSqlResponsePayload, GetNodeInfoRequest,
-    GetNodeInfoResponse, NotifyFollowersRequest, NotifyFollowersResponse, PingRequest,
+    forward_sql_param, ForwardSqlParam, ForwardSqlRequest, ForwardSqlResponse,
+    ForwardSqlResponsePayload, GetNodeInfoRequest, GetNodeInfoResponse, PingRequest,
     PingResponse,
 };

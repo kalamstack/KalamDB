@@ -4,7 +4,7 @@
 //! with appropriate credentials and security settings.
 
 use super::test_support::TestServer;
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use kalamdb_commons::constants::AuthConstants;
 
 #[tokio::test]

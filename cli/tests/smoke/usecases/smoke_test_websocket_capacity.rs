@@ -154,7 +154,7 @@ fn smoke_test_websocket_capacity() {
 
         let live_queries_snapshot = fetch_live_queries_snapshot().await;
         println!(
-            "system.live_queries snapshot while connections active:\n{}",
+            "system.live snapshot while connections active:\n{}",
             live_queries_snapshot
         );
 
@@ -190,7 +190,7 @@ fn smoke_test_websocket_capacity() {
         // Wait long enough to exceed the WebSocket idle timeout (5s) plus cleanup time
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-        // Verify live_queries are cleaned up after closing
+        // Verify system.live entries are cleaned up after closing
         let post_close_count = count_live_query_subscriptions(subscription_prefix_for_cleanup.clone()).await;
         println!(
             "Live queries count after closing connections: {} (should be 0)",
@@ -357,18 +357,18 @@ async fn run_simple_sql() -> Duration {
 
 async fn fetch_live_queries_snapshot() -> String {
     tokio::task::spawn_blocking(|| {
-        execute_sql_as_root_via_client("SELECT * FROM system.live_queries ORDER BY live_id")
+        execute_sql_as_root_via_client("SELECT * FROM system.live ORDER BY live_id")
             .map_err(|e| format!("{}", e))
     })
     .await
     .expect("spawn_blocking join failure")
-    .expect("SELECT * FROM system.live_queries should succeed")
+    .expect("SELECT * FROM system.live should succeed")
 }
 
 async fn count_live_query_subscriptions(prefix: String) -> usize {
     tokio::task::spawn_blocking(move || {
         execute_sql_as_root_via_client_json(
-            "SELECT subscription_id FROM system.live_queries ORDER BY subscription_id",
+            "SELECT subscription_id FROM system.live ORDER BY subscription_id",
         )
         .map_err(|e| format!("{}", e))
     })
@@ -376,7 +376,7 @@ async fn count_live_query_subscriptions(prefix: String) -> usize {
     .expect("spawn_blocking join failure")
     .map(|json_str| {
         let value: serde_json::Value = serde_json::from_str(&json_str)
-            .unwrap_or_else(|e| panic!("Failed to parse system.live_queries JSON: {}", e));
+            .unwrap_or_else(|e| panic!("Failed to parse system.live JSON: {}", e));
         let rows = get_rows_as_hashmaps(&value).unwrap_or_default();
         rows.iter()
             .filter(|row| {
@@ -388,7 +388,7 @@ async fn count_live_query_subscriptions(prefix: String) -> usize {
             })
             .count()
     })
-    .expect("system.live_queries JSON query should succeed")
+    .expect("system.live JSON query should succeed")
 }
 
 async fn wait_for_subscription_ack(

@@ -17,14 +17,14 @@
 <p align="center">
   <a href="https://github.com/jamals86/KalamDB/actions/workflows/sdks.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jamals86/KalamDB/main/.github/badges/sdk-typescript-tests.json" alt="TypeScript SDK Tests" /></a>
   <a href="https://github.com/jamals86/KalamDB/actions/workflows/sdks.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jamals86/KalamDB/main/.github/badges/sdk-dart-tests.json" alt="Dart SDK Tests" /></a>
-  <a href="https://www.npmjs.com/package/kalam-link"><img src="https://img.shields.io/npm/v/kalam-link?label=typescript%20sdk" alt="TypeScript SDK" /></a>
+  <a href="https://www.npmjs.com/package/@kalamdb/client"><img src="https://img.shields.io/npm/v/%40kalamdb%2Fclient?label=typescript%20sdk" alt="TypeScript SDK" /></a>
   <a href="https://pub.dev/packages/kalam_link"><img src="https://img.shields.io/pub/v/kalam_link?label=dart%20sdk" alt="Dart SDK" /></a>
 </p>
 
 KalamDB is a SQL-first realtime state database for AI agents, chat products, and multi-tenant SaaS.
 It combines SQL execution, live subscriptions, pub/sub streams, and hot/cold storage in one Rust runtime.
 
-Supported SDKs: [TypeScript/JavaScript](https://www.npmjs.com/package/kalam-link) and [Dart/Flutter](https://pub.dev/packages/kalam_link).
+Supported SDKs: [TypeScript/JavaScript](https://www.npmjs.com/package/@kalamdb/client) and [Dart/Flutter](https://pub.dev/packages/kalam_link).
 
 PostgreSQL extension Docker image: [jamals86/pg-kalam](https://hub.docker.com/r/jamals86/pg-kalam) with `pg_kalam` preinstalled.
 
@@ -79,7 +79,7 @@ cargo run --bin kalamdb-server
 ## Browser/Frontend Client Example
 
 ```ts
-import { createClient, Auth } from 'kalam-link';
+import { createClient, Auth } from '@kalamdb/client';
 
 const client = createClient({
   url: 'http://localhost:8080',
@@ -119,7 +119,8 @@ await client.disconnect();
 Subscribe an AI agent to a KalamDB topic and process each row with an LLM — fully managed retries, backpressure, and at-least-once delivery via `runAgent`.
 
 ```ts
-import { createClient, Auth, runAgent } from 'kalam-link';
+import { createClient, Auth } from '@kalamdb/client';
+import { runAgent } from '@kalamdb/consumer';
 
 const client = createClient({
   url: 'http://localhost:8080',
@@ -197,7 +198,7 @@ CREATE TABLE chat.messages (
 
 - Docs: <https://kalamdb.org/docs>
 - Quick start: `docs/getting-started/quick-start.md`
-- TypeScript SDK: `link/sdks/typescript/`
+- TypeScript SDK: `link/sdks/typescript/client/`
 - Docker deployment: `docker/run/`
 - PostgreSQL extension Docker image: `jamals86/pg-kalam`
 - Website: <https://kalamdb.org>

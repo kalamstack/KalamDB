@@ -196,6 +196,12 @@ impl VirtualView for SettingsView {
                         "server"
                     ),
                     (
+                        "server.public_origin",
+                        config.server.effective_public_origin(),
+                        "Public origin used by the Admin UI for API and WebSocket traffic",
+                        "server"
+                    ),
+                    (
                         "server.api_version",
                         config.server.api_version,
                         "API version prefix (e.g., v1)",
@@ -603,6 +609,12 @@ impl VirtualView for SettingsView {
                         "jobs.max_retries",
                         config.jobs.max_retries,
                         "Maximum retry attempts per job",
+                        "jobs"
+                    ),
+                    (
+                        "jobs.wal_cleanup_interval_seconds",
+                        config.jobs.wal_cleanup_interval_seconds,
+                        "Interval for periodic RocksDB WAL cleanup flushes",
                         "jobs"
                     ),
                 ]

@@ -4,12 +4,11 @@
 //! Uses constants from kalamdb_commons for table prefixes.
 
 use crate::applier::UnifiedApplier;
-use crate::error_extensions::KalamDbResultExt;
 use crate::job_waker::JobWaker;
 use crate::live::notification::NotificationService;
 use crate::live::ConnectionsManager;
+use crate::live::LiveQueryManager;
 use crate::live::TopicPublisherService;
-use crate::live_query::LiveQueryManager;
 use crate::schema_registry::SchemaRegistry;
 use crate::sql::datafusion_session::DataFusionSessionFactory;
 use crate::sql::executor::SqlExecutor;
@@ -27,7 +26,7 @@ use kalamdb_pg::KalamPgService;
 use kalamdb_raft::CommandExecutor;
 use kalamdb_sharding::{GroupId, ShardRouter};
 use kalamdb_store::StorageBackend;
-use kalamdb_system::{ClusterCoordinator, Job, Namespace, SystemTablesRegistry};
+use kalamdb_system::{ClusterCoordinator, Namespace, SystemTablesRegistry};
 use kalamdb_tables::{SharedTableStore, UserTableStore};
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
@@ -96,7 +95,7 @@ pub struct AppContext {
     executor: Arc<dyn CommandExecutor>,
 
     // ===== System Columns Service =====
-    system_columns_service: Arc<crate::system_columns::SystemColumnsService>,
+    system_columns_service: Arc<crate::schema_registry::SystemColumnsService>,
 
     // ===== Slow Query Logger =====
     slow_query_logger: Arc<crate::slow_query_logger::SlowQueryLogger>,
@@ -246,8 +245,9 @@ impl AppContext {
                 std::path::PathBuf::from(&config.logging.logs_path),
             ));
 
-            // Get stats_view reference for callback wiring later
+            // Get virtual view references for callback wiring later
             let stats_view = system_schema.stats_view();
+            let live_view = system_schema.live_view();
 
             // Register all system tables in DataFusion
             // Use config-driven DataFusion settings for parallelism
@@ -333,7 +333,7 @@ impl AppContext {
             // Extract worker_id from node_id for Snowflake ID generation
             let worker_id = Self::extract_worker_id(&node_id);
             let system_columns_service =
-                Arc::new(crate::system_columns::SystemColumnsService::new(worker_id));
+                Arc::new(crate::schema_registry::SystemColumnsService::new(worker_id));
 
             // Create unified manifest service (hot cache + RocksDB + cold storage)
             let mut manifest_service_obj = crate::manifest::ManifestService::new(
@@ -389,8 +389,9 @@ impl AppContext {
             );
 
             log::debug!("Creating RaftExecutor...");
+            let server_start_time = Instant::now();
             let executor: Arc<dyn CommandExecutor> =
-                Arc::new(kalamdb_raft::RaftExecutor::new(manager));
+                Arc::new(kalamdb_raft::RaftExecutor::new(manager, server_start_time));
 
             // Note: ClusterLiveNotifier removed - Raft replication now handles
             // data consistency across nodes, and each node notifies its own
@@ -430,7 +431,7 @@ impl AppContext {
                 file_storage_service,
                 topic_publisher: Arc::clone(&topic_publisher),
                 sql_executor: OnceCell::new(),
-                server_start_time: Instant::now(),
+                server_start_time,
             });
 
             // Register vector_search with AppContext-backed runtime.
@@ -470,23 +471,12 @@ impl AppContext {
                 },
             }
 
-            // Wire AppContext into notification service for Raft leadership checks
-            // This ensures only the leader fires notifications, preventing duplicates
-            notification_service.set_app_context(Arc::downgrade(&app_ctx));
-
-            // Wire gRPC cluster client + handler for cross-node notification broadcasting.
-            // Only effective in cluster mode (RaftExecutor); single-node mode skips this.
+            // Wire the cluster message handler for non-live cluster RPCs.
             if let Some(raft_executor) =
                 app_ctx.executor().as_any().downcast_ref::<kalamdb_raft::RaftExecutor>()
             {
-                let cluster_client =
-                    Arc::new(kalamdb_raft::ClusterClient::new(raft_executor.manager().clone()));
-                notification_service.set_cluster_client(cluster_client);
-
-                let cluster_handler = Arc::new(crate::live::CoreClusterHandler::new(
-                    Arc::clone(&app_ctx),
-                    Arc::clone(&notification_service),
-                ));
+                let cluster_handler =
+                    Arc::new(crate::live::CoreClusterHandler::new(Arc::clone(&app_ctx)));
                 raft_executor.set_cluster_handler(cluster_handler);
                 let pg_executor =
                     Arc::new(crate::operations::OperationService::new(Arc::clone(&app_ctx)));
@@ -508,11 +498,9 @@ impl AppContext {
             }
 
             let live_query_manager = Arc::new(LiveQueryManager::new(
-                app_ctx.system_tables().live_queries(),
                 app_ctx.schema_registry(),
                 app_ctx.connection_registry(),
                 Arc::clone(&app_ctx.base_session_context),
-                Arc::clone(&app_ctx),
             ));
             if app_ctx.live_query_manager.set(live_query_manager).is_err() {
                 panic!("LiveQueryManager already initialized");
@@ -522,24 +510,17 @@ impl AppContext {
             let app_ctx_for_stats = Arc::clone(&app_ctx);
             stats_view.set_metrics_callback(Arc::new(move || app_ctx_for_stats.compute_metrics()));
 
+            let app_ctx_for_live = Arc::clone(&app_ctx);
+            let live_snapshot_callback: kalamdb_views::live::LiveSnapshotCallback =
+                Arc::new(move || app_ctx_for_live.live_query_manager().snapshot_live_queries());
+            live_view.set_snapshot_callback(Arc::clone(&live_snapshot_callback));
+
             // Wire up ManifestTableProvider in_memory_checker callback
             // This allows system.manifest to show if a cache entry is in hot memory
             let manifest_for_checker = Arc::clone(&app_ctx.manifest_service);
             app_ctx.system_tables().manifest().set_in_memory_checker(Arc::new(
                 move |cache_key: &str| manifest_for_checker.is_in_hot_cache_by_string(cache_key),
             ));
-
-            // Cleanup orphan live queries from previous server run
-            // Live queries don't persist across restarts (WebSocket connections are lost)
-            match app_ctx.system_tables().live_queries().clear_all() {
-                Ok(count) if count > 0 => {
-                    log::info!("Cleared {} orphan live queries from previous server run", count);
-                },
-                Ok(_) => {}, // No orphans to clear
-                Err(e) => {
-                    log::warn!("Failed to clear orphan live queries: {}", e);
-                },
-            }
 
             app_ctx
         }
@@ -697,7 +678,7 @@ impl AppContext {
         let slow_query_logger = Arc::new(crate::slow_query_logger::SlowQueryLogger::new_test());
 
         // Create system columns service with worker_id=0 for tests
-        let system_columns_service = Arc::new(crate::system_columns::SystemColumnsService::new(0));
+        let system_columns_service = Arc::new(crate::schema_registry::SystemColumnsService::new(0));
 
         // Create unified manifest service for tests
         let manifest_service = Arc::new(crate::manifest::ManifestService::new_with_registries(
@@ -725,7 +706,9 @@ impl AppContext {
             "127.0.0.1:8080".to_string(),
         );
         let manager = Arc::new(kalamdb_raft::manager::RaftManager::new(raft_config));
-        let executor: Arc<dyn CommandExecutor> = Arc::new(kalamdb_raft::RaftExecutor::new(manager));
+        let server_start_time = Instant::now();
+        let executor: Arc<dyn CommandExecutor> =
+            Arc::new(kalamdb_raft::RaftExecutor::new(manager, server_start_time));
 
         // Create notification service for tests (before AppContext)
         let notification_service = NotificationService::new(Arc::clone(&connection_registry));
@@ -757,7 +740,7 @@ impl AppContext {
             file_storage_service,
             topic_publisher: Arc::clone(&topic_publisher),
             sql_executor: OnceCell::new(),
-            server_start_time: Instant::now(),
+            server_start_time,
         });
 
         // Register vector_search with AppContext-backed runtime for tests.
@@ -771,9 +754,6 @@ impl AppContext {
         // Topic publishing is now synchronous in table providers — no need to wire
         // into notification service.
 
-        // Wire AppContext into notification service for leadership checks (tests)
-        notification_service.set_app_context(Arc::downgrade(&app_ctx));
-
         // Job manager is initialized externally by kalamdb-jobs (via set_job_manager)
 
         let applier = crate::applier::create_applier(Arc::clone(&app_ctx));
@@ -782,11 +762,9 @@ impl AppContext {
         }
 
         let live_query_manager = Arc::new(LiveQueryManager::new(
-            app_ctx.system_tables().live_queries(),
             app_ctx.schema_registry(),
             app_ctx.connection_registry(),
             Arc::clone(&app_ctx.base_session_context),
-            Arc::clone(&app_ctx),
         ));
         if app_ctx.live_query_manager.set(live_query_manager).is_err() {
             panic!("LiveQueryManager already initialized");
@@ -1021,7 +999,7 @@ impl AppContext {
     ///
     /// Returns an Arc reference to the SystemColumnsService that manages
     /// all system column operations (_seq, _deleted).
-    pub fn system_columns_service(&self) -> Arc<crate::system_columns::SystemColumnsService> {
+    pub fn system_columns_service(&self) -> Arc<crate::schema_registry::SystemColumnsService> {
         self.system_columns_service.clone()
     }
 
@@ -1083,29 +1061,6 @@ impl AppContext {
     /// Get the shared SqlExecutor (panics if not yet initialized)
     pub fn sql_executor(&self) -> Arc<SqlExecutor> {
         self.try_sql_executor().expect("SqlExecutor not initialized in AppContext")
-    }
-
-    // ===== Convenience methods for backward compatibility =====
-
-    /// Insert a job into the jobs table
-    ///
-    /// Convenience wrapper for system_tables().jobs().create_job()
-    pub fn insert_job(&self, job: &Job) -> Result<(), crate::error::KalamDbError> {
-        self.system_tables()
-            .jobs()
-            .create_job(job.clone())
-            .map(|_| ())  // Discard the message, just return ()
-            .into_kalamdb_error("Failed to insert job")
-    }
-
-    /// Scan all jobs from the jobs table
-    ///
-    /// Convenience wrapper for system_tables().jobs().list_jobs()
-    pub fn scan_all_jobs(&self) -> Result<Vec<Job>, crate::error::KalamDbError> {
-        self.system_tables()
-            .jobs()
-            .list_jobs()
-            .into_kalamdb_error("Failed to scan jobs")
     }
 
     /// Get server uptime in seconds

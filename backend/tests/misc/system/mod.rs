@@ -16,6 +16,7 @@ mod test_helpers;
 // System Tests
 mod test_audit_logging;
 mod test_dba_init;
+mod test_runtime_metrics;
 // NOTE: test_config_access requires kalamdb-core's internal test infrastructure
 // and is marked #[ignore]. It should be run via kalamdb-core's test suite instead.
 // mod test_config_access;

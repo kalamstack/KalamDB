@@ -25,6 +25,7 @@ use kalamdb_views::cluster_groups::create_cluster_groups_provider;
 use kalamdb_views::columns_view::create_columns_view_provider;
 use kalamdb_views::datatypes::{DatatypesTableProvider, DatatypesView};
 use kalamdb_views::describe::DescribeView;
+use kalamdb_views::live::{LiveTableProvider, LiveView};
 use kalamdb_views::server_logs::create_server_logs_provider;
 use kalamdb_views::settings::{SettingsTableProvider, SettingsView};
 use kalamdb_views::stats::{StatsTableProvider, StatsView};
@@ -41,6 +42,8 @@ pub struct ViewConfig {
     pub executor: RwLock<Option<Arc<dyn CommandExecutor>>>,
     /// Pre-created StatsView for callback wiring
     pub stats_view: Arc<StatsView>,
+    /// Pre-created system.live view for callback wiring.
+    pub live_view: Arc<LiveView>,
 }
 
 impl std::fmt::Debug for ViewConfig {
@@ -84,6 +87,7 @@ impl SystemSchemaProvider {
                 logs_path,
                 executor: RwLock::new(None),
                 stats_view: Arc::new(StatsView::new()),
+                live_view: Arc::new(LiveView::new(SystemTable::Live)),
             }),
         }
     }
@@ -100,6 +104,11 @@ impl SystemSchemaProvider {
     /// first query.
     pub fn stats_view(&self) -> Arc<StatsView> {
         Arc::clone(&self.view_config.stats_view)
+    }
+
+    /// Get the pre-created system.live view for callback wiring.
+    pub fn live_view(&self) -> Arc<LiveView> {
+        Arc::clone(&self.view_config.live_view)
     }
 
     /// Get or create a view provider, storing it in SchemaRegistry's CachedTableData
@@ -121,6 +130,11 @@ impl SystemSchemaProvider {
             SystemTable::Stats => {
                 let provider =
                     Arc::new(StatsTableProvider::new(Arc::clone(&self.view_config.stats_view)));
+                provider as Arc<dyn TableProvider>
+            },
+            SystemTable::Live => {
+                let provider =
+                    Arc::new(LiveTableProvider::new(Arc::clone(&self.view_config.live_view)));
                 provider as Arc<dyn TableProvider>
             },
             SystemTable::Settings => {

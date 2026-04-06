@@ -352,6 +352,7 @@ impl SqlExecutor {
                     DmlKind::Insert => {
                         super::fast_insert::try_fast_insert(
                             statement,
+                            self.app_context.as_ref(),
                             exec_ctx,
                             &schema_registry,
                             metadata.table_id.as_ref(),
@@ -362,6 +363,7 @@ impl SqlExecutor {
                     DmlKind::Update => {
                         super::fast_point_dml::try_fast_update(
                             statement,
+                            self.app_context.as_ref(),
                             exec_ctx,
                             &schema_registry,
                             metadata.table_id.as_ref(),
@@ -372,6 +374,7 @@ impl SqlExecutor {
                     DmlKind::Delete => {
                         super::fast_point_dml::try_fast_delete(
                             statement,
+                            self.app_context.as_ref(),
                             exec_ctx,
                             &schema_registry,
                             metadata.table_id.as_ref(),
@@ -643,6 +646,9 @@ impl SqlExecutor {
                     match session.execute_logical_plan(executable_plan).await {
                         Ok(df) => df,
                         Err(e) => {
+                            if let Some(not_leader_err) = Self::try_not_leader_error(&e) {
+                                return Err(not_leader_err);
+                            }
                             log::error!(
                                 target: "sql::exec",
                                 "❌ SQL execution failed after replan | sql='{}' | params={} | error='{}'",
@@ -702,6 +708,9 @@ impl SqlExecutor {
             match session.execute_logical_plan(executable_plan).await {
                 Ok(df) => df,
                 Err(e) => {
+                    if let Some(not_leader_err) = Self::try_not_leader_error(&e) {
+                        return Err(not_leader_err);
+                    }
                     log::error!(
                         target: "sql::exec",
                         "❌ SQL execution failed | sql='{}' | params={} | error='{}'",

@@ -12,7 +12,7 @@ use super::test_support::flush_helpers::{
     execute_flush_synchronously, execute_shared_flush_synchronously,
 };
 use super::test_support::{consolidated_helpers, fixtures, TestServer};
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use std::cmp::max;
 use std::time::{Duration, Instant};
 

@@ -11,7 +11,6 @@
 //! - **Testability**: Easy to mock handlers for unit tests
 //! - **Zero Overhead**: Registry lookup via DashMap is <1μs (vs 50-100ns for match)
 
-use crate::app_context::AppContext;
 use crate::error::KalamDbError;
 use crate::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
 use crate::sql::executor::handler_adapter::{DynamicHandlerAdapter, TypedHandlerAdapter};
@@ -64,7 +63,7 @@ type HandlerKey = std::mem::Discriminant<kalamdb_sql::classifier::SqlStatementKi
 /// # Usage Pattern
 /// ```ignore
 /// // Build registry once during initialization
-/// let registry = HandlerRegistry::new(app_context);
+/// let registry = HandlerRegistry::new();
 ///
 /// // Route statement to handler
 /// match registry.handle(session, stmt, params, exec_ctx).await {
@@ -83,17 +82,15 @@ type HandlerKey = std::mem::Discriminant<kalamdb_sql::classifier::SqlStatementKi
 /// - Total overhead: <2μs vs ~50ns for direct match (acceptable trade-off)
 pub struct HandlerRegistry {
     handlers: DashMap<HandlerKey, Arc<dyn SqlStatementHandler>>,
-    app_context: Arc<AppContext>,
 }
 
 impl HandlerRegistry {
     /// Create an empty handler registry.
     ///
     /// Handler registration is performed externally via `kalamdb_handlers::register_all_handlers()`.
-    pub fn new(app_context: Arc<AppContext>) -> Self {
+    pub fn new() -> Self {
         Self {
             handlers: DashMap::new(),
-            app_context,
         }
     }
 
@@ -209,11 +206,6 @@ impl HandlerRegistry {
         let key = std::mem::discriminant(statement.kind());
         self.handlers.contains_key(&key)
     }
-
-    /// Get the AppContext (for handler access if needed)
-    pub fn app_context(&self) -> &Arc<AppContext> {
-        &self.app_context
-    }
 }
 
 #[cfg(test)]
@@ -232,8 +224,8 @@ mod tests {
     async fn test_registry_create_namespace() {
         use kalamdb_sql::classifier::SqlStatementKind;
 
-        let app_ctx = test_app_context_simple();
-        let registry = HandlerRegistry::new(app_ctx);
+        let _app_ctx = test_app_context_simple();
+        let registry = HandlerRegistry::new();
         let ctx = test_context();
 
         let stmt = SqlStatement::new(
@@ -263,8 +255,8 @@ mod tests {
     async fn test_registry_unregistered_handler() {
         use kalamdb_sql::classifier::SqlStatementKind;
 
-        let app_ctx = test_app_context_simple();
-        let registry = HandlerRegistry::new(app_ctx);
+        let _app_ctx = test_app_context_simple();
+        let registry = HandlerRegistry::new();
         let ctx = test_context();
 
         // Use an unclassified statement (not in SqlStatementKind)
@@ -329,8 +321,8 @@ mod tests {
             }
         }
 
-        let app_ctx = test_app_context_simple();
-        let registry = HandlerRegistry::new(app_ctx);
+        let _app_ctx = test_app_context_simple();
+        let registry = HandlerRegistry::new();
 
         // Register stub handler for CreateNamespace
         let key = std::mem::discriminant(&SqlStatementKind::CreateNamespace(

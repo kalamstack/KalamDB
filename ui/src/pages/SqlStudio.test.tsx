@@ -92,7 +92,7 @@ vi.mock("@/services/sqlStudioWorkspaceSyncService", () => ({
   subscribeToSyncedSqlStudioWorkspaceState: (...args: unknown[]) => mockSubscribeToSyncedSqlStudioWorkspaceState(...args),
 }));
 
-vi.mock("kalam-link", () => {
+vi.mock("@kalamdb/client", () => {
   class KalamCellValue {
     private value: unknown;
 

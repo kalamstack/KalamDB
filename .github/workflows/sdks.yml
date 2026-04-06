@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       npm_publish:
-        description: "Publish TypeScript SDK to npm"
+        description: "Publish TypeScript SDK packages to npm"
         type: boolean
         required: false
         default: false
@@ -606,7 +606,7 @@ jobs:
           git push origin main
 
   publish_npm:
-    name: Publish TypeScript SDK to npm
+    name: Publish TypeScript SDK packages to npm
     runs-on: ubuntu-latest
     needs:
       - resolve_versions
@@ -641,9 +641,24 @@ jobs:
           shared-key: npm-publish
           cache-on-failure: true
 
-      - name: Publish TypeScript SDK to npm
+      - name: Publish @kalamdb/client to npm
         shell: bash
-        working-directory: link/sdks/typescript
+        working-directory: link/sdks/typescript/client
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.resolve_versions.outputs.ts_version }}"
+          FORCE_FLAG=""
+          if [[ "${{ github.event.inputs.force_npm_publish }}" == "true" ]]; then
+            FORCE_FLAG="--force"
+          fi
+          chmod +x ./publish.sh
+          ./publish.sh --version "$VERSION" $FORCE_FLAG
+
+      - name: Publish @kalamdb/consumer to npm
+        shell: bash
+        working-directory: link/sdks/typescript/consumer
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |

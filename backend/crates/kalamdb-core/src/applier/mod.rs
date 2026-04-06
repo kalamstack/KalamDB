@@ -41,9 +41,6 @@ mod command;
 mod error;
 pub mod executor;
 
-// Events module
-pub mod events;
-
 // Raft applier implementations (traits defined in kalamdb-raft)
 pub mod raft;
 

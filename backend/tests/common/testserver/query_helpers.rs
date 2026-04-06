@@ -1,7 +1,7 @@
 //! Consolidated test helpers for query execution.
 //!
 //! This module provides utilities for working with query responses in tests.
-//! It uses the built-in helpers from `kalam_link::models::QueryResponse` where
+//! It uses the built-in helpers from `kalam_client::models::QueryResponse` where
 //! possible, and adds test-specific utilities for common patterns.
 //!
 //! # Core Principle
@@ -9,8 +9,8 @@
 //! - Add test-specific helpers here for common assertions and patterns
 //! - Keep all query helpers in this single file
 
-use kalam_link::models::{QueryResponse, ResponseStatus};
-use kalam_link::KalamCellValue;
+use kalam_client::models::{QueryResponse, ResponseStatus};
+use kalam_client::KalamCellValue;
 use serde_json::Value as JsonValue;
 
 /// Get a count value from a COUNT(*) query response safely.

@@ -1,13 +1,13 @@
 //! Comprehensive smoke test for all system tables and views
 //!
-//! This test validates that ALL system tables (11 persisted + 8 views)
+//! This test validates that ALL system tables (10 persisted + 9 views)
 //! can be queried without schema mismatches or errors.
 //!
 //! Covers:
 //! - Persisted tables: users, namespaces, schemas, storages,
-//!   live_queries, jobs, job_nodes, audit_log, manifest, topics, topic_offsets
-//! - Virtual views: stats, settings, server_logs, cluster, cluster_groups,
-//!   datatypes, tables, columns
+//!   jobs, job_nodes, audit_log, manifest, topics, topic_offsets
+//! - Virtual views: live, stats, settings, server_logs, cluster,
+//!   cluster_groups, datatypes, tables, columns
 //!
 //! This test prevents schema definition bugs like the topic_offsets
 //! updated_at column mismatch (BigInt vs Timestamp).
@@ -16,7 +16,7 @@ use crate::common::*;
 
 /// Test that all system tables can be queried without errors
 ///
-/// Iterates over all 19 system objects (11 tables + 8 views) and
+/// Iterates over all 19 system objects (10 tables + 9 views) and
 /// executes SELECT * FROM system.<table> to validate:
 /// - No schema definition vs RecordBatch builder mismatches
 /// - Column types align with Arrow schema expectations
@@ -32,13 +32,12 @@ fn smoke_test_all_system_tables_and_views_queryable() {
     println!("🧪 Testing all system tables and views for schema consistency");
     println!("{}", "=".repeat(70));
 
-    // Persisted system tables (11)
+    // Persisted system tables (10)
     let persisted_tables = vec![
         "users",
         "namespaces",
         "schemas",
         "storages",
-        "live_queries",
         "jobs",
         "job_nodes",
         "audit_log",
@@ -47,8 +46,9 @@ fn smoke_test_all_system_tables_and_views_queryable() {
         "topic_offsets", // Previously had schema mismatch bug
     ];
 
-    // Virtual system views (8)
+    // Virtual system views (9)
     let virtual_views = vec![
+        "live",
         "stats",
         "settings",
         "server_logs",

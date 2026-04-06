@@ -78,7 +78,10 @@ NODE3_HTTP=8083
 NODE3_RPC=9083
 NODE3_ID=3
 
-ROOT_PASSWORD="kalamdb123"
+# Cluster bootstrap always provisions the root account up front.
+# Override for local development with KALAMDB_ROOT_PASSWORD=... ./scripts/cluster.sh start
+ROOT_PASSWORD="${KALAMDB_ROOT_PASSWORD:-kalamdb123}"
+ADMIN_PASSWORD="${KALAMDB_ADMIN_PASSWORD:-$ROOT_PASSWORD}"
 CLUSTER_URLS="http://127.0.0.1:$NODE1_HTTP,http://127.0.0.1:$NODE2_HTTP,http://127.0.0.1:$NODE3_HTTP"
 
 print_header() {
@@ -187,6 +190,11 @@ docker_start_cluster() {
         echo -n "."
         sleep 1
     done
+
+    if ! ensure_admin_user "http://127.0.0.1:$NODE1_HTTP"; then
+        echo -e "${RED}Failed to provision default admin user on Docker cluster startup.${NC}"
+        exit 1
+    fi
 
     docker_show_status
 }
@@ -568,6 +576,11 @@ start_cluster() {
             echo -e "${YELLOW}Cluster is responding but not healthy yet (see /v1/api/cluster/health).${NC}"
         fi
 
+        if ! ensure_admin_user "http://127.0.0.1:$NODE1_HTTP"; then
+            echo -e "${RED}Failed to provision default admin user on cluster startup.${NC}"
+            exit 1
+        fi
+
         echo -e "${GREEN}╔═══════════════════════════════════════════════════════════════════╗${NC}"
         echo -e "${GREEN}║                    Cluster Ready!                                 ║${NC}"
         echo -e "${GREEN}╚═══════════════════════════════════════════════════════════════════╝${NC}"
@@ -576,10 +589,16 @@ start_cluster() {
         echo "Node 2: http://127.0.0.1:$NODE2_HTTP"
         echo "Node 3: http://127.0.0.1:$NODE3_HTTP"
         echo ""
+        echo "Admin UI: http://127.0.0.1:$NODE1_HTTP/ui"
+        echo ""
+        echo "Authentication bootstrap: cluster.sh already configured the root account"
+        echo "Username: root"
         echo "Root password: $ROOT_PASSWORD"
         echo ""
+        echo "Setup note: the setup wizard is skipped for clusters started with this script"
+        echo ""
         echo "Connect with CLI:"
-        echo "  kalam --server http://127.0.0.1:$NODE1_HTTP --username root --password kalamdb123"
+        echo "  kalam --url http://127.0.0.1:$NODE1_HTTP --username root --password \"$ROOT_PASSWORD\" --save-credentials"
         echo ""
         echo "Run cluster tests:"
         echo "  cd cli && cargo test --test cluster"
@@ -703,22 +722,69 @@ sys.exit(1)
 PY
 }
 
+sql_escape() {
+    printf '%s' "$1" | sed "s/'/''/g"
+}
+
+ensure_admin_user() {
+    local base_url="${1:-http://127.0.0.1:$NODE1_HTTP}"
+    local access_token
+    local user_check
+    local admin_password_sql
+
+    access_token=$(get_access_token "$base_url") || return 1
+    admin_password_sql=$(sql_escape "$ADMIN_PASSWORD")
+
+    user_check=$(
+        curl -fsS \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $access_token" \
+            -d '{"sql":"SELECT username FROM system.users WHERE username = '\''admin'\'' LIMIT 1"}' \
+            "$base_url/v1/api/sql"
+    ) || return 1
+
+    if echo "$user_check" | grep -q '"row_count":1'; then
+        curl -fsS \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $access_token" \
+            -d "{\"sql\":\"ALTER USER admin SET PASSWORD '$admin_password_sql'\"}" \
+            "$base_url/v1/api/sql" >/dev/null || return 1
+
+        curl -fsS \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $access_token" \
+            -d '{"sql":"ALTER USER admin SET ROLE '\''dba'\''"}' \
+            "$base_url/v1/api/sql" >/dev/null || return 1
+    else
+        curl -fsS \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $access_token" \
+            -d "{\"sql\":\"CREATE USER admin WITH PASSWORD '$admin_password_sql' ROLE 'dba'\"}" \
+            "$base_url/v1/api/sql" >/dev/null || return 1
+    fi
+}
+
 run_cluster_tests() {
     print_header
     ensure_cluster_healthy
+    ensure_admin_user "http://127.0.0.1:$NODE1_HTTP"
     echo -e "${YELLOW}Running cluster tests...${NC}"
     echo ""
 
     cd "$PROJECT_ROOT/cli"
+    KALAMDB_SERVER_TYPE="cluster" \
+    KALAMDB_SERVER_URL="http://127.0.0.1:$NODE1_HTTP" \
     KALAMDB_CLUSTER_URLS="$CLUSTER_URLS" \
     KALAMDB_ROOT_PASSWORD="$ROOT_PASSWORD" \
+    KALAMDB_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
     RUST_TEST_THREADS=1 \
-        cargo test --test cluster -- --nocapture
+    cargo test --features e2e-tests --test cluster -- --nocapture
 }
 
 run_smoke_tests() {
     print_header
     ensure_cluster_healthy
+    ensure_admin_user "http://127.0.0.1:$NODE1_HTTP"
     echo -e "${YELLOW}Detecting cluster leader for smoke tests...${NC}"
     echo ""
 
@@ -734,7 +800,10 @@ run_smoke_tests() {
     fi
 
     KALAMDB_SERVER_URL="$leader_url" \
+    KALAMDB_SERVER_TYPE="cluster" \
+    KALAMDB_CLUSTER_URLS="$CLUSTER_URLS" \
     KALAMDB_ROOT_PASSWORD="$ROOT_PASSWORD" \
+    KALAMDB_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
     RUST_TEST_THREADS=1 \
         cargo test --features e2e-tests --test smoke -- --nocapture
 }
@@ -742,6 +811,7 @@ run_smoke_tests() {
 run_smoke_tests_all_nodes() {
     print_header
     ensure_cluster_healthy
+    ensure_admin_user "http://127.0.0.1:$NODE1_HTTP"
     echo -e "${YELLOW}Running smoke tests against ALL nodes...${NC}"
     echo ""
 
@@ -759,7 +829,10 @@ run_smoke_tests_all_nodes() {
         echo ""
 
         if KALAMDB_SERVER_URL="$node_url" \
+              KALAMDB_SERVER_TYPE="cluster" \
+              KALAMDB_CLUSTER_URLS="$CLUSTER_URLS" \
            KALAMDB_ROOT_PASSWORD="$ROOT_PASSWORD" \
+              KALAMDB_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
            RUST_TEST_THREADS=1 \
            cargo test --features e2e-tests --test smoke smoke_test_core_operations -- --nocapture; then
             echo -e "${GREEN}✓ Core operations passed on $node_url${NC}"
@@ -786,37 +859,50 @@ run_smoke_tests_all_nodes() {
 run_verification_tests() {
     print_header
     ensure_cluster_healthy
+    ensure_admin_user "http://127.0.0.1:$NODE1_HTTP"
     echo -e "${YELLOW}Running consistency verification tests...${NC}"
     echo ""
 
     cd "$PROJECT_ROOT/cli"
 
     echo -e "${BLUE}Running system tables replication tests...${NC}"
+    KALAMDB_SERVER_TYPE="cluster" \
+    KALAMDB_SERVER_URL="http://127.0.0.1:$NODE1_HTTP" \
     KALAMDB_CLUSTER_URLS="$CLUSTER_URLS" \
     KALAMDB_ROOT_PASSWORD="$ROOT_PASSWORD" \
+    KALAMDB_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
     RUST_TEST_THREADS=1 \
-        cargo test --test cluster cluster_test_system_tables -- --nocapture
+        cargo test --features e2e-tests --test cluster cluster_test_system_tables -- --nocapture
 
     echo ""
     echo -e "${BLUE}Running subscription tests...${NC}"
+    KALAMDB_SERVER_TYPE="cluster" \
+    KALAMDB_SERVER_URL="http://127.0.0.1:$NODE1_HTTP" \
     KALAMDB_CLUSTER_URLS="$CLUSTER_URLS" \
     KALAMDB_ROOT_PASSWORD="$ROOT_PASSWORD" \
+    KALAMDB_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
     RUST_TEST_THREADS=1 \
-        cargo test --test cluster cluster_test_subscription -- --nocapture
+        cargo test --features e2e-tests --test cluster cluster_test_subscription -- --nocapture
 
     echo ""
     echo -e "${BLUE}Running table identity tests...${NC}"
+    KALAMDB_SERVER_TYPE="cluster" \
+    KALAMDB_SERVER_URL="http://127.0.0.1:$NODE1_HTTP" \
     KALAMDB_CLUSTER_URLS="$CLUSTER_URLS" \
     KALAMDB_ROOT_PASSWORD="$ROOT_PASSWORD" \
+    KALAMDB_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
     RUST_TEST_THREADS=1 \
-        cargo test --test cluster cluster_test_table_identity -- --nocapture
+        cargo test --features e2e-tests --test cluster cluster_test_table_identity -- --nocapture
 
     echo ""
     echo -e "${BLUE}Running final consistency tests...${NC}"
+    KALAMDB_SERVER_TYPE="cluster" \
+    KALAMDB_SERVER_URL="http://127.0.0.1:$NODE1_HTTP" \
     KALAMDB_CLUSTER_URLS="$CLUSTER_URLS" \
     KALAMDB_ROOT_PASSWORD="$ROOT_PASSWORD" \
+    KALAMDB_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
     RUST_TEST_THREADS=1 \
-        cargo test --test cluster cluster_test_final -- --nocapture
+        cargo test --features e2e-tests --test cluster cluster_test_final -- --nocapture
 
     echo ""
     echo -e "${GREEN}╔═══════════════════════════════════════════════════════════════════╗${NC}"

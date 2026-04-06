@@ -218,6 +218,8 @@ impl Default for FileUploadSettings {
 pub struct ServerSettings {
     pub host: String,
     pub port: u16,
+    #[serde(default)]
+    pub public_origin: Option<String>,
     #[serde(default = "default_workers")]
     pub workers: usize,
     /// API version prefix for endpoints (default: "v1")
@@ -233,6 +235,17 @@ pub struct ServerSettings {
     /// Set to None/null to disable UI serving
     #[serde(default = "default_ui_path")]
     pub ui_path: Option<String>,
+}
+
+impl ServerSettings {
+    pub fn effective_public_origin(&self) -> String {
+        self.public_origin
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.trim_end_matches('/').to_string())
+            .unwrap_or_else(|| format!("http://localhost:{}", self.port))
+    }
 }
 
 /// Storage settings
@@ -721,6 +734,11 @@ pub struct JobsSettings {
     /// Initial retry backoff delay in milliseconds (default: 100ms)
     #[serde(default = "default_jobs_retry_backoff_ms")]
     pub retry_backoff_ms: u64,
+
+    /// How often the jobs runner flushes all RocksDB memtables so stale WAL
+    /// files can be reclaimed (default: 300s = 5 minutes). Set to 0 to disable.
+    #[serde(default = "default_jobs_wal_cleanup_interval")]
+    pub wal_cleanup_interval_seconds: u64,
 }
 
 /// SQL execution settings (Phase 11, T026)
@@ -1048,6 +1066,7 @@ impl Default for JobsSettings {
             max_concurrent: default_jobs_max_concurrent(),
             max_retries: default_jobs_max_retries(),
             retry_backoff_ms: default_jobs_retry_backoff_ms(),
+            wal_cleanup_interval_seconds: default_jobs_wal_cleanup_interval(),
         }
     }
 }
@@ -1081,6 +1100,7 @@ impl Default for ServerConfig {
             server: ServerSettings {
                 host: "127.0.0.1".to_string(),
                 port: 8080,
+                public_origin: None,
                 workers: 0,
                 api_version: default_api_version(),
                 enable_http2: default_enable_http2(),

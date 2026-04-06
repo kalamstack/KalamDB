@@ -2,7 +2,7 @@ use super::{CLISession, OutputFormat};
 use crate::error::{CLIError, Result};
 use crate::parser::Command;
 use colored::Colorize;
-use kalam_link::SubscriptionConfig;
+use kalam_client::SubscriptionConfig;
 use std::time::Instant;
 
 impl CLISession {
@@ -339,7 +339,7 @@ impl CLISession {
         limit: Option<usize>,
         timeout: Option<u64>,
     ) -> Result<()> {
-        use kalam_link::consumer::AutoOffsetReset;
+        use kalam_client::consumer::AutoOffsetReset;
         use tokio::signal;
         use tokio::time::{sleep, Duration};
 
@@ -496,9 +496,9 @@ impl CLISession {
 
                 // Format operation as string
                 let op_str = match record.op {
-                    kalam_link::consumer::TopicOp::Insert => "INSERT",
-                    kalam_link::consumer::TopicOp::Update => "UPDATE",
-                    kalam_link::consumer::TopicOp::Delete => "DELETE",
+                    kalam_client::consumer::TopicOp::Insert => "INSERT",
+                    kalam_client::consumer::TopicOp::Update => "UPDATE",
+                    kalam_client::consumer::TopicOp::Delete => "DELETE",
                 };
 
                 // Format and display record

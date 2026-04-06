@@ -10,8 +10,9 @@
     "setup": "bash ./setup.sh"
   },
   "dependencies": {
-    "dotenv": "^17.3.1",
-    "kalam-link": "file:../../link/sdks/typescript"
+    "@kalamdb/client": "file:../../link/sdks/typescript/client",
+    "@kalamdb/consumer": "file:../../link/sdks/typescript/consumer",
+    "dotenv": "^17.3.1"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

@@ -156,6 +156,6 @@ pgrx::extension_sql!(
 REVOKE EXECUTE ON FUNCTION kalam_exec(text) FROM PUBLIC;
 "#,
     name = "kalam_exec_revoke",
-    requires = ["kalam_exec"],
+    finalize,
 );
 

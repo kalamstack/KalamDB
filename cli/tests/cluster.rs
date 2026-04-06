@@ -18,7 +18,7 @@ mod common;
 /// Cluster-specific common utilities
 mod cluster_common {
     use crate::common::*;
-    use kalam_link::{KalamCellValue, KalamLinkTimeouts, QueryResponse};
+    use kalam_client::{KalamCellValue, KalamLinkTimeouts, QueryResponse};
     use serde_json::Value;
     use std::sync::OnceLock;
     use std::time::Duration;
@@ -110,16 +110,7 @@ mod cluster_common {
     }
 
     fn query_count_on_url_internal(base_url: &str, sql: &str) -> Result<i64, String> {
-        let client = create_cluster_client(base_url);
-        let sql = sql.to_string();
-
-        let response = cluster_runtime()
-            .block_on(async move { client.execute_query(&sql, None, None, None).await })
-            .map_err(|e| e.to_string())?;
-
-        if !response.success() {
-            return Err(response_error_message(&response));
-        }
+        let response = execute_on_node_response(base_url, sql)?;
 
         let result = response
             .results
@@ -152,6 +143,26 @@ mod cluster_common {
         }
 
         format!("Query failed: {:?}", response)
+    }
+
+    fn is_truncated_read_response(response: &QueryResponse, sql: &str) -> bool {
+        if !is_read_only_sql(sql) {
+            return false;
+        }
+
+        let Some(result) = response.results.first() else {
+            return false;
+        };
+
+        if result.message.as_ref().is_some_and(|message| !message.is_empty()) {
+            return false;
+        }
+
+        if result.rows.as_ref().is_some_and(|rows| !rows.is_empty()) {
+            return false;
+        }
+
+        result.row_count > 0 || result.schema.is_empty()
     }
 
     fn is_read_only_sql(sql: &str) -> bool {
@@ -315,6 +326,17 @@ mod cluster_common {
                             }
                             return Err(err_msg);
                         }
+                        if is_truncated_read_response(&response, &sql) {
+                            if let Some(leader) = leader_url() {
+                                if url != leader {
+                                    last_err = Some(format!(
+                                        "Truncated read response from follower {}",
+                                        url
+                                    ));
+                                    continue;
+                                }
+                            }
+                        }
                         wait_for_cluster_after_sql(&sql);
                         return Ok(serde_json::to_string_pretty(&response)
                             .unwrap_or_else(|_| format!("{:?}", response)));
@@ -372,6 +394,17 @@ mod cluster_common {
                                 continue;
                             }
                             return Err(err_msg);
+                        }
+                        if is_truncated_read_response(&response, &sql) {
+                            if let Some(leader) = leader_url() {
+                                if url != leader {
+                                    last_err = Some(format!(
+                                        "Truncated read response from follower {}",
+                                        url
+                                    ));
+                                    continue;
+                                }
+                            }
                         }
                         wait_for_cluster_after_sql(&sql);
                         return Ok(response);

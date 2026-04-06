@@ -12,6 +12,16 @@ use crate::common::*;
 use std::collections::HashSet;
 use std::time::Duration;
 
+fn query_with_verification_limit(sql: &str, expected_rows: usize) -> String {
+    let trimmed = sql.trim().trim_end_matches(';');
+    if expected_rows == 0 || trimmed.split_whitespace().any(|part| part.eq_ignore_ascii_case("LIMIT"))
+    {
+        trimmed.to_string()
+    } else {
+        format!("{} LIMIT {}", trimmed, expected_rows + 1)
+    }
+}
+
 /// Helper: Compare data across all nodes with retries
 fn verify_data_identical_with_retry(
     urls: &[String],
@@ -20,12 +30,13 @@ fn verify_data_identical_with_retry(
     max_retries: usize,
 ) -> Result<(), String> {
     let mut last_err: Option<String> = None;
+    let bounded_sql = query_with_verification_limit(sql, expected_rows);
 
     for _ in 0..=max_retries {
         let mut all_data: Vec<Vec<String>> = Vec::new();
 
         for url in urls {
-            let rows = fetch_normalized_rows(url, sql).unwrap_or_default();
+            let rows = fetch_normalized_rows(url, &bounded_sql).unwrap_or_default();
             all_data.push(rows);
         }
 

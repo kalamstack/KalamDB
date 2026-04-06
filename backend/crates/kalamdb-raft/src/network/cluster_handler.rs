@@ -19,28 +19,20 @@ use tonic::{Request, Response, Status};
 use super::cluster_service::cluster_server::ClusterService;
 use super::models::{
     ForwardSqlRequest, ForwardSqlResponse, ForwardSqlResponsePayload, GetNodeInfoRequest,
-    GetNodeInfoResponse, NotifyFollowersRequest, NotifyFollowersResponse, PingRequest,
-    PingResponse,
+    GetNodeInfoResponse, PingRequest, PingResponse,
 };
 use crate::manager::RaftManager;
 
 /// Trait for handling incoming cluster messages.
 ///
 /// Implemented by `kalamdb-core` to dispatch cluster messages to
-/// application-level services (notification service, cache, etc.).
+/// application-level services (SQL forwarding, peer liveness, node info, etc.).
 ///
 /// Each gRPC method maps to a handler method here. New methods should
 /// be added with a default implementation that returns `Unimplemented`
 /// so that existing implementations are not broken.
 #[async_trait::async_trait]
 pub trait ClusterMessageHandler: Send + Sync + 'static {
-    /// Handle a forwarded change notification from the leader node.
-    ///
-    /// The `payload` field in the request contains a flexbuffers-serialized
-    /// `ChangeNotification`. The handler is responsible for deserializing
-    /// and dispatching to local subscribers.
-    async fn handle_notify_followers(&self, req: NotifyFollowersRequest) -> Result<(), String>;
-
     /// Handle SQL write forwarding from a follower to the leader.
     async fn handle_forward_sql(
         &self,
@@ -95,27 +87,6 @@ impl std::fmt::Debug for ClusterServiceImpl {
 
 #[async_trait::async_trait]
 impl ClusterService for ClusterServiceImpl {
-    async fn notify_followers(
-        &self,
-        request: Request<NotifyFollowersRequest>,
-    ) -> Result<Response<NotifyFollowersResponse>, Status> {
-        let req = request.into_inner();
-
-        match self.handler.handle_notify_followers(req).await {
-            Ok(()) => Ok(Response::new(NotifyFollowersResponse {
-                success: true,
-                error: String::new(),
-            })),
-            Err(e) => {
-                log::warn!("ClusterService::notify_followers handler error: {}", e);
-                Ok(Response::new(NotifyFollowersResponse {
-                    success: false,
-                    error: e,
-                }))
-            },
-        }
-    }
-
     async fn forward_sql(
         &self,
         request: Request<ForwardSqlRequest>,
@@ -194,11 +165,6 @@ pub struct NoOpClusterHandler;
 
 #[async_trait::async_trait]
 impl ClusterMessageHandler for NoOpClusterHandler {
-    async fn handle_notify_followers(&self, _req: NotifyFollowersRequest) -> Result<(), String> {
-        log::trace!("NoOpClusterHandler: ignoring notify_followers (single-node mode)");
-        Ok(())
-    }
-
     async fn handle_forward_sql(
         &self,
         _req: ForwardSqlRequest,

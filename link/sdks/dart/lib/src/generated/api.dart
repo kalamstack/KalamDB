@@ -97,23 +97,6 @@ Future<DartLoginResponse> dartRefreshToken(
     RustLib.instance.api
         .crateApiDartRefreshToken(client: client, refreshToken: refreshToken);
 
-/// Check server health (version, status, etc.).
-Future<DartHealthCheckResponse> dartHealthCheck(
-        {required DartKalamClient client}) =>
-    RustLib.instance.api.crateApiDartHealthCheck(client: client);
-
-/// Check whether the server requires initial setup.
-Future<DartSetupStatusResponse> dartCheckSetupStatus(
-        {required DartKalamClient client}) =>
-    RustLib.instance.api.crateApiDartCheckSetupStatus(client: client);
-
-/// Perform initial server setup (create first admin user).
-Future<DartServerSetupResponse> dartServerSetup(
-        {required DartKalamClient client,
-        required DartServerSetupRequest request}) =>
-    RustLib.instance.api
-        .crateApiDartServerSetup(client: client, request: request);
-
 /// Pull the next connection lifecycle event.
 ///
 /// Returns `None` when event collection is disabled or the client is dropped.

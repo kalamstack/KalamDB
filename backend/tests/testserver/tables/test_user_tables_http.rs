@@ -7,7 +7,7 @@ use super::test_support::http_server::HttpTestServer;
 use super::test_support::jobs::{
     extract_cleanup_job_id, wait_for_job_completion, wait_for_path_absent,
 };
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use tokio::time::Duration;
 
 async fn lookup_user_id(server: &HttpTestServer, username: &str) -> anyhow::Result<String> {

@@ -18,12 +18,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { DashboardClusterOverview } from "@/components/dashboard/ClusterOverview";
 import { MetricsChart } from "@/components/dashboard/MetricsChart";
 import { StorageUsageChart } from "@/components/dashboard/StorageUsageChart";
 import { PageLayout } from "@/components/layout/PageLayout";
 import { useAuth } from "@/lib/auth";
 import {
   useCheckStorageHealthMutation,
+  useGetClusterSnapshotQuery,
   useGetDbaStatsQuery,
   useGetStatsQuery,
   useGetStoragesQuery,
@@ -78,6 +80,14 @@ export default function Dashboard() {
     data: storages = [],
     refetch: refetchStorages,
   } = useGetStoragesQuery();
+  const {
+    data: clusterSnapshot,
+    isFetching: isClusterLoading,
+    error: clusterError,
+    refetch: refetchCluster,
+  } = useGetClusterSnapshotQuery(undefined, {
+    pollingInterval: 5000,
+  });
   const [checkStorageHealth, { data: storageHealth, isLoading: isStorageHealthLoading, error: storageHealthError }] =
     useCheckStorageHealthMutation();
 
@@ -96,12 +106,19 @@ export default function Dashboard() {
   }, [checkStorageHealth, selectedStorageId]);
 
   async function handleRefresh(): Promise<void> {
-    await Promise.all([refetchStats(), refetchDbaStats(), refetchStorages()]);
+    await Promise.all([refetchStats(), refetchDbaStats(), refetchStorages(), refetchCluster()]);
 
     if (selectedStorageId) {
       await checkStorageHealth({ storageId: selectedStorageId, extended: true });
     }
   }
+
+  const clusterErrorMessage =
+    clusterError && "error" in clusterError && typeof clusterError.error === "string"
+      ? clusterError.error
+      : clusterError
+        ? "Failed to fetch cluster information"
+        : null;
 
   const cards = [
     {
@@ -206,14 +223,23 @@ export default function Dashboard() {
 
       <MetricsChart data={dbaStats} isLoading={isDbaStatsLoading} />
 
-      <StorageUsageChart
-        storages={storages}
-        selectedStorageId={selectedStorageId}
-        onStorageChange={setSelectedStorageId}
-        health={storageHealth ?? null}
-        isLoading={isStorageHealthLoading}
-        error={storageHealthError && "error" in storageHealthError ? storageHealthError.error : null}
-      />
+      <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.95fr)]">
+        <StorageUsageChart
+          storages={storages}
+          selectedStorageId={selectedStorageId}
+          onStorageChange={setSelectedStorageId}
+          health={storageHealth ?? null}
+          isLoading={isStorageHealthLoading}
+          error={storageHealthError && "error" in storageHealthError ? storageHealthError.error : null}
+        />
+
+        <DashboardClusterOverview
+          health={clusterSnapshot?.health ?? null}
+          nodes={clusterSnapshot?.nodes ?? []}
+          isLoading={isClusterLoading}
+          error={clusterErrorMessage}
+        />
+      </div>
 
       {error && (
         <Card className="border-destructive/30 bg-destructive/5">

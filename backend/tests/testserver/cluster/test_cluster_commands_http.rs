@@ -1,5 +1,5 @@
 use anyhow::Result;
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 
 use super::test_support::http_server::start_http_test_server;
 

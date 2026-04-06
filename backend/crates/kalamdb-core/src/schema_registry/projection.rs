@@ -9,7 +9,7 @@
 //! This ensures that all RecordBatches returned from Parquet files match the current
 //! table schema, regardless of when the file was written.
 
-use super::error::RegistryError;
+use super::RegistryError;
 use arrow::array::{ArrayRef, NullArray};
 use arrow::compute::cast;
 use arrow::datatypes::{DataType, Schema, SchemaRef};

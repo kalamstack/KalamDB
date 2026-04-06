@@ -6,10 +6,11 @@
 
 mod forward;
 mod node_info;
-mod notify_followers;
 mod ping;
 
-pub use forward::{ForwardSqlRequest, ForwardSqlResponse, ForwardSqlResponsePayload};
+pub use forward::{
+	forward_sql_param, ForwardSqlParam, ForwardSqlRequest, ForwardSqlResponse,
+	ForwardSqlResponsePayload,
+};
 pub use node_info::{GetNodeInfoRequest, GetNodeInfoResponse};
-pub use notify_followers::{NotifyFollowersRequest, NotifyFollowersResponse};
 pub use ping::{PingRequest, PingResponse};

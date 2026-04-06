@@ -11,8 +11,8 @@
 //! **Requirements**: Running KalamDB server with Topics feature enabled
 
 use crate::common;
-use kalam_link::consumer::{AutoOffsetReset, ConsumerRecord, TopicOp};
-use kalam_link::KalamLinkTimeouts;
+use kalam_client::consumer::{AutoOffsetReset, ConsumerRecord, TopicOp};
+use kalam_client::KalamLinkTimeouts;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -20,7 +20,7 @@ use std::time::Duration;
 use tokio::sync::Mutex as TokioMutex;
 
 /// Create a test client using common infrastructure
-async fn create_test_client() -> kalam_link::KalamLinkClient {
+async fn create_test_client() -> kalam_client::KalamLinkClient {
     let base_url = common::leader_or_server_url();
     common::client_for_user_on_url_with_timeouts(
         &base_url,
@@ -52,6 +52,11 @@ async fn execute_sql(sql: &str) -> Result<(), String> {
             .unwrap_or("Unknown error");
         Err(format!("SQL failed: {}", err_msg))
     }
+}
+
+fn is_retryable_consumer_poll_error(message: &str) -> bool {
+    let normalized = message.to_ascii_lowercase();
+    normalized.contains("error decoding") || normalized.contains("network")
 }
 
 async fn wait_for_topic_ready(topic: &str, expected_routes: usize) {
@@ -321,7 +326,7 @@ async fn test_topic_high_load_concurrent_publishers() {
                     },
                     Err(err) => {
                         let msg = err.to_string();
-                        if msg.contains("error decoding") || msg.contains("network") {
+                        if is_retryable_consumer_poll_error(&msg) {
                             tokio::time::sleep(Duration::from_millis(200)).await;
                             continue;
                         }
@@ -850,7 +855,7 @@ async fn test_topic_high_load_two_consumers_same_group_single_delivery() {
                     },
                     Err(err) => {
                         let message = err.to_string();
-                        if message.contains("error decoding") || message.contains("network") {
+                        if is_retryable_consumer_poll_error(&message) {
                             tokio::time::sleep(Duration::from_millis(100)).await;
                             continue;
                         }
@@ -997,7 +1002,7 @@ async fn test_topic_fan_out_different_groups_receive_all() {
                         },
                         Err(e) => {
                             let msg = e.to_string();
-                            if msg.contains("error decoding") || msg.contains("network") {
+                            if is_retryable_consumer_poll_error(&msg) {
                                 tokio::time::sleep(Duration::from_millis(100)).await;
                                 continue;
                             }
@@ -1136,7 +1141,7 @@ async fn test_topic_four_consumers_same_group_no_duplicates() {
                     },
                     Err(e) => {
                         let msg = e.to_string();
-                        if msg.contains("error decoding") || msg.contains("network") {
+                        if is_retryable_consumer_poll_error(&msg) {
                             tokio::time::sleep(Duration::from_millis(80)).await;
                             continue;
                         }
@@ -1306,7 +1311,7 @@ async fn test_topic_ack_failure_recovery_no_message_loss_with_latency() {
                 },
                 Err(err) => {
                     let message = err.to_string();
-                    if message.contains("error decoding") || message.contains("network") {
+                    if is_retryable_consumer_poll_error(&message) {
                         tokio::time::sleep(Duration::from_millis(80)).await;
                         continue;
                     }
@@ -1360,7 +1365,7 @@ async fn test_topic_ack_failure_recovery_no_message_loss_with_latency() {
             },
             Err(err) => {
                 let message = err.to_string();
-                if message.contains("error decoding") || message.contains("network") {
+                if is_retryable_consumer_poll_error(&message) {
                     tokio::time::sleep(Duration::from_millis(80)).await;
                     continue;
                 }

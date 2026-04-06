@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Auth, createClient, type RowData } from 'kalam-link';
+import { Auth, createClient, type RowData } from '@kalamdb/client';
 import './styles.css';
 
 type ChatMessage = {

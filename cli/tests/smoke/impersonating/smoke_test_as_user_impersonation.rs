@@ -306,14 +306,10 @@ fn smoke_as_user_delete_with_dba_role() {
     create_user_with_retry(&dba_user, password, "dba");
     create_user_with_retry(&target_user, password, "user");
 
-    // Get user_id
-    let target_user_id =
-        get_user_id_for_username(&target_user).expect("Failed to get target user_id");
-
     // INSERT AS USER first
     let insert_sql = format!(
         "EXECUTE AS USER '{}' (INSERT INTO {} (id, active) VALUES (1, true))",
-        target_user_id, full_table
+        target_user, full_table
     );
     execute_sql_via_client_as(&dba_user, password, &insert_sql).expect("Failed to INSERT AS USER");
 
@@ -329,7 +325,7 @@ fn smoke_as_user_delete_with_dba_role() {
 
     // DELETE AS USER
     let delete_sql =
-        format!("EXECUTE AS USER '{}' (DELETE FROM {} WHERE id = 1)", target_user_id, full_table);
+        format!("EXECUTE AS USER '{}' (DELETE FROM {} WHERE id = 1)", target_user, full_table);
     let result = execute_sql_via_client_as(&dba_user, password, &delete_sql);
     assert!(result.is_ok(), "DBA should be able to DELETE AS USER: {:?}", result);
 

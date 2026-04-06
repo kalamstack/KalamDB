@@ -99,6 +99,7 @@ kalamdb-jobs = { path = "../kalamdb-jobs" }
 expensive_tests = []
 # Expose test helpers to other crates' test code (dev-dependencies)
 test-helpers = []
+mimalloc = ["kalamdb-observability/mimalloc", "kalamdb-raft/mimalloc"]
 
 [lib]
 doctest = false

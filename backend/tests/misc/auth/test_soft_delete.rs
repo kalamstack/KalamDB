@@ -7,7 +7,7 @@
 //! - _deleted field is accessible when explicitly selected
 
 use super::test_support::{consolidated_helpers::unique_namespace, fixtures, TestServer};
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 
 #[actix_web::test]
 async fn test_soft_delete_hides_rows() {

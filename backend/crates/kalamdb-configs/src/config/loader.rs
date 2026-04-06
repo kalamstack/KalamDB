@@ -48,6 +48,22 @@ impl ServerConfig {
             return Err(anyhow::anyhow!("Server port cannot be 0"));
         }
 
+        if let Some(public_origin) = self
+            .server
+            .public_origin
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            let valid_scheme = public_origin.starts_with("http://")
+                || public_origin.starts_with("https://");
+            if !valid_scheme {
+                return Err(anyhow::anyhow!(
+                    "server.public_origin must start with http:// or https://"
+                ));
+            }
+        }
+
         // Validate log level
         let valid_levels = ["error", "warn", "info", "debug", "trace"];
         if !valid_levels.contains(&self.logging.level.as_str()) {
@@ -133,6 +149,24 @@ mod tests {
     }
 
     #[test]
+    fn test_effective_public_origin_uses_localhost_fallback() {
+        let mut config = ServerConfig::default();
+        config.server.port = 9090;
+
+        assert_eq!(
+            config.server.effective_public_origin(),
+            "http://localhost:9090"
+        );
+
+        config.server.public_origin = Some("https://db.example.com/".to_string());
+
+        assert_eq!(
+            config.server.effective_public_origin(),
+            "https://db.example.com"
+        );
+    }
+
+    #[test]
     fn test_invalid_log_level() {
         let mut config = ServerConfig::default();
         config.logging.level = "invalid".to_string();
@@ -143,6 +177,14 @@ mod tests {
     fn test_invalid_trusted_proxy_ranges() {
         let mut config = ServerConfig::default();
         config.security.trusted_proxy_ranges = vec!["nope".to_string()];
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_invalid_public_origin_scheme() {
+        let mut config = ServerConfig::default();
+        config.server.public_origin = Some("db.example.com".to_string());
+
         assert!(config.validate().is_err());
     }
 }

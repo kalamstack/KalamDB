@@ -44,8 +44,8 @@ if ! command -v wasm-pack &> /dev/null; then
 fi
 
 # Build SDK
-print_step "Building kalam-link SDK..."
-cd "$REPO_ROOT/link/sdks/typescript"
+print_step "Building @kalamdb/client SDK..."
+cd "$REPO_ROOT/link/sdks/typescript/client"
 npm install
 npm run build
 print_success "SDK built"

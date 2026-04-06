@@ -23,8 +23,8 @@ const PG_PORT: u16 = 28816;
 const TEST_DB: &str = "kalamdb_test";
 
 const DEFAULT_KALAMDB_SERVER_URL: &str = "http://127.0.0.1:8080";
-const KALAMDB_GRPC_HOST: &str = "127.0.0.1";
-const KALAMDB_GRPC_PORT: u16 = 9188;
+const DEFAULT_KALAMDB_GRPC_HOST: &str = "127.0.0.1";
+const DEFAULT_KALAMDB_GRPC_PORT: u16 = 9188;
 
 const DEFAULT_KALAMDB_USER: &str = "root";
 const DEFAULT_KALAMDB_PASSWORD: &str = "kalamdb123";
@@ -83,6 +83,19 @@ fn kalamdb_auth_config() -> KalamDbAuthConfig {
         setup_password,
         root_password,
     }
+}
+
+fn kalamdb_grpc_target() -> (String, u16) {
+    let host = env::var("KALAMDB_GRPC_HOST")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_KALAMDB_GRPC_HOST.to_string());
+    let port = env::var("KALAMDB_GRPC_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(DEFAULT_KALAMDB_GRPC_PORT);
+
+    (host, port)
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +157,22 @@ impl TestEnv {
             .await
             .expect("KalamDB table exists check");
         resp.status().is_success()
+    }
+
+    pub async fn wait_for_kalamdb_table_exists(&self, namespace: &str, table: &str) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+
+        loop {
+            if self.kalamdb_table_exists(namespace, table).await {
+                return;
+            }
+
+            if std::time::Instant::now() >= deadline {
+                panic!("KalamDB table {namespace}.{table} did not become available within timeout");
+            }
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
     }
 
     pub async fn kalamdb_columns(&self, namespace: &str, table: &str) -> Vec<String> {
@@ -274,18 +303,40 @@ impl TestEnv {
 
     async fn ensure_extension_bootstrap(&self) {
         let pg = self.pg_connect().await;
+        let (grpc_host, grpc_port) = kalamdb_grpc_target();
+        const BOOTSTRAP_LOCK_ID: i64 = 8_271_604_221;
 
         pg.batch_execute("CREATE EXTENSION IF NOT EXISTS pg_kalam;")
             .await
             .expect("create extension pg_kalam");
         ensure_schema_exists(&pg, "e2e").await;
-        pg.batch_execute(&format!(
-            "CREATE SERVER IF NOT EXISTS kalam_server
-                 FOREIGN DATA WRAPPER pg_kalam
-                 OPTIONS (host '{KALAMDB_GRPC_HOST}', port '{KALAMDB_GRPC_PORT}');"
-        ))
-        .await
-        .expect("create kalam_server foreign server");
+
+        pg.execute("SELECT pg_advisory_lock($1)", &[&BOOTSTRAP_LOCK_ID])
+            .await
+            .expect("acquire pg_kalam bootstrap advisory lock");
+
+        let bootstrap_result = async {
+            pg.batch_execute(&format!(
+                "CREATE SERVER IF NOT EXISTS kalam_server
+                     FOREIGN DATA WRAPPER pg_kalam
+                     OPTIONS (host '{grpc_host}', port '{grpc_port}');"
+            ))
+            .await
+            .expect("create kalam_server foreign server");
+
+            pg.batch_execute(&format!(
+                "ALTER SERVER kalam_server OPTIONS (SET host '{grpc_host}', SET port '{grpc_port}');"
+            ))
+            .await
+            .expect("repoint kalam_server foreign server");
+        }
+        .await;
+
+        pg.execute("SELECT pg_advisory_unlock($1)", &[&BOOTSTRAP_LOCK_ID])
+            .await
+            .expect("release pg_kalam bootstrap advisory lock");
+
+        bootstrap_result
     }
 
     async fn wait_for_pg(&self) {
@@ -366,6 +417,7 @@ pub async fn create_shared_foreign_table(
          OPTIONS (namespace 'e2e', \"table\" '{table}', table_type 'shared');"
     );
     client.batch_execute(&sql).await.expect("create foreign table");
+    TestEnv::global().await.wait_for_kalamdb_table_exists("e2e", table).await;
 }
 
 pub async fn create_user_foreign_table(
@@ -382,6 +434,7 @@ pub async fn create_user_foreign_table(
          OPTIONS (namespace 'e2e', \"table\" '{table}', table_type 'user');"
     );
     client.batch_execute(&sql).await.expect("create foreign table");
+    TestEnv::global().await.wait_for_kalamdb_table_exists("e2e", table).await;
 }
 
 pub async fn set_user_id(client: &tokio_postgres::Client, user_id: &str) {
@@ -504,7 +557,26 @@ pub fn process_rss_kb(pid: u32) -> u64 {
 }
 
 pub fn process_group_rss_kb(pids: &[u32]) -> u64 {
-    pids.iter().map(|pid| process_rss_kb(*pid)).sum()
+    if pids.is_empty() {
+        return 0;
+    }
+
+    let pid_list = pids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+    let output = Command::new("ps")
+        .args(["-o", "rss=", "-p", &pid_list])
+        .output()
+        .expect("run ps for process group rss");
+    assert!(
+        output.status.success(),
+        "failed to read rss for pids {pid_list}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("parse process group rss output");
+    stdout
+        .lines()
+        .filter_map(|line| line.trim().parse::<u64>().ok())
+        .sum()
 }
 
 pub async fn sample_process_peak_rss_kb(

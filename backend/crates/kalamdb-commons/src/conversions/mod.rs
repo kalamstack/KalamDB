@@ -72,3 +72,5 @@ pub use schema_metadata::{
     with_kalam_column_flags_metadata, with_kalam_data_type_metadata,
     KALAM_COLUMN_FLAGS_METADATA_KEY, KALAM_DATA_TYPE_METADATA_KEY,
 };
+#[cfg(all(feature = "schema-metadata", feature = "arrow-conversion"))]
+pub use schema_metadata::{mask_sensitive_rows_for_role, schema_fields_from_arrow_schema};

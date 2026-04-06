@@ -2,8 +2,8 @@
 
 use super::cluster::ClusterTestServer;
 use anyhow::{Context, Result};
-use kalam_link::models::{QueryResponse, ResponseStatus};
-use kalam_link::{AuthProvider, KalamLinkClient, KalamLinkTimeouts};
+use kalam_client::models::{QueryResponse, ResponseStatus};
+use kalam_client::{AuthProvider, KalamLinkClient, KalamLinkTimeouts};
 use kalamdb_commons::{NamespaceId, Role, UserId, UserName};
 use kalamdb_core::app_context::AppContext;
 use once_cell::sync::{Lazy, OnceCell as SyncOnceCell};
@@ -596,7 +596,7 @@ impl HttpTestServer {
             .await
         {
             Ok(r) => r,
-            Err(kalam_link::KalamLinkError::ServerError {
+            Err(kalam_client::KalamLinkError::ServerError {
                 status_code: _,
                 message,
             }) => {
@@ -756,7 +756,7 @@ impl HttpTestServer {
                 let select_probe = self.execute_sql("SELECT 1 AS ok").await;
                 if matches!(
                     select_probe,
-                    Ok(ref r) if r.status == kalam_link::models::ResponseStatus::Success
+                    Ok(ref r) if r.status == kalam_client::models::ResponseStatus::Success
                 ) {
                     return Ok(());
                 }
@@ -777,7 +777,7 @@ impl HttpTestServer {
             // system.cluster is registered during AppContext init.
             let cluster_probe = "SELECT is_self, is_leader FROM system.cluster";
             match self.execute_sql(cluster_probe).await {
-                Ok(resp) if resp.status == kalam_link::models::ResponseStatus::Success => {
+                Ok(resp) if resp.status == kalam_client::models::ResponseStatus::Success => {
                     let is_ready = resp
                         .results
                         .first()
@@ -812,7 +812,7 @@ impl HttpTestServer {
                     let select_probe = self.execute_sql("SELECT 1 AS ok").await;
                     if matches!(
                         select_probe,
-                        Ok(ref r) if r.status == kalam_link::models::ResponseStatus::Success
+                        Ok(ref r) if r.status == kalam_client::models::ResponseStatus::Success
                     ) {
                         // SQL is up, but cluster leadership isn't confirmed yet.
                     }

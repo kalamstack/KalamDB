@@ -7,7 +7,7 @@
 // without needing to re-query for unchanged values.
 //
 // This verifies the end-to-end delta update pipeline:
-//   Backend (notification.rs compute_json_update_delta) → WebSocket → kalam-link SDK
+//   Backend (notification.rs compute_json_update_delta) → WebSocket → kalam-client SDK
 
 use crate::common::*;
 use std::time::{Duration, Instant};

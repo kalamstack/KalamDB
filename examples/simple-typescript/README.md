@@ -188,7 +188,7 @@ Replace mock client in `src/services/kalamClient.ts`:
 
 ```typescript
 // TODO: Uncomment when WASM module is available
-import init, { KalamClient } from '../../../link/sdks/typescript/pkg/kalam_link.js';
+import init, { KalamClient } from '../../../link/sdks/typescript/client/wasm/kalam_client.js';
 
 export async function createKalamClient(config: KalamClientConfig): Promise<IKalamClient> {
   await init(); // Initialize WASM

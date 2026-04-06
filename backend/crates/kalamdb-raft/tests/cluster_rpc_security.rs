@@ -8,7 +8,7 @@
 //! - Forged/replayed Bearer tokens
 //! - SQL injection payloads in forwarded requests
 //! - Oversized / binary-garbage payloads
-//! - Calling `NotifyFollowers`, `Ping`, and `GetNodeInfo` from outside
+//! - Calling `Ping` and `GetNodeInfo` from outside
 //!   the cluster (documents the mTLS trust boundary)
 //!
 //! # Architecture security model
@@ -23,7 +23,7 @@
 //! if a rogue peer somehow bypasses mTLS it cannot issue writes unless it
 //! holds a valid short-lived JWT.
 //!
-//! `NotifyFollowers`, `Ping`, and `GetNodeInfo` intentionally carry no
+//! `Ping` and `GetNodeInfo` intentionally carry no
 //! per-request credential – they are safe to invoke without a user token and
 //! cannot cause mutations.  Their protection is the mTLS layer alone.
 //! The tests below document this explicitly.
@@ -37,9 +37,7 @@ use kalamdb_commons::models::NodeId;
 use kalamdb_raft::{
     manager::{RaftManager, RaftManagerConfig},
     network::cluster_service::cluster_client::ClusterServiceClient,
-    network::cluster_service::{
-        ForwardSqlRequest, GetNodeInfoRequest, NotifyFollowersRequest, PingRequest,
-    },
+    network::cluster_service::{ForwardSqlRequest, GetNodeInfoRequest, PingRequest},
     ClusterMessageHandler, ForwardSqlResponsePayload, GetNodeInfoResponse, NoOpClusterHandler,
 };
 use tokio::time::sleep;
@@ -60,7 +58,6 @@ const PORT_FORWARD_SQL_REPLAY: u16 = 19709;
 // ForwardSql ports above.  Using a separate base (19720+) avoids the previous
 // conflict where +1 / +2 offsets collided with 19708 and 19709.
 const PORT_UNAUTHENTICATED_PING: u16 = 19720;
-const PORT_UNAUTHENTICATED_NOTIFY_FOLLOWERS: u16 = 19721;
 const PORT_UNAUTHENTICATED_GET_NODE_INFO: u16 = 19722;
 
 // ─── Test handler ────────────────────────────────────────────────────────────
@@ -95,16 +92,6 @@ impl SecurityStubHandler {
 
 #[async_trait]
 impl ClusterMessageHandler for SecurityStubHandler {
-    async fn handle_notify_followers(
-        &self,
-        req: kalamdb_raft::NotifyFollowersRequest,
-    ) -> Result<(), String> {
-        // No user token required – but we track the call for assertions.
-        self.unauthenticated_cluster_calls.fetch_add(1, Ordering::SeqCst);
-        let _ = req;
-        Ok(())
-    }
-
     async fn handle_forward_sql(
         &self,
         req: kalamdb_raft::ForwardSqlRequest,
@@ -199,6 +186,10 @@ impl ClusterMessageHandler for SecurityStubHandler {
             hostname: Some("test-node".to_string()),
             version: Some("test".to_string()),
             memory_mb: Some(512),
+            memory_usage_mb: Some(64),
+            cpu_usage_percent: Some(2.0),
+            uptime_seconds: Some(120),
+            uptime_human: Some("2m".to_string()),
             os: Some("linux".to_string()),
             arch: Some("x86_64".to_string()),
         })
@@ -258,7 +249,7 @@ async fn test_forward_sql_no_auth_header_returns_401() {
     let request = ForwardSqlRequest {
         sql: "INSERT INTO users (name) VALUES ('eve')".to_string(),
         namespace_id: None,
-        params_json: vec![],
+        params: vec![],
         authorization_header: None, // ← no auth
         request_id: None,
     };
@@ -290,7 +281,7 @@ async fn test_forward_sql_empty_auth_header_returns_401() {
     let request = ForwardSqlRequest {
         sql: "SELECT * FROM system.users".to_string(),
         namespace_id: None,
-        params_json: vec![],
+        params: vec![],
         authorization_header: Some("   ".to_string()), // ← whitespace-only
         request_id: None,
     };
@@ -320,7 +311,7 @@ async fn test_forward_sql_basic_auth_is_rejected() {
     let request = ForwardSqlRequest {
         sql: "DROP TABLE users".to_string(),
         namespace_id: None,
-        params_json: vec![],
+        params: vec![],
         authorization_header: Some(basic.to_string()),
         request_id: None,
     };
@@ -355,7 +346,7 @@ async fn test_forward_sql_forged_bearer_token_is_rejected() {
     let request = ForwardSqlRequest {
         sql: "CREATE TABLE secret_exfil (data TEXT)".to_string(),
         namespace_id: None,
-        params_json: vec![],
+        params: vec![],
         authorization_header: Some(forged_jwt.to_string()),
         request_id: None,
     };
@@ -403,7 +394,7 @@ async fn test_forward_sql_rejects_all_malformed_auth_variants() {
         let req = ForwardSqlRequest {
             sql: "SELECT 1".to_string(),
             namespace_id: None,
-            params_json: vec![],
+            params: vec![],
             authorization_header: Some((*auth).to_string()),
             request_id: None,
         };
@@ -452,7 +443,7 @@ async fn test_forward_sql_valid_token_empty_sql_is_not_executed() {
     let req_no_auth = ForwardSqlRequest {
         sql: String::new(),
         namespace_id: None,
-        params_json: vec![],
+        params: vec![],
         authorization_header: None,
         request_id: None,
     };
@@ -468,7 +459,7 @@ async fn test_forward_sql_valid_token_empty_sql_is_not_executed() {
     let req_empty_sql = ForwardSqlRequest {
         sql: String::new(),
         namespace_id: None,
-        params_json: vec![],
+        params: vec![],
         authorization_header: Some("Bearer valid-test-token".to_string()),
         request_id: None,
     };
@@ -484,21 +475,19 @@ async fn test_forward_sql_valid_token_empty_sql_is_not_executed() {
     assert_eq!(rejected.load(Ordering::SeqCst), 1, "Rejected count must remain 1");
 }
 
-/// An oversized payload (8 MiB `params_json`) must not crash the server or
+/// An oversized payload (8 MiB SQL) must not crash the server or
 /// bypass auth checks.  The auth gate runs first and rejects the request
-/// before any deserialization of the payload.
+/// before any execution of the payload.
 #[tokio::test]
 async fn test_forward_sql_oversized_payload_rejected_before_parsing() {
     let (handler, allowed, rejected, _) = SecurityStubHandler::new();
     let handler: Arc<dyn ClusterMessageHandler> = handler;
     let mut client = start_grpc_server_with_handler(handler, PORT_FORWARD_SQL_OVERSIZED).await;
 
-    let oversized_params = vec![0xFF_u8; 8 * 1024 * 1024]; // 8 MiB
-
     let request = ForwardSqlRequest {
-        sql: "INSERT INTO users SELECT * FROM users".to_string(),
+        sql: "A".repeat(8 * 1024 * 1024), // 8 MiB SQL
         namespace_id: None,
-        params_json: oversized_params,
+        params: vec![],
         authorization_header: None, // ← no auth
         request_id: None,
     };
@@ -553,7 +542,7 @@ async fn test_forward_sql_token_replay_is_rejected() {
         let req = ForwardSqlRequest {
             sql: "UPDATE users SET role='system' WHERE name='attacker'".to_string(),
             namespace_id: None,
-            params_json: vec![],
+            params: vec![],
             authorization_header: Some(stolen_token.to_string()),
             request_id: Some(format!("replay-attempt-{}", attempt)),
         };
@@ -568,7 +557,7 @@ async fn test_forward_sql_token_replay_is_rejected() {
 
 // ─── Unauthenticated non-SQL RPC tests ───────────────────────────────────────
 //
-// `NotifyFollowers`, `Ping`, and `GetNodeInfo` do NOT require a user Bearer
+// `Ping` and `GetNodeInfo` do NOT require a user Bearer
 // token.  They are protected solely by the mTLS layer at the transport level.
 // These tests document the *expected* behaviour: the calls succeed but must
 // not produce mutations or expose sensitive state when no mTLS is configured
@@ -591,43 +580,6 @@ async fn test_ping_reachable_without_user_token() {
     assert!(inner.success, "No-auth ping should report success (it is read-only)");
     // The response carries no sensitive authentication state.
     assert!(inner.error.is_empty(), "No error expected for ping");
-}
-
-/// `NotifyFollowers` from an external caller with a garbage payload must not
-/// panic or block the server.  The call is accepted at transport level; the
-/// handler discards the malformed notification gracefully.
-#[tokio::test]
-async fn test_notify_followers_garbage_payload_is_handled_gracefully() {
-    let (handler, _, _, unauthenticated) = SecurityStubHandler::new();
-    let handler: Arc<dyn ClusterMessageHandler> = handler;
-    let port = PORT_UNAUTHENTICATED_NOTIFY_FOLLOWERS;
-    let mut client = start_grpc_server_with_handler(handler, port).await;
-
-    let req = NotifyFollowersRequest {
-        user_id: None,
-        table_namespace: String::new(),
-        table_name: String::new(),
-        payload: vec![0xDE, 0xAD, 0xBE, 0xEF, 0xFF, 0x00], // garbage
-    };
-
-    let resp = client
-        .notify_followers(tonic::Request::new(req))
-        .await
-        .expect("gRPC transport must not fail");
-
-    // Our stub accepts all notifications and tracks them (real handler decodes
-    // the flexbuffers payload and returns an error if invalid, but must not
-    // crash).
-    let inner = resp.into_inner();
-    // Either success=true (stub) or success=false (real handler decoding error)
-    // – what matters is the server does NOT crash.
-    let _ = inner; // server stayed alive
-
-    assert_eq!(
-        unauthenticated.load(Ordering::SeqCst),
-        1,
-        "Unauthenticated cluster call counter must be incremented"
-    );
 }
 
 /// `GetNodeInfo` can be called without a user token.  The response must not
@@ -681,7 +633,7 @@ async fn test_handler_rejects_none_auth() {
         .handle_forward_sql(kalamdb_raft::ForwardSqlRequest {
             sql: "INSERT INTO audit (msg) VALUES ('test')".to_string(),
             namespace_id: None,
-            params_json: vec![],
+            params: vec![],
             authorization_header: None,
             request_id: None,
         })
@@ -701,7 +653,7 @@ async fn test_handler_rejects_basic_auth() {
         .handle_forward_sql(kalamdb_raft::ForwardSqlRequest {
             sql: "DELETE FROM users WHERE 1=1".to_string(),
             namespace_id: None,
-            params_json: vec![],
+            params: vec![],
             authorization_header: Some("Basic cm9vdDpyb290".to_string()),
             request_id: None,
         })
@@ -725,7 +677,7 @@ async fn test_handler_rejects_forged_bearer() {
         .handle_forward_sql(kalamdb_raft::ForwardSqlRequest {
             sql: "SELECT secret FROM system.config".to_string(),
             namespace_id: None,
-            params_json: vec![],
+            params: vec![],
             authorization_header: Some(forged.to_string()),
             request_id: None,
         })
@@ -745,7 +697,7 @@ async fn test_handler_allows_valid_bearer() {
         .handle_forward_sql(kalamdb_raft::ForwardSqlRequest {
             sql: "INSERT INTO logs (msg) VALUES ('hello')".to_string(),
             namespace_id: None,
-            params_json: vec![],
+            params: vec![],
             authorization_header: Some("Bearer valid-test-token".to_string()),
             request_id: None,
         })
@@ -778,7 +730,7 @@ async fn test_handler_sql_injection_bypasses_auth_but_reaches_sql_layer() {
             .handle_forward_sql(kalamdb_raft::ForwardSqlRequest {
                 sql: (*payload).to_string(),
                 namespace_id: None,
-                params_json: vec![],
+                params: vec![],
                 authorization_header: Some("Bearer valid-test-token".to_string()),
                 request_id: None,
             })
@@ -811,7 +763,7 @@ async fn test_noop_handler_forward_sql_returns_error() {
         .handle_forward_sql(kalamdb_raft::ForwardSqlRequest {
             sql: "DROP TABLE everything".to_string(),
             namespace_id: None,
-            params_json: vec![],
+            params: vec![],
             authorization_header: Some("Bearer valid-test-token".to_string()),
             request_id: None,
         })

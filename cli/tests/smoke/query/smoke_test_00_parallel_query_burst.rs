@@ -1,7 +1,7 @@
 // High-concurrency smoke test to ensure SELECT * queries don't starve under load
 // Creates a user table with ~1k rows and fires parallel SELECT * queries.
 //
-// This test uses kalam-link client directly instead of spawning CLI subprocesses,
+// This test uses kalam-client directly instead of spawning CLI subprocesses,
 // which avoids macOS TCP connection limits when running many parallel queries.
 // The parallelism is handled within a single process using std threads that share
 // a single tokio runtime.

@@ -8,7 +8,6 @@
 
 use super::providers::job_nodes::models::JobNode;
 use super::providers::jobs::models::Job;
-use super::providers::live_queries::models::LiveQuery;
 use super::providers::manifest::manifest_table_definition;
 use super::providers::namespaces::models::Namespace;
 use super::providers::storages::models::Storage;
@@ -18,8 +17,8 @@ use super::providers::topics::models::Topic;
 use super::providers::users::models::User;
 use super::providers::{
     AuditLogEntry, AuditLogsTableProvider, JobNodesTableProvider, JobsTableProvider,
-    LiveQueriesTableProvider, ManifestTableProvider, NamespacesTableProvider, SchemasTableProvider,
-    StoragesTableProvider, TopicOffsetsTableProvider, TopicsTableProvider, UsersTableProvider,
+    ManifestTableProvider, NamespacesTableProvider, SchemasTableProvider, StoragesTableProvider,
+    TopicOffsetsTableProvider, TopicsTableProvider, UsersTableProvider,
 };
 // SchemaRegistry will be passed as Arc parameter from kalamdb-core
 use datafusion::datasource::TableProvider;
@@ -47,7 +46,6 @@ pub struct SystemTablesRegistry {
     job_nodes: Arc<JobNodesTableProvider>,
     namespaces: Arc<NamespacesTableProvider>,
     storages: Arc<StoragesTableProvider>,
-    live_queries: Arc<LiveQueriesTableProvider>,
     schemas: Arc<SchemasTableProvider>,
     audit_logs: Arc<AuditLogsTableProvider>,
     topics: Arc<TopicsTableProvider>,
@@ -95,7 +93,6 @@ impl SystemTablesRegistry {
             job_nodes: Arc::new(JobNodesTableProvider::new(storage_backend.clone())),
             namespaces: Arc::new(NamespacesTableProvider::new(storage_backend.clone())),
             storages: Arc::new(StoragesTableProvider::new(storage_backend.clone())),
-            live_queries: Arc::new(LiveQueriesTableProvider::new(storage_backend.clone())),
             schemas: Arc::new(SchemasTableProvider::new(storage_backend.clone())),
             audit_logs: Arc::new(AuditLogsTableProvider::new(storage_backend.clone())),
             topics: Arc::new(TopicsTableProvider::new(storage_backend.clone())),
@@ -125,7 +122,6 @@ impl SystemTablesRegistry {
                     (SystemTable::Namespaces, Namespace::definition()),
                     (SystemTable::Schemas, schemas_table_definition()),
                     (SystemTable::Storages, Storage::definition()),
-                    (SystemTable::LiveQueries, LiveQuery::definition()),
                     (SystemTable::Jobs, Job::definition()),
                     (SystemTable::JobNodes, JobNode::definition()),
                     (SystemTable::AuditLog, AuditLogEntry::definition()),
@@ -164,11 +160,6 @@ impl SystemTablesRegistry {
     /// Get the system.storages provider
     pub fn storages(&self) -> Arc<StoragesTableProvider> {
         self.storages.clone()
-    }
-
-    /// Get the system.live_queries provider
-    pub fn live_queries(&self) -> Arc<LiveQueriesTableProvider> {
-        self.live_queries.clone()
     }
 
     /// Get the system.schemas provider
@@ -296,7 +287,6 @@ impl SystemTablesRegistry {
             SystemTable::JobNodes,
             SystemTable::Namespaces,
             SystemTable::Storages,
-            SystemTable::LiveQueries,
             SystemTable::Schemas,
             SystemTable::AuditLog,
             SystemTable::Manifest,
@@ -398,7 +388,6 @@ impl SystemTablesRegistry {
             SystemTable::JobNodes => Some(self.job_nodes.clone() as Arc<dyn TableProvider>),
             SystemTable::Namespaces => Some(self.namespaces.clone() as Arc<dyn TableProvider>),
             SystemTable::Storages => Some(self.storages.clone() as Arc<dyn TableProvider>),
-            SystemTable::LiveQueries => Some(self.live_queries.clone() as Arc<dyn TableProvider>),
             SystemTable::Schemas => Some(self.schemas.clone() as Arc<dyn TableProvider>),
             SystemTable::AuditLog => Some(self.audit_logs.clone() as Arc<dyn TableProvider>),
             SystemTable::Manifest => Some(self.manifest.clone() as Arc<dyn TableProvider>),
@@ -438,7 +427,6 @@ impl SystemTablesRegistry {
             SystemTable::JobNodes,
             SystemTable::Namespaces,
             SystemTable::Storages,
-            SystemTable::LiveQueries,
             SystemTable::Schemas,
             SystemTable::AuditLog,
             SystemTable::Manifest,

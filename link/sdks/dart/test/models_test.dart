@@ -152,33 +152,6 @@ void main() {
   });
 
   // -----------------------------------------------------------------------
-  // HealthCheckResponse
-  // -----------------------------------------------------------------------
-  group('HealthCheckResponse', () {
-    test('stores all fields', () {
-      const h = HealthCheckResponse(
-        status: 'healthy',
-        version: '0.5.0',
-        apiVersion: 'v1',
-        buildDate: '2026-02-25',
-      );
-      expect(h.status, 'healthy');
-      expect(h.version, '0.5.0');
-      expect(h.apiVersion, 'v1');
-      expect(h.buildDate, '2026-02-25');
-    });
-
-    test('buildDate is optional', () {
-      const h = HealthCheckResponse(
-        status: 'ok',
-        version: '1.0.0',
-        apiVersion: 'v2',
-      );
-      expect(h.buildDate, isNull);
-    });
-  });
-
-  // -----------------------------------------------------------------------
   // Login models
   // -----------------------------------------------------------------------
   group('LoginResponse', () {

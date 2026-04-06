@@ -1,8 +1,6 @@
 //! Data operation responses
 //!
 //! Shared response type for both user and shared data operations.
-
-use kalamdb_commons::models::LiveQueryId;
 use serde::{Deserialize, Serialize};
 
 /// Response for data operations
@@ -16,14 +14,6 @@ pub enum DataResponse {
 
     /// Subscription registered
     Subscribed { subscription_id: String },
-
-    /// Live query created successfully
-    LiveQueryCreated {
-        /// The unique live query ID
-        live_id: LiveQueryId,
-        /// Optional message
-        message: Option<String>,
-    },
 
     /// Error
     Error { message: String },

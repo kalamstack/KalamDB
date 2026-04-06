@@ -27,9 +27,10 @@ impl TypedStatementHandler<AddTopicSourceStatement> for AddTopicSourceHandler {
         let topic_id = TopicId::new(&statement.topic_name);
         let topics_provider = self.app_context.system_tables().topics();
 
-        let mut topic = topics_provider.get_topic_by_id_async(&topic_id).await?.ok_or_else(|| {
-            KalamDbError::NotFound(format!("Topic '{}' does not exist", statement.topic_name))
-        })?;
+        let mut topic =
+            topics_provider.get_topic_by_id_async(&topic_id).await?.ok_or_else(|| {
+                KalamDbError::NotFound(format!("Topic '{}' does not exist", statement.topic_name))
+            })?;
 
         let route = TopicRoute {
             table_id: statement.table_id.clone(),

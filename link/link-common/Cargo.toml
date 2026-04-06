@@ -1,0 +1,66 @@
+[package]
+name = "link-common"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared Rust implementation for KalamDB link crates"
+
+[dependencies]
+tokio = { workspace = true, optional = true }
+reqwest = { version = "0.13.2", default-features = false, features = ["json", "rustls"], optional = true }
+tokio-tungstenite = { workspace = true, optional = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rmp-serde = { workspace = true }
+bytes = { workspace = true, optional = true }
+http-body = { workspace = true, optional = true }
+http-body-util = { workspace = true, optional = true }
+base64 = { workspace = true }
+futures-util = { workspace = true, default-features = false }
+log = { workspace = true }
+miniz_oxide = { workspace = true }
+wasm-bindgen = { workspace = true, optional = true }
+wasm-bindgen-futures = { workspace = true, optional = true }
+js-sys = { workspace = true, optional = true }
+web-sys = { workspace = true, features = [
+	"console",
+	"WebSocket",
+	"BinaryType",
+	"MessageEvent",
+	"CloseEvent",
+	"ErrorEvent",
+	"Event",
+	"EventTarget",
+	"Blob",
+	"FileReader",
+	"Window",
+	"Request",
+	"RequestInit",
+	"RequestMode",
+	"Response",
+	"Headers",
+	"FormData",
+	"BlobPropertyBag",
+], optional = true }
+
+[features]
+default = []
+tokio-runtime = ["tokio", "reqwest", "tokio-tungstenite", "bytes"]
+auth-flows = []
+setup = []
+healthcheck = []
+cluster = []
+consumer = []
+file-uploads = ["bytes", "http-body", "http-body-util", "reqwest/multipart", "reqwest/stream"]
+http2 = ["reqwest/http2"]
+wasm = ["wasm-bindgen", "wasm-bindgen-futures", "js-sys", "web-sys"]
+e2e-tests = []
+
+[lib]
+crate-type = ["rlib"]
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

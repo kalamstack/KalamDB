@@ -10,7 +10,7 @@ use std::time::Duration;
 async fn test_live_query_auth_expiry() {
     let server = TestServer::new_shared().await;
     let manager = server.app_context.live_query_manager();
-    let registry = manager.registry();
+    let registry = server.app_context.connection_registry();
 
     // 1. Setup User and Connection
     let user_id_str = "user_expiry_test";
@@ -31,7 +31,6 @@ async fn test_live_query_auth_expiry() {
         let connection_state =
             registry.get_connection(&connection_id).expect("Connection should exist");
         connection_state.mark_authenticated(user_id.clone(), Role::User);
-        registry.on_authenticated(&connection_id, user_id.clone());
     }
 
     println!("✓ Connection registered and authenticated");
@@ -44,7 +43,7 @@ async fn test_live_query_auth_expiry() {
 
     // 3. Trigger Auth Expiry
     manager
-        .handle_auth_expiry(&connection_id)
+        .unregister_connection(&user_id, &connection_id)
         .await
         .expect("Failed to handle auth expiry");
 

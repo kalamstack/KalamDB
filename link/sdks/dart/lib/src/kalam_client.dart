@@ -16,8 +16,7 @@ Future<Auth> _noAuth() async => const NoAuth();
 
 /// KalamDB client for Dart and Flutter.
 ///
-/// Provides query execution, live subscriptions, authentication,
-/// and server health endpoints.
+/// Provides query execution, live subscriptions, and authentication.
 ///
 /// ```dart
 /// final client = await KalamClient.connect(
@@ -405,21 +404,6 @@ class KalamClient {
   }
 
   // ---------------------------------------------------------------------------
-  // Health
-  // ---------------------------------------------------------------------------
-
-  /// Check server health (version, status, etc.).
-  Future<HealthCheckResponse> healthCheck() async {
-    final resp = await bridge.dartHealthCheck(client: _handle);
-    return HealthCheckResponse(
-      status: resp.status,
-      version: resp.version,
-      apiVersion: resp.apiVersion,
-      buildDate: resp.buildDate,
-    );
-  }
-
-  // ---------------------------------------------------------------------------
   // Subscriptions
   // ---------------------------------------------------------------------------
 
@@ -495,7 +479,7 @@ class KalamClient {
 
   /// Subscribe to a SQL query and receive the current materialized row set.
   ///
-  /// The row materialization happens inside kalam-link's Rust layer, so Dart
+  /// The row materialization happens inside the shared Rust client layer, so Dart
   /// applications can use a higher-level live query API without reimplementing
   /// insert/update/delete reconciliation.
   ///

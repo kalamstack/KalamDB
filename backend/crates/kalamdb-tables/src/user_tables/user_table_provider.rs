@@ -16,7 +16,7 @@ use crate::error_extensions::KalamDbResultExt;
 use crate::manifest::manifest_helpers::{ensure_manifest_ready, load_row_from_parquet_by_seq};
 use crate::user_tables::{UserTableIndexedStore, UserTablePkIndex, UserTableRow};
 use crate::utils::base::{self, BaseTableProvider, TableProviderCore};
-use crate::utils::row_utils::{extract_full_user_context, extract_user_context};
+use crate::utils::row_utils::extract_user_context;
 use async_trait::async_trait;
 
 use datafusion::arrow::datatypes::SchemaRef;
@@ -33,7 +33,6 @@ use kalamdb_commons::conversions::arrow_json_conversion::{coerce_rows, coerce_up
 use kalamdb_commons::ids::{SeqId, UserTableRowId};
 use kalamdb_commons::models::datatypes::KalamDataType;
 use kalamdb_commons::models::UserId;
-use kalamdb_commons::NotLeaderError;
 use kalamdb_commons::StorageKey;
 use kalamdb_session::can_read_all_users;
 use kalamdb_session_datafusion::{
@@ -1645,26 +1644,6 @@ impl TableProvider for UserTableProvider {
         // SECURITY: Enforce user table access rules (namespace isolation)
         check_user_table_access(state, self.core.table_id())
             .map_err(session_error_to_datafusion)?;
-
-        // Extract user context including read_context for leader check
-        let (_user_id, _role, read_context) = extract_full_user_context(state).map_err(|e| {
-            DataFusionError::Execution(format!("Failed to extract user context: {}", e))
-        })?;
-
-        // Check if this is a client read that requires leader
-        // Skip check for internal reads (jobs, live query notifications, etc.)
-        // Route to the Meta group leader where ALL DML data lives
-        // (DML writes go through forward_sql_if_follower to Meta leader)
-        if read_context.requires_leader()
-            && self.core.services.cluster_coordinator.is_cluster_mode().await
-        {
-            let is_leader = self.core.services.cluster_coordinator.is_meta_leader().await;
-            if !is_leader {
-                // Get Meta leader address for client redirection
-                let leader_addr = self.core.services.cluster_coordinator.meta_leader_addr().await;
-                return Err(DataFusionError::External(Box::new(NotLeaderError::new(leader_addr))));
-            }
-        }
 
         self.base_scan(state, projection, filters, limit).await
     }

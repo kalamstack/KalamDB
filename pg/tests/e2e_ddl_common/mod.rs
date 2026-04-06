@@ -31,6 +31,8 @@ const PG_HOST: &str = "127.0.0.1";
 
 /// KalamDB HTTP API (local server by default, overridable via KALAMDB_SERVER_URL).
 const DEFAULT_KALAMDB_SERVER_URL: &str = "http://127.0.0.1:8080";
+const DEFAULT_KALAMDB_GRPC_HOST: &str = "127.0.0.1";
+const DEFAULT_KALAMDB_GRPC_PORT: u16 = 9188;
 const DEFAULT_KALAMDB_USER: &str = "root";
 const DEFAULT_KALAMDB_PASSWORD: &str = "kalamdb123";
 const DEFAULT_SETUP_USER: &str = "admin";
@@ -90,6 +92,19 @@ fn kalamdb_auth_config() -> KalamDbAuthConfig {
         setup_password,
         root_password,
     }
+}
+
+fn kalamdb_grpc_target() -> (String, u16) {
+    let host = env::var("KALAMDB_GRPC_HOST")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_KALAMDB_GRPC_HOST.to_string());
+    let port = env::var("KALAMDB_GRPC_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(DEFAULT_KALAMDB_GRPC_PORT);
+
+    (host, port)
 }
 
 // ---------------------------------------------------------------------------
@@ -204,6 +219,62 @@ impl DdlTestEnv {
             .unwrap_or_default()
     }
 
+    pub async fn wait_for_kalamdb_table_exists(&self, namespace: &str, table: &str) {
+        self.wait_for_kalamdb_table_state(namespace, table, true).await;
+    }
+
+    pub async fn wait_for_kalamdb_table_absent(&self, namespace: &str, table: &str) {
+        self.wait_for_kalamdb_table_state(namespace, table, false).await;
+    }
+
+    pub async fn wait_for_kalamdb_columns<F>(
+        &self,
+        namespace: &str,
+        table: &str,
+        description: &str,
+        predicate: F,
+    ) -> Vec<String>
+    where
+        F: Fn(&[String]) -> bool,
+    {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+
+        loop {
+            let columns = self.kalamdb_columns(namespace, table).await;
+            if predicate(&columns) {
+                return columns;
+            }
+
+            if std::time::Instant::now() >= deadline {
+                panic!(
+                    "KalamDB columns for {namespace}.{table} did not satisfy {description} within timeout: {columns:?}"
+                );
+            }
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    async fn wait_for_kalamdb_table_state(&self, namespace: &str, table: &str, should_exist: bool) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+
+        loop {
+            let exists = self.kalamdb_table_exists(namespace, table).await;
+            if exists == should_exist {
+                return;
+            }
+
+            if std::time::Instant::now() >= deadline {
+                let expectation = if should_exist { "exist" } else { "be removed" };
+                panic!(
+                    "KalamDB table {namespace}.{table} did not {expectation} within timeout"
+                );
+            }
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
     // -- lifecycle ----------------------------------------------------------
 
     async fn start() -> Self {
@@ -224,8 +295,10 @@ impl DdlTestEnv {
             pg_user,
         };
 
-        // 4. Verify PG is reachable
-        let _ = env.pg_connect().await;
+        // 4. Verify PG is reachable and bootstrap the FDW test server.
+        env.ensure_test_db().await;
+        env.wait_for_pg().await;
+        env.ensure_extension_bootstrap().await;
 
         env
     }
@@ -253,6 +326,106 @@ impl DdlTestEnv {
              Start with: cd backend && cargo run",
             config.base_url
         );
+    }
+
+    async fn ensure_test_db(&self) {
+        let postgres = self.pg_connect_to("postgres").await.expect("connect to postgres database");
+
+        let exists = postgres
+            .query_opt("SELECT 1 FROM pg_database WHERE datname = $1", &[&TEST_DB])
+            .await
+            .expect("query test database")
+            .is_some();
+        if !exists {
+            postgres
+                .batch_execute(&format!("CREATE DATABASE {TEST_DB};"))
+                .await
+                .expect("create test database");
+        }
+    }
+
+    async fn ensure_extension_bootstrap(&self) {
+        let pg = self.pg_connect().await;
+        let (grpc_host, grpc_port) = kalamdb_grpc_target();
+        const BOOTSTRAP_LOCK_ID: i64 = 8_271_604_221;
+
+        pg.batch_execute("CREATE EXTENSION IF NOT EXISTS pg_kalam;")
+            .await
+            .expect("create extension pg_kalam");
+
+        let shared_preload = pg
+            .query_one("SHOW shared_preload_libraries", &[])
+            .await
+            .expect("show shared_preload_libraries");
+        let shared_preload: String = shared_preload.get(0);
+        assert!(
+            shared_preload.split(',').any(|entry| entry.trim() == "pg_kalam"),
+            "shared_preload_libraries must include pg_kalam for DDL propagation tests, got: {shared_preload}"
+        );
+
+        pg.execute("SELECT pg_advisory_lock($1)", &[&BOOTSTRAP_LOCK_ID])
+            .await
+            .expect("acquire pg_kalam bootstrap advisory lock");
+
+        let bootstrap_result = async {
+            pg.batch_execute(&format!(
+                "CREATE SERVER IF NOT EXISTS kalam_server
+                     FOREIGN DATA WRAPPER pg_kalam
+                     OPTIONS (host '{grpc_host}', port '{grpc_port}');"
+            ))
+            .await
+            .expect("create kalam_server foreign server");
+
+            pg.batch_execute(&format!(
+                "ALTER SERVER kalam_server OPTIONS (SET host '{grpc_host}', SET port '{grpc_port}');"
+            ))
+            .await
+            .expect("repoint kalam_server foreign server");
+        }
+        .await;
+
+        pg.execute("SELECT pg_advisory_unlock($1)", &[&BOOTSTRAP_LOCK_ID])
+            .await
+            .expect("release pg_kalam bootstrap advisory lock");
+
+        bootstrap_result
+    }
+
+    async fn wait_for_pg(&self) {
+        for i in 0..10 {
+            match self.pg_connect_to("postgres").await {
+                Ok(_client) => return,
+                Err(_) => {
+                    if i == 0 {
+                        eprintln!("  waiting for PostgreSQL on port {PG_PORT}...");
+                    }
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                },
+            }
+        }
+        panic!(
+            "PostgreSQL not reachable at {PG_HOST}:{PG_PORT}\n\
+             Start with: ./pg/scripts/pgrx-test-setup.sh --start"
+        );
+    }
+
+    async fn pg_connect_to(
+        &self,
+        dbname: &str,
+    ) -> Result<tokio_postgres::Client, tokio_postgres::Error> {
+        let (client, conn) = Config::new()
+            .host(PG_HOST)
+            .port(PG_PORT)
+            .user(&self.pg_user)
+            .dbname(dbname)
+            .connect(NoTls)
+            .await?;
+        tokio::spawn(async move {
+            if let Err(error) = conn.await {
+                eprintln!("pg connection error: {error}");
+            }
+        });
+        Ok(client)
     }
 
     async fn authenticate(client: &Client) -> String {

@@ -72,7 +72,7 @@ libc = { workspace = true }
 
 [features]
 default = ["embedded-ui", "mimalloc"]
-mimalloc = ["dep:mimalloc"]
+mimalloc = ["dep:mimalloc", "kalamdb-core/mimalloc"]
 embedded-ui = ["kalamdb-api/embedded-ui"]
 otel = ["dep:tracing-opentelemetry", "dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp"]
 # End-to-end tests that require a full test server instance
@@ -119,6 +119,7 @@ cc = { workspace = true }
 kalamdb-core = { path = "crates/kalamdb-core" }
 kalamdb-api = { path = "crates/kalamdb-api", default-features = false }
 kalamdb-auth = { path = "crates/kalamdb-auth" }
+kalamdb-observability = { path = "crates/kalamdb-observability", features = ["mimalloc"] }
 kalamdb-sql = { path = "crates/kalamdb-sql" }
 kalamdb-store = { path = "crates/kalamdb-store" }
 kalamdb-commons = { path = "crates/kalamdb-commons" }
@@ -127,7 +128,7 @@ kalamdb-tables = { path = "crates/kalamdb-tables" }
 kalamdb-raft = { path = "crates/kalamdb-raft" }
 kalamdb-sharding = { path = "crates/kalamdb-sharding" }
 kalamdb-dba = { path = "crates/kalamdb-dba" }
-kalam-link = { path = "../link" }
+kalam-client = { path = "../link/kalam-client", default-features = false, features = ["tokio-runtime", "cluster"] }
 
 # External dependencies
 tempfile = { workspace = true }

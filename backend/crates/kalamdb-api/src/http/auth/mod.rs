@@ -72,7 +72,7 @@ pub(crate) fn map_auth_error_to_response(err: AuthError) -> HttpResponse {
 /// Extract auth token from `Authorization: Bearer ...` or fallback to auth cookie.
 ///
 /// Header token is preferred so API calls can stay in sync with the same JWT used by
-/// `kalam-link` in the admin UI.
+/// `@kalamdb/client` in the admin UI.
 pub(crate) fn extract_bearer_or_cookie_token(req: &HttpRequest) -> Result<String, AuthError> {
     if let Some(raw_header) = req.headers().get(actix_web::http::header::AUTHORIZATION) {
         let auth_header = raw_header.to_str().map_err(|_| {

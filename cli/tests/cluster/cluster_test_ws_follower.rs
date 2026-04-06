@@ -4,7 +4,7 @@
 
 use crate::cluster_common::*;
 use crate::common::*;
-use kalam_link::{ChangeEvent, KalamLinkTimeouts, SubscriptionManager};
+use kalam_client::{ChangeEvent, KalamLinkTimeouts, SubscriptionManager};
 use serde_json::Value;
 use std::time::Duration;
 
@@ -96,7 +96,7 @@ async fn subscribe_with_retry(
     );
 }
 
-fn response_error_message(response: &kalam_link::QueryResponse) -> String {
+fn response_error_message(response: &kalam_client::QueryResponse) -> String {
     if let Some(error) = &response.error {
         if let Some(details) = &error.details {
             return format!("{} ({})", error.message, details);

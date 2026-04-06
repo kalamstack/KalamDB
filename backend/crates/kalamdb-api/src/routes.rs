@@ -82,8 +82,11 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
 /// Serves the Admin UI from embedded assets at /ui route.
 /// The UI is compressed and included in the binary at compile time.
 #[cfg(feature = "embedded-ui")]
-pub fn configure_embedded_ui_routes(cfg: &mut web::ServiceConfig) {
-    ui::configure_embedded_ui_routes(cfg);
+pub fn configure_embedded_ui_routes(
+    cfg: &mut web::ServiceConfig,
+    runtime_config: ui::UiRuntimeConfig,
+) {
+    ui::configure_embedded_ui_routes(cfg, runtime_config);
 }
 
 /// Check if embedded UI is available
@@ -103,8 +106,12 @@ pub fn is_embedded_ui_available() -> bool {
 /// Serves the built React app from /ui route using filesystem.
 /// Use this only if you need to serve UI from a custom path.
 /// For most cases, use `configure_embedded_ui_routes` instead.
-pub fn configure_ui_routes(cfg: &mut web::ServiceConfig, ui_path: &str) {
-    ui::configure_filesystem_ui_routes(cfg, ui_path);
+pub fn configure_ui_routes(
+    cfg: &mut web::ServiceConfig,
+    ui_path: &str,
+    runtime_config: ui::UiRuntimeConfig,
+) {
+    ui::configure_filesystem_ui_routes(cfg, ui_path, runtime_config);
 }
 
 /// Health check endpoint handler (localhost-only)

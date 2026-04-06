@@ -1,0 +1,229 @@
+
+> @kalamdb/client@0.4.2-rc.1 test
+> npm run build && NO_SERVER=true node --test tests/basic.test.mjs tests/normalize.test.mjs tests/auth-provider-retry.test.mjs tests/cell-value.test.mjs tests/single-socket-subscriptions.test.mjs tests/readme-examples.test.mjs tests/sdk-runtime-coverage.test.mjs
+
+
+> @kalamdb/client@0.4.2-rc.1 build
+> npm run clean && npm run build:wasm && npm run build:prepare-wasm-dts && npm run build:ts && npm run build:copy-wasm
+
+
+> @kalamdb/client@0.4.2-rc.1 clean
+> node -e "const fs=require('fs');const p=require('path');const rm=d=>{try{fs.rmSync(d,{recursive:true,force:true})}catch{}};rm('dist');rm('wasm')"
+
+
+> @kalamdb/client@0.4.2-rc.1 build:wasm
+> node -e "const {execSync,spawnSync}=require('child_process');process.chdir('../../..');const env={...process.env,CARGO_ENCODED_RUSTFLAGS:'',RUSTFLAGS:'',RUSTC_WRAPPER:'',CARGO_BUILD_RUSTC_WRAPPER:'',CARGO_TARGET_DIR:'sdks/typescript/client/.wasm-target',CARGO_HOME:'sdks/typescript/client/.wasm-cargo-home'};execSync('wasm-pack build kalam-client --target web --out-dir ../sdks/typescript/client/wasm --out-name kalam_client --no-opt --profile release-dist --features wasm --no-default-features',{stdio:'inherit',env});const wasmPath='sdks/typescript/client/wasm/kalam_client_bg.wasm';const opt=spawnSync('wasm-opt',['-Oz','--all-features','--strip-debug','--strip-dwarf','-o',wasmPath,wasmPath],{stdio:'inherit',env});if(opt.error&&opt.error.code==='ENOENT'){console.warn('wasm-opt not found; skipping post-build size optimization')}else if(opt.status!==0){process.exit(opt.status||1)}"
+
+[INFO]: 🎯  Checking for the Wasm target...
+[INFO]: 🌀  Compiling to Wasm...
+    Finished `release-dist` profile [optimized] target(s) in 0.19s
+[INFO]: ⬇️  Installing wasm-bindgen...
+[INFO]: License key is set in Cargo.toml but no LICENSE file(s) were found; Please add the LICENSE file(s) to your project directory
+[INFO]: ✨   Done in 0.38s
+[INFO]: 📦   Your wasm pkg is ready to publish at sdks/typescript/client/wasm.
+
+> @kalamdb/client@0.4.2-rc.1 build:prepare-wasm-dts
+> node ../scripts/prepare-wasm-dts.mjs . --add-json-value
+
+
+> @kalamdb/client@0.4.2-rc.1 build:ts
+> tsc
+
+
+> @kalamdb/client@0.4.2-rc.1 build:copy-wasm
+> node ../scripts/copy-wasm.mjs .
+
+✔ resolveAuthProviderWithRetry retries transient errors then succeeds (0.897ms)
+✔ resolveAuthProviderWithRetry fails fast for non-transient errors (0.2935ms)
+✔ isLikelyTransientAuthProviderError detects network-like messages (0.075625ms)
+🧪 Running Basic WASM Module Tests
+
+Test 1: WASM module loads...
+  ✓ init function exists
+  ✓ KalamClient class exists
+
+Test 2: WASM initializes...
+  ✓ WASM initialized successfully
+
+Test 3: KalamClient construction...
+  ✓ KalamClient instance created
+  ✓ isConnected method exists
+  ✓ connect method exists
+  ✓ disconnect method exists
+  ✓ query method exists
+  ✓ insert method exists
+  ✓ delete method exists
+  ✓ subscribe method exists
+  ✓ unsubscribe method exists
+  ✓ consume method is absent from main wasm bundle
+  ✓ ack method is absent from main wasm bundle
+
+Test 4: Constructor parameter validation...
+  ✓ Empty URL throws error
+  ✓ Empty username throws error
+
+==================================================
+Results: 16 passed, 0 failed
+==================================================
+
+✅ All tests passed!
+✔ tests/basic.test.mjs (69.53675ms)
+cell-value.test.mjs: all tests registered
+[FileRef] Failed to parse JSON: SyntaxError: Unexpected token 'j', "just a string" is not valid JSON
+    at JSON.parse (<anonymous>)
+    at FileRef.fromJson (file:///Users/jamal/git/KalamDB/link/sdks/typescript/client/dist/src/file_ref.js:16:58)
+    at FileRef.from (file:///Users/jamal/git/KalamDB/link/sdks/typescript/client/dist/src/file_ref.js:28:28)
+    at KalamCellValue.asFile (file:///Users/jamal/git/KalamDB/link/sdks/typescript/client/dist/src/cell_value.js:177:24)
+    at TestContext.<anonymous> (file:///Users/jamal/git/KalamDB/link/sdks/typescript/client/tests/cell-value.test.mjs:329:55)
+    at Test.runInAsyncScope (node:async_hooks:214:14)
+    at Test.run (node:internal/test_runner/test:1103:25)
+    at Suite.processPendingSubtests (node:internal/test_runner/test:785:18)
+    at Test.postRun (node:internal/test_runner/test:1232:19)
+    at Test.run (node:internal/test_runner/test:1160:12)
+[FileRef] Failed to parse JSON: SyntaxError: Unexpected token 'e', "text" is not valid JSON
+    at JSON.parse (<anonymous>)
+    at FileRef.fromJson (file:///Users/jamal/git/KalamDB/link/sdks/typescript/client/dist/src/file_ref.js:16:58)
+    at FileRef.from (file:///Users/jamal/git/KalamDB/link/sdks/typescript/client/dist/src/file_ref.js:28:28)
+    at KalamCellValue.asFile (file:///Users/jamal/git/KalamDB/link/sdks/typescript/client/dist/src/cell_value.js:177:24)
+    at KalamCellValue.asFileUrl (file:///Users/jamal/git/KalamDB/link/sdks/typescript/client/dist/src/cell_value.js:180:26)
+    at TestContext.<anonymous> (file:///Users/jamal/git/KalamDB/link/sdks/typescript/client/tests/cell-value.test.mjs:355:46)
+    at Test.runInAsyncScope (node:async_hooks:214:14)
+    at Test.run (node:internal/test_runner/test:1103:25)
+    at Suite.processPendingSubtests (node:internal/test_runner/test:785:18)
+    at Test.postRun (node:internal/test_runner/test:1232:19)
+▶ KalamCellValue.from()
+  ✔ wraps null (0.669708ms)
+  ✔ wraps undefined as null (0.082041ms)
+  ✔ wraps string (0.065583ms)
+  ✔ wraps number (0.0665ms)
+  ✔ wraps boolean (0.426416ms)
+  ✔ wraps object (0.258208ms)
+  ✔ wraps array (0.093292ms)
+✔ KalamCellValue.from() (2.356459ms)
+▶ KalamCellValue.asString()
+  ✔ returns string as-is (0.119459ms)
+  ✔ converts number to string (0.059917ms)
+  ✔ converts boolean to string (0.078084ms)
+  ✔ handles Utf8 envelope (0.051042ms)
+  ✔ handles String envelope (0.038375ms)
+  ✔ returns null for SQL NULL (0.031916ms)
+✔ KalamCellValue.asString() (0.514083ms)
+▶ KalamCellValue.asInt()
+  ✔ returns integer (0.077958ms)
+  ✔ truncates float (0.04575ms)
+  ✔ parses string integer (0.05475ms)
+  ✔ converts boolean (0.03425ms)
+  ✔ returns null for non-numeric string (0.032416ms)
+  ✔ returns null for null (0.03075ms)
+✔ KalamCellValue.asInt() (0.374375ms)
+▶ KalamCellValue.asBigInt()
+  ✔ converts number (0.066167ms)
+  ✔ parses string bigint (0.032667ms)
+  ✔ returns null for non-numeric string (0.057334ms)
+✔ KalamCellValue.asBigInt() (0.200334ms)
+▶ KalamCellValue.asFloat()
+  ✔ returns float (0.098833ms)
+  ✔ converts integer to float (0.045875ms)
+  ✔ parses string float (0.064666ms)
+  ✔ converts boolean (0.027292ms)
+  ✔ returns null for NaN string (0.038ms)
+✔ KalamCellValue.asFloat() (0.349ms)
+▶ KalamCellValue.asBool()
+  ✔ returns boolean (0.088375ms)
+  ✔ converts number (0.030166ms)
+  ✔ handles string true/false (0.04ms)
+  ✔ returns null for unrecognized string (0.029375ms)
+✔ KalamCellValue.asBool() (0.317916ms)
+▶ KalamCellValue.asDate()
+  ✔ converts unix millis (0.174167ms)
+  ✔ parses ISO 8601 string (0.167458ms)
+  ✔ parses numeric timestamp string (0.204709ms)
+  ✔ normalizes microsecond timestamp strings (0.97375ms)
+  ✔ returns null for bad date (0.10075ms)
+  ✔ returns null for null (0.048458ms)
+✔ KalamCellValue.asDate() (1.949417ms)
+▶ KalamCellValue.asObject()
+  ✔ returns object (0.455ms)
+  ✔ returns null for non-object (0.034375ms)
+  ✔ returns null for array (not considered object) (0.034ms)
+✔ KalamCellValue.asObject() (0.572917ms)
+▶ KalamCellValue.asArray()
+  ✔ returns array (0.055125ms)
+  ✔ returns null for non-array (0.490542ms)
+✔ KalamCellValue.asArray() (0.578875ms)
+▶ KalamCellValue.toString()
+  ✔ NULL for null (0.076583ms)
+  ✔ string as-is (0.038584ms)
+  ✔ number stringified (0.026875ms)
+  ✔ object as JSON (0.121ms)
+✔ KalamCellValue.toString() (0.335167ms)
+▶ wrapRowMap()
+  ✔ wraps each value in KalamCellValue (0.1325ms)
+  ✔ handles null values (0.04025ms)
+✔ wrapRowMap() (0.227917ms)
+▶ KalamRow.cell()
+  ✔ returns KalamCellValue for each column (0.108583ms)
+  ✔ handles null values (0.046709ms)
+✔ KalamRow.cell() (0.266042ms)
+▶ KalamRow.typedData
+  ✔ returns all cells as KalamCellValue (RowData) (0.088083ms)
+  ✔ caches the result on repeated access (0.03675ms)
+✔ KalamRow.typedData (0.164541ms)
+▶ KalamRow — unified query & subscribe access pattern
+  ✔ cell() works the same whether data is raw or pre-wrapped (0.044583ms)
+✔ KalamRow — unified query & subscribe access pattern (0.065958ms)
+▶ KalamCellValue.asFile()
+  ✔ parses valid FILE column JSON (0.08775ms)
+  ✔ returns null for non-file values (0.538167ms)
+  ✔ returns null for null (0.043583ms)
+✔ KalamCellValue.asFile() (0.716ms)
+▶ KalamCellValue.asFileUrl()
+  ✔ builds download URL from FILE reference (0.102916ms)
+  ✔ returns null for non-file values (0.228042ms)
+✔ KalamCellValue.asFileUrl() (0.368834ms)
+▶ edge cases
+  ✔ KalamCellValue wraps nested objects correctly (0.057667ms)
+✔ edge cases (0.086667ms)
+▶ SeqId
+  ✔ creates from number (0.149ms)
+  ✔ creates from bigint (0.037875ms)
+  ✔ creates from string (0.034666ms)
+  ✔ zero() returns value 0 (0.190917ms)
+  ✔ extracts Snowflake fields (0.339917ms)
+  ✔ toDate returns a Date (0.061834ms)
+  ✔ equals compares values (0.045083ms)
+  ✔ compareTo orders correctly (0.041375ms)
+  ✔ toJSON returns number (0.041875ms)
+  ✔ throws on invalid input (0.190834ms)
+✔ SeqId (1.272625ms)
+▶ KalamCellValue.asSeqId()
+  ✔ converts number to SeqId (0.073708ms)
+  ✔ converts string to SeqId (0.031708ms)
+  ✔ returns null for non-numeric string (0.039375ms)
+  ✔ returns null for null (0.025458ms)
+✔ KalamCellValue.asSeqId() (0.219ms)
+normalize.test.mjs passed
+✔ tests/normalize.test.mjs (41.971709ms)
+✔ README live resume example passes options and exposes typed checkpoints (2.162ms)
+✔ README executeAsUser example wraps SQL for tenant-safe writes (0.255375ms)
+✔ README queryWithFiles example posts multipart data with auth header (12.5105ms)
+✔ queryRows wraps named_rows into KalamRow with typed cell access (2.193834ms)
+✔ subscribeRows wraps change rows and oldValues as KalamRow instances (0.859167ms)
+✔ liveTableRows delegates to live using SELECT * sugar (0.830583ms)
+✔ live passes key columns through to Rust materialization (0.233125ms)
+✔ login refresh and reconnect helpers delegate to wasm client (0.353625ms)
+✔ multiple subscriptions on one client share one websocket connection (12.464292ms)
+✔ failed subscriptions do not leak local subscription state (10.115958ms)
+✔ getSubscriptions trusts wasm empty snapshots over stale local metadata (10.567625ms)
+✔ disconnect clears local subscription metadata even when wasm disconnect fails (11.746375ms)
+✔ subscribeWithSql normalizes websocket rows into RowData cells (11.832917ms)
+✔ live delegates materialized rows to the Rust/WASM layer (12.358958ms)
+✔ parallel subscribe storms connect once and keep sibling subscriptions isolated (11.925875ms)
+ℹ tests 93
+ℹ suites 19
+ℹ pass 93
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 144.7755

@@ -4,8 +4,8 @@
 //! These tests ensure KalamDB handles multiple simultaneous operations safely.
 
 use super::test_support::{consolidated_helpers, TestServer};
-use kalam_link::models::ResponseStatus;
-use kalam_link::parse_i64;
+use kalam_client::models::ResponseStatus;
+use kalam_client::parse_i64;
 use kalamdb_commons::Role;
 
 /// Verify concurrent inserts to same user table work correctly

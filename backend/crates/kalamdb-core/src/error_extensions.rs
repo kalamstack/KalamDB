@@ -23,9 +23,6 @@
 //! validate_input()
 //!     .into_invalid_operation("Input validation failed")?;
 //!
-//! // Not found errors
-//! find_resource()
-//!     .into_not_found("Resource not found")?;
 //! ```
 
 use crate::error::KalamDbError;
@@ -98,32 +95,6 @@ pub trait KalamDbResultExt<T> {
     /// ```
     fn into_invalid_operation(self, context: &str) -> Result<T, KalamDbError>;
 
-    /// Convert errors into KalamDbError::NotFound.
-    ///
-    /// # Example
-    /// ```rust,ignore
-    /// find_table(&table_id)
-    ///     .into_not_found("Table not found")?;
-    /// ```
-    fn into_not_found(self, context: &str) -> Result<T, KalamDbError>;
-
-    /// Convert errors into KalamDbError::AlreadyExists.
-    ///
-    /// # Example
-    /// ```rust,ignore
-    /// check_table_exists(&table_name)
-    ///     .into_already_exists("Table already exists")?;
-    /// ```
-    fn into_already_exists(self, context: &str) -> Result<T, KalamDbError>;
-
-    /// Convert errors into KalamDbError::ConfigError.
-    ///
-    /// # Example
-    /// ```rust,ignore
-    /// parse_config_value()
-    ///     .into_config_error("Invalid configuration")?;
-    /// ```
-    fn into_config_error(self, context: &str) -> Result<T, KalamDbError>;
 }
 
 impl<T, E: std::fmt::Display> KalamDbResultExt<T> for Result<T, E> {
@@ -162,26 +133,12 @@ impl<T, E: std::fmt::Display> KalamDbResultExt<T> for Result<T, E> {
         self.map_err(|e| KalamDbError::InvalidOperation(format!("{}: {}", context, e)))
     }
 
-    #[inline]
-    fn into_not_found(self, context: &str) -> Result<T, KalamDbError> {
-        self.map_err(|e| KalamDbError::NotFound(format!("{}: {}", context, e)))
-    }
-
-    #[inline]
-    fn into_already_exists(self, context: &str) -> Result<T, KalamDbError> {
-        self.map_err(|e| KalamDbError::AlreadyExists(format!("{}: {}", context, e)))
-    }
-
-    #[inline]
-    fn into_config_error(self, context: &str) -> Result<T, KalamDbError> {
-        self.map_err(|e| KalamDbError::ConfigError(format!("{}: {}", context, e)))
-    }
 }
 
 /// Specialized extension methods for commonly-used types.
 ///
-/// These provide even more ergonomic conversions for specific error types
-/// like serde_json and tokio JoinError.
+/// These provide more ergonomic conversions for specific error types
+/// like serde_json.
 pub trait SerdeJsonResultExt<T> {
     /// Convert serde_json errors into KalamDbError::SerializationError.
     ///
@@ -197,36 +154,6 @@ impl<T> SerdeJsonResultExt<T> for Result<T, serde_json::Error> {
     #[inline]
     fn into_serde_error(self, context: &str) -> Result<T, KalamDbError> {
         self.map_err(|e| KalamDbError::SerializationError(format!("{}: {}", context, e)))
-    }
-}
-
-/// Extension for tokio JoinError (for spawn_blocking, spawn, etc.)
-pub trait TokioJoinResultExt<T> {
-    /// Convert tokio JoinError into KalamDbError.
-    ///
-    /// # Example
-    /// ```rust,ignore
-    /// tokio::task::spawn_blocking(move || {
-    ///     // heavy computation
-    /// })
-    /// .await
-    /// .into_join_error("Background task failed")?;
-    /// ```
-    fn into_join_error(self, context: &str) -> Result<T, KalamDbError>;
-}
-
-impl<T> TokioJoinResultExt<T> for Result<T, tokio::task::JoinError> {
-    #[inline]
-    fn into_join_error(self, context: &str) -> Result<T, KalamDbError> {
-        self.map_err(|e| {
-            if e.is_cancelled() {
-                KalamDbError::Other(format!("{}: task was cancelled", context))
-            } else if e.is_panic() {
-                KalamDbError::Other(format!("{}: task panicked", context))
-            } else {
-                KalamDbError::Other(format!("{}: {}", context, e))
-            }
-        })
     }
 }
 
@@ -312,48 +239,6 @@ mod tests {
                 assert!(msg.contains("operation not allowed"));
             },
             _ => panic!("Expected KalamDbError::InvalidOperation"),
-        }
-    }
-
-    #[test]
-    fn test_into_not_found() {
-        let result: Result<(), &str> = Err("resource missing");
-        let err = result.into_not_found("Resource lookup").unwrap_err();
-
-        match err {
-            KalamDbError::NotFound(msg) => {
-                assert!(msg.contains("Resource lookup"));
-                assert!(msg.contains("resource missing"));
-            },
-            _ => panic!("Expected KalamDbError::NotFound"),
-        }
-    }
-
-    #[test]
-    fn test_into_already_exists() {
-        let result: Result<(), &str> = Err("duplicate entry");
-        let err = result.into_already_exists("Create table").unwrap_err();
-
-        match err {
-            KalamDbError::AlreadyExists(msg) => {
-                assert!(msg.contains("Create table"));
-                assert!(msg.contains("duplicate entry"));
-            },
-            _ => panic!("Expected KalamDbError::AlreadyExists"),
-        }
-    }
-
-    #[test]
-    fn test_into_config_error() {
-        let result: Result<(), &str> = Err("invalid config value");
-        let err = result.into_config_error("Config parsing").unwrap_err();
-
-        match err {
-            KalamDbError::ConfigError(msg) => {
-                assert!(msg.contains("Config parsing"));
-                assert!(msg.contains("invalid config value"));
-            },
-            _ => panic!("Expected KalamDbError::ConfigError"),
         }
     }
 

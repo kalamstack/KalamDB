@@ -6,7 +6,7 @@
 use super::test_support::auth_helper::create_user_auth_header_default;
 use super::test_support::consolidated_helpers::{unique_namespace, unique_table};
 use futures_util::future::try_join_all;
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use serial_test::serial;
 
 async fn count_rows(

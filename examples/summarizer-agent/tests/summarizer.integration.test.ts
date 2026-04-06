@@ -3,7 +3,7 @@ import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { Auth, createClient } from 'kalam-link';
+import { Auth, createClient } from '@kalamdb/client';
 import { buildSummary, startSummarizerAgent } from '../src/agent.js';
 
 const exampleRoot = path.resolve(process.cwd());

@@ -216,6 +216,57 @@ Future<void> waitForAsyncCondition(
   }
 }
 
+String _sqlStringLiteral(String value) {
+  return "'${value.replaceAll("'", "''")}'";
+}
+
+/// Count active rows in `system.live` for a set of subscription IDs.
+Future<int> countLiveQueriesBySubscriptionIds(
+  KalamClient client,
+  Iterable<String> subscriptionIds,
+) async {
+  final ids = subscriptionIds.toSet().toList(growable: false);
+  if (ids.isEmpty) {
+    return 0;
+  }
+
+  final inList = ids.map(_sqlStringLiteral).join(', ');
+  final resp = await client.query(
+    'SELECT COUNT(*) AS live_query_count '
+    'FROM system.live '
+    'WHERE subscription_id IN ($inList)',
+  );
+
+  if (!resp.success) {
+    throw StateError(
+      'Failed to query system.live: ${resp.error}',
+    );
+  }
+
+  if (resp.rows.isEmpty) {
+    throw StateError('system.live count query returned no rows');
+  }
+
+  return resp.rows.first['live_query_count']?.asInt() ?? 0;
+}
+
+/// Wait until `system.live` reaches the expected count.
+Future<void> waitForLiveQueryCount(
+  KalamClient client,
+  Iterable<String> subscriptionIds, {
+  required int expectedCount,
+  Duration timeout = const Duration(seconds: 15),
+  Duration poll = const Duration(milliseconds: 200),
+}) async {
+  await waitForAsyncCondition(
+    () async =>
+        await countLiveQueriesBySubscriptionIds(client, subscriptionIds) ==
+        expectedCount,
+    timeout: timeout,
+    poll: poll,
+  );
+}
+
 /// Assert that there are no repeated `_seq` values in [events].
 void expectNoDuplicateSeqs(
   Iterable<ChangeEvent> events, {

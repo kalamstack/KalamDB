@@ -33,7 +33,6 @@ use kalamdb_raft::{
 };
 use kalamdb_sharding::ShardRouter;
 use kalamdb_system::providers::jobs::models::Job;
-use kalamdb_system::providers::live_queries::models::{LiveQuery, LiveQueryStatus};
 use kalamdb_system::{JobStatus, JobType};
 use openraft::{Entry, EntryPayload, LogId, RaftSnapshotBuilder, RaftStorage};
 
@@ -854,37 +853,6 @@ async fn test_user_data_shard_operations() {
         };
         let result = leader.manager.propose_user_data(shard, cmd).await;
         assert!(result.is_ok(), "Delete shard {} should succeed", shard);
-
-        // Test CreateLiveQuery
-        let connection_id = kalamdb_commons::models::ConnectionId::new("conn_test");
-        let live_id = kalamdb_commons::models::LiveQueryId::new(
-            user_id.clone(),
-            connection_id.clone(),
-            &format!("sub_{}", shard),
-        );
-        let now = Utc::now().timestamp_millis();
-        let live_query = LiveQuery {
-            live_id: live_id.clone(),
-            connection_id: connection_id.as_str().to_string(),
-            subscription_id: format!("sub_{}", shard),
-            namespace_id: table_id.namespace_id().clone(),
-            table_name: table_id.table_name().clone(),
-            user_id: user_id.clone(),
-            query: "SELECT * FROM test.users".to_string(),
-            options: None,
-            status: LiveQueryStatus::Active,
-            created_at: now,
-            last_update: now,
-            last_ping_at: now,
-            changes: 0,
-            node_id: NodeId::from(1u64),
-        };
-        let cmd = UserDataCommand::CreateLiveQuery {
-            required_meta_index: 0,
-            live_query,
-        };
-        let result = leader.manager.propose_user_data(shard, cmd).await;
-        assert!(result.is_ok(), "CreateLiveQuery shard {} should succeed", shard);
 
         println!("  ✓ UserDataShard({}) operations verified", shard);
     }

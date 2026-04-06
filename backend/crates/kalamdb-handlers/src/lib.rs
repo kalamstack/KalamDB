@@ -12,18 +12,18 @@
 
 pub mod subscription;
 
-pub use kalamdb_handlers_support::{audit, guards, table_creation};
 pub use kalamdb_handlers_admin::{backup, cluster, compact, export, flush, jobs, system};
 pub use kalamdb_handlers_ddl::{namespace, storage, table, view};
 pub use kalamdb_handlers_stream::topics;
+pub use kalamdb_handlers_support::{audit, guards, table_creation};
 pub use kalamdb_handlers_user::user;
 
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::sql::executor::handler_registry::HandlerRegistry;
 use kalamdb_handlers_admin::register_admin_handlers;
 use kalamdb_handlers_ddl::register_ddl_handlers;
-use kalamdb_handlers_support::register_typed_handler;
 use kalamdb_handlers_stream::register_stream_handlers;
+use kalamdb_handlers_support::register_typed_handler;
 use kalamdb_handlers_user::register_user_handlers;
 use std::sync::Arc;
 

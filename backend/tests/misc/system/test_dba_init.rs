@@ -1,7 +1,7 @@
 //! Integration tests for bootstrap-managed dba.* tables.
 
 use super::test_support::TestServer;
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use kalamdb_commons::models::UserId;
 use kalamdb_dba::{
     models::{NotificationRow, StatsRow},

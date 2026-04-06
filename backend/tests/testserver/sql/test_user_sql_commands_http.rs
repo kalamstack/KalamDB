@@ -1,6 +1,6 @@
 //! SQL-based user management commands over the real HTTP SQL API.
 
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use kalamdb_commons::UserName;
 
 // TODO: Cannot migrate to get_global_server() pattern yet.

@@ -6,7 +6,7 @@ use kalamdb_commons::schemas::SchemaField;
 pub use kalamdb_commons::websocket::{ChangeNotification, ChangeType};
 
 /// Result of registering a live query subscription with initial data
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct SubscriptionResult {
     /// The generated LiveId for the subscription
     pub live_id: LiveQueryId,
@@ -17,19 +17,4 @@ pub struct SubscriptionResult {
     /// Schema describing the columns in the subscription result
     /// Contains column name, data type, and index for each field
     pub schema: Vec<SchemaField>,
-}
-
-/// Registry statistics for both WebSocket connections and topic consumers
-#[derive(Debug, Clone)]
-pub struct RegistryStats {
-    pub total_connections: usize,
-    pub total_subscriptions: usize,
-    pub node_id: String,
-}
-
-/// Registered subscription info (used in subscription service)
-#[derive(Debug)]
-pub struct RegisteredSubscription {
-    pub live_id: LiveQueryId,
-    pub subscription_id: String,
 }

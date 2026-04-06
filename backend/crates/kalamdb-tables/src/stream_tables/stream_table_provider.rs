@@ -15,7 +15,6 @@ use crate::error::KalamDbError;
 use crate::error_extensions::KalamDbResultExt;
 use crate::stream_tables::{StreamTableRow, StreamTableStore};
 use crate::utils::base::{extract_seq_bounds_from_filter, BaseTableProvider, TableProviderCore};
-use crate::utils::row_utils::extract_full_user_context;
 use crate::utils::row_utils::extract_user_context;
 use async_trait::async_trait;
 use datafusion::arrow::datatypes::SchemaRef;
@@ -31,7 +30,6 @@ use datafusion::scalar::ScalarValue;
 use kalamdb_commons::constants::SystemColumnNames;
 use kalamdb_commons::ids::{SeqId, StreamTableRowId};
 use kalamdb_commons::models::UserId;
-use kalamdb_commons::NotLeaderError;
 use kalamdb_session_datafusion::{check_user_table_write_access, session_error_to_datafusion};
 use std::any::Any;
 use std::collections::HashSet;
@@ -466,21 +464,6 @@ impl TableProvider for StreamTableProvider {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
-        // In cluster mode, route client reads to the Meta leader where all DML data lives
-        let (_user_id, _role, read_context) = extract_full_user_context(state).map_err(|e| {
-            DataFusionError::Execution(format!("Failed to extract user context: {}", e))
-        })?;
-
-        if read_context.requires_leader()
-            && self.core.services.cluster_coordinator.is_cluster_mode().await
-        {
-            let is_leader = self.core.services.cluster_coordinator.is_meta_leader().await;
-            if !is_leader {
-                let leader_addr = self.core.services.cluster_coordinator.meta_leader_addr().await;
-                return Err(DataFusionError::External(Box::new(NotLeaderError::new(leader_addr))));
-            }
-        }
-
         self.base_scan(state, projection, filters, limit).await
     }
 

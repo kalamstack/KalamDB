@@ -18,12 +18,9 @@ async fn e2e_ddl_create_shared_table() {
         OPTIONS (namespace '{ns}', \"table\" '{table}', table_type 'shared');"
     );
     pg.batch_execute(&sql).await.expect("CREATE FOREIGN TABLE");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    env.wait_for_kalamdb_table_exists(ns, &table).await;
 
-    assert!(
-        env.kalamdb_table_exists(ns, &table).await,
-        "KalamDB table {ns}.{table} should exist after CREATE FOREIGN TABLE"
-    );
+    assert!(env.kalamdb_table_exists(ns, &table).await, "KalamDB table {ns}.{table} should exist after CREATE FOREIGN TABLE");
 
     let cols = env.kalamdb_columns(ns, &table).await;
     eprintln!("[DDL] Created {ns}.{table}, columns: {cols:?}");
@@ -57,12 +54,9 @@ async fn e2e_ddl_create_user_table() {
         OPTIONS (namespace '{ns}', \"table\" '{table}', table_type 'user');"
     );
     pg.batch_execute(&sql).await.expect("CREATE FOREIGN TABLE (user)");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    env.wait_for_kalamdb_table_exists(ns, &table).await;
 
-    assert!(
-        env.kalamdb_table_exists(ns, &table).await,
-        "KalamDB user table {ns}.{table} should exist"
-    );
+    assert!(env.kalamdb_table_exists(ns, &table).await, "KalamDB user table {ns}.{table} should exist");
 
     let cols = env.kalamdb_columns(ns, &table).await;
     eprintln!("[DDL] Created user table {ns}.{table}, columns: {cols:?}");
@@ -92,17 +86,21 @@ async fn e2e_ddl_alter_add_column() {
         OPTIONS (namespace '{ns}', \"table\" '{table}', table_type 'shared');"
     );
     pg.batch_execute(&sql).await.expect("CREATE FOREIGN TABLE");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-    let cols_before = env.kalamdb_columns(ns, &table).await;
+    let cols_before = env
+        .wait_for_kalamdb_columns(ns, &table, "base columns to include name", |columns| {
+            columns.iter().any(|column| column == "name")
+        })
+        .await;
     eprintln!("[DDL] Before ALTER: columns = {cols_before:?}");
     assert!(cols_before.contains(&"name".to_string()));
 
     let alter_sql = format!("ALTER FOREIGN TABLE {ns}.{table} ADD COLUMN score INTEGER;");
     pg.batch_execute(&alter_sql).await.expect("ALTER ADD COLUMN");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-    let cols_after = env.kalamdb_columns(ns, &table).await;
+    let cols_after = env
+        .wait_for_kalamdb_columns(ns, &table, "added columns to include score", |columns| {
+            columns.iter().any(|column| column == "score")
+        })
+        .await;
     eprintln!("[DDL] After ALTER ADD: columns = {cols_after:?}");
     assert!(
         cols_after.contains(&"score".to_string()),
@@ -132,17 +130,24 @@ async fn e2e_ddl_alter_drop_column() {
         OPTIONS (namespace '{ns}', \"table\" '{table}', table_type 'shared');"
     );
     pg.batch_execute(&sql).await.expect("CREATE FOREIGN TABLE");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-    let cols_before = env.kalamdb_columns(ns, &table).await;
+    let cols_before = env
+        .wait_for_kalamdb_columns(ns, &table, "base columns to include description", |columns| {
+            columns.iter().any(|column| column == "description")
+        })
+        .await;
     eprintln!("[DDL] Before DROP COLUMN: columns = {cols_before:?}");
     assert!(cols_before.contains(&"description".to_string()));
 
     let alter_sql = format!("ALTER FOREIGN TABLE {ns}.{table} DROP COLUMN description;");
     pg.batch_execute(&alter_sql).await.expect("ALTER DROP COLUMN");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-    let cols_after = env.kalamdb_columns(ns, &table).await;
+    let cols_after = env
+        .wait_for_kalamdb_columns(
+            ns,
+            &table,
+            "dropped columns to exclude description",
+            |columns| !columns.iter().any(|column| column == "description"),
+        )
+        .await;
     eprintln!("[DDL] After DROP COLUMN: columns = {cols_after:?}");
     assert!(
         !cols_after.contains(&"description".to_string()),
@@ -171,12 +176,12 @@ async fn e2e_ddl_drop_table() {
         OPTIONS (namespace '{ns}', \"table\" '{table}', table_type 'shared');"
     );
     pg.batch_execute(&sql).await.expect("CREATE FOREIGN TABLE");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    env.wait_for_kalamdb_table_exists(ns, &table).await;
     assert!(env.kalamdb_table_exists(ns, &table).await, "table should exist before DROP");
 
     let drop_sql = format!("DROP FOREIGN TABLE {ns}.{table};");
     pg.batch_execute(&drop_sql).await.expect("DROP FOREIGN TABLE");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    env.wait_for_kalamdb_table_absent(ns, &table).await;
 
     assert!(
         !env.kalamdb_table_exists(ns, &table).await,
@@ -213,7 +218,7 @@ async fn e2e_ddl_full_lifecycle() {
         OPTIONS (namespace '{ns}', \"table\" '{table}', table_type 'shared');"
     );
     pg.batch_execute(&create_sql).await.expect("CREATE");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    env.wait_for_kalamdb_table_exists(ns, &table).await;
     assert!(env.kalamdb_table_exists(ns, &table).await);
 
     pg.batch_execute(&format!(
@@ -233,15 +238,17 @@ async fn e2e_ddl_full_lifecycle() {
     pg.batch_execute(&format!("ALTER FOREIGN TABLE {ns}.{table} ADD COLUMN email TEXT;"))
         .await
         .expect("ALTER ADD");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-    let cols = env.kalamdb_columns(ns, &table).await;
+    let cols = env
+        .wait_for_kalamdb_columns(ns, &table, "added columns to include email", |columns| {
+            columns.iter().any(|column| column == "email")
+        })
+        .await;
     assert!(cols.contains(&"email".to_string()), "should have email column");
 
     pg.batch_execute(&format!("DROP FOREIGN TABLE {ns}.{table};"))
         .await
         .expect("DROP");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    env.wait_for_kalamdb_table_absent(ns, &table).await;
     assert!(!env.kalamdb_table_exists(ns, &table).await);
 }
 
@@ -265,14 +272,17 @@ async fn e2e_ddl_schema_qualified_create() {
         ) SERVER kalam_server;"
     );
     pg.batch_execute(&sql).await.expect("CREATE FOREIGN TABLE (schema-qualified)");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    env.wait_for_kalamdb_table_exists(&ns, &table).await;
 
-    assert!(
-        env.kalamdb_table_exists(&ns, &table).await,
-        "KalamDB table {ns}.{table} should exist after schema-qualified CREATE"
-    );
+    assert!(env.kalamdb_table_exists(&ns, &table).await, "KalamDB table {ns}.{table} should exist after schema-qualified CREATE");
 
-    let cols = env.kalamdb_columns(&ns, &table).await;
+    let cols = env
+        .wait_for_kalamdb_columns(&ns, &table, "schema-qualified columns to exist", |columns| {
+            columns.iter().any(|column| column == "id")
+                && columns.iter().any(|column| column == "name")
+                && columns.iter().any(|column| column == "age")
+        })
+        .await;
     eprintln!("[DDL] Schema-qualified create {ns}.{table}, columns: {cols:?}");
     assert!(cols.contains(&"id".to_string()));
     assert!(cols.contains(&"name".to_string()));
@@ -281,9 +291,11 @@ async fn e2e_ddl_schema_qualified_create() {
     pg.batch_execute(&format!("ALTER FOREIGN TABLE {ns}.{table} ADD COLUMN email TEXT;"))
         .await
         .expect("ALTER ADD COLUMN (schema-qualified)");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-    let cols_after = env.kalamdb_columns(&ns, &table).await;
+    let cols_after = env
+        .wait_for_kalamdb_columns(&ns, &table, "schema-qualified alter to include email", |columns| {
+            columns.iter().any(|column| column == "email")
+        })
+        .await;
     assert!(
         cols_after.contains(&"email".to_string()),
         "should have email column after ALTER"
@@ -292,7 +304,7 @@ async fn e2e_ddl_schema_qualified_create() {
     pg.batch_execute(&format!("DROP FOREIGN TABLE {ns}.{table};"))
         .await
         .expect("DROP FOREIGN TABLE (schema-qualified)");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    env.wait_for_kalamdb_table_absent(&ns, &table).await;
     assert!(
         !env.kalamdb_table_exists(&ns, &table).await,
         "table should not exist after DROP"

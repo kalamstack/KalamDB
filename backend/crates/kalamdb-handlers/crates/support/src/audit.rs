@@ -195,6 +195,7 @@ mod tests {
     use super::*;
     use datafusion::prelude::SessionContext;
     use kalamdb_commons::{Role, UserId};
+    use kalamdb_session::AuthSession;
     use std::sync::Arc;
 
     fn test_session() -> Arc<SessionContext> {
@@ -203,11 +204,13 @@ mod tests {
 
     #[test]
     fn test_create_audit_entry() {
-        let ctx = ExecutionContext::with_audit_info(
-            UserId::from("alice"),
-            Role::User,
-            Some("req-123".to_string()),
-            Some("192.168.1.1".to_string()),
+        let ctx = ExecutionContext::from_session(
+            AuthSession::with_audit_info(
+                UserId::from("alice"),
+                Role::User,
+                Some("req-123".to_string()),
+                Some("192.168.1.1".to_string()),
+            ),
             test_session(),
         );
 

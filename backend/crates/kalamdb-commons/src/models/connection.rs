@@ -14,7 +14,9 @@ pub struct ConnectionInfo {
 impl ConnectionInfo {
     /// Create a new ConnectionInfo from a remote address string.
     pub fn new(remote_addr: Option<String>) -> Self {
-        Self { remote_addr: remote_addr.map(Arc::<str>::from) }
+        Self {
+            remote_addr: remote_addr.map(Arc::<str>::from),
+        }
     }
 
     /// Check if the connection is from localhost.

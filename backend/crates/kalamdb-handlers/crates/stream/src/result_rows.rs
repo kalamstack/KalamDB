@@ -34,7 +34,9 @@ pub fn ack_result(
             Arc::new(Int64Array::from(vec![upto_offset as i64])) as ArrayRef,
         ],
     )
-    .map_err(|e| KalamDbError::SerializationError(format!("Failed to create RecordBatch: {}", e)))?;
+    .map_err(|e| {
+        KalamDbError::SerializationError(format!("Failed to create RecordBatch: {}", e))
+    })?;
 
     Ok(ExecutionResult::Rows {
         batches: vec![batch],

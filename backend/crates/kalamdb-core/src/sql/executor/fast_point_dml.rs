@@ -1,3 +1,4 @@
+use crate::app_context::AppContext;
 use crate::error::KalamDbError;
 use crate::schema_registry::SchemaRegistry;
 use crate::sql::{ExecutionContext, ExecutionResult};
@@ -9,7 +10,6 @@ use kalamdb_session::{
     check_shared_table_write_access_level, check_user_table_write_access_level,
     shared_table_access_level,
 };
-use kalamdb_tables::KalamTableProvider;
 use sqlparser::ast::{
     Assignment, AssignmentTarget, BinaryOperator, Expr, ObjectNamePart, Statement,
 };
@@ -24,6 +24,7 @@ fn log_fast_path_skip(op: &str, reason: &str) {
 
 pub async fn try_fast_update(
     statement: &Statement,
+    app_context: &AppContext,
     exec_ctx: &ExecutionContext,
     schema_registry: &Arc<SchemaRegistry>,
     prepared_table_id: Option<&TableId>,
@@ -98,31 +99,43 @@ pub async fn try_fast_update(
         },
     };
 
-    let provider: Arc<dyn KalamTableProvider> = match schema_registry.get_kalam_provider(&table_id)
-    {
-        Some(provider) => provider,
-        None => {
-            log_fast_path_skip("update", "provider_not_cached");
-            return Ok(None);
-        },
-    };
-
     tracing::debug!(
         table_id = %table_id,
         pk = %pk_value,
         update_columns = updates.values.len(),
+        table_type = %table_type,
         "sql.fast_update"
     );
 
-    let updated = provider.update_row_by_pk(exec_ctx.user_id(), &pk_value, updates).await?;
+    tracing::debug!(table_id = %table_id, pk = %pk_value, table_type = %table_type, "sql.fast_update_applier");
+
+    let rows_affected = match table_type {
+        TableType::User | TableType::Stream => app_context
+            .applier()
+            .update_user_data(
+                table_id.clone(),
+                exec_ctx.user_id().clone(),
+                vec![updates],
+                Some(pk_value.clone()),
+            )
+            .await?
+            .rows_affected(),
+        TableType::Shared => app_context
+            .applier()
+            .update_shared_data(table_id.clone(), vec![updates], Some(pk_value.clone()))
+            .await?
+            .rows_affected(),
+        TableType::System => return Ok(None),
+    };
 
     Ok(Some(ExecutionResult::Updated {
-        rows_affected: usize::from(updated),
+        rows_affected,
     }))
 }
 
 pub async fn try_fast_delete(
     statement: &Statement,
+    app_context: &AppContext,
     exec_ctx: &ExecutionContext,
     schema_registry: &Arc<SchemaRegistry>,
     prepared_table_id: Option<&TableId>,
@@ -165,7 +178,7 @@ pub async fn try_fast_delete(
     };
 
     let table_type = prepared_table_type.unwrap_or(table_def.table_type);
-    if !matches!(table_type, TableType::User | TableType::Shared)
+    if !matches!(table_type, TableType::User | TableType::Shared | TableType::Stream)
         || table_id.namespace_id().is_system_namespace()
     {
         log_fast_path_skip("delete", "unsupported_table_type");
@@ -193,21 +206,30 @@ pub async fn try_fast_delete(
         },
     };
 
-    let provider: Arc<dyn KalamTableProvider> = match schema_registry.get_kalam_provider(&table_id)
-    {
-        Some(provider) => provider,
-        None => {
-            log_fast_path_skip("delete", "provider_not_cached");
-            return Ok(None);
-        },
+    tracing::debug!(table_id = %table_id, pk = %pk_value, table_type = %table_type, "sql.fast_delete");
+
+    tracing::debug!(table_id = %table_id, pk = %pk_value, table_type = %table_type, "sql.fast_delete_applier");
+
+    let rows_affected = match table_type {
+        TableType::User | TableType::Stream => app_context
+            .applier()
+            .delete_user_data(
+                table_id.clone(),
+                exec_ctx.user_id().clone(),
+                Some(vec![pk_value.clone()]),
+            )
+            .await?
+            .rows_affected(),
+        TableType::Shared => app_context
+            .applier()
+            .delete_shared_data(table_id.clone(), Some(vec![pk_value.clone()]))
+            .await?
+            .rows_affected(),
+        TableType::System => return Ok(None),
     };
 
-    tracing::debug!(table_id = %table_id, pk = %pk_value, "sql.fast_delete");
-
-    let deleted = provider.delete_row_by_pk(exec_ctx.user_id(), &pk_value).await?;
-
     Ok(Some(ExecutionResult::Deleted {
-        rows_affected: usize::from(deleted),
+        rows_affected,
     }))
 }
 

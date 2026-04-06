@@ -1,5 +1,5 @@
 use super::test_support::{consolidated_helpers, TestServer};
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use kalamdb_api::limiter::RateLimiter;
 use kalamdb_api::ws::events::cleanup::cleanup_connection;
 use kalamdb_commons::models::{ConnectionId, ConnectionInfo, Role, UserId};
@@ -7,10 +7,10 @@ use kalamdb_commons::websocket::{SubscriptionOptions, SubscriptionRequest};
 use std::sync::Arc;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_live_queries_metadata() {
+async fn test_system_live_metadata() {
     let server = TestServer::new_shared().await;
     let manager = server.app_context.live_query_manager();
-    let registry = manager.registry();
+    let registry = server.app_context.connection_registry();
     let ns = consolidated_helpers::unique_namespace("live_queries_meta");
 
     // 1. Register Connection
@@ -24,7 +24,6 @@ async fn test_live_queries_metadata() {
 
     // Authenticate the connection
     connection_state.mark_authenticated(user_id.clone(), Role::User);
-    registry.on_authenticated(&conn_id, user_id.clone());
 
     let create_ns = format!("CREATE NAMESPACE IF NOT EXISTS {}", ns);
     let ns_resp = server.execute_sql_as_user(&create_ns, "root").await;
@@ -51,7 +50,7 @@ async fn test_live_queries_metadata() {
     let subscription1 = SubscriptionRequest {
         id: "sub_meta_test".to_string(),
         sql: format!("SELECT * FROM {}.events", ns),
-        options: SubscriptionOptions::default(),
+        options: Some(SubscriptionOptions::default()),
     };
 
     println!("Registering subscription...");
@@ -62,15 +61,15 @@ async fn test_live_queries_metadata() {
     let live_id = result.live_id;
     println!("Subscription registered: {}", live_id);
 
-    // 3. Query system.live_queries via SQL
-    let sql = "SELECT * FROM system.live_queries WHERE subscription_id = 'sub_meta_test'";
+    // 3. Query system.live via SQL
+    let sql = "SELECT * FROM system.live WHERE subscription_id = 'sub_meta_test'";
     println!("Executing SQL...");
     let response = server.execute_sql(sql).await;
     println!("SQL executed");
 
     assert_eq!(response.status, ResponseStatus::Success, "SQL failed: {:?}", response.error);
     let rows = response.results[0].rows.as_ref().expect("Expected rows");
-    assert_eq!(rows.len(), 1, "Expected 1 row in system.live_queries");
+    assert_eq!(rows.len(), 1, "Expected 1 row in system.live");
 
     // 4. Unsubscribe
     let subscription_id = live_id.subscription_id().to_string();
@@ -88,14 +87,14 @@ async fn test_live_queries_metadata() {
         response_after.error
     );
     let rows_after = response_after.results[0].rows.as_ref().expect("Expected rows");
-    assert_eq!(rows_after.len(), 0, "Expected 0 rows in system.live_queries after unsubscribe");
+    assert_eq!(rows_after.len(), 0, "Expected 0 rows in system.live after unsubscribe");
 
     // 6. Test connection close cleanup
     // Re-subscribe
     let subscription2 = SubscriptionRequest {
         id: "sub_meta_test2".to_string(),
         sql: format!("SELECT * FROM {}.events", ns),
-        options: SubscriptionOptions::default(),
+        options: Some(SubscriptionOptions::default()),
     };
     let result2 = manager
         .register_subscription_with_initial_data(&connection_state, &subscription2, None)
@@ -105,7 +104,7 @@ async fn test_live_queries_metadata() {
     println!("Second subscription registered: {}", live_id2);
 
     // Verify it exists
-    let sql2 = "SELECT * FROM system.live_queries WHERE subscription_id = 'sub_meta_test2'";
+    let sql2 = "SELECT * FROM system.live WHERE subscription_id = 'sub_meta_test2'";
     let response_before_close = server.execute_sql(sql2).await;
     assert_eq!(response_before_close.results[0].rows.as_ref().unwrap().len(), 1);
 
@@ -125,10 +124,10 @@ async fn test_live_queries_metadata() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_cleanup_connection_removes_live_queries_and_registry_state() {
+async fn test_cleanup_connection_removes_live_rows_and_registry_state() {
     let server = TestServer::new_shared().await;
     let manager = server.app_context.live_query_manager();
-    let registry = manager.registry();
+    let registry = server.app_context.connection_registry();
     let rate_limiter = Arc::new(RateLimiter::new());
     let ns = consolidated_helpers::unique_namespace("live_queries_cleanup");
 
@@ -141,7 +140,6 @@ async fn test_cleanup_connection_removes_live_queries_and_registry_state() {
     let connection_state = registration.state;
 
     connection_state.mark_authenticated(user_id.clone(), Role::User);
-    registry.on_authenticated(&conn_id, user_id.clone());
 
     let create_ns = format!("CREATE NAMESPACE IF NOT EXISTS {}", ns);
     let ns_resp = server.execute_sql_as_user(&create_ns, "root").await;
@@ -167,7 +165,7 @@ async fn test_cleanup_connection_removes_live_queries_and_registry_state() {
     let subscription = SubscriptionRequest {
         id: "sub_cleanup_test".to_string(),
         sql: format!("SELECT * FROM {}.events", ns),
-        options: SubscriptionOptions::default(),
+        options: Some(SubscriptionOptions::default()),
     };
 
     manager
@@ -175,7 +173,7 @@ async fn test_cleanup_connection_removes_live_queries_and_registry_state() {
         .await
         .expect("Failed to register subscription");
 
-    let sql = "SELECT * FROM system.live_queries WHERE subscription_id = 'sub_cleanup_test'";
+    let sql = "SELECT * FROM system.live WHERE subscription_id = 'sub_cleanup_test'";
     let response_before = server.execute_sql(sql).await;
     assert_eq!(
         response_before.status,
@@ -202,6 +200,6 @@ async fn test_cleanup_connection_removes_live_queries_and_registry_state() {
     assert_eq!(
         response_after.results[0].rows.as_ref().unwrap().len(),
         0,
-        "Expected 0 rows in system.live_queries after cleanup_connection"
+        "Expected 0 rows in system.live after cleanup_connection"
     );
 }

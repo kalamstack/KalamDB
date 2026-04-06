@@ -25,7 +25,7 @@
 //! timestamp_format = "iso8601" # iso8601, iso8601-date, iso8601-datetime, unix-ms, unix-sec, relative, rfc2822, rfc3339
 //! ```
 
-use kalam_link::{ConnectionOptions, HttpVersion, TimestampFormat};
+use kalam_client::{ConnectionOptions, HttpVersion, TimestampFormat};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -241,7 +241,7 @@ impl CLIConfiguration {
 
     /// Build ConnectionOptions from CLI configuration
     ///
-    /// Converts CLI config settings to kalam-link ConnectionOptions
+    /// Converts CLI config settings to kalam-client ConnectionOptions
     pub fn to_connection_options(&self) -> ConnectionOptions {
         let mut options = ConnectionOptions::default();
 
@@ -377,7 +377,7 @@ mod tests {
         let options = config.to_connection_options();
 
         // Verify defaults are applied
-        assert_eq!(options.http_version, kalam_link::HttpVersion::Auto);
+        assert_eq!(options.http_version, kalam_client::HttpVersion::Auto);
         assert!(options.auto_reconnect);
         assert_eq!(options.reconnect_delay_ms, 100);
         assert_eq!(options.max_reconnect_delay_ms, 30000);
@@ -392,28 +392,28 @@ mod tests {
 
         // http1 variants
         config.server.as_mut().unwrap().http_version = "http1".to_string();
-        assert_eq!(config.http_version(), kalam_link::HttpVersion::Http1);
+        assert_eq!(config.http_version(), kalam_client::HttpVersion::Http1);
 
         config.server.as_mut().unwrap().http_version = "http/1".to_string();
-        assert_eq!(config.http_version(), kalam_link::HttpVersion::Http1);
+        assert_eq!(config.http_version(), kalam_client::HttpVersion::Http1);
 
         config.server.as_mut().unwrap().http_version = "HTTP/1.1".to_string();
-        assert_eq!(config.http_version(), kalam_link::HttpVersion::Http1);
+        assert_eq!(config.http_version(), kalam_client::HttpVersion::Http1);
 
         // http2 variants
         config.server.as_mut().unwrap().http_version = "http2".to_string();
-        assert_eq!(config.http_version(), kalam_link::HttpVersion::Http2);
+        assert_eq!(config.http_version(), kalam_client::HttpVersion::Http2);
 
         config.server.as_mut().unwrap().http_version = "HTTP/2".to_string();
-        assert_eq!(config.http_version(), kalam_link::HttpVersion::Http2);
+        assert_eq!(config.http_version(), kalam_client::HttpVersion::Http2);
 
         // auto
         config.server.as_mut().unwrap().http_version = "auto".to_string();
-        assert_eq!(config.http_version(), kalam_link::HttpVersion::Auto);
+        assert_eq!(config.http_version(), kalam_client::HttpVersion::Auto);
 
         // unknown defaults to Auto
         config.server.as_mut().unwrap().http_version = "unknown".to_string();
-        assert_eq!(config.http_version(), kalam_link::HttpVersion::Auto);
+        assert_eq!(config.http_version(), kalam_client::HttpVersion::Auto);
     }
 
     #[test]

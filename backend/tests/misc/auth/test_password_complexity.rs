@@ -18,7 +18,7 @@ async fn setup_executor(
     let session_context = server.session_context.clone();
 
     // Create SqlExecutor with desired password complexity enforcement
-    let registry = Arc::new(HandlerRegistry::new(app_context.clone()));
+    let registry = Arc::new(HandlerRegistry::new());
     kalamdb_handlers::register_all_handlers(&registry, app_context.clone(), enforce_complexity);
     let executor = SqlExecutor::new(app_context.clone(), registry);
 

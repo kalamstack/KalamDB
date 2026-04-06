@@ -2,7 +2,7 @@
 
 use super::test_support::auth_helper::create_user_auth_header;
 use super::test_support::consolidated_helpers::{unique_namespace, unique_table};
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use kalamdb_commons::Role;
 use tokio::time::{sleep, Duration, Instant};
 
@@ -104,7 +104,7 @@ async fn test_observability_system_tables_and_jobs_over_http() -> anyhow::Result
         "system.schemas",
         "system.storages",
         "system.jobs",
-        "system.live_queries",
+        "system.live",
     ] {
         let resp = server.execute_sql(&format!("SELECT * FROM {} LIMIT 1", table)).await?;
         assert_eq!(resp.status, ResponseStatus::Success);

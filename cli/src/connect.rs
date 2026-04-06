@@ -3,8 +3,8 @@ use colored::Colorize;
 use kalam_cli::{
     CLIConfiguration, CLIError, CLISession, FileCredentialStore, OutputFormat, Result,
 };
-use kalam_link::credentials::{CredentialStore, Credentials};
-use kalam_link::{
+use kalam_client::credentials::{CredentialStore, Credentials};
+use kalam_client::{
     AuthProvider, KalamLinkClient, KalamLinkError, KalamLinkTimeouts, LoginResponse,
     ServerSetupRequest,
 };
@@ -386,6 +386,13 @@ pub async fn create_session(
         println!();
         println!("No authentication credentials found.");
         println!("Please enter your credentials to connect to: {}", server_url);
+        if is_localhost_url(server_url) {
+            println!("This server is already configured, so setup is not available here.");
+            println!(
+                "If you started it with scripts/cluster.sh, sign in as 'root' with the configured root password"
+            );
+            println!("(default cluster password: kalamdb123).");
+        }
         println!();
 
         // Prompt for username
@@ -840,7 +847,7 @@ pub async fn create_session(
 
     let mut connection_options = config.to_connection_options();
     if server_url.starts_with("http://") {
-        use kalam_link::HttpVersion;
+        use kalam_client::HttpVersion;
         if connection_options.http_version == HttpVersion::Http2 {
             connection_options = connection_options.with_http_version(HttpVersion::Auto);
         }

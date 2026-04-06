@@ -333,6 +333,10 @@ async fn async_main(config: ServerConfig) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use std::alloc::Layout;
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    use kalamdb_observability::{collect_runtime_metrics, force_allocator_collection};
 
     /// Verify the global allocator can allocate, write, read, and free memory.
     /// Under mimalloc this runs through the replaced global allocator; under the
@@ -392,5 +396,83 @@ mod tests {
     fn mimalloc_is_global_allocator() {
         let name = std::any::type_name_of_val(&super::ALLOC);
         assert!(name.contains("MiMalloc"), "expected MiMalloc global allocator, got: {name}");
+    }
+
+    #[cfg(feature = "mimalloc")]
+    #[test]
+    fn mimalloc_allocator_metrics_recover_after_transient_allocation() {
+        let start = Instant::now();
+
+        for _ in 0..16 {
+            black_box(collect_runtime_metrics(start));
+        }
+
+        force_allocator_collection(true);
+        let before = collect_runtime_metrics(start);
+
+        let mut buffers = Vec::with_capacity(64);
+        for _ in 0..64 {
+            buffers.push(vec![0xAB; 1024 * 1024]);
+        }
+
+        black_box(&buffers);
+
+        let during = collect_runtime_metrics(start);
+        let memory_delta = during
+            .memory_bytes
+            .unwrap_or_default()
+            .saturating_sub(before.memory_bytes.unwrap_or_default());
+        assert!(
+            memory_delta >= 32 * 1024 * 1024,
+            "expected >=32MB process memory growth, got {} bytes (before={} during={} source={})",
+            memory_delta,
+            before.memory_bytes.unwrap_or_default(),
+            during.memory_bytes.unwrap_or_default(),
+            during.memory_usage_source,
+        );
+
+        drop(buffers);
+        force_allocator_collection(true);
+
+        let after = collect_runtime_metrics(start);
+        let allowed_growth = 24 * 1024 * 1024;
+        assert!(
+            after.memory_bytes.unwrap_or_default()
+                <= before.memory_bytes.unwrap_or_default() + allowed_growth,
+            "process memory did not recover near baseline: before={} after={} source={}",
+            before.memory_bytes.unwrap_or_default(),
+            after.memory_bytes.unwrap_or_default(),
+            after.memory_usage_source,
+        );
+    }
+
+    #[cfg(feature = "mimalloc")]
+    #[test]
+    fn mimalloc_runtime_metrics_collection_does_not_monotonically_grow_allocator_state() {
+        let start = Instant::now();
+
+        for _ in 0..32 {
+            black_box(collect_runtime_metrics(start));
+        }
+
+        force_allocator_collection(true);
+        let before = collect_runtime_metrics(start);
+
+        for _ in 0..256 {
+            black_box(collect_runtime_metrics(start));
+        }
+
+        force_allocator_collection(true);
+        let after = collect_runtime_metrics(start);
+
+        let allowed_growth = 8 * 1024 * 1024;
+        assert!(
+            after.memory_bytes.unwrap_or_default()
+                <= before.memory_bytes.unwrap_or_default() + allowed_growth,
+            "runtime metrics collection retained too much process memory: before={} after={} source={}",
+            before.memory_bytes.unwrap_or_default(),
+            after.memory_bytes.unwrap_or_default(),
+            after.memory_usage_source,
+        );
     }
 }

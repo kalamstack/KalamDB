@@ -8,7 +8,6 @@
 //! - NamespacesTableProvider: Database namespace catalog
 //! - SchemasTableProvider: Table metadata and schema registry
 //! - StoragesTableProvider: Storage backend configuration
-//! - LiveQueriesTableProvider: Active live query subscriptions
 //! - AuditLogsTableProvider: System audit log entries
 //! - StatsTableProvider: Database statistics and metrics
 //!
@@ -62,12 +61,12 @@ pub use kalamdb_session_datafusion::{
 // Re-export all providers
 pub use providers::{
     AuditLogsTableProvider, InMemoryChecker, JobNodesTableProvider, JobsTableProvider,
-    LiveQueriesTableProvider, ManifestTableProvider, NamespacesTableProvider, SchemasTableProvider,
-    StoragesTableProvider, UsersTableProvider,
+    ManifestTableProvider, NamespacesTableProvider, SchemasTableProvider, StoragesTableProvider,
+    UsersTableProvider,
 };
 
 // Re-export live query models for convenience
-pub use providers::live_queries::models::{LiveQuery, LiveQueryStatus};
+pub use providers::live::models::{LiveQuery, LiveQueryStatus};
 
 // Re-export job models for convenience
 pub use providers::jobs::models::{

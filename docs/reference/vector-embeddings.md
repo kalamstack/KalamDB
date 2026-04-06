@@ -10,7 +10,7 @@
 
 KalamDB provides a native `EMBEDDING(dimension)` data type for storing vector embeddings from machine learning models. This guide demonstrates how to use KalamDB for semantic search, recommendation systems, and AI applications.
 
-Note: Some snippets use a generic `client.execute(...)` / `client.query(...)` shape as pseudocode. The only official JS/TS client documented here is `kalam-link`.
+Note: Some snippets use a generic `client.execute(...)` / `client.query(...)` shape as pseudocode. The official JS/TS client documented here is `@kalamdb/client`.
 
 **What are Vector Embeddings?**
 - Numerical representations of text, images, or other data
@@ -34,7 +34,7 @@ Note: Some snippets use a generic `client.execute(...)` / `client.query(...)` sh
    - [Product Recommendations](#product-recommendations)
    - [Image Similarity Search](#image-similarity-search)
 3. [Integration Patterns](#integration-patterns)
-  - [TypeScript (kalam-link)](#typescript-kalam-link)
+  - [TypeScript SDK](#typescript-sdk)
 4. [Performance Optimization](#performance-optimization)
 5. [Best Practices](#best-practices)
 6. [Troubleshooting](#troubleshooting)
@@ -264,7 +264,7 @@ CREATE INDEX idx_conversation ON chat.messages(conversation_id);
 
 ```typescript
 import { Configuration, OpenAIApi } from 'openai';
-import { createClient, Auth } from 'kalam-link';
+import { createClient, Auth } from '@kalamdb/client';
 
 const openai = new OpenAIApi(new Configuration({ apiKey: process.env.OPENAI_API_KEY }));
 const kalam = createClient({
@@ -623,12 +623,12 @@ for text, score in results:
 
 ---
 
-### TypeScript (kalam-link)
+### TypeScript SDK
 
 Use the TypeScript SDK to execute SQL and pass embeddings as arrays of numbers.
 
 ```typescript
-import { createClient, Auth } from 'kalam-link';
+import { createClient, Auth } from '@kalamdb/client';
 
 const client = createClient({
   url: 'http://localhost:8080',

@@ -1,7 +1,7 @@
 use crate::args::Cli;
 use kalam_cli::{CLIError, FileCredentialStore, Result};
-use kalam_link::credentials::{CredentialStore, Credentials};
-use kalam_link::KalamLinkClient;
+use kalam_client::credentials::{CredentialStore, Credentials};
+use kalam_client::KalamLinkClient;
 use std::io::{self, Write};
 use std::time::Duration;
 

@@ -1,6 +1,5 @@
 use crate::error::KalamDbError;
 use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::scalar::ScalarValue;
 use kalamdb_commons::conversions::arrow_json_conversion as commons;
 use kalamdb_commons::errors::CommonError;
 use kalamdb_commons::models::rows::Row;
@@ -9,16 +8,6 @@ use std::collections::HashMap;
 
 fn map_error(err: CommonError) -> KalamDbError {
     KalamDbError::InvalidOperation(err.to_string())
-}
-
-pub fn scalar_value_to_json(value: &ScalarValue) -> Result<KalamCellValue, KalamDbError> {
-    commons::scalar_value_to_json(value).map_err(map_error)
-}
-
-pub fn record_batch_to_json_rows(
-    batch: &RecordBatch,
-) -> Result<Vec<HashMap<String, KalamCellValue>>, KalamDbError> {
-    commons::record_batch_to_json_rows(batch).map_err(map_error)
 }
 
 pub fn record_batch_to_json_arrays(

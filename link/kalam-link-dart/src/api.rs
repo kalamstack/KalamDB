@@ -20,9 +20,8 @@
 
 use crate::models::{
     DartAuthProvider, DartChangeEvent, DartConnectionError, DartConnectionEvent,
-    DartDisconnectReason, DartHealthCheckResponse, DartLiveRowsConfig, DartLiveRowsEvent,
-    DartLoginResponse, DartQueryResponse, DartServerSetupRequest, DartServerSetupResponse,
-    DartSetupStatusResponse, DartSubscriptionConfig,
+    DartDisconnectReason, DartLiveRowsConfig, DartLiveRowsEvent, DartLoginResponse,
+    DartQueryResponse, DartSubscriptionConfig,
 };
 use flutter_rust_bridge::frb;
 use std::collections::VecDeque;
@@ -41,7 +40,7 @@ const DART_MAX_RECONNECT_DELAY_MS: u64 = 2_000;
 ///
 /// Create one via [`dart_create_client`] and pass it to query/subscribe helpers.
 pub struct DartKalamClient {
-    inner: kalam_link::KalamLinkClient,
+    inner: kalam_client::KalamLinkClient,
     /// Queue of connection lifecycle events (populated when event handlers are
     /// enabled). Dart pulls from this via [`dart_next_connection_event`].
     ///
@@ -123,7 +122,7 @@ fn create_client_inner(
     let event_notify = Arc::new(Notify::new());
     let events_enabled = enable_connection_events.unwrap_or(false);
 
-    let mut builder = kalam_link::KalamLinkClient::builder()
+    let mut builder = kalam_client::KalamLinkClient::builder()
         .base_url(base_url)
         .auth(auth.into_native());
 
@@ -138,7 +137,7 @@ fn create_client_inner(
         .connection_options(build_dart_connection_options(disable_compression, ws_lazy_connect));
 
     if let Some(ms) = keepalive_interval_ms {
-        let mut timeouts = kalam_link::KalamLinkTimeouts::default();
+        let mut timeouts = kalam_client::KalamLinkTimeouts::default();
         timeouts.keepalive_interval = std::time::Duration::from_millis(ms as u64);
         builder = builder.timeouts(timeouts);
     }
@@ -162,11 +161,11 @@ fn create_client_inner(
 fn build_dart_connection_options(
     disable_compression: Option<bool>,
     ws_lazy_connect: Option<bool>,
-) -> kalam_link::ConnectionOptions {
-    let mut conn_opts = kalam_link::ConnectionOptions::default();
+) -> kalam_client::ConnectionOptions {
+    let mut conn_opts = kalam_client::ConnectionOptions::default();
 
     // Favor the smaller binary wire format for Dart subscriptions by default.
-    conn_opts.protocol.serialization = kalam_link::models::SerializationType::MessagePack;
+    conn_opts.protocol.serialization = kalam_client::models::SerializationType::MessagePack;
     // Mobile apps resume and reconnect frequently. Favor a faster first retry
     // than the generic SDK defaults while keeping exponential backoff.
     conn_opts.reconnect_delay_ms = DART_INITIAL_RECONNECT_DELAY_MS;
@@ -209,7 +208,7 @@ pub fn dart_update_auth(client: &DartKalamClient, auth: DartAuthProvider) -> any
 mod tests {
     use super::build_dart_connection_options;
     use super::{DART_INITIAL_RECONNECT_DELAY_MS, DART_MAX_RECONNECT_DELAY_MS};
-    use kalam_link::models::SerializationType;
+    use kalam_client::models::SerializationType;
 
     #[test]
     fn dart_connection_options_default_to_msgpack() {
@@ -234,13 +233,13 @@ mod tests {
     }
 }
 
-/// Build [`EventHandlers`](kalam_link::EventHandlers) that push events into
+/// Build [`EventHandlers`](kalam_client::EventHandlers) that push events into
 /// a shared queue and notify waiters.
 fn build_event_handlers(
     queue: Arc<std::sync::Mutex<VecDeque<DartConnectionEvent>>>,
     notify: Arc<Notify>,
-) -> kalam_link::EventHandlers {
-    let mut handlers = kalam_link::EventHandlers::new();
+) -> kalam_client::EventHandlers {
+    let mut handlers = kalam_client::EventHandlers::new();
 
     // on_connect
     {
@@ -370,35 +369,6 @@ pub async fn dart_refresh_token(
 }
 
 // ---------------------------------------------------------------------------
-// Health / Setup
-// ---------------------------------------------------------------------------
-
-/// Check server health (version, status, etc.).
-pub async fn dart_health_check(
-    client: &DartKalamClient,
-) -> anyhow::Result<DartHealthCheckResponse> {
-    let response = client.inner.health_check().await?;
-    Ok(DartHealthCheckResponse::from(response))
-}
-
-/// Check whether the server requires initial setup.
-pub async fn dart_check_setup_status(
-    client: &DartKalamClient,
-) -> anyhow::Result<DartSetupStatusResponse> {
-    let response = client.inner.check_setup_status().await?;
-    Ok(DartSetupStatusResponse::from(response))
-}
-
-/// Perform initial server setup (create first admin user).
-pub async fn dart_server_setup(
-    client: &DartKalamClient,
-    request: DartServerSetupRequest,
-) -> anyhow::Result<DartServerSetupResponse> {
-    let response = client.inner.server_setup(request.into_native()).await?;
-    Ok(DartServerSetupResponse::from(response))
-}
-
-// ---------------------------------------------------------------------------
 // Connection events (async pull model)
 // ---------------------------------------------------------------------------
 
@@ -484,13 +454,13 @@ pub fn dart_connection_events_enabled(client: &DartKalamClient) -> bool {
 /// On the Dart side, call [`dart_subscription_next`] in a loop to pull
 /// events. The loop ends when `None` is returned (subscription closed).
 pub struct DartSubscription {
-    inner: Arc<Mutex<kalam_link::SubscriptionManager>>,
+    inner: Arc<Mutex<kalam_client::SubscriptionManager>>,
     sub_id: String,
 }
 
 /// Opaque handle to an active high-level live-row subscription.
 pub struct DartLiveRowsSubscription {
-    inner: Arc<Mutex<kalam_link::LiveRowsSubscription>>,
+    inner: Arc<Mutex<kalam_client::LiveRowsSubscription>>,
     sub_id: String,
 }
 
@@ -620,7 +590,7 @@ pub async fn dart_live_query_rows_subscribe(
         native_cfg.sql = sql;
         client.inner.live_query_rows_with_config(native_cfg, native_live_config).await?
     } else {
-        let native_cfg = kalam_link::SubscriptionConfig::new(
+        let native_cfg = kalam_client::SubscriptionConfig::new(
             format!(
                 "dart-live-{}",
                 std::time::SystemTime::now()

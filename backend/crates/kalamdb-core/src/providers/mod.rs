@@ -8,5 +8,3 @@ pub use kalamdb_tables::utils::*;
 pub use kalamdb_tables::utils::{
     base, core, parquet, pk, row_utils, shared, streams, unified_dml, users, version_resolution,
 };
-
-pub const PROVIDER_CONSOLIDATION_VERSION: &str = "13.0.0";

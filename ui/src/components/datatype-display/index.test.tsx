@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { CellDisplay } from "./index";
 
-vi.mock("kalam-link", () => {
+vi.mock("@kalamdb/client", () => {
   class KalamCellValue {
     private value: unknown;
 

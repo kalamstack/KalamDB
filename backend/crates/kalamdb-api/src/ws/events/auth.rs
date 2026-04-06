@@ -13,7 +13,7 @@ use kalamdb_commons::models::{ConnectionInfo, UserId};
 use kalamdb_commons::websocket::{ProtocolOptions, WsAuthCredentials};
 use kalamdb_commons::{Role, WebSocketMessage};
 use kalamdb_core::app_context::AppContext;
-use kalamdb_core::live::{ConnectionsManager, SharedConnectionState};
+use kalamdb_core::live::SharedConnectionState;
 use log::debug;
 use std::sync::Arc;
 use tracing::Instrument;
@@ -35,7 +35,6 @@ pub async fn handle_authenticate(
     credentials: WsAuthCredentials,
     protocol: ProtocolOptions,
     session: &mut Session,
-    registry: &Arc<ConnectionsManager>,
     _app_context: &Arc<AppContext>,
     rate_limiter: &Arc<RateLimiter>,
     user_repo: &Arc<dyn UserRepository>,
@@ -63,7 +62,6 @@ pub async fn handle_authenticate(
         auth_request,
         protocol,
         session,
-        registry,
         user_repo,
         compression,
     )
@@ -76,12 +74,10 @@ pub async fn handle_authenticate(
 /// Called from both the header-auth fast path (handler.rs) and the
 /// message-auth path (authenticate_with_request). Consolidates:
 /// - Marking the connection as authenticated
-/// - Notifying the registry
 /// - Setting the negotiated protocol
 /// - Sending the AuthSuccess response
 pub async fn complete_ws_auth(
     connection_state: &SharedConnectionState,
-    registry: &Arc<ConnectionsManager>,
     user_id: UserId,
     role: Role,
     protocol: ProtocolOptions,
@@ -91,7 +87,6 @@ pub async fn complete_ws_auth(
     let connection_id = connection_state.connection_id().clone();
 
     connection_state.mark_authenticated(user_id.clone(), role);
-    registry.on_authenticated(&connection_id, user_id.clone());
     connection_state.set_protocol(protocol);
 
     let msg = WebSocketMessage::AuthSuccess {
@@ -140,7 +135,6 @@ async fn authenticate_with_request(
     auth_request: AuthRequest,
     protocol: ProtocolOptions,
     session: &mut Session,
-    registry: &Arc<ConnectionsManager>,
     user_repo: &Arc<dyn UserRepository>,
     compression: bool,
 ) -> Result<(), String> {
@@ -176,7 +170,6 @@ async fn authenticate_with_request(
 
         complete_ws_auth(
             connection_state,
-            registry,
             auth_result.user_id,
             auth_result.role,
             protocol,

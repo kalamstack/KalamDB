@@ -54,19 +54,6 @@ pub mod views;
 // Re-export commonly used items
 pub use error_extensions::KalamDbResultExt;
 
-// Re-export modules that were moved to other crates
-pub mod auth {
-    pub use kalamdb_session::permissions;
-}
-
-pub mod live_query {
-    pub use crate::live::*;
-}
-
-pub mod system_columns {
-    pub use crate::schema_registry::SystemColumnsService;
-}
-
 // Test helpers module — compiled for internal unit tests and for other crates'
 // dev-dependencies that enable the "test-helpers" feature.
 #[cfg(any(test, feature = "test-helpers"))]

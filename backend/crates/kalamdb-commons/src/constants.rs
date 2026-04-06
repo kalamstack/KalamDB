@@ -77,7 +77,7 @@ impl AuthConstants {
     /// Default system user id
     pub const DEFAULT_SYSTEM_USER_ID: &'static str = SYSTEM_NAMESPACE;
 
-    /// Anonymous user ID constant (matches ExecutionContext::anonymous())
+    /// Anonymous user ID constant (matches anonymous AuthSession execution)
     pub const ANONYMOUS_USER_ID: &str = "anonymous";
 }
 

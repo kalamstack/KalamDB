@@ -43,14 +43,6 @@ impl ApplierError {
             id: id.to_string(),
         }
     }
-
-    /// Create an already exists error
-    pub fn already_exists(resource_type: impl Into<String>, id: impl fmt::Display) -> Self {
-        Self::AlreadyExists {
-            resource_type: resource_type.into(),
-            id: id.to_string(),
-        }
-    }
 }
 
 impl From<crate::error::KalamDbError> for ApplierError {

@@ -122,8 +122,8 @@ cargo run
 
 KalamDB provides official SDKs for multiple languages in `link/sdks/`:
 
-**TypeScript/JavaScript SDK** (`link/sdks/typescript/`):
-- 📦 Published as `kalam-link` on npm
+**TypeScript/JavaScript SDK** (`link/sdks/typescript/client/`):
+- 📦 Published as `@kalamdb/client` on npm
 - 🔧 37 KB WASM module with full TypeScript types
 - ✅ 14 passing tests, comprehensive API documentation
 - 🌐 Works in browsers and Node.js
@@ -132,7 +132,7 @@ KalamDB provides official SDKs for multiple languages in `link/sdks/`:
 ```json
 {
   "dependencies": {
-    "kalam-link": "file:../../link/sdks/typescript"
+    "@kalamdb/client": "file:../../link/sdks/typescript/client"
   }
 }
 ```

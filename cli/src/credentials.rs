@@ -31,8 +31,8 @@
 //! ```
 
 use crate::history::get_kalam_config_dir;
-use kalam_link::credentials::{CredentialStore, Credentials};
-use kalam_link::Result;
+use kalam_client::credentials::{CredentialStore, Credentials};
+use kalam_client::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -97,12 +97,12 @@ impl FileCredentialStore {
     }
 
     /// Create a new file-based credential store at the default location
-    pub fn new() -> kalam_link::Result<Self> {
+    pub fn new() -> kalam_client::Result<Self> {
         Self::with_path(Self::default_path())
     }
 
     /// Create a new file-based credential store at a custom location
-    pub fn with_path(file_path: PathBuf) -> kalam_link::Result<Self> {
+    pub fn with_path(file_path: PathBuf) -> kalam_client::Result<Self> {
         let mut store = Self {
             file_path,
             cache: HashMap::new(),
@@ -112,7 +112,7 @@ impl FileCredentialStore {
     }
 
     /// Load credentials from disk into memory cache
-    fn load_from_disk(&mut self) -> kalam_link::Result<()> {
+    fn load_from_disk(&mut self) -> kalam_client::Result<()> {
         if !self.file_path.exists() {
             // No file yet, start with empty cache
             self.cache.clear();
@@ -137,7 +137,7 @@ impl FileCredentialStore {
                 e,
                 self.file_path.display()
             );
-            kalam_link::KalamLinkError::ConfigurationError(msg)
+            kalam_client::KalamLinkError::ConfigurationError(msg)
         })?;
 
         let file: CredentialsFile = toml::from_str(&contents).map_err(|e| {
@@ -172,7 +172,7 @@ impl FileCredentialStore {
                 simple_error,
                 self.file_path.display()
             );
-            kalam_link::KalamLinkError::ConfigurationError(msg)
+            kalam_client::KalamLinkError::ConfigurationError(msg)
         })?;
 
         self.cache = file.instances;
@@ -180,13 +180,13 @@ impl FileCredentialStore {
     }
 
     /// Save credentials from memory cache to disk
-    fn save_to_disk(&self) -> kalam_link::Result<()> {
+    fn save_to_disk(&self) -> kalam_client::Result<()> {
         let file = CredentialsFile {
             instances: self.cache.clone(),
         };
 
         let contents = toml::to_string_pretty(&file).map_err(|e| {
-            kalam_link::KalamLinkError::ConfigurationError(format!(
+            kalam_client::KalamLinkError::ConfigurationError(format!(
                 "Failed to serialize credentials: {}",
                 e
             ))
@@ -195,7 +195,7 @@ impl FileCredentialStore {
         // Create parent directory if it doesn't exist
         if let Some(parent) = self.file_path.parent() {
             fs::create_dir_all(parent).map_err(|e| {
-                kalam_link::KalamLinkError::ConfigurationError(format!(
+                kalam_client::KalamLinkError::ConfigurationError(format!(
                     "Failed to create credentials directory '{}': {}",
                     parent.display(),
                     e
@@ -205,7 +205,7 @@ impl FileCredentialStore {
 
         // Write file with secure permissions
         fs::write(&self.file_path, contents).map_err(|e| {
-            kalam_link::KalamLinkError::ConfigurationError(format!(
+            kalam_client::KalamLinkError::ConfigurationError(format!(
                 "Failed to write credentials file at '{}': {}",
                 self.file_path.display(),
                 e
@@ -218,7 +218,7 @@ impl FileCredentialStore {
             use std::os::unix::fs::PermissionsExt;
             let permissions = fs::Permissions::from_mode(0o600);
             fs::set_permissions(&self.file_path, permissions).map_err(|e| {
-                kalam_link::KalamLinkError::ConfigurationError(format!(
+                kalam_client::KalamLinkError::ConfigurationError(format!(
                     "Failed to set file permissions for '{}': {}",
                     self.file_path.display(),
                     e

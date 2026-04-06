@@ -2,7 +2,7 @@
 
 use super::test_support::auth_helper::create_user_auth_header_with_id;
 use super::test_support::http_server::start_http_test_server;
-use kalam_link::models::ResponseStatus as LinkResponseStatus;
+use kalam_client::models::ResponseStatus as LinkResponseStatus;
 use kalamdb_api::http::sql::models::{ResponseStatus, SqlResponse};
 use kalamdb_commons::{Role, UserName};
 use kalamdb_system::FileRef;

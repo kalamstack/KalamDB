@@ -214,6 +214,10 @@ pub fn default_jobs_retry_backoff_ms() -> u64 {
     100 // 100ms initial backoff
 }
 
+pub fn default_jobs_wal_cleanup_interval() -> u64 {
+    300 // 5 minutes
+}
+
 // Execution defaults (Phase 11, T026)
 pub fn default_handler_timeout_seconds() -> u64 {
     30 // 30 seconds

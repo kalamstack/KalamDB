@@ -12,7 +12,7 @@ use kalamdb_auth::CachedUsersRepo;
 use kalamdb_commons::{AuthType, Role, StorageId, UserId};
 use kalamdb_configs::ServerConfig;
 use kalamdb_core::live::ConnectionsManager;
-use kalamdb_core::live_query::LiveQueryManager;
+use kalamdb_core::live::LiveQueryManager;
 use kalamdb_core::sql::datafusion_session::DataFusionSessionFactory;
 use kalamdb_core::sql::executor::handler_registry::HandlerRegistry;
 use kalamdb_core::sql::executor::SqlExecutor;
@@ -121,7 +121,7 @@ pub async fn prepare_components(
     let user_repo: Arc<dyn kalamdb_auth::UserRepository> =
         Arc::new(CachedUsersRepo::new(users_provider));
 
-    let handler_registry = Arc::new(HandlerRegistry::new(app_context.clone()));
+    let handler_registry = Arc::new(HandlerRegistry::new());
     kalamdb_handlers::register_all_handlers(
         &handler_registry,
         app_context.clone(),
@@ -505,6 +505,9 @@ pub async fn run(
     // Share auth settings with HTTP handlers
     let auth_settings = config.auth.clone();
     let ui_path = config.server.ui_path.clone();
+    let ui_runtime_config = kalamdb_api::ui::UiRuntimeConfig::new(
+        config.server.effective_public_origin(),
+    );
 
     // Log UI serving status
     let ui_status = if kalamdb_api::routes::is_embedded_ui_available() {
@@ -538,19 +541,32 @@ pub async fn run(
         // Add UI routes - prefer embedded, fallback to filesystem path
         #[cfg(feature = "embedded-ui")]
         if kalamdb_api::routes::is_embedded_ui_available() {
-            app = app.configure(kalamdb_api::routes::configure_embedded_ui_routes);
+            let runtime_config = ui_runtime_config.clone();
+            app = app.configure(move |cfg| {
+                kalamdb_api::routes::configure_embedded_ui_routes(cfg, runtime_config.clone());
+            });
         } else if let Some(ref path) = ui_path {
             let path: String = path.clone();
+            let runtime_config = ui_runtime_config.clone();
             app = app.configure(move |cfg| {
-                kalamdb_api::routes::configure_ui_routes(cfg, &path);
+                kalamdb_api::routes::configure_ui_routes(
+                    cfg,
+                    &path,
+                    runtime_config.clone(),
+                );
             });
         }
 
         #[cfg(not(feature = "embedded-ui"))]
         if let Some(ref path) = ui_path {
             let path: String = path.clone();
+            let runtime_config = ui_runtime_config.clone();
             app = app.configure(move |cfg| {
-                kalamdb_api::routes::configure_ui_routes(cfg, &path);
+                kalamdb_api::routes::configure_ui_routes(
+                    cfg,
+                    &path,
+                    runtime_config.clone(),
+                );
             });
         }
 
@@ -749,6 +765,9 @@ pub async fn run_for_tests(
     kalamdb_auth::init_trusted_proxy_ranges(&config.security.trusted_proxy_ranges)?;
     let auth_settings = config.auth.clone();
     let ui_path = config.server.ui_path.clone();
+    let ui_runtime_config = kalamdb_api::ui::UiRuntimeConfig::new(
+        config.server.effective_public_origin(),
+    );
 
     let server = HttpServer::new(move || {
         let mut app = App::new()
@@ -767,19 +786,32 @@ pub async fn run_for_tests(
 
         #[cfg(feature = "embedded-ui")]
         if kalamdb_api::routes::is_embedded_ui_available() {
-            app = app.configure(kalamdb_api::routes::configure_embedded_ui_routes);
+            let runtime_config = ui_runtime_config.clone();
+            app = app.configure(move |cfg| {
+                kalamdb_api::routes::configure_embedded_ui_routes(cfg, runtime_config.clone());
+            });
         } else if let Some(ref path) = ui_path {
             let path: String = path.clone();
+            let runtime_config = ui_runtime_config.clone();
             app = app.configure(move |cfg| {
-                kalamdb_api::routes::configure_ui_routes(cfg, &path);
+                kalamdb_api::routes::configure_ui_routes(
+                    cfg,
+                    &path,
+                    runtime_config.clone(),
+                );
             });
         }
 
         #[cfg(not(feature = "embedded-ui"))]
         if let Some(ref path) = ui_path {
             let path: String = path.clone();
+            let runtime_config = ui_runtime_config.clone();
             app = app.configure(move |cfg| {
-                kalamdb_api::routes::configure_ui_routes(cfg, &path);
+                kalamdb_api::routes::configure_ui_routes(
+                    cfg,
+                    &path,
+                    runtime_config.clone(),
+                );
             });
         }
 
@@ -839,6 +871,9 @@ pub async fn run_detached(
     kalamdb_auth::init_trusted_proxy_ranges(&config.security.trusted_proxy_ranges)?;
     let auth_settings = config.auth.clone();
     let ui_path = config.server.ui_path.clone();
+    let ui_runtime_config = kalamdb_api::ui::UiRuntimeConfig::new(
+        config.server.effective_public_origin(),
+    );
 
     let server = HttpServer::new(move || {
         let mut app = App::new()
@@ -857,19 +892,32 @@ pub async fn run_detached(
 
         #[cfg(feature = "embedded-ui")]
         if kalamdb_api::routes::is_embedded_ui_available() {
-            app = app.configure(kalamdb_api::routes::configure_embedded_ui_routes);
+            let runtime_config = ui_runtime_config.clone();
+            app = app.configure(move |cfg| {
+                kalamdb_api::routes::configure_embedded_ui_routes(cfg, runtime_config.clone());
+            });
         } else if let Some(ref path) = ui_path {
             let path: String = path.clone();
+            let runtime_config = ui_runtime_config.clone();
             app = app.configure(move |cfg| {
-                kalamdb_api::routes::configure_ui_routes(cfg, &path);
+                kalamdb_api::routes::configure_ui_routes(
+                    cfg,
+                    &path,
+                    runtime_config.clone(),
+                );
             });
         }
 
         #[cfg(not(feature = "embedded-ui"))]
         if let Some(ref path) = ui_path {
             let path: String = path.clone();
+            let runtime_config = ui_runtime_config.clone();
             app = app.configure(move |cfg| {
-                kalamdb_api::routes::configure_ui_routes(cfg, &path);
+                kalamdb_api::routes::configure_ui_routes(
+                    cfg,
+                    &path,
+                    runtime_config.clone(),
+                );
             });
         }
 

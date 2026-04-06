@@ -300,7 +300,7 @@ pub struct SubscriptionRequest {
     pub sql: String,
     /// Optional subscription options
     #[serde(default)]
-    pub options: SubscriptionOptions,
+    pub options: Option<SubscriptionOptions>,
 }
 
 /// Options for live query subscriptions
@@ -768,14 +768,9 @@ impl SharedChangePayload {
     #[cfg(feature = "msgpack")]
     fn msgpack_cached(&self) -> &(Option<Vec<u8>>, Option<Vec<u8>>) {
         self.msgpack_cache.get_or_init(|| {
-            let rows = self
-                .rows
-                .as_ref()
-                .map(|v| rmp_serde::to_vec_named(v).unwrap_or_default());
-            let old_values = self
-                .old_values
-                .as_ref()
-                .map(|v| rmp_serde::to_vec_named(v).unwrap_or_default());
+            let rows = self.rows.as_ref().map(|v| rmp_serde::to_vec_named(v).unwrap_or_default());
+            let old_values =
+                self.old_values.as_ref().map(|v| rmp_serde::to_vec_named(v).unwrap_or_default());
             (rows, old_values)
         })
     }
@@ -786,14 +781,9 @@ impl SharedChangePayload {
     #[cfg(feature = "serde")]
     fn json_cached(&self) -> &(Option<Vec<u8>>, Option<Vec<u8>>) {
         self.json_cache.get_or_init(|| {
-            let rows = self
-                .rows
-                .as_ref()
-                .map(|v| serde_json::to_vec(v).unwrap_or_default());
-            let old_values = self
-                .old_values
-                .as_ref()
-                .map(|v| serde_json::to_vec(v).unwrap_or_default());
+            let rows = self.rows.as_ref().map(|v| serde_json::to_vec(v).unwrap_or_default());
+            let old_values =
+                self.old_values.as_ref().map(|v| serde_json::to_vec(v).unwrap_or_default());
             (rows, old_values)
         })
     }
@@ -899,7 +889,6 @@ impl ChangeType {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -989,10 +978,7 @@ mod tests {
             payload: Arc::new(SharedChangePayload::new(ChangeType::Insert, Some(vec![]), None)),
         };
 
-        assert!(std::sync::Arc::ptr_eq(
-            &subscription_id,
-            &notification.subscription_id
-        ));
+        assert!(std::sync::Arc::ptr_eq(&subscription_id, &notification.subscription_id));
     }
 
     #[cfg(feature = "msgpack")]
@@ -1011,20 +997,12 @@ mod tests {
         assert!(second.payload.msgpack_cache.get().is_none());
 
         let first_msgpack = first.to_msgpack();
-        let first_cache = second
-            .payload
-            .msgpack_cache
-            .get()
-            .expect("msgpack cache initialized");
+        let first_cache = second.payload.msgpack_cache.get().expect("msgpack cache initialized");
         let first_rows_ptr = first_cache.0.as_ref().expect("rows cached").as_ptr();
         let first_old_ptr = first_cache.1.as_ref().expect("old_values cached").as_ptr();
 
         let second_msgpack = second.to_msgpack();
-        let second_cache = second
-            .payload
-            .msgpack_cache
-            .get()
-            .expect("msgpack cache reused");
+        let second_cache = second.payload.msgpack_cache.get().expect("msgpack cache reused");
         assert_eq!(first_rows_ptr, second_cache.0.as_ref().expect("rows cached").as_ptr());
         assert_eq!(first_old_ptr, second_cache.1.as_ref().expect("old_values cached").as_ptr());
 
@@ -1045,7 +1023,7 @@ mod tests {
         let msg = ClientMessage::subscribe(SubscriptionRequest {
             id: "sub-1".to_string(),
             sql: "SELECT * FROM messages".to_string(),
-            options: SubscriptionOptions::default(),
+            options: Some(SubscriptionOptions::default()),
         });
 
         let json = serde_json::to_string(&msg).unwrap();
@@ -1259,7 +1237,7 @@ mod tests {
         let msg = ClientMessage::subscribe(SubscriptionRequest {
             id: "sub-1".to_string(),
             sql: "SELECT * FROM test".to_string(),
-            options: SubscriptionOptions::default(),
+            options: Some(SubscriptionOptions::default()),
         });
         let bytes = rmp_serde::to_vec_named(&msg).unwrap();
         let parsed: ClientMessage = rmp_serde::from_slice(&bytes).unwrap();
@@ -1286,7 +1264,11 @@ mod tests {
         let bytes = rmp_serde::to_vec_named(&msg).unwrap();
         let parsed: WebSocketMessage = rmp_serde::from_slice(&bytes).unwrap();
         match parsed {
-            WebSocketMessage::AuthSuccess { user_id, role, protocol } => {
+            WebSocketMessage::AuthSuccess {
+                user_id,
+                role,
+                protocol,
+            } => {
                 assert_eq!(user_id, UserId::from("user-1"));
                 assert_eq!(role, "admin");
                 assert_eq!(protocol.serialization, SerializationType::MessagePack);
@@ -1302,9 +1284,11 @@ mod tests {
         let bytes = rmp_serde::to_vec_named(&notification).unwrap();
         let parsed: Notification = rmp_serde::from_slice(&bytes).unwrap();
         match parsed {
-            Notification::Change { subscription_id, .. } => {
+            Notification::Change {
+                subscription_id, ..
+            } => {
                 assert_eq!(subscription_id, "sub-1");
-            }
+            },
             _ => panic!("Expected Change"),
         }
     }

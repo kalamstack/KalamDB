@@ -9,7 +9,7 @@
 
 use crate::cluster_common::*;
 use crate::common::*;
-use kalam_link::{ChangeEvent, KalamLinkTimeouts, SubscriptionManager};
+use kalam_client::{ChangeEvent, KalamLinkTimeouts, SubscriptionManager};
 use serde_json::Value;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -76,30 +76,13 @@ fn create_ws_client(base_url: &str) -> KalamLinkClient {
 async fn execute_query_with_leader_retry(
     base_url: &str,
     query: &str,
-) -> Result<kalam_link::QueryResponse, String> {
-    let client = create_ws_client(base_url);
-    match client.execute_query(query, None, None, None).await {
-        Ok(response) => {
-            if !response.success() {
-                let err = response_error_message(&response);
-                // If NOT_LEADER error, retry on leader
-                if is_leader_error(&err) {
-                    if let Some(leader) = leader_url() {
-                        if leader != base_url {
-                            let leader_client = create_ws_client(&leader);
-                            return leader_client
-                                .execute_query(query, None, None, None)
-                                .await
-                                .map_err(|e| e.to_string());
-                        }
-                    }
-                }
-                return Err(err);
-            }
-            Ok(response)
-        },
-        Err(e) => Err(e.to_string()),
-    }
+) -> Result<kalam_client::QueryResponse, String> {
+    let base_url = base_url.to_string();
+    let query = query.to_string();
+
+    tokio::task::spawn_blocking(move || execute_on_node_response(&base_url, &query))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 async fn subscribe_with_retry(
@@ -130,7 +113,7 @@ async fn subscribe_with_retry(
     );
 }
 
-fn response_error_message(response: &kalam_link::QueryResponse) -> String {
+fn response_error_message(response: &kalam_client::QueryResponse) -> String {
     if let Some(error) = &response.error {
         if let Some(details) = &error.details {
             return format!("{} ({})", error.message, details);

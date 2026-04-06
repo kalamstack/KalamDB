@@ -1,0 +1,25 @@
+# Build outputs
+dist/
+wasm/
+src/wasm/
+
+# Dependencies
+node_modules/
+
+# WASM build artifacts in root (from old builds)
+kalam_client.js
+kalam_client.d.ts
+kalam_client_bg.wasm
+kalam_client_bg.wasm.d.ts
+snippets/
+
+# Package lock (use npm ci for reproducible builds)
+# package-lock.json
+
+# IDE
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db.env

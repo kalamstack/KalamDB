@@ -84,9 +84,14 @@ name = "users"
 path = "tests/users.rs"
 required-features = ["e2e-tests"]
 
+[[test]]
+name = "performance"
+path = "tests/performance.rs"
+required-features = ["e2e-tests"]
+
 [dependencies]
 # KalamDB connectivity
-kalam-link = { path = "../link" }
+kalam-client = { path = "../link/kalam-client", default-features = false, features = ["native-cli"] }
 
 # CLI argument parsing
 clap = { workspace = true }
@@ -155,3 +160,4 @@ kalamdb-configs = { workspace = true }
 kalamdb-server = { workspace = true }
 object_store = { workspace = true }
 jsonwebtoken = { workspace = true }
+sysinfo = { workspace = true }

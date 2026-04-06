@@ -8,7 +8,7 @@
 //! - T089: Read-only enforcement for regular users on public tables
 
 use super::test_support::{consolidated_helpers, TestServer};
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ResponseStatus;
 use kalamdb_commons::Role;
 
 #[tokio::test]

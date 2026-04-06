@@ -13,12 +13,10 @@ pub mod handler_registry;
 pub mod handlers;
 pub mod helpers;
 pub mod parameter_binding;
-pub mod parameter_validation;
 mod sql_executor;
 
 use crate::sql::executor::handler_registry::HandlerRegistry;
 use crate::sql::plan_cache::PlanCache;
-pub use crate::sql::ExecutionMetadata;
 pub use datafusion::scalar::ScalarValue;
 use kalamdb_commons::models::TableId;
 use kalamdb_commons::schemas::TableType;

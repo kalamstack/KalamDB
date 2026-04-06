@@ -99,12 +99,17 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
         {isLoading ? "Signing in..." : "Log in"}
       </Button>
 
-      <p className="text-center text-sm text-muted-foreground">
-        First time on this node?{" "}
-        <Link to="/setup" className="font-medium text-primary hover:underline">
-          Run setup
-        </Link>
-      </p>
+      <div className="space-y-1 text-center text-sm text-muted-foreground">
+        <p>
+          Need setup on an unconfigured node?{" "}
+          <Link to="/setup" className="font-medium text-primary hover:underline">
+            Run setup
+          </Link>
+        </p>
+        <p className="text-xs">
+          Nodes started with scripts/cluster.sh are already configured. Sign in as root with the configured root password.
+        </p>
+      </div>
     </form>
   );
 }

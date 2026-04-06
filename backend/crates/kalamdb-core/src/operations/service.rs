@@ -3,15 +3,15 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use datafusion::prelude::SessionContext;
 use kalamdb_commons::models::{ReadContext, Role, UserId};
+use kalamdb_commons::models::pg_operations::{
+    DeleteRequest, InsertRequest, MutationResult, ScanRequest, ScanResult, UpdateRequest,
+};
 use kalamdb_commons::{NamespaceId, TableType};
 use kalamdb_pg::OperationExecutor;
 use kalamdb_session_datafusion::SessionUserContext;
 use tonic::Status;
 
 use super::scan;
-use super::types::{
-    DeleteRequest, InsertRequest, MutationResult, ScanRequest, ScanResult, UpdateRequest,
-};
 use crate::app_context::AppContext;
 use crate::sql::ExecutionContext;
 

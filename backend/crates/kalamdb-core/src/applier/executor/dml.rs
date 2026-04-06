@@ -290,22 +290,30 @@ impl DmlExecutor {
                 )
             });
 
-            provider
+            let updated = provider
                 .update_by_id_field(&system_user, pk_value, update_row)
                 .await
                 .map_err(|e| ApplierError::Execution(format!("Failed to update row: {}", e)))?;
 
-            delete_file_refs_best_effort(
-                self.app_context.as_ref(),
-                table_id,
-                TableType::Shared,
-                None,
-                &replaced_refs,
-            )
-            .await;
+            let affected_rows = usize::from(updated.is_some());
+            if affected_rows > 0 {
+                delete_file_refs_best_effort(
+                    self.app_context.as_ref(),
+                    table_id,
+                    TableType::Shared,
+                    None,
+                    &replaced_refs,
+                )
+                .await;
+            }
 
-            log::debug!("DmlExecutor: Updated 1 shared row in {} (pk={})", table_id, pk_value);
-            Ok(1)
+            log::debug!(
+                "DmlExecutor: Updated {} shared row(s) in {} (pk={})",
+                affected_rows,
+                table_id,
+                pk_value
+            );
+            Ok(affected_rows)
         } else {
             Err(ApplierError::Execution(format!(
                 "Provider type mismatch for shared table {}",
@@ -511,19 +519,20 @@ impl DmlExecutor {
         updates: Row,
     ) -> Result<usize, ApplierError> {
         match provider.update_by_id_field(user_id, pk_value, updates.clone()).await {
-            Ok(_) => Ok(1),
+            Ok(result) => Ok(usize::from(result.is_some())),
             Err(kalamdb_tables::TableError::NotFound(_)) => {
                 if let Some(key) =
                     provider.find_row_key_by_id_field(user_id, pk_value).await.map_err(|e| {
                         ApplierError::Execution(format!("Failed to find row key: {}", e))
                     })?
                 {
-                    <UserTableProvider as BaseTableProvider<UserTableRowId, UserTableRow>>::update(
-                        provider, user_id, &key, updates,
-                    )
+                    let updated = <UserTableProvider as BaseTableProvider<
+                        UserTableRowId,
+                        UserTableRow,
+                    >>::update(provider, user_id, &key, updates)
                     .await
                     .map_err(|e| ApplierError::Execution(format!("Failed to update row: {}", e)))?;
-                    Ok(1)
+                    Ok(usize::from(updated.is_some()))
                 } else {
                     Ok(0)
                 }
@@ -541,21 +550,22 @@ impl DmlExecutor {
         updates: Row,
     ) -> Result<usize, ApplierError> {
         match provider.update_by_id_field(user_id, pk_value, updates.clone()).await {
-            Ok(_) => Ok(1),
+            Ok(result) => Ok(usize::from(result.is_some())),
             Err(kalamdb_tables::TableError::NotFound(_)) => {
                 if let Some(key) =
                     provider.find_row_key_by_id_field(user_id, pk_value).await.map_err(|e| {
                         ApplierError::Execution(format!("Failed to find row key: {}", e))
                     })?
                 {
-                    <StreamTableProvider as BaseTableProvider<StreamTableRowId, StreamTableRow>>::update(
-                        provider, user_id, &key, updates,
-                    )
-                        .await
-                        .map_err(|e| {
+                    let updated = <StreamTableProvider as BaseTableProvider<
+                        StreamTableRowId,
+                        StreamTableRow,
+                    >>::update(provider, user_id, &key, updates)
+                    .await
+                    .map_err(|e| {
                         ApplierError::Execution(format!("Failed to update row: {}", e))
                     })?;
-                    Ok(1)
+                    Ok(usize::from(updated.is_some()))
                 } else {
                     Ok(0)
                 }

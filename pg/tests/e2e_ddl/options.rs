@@ -32,7 +32,7 @@ async fn e2e_ddl_create_foreign_table_forwards_shared_options() {
     ))
     .await
     .expect("create shared foreign table with forwarded options");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    env.wait_for_kalamdb_table_exists(&ns, &table).await;
 
     let metadata = env
         .kalamdb_sql(&format!(
@@ -95,7 +95,7 @@ async fn e2e_ddl_create_foreign_table_forwards_stream_ttl() {
     ))
     .await
     .expect("create stream foreign table with ttl");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    env.wait_for_kalamdb_table_exists(&ns, &table).await;
 
     let metadata = env
         .kalamdb_sql(&format!(
@@ -152,14 +152,16 @@ async fn e2e_ddl_drop_multiple_foreign_tables() {
         .expect("create table for multi-drop test");
     }
 
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    env.wait_for_kalamdb_table_exists(&ns, &table_a).await;
+    env.wait_for_kalamdb_table_exists(&ns, &table_b).await;
     assert!(env.kalamdb_table_exists(&ns, &table_a).await);
     assert!(env.kalamdb_table_exists(&ns, &table_b).await);
 
     pg.batch_execute(&format!("DROP FOREIGN TABLE {ns}.{table_a}, {ns}.{table_b};"))
         .await
         .expect("drop multiple foreign tables");
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    env.wait_for_kalamdb_table_absent(&ns, &table_a).await;
+    env.wait_for_kalamdb_table_absent(&ns, &table_b).await;
 
     assert!(!env.kalamdb_table_exists(&ns, &table_a).await);
     assert!(!env.kalamdb_table_exists(&ns, &table_b).await);
@@ -215,7 +217,11 @@ async fn e2e_ddl_kalam_exec_passthrough_statements() {
         "kalam_exec SELECT should return row JSON payloads: {select}"
     );
 
-    let columns = env.kalamdb_columns(&ns, &table).await;
+    let columns = env
+        .wait_for_kalamdb_columns(&ns, &table, "kalam_exec alter to include email", |current| {
+            current.iter().any(|column| column == "email")
+        })
+        .await;
     assert!(columns.contains(&"email".to_string()));
 
     let drop = pg_kalam_exec(&pg, &format!("DROP SHARED TABLE IF EXISTS {ns}.{table}")).await;
@@ -223,6 +229,7 @@ async fn e2e_ddl_kalam_exec_passthrough_statements() {
         contains_status(&drop, &["dropped", "ok"]),
         "unexpected DROP TABLE response: {drop}"
     );
+    env.wait_for_kalamdb_table_absent(&ns, &table).await;
     assert!(!env.kalamdb_table_exists(&ns, &table).await);
 
     let _ = pg_kalam_exec(&pg, &format!("DROP NAMESPACE IF EXISTS {ns}")).await;

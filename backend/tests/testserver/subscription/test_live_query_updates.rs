@@ -1,8 +1,8 @@
 //! Integration test for Live Query UPDATE detection via WebSocket
 
 use super::test_support::consolidated_helpers::unique_namespace;
-use kalam_link::models::ChangeEvent;
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ChangeEvent;
+use kalam_client::models::ResponseStatus;
 use tokio::time::Duration;
 
 /// Test UPDATE detection with old/new values
@@ -43,7 +43,7 @@ async fn test_live_query_detects_updates() -> anyhow::Result<()> {
                 .await?;
     assert_eq!(resp.status, ResponseStatus::Success);
 
-    // Connect using kalam-link client
+    // Connect using the kalam-client SDK
     let client = server.link_client("root");
 
     let sql = format!("SELECT * FROM {}.{}", ns, table);

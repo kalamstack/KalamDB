@@ -19,7 +19,7 @@ import {
   setClientErrorListener,
   type Unsubscribe,
 } from "@/lib/kalam-client";
-import type { ServerMessage, ChangeTypeRaw, SchemaField } from "kalam-link";
+import type { ServerMessage, ChangeTypeRaw, SchemaField } from "@kalamdb/client";
 import type {
   QueryRunSummary,
   QueryTab,

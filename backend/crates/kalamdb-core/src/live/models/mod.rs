@@ -10,11 +10,9 @@ pub mod subscription;
 // Re-export commonly used types
 pub use connection::{
     BufferedNotification, ConnectionEvent, ConnectionRegistration, ConnectionState, EventReceiver,
-    EventSender, NotificationReceiver, NotificationSender, SharedConnectionState,
-    SubscriptionFlowControl, SubscriptionHandle, SubscriptionState, EVENT_CHANNEL_CAPACITY,
-    NOTIFICATION_CHANNEL_CAPACITY,
+    EventSender, InitialLoadState, NotificationReceiver, NotificationSender, SharedConnectionState,
+    SubscriptionFlowControl, SubscriptionHandle, SubscriptionRuntimeMetadata, SubscriptionState,
+    EVENT_CHANNEL_CAPACITY, NOTIFICATION_CHANNEL_CAPACITY,
 };
 
-pub use subscription::{
-    ChangeNotification, ChangeType, RegisteredSubscription, RegistryStats, SubscriptionResult,
-};
+pub use subscription::{ChangeNotification, ChangeType, SubscriptionResult};

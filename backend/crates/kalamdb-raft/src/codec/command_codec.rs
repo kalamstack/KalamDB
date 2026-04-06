@@ -121,6 +121,7 @@ pub fn decode_raft_response(bytes: &[u8]) -> Result<RaftResponse, RaftError> {
 mod tests {
     use super::*;
     use crate::{DataResponse, MetaResponse};
+    use kalamdb_commons::models::{NodeId, UserId};
 
     #[test]
     fn meta_response_roundtrip() {
@@ -169,5 +170,30 @@ mod tests {
 
         let err = decode_meta_response(&bytes).expect_err("should reject version mismatch");
         assert!(err.to_string().contains("Unsupported command codec version"));
+    }
+
+    #[test]
+    fn decode_rejects_retired_live_query_command() {
+        #[derive(Serialize)]
+        enum RetiredUserDataCommand {
+            CleanupNodeSubscriptions {
+                required_meta_index: u64,
+                user_id: UserId,
+                failed_node_id: NodeId,
+            },
+        }
+
+        let bytes = encode_typed(
+            KIND_USER_DATA_COMMAND,
+            &RetiredUserDataCommand::CleanupNodeSubscriptions {
+                required_meta_index: 17,
+                user_id: UserId::from("user_1"),
+                failed_node_id: NodeId::from(9),
+            },
+        )
+        .expect("encode retired user data command");
+
+        let err = decode_user_data_command(&bytes).expect_err("retired command must be rejected");
+        assert!(err.to_string().contains("Unknown variant index") || err.to_string().contains("unknown variant"));
     }
 }

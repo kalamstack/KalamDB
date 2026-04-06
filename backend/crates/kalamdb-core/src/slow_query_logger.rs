@@ -163,16 +163,6 @@ impl SlowQueryLogger {
         // Non-blocking send (if channel is full, this is a no-op to avoid backpressure)
         let _ = self.sender.send(entry);
     }
-
-    /// Get the configured threshold in milliseconds
-    pub fn threshold_ms(&self) -> u64 {
-        self.threshold_ms
-    }
-
-    /// Get the configured threshold in seconds (for backwards compatibility)
-    pub fn threshold_secs(&self) -> f64 {
-        self.threshold_ms as f64 / 1000.0
-    }
 }
 
 #[cfg(test)]

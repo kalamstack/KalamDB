@@ -5,7 +5,7 @@
 use crate::common::*;
 use std::time::Duration;
 
-use kalam_link::{SubscriptionConfig, SubscriptionOptions};
+use kalam_client::{SubscriptionConfig, SubscriptionOptions};
 
 /// Helper to create a subscription listener with custom configuration
 fn start_subscription_with_config(

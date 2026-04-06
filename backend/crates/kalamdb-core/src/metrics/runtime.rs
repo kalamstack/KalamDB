@@ -127,12 +127,10 @@ pub fn compute_metrics(ctx: &crate::app_context::AppContext) -> Vec<(String, Str
         metrics.push(("total_storages".to_string(), "0".to_string()));
     }
 
-    // Live queries count
-    if let Ok(batch) = ctx.system_tables().live_queries().scan_all_live_queries() {
-        metrics.push(("total_live_queries".to_string(), batch.num_rows().to_string()));
-    } else {
-        metrics.push(("total_live_queries".to_string(), "0".to_string()));
-    }
+    metrics.push((
+        "total_live_queries".to_string(),
+        ctx.connection_registry().subscription_count().to_string(),
+    ));
 
     // Active WebSocket connections
     let active_connections = ctx.connection_registry().connection_count();

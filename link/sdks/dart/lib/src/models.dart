@@ -35,7 +35,7 @@ class QueryResult {
   /// Column definitions.
   final List<SchemaField> columns;
 
-  /// Named-row JSON objects computed by the Rust kalam-link layer.
+  /// Named-row JSON objects computed by the shared Rust client layer.
   /// Each element is a JSON object string like `{"col":"value", ...}`.
   final List<String> _namedRowsJson;
 
@@ -118,21 +118,6 @@ class ErrorDetail {
 
   @override
   String toString() => 'KalamDbError($code): $message';
-}
-
-/// Health check response from the server.
-class HealthCheckResponse {
-  final String status;
-  final String version;
-  final String apiVersion;
-  final String? buildDate;
-
-  const HealthCheckResponse({
-    required this.status,
-    required this.version,
-    required this.apiVersion,
-    this.buildDate,
-  });
 }
 
 /// Login response containing tokens and user info.

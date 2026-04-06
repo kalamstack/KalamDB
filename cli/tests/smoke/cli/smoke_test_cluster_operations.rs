@@ -14,7 +14,7 @@
 //! These smoke tests focus on single-node behavior that must work in both modes.
 
 use crate::common::*;
-use kalam_link::KalamLinkTimeouts;
+use kalam_client::KalamLinkTimeouts;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -768,19 +768,19 @@ fn smoke_test_cluster_live_query_tracking() {
 
     // Query current live queries
     let result = execute_sql_as_root_via_client(
-        "SELECT live_id, table_name, user_id FROM system.live_queries LIMIT 10",
+        "SELECT live_id, table_name, user_id FROM system.live LIMIT 10",
     )
-    .expect("Failed to query system.live_queries");
+    .expect("Failed to query system.live");
 
-    println!("  Current live queries:\n{}", result);
+    println!("  Current live subscriptions:\n{}", result);
 
     // System should be able to query live queries (even if empty)
     assert!(
         result.contains("row") || result.contains("│") || result.contains("live_id"),
-        "Should be able to query live_queries table"
+        "Should be able to query system.live"
     );
 
-    println!("  ✓ Live query system table accessible");
+    println!("  ✓ Live subscription system view accessible");
     println!("\n  ✅ Live query tracking verified\n");
 }
 

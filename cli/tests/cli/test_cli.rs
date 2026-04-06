@@ -89,7 +89,7 @@ fn test_cli_init_agent_non_interactive_generates_project() {
 
     let package_json = fs::read_to_string(project_dir.join("package.json")).expect("read package");
     assert!(
-        package_json.contains("\"kalam-link\": \"file:"),
+        package_json.contains("\"@kalamdb/client\": \"file:"),
         "generated package should depend on local sdk"
     );
 

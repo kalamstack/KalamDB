@@ -129,8 +129,8 @@ assert!(latency_50_users / latency_250_users < 5.0);
 **JobIdempotencyKeyIndex** (system_jobs_idempotency_key_idx):
 - ✅ `idempotency_key = 'key_value'` (exact match)
 
-**TableIdIndex** (system_live_queries_table_idx):
-- ⚠️ `filter_to_prefix()` currently returns `None` (infrastructure ready, needs implementation)
+`system.live` is an in-memory virtual view backed by the active connection registry.
+It does not use RocksDB secondary indexes.
 
 ## DataFusion Integration Notes
 

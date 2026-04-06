@@ -2,8 +2,8 @@
 
 use super::test_support::consolidated_helpers::unique_namespace;
 use futures_util::StreamExt;
-use kalam_link::models::ChangeEvent;
-use kalam_link::models::ResponseStatus;
+use kalam_client::models::ChangeEvent;
+use kalam_client::models::ResponseStatus;
 use tokio::time::Duration;
 
 /// Test basic INSERT detection via live query subscription
@@ -33,7 +33,7 @@ async fn test_live_query_detects_inserts() -> anyhow::Result<()> {
         .await?;
     assert_eq!(resp.status, ResponseStatus::Success);
 
-    // Connect using kalam-link client
+    // Connect using the kalam-client SDK
     let client = server.link_client("root");
 
     // Subscribe to live query

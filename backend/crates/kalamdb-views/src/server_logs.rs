@@ -39,8 +39,8 @@ fn server_logs_schema() -> SchemaRef {
         .clone()
 }
 
-/// JSON log entry structure (matches the logging format)
-#[derive(Debug, serde::Deserialize)]
+/// Parsed server log entry exposed through `system.server_logs`.
+#[derive(Debug)]
 struct JsonLogEntry {
     timestamp: String,
     level: String,
@@ -48,6 +48,40 @@ struct JsonLogEntry {
     target: Option<String>,
     line: Option<i64>,
     message: String,
+}
+
+/// Raw JSON log entry structure.
+///
+/// `tracing-subscriber` JSON output nests event fields under `fields`, while
+/// older/manual log lines may already expose `message` at the root.
+#[derive(Debug, serde::Deserialize)]
+struct RawJsonLogEntry {
+    timestamp: Option<String>,
+    level: Option<String>,
+    #[serde(alias = "threadName")]
+    thread: Option<String>,
+    target: Option<String>,
+    line: Option<i64>,
+    message: Option<String>,
+    fields: Option<RawJsonLogFields>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct RawJsonLogFields {
+    message: Option<String>,
+}
+
+impl RawJsonLogEntry {
+    fn into_entry(self) -> Option<JsonLogEntry> {
+        Some(JsonLogEntry {
+            timestamp: self.timestamp?,
+            level: self.level?,
+            thread: self.thread,
+            target: self.target,
+            line: self.line,
+            message: self.message.or_else(|| self.fields.and_then(|fields| fields.message))?,
+        })
+    }
 }
 
 /// ServerLogsView - Reads server log files dynamically
@@ -185,8 +219,12 @@ impl ServerLogsView {
             }
 
             // Try to parse as JSON
-            match serde_json::from_str::<JsonLogEntry>(line) {
-                Ok(entry) => entries.push(entry),
+            match serde_json::from_str::<RawJsonLogEntry>(line) {
+                Ok(entry) => {
+                    if let Some(entry) = entry.into_entry() {
+                        entries.push(entry);
+                    }
+                },
                 Err(_) => {
                     // Skip non-JSON lines (e.g., if format is "compact")
                     // This allows graceful degradation
@@ -309,6 +347,27 @@ mod tests {
         assert_eq!(entries[0].level, "INFO");
         assert_eq!(entries[0].message, "Server started");
         assert_eq!(entries[1].level, "DEBUG");
+    }
+
+    #[test]
+    fn test_parse_tracing_json_logs() {
+        let dir = tempdir().unwrap();
+        let log_file = dir.path().join("server.jsonl");
+
+        let mut file = std::fs::File::create(&log_file).unwrap();
+        writeln!(
+            file,
+            r#"{{"timestamp":"2024-01-15T10:30:00.123Z","level":"INFO","fields":{{"message":"Server started"}},"target":"kalamdb_server","threadName":"main"}}"#
+        )
+        .unwrap();
+
+        let view = ServerLogsView::new(dir.path());
+        let entries = view.read_log_entries().unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].level, "INFO");
+        assert_eq!(entries[0].message, "Server started");
+        assert_eq!(entries[0].thread.as_deref(), Some("main"));
     }
 
     #[test]

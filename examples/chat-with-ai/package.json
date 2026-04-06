@@ -12,17 +12,18 @@
     "test": "tsx --test src/agent.test.ts && playwright test"
   },
   "dependencies": {
-    "dotenv": "^17.3.1",
-    "kalam-link": "file:../../link/sdks/typescript",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "@kalamdb/client": "file:../../link/sdks/typescript/client",
+    "@kalamdb/consumer": "file:../../link/sdks/typescript/consumer",
+    "dotenv": "^17.4.1",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
   },
   "devDependencies": {
     "@playwright/test": "^1.53.2",
-    "@types/node": "^24.3.0",
-    "@types/react": "^18.2.66",
-    "@types/react-dom": "^18.2.22",
-    "@vitejs/plugin-react": "^4.2.1",
+    "@types/node": "^25.5.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
     "tsx": "^4.20.6",
     "typescript": "^5.9.2",
     "vite": "^7.3.0"

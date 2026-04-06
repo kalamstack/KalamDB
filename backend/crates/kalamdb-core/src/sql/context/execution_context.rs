@@ -80,30 +80,6 @@ impl ExecutionContext {
         }
     }
 
-    pub fn with_audit_info(
-        user_id: UserId,
-        user_role: Role,
-        request_id: Option<String>,
-        ip_address: Option<String>,
-        base_session_context: Arc<SessionContext>,
-    ) -> Self {
-        Self {
-            auth_session: AuthSession::with_audit_info(user_id, user_role, request_id, ip_address),
-            namespace_id: None,
-            base_session_context,
-            session_context_cache: Arc::new(OnceCell::new()),
-        }
-    }
-
-    pub fn anonymous(base_session_context: Arc<SessionContext>) -> Self {
-        Self {
-            auth_session: AuthSession::anonymous(),
-            namespace_id: None,
-            base_session_context,
-            session_context_cache: Arc::new(OnceCell::new()),
-        }
-    }
-
     #[inline]
     pub fn is_admin(&self) -> bool {
         self.auth_session.is_admin()
@@ -132,6 +108,10 @@ impl ExecutionContext {
         self.auth_session.role()
     }
     #[inline]
+    pub fn username(&self) -> Option<&str> {
+        self.auth_session.user_context().username.as_ref().map(|username| username.as_str())
+    }
+    #[inline]
     pub fn request_id(&self) -> Option<&str> {
         self.auth_session.request_id()
     }
@@ -147,11 +127,6 @@ impl ExecutionContext {
     // Builder methods for Phase 3
     pub fn with_request_id(mut self, request_id: String) -> Self {
         self.auth_session = self.auth_session.with_request_id(request_id);
-        self
-    }
-
-    pub fn with_ip(mut self, ip_address: String) -> Self {
-        self.auth_session = self.auth_session.with_ip(ip_address);
         self
     }
 

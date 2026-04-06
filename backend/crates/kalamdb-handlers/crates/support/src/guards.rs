@@ -123,6 +123,7 @@ mod tests {
     use super::*;
     use kalamdb_commons::models::UserId;
     use kalamdb_commons::Role;
+    use kalamdb_session::AuthSession;
     use std::sync::Arc;
 
     fn create_context(role: Role) -> ExecutionContext {
@@ -172,7 +173,10 @@ mod tests {
     }
 
     fn create_anonymous_context() -> ExecutionContext {
-        ExecutionContext::anonymous(Arc::new(datafusion::prelude::SessionContext::new()))
+        ExecutionContext::from_session(
+            AuthSession::anonymous(),
+            Arc::new(datafusion::prelude::SessionContext::new()),
+        )
     }
 
     #[test]

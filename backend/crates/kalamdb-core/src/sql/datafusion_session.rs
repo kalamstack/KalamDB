@@ -32,12 +32,6 @@ use std::sync::Arc;
 /// Creates DataFusion sessions with optimized settings for parallel query execution.
 /// Configuration is loaded from server.toml [datafusion] section.
 pub struct DataFusionSessionFactory {
-    /// Target partitions for parallel execution (from config or auto-detected)
-    #[allow(dead_code)]
-    target_partitions: usize,
-    /// Batch size for Arrow record processing
-    #[allow(dead_code)]
-    batch_size: usize,
     /// Pre-initialized session state with custom functions registered
     state: SessionState,
 }
@@ -109,8 +103,6 @@ impl DataFusionSessionFactory {
         Self::register_custom_functions(&base_ctx);
 
         Ok(Self {
-            target_partitions,
-            batch_size: settings.batch_size,
             state: base_ctx.state(),
         })
     }
@@ -256,12 +248,11 @@ mod tests {
             memory_limit: 1073741824,
         };
         let factory = DataFusionSessionFactory::with_config(&settings).unwrap();
-
-        // Verify factory uses config values
-        assert_eq!(factory.target_partitions, 4);
-        assert_eq!(factory.batch_size, 4096);
-
         let session = factory.create_session();
+
+        // Verify session state inherited the configured execution settings.
+        assert_eq!(session.state().config().target_partitions(), 4);
+        assert_eq!(session.state().config().batch_size(), 4096);
         assert!(session.catalog("kalam").is_some());
     }
 
@@ -274,9 +265,11 @@ mod tests {
             memory_limit: 1073741824,
         };
         let factory = DataFusionSessionFactory::with_config(&settings).unwrap();
+        let session = factory.create_session();
+        let target_partitions = session.state().config().target_partitions();
 
         // Should auto-detect CPU cores (at least 1)
-        assert!(factory.target_partitions >= 1);
-        assert!(factory.target_partitions <= 16); // Capped at max_partitions
+        assert!(target_partitions >= 1);
+        assert!(target_partitions <= 16); // Capped at max_partitions
     }
 }

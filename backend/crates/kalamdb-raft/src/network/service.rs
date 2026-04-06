@@ -7,7 +7,10 @@
 //! - Client proposal forwarding (forward proposals from followers to leader)
 
 use kalamdb_pg::{KalamPgService, PgServiceServer};
+use std::io::ErrorKind;
+use std::time::Duration;
 use tokio::sync::oneshot;
+use tokio::time::sleep;
 use tonic::transport::{Certificate, Identity, ServerTlsConfig};
 use tonic::{Request, Response, Status};
 use tonic_prost::ProstCodec;
@@ -418,18 +421,13 @@ pub async fn start_rpc_server(
     };
 
     // Try to bind the TCP listener first to detect port conflicts early
-    let listener = tokio::net::TcpListener::bind(addr).await.map_err(|e| {
-        crate::RaftError::Internal(format!(
-            "Failed to bind Raft RPC server to {}: {}. Is the port already in use?",
-            bind_addr, e
-        ))
-    })?;
+    let listener = bind_rpc_listener(addr, &bind_addr).await?;
 
     // Raft consensus service (vote, append_entries, install_snapshot, client_proposal)
     let raft_service = RaftService::new(Arc::clone(&manager));
     let raft_server = raft_server::RaftServer::new(raft_service);
 
-    // Cluster messaging service (notify_followers, forward_sql, ping)
+    // Cluster messaging service (forward_sql, ping, get_node_info)
     let cluster_service =
         super::cluster_handler::ClusterServiceImpl::new(cluster_handler, Arc::clone(&manager));
     let cluster_server =
@@ -525,6 +523,45 @@ pub async fn start_rpc_server(
             ))
         },
     }
+}
+
+async fn bind_rpc_listener(
+    addr: std::net::SocketAddr,
+    bind_addr: &str,
+) -> Result<tokio::net::TcpListener, crate::RaftError> {
+    let retry_ephemeral = addr.port() == 0;
+    let mut last_error = None;
+
+    for _ in 0..20 {
+        match tokio::net::TcpListener::bind(addr).await {
+            Ok(listener) => return Ok(listener),
+            Err(err)
+                if retry_ephemeral
+                    && matches!(err.kind(), ErrorKind::AddrNotAvailable | ErrorKind::AddrInUse) =>
+            {
+                last_error = Some(err);
+                sleep(Duration::from_millis(50)).await;
+            },
+            Err(err) => {
+                return Err(crate::RaftError::Internal(format!(
+                    "Failed to bind Raft RPC server to {}: {}. Is the port already in use?",
+                    bind_addr, err
+                )));
+            },
+        }
+    }
+
+    let err = last_error.unwrap_or_else(|| {
+        std::io::Error::new(
+            ErrorKind::AddrNotAvailable,
+            "failed to bind ephemeral Raft RPC listener after retries",
+        )
+    });
+
+    Err(crate::RaftError::Internal(format!(
+        "Failed to bind Raft RPC server to {}: {}. Is the port already in use?",
+        bind_addr, err
+    )))
 }
 
 #[cfg(test)]

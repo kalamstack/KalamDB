@@ -28,7 +28,7 @@ use kalamdb_vector::{
 use std::sync::Arc;
 
 fn create_executor(app_context: Arc<AppContext>) -> SqlExecutor {
-    let registry = Arc::new(HandlerRegistry::new(app_context.clone()));
+    let registry = Arc::new(HandlerRegistry::new());
     kalamdb_handlers::register_all_handlers(&registry, app_context.clone(), false);
     SqlExecutor::new(app_context, registry)
 }

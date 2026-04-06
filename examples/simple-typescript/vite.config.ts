@@ -24,6 +24,6 @@ export default defineConfig({
     target: 'es2020'
   },
   optimizeDeps: {
-    exclude: ['kalam-link']
+    exclude: ['@kalamdb/client']
   }
 })

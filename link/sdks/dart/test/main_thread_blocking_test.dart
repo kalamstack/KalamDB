@@ -160,13 +160,6 @@ class _MockRustLibApi extends MockRustLibApi {
   }
 
   @override
-  Future<gen.DartHealthCheckResponse> crateApiDartHealthCheck({
-    required DartKalamClient client,
-  }) async {
-    throw UnimplementedError();
-  }
-
-  @override
   Future<gen.DartConnectionEvent?> crateApiDartNextConnectionEvent({
     required DartKalamClient client,
   }) async {

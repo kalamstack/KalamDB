@@ -1,4 +1,5 @@
 use super::*;
+use crate::error::KalamDbError;
 use crate::live::manager::ConnectionsManager;
 use crate::sql::executor::SqlExecutor;
 use crate::test_helpers::test_app_context_simple;
@@ -10,6 +11,7 @@ use kalamdb_commons::schemas::{
 use kalamdb_commons::websocket::{SubscriptionOptions, SubscriptionRequest};
 use kalamdb_commons::{NamespaceId, TableName};
 use kalamdb_commons::{NodeId, UserId};
+use kalamdb_sql::parser::query_parser::QueryParser;
 use kalamdb_sharding::ShardRouter;
 use kalamdb_store::test_utils::TestDb;
 use kalamdb_tables::{
@@ -28,12 +30,12 @@ fn create_test_subscription_request(
     SubscriptionRequest {
         id,
         sql,
-        options: SubscriptionOptions {
+        options: Some(SubscriptionOptions {
             batch_size: None,
             last_rows,
             from: None,
             snapshot_end_seq: None,
-        },
+        }),
     }
 }
 
@@ -42,7 +44,6 @@ async fn create_test_manager() -> (Arc<ConnectionsManager>, LiveQueryManager, Te
     let test_db = TestDb::new(&[]).unwrap();
     let backend: Arc<dyn kalamdb_store::StorageBackend> = test_db.backend();
 
-    let live_queries_provider = app_ctx.system_tables().live_queries();
     let schema_registry = app_ctx.schema_registry();
     let base_session_context = app_ctx.base_session_context();
 
@@ -148,16 +149,11 @@ async fn create_test_manager() -> (Arc<ConnectionsManager>, LiveQueryManager, Te
         Duration::from_secs(5),
     );
 
-    let manager = LiveQueryManager::new(
-        live_queries_provider,
-        schema_registry,
-        connection_registry.clone(),
-        base_session_context,
-        Arc::clone(&app_ctx),
-    );
+    let manager =
+        LiveQueryManager::new(schema_registry, connection_registry.clone(), base_session_context);
     let sql_executor = Arc::new(SqlExecutor::new(
         app_ctx.clone(),
-        Arc::new(crate::sql::executor::handler_registry::HandlerRegistry::new(app_ctx.clone())),
+        Arc::new(crate::sql::executor::handler_registry::HandlerRegistry::new()),
     ));
     manager.set_sql_executor(sql_executor);
     (connection_registry, manager, test_db)
@@ -175,7 +171,6 @@ fn register_and_auth_connection(
         .unwrap();
     let connection_state = registration.state;
     connection_state.mark_authenticated(user_id.clone(), kalamdb_commons::models::Role::User);
-    registry.on_authenticated(&connection_id, user_id);
     connection_state
 }
 
@@ -362,18 +357,20 @@ async fn test_register_subscription() {
 
 #[tokio::test]
 async fn test_extract_table_name() {
-    let (_registry, manager, _test_db) = create_test_manager().await;
+    let (_registry, _manager, _test_db) = create_test_manager().await;
 
-    let table_name = manager
-        .extract_table_name_from_query("SELECT * FROM user1.messages WHERE id > 0")
+    let table_name = QueryParser::extract_table_name("SELECT * FROM user1.messages WHERE id > 0")
+        .map_err(KalamDbError::from)
         .unwrap();
     assert_eq!(table_name, "user1.messages");
 
-    let table_name = manager.extract_table_name_from_query("select id from test.users").unwrap();
+    let table_name = QueryParser::extract_table_name("select id from test.users")
+        .map_err(KalamDbError::from)
+        .unwrap();
     assert_eq!(table_name, "test.users");
 
-    let table_name = manager
-        .extract_table_name_from_query("SELECT * FROM \"ns.my_table\" WHERE x = 1")
+    let table_name = QueryParser::extract_table_name("SELECT * FROM \"ns.my_table\" WHERE x = 1")
+        .map_err(KalamDbError::from)
         .unwrap();
     assert_eq!(table_name, "ns.my_table");
 }
@@ -500,9 +497,8 @@ async fn test_unregister_connection() {
     let removed_live_ids = manager.unregister_connection(&user_id, &connection_id).await.unwrap();
     assert_eq!(removed_live_ids.len(), 2);
 
-    let stats = manager.get_stats().await;
-    assert_eq!(stats.total_connections, 0);
-    assert_eq!(stats.total_subscriptions, 0);
+    assert_eq!(registry.connection_count(), 0);
+    assert_eq!(registry.subscription_count(), 0);
 }
 
 /// Test unregistering a subscription - verifies RwLock was removed correctly
@@ -539,8 +535,7 @@ async fn test_unregister_subscription() {
         .await
         .unwrap();
 
-    let stats = manager.get_stats().await;
-    assert_eq!(stats.total_subscriptions, 0);
+    assert_eq!(registry.subscription_count(), 0);
 }
 
 #[tokio::test]
@@ -589,9 +584,8 @@ async fn test_multi_subscription_support() {
         .unwrap();
     let live_id3 = result3.live_id;
 
-    let stats = manager.get_stats().await;
-    assert_eq!(stats.total_connections, 1);
-    assert_eq!(stats.total_subscriptions, 3);
+    assert_eq!(registry.connection_count(), 1);
+    assert_eq!(registry.subscription_count(), 3);
 
     // Verify all subscriptions are tracked (DashMap - no RwLock)
     let table_id1 = TableId::from_strings("user1", "messages");

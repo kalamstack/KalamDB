@@ -252,13 +252,21 @@ impl JobsManager {
         };
         let flush_check_enabled = flush_check_interval.is_some();
 
-        // WAL cleanup: flush all RocksDB memtables every 5 minutes so idle
-        // column families advance their log numbers and stale WAL files are deleted.
-        let mut wal_cleanup_interval = tokio::time::interval_at(
-            Instant::now() + Duration::from_secs(300),
-            Duration::from_secs(300),
-        );
-        wal_cleanup_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        // WAL cleanup scheduler interval (configurable, default 300 seconds).
+        // Flushes all RocksDB memtables so idle column families advance their
+        // log numbers and stale WAL files can be reclaimed.
+        let wal_cleanup_secs = app_context.config().jobs.wal_cleanup_interval_seconds;
+        let mut wal_cleanup_interval = if wal_cleanup_secs > 0 {
+            let mut interval = tokio::time::interval_at(
+                Instant::now() + Duration::from_secs(wal_cleanup_secs),
+                Duration::from_secs(wal_cleanup_secs),
+            );
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            Some(interval)
+        } else {
+            None
+        };
+        let wal_cleanup_enabled = wal_cleanup_interval.is_some();
 
         // Leadership check interval (for cluster mode)
         let mut leadership_interval = tokio::time::interval_at(
@@ -326,13 +334,26 @@ impl JobsManager {
                 }
                 // Periodic WAL cleanup: flush all RocksDB memtables so idle CFs
                 // don't pin WAL files forever (prevents WAL file accumulation)
-                _ = wal_cleanup_interval.tick() => {
+                _ = async {
+                    if wal_cleanup_enabled {
+                        let interval = wal_cleanup_interval
+                            .as_mut()
+                            .expect("wal cleanup interval missing");
+                        interval.tick().await;
+                    }
+                }, if wal_cleanup_enabled => {
                     let app_ctx = self.get_attached_app_context();
                     let backend = app_ctx.storage_backend();
-                    if let Err(e) = backend.flush_all_memtables() {
-                        log::warn!("WAL cleanup flush_all_memtables failed: {}", e);
-                    } else {
-                        log::debug!("WAL cleanup: flushed all memtables");
+                    match tokio::task::spawn_blocking(move || backend.flush_all_memtables()).await {
+                        Ok(Ok(())) => {
+                            log::debug!("WAL cleanup: flushed all memtables");
+                        },
+                        Ok(Err(e)) => {
+                            log::warn!("WAL cleanup flush_all_memtables failed: {}", e);
+                        },
+                        Err(e) => {
+                            log::warn!("WAL cleanup task join failed: {}", e);
+                        },
                     }
                     continue;
                 }
@@ -723,48 +744,50 @@ impl JobsManager {
             // Phase 2: Execute LEADER actions (ONLY on leader)
             // ============================================
             if is_leader {
-                let node_ids = self.active_cluster_node_ids();
-                let quorum_result = self
-                    .wait_for_job_nodes_quorum(
-                        &job_id,
-                        &node_ids,
-                        Duration::from_secs(JOB_NODE_QUORUM_TIMEOUT_SECS),
-                    )
-                    .await?;
+                if job_type.has_local_work() {
+                    let node_ids = self.active_cluster_node_ids();
+                    let quorum_result = self
+                        .wait_for_job_nodes_quorum(
+                            &job_id,
+                            &node_ids,
+                            Duration::from_secs(JOB_NODE_QUORUM_TIMEOUT_SECS),
+                        )
+                        .await?;
 
-                match quorum_result {
-                    JobNodeQuorumResult::Failed { failed_nodes } => {
-                        let reason = format!(
-                            "Local phase failed on nodes: {}",
-                            failed_nodes
-                                .iter()
-                                .map(|id| id.to_string())
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        );
-                        self.mark_job_failed(&job_id, reason).await?;
-                        return Ok(());
-                    },
-                    JobNodeQuorumResult::TimedOut { completed, total } => {
-                        self.log_job_event(
-                            &job_id,
-                            &Level::Warn,
-                            &format!(
-                                "Quorum timeout (completed {}/{}); proceeding with leader actions",
-                                completed, total
-                            ),
-                        );
-                    },
-                    JobNodeQuorumResult::QuorumReached { completed, total } => {
-                        log_job!(
-                            self,
-                            &job_id,
-                            Level::Trace,
-                            "Quorum reached (completed {}/{})",
-                            completed,
-                            total
-                        );
-                    },
+                    match quorum_result {
+                        JobNodeQuorumResult::Failed { failed_nodes } => {
+                            let reason = format!(
+                                "Local phase failed on nodes: {}",
+                                failed_nodes
+                                    .iter()
+                                    .map(|id| id.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            );
+                            self.mark_job_failed(&job_id, reason).await?;
+                            return Ok(());
+                        },
+                        JobNodeQuorumResult::TimedOut { completed, total } => {
+                            self.log_job_event(
+                                &job_id,
+                                &Level::Warn,
+                                &format!(
+                                    "Quorum timeout (completed {}/{}); proceeding with leader actions",
+                                    completed, total
+                                ),
+                            );
+                        },
+                        JobNodeQuorumResult::QuorumReached { completed, total } => {
+                            log_job!(
+                                self,
+                                &job_id,
+                                Level::Trace,
+                                "Quorum reached (completed {}/{})",
+                                completed,
+                                total
+                            );
+                        },
+                    }
                 }
 
                 if job_type.has_leader_actions() {
@@ -1037,48 +1060,50 @@ impl JobsManager {
     async fn resume_leader_actions(&self, job: Job) -> Result<(), KalamDbError> {
         let job_id = job.job_id.clone();
 
-        let node_ids = self.active_cluster_node_ids();
-        let quorum_result = self
-            .wait_for_job_nodes_quorum(
-                &job_id,
-                &node_ids,
-                Duration::from_secs(JOB_NODE_QUORUM_TIMEOUT_SECS),
-            )
-            .await?;
+        if job.job_type.has_local_work() {
+            let node_ids = self.active_cluster_node_ids();
+            let quorum_result = self
+                .wait_for_job_nodes_quorum(
+                    &job_id,
+                    &node_ids,
+                    Duration::from_secs(JOB_NODE_QUORUM_TIMEOUT_SECS),
+                )
+                .await?;
 
-        match quorum_result {
-            JobNodeQuorumResult::Failed { failed_nodes } => {
-                let reason = format!(
-                    "Local phase failed on nodes: {}",
-                    failed_nodes.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ")
-                );
-                self.mark_job_failed(&job_id, reason).await?;
-                return Ok(());
-            },
-            JobNodeQuorumResult::TimedOut { completed, total } => {
-                // If completed=0, job was never started on workers (failover of queued job)
-                // Use debug level to reduce noise, otherwise warn
-                let level = if completed == 0 {
-                    Level::Debug
-                } else {
-                    Level::Warn
-                };
-                self.log_job_event(
-                    &job_id,
-                    &level,
-                    &format!(
-                        "Quorum timeout (completed {}/{}); proceeding with leader actions",
-                        completed, total
-                    ),
-                );
-            },
-            JobNodeQuorumResult::QuorumReached { completed, total } => {
-                self.log_job_event(
-                    &job_id,
-                    &Level::Debug,
-                    &format!("Quorum reached (completed {}/{})", completed, total),
-                );
-            },
+            match quorum_result {
+                JobNodeQuorumResult::Failed { failed_nodes } => {
+                    let reason = format!(
+                        "Local phase failed on nodes: {}",
+                        failed_nodes.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ")
+                    );
+                    self.mark_job_failed(&job_id, reason).await?;
+                    return Ok(());
+                },
+                JobNodeQuorumResult::TimedOut { completed, total } => {
+                    // If completed=0, job was never started on workers (failover of queued job)
+                    // Use debug level to reduce noise, otherwise warn
+                    let level = if completed == 0 {
+                        Level::Debug
+                    } else {
+                        Level::Warn
+                    };
+                    self.log_job_event(
+                        &job_id,
+                        &level,
+                        &format!(
+                            "Quorum timeout (completed {}/{}); proceeding with leader actions",
+                            completed, total
+                        ),
+                    );
+                },
+                JobNodeQuorumResult::QuorumReached { completed, total } => {
+                    self.log_job_event(
+                        &job_id,
+                        &Level::Debug,
+                        &format!("Quorum reached (completed {}/{})", completed, total),
+                    );
+                },
+            }
         }
 
         if job.job_type.has_leader_actions() {

@@ -16,10 +16,7 @@
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": [
-    "src",
-    "tests",
-    "playwright.config.ts"
-  ],
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

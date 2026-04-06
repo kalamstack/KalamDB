@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Rewrite `link/sdks/typescript/README.md` to accurately document the current `kalam-link` SDK API, including topic produce/consume workflows suitable for npmjs publishing.
+**Goal:** Rewrite `link/sdks/typescript/client/README.md` to accurately document the current `@kalamdb/client` SDK API, including the split between app-facing client APIs and the worker-facing `@kalamdb/consumer` package.
 
 **Architecture:** Derive content directly from `src/index.ts`, `src/client.ts`, `src/types.ts`, and `src/file_ref.ts`. Provide practical examples first, then a complete API reference section grouped by lifecycle/auth/query/subscription/topic/file helpers.
 
@@ -13,7 +13,7 @@
 ### Task 1: Build source-accurate README outline
 
 **Files:**
-- Modify: `/Users/jamal/git/KalamDB/link/sdks/typescript/README.md`
+- Modify: `/Users/jamal/git/KalamDB/link/sdks/typescript/client/README.md`
 
 **Step 1: Capture export surface from `src/index.ts`**
 - Ensure every documented symbol is actually exported.
@@ -27,7 +27,7 @@
 ### Task 2: Rewrite README content
 
 **Files:**
-- Modify: `/Users/jamal/git/KalamDB/link/sdks/typescript/README.md`
+- Modify: `/Users/jamal/git/KalamDB/link/sdks/typescript/client/README.md`
 
 **Step 1: Replace outdated sections and imports**
 - Remove unsupported legacy API references.
@@ -44,7 +44,7 @@
 - Modify as needed.
 
 **Step 1: Run TypeScript build check for SDK package**
-Run: `npm --prefix /Users/jamal/git/KalamDB/link/sdks/typescript run build:ts`
+Run: `npm --prefix /Users/jamal/git/KalamDB/link/sdks/typescript/client run build:ts`
 Expected: PASS.
 
 **Step 2: Run README consistency grep checks**

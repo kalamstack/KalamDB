@@ -11,7 +11,7 @@ const DEFAULT_INPUT_COLUMN: &str = "content";
 const DEFAULT_OUTPUT_COLUMN: &str = "summary";
 const DEFAULT_SYSTEM_PROMPT: &str =
     "Write one concise sentence summarizing the content. Preserve key facts and avoid hallucinations.";
-const FALLBACK_LOCAL_SDK_PATH: &str = "../../link/sdks/typescript";
+const FALLBACK_LOCAL_SDK_PATH: &str = "../../link/sdks/typescript/client";
 
 #[derive(Debug, Clone)]
 struct AgentScaffoldConfig {
@@ -353,7 +353,7 @@ fn detect_sdk_dependency(project_dir: &Path) -> Result<String> {
         .map_err(|e| CLIError::FileError(format!("Failed to read current directory: {}", e)))?;
 
     for ancestor in cwd.ancestors() {
-        let candidate = ancestor.join("link/sdks/typescript");
+        let candidate = ancestor.join("link/sdks/typescript/client");
         if candidate.join("package.json").exists() {
             let relative = relative_path(project_dir, &candidate);
             let relative_str = relative.to_string_lossy().replace('\\', "/").trim().to_string();
@@ -525,7 +525,7 @@ fn render_package_json(package_name: &str, sdk_dependency: &str) -> String {
   "dependencies": {{
     "@langchain/openai": "^0.3.17",
     "dotenv": "^17.3.1",
-    "kalam-link": "{sdk_dependency}"
+    "@kalamdb/client": "{sdk_dependency}"
   }},
   "devDependencies": {{
     "@types/node": "^24.3.0",
@@ -823,7 +823,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SDK_DIR="$(cd "$PROJECT_DIR/{sdk_path}" && pwd)"
-WASM_FILE="$SDK_DIR/dist/wasm/kalam_link_bg.wasm"
+WASM_FILE="$SDK_DIR/dist/wasm/kalam_client_bg.wasm"
 SDK_ENTRY="$SDK_DIR/dist/src/index.js"
 
 needs_build=0
@@ -832,20 +832,20 @@ if [[ ! -f "$WASM_FILE" || ! -f "$SDK_ENTRY" ]]; then
 fi
 
 if [[ "$needs_build" -eq 0 ]]; then
-  if find "$SDK_DIR/src" "$SDK_DIR/../../src" -type f -newer "$SDK_ENTRY" | head -n 1 | grep -q .; then
+  if find "$SDK_DIR/src" "$SDK_DIR/../../../kalam-client/src" "$SDK_DIR/../../../link-common/src" -type f -newer "$SDK_ENTRY" | head -n 1 | grep -q .; then
     needs_build=1
   fi
 fi
 
 if [[ "$needs_build" -eq 1 ]]; then
-  echo "[ensure-sdk] Building local kalam-link SDK..."
+  echo "[ensure-sdk] Building local @kalamdb/client SDK..."
   (
     cd "$SDK_DIR"
     bash ./build.sh
   )
   echo "[ensure-sdk] SDK build complete"
 else
-  echo "[ensure-sdk] Local kalam-link SDK is up to date"
+  echo "[ensure-sdk] Local @kalamdb/client SDK is up to date"
 fi
 "#,
         sdk_path = sdk_relative_for_script,
@@ -863,7 +863,7 @@ import {{
   runAgent,
   type AgentContext,
   type AgentLLMAdapter,
-}} from 'kalam-link';
+}} from '@kalamdb/client';
 
 loadEnv({{ path: '.env.local', quiet: true }});
 loadEnv({{ quiet: true }});

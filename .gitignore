@@ -108,3 +108,12 @@ ui/package-lock.json
 /link/sdks/typescript/.wasm-cargo-home-test2
 ts-sdk-repro/server.toml
 /benchv2/logs
+/benchv2/logs
+/link/kalam-client/sdks/typescript/.wasm-cargo-home
+/link/kalam-client/sdks/typescript/.wasm-target
+/link/kalam-client/sdks/typescript/client/.wasm-cargo-home
+/link/kalam-client/sdks/typescript/client/.wasm-target
+/link/kalam-consumer-wasm/sdks/typescript/consumer/.wasm-cargo-home
+/link/kalam-consumer-wasm/sdks/typescript/consumer/.wasm-target
+/link/sdks/typescript/client/.wasm-cargo-home
+/link/sdks/typescript/client/.wasm-target

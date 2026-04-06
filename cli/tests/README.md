@@ -143,6 +143,12 @@ Multi-node cluster functionality (future).
 
 **Run with**: `cargo test --test cluster`
 
+### 12. **performance/** - Live Server Performance Guards
+Opt-in performance regression tests that measure a running server without auto-starting it.
+- `test_server_memory_regression.rs` - Warmed insert/read workload with server RSS and `system.stats` peak/recovery checks against a post-warmup steady baseline
+
+**Run with**: `cargo nextest run --features e2e-tests --test performance --run-ignored ignored-only`
+
 ## Running Tests
 
 ### Run All Tests
@@ -161,6 +167,7 @@ cargo test --test tables
 cargo test --test flushing
 cargo test --test storage
 cargo test --test smoke
+cargo nextest run --features e2e-tests --test performance --run-ignored ignored-only
 ```
 
 ### Run Specific Smoke Test Subcategory

@@ -2,17 +2,17 @@
 //!
 //! These models support both live query WebSocket subscriptions and topic consumer connections.
 
-use dashmap::DashMap;
 use datafusion::sql::sqlparser::ast::Expr;
 use kalamdb_commons::ids::SeqId;
 use kalamdb_commons::models::{ConnectionId, ConnectionInfo, LiveQueryId, TableId, UserId};
-use kalamdb_commons::websocket::{CompressionType, ProtocolOptions, SerializationType};
 use kalamdb_commons::websocket::WireNotification;
+use kalamdb_commons::websocket::{CompressionType, ProtocolOptions, SerializationType};
 use kalamdb_commons::Role;
-use parking_lot::Mutex;
-use std::collections::VecDeque;
+use parking_lot::{Mutex, RwLock};
+use std::collections::{HashMap, VecDeque};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, Weak};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
@@ -22,13 +22,64 @@ fn epoch_millis() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
 }
 
-/// Maximum pending notifications per connection before dropping new ones
-pub const NOTIFICATION_CHANNEL_CAPACITY: usize = 1000;
+#[derive(Default)]
+struct SubscriptionStringPool {
+    buckets: HashMap<u64, Vec<Weak<str>>>,
+}
+
+impl SubscriptionStringPool {
+    fn intern(&mut self, value: &str) -> Arc<str> {
+        let hash = hash_subscription_str(value);
+        let bucket = self.buckets.entry(hash).or_default();
+        let mut dead_entries = 0usize;
+
+        for weak in bucket.iter() {
+            match weak.upgrade() {
+                Some(existing) if existing.as_ref() == value => return existing,
+                Some(_) => {},
+                None => dead_entries += 1,
+            }
+        }
+
+        if dead_entries > 0 {
+            bucket.retain(|weak| weak.strong_count() > 0);
+        }
+
+        let interned: Arc<str> = Arc::from(value);
+        bucket.push(Arc::downgrade(&interned));
+        interned
+    }
+}
+
+fn hash_subscription_str(value: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    value.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn subscription_string_pool() -> &'static Mutex<SubscriptionStringPool> {
+    static STRING_POOL: OnceLock<Mutex<SubscriptionStringPool>> = OnceLock::new();
+    STRING_POOL.get_or_init(|| Mutex::new(SubscriptionStringPool::default()))
+}
+
+fn intern_subscription_str(value: &str) -> Arc<str> {
+    if value.is_empty() {
+        return Arc::from("");
+    }
+
+    subscription_string_pool().lock().intern(value)
+}
+
+/// Maximum pending notifications per connection before dropping new ones.
+/// Keep this modest: large snapshot catch-up is handled by per-subscription
+/// flow control, while a smaller live buffer reduces worst-case memory per
+/// slow connection.
+pub const NOTIFICATION_CHANNEL_CAPACITY: usize = 256;
 
 /// Maximum pending control events per connection.
-/// At high connection counts, the heartbeat checker may queue multiple events
-/// (ping, timeout, shutdown) before the handler processes them.
-pub const EVENT_CHANNEL_CAPACITY: usize = 64;
+/// Only a few event kinds exist (auth timeout, heartbeat timeout, shutdown),
+/// so a small queue is sufficient and reduces fixed per-connection footprint.
+pub const EVENT_CHANNEL_CAPACITY: usize = 8;
 
 /// Maximum buffered notifications per subscription while initial snapshot loading is in progress.
 ///
@@ -78,9 +129,65 @@ pub struct SubscriptionHandle {
     /// Column projections for filtering notification payload (None = all columns)
     pub projections: Option<Arc<Vec<String>>>,
     /// Shared notification channel
-    pub notification_tx: Arc<NotificationSender>,
-    /// Flow control for initial load buffering and snapshot gating
-    pub flow_control: Arc<SubscriptionFlowControl>,
+    pub notification_tx: NotificationSender,
+    /// Flow control for initial load buffering and snapshot gating.
+    /// None means the subscription was created without initial data.
+    pub flow_control: Option<Arc<SubscriptionFlowControl>>,
+    /// Runtime metadata shared with the full subscription state.
+    pub runtime_metadata: Arc<SubscriptionRuntimeMetadata>,
+}
+
+/// In-memory metadata tracked for active subscriptions only.
+#[derive(Debug)]
+pub struct SubscriptionRuntimeMetadata {
+    query: Arc<str>,
+    options_json: Option<Arc<str>>,
+    created_at_ms: i64,
+    last_update_ms: AtomicI64,
+    changes: AtomicI64,
+}
+
+impl SubscriptionRuntimeMetadata {
+    pub fn new(query: &str, options_json: Option<&str>, created_at_ms: i64) -> Self {
+        Self {
+            query: intern_subscription_str(query),
+            options_json: options_json.map(intern_subscription_str),
+            created_at_ms,
+            last_update_ms: AtomicI64::new(created_at_ms),
+            changes: AtomicI64::new(0),
+        }
+    }
+
+    #[inline]
+    pub fn query(&self) -> &str {
+        &self.query
+    }
+
+    #[inline]
+    pub fn options_json(&self) -> Option<&str> {
+        self.options_json.as_deref()
+    }
+
+    #[inline]
+    pub fn created_at_ms(&self) -> i64 {
+        self.created_at_ms
+    }
+
+    #[inline]
+    pub fn last_update_ms(&self) -> i64 {
+        self.last_update_ms.load(Ordering::Acquire)
+    }
+
+    #[inline]
+    pub fn changes(&self) -> i64 {
+        self.changes.load(Ordering::Acquire)
+    }
+
+    #[inline]
+    pub fn record_delivery(&self) {
+        self.last_update_ms.store(epoch_millis() as i64, Ordering::Release);
+        self.changes.fetch_add(1, Ordering::AcqRel);
+    }
 }
 
 /// Buffered notification with optional SeqId ordering key
@@ -163,29 +270,9 @@ impl SubscriptionFlowControl {
     }
 }
 
-/// Subscription state - stored only in ConnectionState.subscriptions
-///
-/// Contains all metadata needed for:
-/// - Notification filtering (filter_expr)
-/// - Column projections (projections)
-/// - Initial data batch fetching (sql, batch_size, snapshot_end_seq)
-/// - Batch pagination tracking (current_batch_num)
-///
-/// Memory optimization: Uses Arc<str> for SQL and Arc<Expr> for filter
-/// to share data with SubscriptionHandle indices.
+/// Optional initial-load state for subscriptions that fetch a snapshot.
 #[derive(Debug, Clone)]
-pub struct SubscriptionState {
-    pub live_id: LiveQueryId,
-    pub table_id: TableId,
-    /// Original SQL query for batch fetching (Arc for zero-copy)
-    pub sql: Arc<str>,
-    /// Compiled filter expression from WHERE clause (parsed once at subscription time)
-    /// None means no filter (SELECT * without WHERE)
-    /// Arc-wrapped for sharing with SubscriptionHandle
-    pub filter_expr: Option<Arc<Expr>>,
-    /// Column projections from SELECT clause (None = SELECT *, i.e., all columns)
-    /// Arc-wrapped for sharing with SubscriptionHandle
-    pub projections: Option<Arc<Vec<String>>>,
+pub struct InitialLoadState {
     /// Batch size for initial data loading
     pub batch_size: usize,
     /// Snapshot boundary SeqId for consistent batch loading
@@ -195,15 +282,43 @@ pub struct SubscriptionState {
     pub current_batch_num: u32,
     /// Flow control for initial load buffering and snapshot gating
     pub flow_control: Arc<SubscriptionFlowControl>,
+}
+
+/// Subscription state - stored only in ConnectionState.subscriptions
+///
+/// Contains all metadata needed for:
+/// - Notification filtering (filter_expr)
+/// - Column projections (projections)
+/// - Optional initial data batch fetching and pagination
+///
+/// Memory optimization: Uses Arc<Expr> for filter sharing and allocates
+/// snapshot/batch state only when the subscription actually requests it.
+#[derive(Debug, Clone)]
+pub struct SubscriptionState {
+    pub live_id: LiveQueryId,
+    pub table_id: TableId,
+    /// Compiled filter expression from WHERE clause (parsed once at subscription time)
+    /// None means no filter (SELECT * without WHERE)
+    /// Arc-wrapped for sharing with SubscriptionHandle
+    pub filter_expr: Option<Arc<Expr>>,
+    /// Column projections from SELECT clause (None = SELECT *, i.e., all columns)
+    /// Arc-wrapped for sharing with SubscriptionHandle
+    pub projections: Option<Arc<Vec<String>>>,
+    /// Optional initial-load state. None means the subscription streams live changes only.
+    pub initial_load: Option<InitialLoadState>,
     /// Whether this subscription is for a shared table (affects index cleanup)
     pub is_shared: bool,
+    /// Runtime metadata exposed by the in-memory live views.
+    pub runtime_metadata: Arc<SubscriptionRuntimeMetadata>,
 }
 
 /// Connection state — lock-free interior mutability for 100k+ concurrent connections.
 ///
 /// Identity and channel fields are immutable after construction.
 /// Auth fields use set-once primitives (OnceLock + AtomicBool).
-/// Subscriptions use DashMap for concurrent shard-level locking.
+    /// Subscriptions use a compact per-connection map.
+    /// Notification fanout reads from manager-level indices, so connection-local
+    /// subscription access is low-contention and does not need a sharded map.
 /// Heartbeat uses AtomicU64 for zero-contention updates.
 ///
 /// Used for both WebSocket live query connections and topic consumer connections.
@@ -226,10 +341,10 @@ pub struct ConnectionState {
     last_heartbeat_ms: AtomicU64,
 
     // === Subscriptions (concurrent interior-mutable) ===
-    subscriptions: DashMap<String, SubscriptionState>,
+    subscriptions: RwLock<HashMap<Arc<str>, SubscriptionState>>,
 
     // === Channels (immutable after construction) ===
-    pub notification_tx: Arc<NotificationSender>,
+    pub notification_tx: NotificationSender,
     pub event_tx: EventSender,
 }
 
@@ -238,7 +353,7 @@ impl ConnectionState {
     pub fn new(
         connection_id: ConnectionId,
         client_ip: ConnectionInfo,
-        notification_tx: Arc<NotificationSender>,
+        notification_tx: NotificationSender,
         event_tx: EventSender,
     ) -> Self {
         Self {
@@ -251,7 +366,7 @@ impl ConnectionState {
             user_role: OnceLock::new(),
             protocol: OnceLock::new(),
             last_heartbeat_ms: AtomicU64::new(epoch_millis()),
-            subscriptions: DashMap::with_shard_amount(4),
+            subscriptions: RwLock::new(HashMap::new()),
             notification_tx,
             event_tx,
         }
@@ -351,21 +466,27 @@ impl ConnectionState {
         epoch_millis().saturating_sub(self.last_heartbeat_ms.load(Ordering::Acquire))
     }
 
+    /// Last observed heartbeat epoch timestamp in milliseconds.
+    #[inline]
+    pub fn last_heartbeat_ms(&self) -> u64 {
+        self.last_heartbeat_ms.load(Ordering::Acquire)
+    }
+
     // === Subscription management ===
 
     /// Number of active subscriptions.
     pub fn subscription_count(&self) -> usize {
-        self.subscriptions.len()
+        self.subscriptions.read().len()
     }
 
     /// Insert a subscription into the connection's map.
-    pub fn insert_subscription(&self, key: String, state: SubscriptionState) {
-        self.subscriptions.insert(key, state);
+    pub fn insert_subscription(&self, key: Arc<str>, state: SubscriptionState) {
+        self.subscriptions.write().insert(key, state);
     }
 
     /// Remove a subscription by key, returning the removed value.
-    pub fn remove_subscription(&self, key: &str) -> Option<(String, SubscriptionState)> {
-        self.subscriptions.remove(key)
+    pub fn remove_subscription(&self, key: &str) -> Option<(Arc<str>, SubscriptionState)> {
+        self.subscriptions.write().remove_entry(key)
     }
 
     /// Remove a subscription by primary key, falling back to a secondary key
@@ -374,18 +495,19 @@ impl ConnectionState {
         &self,
         primary_key: &str,
         fallback_fn: F,
-    ) -> Option<(String, SubscriptionState)>
+    ) -> Option<(Arc<str>, SubscriptionState)>
     where
         F: FnOnce() -> Option<String>,
     {
-        self.subscriptions
-            .remove(primary_key)
-            .or_else(|| fallback_fn().and_then(|key| self.subscriptions.remove(&key)))
+        let mut subscriptions = self.subscriptions.write();
+        subscriptions.remove_entry(primary_key).or_else(|| {
+            fallback_fn().and_then(|key| subscriptions.remove_entry(key.as_str()))
+        })
     }
 
-    /// Get a subscription by ID (cloned out of the DashMap).
+    /// Get a subscription by ID (cloned out of the connection map).
     pub fn get_subscription(&self, subscription_id: &str) -> Option<SubscriptionState> {
-        self.subscriptions.get(subscription_id).map(|s| s.clone())
+        self.subscriptions.read().get(subscription_id).cloned()
     }
 
     /// Iterate all subscriptions, calling `f` for each.
@@ -393,8 +515,9 @@ impl ConnectionState {
     where
         F: FnMut(&str, &SubscriptionState),
     {
-        for entry in self.subscriptions.iter() {
-            f(entry.key(), entry.value());
+        let subscriptions = self.subscriptions.read();
+        for (key, value) in subscriptions.iter() {
+            f(key.as_ref(), value);
         }
     }
 
@@ -404,33 +527,45 @@ impl ConnectionState {
     where
         F: FnMut(&SubscriptionState) -> T,
     {
-        let mut result = Vec::with_capacity(self.subscriptions.len());
-        // Drain all entries
-        self.subscriptions.retain(|_k, v| {
-            result.push(f(v));
-            false // remove every entry
-        });
+        let mut subscriptions = self.subscriptions.write();
+        let mut result = Vec::with_capacity(subscriptions.len());
+        for (_, value) in subscriptions.drain() {
+            result.push(f(&value));
+        }
         result
     }
 
     /// Update snapshot_end_seq for a subscription.
     pub fn update_snapshot_end_seq(&self, subscription_id: &str, snapshot_end_seq: Option<SeqId>) {
-        if let Some(mut sub) = self.subscriptions.get_mut(subscription_id) {
-            sub.snapshot_end_seq = snapshot_end_seq;
-            sub.flow_control.set_snapshot_end_seq(snapshot_end_seq);
+        if let Some(sub) = self.subscriptions.write().get_mut(subscription_id) {
+            if let Some(initial_load) = sub.initial_load.as_mut() {
+                initial_load.snapshot_end_seq = snapshot_end_seq;
+                initial_load.flow_control.set_snapshot_end_seq(snapshot_end_seq);
+            }
         }
     }
 
     /// Mark initial load complete and flush buffered notifications.
     ///
-    /// Clones the flow_control Arc and drops the DashMap ref before flushing
-    /// to avoid holding the shard lock during channel sends.
+    /// Clones the flow_control Arc and drops the map read lock before flushing
+    /// to avoid holding the lock during channel sends.
     pub fn complete_initial_load(&self, subscription_id: &str) -> usize {
-        let flow_control = match self.subscriptions.get(subscription_id) {
-            Some(sub) => Arc::clone(&sub.flow_control),
-            None => return 0,
+        let (flow_control, runtime_metadata) = {
+            let subscriptions = self.subscriptions.read();
+            match subscriptions.get(subscription_id) {
+                Some(sub) => (
+                    sub.initial_load
+                        .as_ref()
+                        .map(|initial_load| Arc::clone(&initial_load.flow_control)),
+                    Arc::clone(&sub.runtime_metadata),
+                ),
+                None => return 0,
+            }
         };
-        // DashMap ref dropped — shard lock released before sending.
+        let Some(flow_control) = flow_control else {
+            return 0;
+        };
+        // Map guard dropped before sending.
 
         flow_control.mark_initial_complete();
         let buffered = flow_control.drain_buffered_notifications();
@@ -446,6 +581,7 @@ impl ConnectionState {
                     break;
                 }
             } else {
+                runtime_metadata.record_delivery();
                 sent += 1;
             }
         }
@@ -454,9 +590,13 @@ impl ConnectionState {
 
     /// Increment current batch number for a subscription and return the new value.
     pub fn increment_batch_num(&self, subscription_id: &str) -> Option<u32> {
-        if let Some(mut sub) = self.subscriptions.get_mut(subscription_id) {
-            sub.current_batch_num += 1;
-            Some(sub.current_batch_num)
+        if let Some(sub) = self.subscriptions.write().get_mut(subscription_id) {
+            if let Some(initial_load) = sub.initial_load.as_mut() {
+                initial_load.current_batch_num += 1;
+                Some(initial_load.current_batch_num)
+            } else {
+                None
+            }
         } else {
             None
         }
@@ -479,11 +619,7 @@ mod tests {
     fn make_notification(subscription_id: &str) -> Arc<WireNotification> {
         Arc::new(WireNotification {
             subscription_id: Arc::from(subscription_id),
-            payload: Arc::new(SharedChangePayload::new(
-                ChangeType::Insert,
-                Some(Vec::new()),
-                None,
-            )),
+            payload: Arc::new(SharedChangePayload::new(ChangeType::Insert, Some(Vec::new()), None)),
         })
     }
 
@@ -524,5 +660,25 @@ mod tests {
             .collect();
 
         assert_eq!(seqs, vec![3, 6, 9]);
+    }
+
+    #[test]
+    fn test_subscription_runtime_metadata_interns_query_and_options() {
+        let first = SubscriptionRuntimeMetadata::new(
+            "SELECT * FROM shared.events",
+            Some(r#"{"batch_size":100}"#),
+            1,
+        );
+        let second = SubscriptionRuntimeMetadata::new(
+            "SELECT * FROM shared.events",
+            Some(r#"{"batch_size":100}"#),
+            2,
+        );
+
+        assert!(Arc::ptr_eq(&first.query, &second.query));
+        assert!(Arc::ptr_eq(
+            first.options_json.as_ref().expect("options should exist"),
+            second.options_json.as_ref().expect("options should exist"),
+        ));
     }
 }

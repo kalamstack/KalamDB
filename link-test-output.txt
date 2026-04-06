@@ -1,0 +1,10 @@
+   Compiling link-common v0.4.2-rc1 (/Users/jamal/git/KalamDB/link/link-common)
+    Finished `test` profile [unoptimized] target(s) in 3.78s
+     Running unittests src/lib.rs (target/debug/deps/link_common-271fd457d1461f2b)
+
+running 2 tests
+test connection::shared::tests::startup_deadline_disabled_when_initial_timeout_is_zero ... ok
+test connection::shared::tests::startup_deadline_helpers_toggle_resume_state ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 152 filtered out; finished in 0.00s
+

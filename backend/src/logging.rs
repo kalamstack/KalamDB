@@ -169,6 +169,7 @@ pub fn init_logging(
         // JSON lines — includes span fields automatically
         let layer = tracing_subscriber::fmt::layer()
             .json()
+            .flatten_event(true)
             .with_writer(log_file)
             .with_target(true)
             .with_thread_names(true)

@@ -870,8 +870,10 @@ where
         let store = self.clone();
         let prefix = prefix.to_vec();
         let start_key = start_key.map(|s| s.to_vec());
-        run_blocking_result(move || store.scan_with_raw_prefix(&prefix, start_key.as_deref(), limit))
-            .await
+        run_blocking_result(move || {
+            store.scan_with_raw_prefix(&prefix, start_key.as_deref(), limit)
+        })
+        .await
     }
 
     /// Async version of `scan_typed_with_prefix_and_start()` - scans entities with typed prefix and start key.

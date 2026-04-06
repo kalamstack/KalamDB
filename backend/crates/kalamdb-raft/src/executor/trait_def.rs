@@ -54,6 +54,15 @@ pub struct ClusterNodeInfo {
     pub version: Option<String>,
     /// Total system memory in megabytes
     pub memory_mb: Option<u64>,
+    /// Current KalamDB process memory usage in megabytes.
+    /// On macOS this is physical footprint; elsewhere it is RSS.
+    pub memory_usage_mb: Option<u64>,
+    /// Current KalamDB process CPU usage percentage
+    pub cpu_usage_percent: Option<f32>,
+    /// KalamDB server uptime in seconds
+    pub uptime_seconds: Option<u64>,
+    /// KalamDB server uptime in compact human-readable form
+    pub uptime_human: Option<String>,
     /// Operating system (e.g., "linux", "macos", "windows")
     pub os: Option<String>,
     /// CPU architecture (e.g., "x86_64", "aarch64")
@@ -202,6 +211,10 @@ mod tests {
             hostname: Some("node-1.local".to_string()),
             version: Some("0.2.0".to_string()),
             memory_mb: Some(16384),
+            memory_usage_mb: Some(256),
+            cpu_usage_percent: Some(12.5),
+            uptime_seconds: Some(7200),
+            uptime_human: Some("2h 0m".to_string()),
             os: Some("linux".to_string()),
             arch: Some("x86_64".to_string()),
         };
@@ -235,6 +248,10 @@ mod tests {
             hostname: Some("node-2.local".to_string()),
             version: Some("0.2.0".to_string()),
             memory_mb: Some(8192),
+            memory_usage_mb: Some(192),
+            cpu_usage_percent: Some(4.25),
+            uptime_seconds: Some(3600),
+            uptime_human: Some("1h 0m".to_string()),
             os: Some("linux".to_string()),
             arch: Some("aarch64".to_string()),
         };
@@ -331,6 +348,10 @@ mod tests {
             hostname: None,
             version: None,
             memory_mb: None,
+            memory_usage_mb: None,
+            cpu_usage_percent: None,
+            uptime_seconds: None,
+            uptime_human: None,
             os: None,
             arch: None,
         };
@@ -364,6 +385,10 @@ mod tests {
                 hostname: Some("leader.local".to_string()),
                 version: Some("0.2.0".to_string()),
                 memory_mb: Some(32768),
+                memory_usage_mb: Some(384),
+                cpu_usage_percent: Some(8.75),
+                uptime_seconds: Some(10_800),
+                uptime_human: Some("3h 0m".to_string()),
                 os: Some("linux".to_string()),
                 arch: Some("x86_64".to_string()),
             },
@@ -387,6 +412,10 @@ mod tests {
                 hostname: Some("follower.local".to_string()),
                 version: Some("0.2.0".to_string()),
                 memory_mb: Some(16384),
+                memory_usage_mb: Some(224),
+                cpu_usage_percent: Some(2.5),
+                uptime_seconds: Some(9_600),
+                uptime_human: Some("2h 40m".to_string()),
                 os: Some("linux".to_string()),
                 arch: Some("x86_64".to_string()),
             },

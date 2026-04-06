@@ -4,7 +4,7 @@
 //!
 //! Provides user-friendly error messages and context for common CLI failures.
 
-use kalam_link::KalamLinkError;
+use kalam_client::KalamLinkError;
 use std::fmt;
 
 /// Result type for CLI operations
@@ -13,7 +13,7 @@ pub type Result<T> = std::result::Result<T, CLIError>;
 /// Errors that can occur in the CLI
 #[derive(Debug)]
 pub enum CLIError {
-    /// Error from kalam-link library
+    /// Error from the kalam-client library
     LinkError(KalamLinkError),
 
     /// Configuration file error

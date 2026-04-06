@@ -5,7 +5,7 @@ For usage documentation, see [README.md](README.md).
 
 ## Architecture
 
-The Dart SDK is a thin Dart layer over the `kalam-link` Rust core, bridged via
+The Dart SDK is a thin Dart layer over the shared Rust client, bridged via
 [flutter_rust_bridge](https://cjycode.com/flutter_rust_bridge/) v2.
 
 ```
@@ -13,7 +13,8 @@ Flutter App
   └─ kalam_link (Dart package)         ← this package
       └─ Generated FRB bindings          ← lib/src/generated/ (auto-generated, do not edit)
           └─ kalam-link-dart (Rust)      ← link/kalam-link-dart/  (bridge crate)
-              └─ kalam-link              ← link/src/  (core client library)
+              └─ kalam-client            ← link/kalam-client/  (Rust/WASM entry crate)
+                  └─ link-common         ← link/link-common/src/  (shared client implementation)
 ```
 
 The FRB codegen tool reads `#[frb]`-annotated Rust functions in `kalam-link-dart` and generates
@@ -53,11 +54,10 @@ Rust changes.
 From `link/sdks/dart`:
 
 ```bash
-./build.sh                                # flutter pub get + optional FRB generation + dart analyze
-./build_native_libs.sh                    # auto-detect platforms for this OS + build
-./build_native_libs.sh all                # build ALL platforms
-./build_native_libs.sh android ios web    # specific platforms
-./build_native_libs.sh android --all-abis # all four Android ABIs
+./build.sh                                # canonical build: deps + optional FRB generation + native artefacts + analyze
+./build.sh all                            # build every platform (requires all cross-compile toolchains)
+./build.sh android ios web                # build specific platforms and prepare the SDK
+./build.sh android --all-abis             # Android all four ABIs + SDK prep
 ./test.sh                                 # flutter pub get + dart analyze + flutter test
 ./publish.sh                              # validate platform artefacts + publish to pub.dev
 ./publish.sh --dry-run                    # validate only, no upload
@@ -70,11 +70,11 @@ FRB_GENERATE=always ./build.sh   # always regenerate
 FRB_GENERATE=never  ./build.sh   # skip regeneration
 ```
 
-Force native library rebuild in one step:
+Choose the platform set explicitly when needed:
 
 ```bash
-BUILD_NATIVE=1 ./build.sh                              # auto-detect platforms
-BUILD_NATIVE=1 BUILD_PLATFORMS="android ios" ./build.sh # specific platforms
+./build.sh                              # auto-detect platforms for this host
+BUILD_PLATFORMS="android ios" ./build.sh # env override if you prefer not to pass args
 ```
 
 ## Platform Support
@@ -117,13 +117,13 @@ Prerequisites vary by platform:
 # From link/sdks/dart
 
 # Auto-detect and build for current OS platforms
-./build_native_libs.sh
+./build.sh
 
 # Build for specific platforms
-./build_native_libs.sh android ios macos web
+./build.sh android ios macos web
 
 # Build everything (requires all cross-compile toolchains)
-./build_native_libs.sh all
+./build.sh all
 
 # Commit and prepare for publish
 git add android/ ios/ macos/ linux/ windows/ web/
@@ -168,7 +168,7 @@ to [pub.dev](https://pub.dev/packages/kalam_link).
 Before a new release:
 1. Bump `version` in `pubspec.yaml`
 2. Add an entry to `CHANGELOG.md`
-3. Rebuild native libs: `./build_native_libs.sh all` (commit all artefacts)
+3. Rebuild native libs: `./build.sh all` (commit all artefacts)
 4. Commit + tag (`git tag dart-v0.x.y`)
 5. Run `./publish.sh` (validates all platform artefacts exist before uploading)
 
@@ -176,7 +176,8 @@ Before a new release:
 
 | Path | Purpose |
 |------|---------|
-| `link/src/` | Core `kalam-link` Rust library (HTTP, WebSocket, auth) |
-| `link/kalam-link-dart/` | FRB bridge crate — wraps `kalam-link` with `#[frb]` annotations |
+| `link/kalam-client/` | Rust/WASM entry crate used by the Dart bridge |
+| `link/link-common/src/` | Shared Rust client implementation (HTTP, WebSocket, auth) |
+| `link/kalam-link-dart/` | FRB bridge crate — wraps the shared client with `#[frb]` annotations |
 | `link/sdks/dart/lib/src/generated/` | Auto-generated Dart bindings (do not edit manually) |
 | `link/sdks/dart/lib/src/` | Hand-written Dart API layer (`kalam_client.dart`, `auth.dart`, `models.dart`) |

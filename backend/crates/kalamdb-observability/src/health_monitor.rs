@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::runtime_metrics::SHARED_SYSTEM;
+use crate::runtime_metrics::{current_process_physical_footprint_bytes, SHARED_SYSTEM};
 
 /// Global counter for active WebSocket sessions
 /// This is updated by kalamdb-api when sessions start/stop
@@ -118,7 +118,10 @@ impl HealthMonitor {
         let (open_files, open_file_breakdown) = Self::collect_open_file_metrics();
 
         if let Some(proc) = process {
-            let memory_mb = proc.memory() / 1024 / 1024;
+            let rss_mb = proc.memory() / 1024 / 1024;
+            let memory_mb = current_process_physical_footprint_bytes(Some(proc.pid().as_u32()))
+                .map(|bytes| bytes / 1024 / 1024)
+                .unwrap_or(rss_mb);
             let cpu_usage = proc.cpu_usage();
             (Some(memory_mb), Some(cpu_usage), open_files, open_file_breakdown)
         } else {
@@ -216,7 +219,20 @@ impl HealthMonitor {
         let mut segments = Vec::new();
 
         if let Some(memory_mb) = metric_map.get("memory_usage_mb").copied() {
-            segments.push(format!("Memory: {} MB", memory_mb));
+            let rss_mb = metric_map.get("memory_rss_mb").copied();
+            let rss_gap_mb = metric_map.get("memory_rss_gap_mb").copied();
+
+            let mut memory_segment = format!("Memory: {} MB", memory_mb);
+            if let Some(memory_source) = metric_map.get("memory_usage_source").copied() {
+                memory_segment.push_str(&format!(" ({})", memory_source));
+            }
+            if let Some(rss_mb) = rss_mb {
+                memory_segment.push_str(&format!(", rss {} MB", rss_mb));
+            }
+            if let Some(rss_gap_mb) = rss_gap_mb {
+                memory_segment.push_str(&format!(", gap {} MB", rss_gap_mb));
+            }
+            segments.push(memory_segment);
         }
         if let Some(cpu_usage) = metric_map.get("cpu_usage_percent").copied() {
             segments.push(format!("CPU: {}%", cpu_usage));
@@ -423,6 +439,25 @@ mod tests {
         assert!(line.contains("Jobs: 0 running, 0 queued, 0 failed (total: 100)"));
         assert!(line.contains(
             "Caches: Schema 30 latest/45 total, Plan 7, Topics 3 / 12 routes, Strings 88"
+        ));
+    }
+
+    #[test]
+    fn format_log_from_pairs_includes_memory_source_details_when_present() {
+        let metrics = vec![
+            ("memory_usage_mb".to_string(), "109".to_string()),
+            (
+                "memory_usage_source".to_string(),
+                "physical_footprint".to_string(),
+            ),
+            ("memory_rss_mb".to_string(), "141".to_string()),
+            ("memory_rss_gap_mb".to_string(), "32".to_string()),
+        ];
+
+        let line = HealthMonitor::format_log_from_pairs(&metrics);
+
+        assert!(line.contains(
+            "Health metrics: Memory: 109 MB (physical_footprint), rss 141 MB, gap 32 MB"
         ));
     }
 }

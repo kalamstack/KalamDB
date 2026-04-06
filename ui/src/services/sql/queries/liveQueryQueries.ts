@@ -15,7 +15,7 @@ function buildLiveQueriesSelect(): string {
     SELECT live_id, connection_id, subscription_id, namespace_id,
            table_name, user_id, query, options, status,
            created_at, last_update, changes, node_id
-    FROM system.live_queries
+    FROM system.live
   `;
 }
 

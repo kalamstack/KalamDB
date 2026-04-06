@@ -4,7 +4,7 @@
 //!
 //! Provides consistent, colorized output formatting for query results.
 
-use kalam_link::{ErrorDetail, KalamDataType, QueryResponse, TimestampFormatter};
+use kalam_client::{ErrorDetail, KalamDataType, QueryResponse, TimestampFormatter};
 use serde_json::Value as JsonValue;
 
 use crate::{error::Result, session::OutputFormat};
@@ -520,7 +520,7 @@ impl OutputFormatter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kalam_link::TimestampFormat;
+    use kalam_client::TimestampFormat;
 
     #[test]
     fn test_format_json_value() {

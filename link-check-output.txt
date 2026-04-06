@@ -1,0 +1,7 @@
+    Blocking waiting for file lock on build directory
+    Checking link-common v0.4.2-rc1 (/Users/jamal/git/KalamDB/link/link-common)
+    Checking kalam-client v0.4.2-rc1 (/Users/jamal/git/KalamDB/link/kalam-client)
+    Checking kalam-consumer-wasm v0.4.2-rc1 (/Users/jamal/git/KalamDB/link/kalam-consumer-wasm)
+    Checking kalam-link-dart v0.4.2-rc1 (/Users/jamal/git/KalamDB/link/kalam-link-dart)
+    Checking kalam-consumer v0.4.2-rc1 (/Users/jamal/git/KalamDB/link/kalam-consumer)
+    Finished `dev` profile [unoptimized] target(s) in 26.93s

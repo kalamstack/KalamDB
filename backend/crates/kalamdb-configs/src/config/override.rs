@@ -8,6 +8,7 @@ impl ServerConfig {
     /// Supported environment variables (T030):
     /// - KALAMDB_SERVER_HOST: Override server.host
     /// - KALAMDB_SERVER_PORT: Override server.port
+    /// - KALAMDB_SERVER_PUBLIC_ORIGIN: Override server.public_origin
     /// - KALAMDB_LOG_LEVEL: Override logging.level
     /// - KALAMDB_LOGS_DIR: Override logging.logs_path
     /// - KALAMDB_LOG_TO_CONSOLE: Override logging.log_to_console
@@ -64,6 +65,10 @@ impl ServerConfig {
             self.server.port = port_str
                 .parse()
                 .map_err(|_| anyhow::anyhow!("Invalid KALAMDB_SERVER_PORT value: {}", port_str))?;
+        }
+
+        if let Ok(origin) = env::var("KALAMDB_SERVER_PUBLIC_ORIGIN") {
+            self.server.public_origin = Some(origin);
         }
 
         // Log level

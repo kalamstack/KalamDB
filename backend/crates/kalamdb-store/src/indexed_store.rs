@@ -96,8 +96,8 @@
 //! let running_jobs = store.scan_by_index(0, Some(&[JobStatus::Running as u8]), Some(10))?;
 //! ```
 
-use crate::entity_store::{EntityIterator, EntityStore};
 use crate::async_utils::run_blocking_result;
+use crate::entity_store::{EntityIterator, EntityStore};
 use crate::storage_trait::{Operation, Partition, Result, StorageBackend, StorageError};
 use kalamdb_commons::{KSerializable, StorageKey};
 use std::collections::{HashMap, HashSet};

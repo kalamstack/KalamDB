@@ -25,12 +25,12 @@
 //! // Single-node mode (no [cluster] config):
 //! let config = RaftManagerConfig::for_single_node("127.0.0.1:8080".to_string());
 //! let manager = RaftManager::new(config);
-//! let executor = RaftExecutor::new(manager);
+//! let executor = RaftExecutor::new(manager, std::time::Instant::now());
 //!
 //! // Cluster mode:
 //! let config = RaftManagerConfig::from(cluster_config);
 //! let manager = RaftManager::new(config);
-//! let executor = RaftExecutor::new(manager);
+//! let executor = RaftExecutor::new(manager, std::time::Instant::now());
 //!
 //! // Same interface in both modes:
 //! ctx.executor().execute_meta(MetaCommand::CreateTable { ... }).await?;
@@ -69,9 +69,9 @@ pub use manager::{
 };
 pub use network::{start_rpc_server, RaftNetwork, RaftNetworkFactory, RaftService};
 pub use network::{
-    ClusterClient, ClusterMessageHandler, ClusterServiceImpl, ForwardSqlRequest,
-    ForwardSqlResponse, ForwardSqlResponsePayload, GetNodeInfoRequest, GetNodeInfoResponse,
-    NoOpClusterHandler, NotifyFollowersRequest, NotifyFollowersResponse, PingRequest, PingResponse,
+    forward_sql_param, ClusterClient, ClusterMessageHandler, ClusterServiceImpl,
+    ForwardSqlParam, ForwardSqlRequest, ForwardSqlResponse, ForwardSqlResponsePayload,
+    GetNodeInfoRequest, GetNodeInfoResponse, NoOpClusterHandler, PingRequest, PingResponse,
 };
 pub use state_machine::{serde_helpers, ApplyResult, KalamStateMachine, StateMachineSnapshot};
 pub use storage::{KalamNode, KalamRaftStorage, KalamTypeConfig};

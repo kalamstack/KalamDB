@@ -1,6 +1,6 @@
 # Kalam CLI
 
-Interactive terminal client for KalamDB, built on `kalam-link`.
+Interactive terminal client for KalamDB, built on `kalam-client`.
 
 Binary name: `kalam` (from the `cli` crate).
 

@@ -38,7 +38,10 @@ members = [
     "backend/crates/kalamdb-pg",
     "backend/crates/kalamdb-server-auth",
     "backend",
-    "link",
+    "link/link-common",
+    "link/kalam-client",
+    "link/kalam-consumer",
+    "link/kalam-consumer-wasm",
     "link/kalam-link-dart",
     "cli"
 ]
@@ -193,16 +196,17 @@ usearch = "2.24.0"
 parking_lot = "0.12"
 tokio-util = "0.7.18"
 hex = "0.4"
-hmac = "0.12"
+hmac = "0.13.0"
 sha2 = "0.11.0"
 storekey = "0.11"
 moka = { version = "0.12.15", features = ["future", "sync"] }
 ntest = "0.9.5"
 ipnet = "2.11.0"
-wasm-bindgen = { version = "0.2.115" }
-wasm-bindgen-futures = { version = "0.4.65" }
+wasm-bindgen = { version = "0.2.117" }
+wasm-bindgen-futures = { version = "0.4.67" }
 js-sys = { version = "0.3.92" }
-libc = "0.2.183"
+libc = "0.2.184"
+libmimalloc-sys = { version = "0.1.44", features = ["extended"] }
 web-sys = { version = "0.3.92" }
 tsify-next = { version = "0.5.6", default-features = false, features = ["js"] }
 serde-wasm-bindgen = "0.6.5"

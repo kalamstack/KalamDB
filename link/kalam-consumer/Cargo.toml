@@ -1,0 +1,23 @@
+[package]
+name = "kalam-consumer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Topic consumer crate layered on the lightweight KalamDB client"
+keywords = ["kalamdb", "consumer", "topics", "workers"]
+categories = ["database", "web-programming::http-client"]
+
+[dependencies]
+kalam-client = { path = "../kalam-client", default-features = false }
+
+[features]
+default = ["native-sdk"]
+native-sdk = ["kalam-client/native-sdk", "kalam-client/consumer"]
+wasm = ["kalam-client/consumer"]
+http2 = ["kalam-client/http2"]
+
+[lib]
+crate-type = ["rlib"]
