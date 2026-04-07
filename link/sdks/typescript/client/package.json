@@ -1,7 +1,7 @@
 {
   "name": "@kalamdb/client",
   "type": "module",
-  "version": "0.4.2-rc.1",
+  "version": "0.4.2-rc.2",
   "description": "WebAssembly-compatible KalamDB client library with TypeScript support",
   "license": "Apache-2.0",
   "author": "KalamDB Team",
