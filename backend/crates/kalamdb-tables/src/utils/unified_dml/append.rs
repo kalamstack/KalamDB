@@ -77,6 +77,7 @@ pub fn append_version_sync_with_deps(
             let entity = UserTableRow {
                 user_id: user_id.clone(),
                 _seq: seq_id,
+                _commit_seq: 0,
                 _deleted: deleted,
                 fields: json_to_row(&fields).ok_or_else(|| {
                     KalamDbError::InvalidOperation(
@@ -109,6 +110,7 @@ pub fn append_version_sync_with_deps(
             // Create SharedTableRow
             let entity = SharedTableRow {
                 _seq: seq_id,
+                _commit_seq: 0,
                 _deleted: deleted,
                 fields: json_to_row(&fields).ok_or_else(|| {
                     KalamDbError::InvalidOperation(

@@ -13,6 +13,7 @@ pub mod handler_registry;
 pub mod handlers;
 pub mod helpers;
 pub mod parameter_binding;
+pub mod request_transaction_state;
 mod sql_executor;
 
 use crate::sql::executor::handler_registry::HandlerRegistry;

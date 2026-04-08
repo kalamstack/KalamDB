@@ -14,6 +14,7 @@ use crate::{TableId, TableType};
 pub struct ScanRequest {
     pub table_id: TableId,
     pub table_type: TableType,
+    pub session_id: Option<String>,
     pub columns: Vec<String>,
     pub limit: Option<usize>,
     pub user_id: Option<UserId>,
@@ -23,6 +24,7 @@ pub struct ScanRequest {
 pub struct InsertRequest {
     pub table_id: TableId,
     pub table_type: TableType,
+    pub session_id: Option<String>,
     pub user_id: Option<UserId>,
     pub rows: Vec<Row>,
 }
@@ -31,6 +33,7 @@ pub struct InsertRequest {
 pub struct UpdateRequest {
     pub table_id: TableId,
     pub table_type: TableType,
+    pub session_id: Option<String>,
     pub user_id: Option<UserId>,
     pub updates: Vec<Row>,
     pub pk_value: String,
@@ -40,6 +43,7 @@ pub struct UpdateRequest {
 pub struct DeleteRequest {
     pub table_id: TableId,
     pub table_type: TableType,
+    pub session_id: Option<String>,
     pub user_id: Option<UserId>,
     pub pk_value: String,
 }

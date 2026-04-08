@@ -427,7 +427,7 @@ mod tests {
     // detects no-op UPDATEs (same logical value, potentially different ScalarValue type).
 
     /// Build a schema matching the user's chat.messages table:
-    /// id TEXT PK, thread_id TEXT, role TEXT, content TEXT, created_at TIMESTAMP, _seq INT64, _deleted BOOLEAN
+    /// id TEXT PK, thread_id TEXT, role TEXT, content TEXT, created_at TIMESTAMP, _seq INT64, _commit_seq UINT64, _deleted BOOLEAN
     fn chat_messages_schema() -> Arc<Schema> {
         Arc::new(Schema::new(vec![
             Field::new("id", DataType::Utf8, false),
@@ -440,6 +440,7 @@ mod tests {
                 true,
             ),
             Field::new("_seq", DataType::Int64, false),
+            Field::new("_commit_seq", DataType::UInt64, false),
             Field::new("_deleted", DataType::Boolean, false),
         ]))
     }
@@ -453,6 +454,7 @@ mod tests {
             ("content", ScalarValue::Utf8(Some("hello world".into()))),
             ("created_at", ScalarValue::TimestampMicrosecond(Some(1704067200000000), None)),
             ("_seq", ScalarValue::Int64(Some(0))),
+            ("_commit_seq", ScalarValue::UInt64(Some(0))),
             ("_deleted", ScalarValue::Boolean(Some(false))),
         ])
     }

@@ -19,7 +19,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crate::applier::SharedDataApplier;
-use crate::{DataResponse, GroupId, RaftError, SharedDataCommand};
+use crate::{DataResponse, GroupId, RaftCommand, RaftError, SharedDataCommand};
+use kalamdb_commons::models::TransactionId;
+use kalamdb_commons::TableType;
+use kalamdb_transactions::StagedMutation;
 
 use super::{
     decode as bincode_decode, encode as bincode_encode, ApplyResult, KalamStateMachine,
@@ -46,6 +49,23 @@ struct SharedDataSnapshot {
     /// Pending commands waiting for Meta to catch up (for crash recovery)
     #[serde(default)]
     pending_commands: Vec<PendingCommand>,
+}
+
+enum SharedApplyCommand {
+    Shared(SharedDataCommand),
+    TransactionCommit {
+        transaction_id: TransactionId,
+        mutations: Vec<StagedMutation>,
+    },
+}
+
+impl SharedApplyCommand {
+    fn required_meta_index(&self) -> u64 {
+        match self {
+            Self::Shared(command) => command.required_meta_index(),
+            Self::TransactionCommit { .. } => 0,
+        }
+    }
 }
 
 /// State machine for shared table operations
@@ -152,9 +172,8 @@ impl SharedDataStateMachine {
         }
 
         for pending in drained {
-            let cmd =
-                crate::codec::command_codec::decode_shared_data_command(&pending.command_bytes)?;
-            let _ = self.apply_command(cmd).await?;
+            let cmd = Self::decode_apply_command(&pending.command_bytes)?;
+            let _ = self.apply_decoded_command(cmd).await?;
             log::debug!(
                 "SharedDataStateMachine[{}]: Applied buffered command log_index={}",
                 self.shard,
@@ -325,6 +344,70 @@ impl SharedDataStateMachine {
             },
         }
     }
+
+    fn decode_apply_command(command: &[u8]) -> Result<SharedApplyCommand, RaftError> {
+        if let Ok(cmd) = crate::codec::command_codec::decode_shared_data_command(command) {
+            return Ok(SharedApplyCommand::Shared(cmd));
+        }
+
+        match crate::codec::command_codec::decode_raft_command(command)? {
+            RaftCommand::TransactionCommit {
+                transaction_id,
+                mutations,
+            } => Ok(SharedApplyCommand::TransactionCommit {
+                transaction_id,
+                mutations,
+            }),
+            other => Err(RaftError::Serialization(format!(
+                "Unexpected raft command for shared data state machine: {:?}",
+                other
+            ))),
+        }
+    }
+
+    async fn apply_decoded_command(
+        &self,
+        cmd: SharedApplyCommand,
+    ) -> Result<DataResponse, RaftError> {
+        match cmd {
+            SharedApplyCommand::Shared(command) => self.apply_command(command).await,
+            SharedApplyCommand::TransactionCommit {
+                transaction_id,
+                mutations,
+            } => self.apply_transaction_commit(transaction_id, mutations).await,
+        }
+    }
+
+    async fn apply_transaction_commit(
+        &self,
+        transaction_id: TransactionId,
+        mutations: Vec<StagedMutation>,
+    ) -> Result<DataResponse, RaftError> {
+        if mutations.iter().any(|mutation| mutation.table_type != TableType::Shared) {
+            return Ok(DataResponse::error(
+                "TransactionCommit contained non-shared mutation for shared data shard",
+            ));
+        }
+
+        let applier = {
+            let guard = self.applier.read();
+            guard.clone()
+        };
+
+        let Some(applier) = applier else {
+            return Ok(DataResponse::error(
+                "No applier set, transaction commit not persisted",
+            ));
+        };
+
+        match applier.apply_transaction_batch(&transaction_id, &mutations).await {
+            Ok(result) => {
+                self.total_operations.fetch_add(1, Ordering::Relaxed);
+                Ok(DataResponse::TransactionCommitted(result))
+            },
+            Err(error) => Ok(DataResponse::error(error.to_string())),
+        }
+    }
 }
 
 impl Default for SharedDataStateMachine {
@@ -353,7 +436,7 @@ impl KalamStateMachine for SharedDataStateMachine {
         }
 
         // Deserialize command to check watermark
-        let cmd = crate::codec::command_codec::decode_shared_data_command(command)?;
+        let cmd = Self::decode_apply_command(command)?;
         let required_meta = cmd.required_meta_index();
 
         // Check watermark: if Meta is behind AND required_meta > 0, wait for it to catch up.
@@ -390,7 +473,7 @@ impl KalamStateMachine for SharedDataStateMachine {
         }
 
         // Apply current command
-        let response = self.apply_command(cmd).await?;
+        let response = self.apply_decoded_command(cmd).await?;
 
         // Update last applied
         self.last_applied_index.store(index, Ordering::Release);
@@ -462,8 +545,52 @@ impl KalamStateMachine for SharedDataStateMachine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use std::collections::BTreeMap;
     use kalamdb_commons::models::NamespaceId;
+    use kalamdb_commons::models::OperationKind;
+    use kalamdb_commons::models::rows::Row;
     use kalamdb_commons::TableId;
+
+    struct TransactionBatchSharedApplier;
+
+    #[async_trait]
+    impl SharedDataApplier for TransactionBatchSharedApplier {
+        async fn insert(&self, _table_id: &TableId, rows: &[Row]) -> Result<usize, RaftError> {
+            Ok(rows.len())
+        }
+
+        async fn update(
+            &self,
+            _table_id: &TableId,
+            _updates: &[Row],
+            _filter: Option<&str>,
+        ) -> Result<usize, RaftError> {
+            Ok(1)
+        }
+
+        async fn delete(
+            &self,
+            _table_id: &TableId,
+            _pk_values: Option<&[String]>,
+        ) -> Result<usize, RaftError> {
+            Ok(1)
+        }
+
+        async fn apply_transaction_batch(
+            &self,
+            _transaction_id: &TransactionId,
+            mutations: &[StagedMutation],
+        ) -> Result<crate::TransactionApplyResult, RaftError> {
+            Ok(crate::TransactionApplyResult {
+                rows_affected: mutations.len(),
+                commit_seq: 91,
+                notifications_sent: 0,
+                manifest_updates: 0,
+                publisher_events: 0,
+            })
+        }
+    }
 
     #[tokio::test]
     async fn test_shared_data_state_machine_insert() {
@@ -473,6 +600,7 @@ mod tests {
             table_id: TableId::new(NamespaceId::default(), "config".into()),
             rows: vec![],
             required_meta_index: 0,
+            transaction_id: None,
         };
         let cmd_bytes = crate::codec::command_codec::encode_shared_data_command(&cmd).unwrap();
 
@@ -491,6 +619,7 @@ mod tests {
             table_id: TableId::new(NamespaceId::default(), "settings".into()),
             rows: vec![],
             required_meta_index: 0,
+            transaction_id: None,
         };
         sm.apply(1, 1, &crate::codec::command_codec::encode_shared_data_command(&insert).unwrap())
             .await
@@ -502,6 +631,7 @@ mod tests {
             updates: vec![],
             filter: None,
             required_meta_index: 0,
+            transaction_id: None,
         };
         sm.apply(2, 1, &crate::codec::command_codec::encode_shared_data_command(&update).unwrap())
             .await
@@ -512,6 +642,7 @@ mod tests {
             table_id: TableId::new(NamespaceId::default(), "settings".into()),
             pk_values: None,
             required_meta_index: 0,
+            transaction_id: None,
         };
         sm.apply(3, 1, &crate::codec::command_codec::encode_shared_data_command(&delete).unwrap())
             .await
@@ -527,6 +658,44 @@ mod tests {
             assert_eq!(ops[0].operation, "insert");
             assert_eq!(ops[1].operation, "update");
             assert_eq!(ops[2].operation, "delete");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_shared_data_state_machine_transaction_commit() {
+        let sm = SharedDataStateMachine::with_applier(0, Arc::new(TransactionBatchSharedApplier));
+        let transaction_id = TransactionId::new("01960f7b-3d15-7d6d-b26c-7e4db6f25f8d");
+        let table_id = TableId::new(NamespaceId::default(), "config".into());
+
+        let cmd = RaftCommand::TransactionCommit {
+            transaction_id: transaction_id.clone(),
+            mutations: vec![StagedMutation::new(
+                transaction_id,
+                table_id,
+                TableType::Shared,
+                None,
+                OperationKind::Insert,
+                "1",
+                Row::new(BTreeMap::new()),
+                false,
+            )],
+        };
+
+        let payload = crate::codec::command_codec::encode_raft_command(&cmd).unwrap();
+        let result = sm.apply(1, 1, &payload).await.unwrap();
+
+        match result {
+            ApplyResult::Ok(data) => {
+                let response = crate::codec::command_codec::decode_data_response(&data).unwrap();
+                match response {
+                    DataResponse::TransactionCommitted(result) => {
+                        assert_eq!(result.rows_affected, 1);
+                        assert_eq!(result.commit_seq, 91);
+                    },
+                    other => panic!("unexpected response: {:?}", other),
+                }
+            },
+            other => panic!("unexpected apply result: {:?}", other),
         }
     }
 }

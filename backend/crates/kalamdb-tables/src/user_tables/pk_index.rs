@@ -150,6 +150,7 @@ mod tests {
         let row = UserTableRow {
             user_id: user_id.clone(),
             _seq: SeqId::new(seq),
+            _commit_seq: 0,
             _deleted: false,
             fields: Row::new(values),
         };

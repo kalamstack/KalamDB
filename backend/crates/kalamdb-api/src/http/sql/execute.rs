@@ -36,6 +36,7 @@ use kalamdb_raft::GroupId;
 use kalamdb_session::AuthSession;
 use std::sync::Arc;
 use std::time::Instant;
+use uuid::Uuid;
 
 use super::execution_paths::{execute_batch_path, execute_file_upload_path};
 use super::file_utils::extract_file_placeholders;
@@ -114,8 +115,11 @@ pub async fn execute_sql_v1(
     // 4. Build execution context
     let default_namespace = namespace_id.clone().unwrap_or_else(|| NamespaceId::new("default"));
     let base_session = app_context.base_session_context();
-    let exec_ctx = ExecutionContext::from_session(session, Arc::clone(&base_session))
+    let mut exec_ctx = ExecutionContext::from_session(session, Arc::clone(&base_session))
         .with_namespace_id(default_namespace.clone());
+    if exec_ctx.request_id().is_none() {
+        exec_ctx = exec_ctx.with_request_id(Uuid::now_v7().to_string());
+    }
     let auth_username = authorized_username(&exec_ctx);
     let impersonation_service = SqlImpersonationService::new(Arc::clone(app_context.get_ref()));
 
@@ -146,6 +150,7 @@ pub async fn execute_sql_v1(
             &req_for_forward,
             app_context.get_ref(),
             &default_namespace,
+            exec_ctx.request_id(),
         )
         .await
         {

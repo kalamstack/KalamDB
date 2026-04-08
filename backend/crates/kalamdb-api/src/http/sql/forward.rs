@@ -57,6 +57,7 @@ async fn forward_sql_grpc(
     http_req: &HttpRequest,
     req: &QueryRequest,
     app_context: &AppContext,
+    request_id: Option<&str>,
     start_time: Instant,
 ) -> Option<HttpResponse> {
     let client = match cluster_client_for(app_context) {
@@ -79,7 +80,8 @@ async fn forward_sql_grpc(
         sql: req.sql.clone(),
         namespace_id: req.namespace_id.as_ref().map(|ns| ns.to_string()),
         authorization_header: header_to_string(http_req, "Authorization"),
-        request_id: header_to_string(http_req, "X-Request-ID"),
+        request_id: header_to_string(http_req, "X-Request-ID")
+            .or_else(|| request_id.map(ToOwned::to_owned)),
         params,
     };
 
@@ -119,6 +121,7 @@ pub async fn forward_sql_if_follower(
     req: &QueryRequest,
     app_context: &Arc<AppContext>,
     default_namespace: &NamespaceId,
+    request_id: Option<&str>,
 ) -> Option<HttpResponse> {
     let start_time = Instant::now();
     let executor = app_context.executor();
@@ -135,6 +138,7 @@ pub async fn forward_sql_if_follower(
                 http_req,
                 req,
                 app_context.as_ref(),
+                request_id,
                 start_time,
             )
             .await
@@ -164,6 +168,7 @@ pub async fn forward_sql_if_follower(
             http_req,
             req,
             app_context.as_ref(),
+            request_id,
             start_time,
         )
         .await;
@@ -178,6 +183,7 @@ pub async fn handle_not_leader_error(
     http_req: &HttpRequest,
     req: &QueryRequest,
     app_context: &AppContext,
+    request_id: Option<&str>,
     start_time: Instant,
 ) -> Option<HttpResponse> {
     if !app_context.is_cluster_mode() {
@@ -196,6 +202,7 @@ pub async fn handle_not_leader_error(
                 http_req,
                 req,
                 app_context,
+                request_id,
                 start_time,
             )
             .await;
@@ -207,5 +214,13 @@ pub async fn handle_not_leader_error(
         );
     }
 
-    forward_sql_grpc(ForwardTarget::Leader, http_req, req, app_context, start_time).await
+    forward_sql_grpc(
+        ForwardTarget::Leader,
+        http_req,
+        req,
+        app_context,
+        request_id,
+        start_time,
+    )
+    .await
 }

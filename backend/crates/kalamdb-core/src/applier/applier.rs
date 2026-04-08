@@ -9,12 +9,14 @@ use std::sync::Arc;
 
 use kalamdb_commons::models::rows::Row;
 use kalamdb_commons::models::schemas::{TableDefinition, TableType};
-use kalamdb_commons::models::{NamespaceId, StorageId, TableId, UserId};
+use kalamdb_commons::models::{NamespaceId, StorageId, TableId, TransactionId, UserId};
 use kalamdb_raft::{
     DataResponse, GroupId, MetaCommand, RaftExecutor, SharedDataCommand, UserDataCommand,
 };
+use kalamdb_sharding::ShardRouter;
 use kalamdb_system::Storage;
 use kalamdb_system::User;
+use kalamdb_transactions::StagedMutation;
 
 use super::error::ApplierError;
 use super::executor::CommandExecutorImpl;
@@ -140,6 +142,13 @@ pub trait UnifiedApplier: Send + Sync {
         pk_values: Option<Vec<String>>,
     ) -> Result<DataResponse, ApplierError>;
 
+    /// Commit a staged explicit transaction through a single Raft proposal.
+    async fn commit_transaction(
+        &self,
+        transaction_id: TransactionId,
+        mutations: Vec<StagedMutation>,
+    ) -> Result<DataResponse, ApplierError>;
+
     // =========================================================================
     // Status Methods
     // =========================================================================
@@ -227,6 +236,62 @@ impl RaftApplier {
             .execute_shared_data(cmd)
             .await
             .map_err(|e| ApplierError::Raft(e.to_string()))
+    }
+
+    fn transaction_group_id(
+        &self,
+        raft_mgr: &kalamdb_raft::RaftManager,
+        mutations: &[StagedMutation],
+    ) -> Result<GroupId, ApplierError> {
+        if mutations.is_empty() {
+            return Err(ApplierError::Validation(
+                "transaction commit requires at least one staged mutation".to_string(),
+            ));
+        }
+
+        let router = ShardRouter::new(raft_mgr.user_shards(), raft_mgr.shared_shards());
+        let mut expected_group = None;
+
+        for mutation in mutations {
+            let group_id = match mutation.table_type {
+                TableType::User => {
+                    let user_id = mutation.user_id.as_ref().ok_or_else(|| {
+                        ApplierError::Validation(
+                            "user transaction mutation missing user_id".to_string(),
+                        )
+                    })?;
+                    GroupId::DataUserShard(router.user_shard_id(user_id))
+                },
+                TableType::Shared => GroupId::DataSharedShard(router.shared_shard_id()),
+                TableType::Stream => {
+                    return Err(ApplierError::Validation(
+                        "stream tables are not supported in explicit transactions".to_string(),
+                    ));
+                },
+                TableType::System => {
+                    return Err(ApplierError::Validation(
+                        "system tables are not supported in explicit transactions".to_string(),
+                    ));
+                },
+            };
+
+            if let Some(existing_group) = expected_group {
+                if existing_group != group_id {
+                    return Err(ApplierError::Validation(format!(
+                        "explicit transactions must remain within one data raft group; '{}' mapped to {:?} while prior mutations mapped to {:?}",
+                        mutation.table_id, group_id, existing_group
+                    )));
+                }
+            } else {
+                expected_group = Some(group_id);
+            }
+        }
+
+        expected_group.ok_or_else(|| {
+            ApplierError::Validation(
+                "failed to resolve a target raft group for transaction commit".to_string(),
+            )
+        })
     }
 }
 
@@ -339,6 +404,7 @@ impl UnifiedApplier for RaftApplier {
     ) -> Result<DataResponse, ApplierError> {
         let raft_cmd = UserDataCommand::Insert {
             required_meta_index: 0, // Will be set by RaftExecutor
+            transaction_id: None,
             table_id,
             user_id,
             rows,
@@ -355,6 +421,7 @@ impl UnifiedApplier for RaftApplier {
     ) -> Result<DataResponse, ApplierError> {
         let raft_cmd = UserDataCommand::Update {
             required_meta_index: 0, // Will be set by RaftExecutor
+            transaction_id: None,
             table_id,
             user_id,
             updates,
@@ -371,6 +438,7 @@ impl UnifiedApplier for RaftApplier {
     ) -> Result<DataResponse, ApplierError> {
         let raft_cmd = UserDataCommand::Delete {
             required_meta_index: 0, // Will be set by RaftExecutor
+            transaction_id: None,
             table_id,
             user_id,
             pk_values,
@@ -389,6 +457,7 @@ impl UnifiedApplier for RaftApplier {
     ) -> Result<DataResponse, ApplierError> {
         let raft_cmd = SharedDataCommand::Insert {
             required_meta_index: 0, // Will be set by RaftExecutor
+            transaction_id: None,
             table_id,
             rows,
         };
@@ -403,6 +472,7 @@ impl UnifiedApplier for RaftApplier {
     ) -> Result<DataResponse, ApplierError> {
         let raft_cmd = SharedDataCommand::Update {
             required_meta_index: 0, // Will be set by RaftExecutor
+            transaction_id: None,
             table_id,
             updates,
             filter,
@@ -417,6 +487,7 @@ impl UnifiedApplier for RaftApplier {
     ) -> Result<DataResponse, ApplierError> {
         let raft_cmd = SharedDataCommand::Delete {
             required_meta_index: 0, // Will be set by RaftExecutor
+            transaction_id: None,
             table_id,
             pk_values,
         };
@@ -424,6 +495,32 @@ impl UnifiedApplier for RaftApplier {
     }
 
     // =========================================================================
+
+        async fn commit_transaction(
+            &self,
+            transaction_id: TransactionId,
+            mutations: Vec<StagedMutation>,
+        ) -> Result<DataResponse, ApplierError> {
+            let app_ctx = self.executor().app_context();
+            let executor = app_ctx.executor();
+            let raft_exec = executor
+                .as_any()
+                .downcast_ref::<RaftExecutor>()
+                .ok_or(ApplierError::NoLeader)?;
+            let raft_mgr = raft_exec.manager();
+
+            let group_id = self.transaction_group_id(raft_mgr, &mutations)?;
+            let response = raft_mgr
+                .propose_transaction_commit(group_id, transaction_id, mutations)
+                .await
+                .map_err(|e| ApplierError::Raft(e.to_string()))?;
+
+            if let DataResponse::Error { message } = &response {
+                return Err(ApplierError::Raft(message.clone()));
+            }
+
+            Ok(response)
+        }
     // Status Methods
     // =========================================================================
 

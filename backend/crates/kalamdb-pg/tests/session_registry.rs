@@ -34,7 +34,7 @@ fn session_registry_begin_commit_transaction() {
 
     let session = registry.open_or_get("s1");
     assert_eq!(session.transaction_id(), Some(tx_id.as_str()));
-    assert_eq!(session.transaction_state(), Some(TransactionState::Active));
+    assert_eq!(session.transaction_state(), Some(TransactionState::OpenRead));
 
     let committed = registry.commit_transaction("s1", &tx_id).expect("commit");
     assert_eq!(committed, tx_id);
@@ -114,7 +114,9 @@ fn session_registry_mark_writes() {
     assert!(!registry.open_or_get("s1").transaction_has_writes());
 
     registry.mark_transaction_writes("s1");
-    assert!(registry.open_or_get("s1").transaction_has_writes());
+    let session = registry.open_or_get("s1");
+    assert_eq!(session.transaction_state(), Some(TransactionState::OpenWrite));
+    assert!(session.transaction_has_writes());
 }
 
 #[test]
@@ -132,7 +134,7 @@ fn session_registry_multiple_sessions_independent() {
 
     registry.commit_transaction("s1", &tx1).expect("commit s1");
     let s2 = registry.open_or_get("s2");
-    assert_eq!(s2.transaction_state(), Some(TransactionState::Active));
+    assert_eq!(s2.transaction_state(), Some(TransactionState::OpenRead));
 
     registry.rollback_transaction("s2", &tx2).expect("rollback s2");
 }
@@ -146,6 +148,23 @@ fn session_registry_remove_session() {
     let removed = registry.remove("s1");
     assert!(removed.is_some());
     assert_eq!(registry.len(), 0);
+}
+
+#[test]
+fn session_registry_close_session_clears_transaction_state() {
+    let registry = SessionRegistry::default();
+    registry.open_or_get("s1");
+
+    let tx_id = registry.begin_transaction("s1").expect("begin");
+    registry.mark_transaction_writes("s1");
+
+    let closed = registry.close_session("s1").expect("close session");
+    assert_eq!(closed.session_id(), "s1");
+    assert_eq!(closed.transaction_id(), None);
+    assert_eq!(closed.transaction_state(), None);
+    assert!(!closed.transaction_has_writes());
+    assert_eq!(registry.len(), 0);
+    assert!(registry.rollback_transaction("s1", &tx_id).is_err());
 }
 
 #[test]

@@ -154,11 +154,18 @@ pub fn inject_system_columns(
     schema: &SchemaRef,
     row: &mut Row,
     seq_value: i64,
+    commit_seq_value: u64,
     deleted_value: bool,
 ) {
     if schema.field_with_name(SystemColumnNames::SEQ).is_ok() {
         row.values
             .insert(SystemColumnNames::SEQ.to_string(), ScalarValue::Int64(Some(seq_value)));
+    }
+    if schema.field_with_name(SystemColumnNames::COMMIT_SEQ).is_ok() {
+        row.values.insert(
+            SystemColumnNames::COMMIT_SEQ.to_string(),
+            ScalarValue::UInt64(Some(commit_seq_value)),
+        );
     }
     if schema.field_with_name(SystemColumnNames::DELETED).is_ok() {
         row.values.insert(
@@ -172,6 +179,7 @@ pub fn inject_system_columns(
 pub trait ScanRow {
     fn row(&self) -> &Row;
     fn seq_value(&self) -> i64;
+    fn commit_seq_value(&self) -> u64;
     fn deleted_flag(&self) -> bool;
 }
 
@@ -182,6 +190,10 @@ impl ScanRow for crate::SharedTableRow {
 
     fn seq_value(&self) -> i64 {
         self._seq.as_i64()
+    }
+
+    fn commit_seq_value(&self) -> u64 {
+        self._commit_seq
     }
 
     fn deleted_flag(&self) -> bool {
@@ -198,6 +210,10 @@ impl ScanRow for crate::UserTableRow {
         self._seq.as_i64()
     }
 
+    fn commit_seq_value(&self) -> u64 {
+        self._commit_seq
+    }
+
     fn deleted_flag(&self) -> bool {
         self._deleted
     }
@@ -210,6 +226,10 @@ impl ScanRow for crate::StreamTableRow {
 
     fn seq_value(&self) -> i64 {
         self._seq.as_i64()
+    }
+
+    fn commit_seq_value(&self) -> u64 {
+        0
     }
 
     fn deleted_flag(&self) -> bool {
@@ -252,7 +272,13 @@ where
 
         enrich_row(&mut materialized, &row);
 
-        inject_system_columns(schema, &mut materialized, row.seq_value(), row.deleted_flag());
+        inject_system_columns(
+            schema,
+            &mut materialized,
+            row.seq_value(),
+            row.commit_seq_value(),
+            row.deleted_flag(),
+        );
         rows.push(materialized);
     }
 

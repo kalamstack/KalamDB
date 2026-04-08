@@ -146,6 +146,7 @@ mod tests {
         let key = SeqId::new(seq);
         let row = SharedTableRow {
             _seq: SeqId::new(seq),
+            _commit_seq: 0,
             _deleted: false,
             fields: Row::new(values),
         };

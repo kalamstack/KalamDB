@@ -13,6 +13,7 @@ use crate::schema_registry::SchemaRegistry;
 use crate::sql::datafusion_session::DataFusionSessionFactory;
 use crate::sql::executor::SqlExecutor;
 use crate::sql::table_functions::{CoreVectorSearchRuntime, VectorSearchTableFunction};
+use crate::transactions::{CommitSequenceTracker, TransactionCoordinator};
 use crate::views::system_schema_provider::SystemSchemaProvider;
 use async_trait::async_trait;
 use datafusion::catalog::SchemaProvider;
@@ -29,6 +30,7 @@ use kalamdb_store::StorageBackend;
 use kalamdb_system::{ClusterCoordinator, Namespace, SystemTablesRegistry};
 use kalamdb_tables::{SharedTableStore, UserTableStore};
 use kalamdb_views::sessions::{PgSessionSnapshot, SessionsSnapshotCallback};
+use kalamdb_views::transactions::{TransactionSnapshot, TransactionsSnapshotCallback};
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -114,6 +116,10 @@ pub struct AppContext {
     // ===== Unified Applier (single execution path for all commands) =====
     applier: OnceCell<Arc<dyn UnifiedApplier>>,
 
+    // ===== Transaction Coordination =====
+    commit_sequence_tracker: Arc<CommitSequenceTracker>,
+    transaction_coordinator: OnceCell<Arc<TransactionCoordinator>>,
+
     // ===== Shared SqlExecutor =====
     sql_executor: OnceCell<Arc<SqlExecutor>>,
 
@@ -138,6 +144,8 @@ impl std::fmt::Debug for AppContext {
             .field("system_tables", &"Arc<SystemTablesRegistry>")
             .field("executor", &"Arc<dyn CommandExecutor>")
             .field("applier", &"OnceCell<Arc<dyn UnifiedApplier>>")
+            .field("commit_sequence_tracker", &"Arc<CommitSequenceTracker>")
+            .field("transaction_coordinator", &"OnceCell<Arc<TransactionCoordinator>>")
             .field("system_columns_service", &"Arc<SystemColumnsService>")
             .field("slow_query_logger", &"Arc<SlowQueryLogger>")
             .field("manifest_service", &"Arc<ManifestService>")
@@ -250,6 +258,7 @@ impl AppContext {
             let stats_view = system_schema.stats_view();
             let live_view = system_schema.live_view();
             let sessions_view = system_schema.sessions_view();
+            let transactions_view = system_schema.transactions_view();
 
             // Register all system tables in DataFusion
             // Use config-driven DataFusion settings for parallelism
@@ -409,6 +418,9 @@ impl AppContext {
             // Create unified topic publisher service for pub/sub infrastructure
             let topic_publisher = Arc::new(TopicPublisherService::new(storage_backend.clone()));
 
+            // Create the shared committed snapshot tracker used by the transaction coordinator
+            let commit_sequence_tracker = Arc::new(CommitSequenceTracker::new(0));
+
             let app_ctx = Arc::new(AppContext {
                 node_id,
                 config,
@@ -425,6 +437,8 @@ impl AppContext {
                 system_tables,
                 executor,
                 applier: OnceCell::new(),
+                commit_sequence_tracker: Arc::clone(&commit_sequence_tracker),
+                transaction_coordinator: OnceCell::new(),
                 session_factory,
                 base_session_context,
                 system_columns_service,
@@ -526,6 +540,39 @@ impl AppContext {
             if app_ctx.applier.set(applier).is_err() {
                 panic!("UnifiedApplier already initialized");
             }
+
+            let transaction_coordinator = Arc::new(TransactionCoordinator::new(
+                Arc::clone(&app_ctx),
+                Arc::clone(&commit_sequence_tracker),
+            ));
+            if app_ctx.transaction_coordinator.set(transaction_coordinator).is_err() {
+                panic!("TransactionCoordinator already initialized");
+            }
+            app_ctx.transaction_coordinator().start_timeout_sweeper();
+
+            let app_ctx_for_transactions = Arc::clone(&app_ctx);
+            let transactions_snapshot_callback: TransactionsSnapshotCallback = Arc::new(move || {
+                app_ctx_for_transactions
+                    .transaction_coordinator()
+                    .active_metrics()
+                    .into_iter()
+                    .map(|metric| TransactionSnapshot {
+                        transaction_id: metric.transaction_id.to_string(),
+                        owner_id: metric.owner_id.to_string(),
+                        origin: metric.origin.as_str().to_string(),
+                        state: metric.state.lifecycle_str().to_string(),
+                        age_ms: metric.age_ms.min(i64::MAX as u64) as i64,
+                        idle_ms: metric.idle_ms.min(i64::MAX as u64) as i64,
+                        write_count: metric.write_count.min(i64::MAX as usize) as i64,
+                        write_bytes: metric.write_bytes.min(i64::MAX as usize) as i64,
+                        touched_tables_count: metric.touched_tables_count.min(i64::MAX as usize)
+                            as i64,
+                        snapshot_commit_seq: metric.snapshot_commit_seq.min(i64::MAX as u64)
+                            as i64,
+                    })
+                    .collect()
+            });
+            transactions_view.set_snapshot_callback(transactions_snapshot_callback);
 
             let live_query_manager = Arc::new(LiveQueryManager::new(
                 app_ctx.schema_registry(),
@@ -746,6 +793,9 @@ impl AppContext {
         // Create unified topic publisher service for tests
         let topic_publisher = Arc::new(TopicPublisherService::new(storage_backend.clone()));
 
+        // Create transaction snapshot tracker for tests
+        let commit_sequence_tracker = Arc::new(CommitSequenceTracker::new(0));
+
         let app_ctx = Arc::new(AppContext {
             node_id,
             config,
@@ -762,6 +812,8 @@ impl AppContext {
             system_tables,
             executor,
             applier: OnceCell::new(),
+            commit_sequence_tracker: Arc::clone(&commit_sequence_tracker),
+            transaction_coordinator: OnceCell::new(),
             session_factory,
             base_session_context,
             system_columns_service,
@@ -790,6 +842,15 @@ impl AppContext {
         if app_ctx.applier.set(applier).is_err() {
             panic!("UnifiedApplier already initialized");
         }
+
+        let transaction_coordinator = Arc::new(TransactionCoordinator::new(
+            Arc::clone(&app_ctx),
+            Arc::clone(&commit_sequence_tracker),
+        ));
+        if app_ctx.transaction_coordinator.set(transaction_coordinator).is_err() {
+            panic!("TransactionCoordinator already initialized");
+        }
+        app_ctx.transaction_coordinator().start_timeout_sweeper();
 
         let live_query_manager = Arc::new(LiveQueryManager::new(
             app_ctx.schema_registry(),
@@ -1023,6 +1084,22 @@ impl AppContext {
     /// All mutations flow through this applier, regardless of mode.
     pub fn applier(&self) -> Arc<dyn UnifiedApplier> {
         self.applier.get().expect("UnifiedApplier not initialized").clone()
+    }
+
+    /// Get the shared committed snapshot tracker.
+    pub fn commit_sequence_tracker(&self) -> Arc<CommitSequenceTracker> {
+        self.commit_sequence_tracker.clone()
+    }
+
+    /// Try to access the transaction coordinator if it has been initialized.
+    pub fn try_transaction_coordinator(&self) -> Option<Arc<TransactionCoordinator>> {
+        self.transaction_coordinator.get().map(Arc::clone)
+    }
+
+    /// Get the transaction coordinator.
+    pub fn transaction_coordinator(&self) -> Arc<TransactionCoordinator> {
+        self.try_transaction_coordinator()
+            .expect("TransactionCoordinator not initialized in AppContext")
     }
 
     /// Get the system columns service (Phase 12, US5, T027)

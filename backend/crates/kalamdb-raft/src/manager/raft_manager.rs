@@ -1106,6 +1106,46 @@ impl RaftManager {
         }
     }
 
+    /// Propose a transaction commit command to a specific data group.
+    pub async fn propose_transaction_commit(
+        &self,
+        group_id: GroupId,
+        transaction_id: kalamdb_commons::models::TransactionId,
+        mutations: Vec<kalamdb_transactions::StagedMutation>,
+    ) -> Result<crate::DataResponse, RaftError> {
+        let cmd = crate::RaftCommand::TransactionCommit {
+            transaction_id,
+            mutations,
+        };
+
+        let response = match group_id {
+            GroupId::DataUserShard(shard) => {
+                if shard >= self.user_shards_count {
+                    return Err(RaftError::InvalidGroup(format!("DataUserShard({})", shard)));
+                }
+                self.propose_to_group(&self.user_data_shards[shard as usize], cmd).await?
+            },
+            GroupId::DataSharedShard(shard) => {
+                if shard >= self.shared_shards_count {
+                    return Err(RaftError::InvalidGroup(format!("DataSharedShard({})", shard)));
+                }
+                self.propose_to_group(&self.shared_data_shards[shard as usize], cmd).await?
+            },
+            GroupId::Meta => {
+                return Err(RaftError::InvalidGroup(
+                    "TransactionCommit cannot target Meta group".to_string(),
+                ));
+            },
+        };
+
+        match response {
+            crate::RaftResponse::Data(r) => Ok(r),
+            _ => Err(RaftError::Internal(
+                "Unexpected response type for TransactionCommit command".to_string(),
+            )),
+        }
+    }
+
     /// Propose a command to any group by GroupId (for RPC server handling)
     ///
     /// Used by the RaftService when receiving a forwarded proposal.

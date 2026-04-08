@@ -93,6 +93,11 @@ impl RaftExecutor {
         &self.manager
     }
 
+    /// Access the hosted PostgreSQL gRPC service if it has been registered.
+    pub fn pg_service(&self) -> Option<Arc<KalamPgService>> {
+        self.pg_service.get().map(Arc::clone)
+    }
+
     /// Refresh the per-peer statistics cache by fanning out `GetNodeInfo` RPCs
     /// to all known peers in parallel.
     ///

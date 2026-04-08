@@ -42,6 +42,7 @@ mod oauth_provider;
 mod payload_mode;
 mod read_context;
 mod role;
+mod transaction;
 mod topic_op;
 mod user_name;
 
@@ -62,6 +63,7 @@ pub use payload_mode::PayloadMode;
 pub use read_context::ReadContext;
 pub use role::Role;
 pub use schemas::{TableAccess, TableName};
+pub use transaction::{OperationKind, TransactionOrigin, TransactionState};
 pub use topic_op::TopicOp;
 pub use user_name::UserName;
 pub use user_name::UserName as Username;

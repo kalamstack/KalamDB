@@ -4055,6 +4055,7 @@ dependencies = [
  "kalamdb-store",
  "kalamdb-system",
  "kalamdb-tables",
+ "kalamdb-transactions",
  "kalamdb-vector",
  "kalamdb-views",
  "log",
@@ -4293,14 +4294,18 @@ dependencies = [
  "async-trait",
  "bytes",
  "dashmap 6.1.0",
+ "datafusion-common",
  "kalamdb-commons",
+ "kalamdb-core",
  "kalamdb-server-auth",
  "log",
+ "ntest",
  "prost",
  "serde_json",
  "tokio",
  "tonic",
  "tonic-prost",
+ "uuid",
 ]
 
 [[package]]
@@ -4338,6 +4343,7 @@ dependencies = [
  "kalamdb-sharding",
  "kalamdb-store",
  "kalamdb-system",
+ "kalamdb-transactions",
  "log",
  "ntest",
  "openraft",
@@ -4549,6 +4555,7 @@ dependencies = [
  "kalamdb-store",
  "kalamdb-streams",
  "kalamdb-system",
+ "kalamdb-transactions",
  "kalamdb-vector",
  "log",
  "once_cell",
@@ -4558,6 +4565,17 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "kalamdb-transactions"
+version = "0.4.2-rc1"
+dependencies = [
+ "datafusion",
+ "futures-util",
+ "kalamdb-commons",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

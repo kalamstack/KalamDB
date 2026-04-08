@@ -4,7 +4,7 @@
 //! `Meta` group's last applied index on the leader at proposal time. Followers
 //! buffer data commands until local `Meta` has applied at least that index.
 
-use kalamdb_commons::models::UserId;
+use kalamdb_commons::models::{TransactionId, UserId};
 use kalamdb_commons::TableId;
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +24,8 @@ pub enum UserDataCommand {
     Insert {
         /// Watermark: Meta group's last_applied_index at proposal time
         required_meta_index: u64,
+        #[serde(default)]
+        transaction_id: Option<TransactionId>,
         table_id: TableId,
         user_id: UserId,
         /// Rows to insert
@@ -34,6 +36,8 @@ pub enum UserDataCommand {
     Update {
         /// Watermark: Meta group's last_applied_index at proposal time
         required_meta_index: u64,
+        #[serde(default)]
+        transaction_id: Option<TransactionId>,
         table_id: TableId,
         user_id: UserId,
         /// Updates to apply
@@ -46,6 +50,8 @@ pub enum UserDataCommand {
     Delete {
         /// Watermark: Meta group's last_applied_index at proposal time
         required_meta_index: u64,
+        #[serde(default)]
+        transaction_id: Option<TransactionId>,
         table_id: TableId,
         user_id: UserId,
         /// Primary keys to delete
@@ -98,6 +104,14 @@ impl UserDataCommand {
             UserDataCommand::Delete { user_id, .. } => user_id,
         }
     }
+
+    pub fn transaction_id(&self) -> Option<&TransactionId> {
+        match self {
+            UserDataCommand::Insert { transaction_id, .. }
+            | UserDataCommand::Update { transaction_id, .. }
+            | UserDataCommand::Delete { transaction_id, .. } => transaction_id.as_ref(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -109,6 +123,7 @@ mod tests {
     fn test_user_data_command_watermark_get_set() {
         let mut cmd = UserDataCommand::Insert {
             required_meta_index: 100,
+            transaction_id: None,
             table_id: TableId::new(NamespaceId::from("ns"), TableName::from("table")),
             user_id: UserId::from("user_1"),
             rows: vec![],
@@ -124,6 +139,7 @@ mod tests {
         let user_id = UserId::from("user_123");
         let cmd = UserDataCommand::Delete {
             required_meta_index: 50,
+            transaction_id: None,
             table_id: TableId::new(NamespaceId::from("ns"), TableName::from("table")),
             user_id: user_id.clone(),
             pk_values: None,
@@ -136,6 +152,7 @@ mod tests {
     fn test_user_command_serialization() {
         let cmd = UserDataCommand::Insert {
             required_meta_index: 123,
+            transaction_id: None,
             table_id: TableId::new(NamespaceId::from("test_ns"), TableName::from("test_table")),
             user_id: UserId::from("user_456"),
             rows: vec![],
@@ -153,12 +170,14 @@ mod tests {
         let commands = vec![
             UserDataCommand::Insert {
                 required_meta_index: 1,
+                transaction_id: None,
                 table_id: table_id.clone(),
                 user_id: user_id.clone(),
                 rows: vec![],
             },
             UserDataCommand::Update {
                 required_meta_index: 2,
+                transaction_id: None,
                 table_id: table_id.clone(),
                 user_id: user_id.clone(),
                 updates: vec![],
@@ -166,6 +185,7 @@ mod tests {
             },
             UserDataCommand::Delete {
                 required_meta_index: 3,
+                transaction_id: None,
                 table_id: table_id.clone(),
                 user_id: user_id.clone(),
                 pk_values: None,
@@ -186,6 +206,7 @@ mod tests {
 
         let mut insert = UserDataCommand::Insert {
             required_meta_index: 100, // Initially non-zero
+            transaction_id: None,
             table_id: table_id.clone(),
             user_id: user_id.clone(),
             rows: vec![],
@@ -193,6 +214,7 @@ mod tests {
 
         let mut update = UserDataCommand::Update {
             required_meta_index: 100,
+            transaction_id: None,
             table_id: table_id.clone(),
             user_id: user_id.clone(),
             updates: vec![],
@@ -201,6 +223,7 @@ mod tests {
 
         let mut delete = UserDataCommand::Delete {
             required_meta_index: 100,
+            transaction_id: None,
             table_id: table_id.clone(),
             user_id: user_id.clone(),
             pk_values: None,

@@ -285,6 +285,10 @@ mod tests {
             self.seq
         }
 
+        fn commit_seq(&self) -> u64 {
+            0
+        }
+
         fn deleted(&self) -> bool {
             self.deleted
         }
@@ -324,8 +328,13 @@ mod tests {
         )];
         let build_calls = AtomicUsize::new(0);
 
-        let resolved =
-            resolve_latest_kvs_from_cold_batch("id", hot_rows, &cold_batch, false, |row_data| {
+        let resolved = resolve_latest_kvs_from_cold_batch(
+            "id",
+            hot_rows,
+            &cold_batch,
+            false,
+            None,
+            |row_data| {
                 build_calls.fetch_add(1, Ordering::SeqCst);
                 let pk = match row_data.fields.get("id").unwrap() {
                     ScalarValue::Utf8(Some(value)) | ScalarValue::LargeUtf8(Some(value)) => {
@@ -348,14 +357,82 @@ mod tests {
                         value: name,
                     },
                 ))
-            })
-            .unwrap();
+            },
+        )
+        .unwrap();
 
         assert_eq!(build_calls.load(Ordering::SeqCst), 2);
         assert_eq!(resolved.len(), 3);
         assert!(resolved.iter().any(|(_, row)| row.pk == "a" && row.value == "hot-a"));
         assert!(resolved.iter().any(|(_, row)| row.pk == "b" && row.value == "cold-b"));
         assert!(resolved.iter().any(|(_, row)| row.pk == "c" && row.value == "cold-c"));
+    }
+
+    #[test]
+    fn resolve_latest_kvs_from_cold_batch_honors_snapshot_commit_seq() {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Utf8, false),
+            Field::new(SystemColumnNames::SEQ, DataType::Int64, false),
+            Field::new(SystemColumnNames::COMMIT_SEQ, DataType::UInt64, false),
+            Field::new(SystemColumnNames::DELETED, DataType::Boolean, false),
+            Field::new("name", DataType::Utf8, true),
+        ]));
+        let cold_batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(StringArray::from(vec!["a"])),
+                Arc::new(Int64Array::from(vec![5])),
+                Arc::new(UInt64Array::from(vec![2_u64])),
+                Arc::new(BooleanArray::from(vec![false])),
+                Arc::new(StringArray::from(vec!["cold-new"])),
+            ],
+        )
+        .unwrap();
+
+        let hot_rows = vec![(
+            "hot-a".to_string(),
+            TestVersionedRow {
+                seq: SeqId::from_i64(4),
+                deleted: false,
+                pk: "a".to_string(),
+                value: "hot-visible".to_string(),
+            },
+        )];
+
+        let resolved = resolve_latest_kvs_from_cold_batch(
+            "id",
+            hot_rows,
+            &cold_batch,
+            false,
+            Some(1),
+            |row_data| {
+                let pk = match row_data.fields.get("id").unwrap() {
+                    ScalarValue::Utf8(Some(value)) | ScalarValue::LargeUtf8(Some(value)) => {
+                        value.clone()
+                    },
+                    value => value.to_string(),
+                };
+                let name = match row_data.fields.get("name").unwrap() {
+                    ScalarValue::Utf8(Some(value)) | ScalarValue::LargeUtf8(Some(value)) => {
+                        value.clone()
+                    },
+                    value => value.to_string(),
+                };
+                Ok((
+                    pk.clone(),
+                    TestVersionedRow {
+                        seq: row_data.seq_id,
+                        deleted: row_data.deleted,
+                        pk,
+                        value: name,
+                    },
+                ))
+            },
+        )
+        .unwrap();
+
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].1.value, "hot-visible");
     }
 }
 
@@ -469,6 +546,7 @@ where
 #[derive(Debug, Clone)]
 pub struct ParquetRowData {
     pub seq_id: SeqId,
+    pub commit_seq: u64,
     pub deleted: bool,
     pub fields: Row,
 }
@@ -491,13 +569,34 @@ pub fn parquet_batch_to_rows(batch: &RecordBatch) -> Result<Vec<ParquetRowData>,
 /// Trait covering the minimal information needed for merging versioned rows
 pub trait VersionedRow {
     fn seq_id(&self) -> SeqId;
+    fn commit_seq(&self) -> u64;
     fn deleted(&self) -> bool;
     fn pk_value(&self, pk_name: &str) -> Option<String>;
+}
+
+#[inline]
+fn is_visible_at_snapshot(commit_seq: u64, snapshot_commit_seq: Option<u64>) -> bool {
+    snapshot_commit_seq.is_none_or(|snapshot| commit_seq <= snapshot)
+}
+
+#[inline]
+fn prefers_version(
+    candidate_commit_seq: u64,
+    candidate_seq: SeqId,
+    current_commit_seq: u64,
+    current_seq: SeqId,
+) -> bool {
+    candidate_commit_seq > current_commit_seq
+        || (candidate_commit_seq == current_commit_seq && candidate_seq > current_seq)
 }
 
 impl VersionedRow for SharedTableRow {
     fn seq_id(&self) -> SeqId {
         self._seq
+    }
+
+    fn commit_seq(&self) -> u64 {
+        self._commit_seq
     }
 
     fn deleted(&self) -> bool {
@@ -523,6 +622,10 @@ impl VersionedRow for UserTableRow {
         self._seq
     }
 
+    fn commit_seq(&self) -> u64 {
+        self._commit_seq
+    }
+
     fn deleted(&self) -> bool {
         self._deleted
     }
@@ -544,6 +647,10 @@ impl VersionedRow for UserTableRow {
 impl VersionedRow for RowMetadata {
     fn seq_id(&self) -> SeqId {
         self.seq
+    }
+
+    fn commit_seq(&self) -> u64 {
+        self.commit_seq
     }
 
     fn deleted(&self) -> bool {
@@ -579,6 +686,7 @@ pub fn parquet_batch_to_metadata(
 struct ParquetBatchDecoder<'a> {
     batch: &'a RecordBatch,
     seq_array: &'a Int64Array,
+    commit_seq_array: Option<&'a UInt64Array>,
     deleted_array: Option<&'a BooleanArray>,
     pk_idx: Option<usize>,
     value_columns: Vec<(usize, String)>,
@@ -598,6 +706,8 @@ impl<'a> ParquetBatchDecoder<'a> {
             })?;
         let deleted_idx =
             schema.fields().iter().position(|f| f.name() == SystemColumnNames::DELETED);
+        let commit_seq_idx =
+            schema.fields().iter().position(|f| f.name() == SystemColumnNames::COMMIT_SEQ);
         let pk_idx = pk_name.and_then(|name| schema.fields().iter().position(|f| f.name() == name));
 
         let seq_array = batch
@@ -607,12 +717,16 @@ impl<'a> ParquetBatchDecoder<'a> {
             .ok_or_else(|| KalamDbError::Other("_seq column is not Int64Array".to_string()))?;
         let deleted_array =
             deleted_idx.and_then(|idx| batch.column(idx).as_any().downcast_ref::<BooleanArray>());
+        let commit_seq_array = commit_seq_idx
+            .and_then(|idx| batch.column(idx).as_any().downcast_ref::<UInt64Array>());
         let value_columns = schema
             .fields()
             .iter()
             .enumerate()
             .filter(|(_, field)| {
-                field.name() != SystemColumnNames::SEQ && field.name() != SystemColumnNames::DELETED
+                field.name() != SystemColumnNames::SEQ
+                    && field.name() != SystemColumnNames::COMMIT_SEQ
+                    && field.name() != SystemColumnNames::DELETED
             })
             .map(|(idx, field)| (idx, field.name().clone()))
             .collect();
@@ -620,6 +734,7 @@ impl<'a> ParquetBatchDecoder<'a> {
         Ok(Self {
             batch,
             seq_array,
+            commit_seq_array,
             deleted_array,
             pk_idx,
             value_columns,
@@ -632,6 +747,10 @@ impl<'a> ParquetBatchDecoder<'a> {
             .deleted_array
             .and_then(|arr| (!arr.is_null(row_idx)).then(|| arr.value(row_idx)))
             .unwrap_or(false);
+        let commit_seq = self
+            .commit_seq_array
+            .and_then(|arr| (!arr.is_null(row_idx)).then(|| arr.value(row_idx)))
+            .unwrap_or(0);
         let pk_value = self.pk_idx.and_then(|idx| {
             let array = self.batch.column(idx);
             arrow_value_to_scalar(array.as_ref(), row_idx).ok().and_then(|sv| match &sv {
@@ -643,6 +762,7 @@ impl<'a> ParquetBatchDecoder<'a> {
 
         RowMetadata {
             seq,
+            commit_seq,
             deleted,
             pk_value,
         }
@@ -666,6 +786,7 @@ impl<'a> ParquetBatchDecoder<'a> {
 
         Ok(ParquetRowData {
             seq_id: metadata.seq,
+            commit_seq: metadata.commit_seq,
             deleted: metadata.deleted,
             fields: Row::new(values),
         })
@@ -674,7 +795,12 @@ impl<'a> ParquetBatchDecoder<'a> {
 
 /// Count unique non-deleted rows after version resolution (hot + cold merge).
 /// Only tracks (SeqId, deleted) per PK — avoids storing full row metadata.
-pub fn count_merged_rows<R, I, J>(pk_name: &str, hot_rows: I, cold_rows: J) -> usize
+pub fn count_merged_rows<R, I, J>(
+    pk_name: &str,
+    hot_rows: I,
+    cold_rows: J,
+    snapshot_commit_seq: Option<u64>,
+) -> usize
 where
     I: IntoIterator<Item = R>,
     J: IntoIterator<Item = R>,
@@ -682,29 +808,34 @@ where
 {
     use std::collections::hash_map::Entry;
 
-    let mut best: HashMap<String, (SeqId, bool)> = HashMap::new();
+    let mut best: HashMap<String, (u64, SeqId, bool)> = HashMap::new();
 
     for row in hot_rows.into_iter().chain(cold_rows) {
+        if !is_visible_at_snapshot(row.commit_seq(), snapshot_commit_seq) {
+            continue;
+        }
         let pk_key = row
             .pk_value(pk_name)
             .filter(|val| !val.is_empty())
             .unwrap_or_else(|| format!("_seq:{}", row.seq_id().as_i64()));
+        let commit_seq = row.commit_seq();
         let seq = row.seq_id();
         let deleted = row.deleted();
 
         match best.entry(pk_key) {
             Entry::Occupied(mut entry) => {
-                if seq > entry.get().0 {
-                    *entry.get_mut() = (seq, deleted);
+                let (current_commit_seq, current_seq, _) = *entry.get();
+                if prefers_version(commit_seq, seq, current_commit_seq, current_seq) {
+                    *entry.get_mut() = (commit_seq, seq, deleted);
                 }
             },
             Entry::Vacant(entry) => {
-                entry.insert((seq, deleted));
+                entry.insert((commit_seq, seq, deleted));
             },
         }
     }
 
-    best.values().filter(|(_, deleted)| !deleted).count()
+    best.values().filter(|(_, _, deleted)| !deleted).count()
 }
 
 /// Count resolved rows from hot + cold storage using metadata-only decode.
@@ -716,6 +847,7 @@ pub fn count_resolved_from_metadata(
     pk_name: &str,
     hot_metadata: Vec<RowMetadata>,
     cold_batch: &RecordBatch,
+    snapshot_commit_seq: Option<u64>,
 ) -> Result<usize, KalamDbError> {
     let cold_metadata = parquet_batch_to_metadata(cold_batch, pk_name)?;
 
@@ -723,6 +855,7 @@ pub fn count_resolved_from_metadata(
         pk_name,
         hot_metadata,
         cold_metadata.into_iter().map(|(_, m)| m),
+        snapshot_commit_seq,
     ))
 }
 
@@ -732,6 +865,7 @@ pub fn merge_versioned_rows<K, R, I, J>(
     hot_rows: I,
     cold_rows: J,
     keep_deleted: bool,
+    snapshot_commit_seq: Option<u64>,
 ) -> Vec<(K, R)>
 where
     I: IntoIterator<Item = (K, R)>,
@@ -744,6 +878,9 @@ where
     let mut best: HashMap<String, (K, R)> = HashMap::new();
 
     for (key, row) in hot_rows.into_iter().chain(cold_rows) {
+        if !is_visible_at_snapshot(row.commit_seq(), snapshot_commit_seq) {
+            continue;
+        }
         let pk_key = row
             .pk_value(pk_name)
             .filter(|val| !val.is_empty())
@@ -751,7 +888,12 @@ where
 
         match best.entry(pk_key) {
             Entry::Occupied(mut entry) => {
-                if row.seq_id() > entry.get().1.seq_id() {
+                if prefers_version(
+                    row.commit_seq(),
+                    row.seq_id(),
+                    entry.get().1.commit_seq(),
+                    entry.get().1.seq_id(),
+                ) {
                     entry.insert((key, row));
                 }
             },
@@ -772,6 +914,7 @@ pub fn resolve_latest_kvs_from_cold_batch<K, R, I, F>(
     hot_rows: I,
     cold_batch: &RecordBatch,
     keep_deleted: bool,
+    snapshot_commit_seq: Option<u64>,
     build_cold_row: F,
 ) -> Result<Vec<(K, R)>, KalamDbError>
 where
@@ -794,6 +937,13 @@ where
     where
         R: VersionedRow,
     {
+        fn commit_seq(&self) -> u64 {
+            match self {
+                Winner::Hot((_, row)) => row.commit_seq(),
+                Winner::Cold { metadata, .. } => metadata.commit_seq,
+            }
+        }
+
         fn seq_id(&self) -> SeqId {
             match self {
                 Winner::Hot((_, row)) => row.seq_id(),
@@ -812,6 +962,9 @@ where
     let mut best: HashMap<String, Winner<K, R>> = HashMap::new();
 
     for (key, row) in hot_rows {
+        if !is_visible_at_snapshot(row.commit_seq(), snapshot_commit_seq) {
+            continue;
+        }
         let pk_key = row
             .pk_value(pk_name)
             .filter(|val| !val.is_empty())
@@ -819,7 +972,12 @@ where
 
         match best.entry(pk_key) {
             Entry::Occupied(mut entry) => {
-                if row.seq_id() > entry.get().seq_id() {
+                if prefers_version(
+                    row.commit_seq(),
+                    row.seq_id(),
+                    entry.get().commit_seq(),
+                    entry.get().seq_id(),
+                ) {
                     entry.insert(Winner::Hot((key, row)));
                 }
             },
@@ -832,6 +990,9 @@ where
     let decoder = ParquetBatchDecoder::new(cold_batch, Some(pk_name))?;
     for row_idx in 0..cold_batch.num_rows() {
         let metadata = decoder.metadata_at(row_idx);
+        if !is_visible_at_snapshot(metadata.commit_seq, snapshot_commit_seq) {
+            continue;
+        }
         let pk_key = metadata
             .pk_value
             .clone()
@@ -840,7 +1001,12 @@ where
 
         match best.entry(pk_key) {
             Entry::Occupied(mut entry) => {
-                if metadata.seq > entry.get().seq_id() {
+                if prefers_version(
+                    metadata.commit_seq,
+                    metadata.seq,
+                    entry.get().commit_seq(),
+                    entry.get().seq_id(),
+                ) {
                     entry.insert(Winner::Cold { row_idx, metadata });
                 }
             },

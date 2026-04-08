@@ -62,6 +62,8 @@ pub enum SystemTable {
     Live,
     /// system.sessions - Active PostgreSQL gRPC sessions (computed on-demand)
     Sessions,
+    /// system.transactions - Active explicit transactions across all origins (computed on-demand)
+    Transactions,
     /// system.settings - Server configuration settings (computed on-demand)
     Settings,
     /// system.server_logs - Server log entries (computed from log files)
@@ -99,6 +101,7 @@ impl SystemTable {
             SystemTable::Stats => "stats",
             SystemTable::Live => "live",
             SystemTable::Sessions => "sessions",
+            SystemTable::Transactions => "transactions",
             SystemTable::Settings => "settings",
             SystemTable::ServerLogs => "server_logs",
             SystemTable::Cluster => "cluster",
@@ -122,6 +125,7 @@ impl SystemTable {
             SystemTable::Stats
                 | SystemTable::Live
                 | SystemTable::Sessions
+                | SystemTable::Transactions
                 | SystemTable::Settings
                 | SystemTable::ServerLogs
                 | SystemTable::Cluster
@@ -152,6 +156,7 @@ impl SystemTable {
             SystemTable::Stats
             | SystemTable::Live
             | SystemTable::Sessions
+            | SystemTable::Transactions
             | SystemTable::Settings
             | SystemTable::ServerLogs
             | SystemTable::Cluster
@@ -190,6 +195,7 @@ impl SystemTable {
             // Views
             "stats" => Ok(SystemTable::Stats),
             "sessions" => Ok(SystemTable::Sessions),
+            "transactions" => Ok(SystemTable::Transactions),
             "settings" => Ok(SystemTable::Settings),
             "server_logs" => Ok(SystemTable::ServerLogs),
             "cluster" => Ok(SystemTable::Cluster),
@@ -225,6 +231,7 @@ impl SystemTable {
             SystemTable::Stats,
             SystemTable::Live,
             SystemTable::Sessions,
+            SystemTable::Transactions,
             SystemTable::Settings,
             SystemTable::ServerLogs,
             SystemTable::Cluster,
@@ -255,6 +262,7 @@ impl SystemTable {
             SystemTable::Stats,
             SystemTable::Live,
             SystemTable::Sessions,
+            SystemTable::Transactions,
             SystemTable::Settings,
             SystemTable::ServerLogs,
             SystemTable::Cluster,
@@ -310,6 +318,7 @@ impl SystemTable {
             SystemTable::Stats
             | SystemTable::Live
             | SystemTable::Sessions
+            | SystemTable::Transactions
             | SystemTable::Settings
             | SystemTable::ServerLogs
             | SystemTable::Cluster

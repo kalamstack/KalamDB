@@ -78,6 +78,8 @@ pub struct SystemColumns {
     pub seq: Arc<str>,
     /// "_deleted" column (soft delete flag)
     pub deleted: Arc<str>,
+    /// "_commit_seq" column (committed snapshot visibility marker)
+    pub commit_seq: Arc<str>,
     /// "user_id" column (user identifier in system tables)
     pub user_id: Arc<str>,
     /// "namespace_id" column (namespace identifier)
@@ -96,6 +98,7 @@ pub struct SystemColumns {
 pub static SYSTEM_COLUMNS: Lazy<SystemColumns> = Lazy::new(|| SystemColumns {
     seq: intern(SystemColumnNames::SEQ),
     deleted: intern(SystemColumnNames::DELETED),
+    commit_seq: intern(SystemColumnNames::COMMIT_SEQ),
     user_id: intern("user_id"),
     namespace_id: intern("namespace_id"),
     table_id: intern("table_id"),
@@ -156,14 +159,18 @@ mod tests {
         // Access system columns
         let seq = SYSTEM_COLUMNS.seq.clone();
         let deleted = SYSTEM_COLUMNS.deleted.clone();
+        let commit_seq = SYSTEM_COLUMNS.commit_seq.clone();
 
         // Verify they have correct values
         assert_eq!(seq.as_ref(), SystemColumnNames::SEQ);
         assert_eq!(deleted.as_ref(), SystemColumnNames::DELETED);
+        assert_eq!(commit_seq.as_ref(), SystemColumnNames::COMMIT_SEQ);
 
         // Interning the same string should return the same Arc
         let seq2 = intern(SystemColumnNames::SEQ);
         assert!(Arc::ptr_eq(&seq, &seq2));
+        let commit_seq2 = intern(SystemColumnNames::COMMIT_SEQ);
+        assert!(Arc::ptr_eq(&commit_seq, &commit_seq2));
     }
 
     #[test]
@@ -172,6 +179,7 @@ mod tests {
 
         assert_eq!(cols.seq.as_ref(), SystemColumnNames::SEQ);
         assert_eq!(cols.deleted.as_ref(), SystemColumnNames::DELETED);
+        assert_eq!(cols.commit_seq.as_ref(), SystemColumnNames::COMMIT_SEQ);
         assert_eq!(cols.user_id.as_ref(), "user_id");
         assert_eq!(cols.namespace_id.as_ref(), "namespace_id");
         assert_eq!(cols.table_id.as_ref(), "table_id");

@@ -54,7 +54,7 @@ pub use state_machine::MetaStateMachine;
 
 // Re-exports - Data layer
 pub use applier::{NoOpSharedDataApplier, NoOpUserDataApplier, SharedDataApplier, UserDataApplier};
-pub use commands::{DataResponse, SharedDataCommand, UserDataCommand};
+pub use commands::{DataResponse, SharedDataCommand, TransactionApplyResult, UserDataCommand};
 pub use state_machine::{SharedDataStateMachine, UserDataStateMachine};
 
 // Re-exports - Core types

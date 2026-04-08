@@ -2,18 +2,24 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use datafusion::prelude::SessionContext;
-use kalamdb_commons::models::{ReadContext, Role, UserId};
+use kalamdb_commons::models::rows::Row;
+use kalamdb_commons::models::{OperationKind, ReadContext, Role, TransactionId, TransactionOrigin, UserId};
 use kalamdb_commons::models::pg_operations::{
     DeleteRequest, InsertRequest, MutationResult, ScanRequest, ScanResult, UpdateRequest,
 };
 use kalamdb_commons::{NamespaceId, TableType};
 use kalamdb_pg::OperationExecutor;
 use kalamdb_session_datafusion::SessionUserContext;
+use kalamdb_transactions::{TransactionQueryContext, TransactionQueryExtension};
+use std::collections::BTreeMap;
 use tonic::Status;
 
 use super::scan;
 use crate::app_context::AppContext;
 use crate::sql::ExecutionContext;
+use crate::transactions::{
+    CoordinatorAccessValidator, CoordinatorOverlayView, ExecutionOwnerKey, StagedMutation,
+};
 
 /// Domain-typed operation executor for Tier-2 (typed) callers.
 ///
@@ -30,15 +36,12 @@ impl OperationService {
         Self { app_context }
     }
 
-    /// Build a per-request SessionContext with user identity and role injected.
-    ///
-    /// The PG extension acts as a bridge: the `user_id` comes from the FDW
-    /// request (derived from the `kalam.user_id` GUC on the Postgres side).
-    ///
-    /// Role selection:
-    /// - **User/Stream tables**: `Role::User` so row-level security (RLS) is enforced
-    /// - **Shared tables**: `Role::Service` so Restricted/Private shared tables are accessible
-    fn session_with_user(&self, user_id: Option<&UserId>, role: Role) -> SessionContext {
+    fn session_with_query_context(
+        &self,
+        user_id: Option<&UserId>,
+        role: Role,
+        transaction_query_context: Option<TransactionQueryContext>,
+    ) -> SessionContext {
         let base = self.app_context.base_session_context();
         let mut state = base.state().clone();
 
@@ -47,6 +50,14 @@ impl OperationService {
             None => SessionUserContext::new(UserId::anonymous(), role, ReadContext::Client),
         };
         state.config_mut().options_mut().extensions.insert(ctx);
+
+        if let Some(transaction_query_context) = transaction_query_context {
+            state
+                .config_mut()
+                .options_mut()
+                .extensions
+                .insert(TransactionQueryExtension::new(transaction_query_context));
+        }
 
         SessionContext::new_with_state(state)
     }
@@ -61,13 +72,202 @@ impl OperationService {
             _ => Role::Service,
         }
     }
+
+    fn active_transaction_for_session(&self, session_id: Option<&str>) -> Result<Option<TransactionId>, Status> {
+        // Autocommit typed DML stays on the hot path here: no transaction handle means
+        // one session-id parse plus one coordinator owner-key lookup, with no overlay,
+        // query-context, or staged-write allocation.
+        let Some(session_id) = session_id.map(str::trim).filter(|session_id| !session_id.is_empty()) else {
+            return Ok(None);
+        };
+
+        let owner_key = ExecutionOwnerKey::from_pg_session_id(session_id)
+            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+        Ok(self.app_context.transaction_coordinator().active_for_owner(&owner_key))
+    }
+
+    fn transaction_query_context_for_session(
+        &self,
+        session_id: Option<&str>,
+    ) -> Result<Option<TransactionQueryContext>, Status> {
+        // Autocommit reads return from this helper without constructing an overlay view
+        // or mutation sink unless an active transaction handle is actually present.
+        let Some(session_id) = session_id.map(str::trim).filter(|session_id| !session_id.is_empty()) else {
+            return Ok(None);
+        };
+
+        let owner_key = ExecutionOwnerKey::from_pg_session_id(session_id)
+            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+        let coordinator = self.app_context.transaction_coordinator();
+        let Some(transaction_id) = coordinator.active_for_owner(&owner_key) else {
+            return Ok(None);
+        };
+
+        let handle = coordinator
+            .get_handle(&transaction_id)
+            .ok_or_else(|| Status::failed_precondition(format!(
+                "active transaction '{}' has no handle",
+                transaction_id
+            )))?;
+
+        if !handle.state.is_open() {
+            return Err(Status::failed_precondition(format!(
+                "transaction '{}' is {}",
+                transaction_id, handle.state
+            )));
+        }
+
+        Ok(Some(TransactionQueryContext::new(
+            transaction_id.clone(),
+            handle.snapshot_commit_seq,
+            Arc::new(CoordinatorOverlayView::new(
+                Arc::clone(&coordinator),
+                transaction_id.clone(),
+            )),
+            Arc::new(crate::transactions::CoordinatorMutationSink::new(coordinator)),
+            Arc::new(CoordinatorAccessValidator::new(
+                self.app_context.transaction_coordinator(),
+            )),
+        )))
+    }
+
+    async fn stage_insert(
+        &self,
+        transaction_id: &TransactionId,
+        request: InsertRequest,
+    ) -> Result<MutationResult, Status> {
+        let coordinator = self.app_context.transaction_coordinator();
+        let affected_rows = request.rows.len() as u64;
+
+        for row in request.rows {
+            let primary_key = primary_key_from_row(&row)?;
+            let mutation = StagedMutation::new(
+                transaction_id.clone(),
+                request.table_id.clone(),
+                request.table_type,
+                request.user_id.clone(),
+                OperationKind::Insert,
+                primary_key,
+                row,
+                false,
+            );
+
+            coordinator
+                .stage(transaction_id, mutation)
+                .map_err(|e| Status::failed_precondition(e.to_string()))?;
+        }
+
+        Ok(MutationResult { affected_rows })
+    }
+
+    async fn stage_update(
+        &self,
+        transaction_id: &TransactionId,
+        request: UpdateRequest,
+    ) -> Result<MutationResult, Status> {
+        let coordinator = self.app_context.transaction_coordinator();
+        let payload = request
+            .updates
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| Row::new(BTreeMap::new()));
+        let mutation = StagedMutation::new(
+            transaction_id.clone(),
+            request.table_id,
+            request.table_type,
+            request.user_id,
+            OperationKind::Update,
+            request.pk_value,
+            payload,
+            false,
+        );
+
+        coordinator
+            .stage(transaction_id, mutation)
+            .map_err(|e| Status::failed_precondition(e.to_string()))?;
+
+        Ok(MutationResult { affected_rows: 1 })
+    }
+
+    async fn stage_delete(
+        &self,
+        transaction_id: &TransactionId,
+        request: DeleteRequest,
+    ) -> Result<MutationResult, Status> {
+        let coordinator = self.app_context.transaction_coordinator();
+        let mutation = StagedMutation::new(
+            transaction_id.clone(),
+            request.table_id,
+            request.table_type,
+            request.user_id,
+            OperationKind::Delete,
+            request.pk_value,
+            Row::new(BTreeMap::new()),
+            true,
+        );
+
+        coordinator
+            .stage(transaction_id, mutation)
+            .map_err(|e| Status::failed_precondition(e.to_string()))?;
+
+        Ok(MutationResult { affected_rows: 1 })
+    }
 }
 
 #[async_trait]
 impl OperationExecutor for OperationService {
+    async fn begin_transaction(&self, session_id: &str) -> Result<Option<String>, Status> {
+        let owner_key = ExecutionOwnerKey::from_pg_session_id(session_id)
+            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+        let transaction_id = self
+            .app_context
+            .transaction_coordinator()
+            .begin(owner_key, session_id.to_string().into(), TransactionOrigin::PgRpc)
+            .map_err(|e| Status::failed_precondition(e.to_string()))?;
+        Ok(Some(transaction_id.to_string()))
+    }
+
+    async fn commit_transaction(
+        &self,
+        _session_id: &str,
+        transaction_id: &str,
+    ) -> Result<Option<String>, Status> {
+        let transaction_id = TransactionId::try_new(transaction_id.to_string())
+            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+        let result = self
+            .app_context
+            .transaction_coordinator()
+            .commit(&transaction_id)
+            .await
+            .map_err(|e| Status::failed_precondition(e.to_string()))?;
+        Ok(Some(result.transaction_id.to_string()))
+    }
+
+    async fn rollback_transaction(
+        &self,
+        _session_id: &str,
+        transaction_id: &str,
+    ) -> Result<Option<String>, Status> {
+        let transaction_id = TransactionId::try_new(transaction_id.to_string())
+            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+        self.app_context
+            .transaction_coordinator()
+            .rollback(&transaction_id)
+            .map_err(|e| Status::failed_precondition(e.to_string()))?;
+        Ok(Some(transaction_id.to_string()))
+    }
+
     async fn execute_scan(&self, request: ScanRequest) -> Result<ScanResult, Status> {
         let role = Self::role_for_table_type(request.table_type);
-        let session = self.session_with_user(request.user_id.as_ref(), role);
+        // Non-transactional scans pay only the idle-session lookup above. The
+        // transaction query extension is attached only when a live transaction exists.
+        let transaction_query_context =
+            self.transaction_query_context_for_session(request.session_id.as_deref())?;
+        let session = self.session_with_query_context(
+            request.user_id.as_ref(),
+            role,
+            transaction_query_context,
+        );
         let batches = scan::execute_scan(
             &self.app_context.schema_registry(),
             &session,
@@ -81,6 +281,14 @@ impl OperationExecutor for OperationService {
     }
 
     async fn execute_insert(&self, request: InsertRequest) -> Result<MutationResult, Status> {
+        // Autocommit requests pay only the owner-key lookup here; we do not allocate
+        // transaction overlays or staged write buffers unless an explicit transaction is active.
+        if let Some(transaction_id) =
+            self.active_transaction_for_session(request.session_id.as_deref())?
+        {
+            return self.stage_insert(&transaction_id, request).await;
+        }
+
         let applier = self.app_context.applier();
         let affected = match request.table_type {
             TableType::User | TableType::Stream => {
@@ -108,6 +316,13 @@ impl OperationExecutor for OperationService {
     }
 
     async fn execute_update(&self, request: UpdateRequest) -> Result<MutationResult, Status> {
+        // Preserve the autocommit fast path: one presence check, then go straight to the applier.
+        if let Some(transaction_id) =
+            self.active_transaction_for_session(request.session_id.as_deref())?
+        {
+            return self.stage_update(&transaction_id, request).await;
+        }
+
         let applier = self.app_context.applier();
         let affected = match request.table_type {
             TableType::User | TableType::Stream => {
@@ -140,6 +355,13 @@ impl OperationExecutor for OperationService {
     }
 
     async fn execute_delete(&self, request: DeleteRequest) -> Result<MutationResult, Status> {
+        // Preserve the autocommit fast path: avoid transaction-specific allocations when absent.
+        if let Some(transaction_id) =
+            self.active_transaction_for_session(request.session_id.as_deref())?
+        {
+            return self.stage_delete(&transaction_id, request).await;
+        }
+
         let applier = self.app_context.applier();
         let affected = match request.table_type {
             TableType::User | TableType::Stream => {
@@ -216,6 +438,13 @@ impl OperationExecutor for OperationService {
     }
 }
 
+fn primary_key_from_row(row: &Row) -> Result<String, Status> {
+    row.values
+        .get("id")
+        .map(|value| value.to_string())
+        .ok_or_else(|| Status::invalid_argument("transactional inserts require an 'id' primary key in the typed pg path"))
+}
+
 fn require_user_id(user_id: Option<UserId>, operation: &str) -> Result<UserId, Status> {
     user_id.ok_or_else(|| {
         Status::invalid_argument(format!("user_id required for user/stream table {}", operation))
@@ -230,6 +459,7 @@ mod tests {
     use arrow::array::{Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
+    use datafusion_common::ScalarValue;
     use datafusion::datasource::MemTable;
     use kalamdb_commons::datatypes::KalamDataType;
     use kalamdb_commons::models::rows::Row;
@@ -300,6 +530,7 @@ mod tests {
         let req = ScanRequest {
             table_id: TableId::new(NamespaceId::new("no_ns"), TableName::new("no_table")),
             table_type: TableType::Shared,
+            session_id: None,
             columns: vec![],
             limit: None,
             user_id: None,
@@ -318,6 +549,7 @@ mod tests {
             .execute_scan(ScanRequest {
                 table_id,
                 table_type: TableType::Shared,
+                session_id: None,
                 columns: vec![],
                 limit: None,
                 user_id: None,
@@ -352,6 +584,7 @@ mod tests {
             .execute_scan(ScanRequest {
                 table_id,
                 table_type: TableType::Shared,
+                session_id: None,
                 columns: vec![],
                 limit: None,
                 user_id: None,
@@ -388,6 +621,7 @@ mod tests {
             .execute_scan(ScanRequest {
                 table_id,
                 table_type: TableType::Shared,
+                session_id: None,
                 columns: vec!["name".to_string()],
                 limit: None,
                 user_id: None,
@@ -408,6 +642,7 @@ mod tests {
             .execute_scan(ScanRequest {
                 table_id,
                 table_type: TableType::Shared,
+                session_id: None,
                 columns: vec!["nonexistent_col".to_string()],
                 limit: None,
                 user_id: None,
@@ -444,6 +679,7 @@ mod tests {
             .execute_scan(ScanRequest {
                 table_id,
                 table_type: TableType::Shared,
+                session_id: None,
                 columns: vec![],
                 limit: Some(2),
                 user_id: None,
@@ -465,6 +701,7 @@ mod tests {
             .execute_insert(InsertRequest {
                 table_id: TableId::new(NamespaceId::new("system"), TableName::new("users")),
                 table_type: TableType::System,
+                session_id: None,
                 rows: vec![empty_row()],
                 user_id: None,
             })
@@ -480,6 +717,7 @@ mod tests {
             .execute_update(UpdateRequest {
                 table_id: TableId::new(NamespaceId::new("system"), TableName::new("users")),
                 table_type: TableType::System,
+                session_id: None,
                 updates: vec![empty_row()],
                 pk_value: "some_pk".to_string(),
                 user_id: None,
@@ -496,6 +734,7 @@ mod tests {
             .execute_delete(DeleteRequest {
                 table_id: TableId::new(NamespaceId::new("system"), TableName::new("users")),
                 table_type: TableType::System,
+                session_id: None,
                 pk_value: "some_pk".to_string(),
                 user_id: None,
             })
@@ -515,6 +754,7 @@ mod tests {
             .execute_insert(InsertRequest {
                 table_id: TableId::new(NamespaceId::new("default"), TableName::new("tbl")),
                 table_type: TableType::User,
+                session_id: None,
                 rows: vec![empty_row()],
                 user_id: None,
             })
@@ -531,6 +771,7 @@ mod tests {
             .execute_update(UpdateRequest {
                 table_id: TableId::new(NamespaceId::new("default"), TableName::new("tbl")),
                 table_type: TableType::User,
+                session_id: None,
                 updates: vec![empty_row()],
                 pk_value: "pk".to_string(),
                 user_id: None,
@@ -547,6 +788,7 @@ mod tests {
             .execute_delete(DeleteRequest {
                 table_id: TableId::new(NamespaceId::new("default"), TableName::new("tbl")),
                 table_type: TableType::User,
+                session_id: None,
                 pk_value: "pk".to_string(),
                 user_id: None,
             })
@@ -562,6 +804,7 @@ mod tests {
             .execute_insert(InsertRequest {
                 table_id: TableId::new(NamespaceId::new("default"), TableName::new("events")),
                 table_type: TableType::Stream,
+                session_id: None,
                 rows: vec![empty_row()],
                 user_id: None,
             })
@@ -569,5 +812,50 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
         assert!(err.message().contains("user_id required"));
+    }
+
+    #[tokio::test]
+    async fn insert_with_active_pg_transaction_stages_into_coordinator() {
+        let (app_ctx, svc) = setup();
+        let session_id = "pg-321-deadbeef";
+        let transaction_id = app_ctx
+            .transaction_coordinator()
+            .begin(
+                crate::transactions::ExecutionOwnerKey::from_pg_session_id(session_id).unwrap(),
+                session_id.to_string().into(),
+                kalamdb_commons::models::TransactionOrigin::PgRpc,
+            )
+            .unwrap();
+
+        let mut values = BTreeMap::new();
+        values.insert("id".to_string(), ScalarValue::Int64(Some(42)));
+        values.insert(
+            "name".to_string(),
+            ScalarValue::Utf8(Some("staged item".to_string())),
+        );
+
+        let result = svc
+            .execute_insert(InsertRequest {
+                table_id: TableId::new(NamespaceId::new("default"), TableName::new("items")),
+                table_type: TableType::Shared,
+                session_id: Some(session_id.to_string()),
+                user_id: None,
+                rows: vec![Row::new(values)],
+            })
+            .await
+            .expect("insert should stage successfully");
+
+        assert_eq!(result.affected_rows, 1);
+
+        let overlay = app_ctx
+            .transaction_coordinator()
+            .get_overlay(&transaction_id)
+            .expect("overlay should exist after staging");
+        let table_id = TableId::new(NamespaceId::new("default"), TableName::new("items"));
+        let entry = overlay
+            .latest_visible_entry(&table_id, "42")
+            .expect("latest staged row should be visible in overlay");
+        assert_eq!(entry.operation_kind, OperationKind::Insert);
+        assert!(!entry.tombstone);
     }
 }

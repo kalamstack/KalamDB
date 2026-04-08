@@ -134,6 +134,7 @@ mod tests {
         UserTableRow {
             user_id: user_id.clone(),
             _seq: SeqId::new(seq),
+            _commit_seq: 0,
             fields: Row::new(values),
             _deleted: false,
         }

@@ -19,6 +19,7 @@ pub mod server_logs;
 pub mod settings;
 pub mod stats;
 pub mod tables_view;
+pub mod transactions;
 pub mod view_base;
 
 pub use cluster::*;
@@ -33,4 +34,5 @@ pub use server_logs::*;
 pub use settings::*;
 pub use stats::*;
 pub use tables_view::*;
+pub use transactions::*;
 pub use view_base::*;

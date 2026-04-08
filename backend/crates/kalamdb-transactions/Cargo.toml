@@ -1,0 +1,23 @@
+[package]
+name = "kalamdb-transactions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared transaction query types for KalamDB"
+keywords = ["kalamdb", "transactions", "query"]
+categories = ["database"]
+
+[dependencies]
+kalamdb-commons = { path = "../kalamdb-commons", features = ["full"] }
+datafusion = { workspace = true }
+futures-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lib]
+name = "kalamdb_transactions"
+path = "src/lib.rs"
+doctest = false

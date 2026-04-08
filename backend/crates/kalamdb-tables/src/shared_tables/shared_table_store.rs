@@ -30,7 +30,7 @@ use super::pk_index::create_shared_table_pk_index;
 ///
 /// **MVCC Architecture (Phase 12, User Story 5)**:
 /// - Removed: row_id (redundant with _seq), _updated (timestamp embedded in _seq Snowflake ID), access_level (moved to schema definition)
-/// - Kept: _seq (version identifier with embedded timestamp), _deleted (tombstone), fields (all shared table columns including PK)
+/// - Kept: _seq (version identifier with embedded timestamp), `_commit_seq` (commit-order visibility), _deleted (tombstone), fields (all shared table columns including PK)
 ///
 /// **Note on System Column Naming**:
 /// The underscore prefix (`_seq`, `_deleted`) follows SQL convention for system-managed columns.
@@ -40,6 +40,10 @@ pub struct SharedTableRow {
     /// Monotonically increasing sequence ID (Snowflake ID with embedded timestamp)
     /// Maps to SQL column `_seq`
     pub _seq: SeqId,
+    /// Commit-order visibility marker assigned by the durable apply path.
+    /// Maps to SQL column `_commit_seq`
+    #[serde(default)]
+    pub _commit_seq: u64,
     /// Soft delete tombstone marker
     /// Maps to SQL column `_deleted`
     pub _deleted: bool,
@@ -51,6 +55,7 @@ impl KSerializable for SharedTableRow {
     fn encode(&self) -> Result<Vec<u8>, kalamdb_commons::storage::StorageError> {
         kalamdb_commons::serialization::row_codec::encode_shared_table_row(
             self._seq,
+            self._commit_seq,
             self._deleted,
             &self.fields,
         )
@@ -60,10 +65,11 @@ impl KSerializable for SharedTableRow {
     where
         Self: Sized,
     {
-        let (seq, deleted, fields) =
+        let (seq, commit_seq, deleted, fields) =
             kalamdb_commons::serialization::row_codec::decode_shared_table_row(bytes)?;
         Ok(Self {
             _seq: seq,
+            _commit_seq: commit_seq,
             _deleted: deleted,
             fields,
         })
@@ -179,6 +185,7 @@ mod tests {
         values.insert("id".to_string(), ScalarValue::Int64(Some(seq)));
         SharedTableRow {
             _seq: SeqId::new(seq),
+            _commit_seq: 0,
             fields: Row::new(values),
             _deleted: false,
         }

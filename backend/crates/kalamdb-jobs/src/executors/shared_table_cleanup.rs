@@ -27,6 +27,7 @@ pub(crate) async fn cleanup_empty_shared_scope_if_needed<T: JobParams>(
             Some(1),
             false,
             None,
+            None,
         )
         .await?;
 

@@ -996,7 +996,40 @@ impl PgService for KalamPgService {
             return Err(Status::invalid_argument("session_id must not be empty"));
         }
 
-        self.session_registry.remove(session_id);
+        if let Some(session) = self.session_registry.get(session_id) {
+            if let Some(transaction_id) = session.transaction_id().map(ToOwned::to_owned) {
+                if let Some(executor) = self.operation_executor.as_deref() {
+                    match executor.rollback_transaction(session_id, &transaction_id).await {
+                        Ok(_) => {},
+                        Err(status)
+                            if status.code() == tonic::Code::FailedPrecondition
+                                && status.message().contains("committing") =>
+                        {
+                            log::debug!(
+                                "PG close_session: transaction '{}' is already committing for session '{}'",
+                                transaction_id,
+                                session_id
+                            );
+                        },
+                        Err(status) => return Err(status),
+                    }
+                }
+
+                if let Err(error) = self
+                    .session_registry
+                    .rollback_transaction(session_id, &transaction_id)
+                {
+                    log::debug!(
+                        "PG close_session: local rollback bookkeeping skipped for session '{}' tx '{}': {}",
+                        session_id,
+                        transaction_id,
+                        error
+                    );
+                }
+            }
+        }
+
+        self.session_registry.close_session(session_id);
         log::debug!("PG session closed: {}", session_id);
 
         Ok(Response::new(CloseSessionResponse {}))
@@ -1105,10 +1138,42 @@ impl PgService for KalamPgService {
             Some("BeginTransaction"),
         );
 
-        let transaction_id = self
-            .session_registry
-            .begin_transaction(session_id)
-            .map_err(|e| Status::failed_precondition(e))?;
+        if let Some(session) = self.session_registry.get(session_id) {
+            if let Some(stale_transaction_id) = session.transaction_id().map(ToOwned::to_owned) {
+                log::warn!(
+                    "PG begin_transaction: auto-rolling back stale transaction '{}' for session '{}'",
+                    stale_transaction_id,
+                    session_id
+                );
+
+                if let Some(executor) = self.operation_executor.as_deref() {
+                    executor
+                        .rollback_transaction(session_id, &stale_transaction_id)
+                        .await?;
+                }
+
+                self.session_registry
+                    .rollback_transaction(session_id, &stale_transaction_id)
+                    .map_err(Status::failed_precondition)?;
+            }
+        }
+
+        let transaction_id = if let Some(executor) = self.operation_executor.as_deref() {
+            match executor.begin_transaction(session_id).await? {
+                Some(transaction_id) => self
+                    .session_registry
+                    .begin_transaction_with_id(session_id, transaction_id.as_str())
+                    .map_err(Status::failed_precondition)?,
+                None => self
+                    .session_registry
+                    .begin_transaction(session_id)
+                    .map_err(Status::failed_precondition)?,
+            }
+        } else {
+            self.session_registry
+                .begin_transaction(session_id)
+                .map_err(Status::failed_precondition)?
+        };
 
         log::debug!("PG begin_transaction: session={} tx={}", session_id, transaction_id);
 
@@ -1138,10 +1203,19 @@ impl PgService for KalamPgService {
             Some("CommitTransaction"),
         );
 
-        let committed_id = self
-            .session_registry
-            .commit_transaction(session_id, transaction_id)
-            .map_err(|e| Status::failed_precondition(e))?;
+        let committed_id = if let Some(executor) = self.operation_executor.as_deref() {
+            let committed_id = executor
+                .commit_transaction(session_id, transaction_id)
+                .await?
+                .unwrap_or_else(|| transaction_id.to_string());
+            self.session_registry
+                .commit_transaction(session_id, committed_id.as_str())
+                .map_err(Status::failed_precondition)?
+        } else {
+            self.session_registry
+                .commit_transaction(session_id, transaction_id)
+                .map_err(Status::failed_precondition)?
+        };
 
         log::debug!("PG commit_transaction: session={} tx={}", session_id, committed_id);
 
@@ -1170,10 +1244,19 @@ impl PgService for KalamPgService {
             Some("RollbackTransaction"),
         );
 
-        let rolled_back_id = self
-            .session_registry
-            .rollback_transaction(session_id, transaction_id)
-            .map_err(|e| Status::failed_precondition(e))?;
+        let rolled_back_id = if let Some(executor) = self.operation_executor.as_deref() {
+            let rolled_back_id = executor
+                .rollback_transaction(session_id, transaction_id)
+                .await?
+                .unwrap_or_else(|| transaction_id.to_string());
+            self.session_registry
+                .rollback_transaction(session_id, rolled_back_id.as_str())
+                .map_err(Status::failed_precondition)?
+        } else {
+            self.session_registry
+                .rollback_transaction(session_id, transaction_id)
+                .map_err(Status::failed_precondition)?
+        };
 
         log::debug!("PG rollback_transaction: session={} tx={}", session_id, rolled_back_id);
 

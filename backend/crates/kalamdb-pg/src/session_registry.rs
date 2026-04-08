@@ -1,7 +1,9 @@
 use dashmap::DashMap;
+use kalamdb_commons::models::TransactionState;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 
 fn current_timestamp_ms() -> i64 {
     SystemTime::now()
@@ -15,17 +17,6 @@ fn normalize_optional(value: Option<&str>) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
-}
-
-/// Current lifecycle state of a transaction handle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TransactionState {
-    /// Transaction is active and accepting operations.
-    Active,
-    /// Transaction has been committed.
-    Committed,
-    /// Transaction has been rolled back.
-    RolledBack,
 }
 
 /// Mutable session state shared across PostgreSQL requests that belong to the same backend.
@@ -128,16 +119,6 @@ impl RemotePgSession {
     }
 }
 
-impl TransactionState {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            TransactionState::Active => "active",
-            TransactionState::Committed => "committed",
-            TransactionState::RolledBack => "rolled_back",
-        }
-    }
-}
-
 /// Concurrent registry for PostgreSQL backend sessions.
 #[derive(Debug, Default)]
 pub struct SessionRegistry {
@@ -196,12 +177,26 @@ impl SessionRegistry {
     ///
     /// If a transaction is already active on this session, returns an error.
     pub fn begin_transaction(&self, session_id: &str) -> Result<String, String> {
+        let transaction_id = Uuid::now_v7().to_string();
+        self.begin_transaction_with_id(session_id, transaction_id.as_str())
+    }
+
+    /// Begin a new transaction for the given session using an externally supplied ID.
+    pub fn begin_transaction_with_id(
+        &self,
+        session_id: &str,
+        transaction_id: &str,
+    ) -> Result<String, String> {
         let mut session = self
             .sessions
             .get_mut(session_id)
             .ok_or_else(|| format!("session '{}' not found", session_id))?;
 
-        if let Some(TransactionState::Active) = session.transaction_state {
+        if session
+            .transaction_state
+            .map(|state| state.is_open())
+            .unwrap_or(false)
+        {
             // Auto-rollback stale transaction left by a crashed/disconnected client.
             // This is a safety net — the FDW xact_callback should normally commit/rollback,
             // but network failures or panics can leave orphaned transactions.
@@ -215,10 +210,17 @@ impl SessionRegistry {
             session.transaction_has_writes = false;
         }
 
-        let tx_id =
-            format!("tx-{}-{}", session_id, self.tx_counter.fetch_add(1, Ordering::Relaxed));
+        let tx_id = if transaction_id.trim().is_empty() {
+            format!(
+                "{}-{}",
+                Uuid::now_v7(),
+                self.tx_counter.fetch_add(1, Ordering::Relaxed)
+            )
+        } else {
+            transaction_id.trim().to_string()
+        };
         session.transaction_id = Some(tx_id.clone());
-        session.transaction_state = Some(TransactionState::Active);
+        session.transaction_state = Some(TransactionState::OpenRead);
         session.transaction_has_writes = false;
         session.last_seen_at_ms = current_timestamp_ms();
         Ok(tx_id)
@@ -238,12 +240,24 @@ impl SessionRegistry {
             .ok_or_else(|| format!("session '{}' not found", session_id))?;
 
         match session.transaction_state {
-            Some(TransactionState::Active) => {},
+            Some(TransactionState::OpenRead | TransactionState::OpenWrite) => {},
             Some(TransactionState::Committed) => {
                 return Err("transaction already committed".to_string());
             },
             Some(TransactionState::RolledBack) => {
                 return Err("transaction already rolled back".to_string());
+            },
+            Some(TransactionState::Committing) => {
+                return Err("transaction is already committing".to_string());
+            },
+            Some(TransactionState::RollingBack) => {
+                return Err("transaction is already rolling back".to_string());
+            },
+            Some(TransactionState::TimedOut) => {
+                return Err("transaction timed out".to_string());
+            },
+            Some(TransactionState::Aborted) => {
+                return Err("transaction aborted".to_string());
             },
             None => {
                 return Err("no active transaction".to_string());
@@ -282,7 +296,7 @@ impl SessionRegistry {
             .ok_or_else(|| format!("session '{}' not found", session_id))?;
 
         match session.transaction_state {
-            Some(TransactionState::Active) => {},
+            Some(TransactionState::OpenRead | TransactionState::OpenWrite) => {},
             Some(TransactionState::RolledBack) => {
                 // Idempotent rollback
                 let tx_id = session.transaction_id.take().unwrap_or_default();
@@ -293,6 +307,23 @@ impl SessionRegistry {
             },
             Some(TransactionState::Committed) => {
                 return Err("cannot rollback already-committed transaction".to_string());
+            },
+            Some(TransactionState::Committing) => {
+                return Err("cannot rollback transaction while it is committing".to_string());
+            },
+            Some(TransactionState::RollingBack) => {
+                let tx_id = session.transaction_id.take().unwrap_or_default();
+                session.transaction_state = None;
+                session.transaction_has_writes = false;
+                session.last_seen_at_ms = current_timestamp_ms();
+                return Ok(tx_id);
+            },
+            Some(TransactionState::TimedOut | TransactionState::Aborted) => {
+                let tx_id = session.transaction_id.take().unwrap_or_default();
+                session.transaction_state = None;
+                session.transaction_has_writes = false;
+                session.last_seen_at_ms = current_timestamp_ms();
+                return Ok(tx_id);
             },
             None => {
                 // No active transaction — idempotent no-op
@@ -319,7 +350,14 @@ impl SessionRegistry {
     /// Mark the active transaction as having performed writes.
     pub fn mark_transaction_writes(&self, session_id: &str) {
         if let Some(mut session) = self.sessions.get_mut(session_id) {
-            if session.transaction_state == Some(TransactionState::Active) {
+            if session.transaction_state == Some(TransactionState::OpenRead) {
+                session.transaction_state = Some(TransactionState::OpenWrite);
+            }
+            if session
+                .transaction_state
+                .map(|state| state.is_open())
+                .unwrap_or(false)
+            {
                 session.transaction_has_writes = true;
             }
             session.last_seen_at_ms = current_timestamp_ms();
@@ -334,6 +372,23 @@ impl SessionRegistry {
     /// Return a point-in-time snapshot of all tracked sessions.
     pub fn snapshot(&self) -> Vec<RemotePgSession> {
         self.sessions.iter().map(|entry| entry.value().clone()).collect()
+    }
+
+    /// Get a point-in-time snapshot of a tracked session.
+    pub fn get(&self, session_id: &str) -> Option<RemotePgSession> {
+        self.sessions.get(session_id).map(|session| session.clone())
+    }
+
+    /// Close a session and clear any tracked transaction metadata before removal.
+    pub fn close_session(&self, session_id: &str) -> Option<RemotePgSession> {
+        if let Some(mut session) = self.sessions.get_mut(session_id) {
+            session.transaction_id = None;
+            session.transaction_state = None;
+            session.transaction_has_writes = false;
+            session.last_seen_at_ms = current_timestamp_ms();
+        }
+
+        self.sessions.remove(session_id).map(|(_, session)| session)
     }
 
     /// Remove a session from the registry.
@@ -470,5 +525,18 @@ mod tests {
         // Rollback with no active transaction should be idempotent
         let result = registry.rollback_transaction("pg-1", "any-tx-id");
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn mark_transaction_writes_promotes_open_read_to_open_write() {
+        let registry = SessionRegistry::default();
+        registry.open_or_get("pg-1");
+        let _tx_id = registry.begin_transaction("pg-1").unwrap();
+
+        registry.mark_transaction_writes("pg-1");
+
+        let session = registry.open_or_get("pg-1");
+        assert_eq!(session.transaction_state(), Some(TransactionState::OpenWrite));
+        assert!(session.transaction_has_writes());
     }
 }

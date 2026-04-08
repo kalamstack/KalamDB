@@ -591,6 +591,7 @@ async fn test_all_groups_accept_proposals() {
         let leader = cluster.get_leader_node(GroupId::DataUserShard(shard)).unwrap();
         let cmd = UserDataCommand::Insert {
             required_meta_index: 0,
+            transaction_id: None,
             table_id: TableId::new(
                 NamespaceId::from("ns1"),
                 TableName::from(format!("table{}", shard)),
@@ -607,6 +608,7 @@ async fn test_all_groups_accept_proposals() {
         let leader = cluster.get_leader_node(GroupId::DataSharedShard(0)).unwrap();
         let cmd = SharedDataCommand::Insert {
             required_meta_index: 0,
+            transaction_id: None,
             table_id: TableId::new(NamespaceId::from("shared"), TableName::from("data")),
             rows: vec![make_test_row()],
         };
@@ -826,6 +828,7 @@ async fn test_user_data_shard_operations() {
         // Test Insert
         let cmd = UserDataCommand::Insert {
             required_meta_index: 0,
+            transaction_id: None,
             table_id: table_id.clone(),
             user_id: user_id.clone(),
             rows: vec![make_test_row()],
@@ -836,6 +839,7 @@ async fn test_user_data_shard_operations() {
         // Test Update
         let cmd = UserDataCommand::Update {
             required_meta_index: 0,
+            transaction_id: None,
             table_id: table_id.clone(),
             user_id: user_id.clone(),
             updates: vec![make_test_row()],
@@ -847,6 +851,7 @@ async fn test_user_data_shard_operations() {
         // Test Delete
         let cmd = UserDataCommand::Delete {
             required_meta_index: 0,
+            transaction_id: None,
             table_id: table_id.clone(),
             user_id: user_id.clone(),
             pk_values: None,
@@ -876,6 +881,7 @@ async fn test_shared_data_shard_operations() {
     // Test Insert
     let cmd = SharedDataCommand::Insert {
         required_meta_index: 0,
+        transaction_id: None,
         table_id: table_id.clone(),
         rows: vec![make_test_row()],
     };
@@ -885,6 +891,7 @@ async fn test_shared_data_shard_operations() {
     // Test Update
     let cmd = SharedDataCommand::Update {
         required_meta_index: 0,
+        transaction_id: None,
         table_id: table_id.clone(),
         updates: vec![make_test_row()],
         filter: None,
@@ -895,6 +902,7 @@ async fn test_shared_data_shard_operations() {
     // Test Delete
     let cmd = SharedDataCommand::Delete {
         required_meta_index: 0,
+        transaction_id: None,
         table_id: table_id.clone(),
         pk_values: None,
     };
@@ -927,6 +935,7 @@ async fn test_proposal_throughput() {
     for i in 0..total_proposals {
         let cmd = UserDataCommand::Insert {
             required_meta_index: 0,
+            transaction_id: None,
             table_id: TableId::new(NamespaceId::from("perf"), TableName::from("test")),
             user_id: UserId::from(format!("user_{}", i)),
             rows: vec![make_test_row()],
@@ -975,6 +984,7 @@ async fn test_concurrent_multi_group_proposals() {
                 for i in 0..25 {
                     let cmd = UserDataCommand::Insert {
                         required_meta_index: 0,
+                        transaction_id: None,
                         table_id: TableId::new(
                             NamespaceId::from("concurrent"),
                             TableName::from(format!("shard{}", shard)),
@@ -1104,6 +1114,7 @@ async fn test_invalid_shard_error() {
         user_id: UserId::from("user1"),
         rows: vec![make_test_row()],
         required_meta_index: 0,
+        transaction_id: None,
     };
 
     let result = node.manager.propose_user_data(99, cmd).await; // Invalid shard

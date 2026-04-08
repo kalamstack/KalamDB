@@ -10,6 +10,10 @@ pub struct ServerConfig {
     pub limits: LimitsSettings,
     pub logging: LoggingSettings,
     pub performance: PerformanceSettings,
+    #[serde(default = "default_transaction_timeout_secs")]
+    pub transaction_timeout_secs: u64,
+    #[serde(default = "default_max_transaction_buffer_bytes")]
+    pub max_transaction_buffer_bytes: usize,
     #[serde(default)]
     pub datafusion: DataFusionSettings,
     #[serde(default)]
@@ -1138,6 +1142,8 @@ impl Default for ServerConfig {
                 client_disconnect_timeout: default_client_disconnect_timeout(),
                 max_header_size: default_max_header_size(),
             },
+            transaction_timeout_secs: default_transaction_timeout_secs(),
+            max_transaction_buffer_bytes: default_max_transaction_buffer_bytes(),
             datafusion: DataFusionSettings::default(),
             flush: FlushSettings::default(),
             manifest_cache: ManifestCacheSettings::default(),

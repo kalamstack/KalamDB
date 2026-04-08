@@ -25,6 +25,7 @@ impl From<StreamTableRow> for KTableRow {
         KTableRow {
             user_id: row.user_id,
             _seq: row._seq,
+            _commit_seq: 0,
             _deleted: false,
             fields: row.fields,
         }

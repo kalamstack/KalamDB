@@ -41,9 +41,12 @@ impl SystemColumnNames {
     /// Sequence column used for MVCC versioning
     pub const SEQ: &'static str = "_seq";
 
+    /// Commit-order marker used for snapshot visibility on committed rows.
+    pub const COMMIT_SEQ: &'static str = "_commit_seq";
+
     /// Check if a column name is a system column
     pub fn is_system_column(column_name: &str) -> bool {
-        matches!(column_name, Self::DELETED | Self::SEQ)
+        matches!(column_name, Self::DELETED | Self::SEQ | Self::COMMIT_SEQ)
     }
 }
 

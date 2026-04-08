@@ -11,8 +11,10 @@ use std::sync::Arc;
 use crate::app_context::AppContext;
 use crate::applier::executor::CommandExecutorImpl;
 use kalamdb_commons::models::rows::Row;
+use kalamdb_commons::models::TransactionId;
 use kalamdb_commons::TableId;
-use kalamdb_raft::{RaftError, SharedDataApplier};
+use kalamdb_transactions::StagedMutation;
+use kalamdb_raft::{RaftError, SharedDataApplier, TransactionApplyResult};
 
 /// SharedDataApplier implementation using Unified Command Executor
 ///
@@ -68,6 +70,18 @@ impl SharedDataApplier for ProviderSharedDataApplier {
         self.executor
             .dml()
             .delete_shared_data(table_id, pk_values)
+            .await
+            .map_err(|e| RaftError::provider(e.to_string()))
+    }
+
+    async fn apply_transaction_batch(
+        &self,
+        transaction_id: &TransactionId,
+        mutations: &[StagedMutation],
+    ) -> Result<TransactionApplyResult, RaftError> {
+        self.executor
+            .dml()
+            .apply_shared_transaction_batch(transaction_id, mutations)
             .await
             .map_err(|e| RaftError::provider(e.to_string()))
     }

@@ -80,12 +80,14 @@ table RowPayload {
 table UserTableRowPayload {
   user_id: string;
   seq: long;
+  commit_seq: ulong = 0;
   deleted: bool = false;
   fields: RowPayload;
 }
 
 table SharedTableRowPayload {
   seq: long;
+  commit_seq: ulong = 0;
   deleted: bool = false;
   fields: RowPayload;
 }

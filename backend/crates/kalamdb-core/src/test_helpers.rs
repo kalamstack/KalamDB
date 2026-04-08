@@ -18,6 +18,8 @@ use kalamdb_commons::models::NamespaceId;
 #[cfg(any(test, feature = "test-helpers"))]
 use once_cell::sync::OnceCell;
 #[cfg(any(test, feature = "test-helpers"))]
+use std::sync::atomic::{AtomicU16, Ordering};
+#[cfg(any(test, feature = "test-helpers"))]
 use std::sync::Once;
 
 #[cfg(any(test, feature = "test-helpers"))]
@@ -30,6 +32,38 @@ static TEST_APP_CONTEXT: OnceCell<Arc<AppContext>> = OnceCell::new();
 static INIT: Once = Once::new();
 #[cfg(any(test, feature = "test-helpers"))]
 static BOOTSTRAP_INIT: Once = Once::new();
+#[cfg(any(test, feature = "test-helpers"))]
+static TEST_PORT_OFFSET: AtomicU16 = AtomicU16::new(0);
+
+#[cfg(any(test, feature = "test-helpers"))]
+fn next_test_ports() -> (u16, u16) {
+    let pid_component = ((std::process::id() % 1000) as u16) * 20;
+    let offset = TEST_PORT_OFFSET.fetch_add(2, Ordering::Relaxed);
+    (20_000 + pid_component + offset, 30_000 + pid_component + offset)
+}
+
+#[cfg(any(test, feature = "test-helpers"))]
+fn default_test_cluster_config(node_id: u64) -> kalamdb_configs::ClusterConfig {
+    let (rpc_port, api_port) = next_test_ports();
+    kalamdb_configs::ClusterConfig {
+        cluster_id: "test-cluster".to_string(),
+        node_id,
+        rpc_addr: format!("127.0.0.1:{}", rpc_port),
+        api_addr: format!("http://127.0.0.1:{}", api_port),
+        peers: Vec::new(),
+        user_shards: 32,
+        shared_shards: 1,
+        heartbeat_interval_ms: 50,
+        election_timeout_ms: (150, 300),
+        snapshot_policy: "LogsSinceLast(1000)".to_string(),
+        max_snapshots_to_keep: 3,
+        replication_timeout_ms: 5_000,
+        reconnect_interval_ms: 3_000,
+        peer_wait_max_retries: None,
+        peer_wait_initial_delay_ms: None,
+        peer_wait_max_delay_ms: None,
+    }
+}
 
 // ── Full helpers (no kalamdb-jobs dep) ─────────────────────────────────────────
 
@@ -57,6 +91,7 @@ pub fn init_test_app_context() -> Arc<TestDb> {
         test_config.storage.data_path = "data".to_string();
         test_config.execution.max_parameters = 50;
         test_config.execution.max_parameter_size_bytes = 512 * 1024;
+        test_config.cluster = Some(default_test_cluster_config(1));
 
         let app_ctx = AppContext::init(
             storage_backend,
@@ -71,7 +106,10 @@ pub fn init_test_app_context() -> Arc<TestDb> {
     // - Start + initialize single-node Raft so meta operations have a leader
     // - Seed default namespace + default local storage so scans can resolve storage paths
     BOOTSTRAP_INIT.call_once(|| {
-        let app_ctx = test_app_context();
+        let app_ctx = TEST_APP_CONTEXT
+            .get()
+            .expect("TEST_APP_CONTEXT should be initialized before bootstrap")
+            .clone();
         let executor = app_ctx.executor();
 
         // Keep a dedicated Tokio runtime alive for the lifetime of the test process.
@@ -99,7 +137,13 @@ pub fn init_test_app_context() -> Arc<TestDb> {
             .expect("raft bootstrap result")
             .expect("raft bootstrap should succeed");
 
-        let app_ctx = test_app_context();
+        let app_ctx = TEST_APP_CONTEXT
+            .get()
+            .expect("TEST_APP_CONTEXT should remain available after bootstrap")
+            .clone();
+
+        // Match normal server startup so replicated data commands apply into local providers.
+        app_ctx.wire_raft_appliers();
 
         // Ensure default namespace exists
         let namespaces = app_ctx.system_tables().namespaces();

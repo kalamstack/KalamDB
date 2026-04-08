@@ -20,6 +20,7 @@ use chrono::Utc;
 use datafusion::scalar::ScalarValue;
 use kalamdb_commons::conversions::json_value_to_scalar;
 use kalamdb_commons::ids::SnowflakeGenerator;
+use kalamdb_commons::models::{OperationKind, TransactionId};
 use kalamdb_commons::models::rows::row::Row;
 use kalamdb_commons::schemas::{ColumnDefault, TableType};
 use kalamdb_commons::TableId;
@@ -31,6 +32,7 @@ use ulid::Ulid;
 use uuid::Uuid;
 
 use super::helpers::ast_parsing;
+use crate::transactions::StagedMutation;
 
 static FAST_INSERT_SNOWFLAKE_GENERATOR: OnceLock<SnowflakeGenerator> = OnceLock::new();
 
@@ -61,6 +63,7 @@ pub async fn try_fast_insert(
     schema_registry: &Arc<SchemaRegistry>,
     prepared_table_id: Option<&TableId>,
     prepared_table_type: Option<TableType>,
+    transaction_id: Option<&TransactionId>,
 ) -> Result<Option<ExecutionResult>, KalamDbError> {
     let insert = match statement {
         Statement::Insert(insert) => insert,
@@ -170,6 +173,21 @@ pub async fn try_fast_insert(
         insert.columns.iter().map(|ident| ident.value.clone()).collect()
     };
 
+    if !insert.columns.is_empty() {
+        for column_name in &column_names {
+            let exists = schema
+                .fields()
+                .iter()
+                .any(|field| !field.name().starts_with('_') && field.name() == column_name.as_str());
+            if !exists {
+                return Err(KalamDbError::InvalidOperation(format!(
+                    "Column '{}' does not exist",
+                    column_name
+                )));
+            }
+        }
+    }
+
     // 7b. Materialize missing DEFAULT columns here so cluster writes still go
     //     through the applier/Raft path instead of falling back to local
     //     DataFusion provider.insert_into() execution.
@@ -199,7 +217,7 @@ pub async fn try_fast_insert(
     let row_count = rows.len();
     tracing::debug!(table_id = %table_id, row_count = row_count, "sql.fast_insert");
 
-    if !returning_seq {
+    if transaction_id.is_none() && !returning_seq {
         if let Some(table_type) = resolved_table_type {
             tracing::debug!(table_id = %table_id, row_count = row_count, table_type = %table_type, "sql.fast_insert_applier");
             let rows_affected = match table_type {
@@ -221,6 +239,12 @@ pub async fn try_fast_insert(
     }
 
     if returning_seq {
+        if transaction_id.is_some() {
+            return Err(KalamDbError::InvalidOperation(
+                "INSERT ... RETURNING is not supported inside explicit SQL transactions"
+                    .to_string(),
+            ));
+        }
         // INSERT ... RETURNING _seq: return the generated sequence IDs as rows
         let seq_values = kalam_provider.insert_rows_returning(user_id, rows).await?;
         let schema = Arc::new(arrow::datatypes::Schema::new(vec![arrow::datatypes::Field::new(
@@ -244,6 +268,47 @@ pub async fn try_fast_insert(
             batches: vec![batch],
             row_count,
             schema: Some(schema),
+        }))
+    } else if let Some(transaction_id) = transaction_id {
+        let table_type = resolved_table_type.ok_or_else(|| {
+            KalamDbError::InvalidOperation(format!(
+                "could not resolve table type for '{}' while staging INSERT",
+                table_id
+            ))
+        })?;
+        let pk_columns = cached_table.table.get_primary_key_columns();
+        if pk_columns.len() != 1 {
+            return Ok(None);
+        }
+        let pk_column = pk_columns[0];
+
+        for row in rows {
+            let primary_key = row.values.get(pk_column).ok_or_else(|| {
+                KalamDbError::InvalidOperation(format!(
+                    "transactional INSERT requires primary key column '{}'",
+                    pk_column
+                ))
+            })?;
+            let mutation = StagedMutation::new(
+                transaction_id.clone(),
+                table_id.clone(),
+                table_type,
+                match table_type {
+                    TableType::User | TableType::Stream => Some(exec_ctx.user_id().clone()),
+                    TableType::Shared | TableType::System => None,
+                },
+                OperationKind::Insert,
+                primary_key.to_string(),
+                row,
+                false,
+            );
+            app_context
+                .transaction_coordinator()
+                .stage(transaction_id, mutation)?;
+        }
+
+        Ok(Some(ExecutionResult::Inserted {
+            rows_affected: row_count,
         }))
     } else {
         let rows_affected = kalam_provider.insert_rows(user_id, rows).await?;

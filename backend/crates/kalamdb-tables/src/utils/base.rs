@@ -75,9 +75,11 @@ use kalamdb_commons::ids::SeqId;
 use kalamdb_commons::models::rows::Row;
 use kalamdb_commons::models::{NamespaceId, TableName, UserId};
 use kalamdb_commons::schemas::TableType;
+use kalamdb_commons::NotLeaderError;
 use kalamdb_commons::{StorageKey, TableId};
 use kalamdb_filestore::registry::ListResult;
 use kalamdb_system::ClusterCoordinator as ClusterCoordinatorTrait;
+use kalamdb_transactions::{extract_transaction_query_context, TransactionAccessError};
 use kalamdb_system::Manifest;
 use kalamdb_system::SchemaRegistry as SchemaRegistryTrait;
 use std::collections::{HashMap, HashSet};
@@ -406,9 +408,10 @@ pub trait BaseTableProvider<K: StorageKey, V>: Send + Sync + TableProvider {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
+        self.validate_transaction_table_access(state)?;
         self.ensure_leader_read(state)
             .await
-            .map_err(|e| DataFusionError::Execution(e.to_string()))?;
+            .map_err(kalam_error_to_datafusion)?;
 
         // Combine filters (AND) for pruning and pass to scan_rows
         let combined_filter: Option<Expr> = if filters.is_empty() {
@@ -437,6 +440,31 @@ pub trait BaseTableProvider<K: StorageKey, V>: Send + Sync + TableProvider {
         let final_projection = if filters.is_empty() { None } else { projection };
 
         mem.scan(state, final_projection, filters, limit).await
+    }
+
+    fn validate_transaction_table_access(&self, state: &dyn Session) -> DataFusionResult<()> {
+        let Some(transaction_query_context) = extract_transaction_query_context(state) else {
+            return Ok(());
+        };
+
+        let user_id = match self.provider_table_type() {
+            TableType::User | TableType::Stream => {
+                let (user_id, _role, _read_context) = extract_full_user_context(state)
+                    .map_err(|error| DataFusionError::Execution(error.to_string()))?;
+                Some(user_id)
+            },
+            TableType::Shared | TableType::System => None,
+        };
+
+        transaction_query_context
+            .access_validator
+            .validate_table_access(
+                &transaction_query_context.transaction_id,
+                self.table_id(),
+                self.provider_table_type(),
+                user_id,
+            )
+            .map_err(transaction_access_error_to_datafusion)
     }
 
     /// Enforce leader-only reads for client contexts in cluster mode.
@@ -541,12 +569,33 @@ pub trait BaseTableProvider<K: StorageKey, V>: Send + Sync + TableProvider {
         limit: Option<usize>,
         keep_deleted: bool,
         cold_columns: Option<&[String]>,
+        snapshot_commit_seq: Option<u64>,
     ) -> Result<Vec<(K, V)>, KalamDbError>;
 
     /// Extract row fields from provider-specific value type
     ///
     /// Each provider implements this to access the internal `Row` stored on their row type.
     fn extract_row(row: &V) -> &Row;
+}
+
+pub(crate) fn transaction_access_error_to_datafusion(
+    error: TransactionAccessError,
+) -> DataFusionError {
+    match error {
+        TransactionAccessError::NotLeader { leader_addr } => {
+            DataFusionError::External(Box::new(NotLeaderError::new(leader_addr)))
+        },
+        TransactionAccessError::InvalidOperation(message) => DataFusionError::Execution(message),
+    }
+}
+
+fn kalam_error_to_datafusion(error: KalamDbError) -> DataFusionError {
+    match error {
+        KalamDbError::NotLeader { leader_addr } => {
+            DataFusionError::External(Box::new(NotLeaderError::new(leader_addr)))
+        },
+        other => DataFusionError::Execution(other.to_string()),
+    }
 }
 
 /// Check if a filter expression references the _deleted column
@@ -1381,7 +1430,11 @@ pub fn compute_cold_columns(
     let proj = projection?;
     let mut cols: Vec<String> = proj.iter().map(|&i| schema.field(i).name().clone()).collect();
     // Always include columns required for version resolution
-    for sys_col in [SystemColumnNames::SEQ, SystemColumnNames::DELETED] {
+    for sys_col in [
+        SystemColumnNames::SEQ,
+        SystemColumnNames::COMMIT_SEQ,
+        SystemColumnNames::DELETED,
+    ] {
         let s = sys_col.to_string();
         if !cols.contains(&s) {
             cols.push(s);
@@ -1541,11 +1594,15 @@ pub fn extract_embedding_vector(value: &ScalarValue, expected_dimensions: u32) -
 
 /// Build a notification row from any entity that has common MVCC fields.
 ///
-/// Both SharedTableRow and UserTableRow have `_seq`, `_deleted`, and `fields`.
+/// Both SharedTableRow and UserTableRow have `_seq`, `_commit_seq`, `_deleted`, and `fields`.
 /// This function avoids duplicating the notification row building logic.
-pub fn build_notification_row(fields: &Row, seq: SeqId, deleted: bool) -> Row {
+pub fn build_notification_row(fields: &Row, seq: SeqId, commit_seq: u64, deleted: bool) -> Row {
     let mut values = fields.values.clone();
     values.insert(SystemColumnNames::SEQ.to_string(), ScalarValue::Int64(Some(seq.as_i64())));
+    values.insert(
+        SystemColumnNames::COMMIT_SEQ.to_string(),
+        ScalarValue::UInt64(Some(commit_seq)),
+    );
     values.insert(SystemColumnNames::DELETED.to_string(), ScalarValue::Boolean(Some(deleted)));
     Row::new(values)
 }

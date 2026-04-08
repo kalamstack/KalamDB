@@ -6,6 +6,7 @@ use kalamdb_core::app_context::AppContext;
 use kalamdb_core::schema_registry::SchemaRegistry;
 use kalamdb_core::sql::context::ExecutionContext;
 use kalamdb_core::sql::executor::{PreparedExecutionStatement, ScalarValue, SqlExecutor};
+use kalamdb_core::sql::executor::request_transaction_state::RequestTransactionState;
 use kalamdb_core::sql::SqlImpersonationService;
 use kalamdb_system::FileSubfolderState;
 use std::collections::HashMap;
@@ -255,6 +256,20 @@ pub(super) async fn execute_batch_path(
     let mut total_updated = 0usize;
     let mut total_deleted = 0usize;
     let mut params_remaining = Some(params);
+    let mut request_transaction_state = match RequestTransactionState::from_execution_context(exec_ctx)
+    {
+        Ok(state) => state,
+        Err(err) => {
+            return HttpResponse::BadRequest().json(SqlResponse::error(
+                ErrorCode::SqlExecutionError,
+                &err.to_string(),
+                took_ms(start_time),
+            ));
+        },
+    };
+    if let Some(state) = request_transaction_state.as_mut() {
+        state.sync_from_coordinator(app_context);
+    }
 
     for (idx, stmt) in prepared_statements.iter().enumerate() {
         let is_last = idx + 1 == stmt_count;
@@ -401,12 +416,17 @@ pub(super) async fn execute_batch_path(
                 results.push(result);
             },
             Err(err) => {
+                if let Some(state) = request_transaction_state.as_mut() {
+                    let _ = state.rollback_if_active(app_context);
+                }
+
                 if let Some(kalamdb_err) = err.downcast_ref::<kalamdb_core::error::KalamDbError>() {
                     if let Some(response) = handle_not_leader_error(
                         kalamdb_err,
                         http_req,
                         req_for_forward,
                         app_context,
+                        exec_ctx.request_id(),
                         start_time,
                     )
                     .await
@@ -422,6 +442,21 @@ pub(super) async fn execute_batch_path(
                     took_ms(start_time),
                 ));
             },
+        }
+
+        if let Some(state) = request_transaction_state.as_mut() {
+            state.sync_from_coordinator(app_context);
+        }
+    }
+
+    if let Some(state) = request_transaction_state.as_mut() {
+        if state.is_active() {
+            let _ = state.rollback_if_active(app_context);
+            return HttpResponse::BadRequest().json(SqlResponse::error(
+                ErrorCode::SqlExecutionError,
+                "Request completed with an open explicit transaction; rolled back automatically",
+                took_ms(start_time),
+            ));
         }
     }
 

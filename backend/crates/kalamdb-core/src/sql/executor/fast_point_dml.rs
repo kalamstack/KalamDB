@@ -2,6 +2,8 @@ use crate::app_context::AppContext;
 use crate::error::KalamDbError;
 use crate::schema_registry::SchemaRegistry;
 use crate::sql::{ExecutionContext, ExecutionResult};
+use crate::transactions::StagedMutation;
+use kalamdb_commons::models::{OperationKind, TransactionId};
 use kalamdb_commons::models::rows::row::Row;
 use kalamdb_commons::schemas::TableType;
 use kalamdb_commons::TableAccess;
@@ -29,6 +31,7 @@ pub async fn try_fast_update(
     schema_registry: &Arc<SchemaRegistry>,
     prepared_table_id: Option<&TableId>,
     prepared_table_type: Option<TableType>,
+    transaction_id: Option<&TransactionId>,
 ) -> Result<Option<ExecutionResult>, KalamDbError> {
     let update = match statement {
         Statement::Update(update) => update,
@@ -109,6 +112,27 @@ pub async fn try_fast_update(
 
     tracing::debug!(table_id = %table_id, pk = %pk_value, table_type = %table_type, "sql.fast_update_applier");
 
+    if let Some(transaction_id) = transaction_id {
+        let mutation = StagedMutation::new(
+            transaction_id.clone(),
+            table_id,
+            table_type,
+            match table_type {
+                TableType::User | TableType::Stream => Some(exec_ctx.user_id().clone()),
+                TableType::Shared | TableType::System => None,
+            },
+            OperationKind::Update,
+            pk_value,
+            updates,
+            false,
+        );
+        app_context
+            .transaction_coordinator()
+            .stage(transaction_id, mutation)?;
+
+        return Ok(Some(ExecutionResult::Updated { rows_affected: 1 }));
+    }
+
     let rows_affected = match table_type {
         TableType::User | TableType::Stream => app_context
             .applier()
@@ -140,6 +164,7 @@ pub async fn try_fast_delete(
     schema_registry: &Arc<SchemaRegistry>,
     prepared_table_id: Option<&TableId>,
     prepared_table_type: Option<TableType>,
+    transaction_id: Option<&TransactionId>,
 ) -> Result<Option<ExecutionResult>, KalamDbError> {
     let delete = match statement {
         Statement::Delete(delete) => delete,
@@ -209,6 +234,27 @@ pub async fn try_fast_delete(
     tracing::debug!(table_id = %table_id, pk = %pk_value, table_type = %table_type, "sql.fast_delete");
 
     tracing::debug!(table_id = %table_id, pk = %pk_value, table_type = %table_type, "sql.fast_delete_applier");
+
+    if let Some(transaction_id) = transaction_id {
+        let mutation = StagedMutation::new(
+            transaction_id.clone(),
+            table_id,
+            table_type,
+            match table_type {
+                TableType::User | TableType::Stream => Some(exec_ctx.user_id().clone()),
+                TableType::Shared | TableType::System => None,
+            },
+            OperationKind::Delete,
+            pk_value,
+            Row::new(BTreeMap::new()),
+            true,
+        );
+        app_context
+            .transaction_coordinator()
+            .stage(transaction_id, mutation)?;
+
+        return Ok(Some(ExecutionResult::Deleted { rows_affected: 1 }));
+    }
 
     let rows_affected = match table_type {
         TableType::User | TableType::Stream => app_context

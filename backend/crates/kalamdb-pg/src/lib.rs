@@ -28,4 +28,6 @@ pub use service::{
     ScanRpcRequest, ScanRpcResponse, UpdateRpcRequest, UpdateRpcResponse,
 };
 #[cfg(feature = "server")]
-pub use session_registry::{RemotePgSession, SessionRegistry, TransactionState};
+pub use kalamdb_commons::models::TransactionState;
+#[cfg(feature = "server")]
+pub use session_registry::{RemotePgSession, SessionRegistry};

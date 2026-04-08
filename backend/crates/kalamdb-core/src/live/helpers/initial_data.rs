@@ -528,6 +528,7 @@ mod tests {
         let row = UserTableRow {
             user_id: user_id.clone(),
             _seq: seq,
+            _commit_seq: 0,
             fields: json_to_row(&serde_json::json!({"id": 1, "name": "Item One"})).unwrap(),
             _deleted: false,
         };
@@ -675,6 +676,7 @@ mod tests {
             let row = UserTableRow {
                 user_id: user_id.clone(),
                 _seq: seq,
+                _commit_seq: 0,
                 fields,
                 _deleted: false,
             };
@@ -856,6 +858,7 @@ mod tests {
             let row = UserTableRow {
                 user_id: user_id.clone(),
                 _seq: seq,
+                _commit_seq: 0,
                 fields,
                 _deleted: false,
             };

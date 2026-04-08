@@ -27,6 +27,23 @@ pub trait OperationExecutor: Send + Sync + 'static {
     async fn execute_insert(&self, request: InsertRequest) -> Result<MutationResult, Status>;
     async fn execute_update(&self, request: UpdateRequest) -> Result<MutationResult, Status>;
     async fn execute_delete(&self, request: DeleteRequest) -> Result<MutationResult, Status>;
+    async fn begin_transaction(&self, _session_id: &str) -> Result<Option<String>, Status> {
+        Ok(None)
+    }
+    async fn commit_transaction(
+        &self,
+        _session_id: &str,
+        _transaction_id: &str,
+    ) -> Result<Option<String>, Status> {
+        Ok(None)
+    }
+    async fn rollback_transaction(
+        &self,
+        _session_id: &str,
+        _transaction_id: &str,
+    ) -> Result<Option<String>, Status> {
+        Ok(None)
+    }
     async fn execute_sql(&self, sql: &str) -> Result<String, Status>;
     /// Execute an arbitrary SQL statement and return (message, ipc_batches).
     ///
@@ -101,6 +118,7 @@ pub fn scan_request_from_rpc(rpc: &ScanRpcRequest) -> Result<ScanRequest, Status
     Ok(ScanRequest {
         table_id,
         table_type,
+        session_id: Some(rpc.session_id.clone()),
         columns: rpc.columns.clone(),
         limit: rpc.limit.map(|l| l as usize),
         user_id: parse_user_id(rpc.user_id.as_deref()),
@@ -127,6 +145,7 @@ pub fn insert_request_from_rpc(rpc: &InsertRpcRequest) -> Result<InsertRequest, 
     Ok(InsertRequest {
         table_id,
         table_type,
+        session_id: Some(rpc.session_id.clone()),
         user_id: parse_user_id(rpc.user_id.as_deref()),
         rows,
     })
@@ -140,6 +159,7 @@ pub fn update_request_from_rpc(rpc: &UpdateRpcRequest) -> Result<UpdateRequest, 
     Ok(UpdateRequest {
         table_id,
         table_type,
+        session_id: Some(rpc.session_id.clone()),
         user_id: parse_user_id(rpc.user_id.as_deref()),
         updates,
         pk_value: rpc.pk_value.clone(),
@@ -153,6 +173,7 @@ pub fn delete_request_from_rpc(rpc: &DeleteRpcRequest) -> Result<DeleteRequest, 
     Ok(DeleteRequest {
         table_id,
         table_type,
+        session_id: Some(rpc.session_id.clone()),
         user_id: parse_user_id(rpc.user_id.as_deref()),
         pk_value: rpc.pk_value.clone(),
     })

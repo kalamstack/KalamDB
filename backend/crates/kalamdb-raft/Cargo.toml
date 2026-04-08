@@ -16,6 +16,7 @@ kalamdb-observability = { path = "../kalamdb-observability" }
 kalamdb-system = { path = "../kalamdb-system" }
 kalamdb-store = { path = "../kalamdb-store" }
 kalamdb-sharding = { path = "../kalamdb-sharding" }
+kalamdb-transactions = { path = "../kalamdb-transactions" }
 
 # Raft consensus
 openraft = { workspace = true }

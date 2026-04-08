@@ -15,6 +15,7 @@ members = [
     "backend/crates/kalamdb-sharding",
     "backend/crates/kalamdb-session",
     "backend/crates/kalamdb-session-datafusion",
+    "backend/crates/kalamdb-transactions",
     "backend/crates/kalamdb-system",
     "backend/crates/kalamdb-tables",
     "backend/crates/kalamdb-dba",

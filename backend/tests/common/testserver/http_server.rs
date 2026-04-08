@@ -858,62 +858,83 @@ impl Drop for HttpTestServer {
     }
 }
 
-/// Start a near-production HTTP server on a random available port.
-///
-/// This is intended for integration tests that want to use `reqwest`/WebSocket
-/// clients against a real server instance.
-#[allow(dead_code)]
-pub async fn start_http_test_server() -> Result<HttpTestServer> {
-    let _global_lock = acquire_global_http_test_server_lock()?;
-    let temp_dir = tempfile::TempDir::new()?;
-    let data_path = temp_dir.path().to_path_buf();
-
-    let mut config = kalamdb_configs::ServerConfig::default();
-    config.server.host = "127.0.0.1".to_string();
-    config.server.port = 0;
-    config.server.ui_path = None;
-    config.storage.data_path = data_path.to_string_lossy().into_owned();
-    // Increase rate limits for tests (default is 100/sec which is too low for insert loops)
-    config.rate_limit.max_queries_per_sec = 100000;
-    config.rate_limit.max_messages_per_sec = 10000;
-    let skip_raft_leader_check = false;
-
-    // Match production behavior: initialize JWT config from server settings.
-    kalamdb_auth::services::unified::init_auth_config(&config.auth, &config.oauth);
-
-    // Use bootstrap_isolated to ensure each test gets a fresh AppContext
-    // This prevents state leakage between tests (Raft logs, system tables, etc.)
-    let (components, app_context) = kalamdb_server::lifecycle::bootstrap_isolated(&config).await?;
-    let running =
-        kalamdb_server::lifecycle::run_for_tests(&config, components, app_context).await?;
-
-    let base_url = running.base_url.clone();
-    let jwt_secret = config.auth.jwt_secret.clone();
-
-    let server = HttpTestServer {
-        _temp_dir: Some(temp_dir),
-        _global_lock: None,
-        base_url,
-        data_path,
-        root_auth_header: root_jwt_auth_header(&jwt_secret),
-        jwt_secret,
-        link_client_cache: Mutex::new(HashMap::new()),
-        user_id_cache: std::sync::Mutex::new(HashMap::new()),
-        user_password_cache: std::sync::Mutex::new(HashMap::new()),
-        user_token_cache: std::sync::Mutex::new(HashMap::new()),
-        running: Some(running),
-        skip_raft_leader_check,
-    };
-
-    server.wait_until_ready().await?;
-
-    Ok(server)
+fn reserve_local_port() -> Result<u16> {
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
+    Ok(listener.local_addr()?.port())
 }
 
-/// Start a near-production HTTP server with a config override.
-#[allow(dead_code)]
-pub async fn start_http_test_server_with_config(
+async fn wait_for_cluster_ready(nodes: &[HttpTestServer]) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+
+    loop {
+        let mut meta_leader_count = 0usize;
+        let mut shared_leader_count = 0usize;
+        let mut known_meta_leader = None;
+        let mut known_shared_leader = None;
+        let mut ready = true;
+
+        for node in nodes {
+            let executor = node.app_context().executor();
+            let meta_leader = executor.get_leader(kalamdb_raft::GroupId::Meta).await;
+            let shared_leader = executor
+                .get_leader(kalamdb_raft::GroupId::DataSharedShard(0))
+                .await;
+
+            if meta_leader.is_none() || shared_leader.is_none() {
+                ready = false;
+                break;
+            }
+
+            if executor.is_leader(kalamdb_raft::GroupId::Meta).await {
+                meta_leader_count += 1;
+            }
+
+            if executor
+                .is_leader(kalamdb_raft::GroupId::DataSharedShard(0))
+                .await
+            {
+                shared_leader_count += 1;
+            }
+
+            if let Some(current_meta_leader) = known_meta_leader {
+                if Some(current_meta_leader) != meta_leader {
+                    ready = false;
+                    break;
+                }
+            } else {
+                known_meta_leader = meta_leader;
+            }
+
+            if let Some(current_shared_leader) = known_shared_leader {
+                if Some(current_shared_leader) != shared_leader {
+                    ready = false;
+                    break;
+                }
+            } else {
+                known_shared_leader = shared_leader;
+            }
+        }
+
+        if ready && meta_leader_count == 1 && shared_leader_count == 1 {
+            return Ok(());
+        }
+
+        if Instant::now() >= deadline {
+            return Err(anyhow::anyhow!(
+                "Timed out waiting for 3-node cluster to converge (meta_leaders={}, shared_leaders={})",
+                meta_leader_count,
+                shared_leader_count
+            ));
+        }
+
+        sleep(Duration::from_millis(100)).await;
+    }
+}
+
+async fn start_http_test_server_with_setup(
     override_config: impl FnOnce(&mut kalamdb_configs::ServerConfig),
+    initialize_cluster: bool,
+    skip_raft_leader_check: bool,
 ) -> Result<HttpTestServer> {
     let _global_lock = acquire_global_http_test_server_lock()?;
     let temp_dir = tempfile::TempDir::new()?;
@@ -924,18 +945,23 @@ pub async fn start_http_test_server_with_config(
     config.server.port = 0;
     config.server.ui_path = None;
     config.storage.data_path = data_path.to_string_lossy().into_owned();
-    // Increase rate limits for tests (default is 100/sec which is too low for insert loops)
     config.rate_limit.max_queries_per_sec = 100000;
     config.rate_limit.max_messages_per_sec = 10000;
     override_config(&mut config);
-    let skip_raft_leader_check = false;
 
     kalamdb_auth::services::unified::init_auth_config(&config.auth, &config.oauth);
 
-    // Use bootstrap_isolated to ensure each test gets a fresh AppContext
-    let (components, app_context) = kalamdb_server::lifecycle::bootstrap_isolated(&config).await?;
-    let running =
-        kalamdb_server::lifecycle::run_for_tests(&config, components, app_context).await?;
+    let (components, app_context) = if initialize_cluster {
+        kalamdb_server::lifecycle::bootstrap_isolated(&config).await?
+    } else {
+        kalamdb_server::lifecycle::bootstrap_isolated_without_cluster_init(&config).await?
+    };
+
+    let running = if config.server.port == 0 {
+        kalamdb_server::lifecycle::run_for_tests(&config, components, app_context).await?
+    } else {
+        kalamdb_server::lifecycle::run_detached(&config, components, app_context).await?
+    };
 
     let base_url = running.base_url.clone();
     let jwt_secret = config.auth.jwt_secret.clone();
@@ -959,23 +985,89 @@ pub async fn start_http_test_server_with_config(
     Ok(server)
 }
 
+/// Start a near-production HTTP server on a random available port.
+///
+/// This is intended for integration tests that want to use `reqwest`/WebSocket
+/// clients against a real server instance.
+#[allow(dead_code)]
+pub async fn start_http_test_server() -> Result<HttpTestServer> {
+    start_http_test_server_with_setup(|_| {}, true, false).await
+}
+
+/// Start a near-production HTTP server with a config override.
+#[allow(dead_code)]
+pub async fn start_http_test_server_with_config(
+    override_config: impl FnOnce(&mut kalamdb_configs::ServerConfig),
+) -> Result<HttpTestServer> {
+    start_http_test_server_with_setup(override_config, true, false).await
+}
+
 /// Start a 3-node cluster for testing
 async fn start_cluster_server() -> Result<ClusterTestServer> {
     let _guard = HTTP_TEST_SERVER_LOCK.lock().await;
 
     eprintln!("🚀 Starting 3-node cluster for testing...");
 
-    // Start 3 independent servers with standalone mode for now
-    // TODO: Configure them as a proper Raft cluster and add members
+    let cluster_id = format!("http-test-cluster-{}", std::process::id());
+    let node_specs = (1u64..=3)
+        .map(|node_id| {
+            Ok((
+                node_id,
+                reserve_local_port()?,
+                reserve_local_port()?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
     let mut nodes = Vec::new();
 
-    for i in 0..3 {
-        eprintln!("  📍 Starting node {} of 3...", i + 1);
-        let server = start_http_test_server()
+    for (index, (node_id, rpc_port, api_port)) in node_specs.iter().copied().enumerate() {
+        eprintln!("  📍 Starting node {} of 3...", index + 1);
+
+        let peers = node_specs
+            .iter()
+            .filter(|(peer_node_id, _, _)| *peer_node_id != node_id)
+            .map(|(peer_node_id, peer_rpc_port, peer_api_port)| kalamdb_configs::PeerConfig {
+                node_id: *peer_node_id,
+                rpc_addr: format!("127.0.0.1:{}", peer_rpc_port),
+                api_addr: format!("http://127.0.0.1:{}", peer_api_port),
+                rpc_server_name: None,
+            })
+            .collect::<Vec<_>>();
+
+        let cluster_id = cluster_id.clone();
+        let initialize_cluster = node_id == 1;
+        let server = start_http_test_server_with_setup(
+            move |config| {
+                config.server.port = api_port;
+                config.cluster = Some(kalamdb_configs::ClusterConfig {
+                    cluster_id: cluster_id.clone(),
+                    node_id,
+                    rpc_addr: format!("127.0.0.1:{}", rpc_port),
+                    api_addr: format!("http://127.0.0.1:{}", api_port),
+                    peers,
+                    user_shards: 1,
+                    shared_shards: 1,
+                    heartbeat_interval_ms: 50,
+                    election_timeout_ms: (150, 300),
+                    snapshot_policy: "LogsSinceLast(1000)".to_string(),
+                    max_snapshots_to_keep: 3,
+                    replication_timeout_ms: 5_000,
+                    reconnect_interval_ms: 250,
+                    peer_wait_max_retries: Some(80),
+                    peer_wait_initial_delay_ms: Some(100),
+                    peer_wait_max_delay_ms: Some(500),
+                });
+            },
+            initialize_cluster,
+            !initialize_cluster,
+        )
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to start cluster node {}: {}", i, e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to start cluster node {}: {}", index, e))?;
         nodes.push(server);
     }
+
+    wait_for_cluster_ready(&nodes).await?;
 
     eprintln!("✅ 3-node cluster started successfully");
 

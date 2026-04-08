@@ -1335,3 +1335,4 @@ Postgres Extension:
 - Check have anonymous accss works in kalam-link
 - Make an option for streams table to not-wait-for-ack, fire and forget
 - make the examples/ use the cli instead of api calls directly in this way we can make sure the cli covers everything we need
+- make sure we store _seq as UInt64 also on flatbuffers: seq: long; as ulong check everywhere seqid should always be unsigned

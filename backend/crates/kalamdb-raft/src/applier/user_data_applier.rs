@@ -7,10 +7,11 @@
 //! The implementation lives in kalamdb-core using provider infrastructure.
 
 use async_trait::async_trait;
-use kalamdb_commons::models::UserId;
+use kalamdb_commons::models::{TransactionId, UserId};
 use kalamdb_commons::TableId;
+use kalamdb_transactions::StagedMutation;
 
-use crate::RaftError;
+use crate::{RaftError, TransactionApplyResult};
 
 /// Applier callback for user table data operations
 ///
@@ -73,6 +74,13 @@ pub trait UserDataApplier: Send + Sync {
         user_id: &UserId,
         pk_values: Option<&[String]>,
     ) -> Result<usize, RaftError>;
+
+    /// Apply an explicit-transaction write set inside one state-machine cycle.
+    async fn apply_transaction_batch(
+        &self,
+        transaction_id: &TransactionId,
+        mutations: &[StagedMutation],
+    ) -> Result<TransactionApplyResult, RaftError>;
 }
 
 /// No-op applier for testing or standalone scenarios
@@ -106,6 +114,14 @@ impl UserDataApplier for NoOpUserDataApplier {
         _pk_values: Option<&[String]>,
     ) -> Result<usize, RaftError> {
         Ok(0)
+    }
+
+    async fn apply_transaction_batch(
+        &self,
+        _transaction_id: &TransactionId,
+        _mutations: &[StagedMutation],
+    ) -> Result<TransactionApplyResult, RaftError> {
+        Ok(TransactionApplyResult::default())
     }
 }
 
@@ -172,6 +188,20 @@ mod tests {
         ) -> Result<usize, RaftError> {
             self.delete_count.fetch_add(1, Ordering::SeqCst);
             Ok(1)
+        }
+
+        async fn apply_transaction_batch(
+            &self,
+            _transaction_id: &TransactionId,
+            mutations: &[StagedMutation],
+        ) -> Result<TransactionApplyResult, RaftError> {
+            Ok(TransactionApplyResult {
+                rows_affected: mutations.len(),
+                commit_seq: 1,
+                notifications_sent: 0,
+                manifest_updates: 0,
+                publisher_events: 0,
+            })
         }
     }
 

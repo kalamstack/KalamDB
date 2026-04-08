@@ -229,6 +229,7 @@ async fn test_user_data_buffering_when_meta_behind() {
             values: BTreeMap::new(),
         }],
         required_meta_index: current_meta + 100, // Well above current, so must buffer
+        transaction_id: None,
     };
 
     let cmd_bytes = encode_user_data_command(&cmd).unwrap();
@@ -250,6 +251,7 @@ async fn test_user_data_buffering_when_meta_behind() {
             values: BTreeMap::new(),
         }],
         required_meta_index: 0, // Can apply immediately, also triggers drain
+        transaction_id: None,
     };
 
     let cmd2_bytes = encode_user_data_command(&cmd2).unwrap();
@@ -276,6 +278,7 @@ async fn test_user_data_immediate_apply_when_meta_caught_up() {
             values: BTreeMap::new(),
         }],
         required_meta_index: 500, // Meta is at 1000, so this applies immediately
+        transaction_id: None,
     };
 
     let cmd_bytes = encode_user_data_command(&cmd).unwrap();
@@ -309,6 +312,7 @@ async fn test_user_data_snapshot_includes_pending_commands() {
             values: BTreeMap::new(),
         }],
         required_meta_index: current_meta + 1000, // Will be buffered
+        transaction_id: None,
     };
 
     let cmd_bytes = encode_user_data_command(&cmd).unwrap();
@@ -348,6 +352,7 @@ async fn test_shared_data_buffering() {
             values: BTreeMap::new(),
         }],
         required_meta_index: current_meta + 500,
+        transaction_id: None,
     };
 
     let cmd_bytes = encode_shared_data_command(&cmd).unwrap();
@@ -367,6 +372,7 @@ async fn test_shared_data_buffering() {
             values: BTreeMap::new(),
         }],
         required_meta_index: 0,
+        transaction_id: None,
     };
     let cmd2_bytes = encode_shared_data_command(&cmd2).unwrap();
     sm.apply(2, 1, &cmd2_bytes).await.unwrap();
@@ -390,6 +396,7 @@ async fn test_shared_data_snapshot_roundtrip() {
             values: BTreeMap::new(),
         }],
         required_meta_index: current_meta + 2000, // Will be buffered
+        transaction_id: None,
     };
 
     let cmd_bytes = encode_shared_data_command(&cmd).unwrap();
@@ -446,6 +453,7 @@ async fn test_rejoin_ordering_scenario() {
                 values: BTreeMap::new(),
             }],
             required_meta_index: *required_meta,
+            transaction_id: None,
         };
 
         let cmd_bytes = encode_user_data_command(&cmd).unwrap();
@@ -466,6 +474,7 @@ async fn test_rejoin_ordering_scenario() {
             values: BTreeMap::new(),
         }],
         required_meta_index: 0, // Immediate
+        transaction_id: None,
     };
     let trigger_bytes = encode_user_data_command(&trigger_cmd).unwrap();
     sm.apply(56, 1, &trigger_bytes).await.unwrap();
@@ -484,6 +493,7 @@ async fn test_rejoin_ordering_scenario() {
             values: BTreeMap::new(),
         }],
         required_meta_index: 0,
+        transaction_id: None,
     };
     let trigger2_bytes = encode_user_data_command(&trigger_cmd2).unwrap();
     sm.apply(57, 1, &trigger2_bytes).await.unwrap();

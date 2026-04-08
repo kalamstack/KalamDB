@@ -121,7 +121,11 @@ pub fn decode_raft_response(bytes: &[u8]) -> Result<RaftResponse, RaftError> {
 mod tests {
     use super::*;
     use crate::{DataResponse, MetaResponse};
-    use kalamdb_commons::models::{NodeId, UserId};
+    use kalamdb_commons::models::rows::Row;
+    use kalamdb_commons::models::{NamespaceId, NodeId, TableName, UserId};
+    use kalamdb_commons::{TableId, TableType};
+    use kalamdb_transactions::StagedMutation;
+    use std::collections::BTreeMap;
 
     #[test]
     fn meta_response_roundtrip() {
@@ -195,5 +199,99 @@ mod tests {
 
         let err = decode_user_data_command(&bytes).expect_err("retired command must be rejected");
         assert!(err.to_string().contains("Unknown variant index") || err.to_string().contains("unknown variant"));
+    }
+
+    #[test]
+    fn option_none_serializes_compactly() {
+        let bytes = flexbuffers::to_vec(&Option::<kalamdb_commons::models::TransactionId>::None)
+            .expect("encode none option");
+        assert_eq!(bytes.len(), 1);
+    }
+
+    #[test]
+    fn decode_user_data_command_defaults_transaction_id_to_none() {
+        #[derive(Serialize)]
+        enum LegacyUserDataCommand {
+            Insert {
+                required_meta_index: u64,
+                table_id: TableId,
+                user_id: UserId,
+                rows: Vec<kalamdb_commons::models::rows::Row>,
+            },
+        }
+
+        let bytes = encode_typed(
+            KIND_USER_DATA_COMMAND,
+            &LegacyUserDataCommand::Insert {
+                required_meta_index: 7,
+                table_id: TableId::new(NamespaceId::from("ns"), TableName::from("items")),
+                user_id: UserId::from("user_1"),
+                rows: vec![],
+            },
+        )
+        .expect("encode legacy user command");
+
+        let decoded = decode_user_data_command(&bytes).expect("decode user command with default");
+        assert!(decoded.transaction_id().is_none());
+    }
+
+    #[test]
+    fn decode_shared_data_command_defaults_transaction_id_to_none() {
+        #[derive(Serialize)]
+        enum LegacySharedDataCommand {
+            Insert {
+                required_meta_index: u64,
+                table_id: TableId,
+                rows: Vec<kalamdb_commons::models::rows::Row>,
+            },
+        }
+
+        let bytes = encode_typed(
+            KIND_SHARED_DATA_COMMAND,
+            &LegacySharedDataCommand::Insert {
+                required_meta_index: 9,
+                table_id: TableId::new(NamespaceId::from("ns"), TableName::from("shared_items")),
+                rows: vec![],
+            },
+        )
+        .expect("encode legacy shared command");
+
+        let decoded =
+            decode_shared_data_command(&bytes).expect("decode shared command with default");
+        assert!(decoded.transaction_id().is_none());
+    }
+
+    #[test]
+    fn raft_transaction_commit_roundtrip() {
+        let command = RaftCommand::TransactionCommit {
+            transaction_id: kalamdb_commons::models::TransactionId::new(
+                "01960f7b-3d15-7d6d-b26c-7e4db6f25f8d",
+            ),
+            mutations: vec![StagedMutation::new(
+                kalamdb_commons::models::TransactionId::new(
+                    "01960f7b-3d15-7d6d-b26c-7e4db6f25f8d",
+                ),
+                TableId::new(NamespaceId::from("ns"), TableName::from("items")),
+                TableType::Shared,
+                None,
+                kalamdb_commons::models::OperationKind::Insert,
+                "1",
+                Row::new(BTreeMap::new()),
+                false,
+            )],
+        };
+
+        let bytes = encode_raft_command(&command).expect("encode raft command");
+        let decoded = decode_raft_command(&bytes).expect("decode raft command");
+        match decoded {
+            RaftCommand::TransactionCommit {
+                transaction_id,
+                mutations,
+            } => {
+                assert_eq!(transaction_id.as_str(), "01960f7b-3d15-7d6d-b26c-7e4db6f25f8d");
+                assert_eq!(mutations.len(), 1);
+            },
+            _ => panic!("expected transaction commit variant"),
+        }
     }
 }

@@ -1,7 +1,12 @@
 use kalamdb_pg::{
-    BeginTransactionRequest, CommitTransactionRequest, KalamPgService, OpenSessionRequest,
-    PgService, PgServiceServer, PingRequest, RollbackTransactionRequest,
+    BeginTransactionRequest, CloseSessionRequest, CommitTransactionRequest, DeleteRequest,
+    InsertRequest, KalamPgService, MutationResult, OpenSessionRequest, OperationExecutor,
+    PgService, PgServiceServer, PingRequest, RollbackTransactionRequest, ScanRequest,
+    ScanResult, UpdateRequest,
 };
+use async_trait::async_trait;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use tonic::Request;
 
 fn service() -> KalamPgService {
@@ -10,6 +15,75 @@ fn service() -> KalamPgService {
 
 fn plain_request<T>(payload: T) -> Request<T> {
     Request::new(payload)
+}
+
+#[derive(Default)]
+struct RecordingExecutor {
+    begin_calls: AtomicUsize,
+    commit_calls: AtomicUsize,
+    rollback_calls: AtomicUsize,
+}
+
+#[async_trait]
+impl OperationExecutor for RecordingExecutor {
+    async fn execute_scan(&self, _request: ScanRequest) -> Result<ScanResult, tonic::Status> {
+        Err(tonic::Status::unimplemented("not needed for this test"))
+    }
+
+    async fn execute_insert(
+        &self,
+        _request: InsertRequest,
+    ) -> Result<MutationResult, tonic::Status> {
+        Err(tonic::Status::unimplemented("not needed for this test"))
+    }
+
+    async fn execute_update(
+        &self,
+        _request: UpdateRequest,
+    ) -> Result<MutationResult, tonic::Status> {
+        Err(tonic::Status::unimplemented("not needed for this test"))
+    }
+
+    async fn execute_delete(
+        &self,
+        _request: DeleteRequest,
+    ) -> Result<MutationResult, tonic::Status> {
+        Err(tonic::Status::unimplemented("not needed for this test"))
+    }
+
+    async fn begin_transaction(&self, _session_id: &str) -> Result<Option<String>, tonic::Status> {
+        self.begin_calls.fetch_add(1, Ordering::Relaxed);
+        Ok(Some("01960f7b-3d15-7d6d-b26c-7e4db6f25f8d".to_string()))
+    }
+
+    async fn commit_transaction(
+        &self,
+        _session_id: &str,
+        transaction_id: &str,
+    ) -> Result<Option<String>, tonic::Status> {
+        self.commit_calls.fetch_add(1, Ordering::Relaxed);
+        Ok(Some(transaction_id.to_string()))
+    }
+
+    async fn rollback_transaction(
+        &self,
+        _session_id: &str,
+        transaction_id: &str,
+    ) -> Result<Option<String>, tonic::Status> {
+        self.rollback_calls.fetch_add(1, Ordering::Relaxed);
+        Ok(Some(transaction_id.to_string()))
+    }
+
+    async fn execute_sql(&self, _sql: &str) -> Result<String, tonic::Status> {
+        Err(tonic::Status::unimplemented("not needed for this test"))
+    }
+
+    async fn execute_query(
+        &self,
+        _sql: &str,
+    ) -> Result<(String, Vec<bytes::Bytes>), tonic::Status> {
+        Err(tonic::Status::unimplemented("not needed for this test"))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -267,6 +341,123 @@ async fn begin_after_commit_succeeds() {
         }))
         .await;
     assert!(resp.is_ok());
+}
+
+#[tokio::test]
+async fn transaction_rpcs_delegate_to_configured_operation_executor() {
+    let executor = Arc::new(RecordingExecutor::default());
+    let service = KalamPgService::new(false, None).with_operation_executor(executor.clone());
+
+    service
+        .open_session(plain_request(OpenSessionRequest {
+            session_id: "pg-321-deadbeef".to_string(),
+            current_schema: None,
+        }))
+        .await
+        .unwrap();
+
+    let tx_id = service
+        .begin_transaction(plain_request(BeginTransactionRequest {
+            session_id: "pg-321-deadbeef".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner()
+        .transaction_id;
+
+    assert_eq!(tx_id, "01960f7b-3d15-7d6d-b26c-7e4db6f25f8d");
+    assert_eq!(executor.begin_calls.load(Ordering::Relaxed), 1);
+
+    service
+        .commit_transaction(plain_request(CommitTransactionRequest {
+            session_id: "pg-321-deadbeef".to_string(),
+            transaction_id: tx_id.clone(),
+        }))
+        .await
+        .unwrap();
+    assert_eq!(executor.commit_calls.load(Ordering::Relaxed), 1);
+
+    let tx_id = service
+        .begin_transaction(plain_request(BeginTransactionRequest {
+            session_id: "pg-321-deadbeef".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner()
+        .transaction_id;
+
+    service
+        .rollback_transaction(plain_request(RollbackTransactionRequest {
+            session_id: "pg-321-deadbeef".to_string(),
+            transaction_id: tx_id,
+        }))
+        .await
+        .unwrap();
+    assert_eq!(executor.rollback_calls.load(Ordering::Relaxed), 1);
+}
+
+#[tokio::test]
+async fn close_session_rolls_back_via_configured_operation_executor() {
+    let executor = Arc::new(RecordingExecutor::default());
+    let service = KalamPgService::new(false, None).with_operation_executor(executor.clone());
+
+    service
+        .open_session(plain_request(OpenSessionRequest {
+            session_id: "pg-close-1".to_string(),
+            current_schema: None,
+        }))
+        .await
+        .unwrap();
+
+    let tx_id = service
+        .begin_transaction(plain_request(BeginTransactionRequest {
+            session_id: "pg-close-1".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner()
+        .transaction_id;
+    assert!(!tx_id.is_empty());
+
+    service
+        .close_session(plain_request(CloseSessionRequest {
+            session_id: "pg-close-1".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    assert_eq!(executor.rollback_calls.load(Ordering::Relaxed), 1);
+}
+
+#[tokio::test]
+async fn begin_transaction_reclaims_stale_remote_transaction_via_executor() {
+    let executor = Arc::new(RecordingExecutor::default());
+    let service = KalamPgService::new(false, None).with_operation_executor(executor.clone());
+
+    service
+        .open_session(plain_request(OpenSessionRequest {
+            session_id: "pg-stale-1".to_string(),
+            current_schema: None,
+        }))
+        .await
+        .unwrap();
+
+    service
+        .begin_transaction(plain_request(BeginTransactionRequest {
+            session_id: "pg-stale-1".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    service
+        .begin_transaction(plain_request(BeginTransactionRequest {
+            session_id: "pg-stale-1".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    assert_eq!(executor.begin_calls.load(Ordering::Relaxed), 2);
+    assert_eq!(executor.rollback_calls.load(Ordering::Relaxed), 1);
 }
 
 // ---------------------------------------------------------------------------

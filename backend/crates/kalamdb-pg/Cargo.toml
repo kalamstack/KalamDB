@@ -17,6 +17,7 @@ server = [
 	"dep:kalamdb-server-auth",
 	"dep:log",
 	"dep:serde_json",
+	"dep:uuid",
 ]
 tls = ["tonic/tls-webpki-roots", "tonic/tls-ring"]
 
@@ -30,10 +31,16 @@ dashmap = { workspace = true, optional = true }
 log = { workspace = true, optional = true }
 prost = { workspace = true }
 serde_json = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
 tonic = { workspace = true }
 tonic-prost = { workspace = true }
 kalamdb-server-auth = { path = "../kalamdb-server-auth", optional = true }
 
 [dev-dependencies]
+arrow-ipc = { workspace = true }
+datafusion-common = { workspace = true }
+kalamdb-commons = { path = "../kalamdb-commons", features = ["full"] }
+kalamdb-core = { path = "../kalamdb-core", features = ["test-helpers"] }
+ntest = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 tonic = { workspace = true }

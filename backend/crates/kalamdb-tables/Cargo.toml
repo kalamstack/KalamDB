@@ -20,6 +20,7 @@ kalamdb-streams = { path = "../kalamdb-streams" }
 kalamdb-sharding = { path = "../kalamdb-sharding" }
 kalamdb-session = { path = "../kalamdb-session" }
 kalamdb-session-datafusion = { path = "../kalamdb-session-datafusion" }
+kalamdb-transactions = { path = "../kalamdb-transactions" }
 kalamdb-vector = { path = "../kalamdb-vector" }
 
 # Apache Arrow ecosystem

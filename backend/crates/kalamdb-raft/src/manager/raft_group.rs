@@ -429,6 +429,9 @@ impl<SM: KalamStateMachine + Send + Sync + 'static> RaftGroup<SM> {
             crate::RaftCommand::SharedData(cmd) => {
                 crate::codec::command_codec::encode_shared_data_command(cmd)?
             },
+            crate::RaftCommand::TransactionCommit { .. } => {
+                crate::codec::command_codec::encode_raft_command(&command)?
+            },
         };
 
         // Clone Arc once outside the lock scope to avoid holding read lock
@@ -451,7 +454,9 @@ impl<SM: KalamStateMachine + Send + Sync + 'static> RaftGroup<SM> {
         let response_obj = if response.data.is_empty() {
             match command {
                 crate::RaftCommand::Meta(_) => crate::RaftResponse::Meta(crate::MetaResponse::Ok),
-                crate::RaftCommand::UserData(_) | crate::RaftCommand::SharedData(_) => {
+                crate::RaftCommand::UserData(_)
+                | crate::RaftCommand::SharedData(_)
+                | crate::RaftCommand::TransactionCommit { .. } => {
                     crate::RaftResponse::Data(crate::DataResponse::Ok)
                 },
             }
@@ -462,7 +467,9 @@ impl<SM: KalamStateMachine + Send + Sync + 'static> RaftGroup<SM> {
                         crate::codec::command_codec::decode_meta_response(&response.data)?;
                     crate::RaftResponse::Meta(meta_response)
                 },
-                crate::RaftCommand::UserData(_) | crate::RaftCommand::SharedData(_) => {
+                crate::RaftCommand::UserData(_)
+                | crate::RaftCommand::SharedData(_)
+                | crate::RaftCommand::TransactionCommit { .. } => {
                     let data_response =
                         crate::codec::command_codec::decode_data_response(&response.data)?;
                     crate::RaftResponse::Data(data_response)

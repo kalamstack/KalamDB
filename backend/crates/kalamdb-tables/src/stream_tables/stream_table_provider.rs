@@ -346,6 +346,7 @@ impl BaseTableProvider<StreamTableRowId, StreamTableRow> for StreamTableProvider
                 limit,
                 keep_deleted,
                 None,
+                None,
             )
             .await?;
         let table_id = self.core.table_id();
@@ -376,6 +377,7 @@ impl BaseTableProvider<StreamTableRowId, StreamTableRow> for StreamTableProvider
         limit: Option<usize>,
         _keep_deleted: bool,
         _cold_columns: Option<&[String]>,
+        _snapshot_commit_seq: Option<u64>,
     ) -> Result<Vec<(StreamTableRowId, StreamTableRow)>, KalamDbError> {
         let table_id = self.core.table_id();
 

@@ -71,6 +71,7 @@ pub fn encode_user_table_row(row: &UserTableRow) -> Result<Vec<u8>> {
         &fb_row::UserTableRowPayloadArgs {
             user_id: Some(user_id),
             seq: row._seq.as_i64(),
+            commit_seq: row._commit_seq,
             deleted: row._deleted,
             fields: Some(fields),
         },
@@ -99,12 +100,18 @@ pub fn decode_user_table_row(bytes: &[u8]) -> Result<UserTableRow> {
     Ok(UserTableRow {
         user_id: UserId::from(user_id),
         _seq: SeqId::new(payload.seq()),
+        _commit_seq: payload.commit_seq(),
         _deleted: payload.deleted(),
         fields: decode_row_payload(fields)?,
     })
 }
 
-pub fn encode_shared_table_row(seq: SeqId, deleted: bool, fields: &Row) -> Result<Vec<u8>> {
+pub fn encode_shared_table_row(
+    seq: SeqId,
+    commit_seq: u64,
+    deleted: bool,
+    fields: &Row,
+) -> Result<Vec<u8>> {
     let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(256);
     let fields = encode_row_payload_table(&mut builder, fields)?;
 
@@ -112,6 +119,7 @@ pub fn encode_shared_table_row(seq: SeqId, deleted: bool, fields: &Row) -> Resul
         &mut builder,
         &fb_row::SharedTableRowPayloadArgs {
             seq: seq.as_i64(),
+            commit_seq,
             deleted,
             fields: Some(fields),
         },
@@ -121,7 +129,7 @@ pub fn encode_shared_table_row(seq: SeqId, deleted: bool, fields: &Row) -> Resul
     encode_envelope_inline(CodecKind::FlatBuffers, ROW_SCHEMA_VERSION, builder.finished_data())
 }
 
-pub fn decode_shared_table_row(bytes: &[u8]) -> Result<(SeqId, bool, Row)> {
+pub fn decode_shared_table_row(bytes: &[u8]) -> Result<(SeqId, u64, bool, Row)> {
     let envelope = decode_enveloped(bytes, ROW_SCHEMA_VERSION)?;
     let payload =
         flatbuffers::root::<fb_row::SharedTableRowPayload>(&envelope.payload).map_err(|e| {
@@ -133,7 +141,12 @@ pub fn decode_shared_table_row(bytes: &[u8]) -> Result<(SeqId, bool, Row)> {
         )
     })?;
 
-    Ok((SeqId::new(payload.seq()), payload.deleted(), decode_row_payload(fields)?))
+    Ok((
+        SeqId::new(payload.seq()),
+        payload.commit_seq(),
+        payload.deleted(),
+        decode_row_payload(fields)?,
+    ))
 }
 
 /// Lightweight metadata extracted from a shared/user table row without full field deserialization.
@@ -144,6 +157,7 @@ pub fn decode_shared_table_row(bytes: &[u8]) -> Result<(SeqId, bool, Row)> {
 #[derive(Debug, Clone)]
 pub struct RowMetadata {
     pub seq: SeqId,
+    pub commit_seq: u64,
     pub deleted: bool,
     pub pk_value: Option<String>,
 }
@@ -165,6 +179,7 @@ pub fn decode_shared_table_row_metadata(bytes: &[u8], pk_name: &str) -> Result<R
 
     Ok(RowMetadata {
         seq: SeqId::new(payload.seq()),
+        commit_seq: payload.commit_seq(),
         deleted: payload.deleted(),
         pk_value,
     })
@@ -193,6 +208,7 @@ pub fn decode_user_table_row_metadata(
         UserId::from(user_id),
         RowMetadata {
             seq: SeqId::new(payload.seq()),
+            commit_seq: payload.commit_seq(),
             deleted: payload.deleted(),
             pk_value,
         },
@@ -712,6 +728,7 @@ pub fn batch_encode_user_table_rows(rows: &[UserTableRow]) -> Result<Vec<Vec<u8>
             &fb_row::UserTableRowPayloadArgs {
                 user_id: Some(user_id),
                 seq: row._seq.as_i64(),
+                commit_seq: row._commit_seq,
                 deleted: row._deleted,
                 fields: Some(fields),
             },
@@ -730,12 +747,12 @@ pub fn batch_encode_user_table_rows(rows: &[UserTableRow]) -> Result<Vec<Vec<u8>
 }
 
 /// Batch-encode multiple shared table rows, reusing internal FlatBufferBuilders.
-pub fn batch_encode_shared_table_rows(rows: &[(SeqId, bool, &Row)]) -> Result<Vec<Vec<u8>>> {
+pub fn batch_encode_shared_table_rows(rows: &[(SeqId, u64, bool, &Row)]) -> Result<Vec<Vec<u8>>> {
     let _span = tracing::info_span!("batch_encode_shared_table_rows", count = rows.len()).entered();
     let mut results = Vec::with_capacity(rows.len());
     let mut inner_builder = flatbuffers::FlatBufferBuilder::with_capacity(512);
 
-    for (seq, deleted, fields) in rows {
+    for (seq, commit_seq, deleted, fields) in rows {
         inner_builder.reset();
 
         let fields_offset = encode_row_payload_table(&mut inner_builder, fields)?;
@@ -743,6 +760,7 @@ pub fn batch_encode_shared_table_rows(rows: &[(SeqId, bool, &Row)]) -> Result<Ve
             &mut inner_builder,
             &fb_row::SharedTableRowPayloadArgs {
                 seq: seq.as_i64(),
+                commit_seq: *commit_seq,
                 deleted: *deleted,
                 fields: Some(fields_offset),
             },
@@ -803,6 +821,7 @@ mod tests {
         let row = UserTableRow {
             user_id: UserId::from("user1"),
             _seq: SeqId::new(123),
+            _commit_seq: 55,
             _deleted: false,
             fields,
         };
@@ -819,11 +838,12 @@ mod tests {
         values.insert("name".to_string(), ScalarValue::Utf8(Some("shared".to_string())));
         let fields = Row { values };
 
-        let encoded =
-            encode_shared_table_row(SeqId::new(456), true, &fields).expect("encode shared row");
-        let (seq, deleted, decoded_fields) =
+        let encoded = encode_shared_table_row(SeqId::new(456), 77, true, &fields)
+            .expect("encode shared row");
+        let (seq, commit_seq, deleted, decoded_fields) =
             decode_shared_table_row(&encoded).expect("decode shared row");
         assert_eq!(seq, SeqId::new(456));
+        assert_eq!(commit_seq, 77);
         assert!(deleted);
         assert_eq!(decoded_fields, fields);
     }

@@ -1,14 +1,24 @@
 use super::*;
 use crate::error::KalamDbError;
 use crate::live::manager::ConnectionsManager;
+use crate::live::models::connection::MAX_BUFFERED_NOTIFICATIONS_PER_SUBSCRIPTION;
+use crate::live::models::{
+    InitialLoadState, SubscriptionFlowControl, SubscriptionHandle, SubscriptionRuntimeMetadata,
+    SubscriptionState,
+};
+use crate::live::NotificationService;
 use crate::sql::executor::SqlExecutor;
 use crate::test_helpers::test_app_context_simple;
+use datafusion::scalar::ScalarValue;
+use kalamdb_commons::constants::SystemColumnNames;
 use kalamdb_commons::datatypes::KalamDataType;
+use kalamdb_commons::ids::SeqId;
+use kalamdb_commons::models::rows::Row;
 use kalamdb_commons::models::{ConnectionId, ConnectionInfo, TableId};
 use kalamdb_commons::schemas::{
     ColumnDefinition, FieldFlag, TableDefinition, TableOptions, TableType,
 };
-use kalamdb_commons::websocket::{SubscriptionOptions, SubscriptionRequest};
+use kalamdb_commons::websocket::{SubscriptionOptions, SubscriptionRequest, WireNotification};
 use kalamdb_commons::{NamespaceId, TableName};
 use kalamdb_commons::{NodeId, UserId};
 use kalamdb_sql::parser::query_parser::QueryParser;
@@ -17,9 +27,11 @@ use kalamdb_store::test_utils::TestDb;
 use kalamdb_tables::{
     new_shared_table_store, new_stream_table_store, new_user_table_store, StreamTableStoreConfig,
 };
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
+use tokio::sync::mpsc;
 
 /// Helper function to create a SubscriptionRequest for tests
 fn create_test_subscription_request(
@@ -172,6 +184,51 @@ fn register_and_auth_connection(
     let connection_state = registration.state;
     connection_state.mark_authenticated(user_id.clone(), kalamdb_commons::models::Role::User);
     connection_state
+}
+
+fn make_notification_row(id: i64, seq: i64) -> Row {
+    let mut values = BTreeMap::new();
+    values.insert("id".to_string(), ScalarValue::Int64(Some(id)));
+    values.insert(
+        "body".to_string(),
+        ScalarValue::Utf8(Some(format!("message-{seq}"))),
+    );
+    values.insert(SystemColumnNames::SEQ.to_string(), ScalarValue::Int64(Some(seq)));
+    Row::new(values)
+}
+
+fn make_insert_change(table_id: &TableId, seq: i64) -> crate::live::ChangeNotification {
+    crate::live::ChangeNotification::insert(table_id.clone(), make_notification_row(seq, seq))
+}
+
+fn make_runtime_metadata(query: &str) -> Arc<SubscriptionRuntimeMetadata> {
+    Arc::new(SubscriptionRuntimeMetadata::new(query, None, 1))
+}
+
+fn make_subscription_handle(
+    subscription_id: &str,
+    notification_tx: mpsc::Sender<Arc<WireNotification>>,
+    flow_control: Arc<SubscriptionFlowControl>,
+    runtime_metadata: Arc<SubscriptionRuntimeMetadata>,
+) -> SubscriptionHandle {
+    SubscriptionHandle {
+        subscription_id: Arc::from(subscription_id),
+        filter_expr: None,
+        projections: None,
+        notification_tx,
+        flow_control: Some(flow_control),
+        runtime_metadata,
+    }
+}
+
+fn delivered_seq(notification: &WireNotification) -> i64 {
+    let json: serde_json::Value =
+        serde_json::from_slice(&notification.to_json()).expect("notification json");
+    json["rows"][0][SystemColumnNames::SEQ]
+        .as_str()
+        .expect("delivered notification seq")
+        .parse()
+        .expect("delivered notification seq parses")
 }
 
 #[test]
@@ -600,4 +657,199 @@ async fn test_multi_subscription_support() {
     assert_ne!(live_id1.to_string(), live_id2.to_string());
     assert_ne!(live_id1.to_string(), live_id3.to_string());
     assert_ne!(live_id2.to_string(), live_id3.to_string());
+}
+
+#[tokio::test]
+#[ntest::timeout(10000)]
+async fn test_hot_table_commit_burst_preserves_delivered_order() {
+    const HOT_SUBSCRIBER_COUNT: usize = 10_000;
+    const OBSERVED_SUBSCRIBERS: usize = 2;
+    const BURST_SIZE: usize = 32;
+
+    let registry = ConnectionsManager::new(
+        NodeId::new(1),
+        Duration::from_secs(30),
+        Duration::from_secs(10),
+        Duration::from_secs(5),
+    );
+    let service = NotificationService::new(Arc::clone(&registry));
+    let table_id = TableId::from_strings("shared", "hot_commit_burst");
+
+    let mut observed_receivers = Vec::with_capacity(OBSERVED_SUBSCRIBERS);
+    for index in 0..OBSERVED_SUBSCRIBERS {
+        let connection_id = ConnectionId::new(format!("observed-hot-{index}"));
+        let live_id = crate::live::LiveQueryId::new(
+            UserId::new(format!("observed-user-{index}")),
+            connection_id.clone(),
+            format!("observed-sub-{index}"),
+        );
+        let (tx, rx) = mpsc::channel(BURST_SIZE + 8);
+        let flow_control = Arc::new(SubscriptionFlowControl::new());
+        flow_control.mark_initial_complete();
+
+        registry.index_shared_subscription(
+            &connection_id,
+            live_id,
+            table_id.clone(),
+            make_subscription_handle(
+                &format!("observed-sub-{index}"),
+                tx,
+                flow_control,
+                make_runtime_metadata("SELECT * FROM shared.hot_commit_burst"),
+            ),
+        );
+        observed_receivers.push(rx);
+    }
+
+    let (filler_tx, filler_rx) = mpsc::channel(1);
+    drop(filler_rx);
+    let filler_flow = Arc::new(SubscriptionFlowControl::new());
+    filler_flow.mark_initial_complete();
+    let filler_metadata = make_runtime_metadata("SELECT * FROM shared.hot_commit_burst");
+
+    for index in OBSERVED_SUBSCRIBERS..HOT_SUBSCRIBER_COUNT {
+        let connection_id = ConnectionId::new(format!("filler-hot-{index}"));
+        let live_id = crate::live::LiveQueryId::new(
+            UserId::new("filler-user"),
+            connection_id.clone(),
+            format!("filler-sub-{index}"),
+        );
+        registry.index_shared_subscription(
+            &connection_id,
+            live_id,
+            table_id.clone(),
+            make_subscription_handle(
+                &format!("filler-sub-{index}"),
+                filler_tx.clone(),
+                Arc::clone(&filler_flow),
+                Arc::clone(&filler_metadata),
+            ),
+        );
+    }
+
+    assert_eq!(registry.subscription_count(), HOT_SUBSCRIBER_COUNT);
+    assert_eq!(registry.get_shared_subscriptions_for_table(&table_id).len(), HOT_SUBSCRIBER_COUNT);
+
+    for seq in 1..=BURST_SIZE {
+        service.notify_async(None, table_id.clone(), make_insert_change(&table_id, seq as i64));
+    }
+
+    let expected: Vec<_> = (1..=BURST_SIZE as i64).collect();
+    for (index, receiver) in observed_receivers.iter_mut().enumerate() {
+        let mut delivered = Vec::with_capacity(BURST_SIZE);
+        for _ in 0..BURST_SIZE {
+            let notification = tokio::time::timeout(Duration::from_secs(5), receiver.recv())
+                .await
+                .expect("notification should arrive before timeout")
+                .expect("notification channel should stay open");
+            delivered.push(delivered_seq(notification.as_ref()));
+        }
+
+        assert_eq!(
+            delivered, expected,
+            "observed subscriber {index} should preserve per-table delivery order"
+        );
+    }
+}
+
+#[tokio::test]
+#[ntest::timeout(10000)]
+async fn test_slow_subscriber_commit_burst_stays_bounded_and_cleans_up() {
+    const OVERFLOW_NOTIFICATIONS: usize = 64;
+
+    let (registry, manager, _test_db) = create_test_manager().await;
+    let service = NotificationService::new(Arc::clone(&registry));
+
+    let user_id = UserId::new("slow-user");
+    let connection_id = ConnectionId::new("slow-conn");
+    let mut registration = registry
+        .register_connection(connection_id.clone(), ConnectionInfo::new(None))
+        .expect("connection should register");
+    let connection_state = Arc::clone(&registration.state);
+    connection_state.mark_auth_started();
+    connection_state.mark_authenticated(user_id.clone(), kalamdb_commons::models::Role::User);
+
+    let table_id = TableId::from_strings("shared", "slow_commit_burst");
+    let live_id = crate::live::LiveQueryId::new(
+        user_id.clone(),
+        connection_id.clone(),
+        "slow-sub".to_string(),
+    );
+    let flow_control = Arc::new(SubscriptionFlowControl::new());
+    let snapshot_end_seq = Some(SeqId::from(0));
+    flow_control.set_snapshot_end_seq(snapshot_end_seq);
+    let runtime_metadata = make_runtime_metadata("SELECT * FROM shared.slow_commit_burst");
+
+    connection_state.insert_subscription(
+        Arc::from("slow-sub"),
+        SubscriptionState {
+            live_id: live_id.clone(),
+            table_id: table_id.clone(),
+            filter_expr: None,
+            projections: None,
+            initial_load: Some(InitialLoadState {
+                batch_size: 128,
+                snapshot_end_seq,
+                current_batch_num: 0,
+                flow_control: Arc::clone(&flow_control),
+            }),
+            is_shared: true,
+            runtime_metadata: Arc::clone(&runtime_metadata),
+        },
+    );
+    registry.index_shared_subscription(
+        &connection_id,
+        live_id.clone(),
+        table_id.clone(),
+        make_subscription_handle(
+            "slow-sub",
+            connection_state.notification_tx.clone(),
+            Arc::clone(&flow_control),
+            Arc::clone(&runtime_metadata),
+        ),
+    );
+
+    let burst_size = MAX_BUFFERED_NOTIFICATIONS_PER_SUBSCRIPTION + OVERFLOW_NOTIFICATIONS;
+    for seq in 1..=burst_size {
+        service.notify_async(None, table_id.clone(), make_insert_change(&table_id, seq as i64));
+    }
+
+    tokio::time::sleep(Duration::from_millis(250)).await;
+
+    assert!(
+        registration.notification_rx.try_recv().is_err(),
+        "initial-load gating should buffer commit-burst notifications instead of sending them"
+    );
+
+    let buffered = flow_control.drain_buffered_notifications();
+    assert_eq!(
+        buffered.len(),
+        MAX_BUFFERED_NOTIFICATIONS_PER_SUBSCRIPTION,
+        "slow subscriber buffer must stay capped during commit bursts"
+    );
+
+    let first_seq = buffered
+        .first()
+        .and_then(|item| item.seq)
+        .expect("buffered notifications should carry seq ordering");
+    let last_seq = buffered
+        .last()
+        .and_then(|item| item.seq)
+        .expect("buffered notifications should carry seq ordering");
+    assert_eq!(
+        first_seq,
+        SeqId::from((OVERFLOW_NOTIFICATIONS + 1) as i64),
+        "bounded buffer should retain the newest notifications"
+    );
+    assert_eq!(last_seq, SeqId::from(burst_size as i64));
+
+    let removed_live_ids = manager
+        .unregister_connection(&user_id, &connection_id)
+        .await
+        .expect("connection cleanup should succeed");
+    assert_eq!(removed_live_ids, vec![live_id]);
+    assert_eq!(registry.connection_count(), 0);
+    assert_eq!(registry.subscription_count(), 0);
+    assert!(!registry.has_shared_subscriptions(&table_id));
+    assert_eq!(connection_state.subscription_count(), 0);
 }

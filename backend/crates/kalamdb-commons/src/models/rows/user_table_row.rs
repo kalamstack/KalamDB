@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// **MVCC Architecture (Phase 12, User Story 5)**:
 /// - Removed: row_id (redundant with _seq), _updated (timestamp embedded in _seq Snowflake ID)
-/// - Kept: user_id (row owner), _seq (version identifier with embedded timestamp), _deleted (tombstone), fields (all user columns including PK)
+/// - Kept: user_id (row owner), _seq (version identifier with embedded timestamp), `_commit_seq` (commit-order visibility), _deleted (tombstone), fields (all user columns including PK)
 ///
 /// **Note on System Column Naming**:
 /// The underscore prefix (`_seq`, `_deleted`) follows SQL convention for system-managed columns.
@@ -19,6 +19,10 @@ pub struct UserTableRow {
     /// Monotonically increasing sequence ID (Snowflake ID with embedded timestamp)
     /// Maps to SQL column `_seq`
     pub _seq: SeqId,
+    /// Commit-order visibility marker assigned by the durable apply path.
+    /// Maps to SQL column `_commit_seq`
+    #[serde(default)]
+    pub _commit_seq: u64,
     /// Soft delete tombstone marker
     /// Maps to SQL column `_deleted`
     pub _deleted: bool,
@@ -31,6 +35,7 @@ impl From<UserTableRow> for KTableRow {
         KTableRow {
             user_id: row.user_id,
             _seq: row._seq,
+            _commit_seq: row._commit_seq,
             _deleted: row._deleted,
             fields: row.fields,
         }

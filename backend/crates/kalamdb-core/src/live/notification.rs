@@ -13,6 +13,7 @@ use super::helpers::filter_eval::matches as filter_matches;
 use super::manager::ConnectionsManager;
 use super::models::{ChangeNotification, ChangeType, SubscriptionHandle};
 use crate::error::KalamDbError;
+use crate::transactions::{CommitSideEffectPlan, FanoutOwnerScope};
 use kalamdb_commons::constants::SystemColumnNames;
 use kalamdb_commons::conversions::arrow_json_conversion::scalar_value_to_json;
 use kalamdb_commons::ids::SeqId;
@@ -41,6 +42,22 @@ struct NotificationTask {
     user_id: Option<UserId>,
     table_id: TableId,
     notification: ChangeNotification,
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum PayloadCacheKey {
+    AllColumns,
+    Projection(Arc<Vec<String>>),
+}
+
+impl PayloadCacheKey {
+    #[inline]
+    fn from_projections(projections: &Option<Arc<Vec<String>>>) -> Self {
+        match projections {
+            Some(columns) => Self::Projection(Arc::clone(columns)),
+            None => Self::AllColumns,
+        }
+    }
 }
 
 #[inline]
@@ -152,6 +169,8 @@ fn project_update_delta(
 /// Build the `SharedChangePayload` for a notification.
 /// Converts Row data to `RowData` (`HashMap<String, KalamCellValue>`) once per
 /// projection group; the result is shared via `Arc` across all subscribers.
+/// JSON and MessagePack bytes are then cached lazily inside `SharedChangePayload`,
+/// so notification fanout only needs to group by projection requirements here.
 fn build_shared_payload(
     change_type: &ChangeType,
     new_row: &Row,
@@ -350,12 +369,33 @@ impl NotificationService {
         }
     }
 
+    /// Release a grouped explicit-transaction fanout plan after durable commit.
+    pub fn dispatch_commit_plan(&self, plan: &CommitSideEffectPlan) -> usize {
+        let mut dispatched = 0;
+
+        for dispatch in &plan.notifications {
+            let user_id = match &dispatch.owner_scope {
+                FanoutOwnerScope::Shared => None,
+                FanoutOwnerScope::User(user_id) => Some(user_id.clone()),
+            };
+
+            for notification in &dispatch.notifications {
+                self.notify_async(user_id.clone(), dispatch.table_id.clone(), notification.clone());
+                dispatched += 1;
+            }
+        }
+
+        dispatched
+    }
+
     /// Unified dispatch: filters, builds notifications, and delivers to subscribers.
     ///
-    /// Groups subscribers by projection pointer identity so identical projections
-    /// share a single `Arc<Notification>` (avoids N duplicate JSON conversions for
-    /// SELECT * subscribers). For large subscriber counts (>SHARED_NOTIFY_CHUNK_SIZE),
-    /// uses parallel chunked fan-out via `tokio::spawn`.
+    /// Groups subscribers by projection requirements so equivalent projections
+    /// share a single `Arc<SharedChangePayload>` even when they come from different
+    /// subscription objects. Serialization reuse stays inside `SharedChangePayload`,
+    /// which lazily caches JSON and MessagePack bytes for the shared row payload.
+    /// For large subscriber counts (>SHARED_NOTIFY_CHUNK_SIZE), uses parallel chunked
+    /// fan-out via `tokio::spawn`.
     async fn dispatch_to_subscribers(
         table_id: &TableId,
         change_notification: ChangeNotification,
@@ -422,9 +462,10 @@ impl NotificationService {
 
 /// Dispatch notifications to a slice of subscribers.
 ///
-/// Groups subscribers by projection pointer identity so that subscribers with
-/// identical projections (common case: all SELECT *) share a single
-/// `Arc<SharedChangePayload>`, avoiding redundant Row→RowData conversion.
+/// Groups subscribers by projection requirements so that subscribers with
+/// identical projections share a single `Arc<SharedChangePayload>`, avoiding
+/// redundant Row→RowData conversion. The shared payload then reuses cached JSON
+/// and MessagePack bytes across subscribers that serialize the same change.
 fn dispatch_chunk<I>(
     handles: I,
     new_row: &Row,
@@ -436,8 +477,8 @@ fn dispatch_chunk<I>(
 where
     I: IntoIterator<Item = SubscriptionHandle>,
 {
-    // Cache: projection pointer → shared payload (built once per projection group).
-    let mut cache: HashMap<usize, Arc<SharedChangePayload>> = HashMap::new();
+    // Cache: projection requirements → shared payload (built once per projection group).
+    let mut cache: HashMap<PayloadCacheKey, Arc<SharedChangePayload>> = HashMap::new();
     let mut count = 0usize;
 
     for handle in handles {
@@ -457,11 +498,7 @@ where
             }
         }
 
-        // Projection cache key: Arc pointer address for Some, 0 for None (SELECT *)
-        let proj_key = match &handle.projections {
-            Some(arc) => Arc::as_ptr(arc) as usize,
-            None => 0,
-        };
+        let proj_key = PayloadCacheKey::from_projections(&handle.projections);
 
         let payload = if let Some(cached) = cache.get(&proj_key) {
             Arc::clone(cached)
@@ -749,5 +786,107 @@ mod tests {
         assert_eq!(delivered.subscription_id.as_ref(), "sub_async");
 
         assert!(NotificationServiceTrait::has_subscribers(&*service, None, &table_id));
+    }
+
+    #[test]
+    fn dispatch_chunk_reuses_payload_for_equivalent_projection_values() {
+        let (tx_a, mut rx_a) = mpsc::channel(8);
+        let flow_a = Arc::new(SubscriptionFlowControl::new());
+        flow_a.mark_initial_complete();
+        let handle_a = make_shared_handle(
+            "sub_proj_a",
+            tx_a,
+            Arc::clone(&flow_a),
+            None,
+            Some(vec!["id"]),
+        );
+
+        let (tx_b, mut rx_b) = mpsc::channel(8);
+        let flow_b = Arc::new(SubscriptionFlowControl::new());
+        flow_b.mark_initial_complete();
+        let handle_b = make_shared_handle(
+            "sub_proj_b",
+            tx_b,
+            Arc::clone(&flow_b),
+            None,
+            Some(vec!["id"]),
+        );
+
+        let row = make_row(9, "shared", 9);
+        let delivered = dispatch_chunk(
+            vec![handle_a, handle_b].into_iter(),
+            &row,
+            None,
+            &ChangeType::Insert,
+            &[],
+            Some(SeqId::from(9)),
+        )
+        .expect("dispatch succeeds");
+        assert_eq!(delivered, 2);
+
+        let first = rx_a.try_recv().expect("first subscriber receives notification");
+        let second = rx_b.try_recv().expect("second subscriber receives notification");
+
+        assert!(Arc::ptr_eq(&first.payload, &second.payload));
+
+        let first_json: serde_json::Value =
+            serde_json::from_slice(&first.to_json()).expect("json payload");
+        assert!(first_json["rows"][0].get("id").is_some());
+        assert!(first_json["rows"][0].get("body").is_none());
+
+        let second_msgpack = second.to_msgpack();
+        assert!(!second_msgpack.is_empty());
+    }
+
+    #[test]
+    fn dispatch_chunk_separates_distinct_projection_groups() {
+        let (tx_id, mut rx_id) = mpsc::channel(8);
+        let flow_id = Arc::new(SubscriptionFlowControl::new());
+        flow_id.mark_initial_complete();
+        let handle_id = make_shared_handle(
+            "sub_only_id",
+            tx_id,
+            Arc::clone(&flow_id),
+            None,
+            Some(vec!["id"]),
+        );
+
+        let (tx_body, mut rx_body) = mpsc::channel(8);
+        let flow_body = Arc::new(SubscriptionFlowControl::new());
+        flow_body.mark_initial_complete();
+        let handle_body = make_shared_handle(
+            "sub_only_body",
+            tx_body,
+            Arc::clone(&flow_body),
+            None,
+            Some(vec!["body"]),
+        );
+
+        let row = make_row(17, "separate", 17);
+        let delivered = dispatch_chunk(
+            vec![handle_id, handle_body].into_iter(),
+            &row,
+            None,
+            &ChangeType::Insert,
+            &[],
+            Some(SeqId::from(17)),
+        )
+        .expect("dispatch succeeds");
+        assert_eq!(delivered, 2);
+
+        let first = rx_id.try_recv().expect("id projection receives notification");
+        let second = rx_body.try_recv().expect("body projection receives notification");
+
+        assert!(!Arc::ptr_eq(&first.payload, &second.payload));
+
+        let first_json: serde_json::Value =
+            serde_json::from_slice(&first.to_json()).expect("first json payload");
+        let second_json: serde_json::Value =
+            serde_json::from_slice(&second.to_json()).expect("second json payload");
+
+        assert!(first_json["rows"][0].get("id").is_some());
+        assert!(first_json["rows"][0].get("body").is_none());
+        assert!(second_json["rows"][0].get("body").is_some());
+        assert!(second_json["rows"][0].get("id").is_none());
     }
 }
