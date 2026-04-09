@@ -7,7 +7,7 @@ pub mod cached_table_data;
 pub mod projection;
 pub mod registry;
 
-pub use cached_table_data::{CachedProvider, CachedTableData, TableEntry};
+pub use cached_table_data::{CachedTableData, TableEntry};
 pub use kalamdb_commons::helpers::string_interner::SystemColumns;
 pub use kalamdb_views::error::RegistryError;
 

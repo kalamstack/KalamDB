@@ -14,6 +14,7 @@ kalamdb-commons = { path = "../kalamdb-commons", features = ["full"] }
 kalamdb-configs = { path = "../kalamdb-configs" }
 kalamdb-filestore = { path = "../kalamdb-filestore" }
 kalamdb-observability = { path = "../kalamdb-observability" }
+kalamdb-plan-cache = { workspace = true }
 kalamdb-pg = { path = "../kalamdb-pg" }
 kalamdb-raft = { path = "../kalamdb-raft" }
 kalamdb-session = { path = "../kalamdb-session" }
@@ -41,7 +42,6 @@ sqlparser = { workspace = true }
 # Concurrent data structures
 dashmap = { workspace = true }
 parking_lot = { workspace = true }
-moka = { workspace = true }
 
 # Async
 async-trait = { workspace = true }

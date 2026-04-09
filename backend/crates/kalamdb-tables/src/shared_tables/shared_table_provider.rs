@@ -2489,8 +2489,8 @@ impl TableProvider for SharedTableProvider {
 impl crate::utils::dml_provider::KalamTableProvider for SharedTableProvider {
     async fn insert_rows(&self, user_id: &UserId, rows: Vec<Row>) -> Result<usize, KalamDbError> {
         // In cluster mode, ensure we're on the shared shard leader.
-        // This is needed because fast_insert bypasses DataFusion's insert_into(),
-        // which has its own leadership check.
+        // This path bypasses DataFusion's insert_into(), which has its own
+        // leadership check.
         if self.core.services.cluster_coordinator.is_cluster_mode().await {
             let is_leader = self.core.services.cluster_coordinator.is_leader_for_shared().await;
             if !is_leader {

@@ -367,6 +367,7 @@ async fn run_terminal_proxy_cleanup_scenario(action: TerminalAction) {
         ))
         .await
         .ok();
+    cleanup.disconnect().await;
     env.kalamdb_sql(&format!("DROP SHARED TABLE IF EXISTS e2e.{table}")).await;
 
     proxy.shutdown().await;

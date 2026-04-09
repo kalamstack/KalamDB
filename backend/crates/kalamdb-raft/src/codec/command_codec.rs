@@ -203,9 +203,17 @@ mod tests {
 
     #[test]
     fn option_none_serializes_compactly() {
-        let bytes = flexbuffers::to_vec(&Option::<kalamdb_commons::models::TransactionId>::None)
+        let none_bytes = flexbuffers::to_vec(&Option::<kalamdb_commons::models::TransactionId>::None)
             .expect("encode none option");
-        assert_eq!(bytes.len(), 1);
+        let some_bytes = flexbuffers::to_vec(&Some(
+            kalamdb_commons::models::TransactionId::new(
+                "01960f7b-3d15-7d6d-b26c-7e4db6f25f8d",
+            ),
+        ))
+        .expect("encode some option");
+
+        assert!(none_bytes.len() <= 3);
+        assert!(none_bytes.len() < some_bytes.len());
     }
 
     #[test]

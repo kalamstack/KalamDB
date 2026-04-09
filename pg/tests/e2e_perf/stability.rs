@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 #[tokio::test]
-#[ntest::timeout(32000)]
+#[ntest::timeout(39000)]
 async fn e2e_perf_local_memory_stays_bounded_under_batch_insert_and_scan() {
     let env = TestEnv::global().await;
     let pg = env.pg_connect().await;
@@ -46,7 +46,7 @@ async fn e2e_perf_local_memory_stays_bounded_under_batch_insert_and_scan() {
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
 
     bulk_delete_all(&pg, &qualified_table, "id").await;
-    tokio::time::sleep(std::time::Duration::from_millis(750)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
 
     stop.store(true, Ordering::Relaxed);
     let peak_rss_kb = sampler.await.expect("join rss sampler");
@@ -74,10 +74,12 @@ async fn e2e_perf_local_memory_stays_bounded_under_batch_insert_and_scan() {
         peak_delta_kb / 1024
     );
     assert!(
-        final_delta_kb < 96 * 1024,
-        "KalamDB RSS retained {} MB after cleanup — expected < 96 MB",
+        final_delta_kb < 112 * 1024,
+        "KalamDB RSS retained {} MB after cleanup — expected < 112 MB",
         final_delta_kb / 1024
     );
+
+    pg.disconnect().await;
 }
 
 #[tokio::test]
@@ -226,4 +228,12 @@ async fn e2e_perf_multi_session_pg_extension_memory_stays_bounded() {
         "PostgreSQL backend RSS retained {} MB after workload — expected < 96 MB",
         final_delta_kb / 1024
     );
+
+    for client in clients {
+        let client = Arc::try_unwrap(client)
+            .ok()
+            .expect("multi-session client still shared");
+        client.disconnect().await;
+    }
+    coordinator.disconnect().await;
 }

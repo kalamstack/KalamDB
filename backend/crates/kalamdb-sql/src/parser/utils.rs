@@ -106,6 +106,17 @@ pub fn extract_dml_table_id(sql: &str, default_namespace: &str) -> Option<TableI
         .and_then(|statement| extract_dml_table_id_from_statement(statement, default_namespace))
 }
 
+/// Extract the target table for simple INSERT/UPDATE/DELETE statements using
+/// token scanning instead of a full AST parse.
+///
+/// Returns `None` for complex or unrecognized token layouts so callers can
+/// fall back to the full parser when exact syntax support is required.
+pub fn extract_dml_table_id_fast(sql: &str, default_namespace: &str) -> Option<TableId> {
+    let dialect = GenericDialect {};
+    let tokens = collect_non_whitespace_tokens(sql, &dialect).ok()?;
+    extract_dml_table_id_from_tokens(&tokens, default_namespace)
+}
+
 /// Extract the target table for INSERT/UPDATE/DELETE from a parsed SQL statement.
 pub fn extract_dml_table_id_from_statement(
     statement: &Statement,
@@ -172,6 +183,63 @@ fn table_id_from_parts(parts: &[String], default_namespace: &str) -> Option<Tabl
         2 => Some(TableId::from_strings(&parts[0], &parts[1])),
         _ => None,
     }
+}
+
+fn extract_dml_table_id_from_tokens(tokens: &[Token], default_namespace: &str) -> Option<TableId> {
+    let compact_tokens: Vec<&Token> = tokens
+        .iter()
+        .filter(|token| !matches!(token, Token::Whitespace(_)))
+        .collect();
+
+    match *(compact_tokens.first()?) {
+        Token::Word(ref word) if word.value.eq_ignore_ascii_case("INSERT") => {
+            let into_token = compact_tokens.get(1)?;
+            if !matches!(**into_token, Token::Word(ref word) if word.value.eq_ignore_ascii_case("INTO")) {
+                return None;
+            }
+            let (parts, _) = extract_object_name_parts(&compact_tokens, 2)?;
+            table_id_from_parts(&parts, default_namespace)
+        },
+        Token::Word(ref word) if word.value.eq_ignore_ascii_case("UPDATE") => {
+            let (parts, _) = extract_object_name_parts(&compact_tokens, 1)?;
+            table_id_from_parts(&parts, default_namespace)
+        },
+        Token::Word(ref word) if word.value.eq_ignore_ascii_case("DELETE") => {
+            let from_token = compact_tokens.get(1)?;
+            if !matches!(**from_token, Token::Word(ref word) if word.value.eq_ignore_ascii_case("FROM")) {
+                return None;
+            }
+            let (parts, _) = extract_object_name_parts(&compact_tokens, 2)?;
+            table_id_from_parts(&parts, default_namespace)
+        },
+        _ => None,
+    }
+}
+
+fn extract_object_name_parts(tokens: &[&Token], start_idx: usize) -> Option<(Vec<String>, usize)> {
+    let mut idx = start_idx;
+    let mut parts = Vec::new();
+
+    loop {
+        match *(tokens.get(idx)?) {
+            Token::Word(ref word) => {
+                parts.push(word.value.clone());
+                idx += 1;
+            },
+            _ => return None,
+        }
+
+        match tokens.get(idx) {
+            Some(token) if matches!(**token, Token::Period) => idx += 1,
+            _ => break,
+        }
+    }
+
+    if parts.is_empty() {
+        return None;
+    }
+
+    Some((parts, idx))
 }
 
 /// Collect non-whitespace tokens using sqlparser's parser lookahead.
@@ -497,6 +565,28 @@ mod tests {
 
         let delete = extract_dml_table_id("DELETE FROM chat.messages WHERE id = 1", "default")
             .expect("delete table id");
+        assert_eq!(delete.full_name(), "chat.messages");
+    }
+
+    #[test]
+    fn test_extract_dml_table_id_fast_insert_update_delete() {
+        let insert = extract_dml_table_id_fast(
+            "INSERT INTO chat.messages (id) VALUES (1)",
+            "default",
+        )
+        .expect("fast insert table id");
+        assert_eq!(insert.full_name(), "chat.messages");
+
+        let update =
+            extract_dml_table_id_fast("UPDATE messages SET id = 2 WHERE id = 1", "chat")
+                .expect("fast update table id");
+        assert_eq!(update.full_name(), "chat.messages");
+
+        let delete = extract_dml_table_id_fast(
+            "DELETE FROM chat.messages WHERE id = 1",
+            "default",
+        )
+        .expect("fast delete table id");
         assert_eq!(delete.full_name(), "chat.messages");
     }
 

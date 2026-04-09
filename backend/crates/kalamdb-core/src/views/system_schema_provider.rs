@@ -216,7 +216,7 @@ impl SystemSchemaProvider {
         let secured: Arc<dyn TableProvider + Send + Sync> =
             secure_provider(provider, system_table.table_id());
         if let Some(cached) = self.schema_registry.get(&table_id) {
-            cached.set_system_provider(Arc::clone(&secured));
+            cached.set_provider(Arc::clone(&secured));
         }
 
         Some(secured)

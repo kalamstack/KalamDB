@@ -514,7 +514,7 @@ mod tests {
         // Wrap seed data in a MemTable provider
         let mem =
             MemTable::try_new(Arc::clone(&arrow_schema), vec![batches]).expect("MemTable creation");
-        cached.set_system_provider(Arc::new(mem));
+        cached.set_provider(Arc::new(mem));
 
         app_ctx.schema_registry().insert_cached(table_id.clone(), cached);
         arrow_schema

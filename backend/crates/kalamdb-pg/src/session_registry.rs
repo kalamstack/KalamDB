@@ -1,5 +1,6 @@
 use dashmap::DashMap;
 use kalamdb_commons::models::TransactionState;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -29,6 +30,47 @@ pub struct RemotePgSession {
     last_seen_at_ms: i64,
     client_addr: Option<String>,
     last_method: Option<String>,
+}
+
+/// Live transaction state resolved from the core transaction coordinator for a pg session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LivePgTransaction {
+    session_id: String,
+    transaction_id: String,
+    transaction_state: TransactionState,
+    transaction_has_writes: bool,
+}
+
+impl LivePgTransaction {
+    pub fn new(
+        session_id: impl Into<String>,
+        transaction_id: impl Into<String>,
+        transaction_state: TransactionState,
+        transaction_has_writes: bool,
+    ) -> Self {
+        Self {
+            session_id: session_id.into(),
+            transaction_id: transaction_id.into(),
+            transaction_state,
+            transaction_has_writes,
+        }
+    }
+
+    pub fn session_id(&self) -> &str {
+        self.session_id.as_str()
+    }
+
+    pub fn transaction_id(&self) -> &str {
+        self.transaction_id.as_str()
+    }
+
+    pub fn transaction_state(&self) -> TransactionState {
+        self.transaction_state
+    }
+
+    pub fn transaction_has_writes(&self) -> bool {
+        self.transaction_has_writes
+    }
 }
 
 impl RemotePgSession {
@@ -93,6 +135,15 @@ impl RemotePgSession {
         self
     }
 
+    fn with_live_transaction(mut self, live_transaction: Option<&LivePgTransaction>) -> Self {
+        self.transaction_id = live_transaction.map(|transaction| transaction.transaction_id().to_owned());
+        self.transaction_state = live_transaction.map(LivePgTransaction::transaction_state);
+        self.transaction_has_writes = live_transaction
+            .map(LivePgTransaction::transaction_has_writes)
+            .unwrap_or(false);
+        self
+    }
+
     fn record_activity(
         &mut self,
         current_schema: Option<&str>,
@@ -114,6 +165,16 @@ impl RemotePgSession {
 
         self.last_seen_at_ms = touched_at_ms;
     }
+}
+
+fn compare_sessions_for_observability(
+    left: &RemotePgSession,
+    right: &RemotePgSession,
+) -> std::cmp::Ordering {
+    right
+        .last_seen_at_ms
+        .cmp(&left.last_seen_at_ms)
+        .then_with(|| left.session_id.cmp(&right.session_id))
 }
 
 /// Concurrent registry for PostgreSQL backend sessions.
@@ -359,6 +420,32 @@ impl SessionRegistry {
         self.sessions.iter().map(|entry| entry.value().clone()).collect()
     }
 
+    /// Return a point-in-time snapshot of tracked sessions with transaction state
+    /// reconciled against the live coordinator view for pg-owned transactions.
+    pub fn snapshot_with_live_transactions<I>(
+        &self,
+        active_transactions: I,
+    ) -> Vec<RemotePgSession>
+    where
+        I: IntoIterator<Item = LivePgTransaction>,
+    {
+        let active_transactions = active_transactions
+            .into_iter()
+            .map(|transaction| (transaction.session_id().to_owned(), transaction))
+            .collect::<HashMap<_, _>>();
+
+        let mut snapshot = self
+            .snapshot()
+            .into_iter()
+            .map(|session| {
+                let session_id = session.session_id().to_owned();
+                session.with_live_transaction(active_transactions.get(session_id.as_str()))
+            })
+            .collect::<Vec<_>>();
+        snapshot.sort_by(compare_sessions_for_observability);
+        snapshot
+    }
+
     /// Get a point-in-time snapshot of a tracked session.
     pub fn get(&self, session_id: &str) -> Option<RemotePgSession> {
         self.sessions.get(session_id).map(|session| session.clone())
@@ -543,6 +630,46 @@ mod tests {
         registry.mark_transaction_writes("pg-1");
 
         let session = registry.open_or_get("pg-1");
+        assert_eq!(session.transaction_state(), Some(TransactionState::OpenWrite));
+        assert!(session.transaction_has_writes());
+    }
+
+    #[test]
+    fn snapshot_with_live_transactions_clears_stale_local_transaction_state() {
+        let registry = SessionRegistry::default();
+        registry.open_or_get("pg-1");
+        let _tx_id = registry.begin_transaction("pg-1").unwrap();
+        registry.mark_transaction_writes("pg-1");
+
+        let snapshot = registry.snapshot_with_live_transactions(Vec::<LivePgTransaction>::new());
+        let session = snapshot
+            .into_iter()
+            .find(|session| session.session_id() == "pg-1")
+            .unwrap();
+
+        assert_eq!(session.transaction_id(), None);
+        assert_eq!(session.transaction_state(), None);
+        assert!(!session.transaction_has_writes());
+    }
+
+    #[test]
+    fn snapshot_with_live_transactions_prefers_live_transaction_state() {
+        let registry = SessionRegistry::default();
+        registry.open_or_get("pg-1");
+        registry.begin_transaction_with_id("pg-1", "stale-tx").unwrap();
+
+        let snapshot = registry.snapshot_with_live_transactions(vec![LivePgTransaction::new(
+            "pg-1",
+            "live-tx",
+            TransactionState::OpenWrite,
+            true,
+        )]);
+        let session = snapshot
+            .into_iter()
+            .find(|session| session.session_id() == "pg-1")
+            .unwrap();
+
+        assert_eq!(session.transaction_id(), Some("live-tx"));
         assert_eq!(session.transaction_state(), Some(TransactionState::OpenWrite));
         assert!(session.transaction_has_writes());
     }

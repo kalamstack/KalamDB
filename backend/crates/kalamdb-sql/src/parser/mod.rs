@@ -27,7 +27,7 @@ pub use extensions::*;
 pub use query_parser::*;
 pub use system::*;
 pub use utils::{
-    extract_dml_table_id, extract_dml_table_id_from_statement,
+    extract_dml_table_id, extract_dml_table_id_fast, extract_dml_table_id_from_statement,
     normalize_context_keyword_calls_for_sqlparser, parse_single_statement,
     rewrite_context_functions_for_datafusion,
 };

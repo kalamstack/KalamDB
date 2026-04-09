@@ -19,8 +19,8 @@ use crate::error::KalamDbError;
 /// Unified table provider that extends DataFusion's `TableProvider` with
 /// KalamDB-specific DML operations.
 ///
-/// Stored in `CachedTableData` as the single provider reference. The fast INSERT
-/// path calls `insert_rows()` directly, bypassing DataFusion's optimizer (~2.6ms).
+/// Implementations back the schema registry's cached `TableProvider` entries and
+/// provide direct DML helpers for executor- or provider-owned write paths.
 ///
 /// All table types implement this trait:
 /// - **User/Shared/Stream**: Override `insert_rows()` with batch-insert logic.

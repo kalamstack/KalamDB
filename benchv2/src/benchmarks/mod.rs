@@ -31,6 +31,7 @@ pub mod reconnect_subscribe_bench;
 pub mod sequential_crud_bench;
 pub mod subscribe_change_latency_bench;
 pub mod subscribe_initial_load_bench;
+pub mod transaction_multi_insert_bench;
 pub mod wide_column_insert_bench;
 
 use std::future::Future;
@@ -90,6 +91,7 @@ pub fn all_benchmarks() -> Vec<Box<dyn Benchmark>> {
         Box::new(ddl_bench::DropTableBench),
         Box::new(insert_bench::SingleInsertBench),
         Box::new(bulk_insert_bench::BulkInsertBench),
+        Box::new(transaction_multi_insert_bench::TransactionMultiInsertBench),
         Box::new(select_bench::SelectAllBench),
         Box::new(select_bench::SelectByFilterBench),
         Box::new(select_bench::SelectCountBench),

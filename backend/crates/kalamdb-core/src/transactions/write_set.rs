@@ -29,14 +29,24 @@ impl TransactionWriteSet {
         }
     }
 
-    pub fn stage(&mut self, mut mutation: StagedMutation) -> u64 {
+    pub fn stage(&mut self, mutation: StagedMutation) -> u64 {
+        let estimated_bytes = mutation.approximate_size_bytes();
+        self.stage_with_estimated_size(mutation, estimated_bytes)
+    }
+
+    pub fn stage_with_estimated_size(
+        &mut self,
+        mut mutation: StagedMutation,
+        estimated_bytes: usize,
+    ) -> u64 {
         let mutation_order = self.next_mutation_order;
         self.next_mutation_order += 1;
         mutation.mutation_order = mutation_order;
 
+        let overlay_entry = mutation.overlay_entry();
         let table_id = mutation.table_id.clone();
         let primary_key = mutation.primary_key.clone();
-        self.buffer_bytes += mutation.approximate_size_bytes();
+        self.buffer_bytes += estimated_bytes;
 
         let mutation_index = self.ordered_mutations.len();
         self.ordered_mutations.push(mutation);
@@ -45,7 +55,9 @@ impl TransactionWriteSet {
             .or_default()
             .insert(primary_key, mutation_index);
         self.overlay_cache
-            .insert(table_id.clone(), self.build_table_overlay(&table_id));
+            .entry(table_id.clone())
+            .or_insert_with(|| TransactionOverlay::new(self.transaction_id.clone()))
+            .apply_entry(overlay_entry);
 
         mutation_order
     }
@@ -74,20 +86,6 @@ impl TransactionWriteSet {
         for table_overlay in self.overlay_cache.values() {
             overlay.merge_from(table_overlay);
         }
-        overlay
-    }
-
-    fn build_table_overlay(&self, table_id: &TableId) -> TransactionOverlay {
-        let mut overlay = TransactionOverlay::new(self.transaction_id.clone());
-
-        if let Some(latest_by_key) = self.latest_by_table_key.get(table_id) {
-            for mutation_index in latest_by_key.values() {
-                if let Some(mutation) = self.ordered_mutations.get(*mutation_index) {
-                    overlay.apply_entry(mutation.overlay_entry());
-                }
-            }
-        }
-
         overlay
     }
 }
@@ -141,5 +139,62 @@ mod tests {
         let entry = overlay.latest_visible_entry(&table_id, "1").unwrap();
         assert_eq!(entry.mutation_order, 1);
         assert_eq!(entry.operation_kind, OperationKind::Update);
+    }
+
+    #[test]
+    fn stage_updates_overlay_incrementally() {
+        let transaction_id = TransactionId::new("01960f7b-3d15-7d6d-b26c-7e4db6f25f8d");
+        let table_id = TableId::new(NamespaceId::new("app"), TableName::new("items"));
+        let mut write_set = TransactionWriteSet::new(transaction_id.clone());
+
+        let mut inserted_values = BTreeMap::new();
+        inserted_values.insert("id".to_string(), ScalarValue::Int64(Some(1)));
+        inserted_values.insert(
+            "name".to_string(),
+            ScalarValue::Utf8(Some("before".to_string())),
+        );
+        inserted_values.insert(
+            "color".to_string(),
+            ScalarValue::Utf8(Some("red".to_string())),
+        );
+        write_set.stage(StagedMutation::new(
+            transaction_id.clone(),
+            table_id.clone(),
+            TableType::Shared,
+            None,
+            OperationKind::Insert,
+            "1",
+            Row::new(inserted_values),
+            false,
+        ));
+
+        let mut updated_values = BTreeMap::new();
+        updated_values.insert(
+            "name".to_string(),
+            ScalarValue::Utf8(Some("after".to_string())),
+        );
+        write_set.stage(StagedMutation::new(
+            transaction_id,
+            table_id.clone(),
+            TableType::Shared,
+            None,
+            OperationKind::Update,
+            "1",
+            Row::new(updated_values),
+            false,
+        ));
+
+        let overlay = write_set.overlay_for_table(&table_id).expect("table overlay");
+        let entry = overlay.latest_visible_entry(&table_id, "1").expect("overlay entry");
+        assert_eq!(entry.operation_kind, OperationKind::Insert);
+        assert_eq!(entry.payload.values.get("id"), Some(&ScalarValue::Int64(Some(1))));
+        assert_eq!(
+            entry.payload.values.get("name"),
+            Some(&ScalarValue::Utf8(Some("after".to_string())))
+        );
+        assert_eq!(
+            entry.payload.values.get("color"),
+            Some(&ScalarValue::Utf8(Some("red".to_string())))
+        );
     }
 }

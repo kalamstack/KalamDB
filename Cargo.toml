@@ -29,6 +29,7 @@ members = [
     "backend/crates/kalamdb-handlers/crates/stream",
     "backend/crates/kalamdb-handlers/crates/user",
     "backend/crates/kalamdb-jobs",
+    "backend/crates/kalamdb-plan-cache",
     "backend/crates/kalamdb-publisher",
     "backend/crates/kalamdb-sql",
     "backend/crates/kalamdb-store",
@@ -160,6 +161,7 @@ rand = "0.10.0"
 rcgen = "0.14.1"
 x509-parser = "0.18.1"
 kalamdb-commons = { path = "backend/crates/kalamdb-commons" }
+kalamdb-plan-cache = { path = "backend/crates/kalamdb-plan-cache" }
 kalamdb-tables = { path = "backend/crates/kalamdb-tables" }
 kalamdb-views = { path = "backend/crates/kalamdb-views" }
 cookie = "0.18"

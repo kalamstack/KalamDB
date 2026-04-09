@@ -13,6 +13,7 @@
 //   cargo nextest run --features e2e -p kalam-pg-extension -E 'test(e2e_ddl)'
 #![allow(dead_code)]
 
+use std::ops::{Deref, DerefMut};
 use std::sync::OnceLock;
 use std::time::Duration;
 use std::{env, fmt};
@@ -117,6 +118,50 @@ pub struct DdlTestEnv {
     pg_user: String,
 }
 
+pub struct OwnedPgClient {
+    client: Option<tokio_postgres::Client>,
+    connection_task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl OwnedPgClient {
+    fn new(client: tokio_postgres::Client, connection_task: tokio::task::JoinHandle<()>) -> Self {
+        Self {
+            client: Some(client),
+            connection_task: Some(connection_task),
+        }
+    }
+
+    pub async fn disconnect(mut self) {
+        self.client.take();
+        if let Some(connection_task) = self.connection_task.take() {
+            let _ = connection_task.await;
+        }
+    }
+}
+
+impl Deref for OwnedPgClient {
+    type Target = tokio_postgres::Client;
+
+    fn deref(&self) -> &Self::Target {
+        self.client.as_ref().expect("pg client already disconnected")
+    }
+}
+
+impl DerefMut for OwnedPgClient {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.client.as_mut().expect("pg client already disconnected")
+    }
+}
+
+impl Drop for OwnedPgClient {
+    fn drop(&mut self) {
+        self.client.take();
+        if let Some(connection_task) = self.connection_task.take() {
+            connection_task.abort();
+        }
+    }
+}
+
 static ENV: OnceLock<DdlTestEnv> = OnceLock::new();
 
 impl DdlTestEnv {
@@ -131,21 +176,10 @@ impl DdlTestEnv {
     }
 
     /// Open a new `tokio_postgres::Client` connected to the pgrx test PG.
-    pub async fn pg_connect(&self) -> tokio_postgres::Client {
-        let (client, conn) = Config::new()
-            .host(PG_HOST)
-            .port(PG_PORT)
-            .user(&self.pg_user)
-            .dbname(TEST_DB)
-            .connect(NoTls)
+    pub async fn pg_connect(&self) -> OwnedPgClient {
+        self.pg_connect_to(TEST_DB)
             .await
-            .expect("connect to pgrx PostgreSQL (is it running on port 28816?)");
-        tokio::spawn(async move {
-            if let Err(e) = conn.await {
-                eprintln!("pg connection error: {e}");
-            }
-        });
-        client
+            .expect("connect to pgrx PostgreSQL (is it running on port 28816?)")
     }
 
     /// Execute a SQL statement on KalamDB via its HTTP API.
@@ -342,6 +376,8 @@ impl DdlTestEnv {
                 .await
                 .expect("create test database");
         }
+
+        postgres.disconnect().await;
     }
 
     async fn ensure_extension_bootstrap(&self) {
@@ -388,13 +424,18 @@ impl DdlTestEnv {
             .await
             .expect("release pg_kalam bootstrap advisory lock");
 
+        pg.disconnect().await;
+
         bootstrap_result
     }
 
     async fn wait_for_pg(&self) {
         for i in 0..10 {
             match self.pg_connect_to("postgres").await {
-                Ok(_client) => return,
+                Ok(client) => {
+                    client.disconnect().await;
+                    return;
+                }
                 Err(_) => {
                     if i == 0 {
                         eprintln!("  waiting for PostgreSQL on port {PG_PORT}...");
@@ -412,7 +453,7 @@ impl DdlTestEnv {
     async fn pg_connect_to(
         &self,
         dbname: &str,
-    ) -> Result<tokio_postgres::Client, tokio_postgres::Error> {
+    ) -> Result<OwnedPgClient, tokio_postgres::Error> {
         let (client, conn) = Config::new()
             .host(PG_HOST)
             .port(PG_PORT)
@@ -420,12 +461,12 @@ impl DdlTestEnv {
             .dbname(dbname)
             .connect(NoTls)
             .await?;
-        tokio::spawn(async move {
+        let connection_task = tokio::spawn(async move {
             if let Err(error) = conn.await {
                 eprintln!("pg connection error: {error}");
             }
         });
-        Ok(client)
+        Ok(OwnedPgClient::new(client, connection_task))
     }
 
     async fn authenticate(client: &Client) -> String {

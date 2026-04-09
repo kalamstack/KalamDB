@@ -19,11 +19,11 @@ use async_trait::async_trait;
 use datafusion::catalog::SchemaProvider;
 use datafusion::prelude::SessionContext;
 use kalamdb_commons::constants::SYSTEM_NAMESPACE;
-use kalamdb_commons::models::{NamespaceId, UserId};
+use kalamdb_commons::models::{NamespaceId, TransactionOrigin, UserId};
 use kalamdb_commons::{constants::ColumnFamilyNames, NodeId};
 use kalamdb_configs::ServerConfig;
 use kalamdb_filestore::StorageRegistry;
-use kalamdb_pg::KalamPgService;
+use kalamdb_pg::{KalamPgService, LivePgTransaction};
 use kalamdb_raft::CommandExecutor;
 use kalamdb_sharding::{GroupId, ShardRouter};
 use kalamdb_store::StorageBackend;
@@ -32,7 +32,6 @@ use kalamdb_tables::{SharedTableStore, UserTableStore};
 use kalamdb_views::sessions::{PgSessionSnapshot, SessionsSnapshotCallback};
 use kalamdb_views::transactions::{TransactionSnapshot, TransactionsSnapshotCallback};
 use once_cell::sync::OnceCell;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -503,8 +502,8 @@ impl AppContext {
                 let pg_service = Arc::new(
                     KalamPgService::new(mtls, pg_auth_token).with_operation_executor(pg_executor),
                 );
-                let session_registry = pg_service.session_registry();
                 let app_ctx_for_sessions = Arc::clone(&app_ctx);
+                let pg_service_for_sessions = Arc::clone(&pg_service);
                 let sessions_snapshot_callback: SessionsSnapshotCallback = Arc::new(move || {
                     let active_pg_transactions = app_ctx_for_sessions
                         .try_transaction_coordinator()
@@ -512,39 +511,27 @@ impl AppContext {
                             transaction_coordinator
                                 .active_metrics()
                                 .into_iter()
-                                .filter(|metric| {
-                                    matches!(
-                                        metric.origin,
-                                        kalamdb_commons::models::TransactionOrigin::PgRpc
-                                    )
-                                })
+                                .filter(|metric| matches!(metric.origin, TransactionOrigin::PgRpc))
                                 .map(|metric| {
-                                    (
+                                    LivePgTransaction::new(
                                         metric.owner_id.to_string(),
-                                        (
-                                            metric.transaction_id.to_string(),
-                                            metric.state.as_str().to_string(),
-                                            metric.write_count > 0,
-                                        ),
+                                        metric.transaction_id.to_string(),
+                                        metric.state,
+                                        metric.write_count > 0,
                                     )
                                 })
-                                .collect::<HashMap<_, _>>()
+                                .collect::<Vec<_>>()
                         })
                         .unwrap_or_default();
-                    let mut snapshot = session_registry
-                        .snapshot()
+                    pg_service_for_sessions
+                        .snapshot_with_live_transactions(active_pg_transactions)
                         .into_iter()
                         .map(|session| PgSessionSnapshot {
-                            transaction_id: active_pg_transactions
-                                .get(session.session_id())
-                                .map(|(transaction_id, _, _)| transaction_id.clone()),
-                            transaction_state: active_pg_transactions
-                                .get(session.session_id())
-                                .map(|(_, transaction_state, _)| transaction_state.clone()),
-                            transaction_has_writes: active_pg_transactions
-                                .get(session.session_id())
-                                .map(|(_, _, transaction_has_writes)| *transaction_has_writes)
-                                .unwrap_or(false),
+                            transaction_id: session.transaction_id().map(ToOwned::to_owned),
+                            transaction_state: session
+                                .transaction_state()
+                                .map(|state| state.as_str().to_string()),
+                            transaction_has_writes: session.transaction_has_writes(),
                             session_id: session.session_id().to_string(),
                             current_schema: session.current_schema().map(ToOwned::to_owned),
                             client_addr: session.client_addr().map(ToOwned::to_owned),
@@ -552,14 +539,7 @@ impl AppContext {
                             last_seen_at_ms: session.last_seen_at_ms(),
                             last_method: session.last_method().map(ToOwned::to_owned),
                         })
-                        .collect::<Vec<_>>();
-                    snapshot.sort_by(|left, right| {
-                        right
-                            .last_seen_at_ms
-                            .cmp(&left.last_seen_at_ms)
-                            .then_with(|| left.session_id.cmp(&right.session_id))
-                    });
-                    snapshot
+                        .collect()
                 });
                 sessions_view.set_snapshot_callback(sessions_snapshot_callback);
                 raft_executor.set_pg_service(pg_service);

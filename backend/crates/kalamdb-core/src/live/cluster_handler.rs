@@ -9,7 +9,7 @@ use kalamdb_auth::{authenticate, AuthRequest, CoreUsersRepo, UserRepository};
 use kalamdb_commons::conversions::{
     mask_sensitive_rows_for_role, record_batch_to_json_arrays, schema_fields_from_arrow_schema,
 };
-use kalamdb_commons::models::{ConnectionInfo, KalamCellValue, NamespaceId, TableId, Username};
+use kalamdb_commons::models::{ConnectionInfo, KalamCellValue, NamespaceId, Username};
 use kalamdb_commons::schemas::SchemaField;
 use kalamdb_commons::Role;
 use kalamdb_raft::{
@@ -207,37 +207,16 @@ impl CoreClusterHandler {
             None => (trimmed.to_string(), None),
         };
 
-        let parsed_statement = kalamdb_sql::parse_single_statement(&sql).ok().flatten();
-        let table_id = parsed_statement.as_ref().and_then(|stmt| {
-            kalamdb_sql::extract_dml_table_id_from_statement(stmt, default_namespace.as_str())
-        });
-        let table_type = table_id
-            .as_ref()
-            .and_then(|table_id| self.table_type_for(table_id));
-        let classified_statement = kalamdb_sql::classifier::SqlStatement::classify_and_parse(
-            &sql,
-            default_namespace,
-            actor_role,
-        )
-        .map_err(|err| err.to_string())?;
+        let prepared_statement = self
+            .app_context
+            .sql_executor()
+            .prepare_statement_metadata_for_role(&sql, default_namespace, actor_role)
+            .map_err(|err| err.to_string())?;
 
         Ok((
-            PreparedExecutionStatement::new(
-                sql,
-                table_id,
-                table_type,
-                parsed_statement,
-                Some(classified_statement),
-            ),
+            prepared_statement,
             execute_as_username,
         ))
-    }
-
-    fn table_type_for(&self, table_id: &TableId) -> Option<kalamdb_commons::schemas::TableType> {
-        self.app_context
-            .schema_registry()
-            .get(table_id)
-            .map(|cached| cached.table_entry().table_type)
     }
 }
 

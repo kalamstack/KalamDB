@@ -174,9 +174,8 @@ pub async fn execute_sql_v1(
     let schema_registry = app_context.schema_registry();
     let prepared_statements = match split_and_prepare_statements(
         &sql,
-        &default_namespace,
         &exec_ctx,
-        &schema_registry,
+        sql_executor.get_ref(),
         start_time,
     ) {
         Ok(stmts) => stmts,

@@ -1,11 +1,8 @@
 use actix_web::HttpResponse;
-use kalamdb_commons::models::{NamespaceId, TableId, UserId, Username};
-use kalamdb_commons::schemas::TableType;
-use kalamdb_core::schema_registry::SchemaRegistry;
+use kalamdb_commons::models::{NamespaceId, UserId, Username};
 use kalamdb_core::sql::context::ExecutionContext;
-use kalamdb_core::sql::executor::PreparedExecutionStatement;
+use kalamdb_core::sql::executor::{PreparedExecutionStatement, SqlExecutor};
 use kalamdb_core::sql::SqlImpersonationService;
-use std::collections::HashMap;
 use std::time::Instant;
 
 use super::models::{ErrorCode, SqlResponse};
@@ -109,9 +106,8 @@ pub(super) fn classify_sql(
 
 pub(super) fn split_and_prepare_statements(
     sql: &str,
-    default_namespace: &NamespaceId,
     exec_ctx: &ExecutionContext,
-    schema_registry: &SchemaRegistry,
+    sql_executor: &SqlExecutor,
     start_time: Instant,
 ) -> Result<Vec<PreparedApiExecutionStatement>, HttpResponse> {
     let raw_statements = kalamdb_sql::split_statements(sql).map_err(|err| {
@@ -130,7 +126,6 @@ pub(super) fn split_and_prepare_statements(
         )));
     }
 
-    let mut table_type_cache: HashMap<TableId, Option<TableType>> = HashMap::new();
     let mut prepared = Vec::with_capacity(raw_statements.len());
 
     for raw_statement in &raw_statements {
@@ -142,30 +137,26 @@ pub(super) fn split_and_prepare_statements(
             ))
         })?;
 
-        let parsed_sql_statement = kalamdb_sql::parse_single_statement(&parsed.sql).ok().flatten();
+        let prepared_statement = sql_executor
+            .prepare_statement_metadata(&parsed.sql, exec_ctx)
+            .map_err(|err| match err {
+                kalamdb_sql::classifier::StatementClassificationError::Unauthorized(msg) => {
+                    HttpResponse::Forbidden().json(SqlResponse::error(
+                        ErrorCode::PermissionDenied,
+                        &msg,
+                        took_ms(start_time),
+                    ))
+                },
+                kalamdb_sql::classifier::StatementClassificationError::InvalidSql {
+                    message,
+                    ..
+                } => HttpResponse::BadRequest().json(SqlResponse::error(
+                    ErrorCode::InvalidSql,
+                    &message,
+                    took_ms(start_time),
+                )),
+            })?;
 
-        let table_id = parsed_sql_statement.as_ref().and_then(|stmt| {
-            kalamdb_sql::extract_dml_table_id_from_statement(stmt, default_namespace.as_str())
-        });
-
-        let table_type = table_id.as_ref().and_then(|tid| {
-            if let Some(cached) = table_type_cache.get(tid) {
-                return *cached;
-            }
-            let resolved = schema_registry.get(tid).map(|c| c.table_entry().table_type);
-            table_type_cache.insert(tid.clone(), resolved);
-            resolved
-        });
-
-        let classified = classify_sql(&parsed.sql, default_namespace, exec_ctx, start_time)?;
-
-        let prepared_statement = PreparedExecutionStatement::new(
-            parsed.sql,
-            table_id,
-            table_type,
-            parsed_sql_statement,
-            Some(classified),
-        );
         prepared.push(PreparedApiExecutionStatement {
             execute_as_username: parsed.execute_as_username,
             prepared_statement,

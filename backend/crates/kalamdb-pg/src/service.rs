@@ -12,7 +12,7 @@ use tonic_prost::ProstCodec;
 #[cfg(feature = "server")]
 use crate::operation_executor::{self, OperationExecutor};
 #[cfg(feature = "server")]
-use crate::{RemotePgSession, SessionRegistry};
+use crate::{LivePgTransaction, RemotePgSession, SessionRegistry};
 
 const PG_SERVICE_NAME: &str = "kalamdb.pg.PgService";
 
@@ -925,6 +925,16 @@ impl KalamPgService {
 
     pub fn session_registry(&self) -> Arc<SessionRegistry> {
         Arc::clone(&self.session_registry)
+    }
+
+    pub fn snapshot_with_live_transactions<I>(
+        &self,
+        active_transactions: I,
+    ) -> Vec<RemotePgSession>
+    where
+        I: IntoIterator<Item = LivePgTransaction>,
+    {
+        self.session_registry.snapshot_with_live_transactions(active_transactions)
     }
 
     fn close_ephemeral_idle_session_if_created(&self, session_id: &str, had_session: bool) {

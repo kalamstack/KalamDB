@@ -71,6 +71,25 @@ impl TransactionHandle {
         self.touched_tables.insert(table_id);
     }
 
+    pub fn record_staged_write_batch<I>(
+        &mut self,
+        table_ids: I,
+        write_count: usize,
+        write_bytes: usize,
+    )
+    where
+        I: IntoIterator<Item = TableId>,
+    {
+        self.last_activity_at = Instant::now();
+        self.state = TransactionState::OpenWrite;
+        self.write_count = write_count;
+        self.write_bytes = write_bytes;
+        self.has_write_set = true;
+        for table_id in table_ids {
+            self.touched_tables.insert(table_id);
+        }
+    }
+
     pub fn mark_state(&mut self, state: TransactionState) {
         self.state = state;
         self.last_activity_at = Instant::now();

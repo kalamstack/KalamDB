@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
@@ -19,12 +20,6 @@ use super::{
     TransactionCommitResult, TransactionHandle, TransactionOverlay, TransactionRaftBinding,
     TransactionWriteSet,
 };
-
-#[derive(Debug, Clone, Copy)]
-struct TransactionAccessRoute {
-    group_id: GroupId,
-    current_leader_node_id: Option<NodeId>,
-}
 
 /// In-memory coordinator for active explicit transactions.
 #[derive(Debug)]
@@ -167,9 +162,109 @@ impl TransactionCoordinator {
             .write_sets
             .entry(transaction_id.clone())
             .or_insert_with(|| TransactionWriteSet::new(transaction_id.clone()));
-        write_set.stage(mutation);
+        write_set.stage_with_estimated_size(mutation, estimated_bytes);
 
         handle.record_staged_write(table_id, write_set.affected_rows(), write_set.buffer_bytes);
+        Ok(())
+    }
+
+    pub fn stage_batch(
+        &self,
+        transaction_id: &TransactionId,
+        mutations: Vec<StagedMutation>,
+    ) -> Result<(), KalamDbError> {
+        if mutations.is_empty() {
+            return Ok(());
+        }
+
+        let mut validated_targets: HashSet<(TableId, TableType, Option<UserId>)> = HashSet::new();
+        let mut touched_tables = HashSet::new();
+        let mut estimated_sizes = Vec::with_capacity(mutations.len());
+        let mut total_estimated_bytes = 0usize;
+
+        for mutation in &mutations {
+            if mutation.table_type == TableType::Stream {
+                return Err(KalamDbError::InvalidOperation(
+                    "stream tables are not supported inside explicit transactions".to_string(),
+                ));
+            }
+
+            if mutation.table_type == TableType::System {
+                return Err(KalamDbError::InvalidOperation(
+                    "system tables are not supported inside explicit transactions".to_string(),
+                ));
+            }
+
+            if &mutation.transaction_id != transaction_id {
+                return Err(KalamDbError::InvalidOperation(format!(
+                    "staged mutation transaction mismatch: expected '{}', got '{}'",
+                    transaction_id, mutation.transaction_id
+                )));
+            }
+
+            let estimated_bytes = mutation.approximate_size_bytes();
+            estimated_sizes.push(estimated_bytes);
+            total_estimated_bytes = total_estimated_bytes.saturating_add(estimated_bytes);
+            touched_tables.insert(mutation.table_id.clone());
+
+            let target = (
+                mutation.table_id.clone(),
+                mutation.table_type,
+                mutation.user_id.clone(),
+            );
+            if validated_targets.insert(target) {
+                self.validate_table_access(
+                    transaction_id,
+                    &mutation.table_id,
+                    mutation.table_type,
+                    mutation.user_id.as_ref(),
+                )?;
+            }
+        }
+
+        let mut handle = self
+            .active_by_id
+            .get_mut(transaction_id)
+            .ok_or_else(|| KalamDbError::NotFound(format!("transaction '{}' not found", transaction_id)))?;
+
+        if !handle.state.is_open() {
+            return Err(Self::state_error(transaction_id, handle.state, "stage writes in"));
+        }
+
+        let projected_buffer_bytes = handle.write_bytes.saturating_add(total_estimated_bytes);
+        let max_transaction_buffer_bytes = self.app_context.config().max_transaction_buffer_bytes;
+        if projected_buffer_bytes > max_transaction_buffer_bytes {
+            handle.mark_state(TransactionState::Aborted);
+            drop(handle);
+            self.write_sets.remove(transaction_id);
+
+            tracing::warn!(
+                transaction_id = %transaction_id,
+                projected_buffer_bytes,
+                max_transaction_buffer_bytes,
+                "transaction buffer limit exceeded"
+            );
+
+            return Err(KalamDbError::InvalidOperation(format!(
+                "transaction '{}' exceeded buffer limit of {} bytes and was aborted",
+                transaction_id, max_transaction_buffer_bytes
+            )));
+        }
+
+        let mut write_set = self
+            .write_sets
+            .entry(transaction_id.clone())
+            .or_insert_with(|| TransactionWriteSet::new(transaction_id.clone()));
+
+        for (mutation, estimated_bytes) in mutations.into_iter().zip(estimated_sizes.into_iter()) {
+            write_set.stage_with_estimated_size(mutation, estimated_bytes);
+        }
+
+        handle.record_staged_write_batch(
+            touched_tables.into_iter(),
+            write_set.affected_rows(),
+            write_set.buffer_bytes,
+        );
         Ok(())
     }
 
@@ -356,63 +451,50 @@ impl TransactionCoordinator {
             return Err(Self::state_error(transaction_id, handle.state, "access"));
         }
 
-        let Some(route) = self.resolve_access_route(table_id, table_type, user_id)? else {
+        let Some(group_id) = self.resolve_group_id(table_id, table_type, user_id)? else {
             handle.touch();
             return Ok(());
         };
 
         let current_node_id = self.app_context.executor().node_id();
-        let outcome = match handle.raft_binding {
-            TransactionRaftBinding::LocalSingleNode => TransactionAccessOutcome::Allow,
+        let result = match handle.raft_binding {
+            TransactionRaftBinding::LocalSingleNode => Ok(()),
             TransactionRaftBinding::UnboundCluster => {
-                if route.current_leader_node_id == Some(current_node_id) {
+                let current_leader_node_id = self.current_leader_for_group(group_id);
+                if current_leader_node_id == Some(current_node_id) {
                     handle.raft_binding = TransactionRaftBinding::BoundCluster {
-                        group_id: route.group_id,
+                        group_id,
                         leader_node_id: current_node_id,
                     };
-                    TransactionAccessOutcome::Allow
+                    Ok(())
                 } else {
-                    TransactionAccessOutcome::Error(KalamDbError::NotLeader {
-                        leader_addr: route
-                            .current_leader_node_id
+                    Err(KalamDbError::NotLeader {
+                        leader_addr: current_leader_node_id
                             .and_then(|node_id| self.leader_addr_for_node(node_id)),
                     })
                 }
             },
             TransactionRaftBinding::BoundCluster {
-                group_id,
-                leader_node_id,
+                group_id: bound_group_id,
+                ..
             } => {
-                if group_id != route.group_id {
-                    TransactionAccessOutcome::Error(KalamDbError::InvalidOperation(format!(
+                if bound_group_id != group_id {
+                    Err(KalamDbError::InvalidOperation(format!(
                         "explicit transaction '{}' is already bound to data raft group '{}' and cannot access table '{}' in group '{}'",
-                        transaction_id, group_id, table_id, route.group_id
+                        transaction_id, bound_group_id, table_id, group_id
                     )))
-                } else if route.current_leader_node_id != Some(leader_node_id) {
-                    handle.mark_state(TransactionState::Aborted);
-                    TransactionAccessOutcome::Abort(Self::leader_change_error(
-                        transaction_id,
-                        group_id,
-                        leader_node_id,
-                        route.current_leader_node_id,
-                    ))
                 } else {
-                    TransactionAccessOutcome::Allow
+                    Ok(())
                 }
             },
         };
 
-        match outcome {
-            TransactionAccessOutcome::Allow => {
+        match result {
+            Ok(()) => {
                 handle.touch();
                 Ok(())
             },
-            TransactionAccessOutcome::Error(error) => Err(error),
-            TransactionAccessOutcome::Abort(error) => {
-                drop(handle);
-                self.write_sets.remove(transaction_id);
-                Err(error)
-            },
+            Err(error) => Err(error),
         }
     }
 
@@ -578,12 +660,12 @@ impl TransactionCoordinator {
         }
     }
 
-    fn resolve_access_route(
+    fn resolve_group_id(
         &self,
         table_id: &TableId,
         table_type: TableType,
         user_id: Option<&UserId>,
-    ) -> Result<Option<TransactionAccessRoute>, KalamDbError> {
+    ) -> Result<Option<GroupId>, KalamDbError> {
         if !self.app_context.is_cluster_mode() {
             return Ok(None);
         }
@@ -605,10 +687,7 @@ impl TransactionCoordinator {
             TableType::System => return Ok(None),
         };
 
-        Ok(Some(TransactionAccessRoute {
-            group_id,
-            current_leader_node_id: self.current_leader_for_group(group_id),
-        }))
+        Ok(Some(group_id))
     }
 
     fn current_leader_for_group(&self, group_id: GroupId) -> Option<NodeId> {
@@ -671,10 +750,4 @@ impl TransactionCoordinator {
             transaction_id, group_id, prior_leader_node_id, current_leader
         ))
     }
-}
-
-enum TransactionAccessOutcome {
-    Allow,
-    Error(KalamDbError),
-    Abort(KalamDbError),
 }

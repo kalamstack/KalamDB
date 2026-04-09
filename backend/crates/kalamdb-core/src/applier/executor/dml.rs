@@ -643,6 +643,103 @@ impl DmlExecutor {
         let commit_seq = self.app_context.commit_sequence_tracker().allocate_next();
         let mut affected_rows = 0;
         let mut side_effect_plan = CommitSideEffectPlan::new(transaction_id.clone());
+
+        if let Some(first_mutation) = mutations.first() {
+            if let Some(user_id) = first_mutation.user_id.clone() {
+                let all_inserts_same_table_and_user = mutations.iter().all(|mutation| {
+                    &mutation.transaction_id == transaction_id
+                        && mutation.operation_kind == OperationKind::Insert
+                        && mutation.table_id == first_mutation.table_id
+                        && mutation.user_id.as_ref() == Some(&user_id)
+                });
+
+                if all_inserts_same_table_and_user {
+                    let provider_arc = self
+                        .load_provider(&first_mutation.table_id, "Table provider")
+                        .await?;
+                    let provider = provider_arc
+                        .as_any()
+                        .downcast_ref::<UserTableProvider>()
+                        .ok_or_else(|| {
+                            ApplierError::Execution(format!(
+                                "Provider type mismatch for user table {}",
+                                first_mutation.table_id
+                            ))
+                        })?;
+
+                    let applied = provider
+                        .insert_batch_deferred_prevalidated(
+                            &user_id,
+                            mutations
+                                .iter()
+                                .map(|mutation| mutation.payload.clone())
+                                .collect(),
+                        )
+                        .await
+                        .map_err(|e| {
+                            ApplierError::Execution(format!("Failed to insert batch rows: {}", e))
+                        })?;
+
+                    if applied.len() != mutations.len() {
+                        return Err(ApplierError::Execution(format!(
+                            "User transaction batch insert length mismatch: expected {}, got {}",
+                            mutations.len(),
+                            applied.len()
+                        )));
+                    }
+
+                    for (_mutation, (row_key, notification)) in
+                        mutations.iter().zip(applied.into_iter())
+                    {
+                        provider.patch_commit_seq_for_row_key(&row_key, commit_seq).await.map_err(
+                            |e| {
+                                ApplierError::Execution(format!(
+                                    "Failed to stamp commit_seq: {}",
+                                    e
+                                ))
+                            },
+                        )?;
+
+                        affected_rows += 1;
+                        side_effect_plan.record_manifest_update();
+
+                        if let Some(notification) = notification {
+                            if self
+                                .publish_transaction_notification(Some(&user_id), &notification)
+                                .await
+                            {
+                                side_effect_plan.record_publisher_event();
+                            }
+
+                            if NotificationServiceTrait::has_subscribers(
+                                self.app_context.notification_service().as_ref(),
+                                Some(&user_id),
+                                &notification.table_id,
+                            ) {
+                                side_effect_plan.push_notification(
+                                    FanoutOwnerScope::User(user_id.clone()),
+                                    notification,
+                                );
+                            }
+                        }
+                    }
+
+                    let notifications_sent = self
+                        .app_context
+                        .notification_service()
+                        .dispatch_commit_plan(&side_effect_plan);
+
+                    return Ok(TransactionApplyResult {
+                        rows_affected: affected_rows,
+                        commit_seq,
+                        notifications_sent,
+                        manifest_updates: side_effect_plan.manifest_updates,
+                        publisher_events: side_effect_plan.publisher_events,
+                    });
+                }
+            }
+        }
+
         let mut cached_provider: Option<(
             TableId,
             Arc<dyn datafusion::datasource::TableProvider + Send + Sync>,

@@ -6,7 +6,7 @@
 //!
 //! - [`SqlExecutor`]: Main entry point for executing SQL statements
 //! - [`DataFusionSessionFactory`]: Creates configured DataFusion session contexts
-//! - [`plan_cache`]: Query plan caching for improved performance
+//! - [`plan_cache`]: Shared SQL cache registry and query plan caching
 //! - [`functions`]: Custom SQL functions (e.g., `CURRENT_USER()`)
 //!
 //! # Handler Pattern

@@ -30,4 +30,4 @@ pub use service::{
     ScanRpcRequest, ScanRpcResponse, UpdateRpcRequest, UpdateRpcResponse,
 };
 #[cfg(feature = "server")]
-pub use session_registry::{RemotePgSession, SessionRegistry};
+pub use session_registry::{LivePgTransaction, RemotePgSession, SessionRegistry};

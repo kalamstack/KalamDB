@@ -5,18 +5,20 @@ use crate::benchmarks::Benchmark;
 use crate::client::KalamClient;
 use crate::config::Config;
 
-/// Benchmark: Bulk INSERT (50 rows per statement via multi-value INSERT).
-pub struct BulkInsertBench;
+/// Benchmark: explicit transaction containing 50 single-row INSERT statements.
+pub struct TransactionMultiInsertBench;
 
-impl Benchmark for BulkInsertBench {
+impl Benchmark for TransactionMultiInsertBench {
     fn name(&self) -> &str {
-        "bulk_insert"
+        "transaction_multi_insert"
     }
+
     fn category(&self) -> &str {
         "Insert"
     }
+
     fn description(&self) -> &str {
-        "One INSERT statement with 50 rows (statement-scoped transaction)"
+        "Explicit BEGIN/COMMIT with 50 single-row INSERT statements"
     }
 
     fn setup<'a>(
@@ -29,11 +31,14 @@ impl Benchmark for BulkInsertBench {
                 .sql_ok(&format!("CREATE NAMESPACE IF NOT EXISTS {}", config.namespace))
                 .await?;
             let _ = client
-                .sql(&format!("DROP TABLE IF EXISTS {}.bulk_insert_bench", config.namespace))
+                .sql(&format!(
+                    "DROP TABLE IF EXISTS {}.transaction_multi_insert_bench",
+                    config.namespace
+                ))
                 .await;
             client
                 .sql_ok(&format!(
-                    "CREATE TABLE {}.bulk_insert_bench (id INT PRIMARY KEY, name TEXT, value DOUBLE)",
+                    "CREATE TABLE {}.transaction_multi_insert_bench (id INT PRIMARY KEY, name TEXT, value DOUBLE)",
                     config.namespace
                 ))
                 .await?;
@@ -49,19 +54,21 @@ impl Benchmark for BulkInsertBench {
     ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
         Box::pin(async move {
             let base = iteration * 50;
-            let values: Vec<String> = (0..50)
-                .map(|i| {
-                    let id = base + i;
-                    format!("({}, 'bulk_user_{}', {:.2})", id, id, id as f64 * 0.7)
+            let statements: Vec<String> = (0..50)
+                .map(|offset| {
+                    let id = base + offset;
+                    format!(
+                        "INSERT INTO {}.transaction_multi_insert_bench (id, name, value) VALUES ({}, 'tx_user_{}', {:.2});",
+                        config.namespace,
+                        id,
+                        id,
+                        id as f64 * 0.7
+                    )
                 })
                 .collect();
 
             client
-                .sql_ok(&format!(
-                    "INSERT INTO {}.bulk_insert_bench (id, name, value) VALUES {}",
-                    config.namespace,
-                    values.join(", ")
-                ))
+                .sql_ok(&format!("BEGIN; {} COMMIT;", statements.join(" ")))
                 .await?;
             Ok(())
         })
@@ -74,7 +81,10 @@ impl Benchmark for BulkInsertBench {
     ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
         Box::pin(async move {
             let _ = client
-                .sql(&format!("DROP TABLE IF EXISTS {}.bulk_insert_bench", config.namespace))
+                .sql(&format!(
+                    "DROP TABLE IF EXISTS {}.transaction_multi_insert_bench",
+                    config.namespace
+                ))
                 .await;
             Ok(())
         })

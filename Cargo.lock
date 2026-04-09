@@ -4046,6 +4046,7 @@ dependencies = [
  "kalamdb-jobs",
  "kalamdb-observability",
  "kalamdb-pg",
+ "kalamdb-plan-cache",
  "kalamdb-publisher",
  "kalamdb-raft",
  "kalamdb-session",
@@ -4059,7 +4060,6 @@ dependencies = [
  "kalamdb-vector",
  "kalamdb-views",
  "log",
- "moka",
  "ntest",
  "once_cell",
  "parking_lot",
@@ -4306,6 +4306,15 @@ dependencies = [
  "tonic",
  "tonic-prost",
  "uuid",
+]
+
+[[package]]
+name = "kalamdb-plan-cache"
+version = "0.4.2-rc1"
+dependencies = [
+ "datafusion",
+ "kalamdb-commons",
+ "moka",
 ]
 
 [[package]]

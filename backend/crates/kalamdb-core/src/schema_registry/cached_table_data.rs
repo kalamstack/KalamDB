@@ -8,7 +8,6 @@ use kalamdb_commons::models::{StorageId, TableId};
 use kalamdb_commons::schemas::{TableOptions, TableType};
 use kalamdb_commons::TableAccess;
 use kalamdb_filestore::StorageCached;
-use kalamdb_tables::KalamTableProvider;
 use parking_lot::RwLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -22,24 +21,6 @@ pub struct TableEntry {
     pub table_type: TableType,
     /// Access level (for shared tables)
     pub access_level: Option<TableAccess>,
-}
-
-/// Cached provider wrapper — either a full `KalamTableProvider` (User/Shared/Stream)
-/// or a plain `TableProvider` (System tables that don't support DML).
-pub enum CachedProvider {
-    /// User/Shared/Stream tables with full DML support via `KalamTableProvider`
-    Kalam(Arc<dyn KalamTableProvider>),
-    /// System tables (read-only, DataFusion `TableProvider` only)
-    System(Arc<dyn TableProvider + Send + Sync>),
-}
-
-impl Clone for CachedProvider {
-    fn clone(&self) -> Self {
-        match self {
-            Self::Kalam(p) => Self::Kalam(Arc::clone(p)),
-            Self::System(p) => Self::System(Arc::clone(p)),
-        }
-    }
 }
 
 /// Cached table data containing all metadata and schema information
@@ -72,15 +53,13 @@ pub struct CachedTableData {
     /// Used for Parquet row-group statistics keyed by stable column_id
     indexed_columns: Vec<(u64, String)>,
 
-    /// Cached KalamDB table provider (User/Shared/Stream or System)
+    /// Cached DataFusion table provider for this table.
     ///
-    /// Lazily initialized when first needed. For User/Shared/Stream tables,
-    /// stores a `KalamTableProvider` that supports both DataFusion scans and
-    /// direct DML (fast INSERT bypass). For System tables, stores a plain
-    /// `TableProvider` (read-only).
+    /// Lazily initialized when first needed and reused for both system and
+    /// non-system tables through the common `TableProvider` surface.
     ///
     /// **Thread Safety**: RwLock allows concurrent reads, exclusive writes for initialization
-    provider: Arc<RwLock<Option<CachedProvider>>>,
+    provider: Arc<RwLock<Option<Arc<dyn TableProvider + Send + Sync>>>>,
 }
 
 impl std::fmt::Debug for CachedTableData {
@@ -277,42 +256,15 @@ impl CachedTableData {
 
     /// Get the cached DataFusion TableProvider for this table
     ///
-    /// Returns the underlying `TableProvider` regardless of whether this is
-    /// a `KalamTableProvider` (User/Shared/Stream) or plain System provider.
-    /// Uses trait upcasting for `KalamTableProvider` → `TableProvider`.
-    ///
     /// **Performance**: O(1) access with read lock
     pub fn get_provider(&self) -> Option<Arc<dyn TableProvider + Send + Sync>> {
-        let guard = self.provider.read();
-        guard.as_ref().map(|cached| match cached {
-            CachedProvider::Kalam(p) => Arc::clone(p) as Arc<dyn TableProvider + Send + Sync>,
-            CachedProvider::System(p) => Arc::clone(p),
-        })
+        self.provider.read().as_ref().map(Arc::clone)
     }
 
-    /// Get the `KalamTableProvider` for fast INSERT bypass
-    ///
-    /// Returns `Some` for User/Shared/Stream tables, `None` for System tables.
-    ///
-    /// **Performance**: O(1) access with read lock
-    pub fn get_kalam_provider(&self) -> Option<Arc<dyn KalamTableProvider>> {
-        let guard = self.provider.read();
-        match guard.as_ref() {
-            Some(CachedProvider::Kalam(p)) => Some(Arc::clone(p)),
-            _ => None,
-        }
-    }
-
-    /// Set a `KalamTableProvider` (User/Shared/Stream tables)
-    pub fn set_kalam_provider(&self, provider: Arc<dyn KalamTableProvider>) {
+    /// Set the cached `TableProvider` for this table.
+    pub fn set_provider(&self, provider: Arc<dyn TableProvider + Send + Sync>) {
         let mut guard = self.provider.write();
-        *guard = Some(CachedProvider::Kalam(provider));
-    }
-
-    /// Set a plain `TableProvider` for system tables
-    pub fn set_system_provider(&self, provider: Arc<dyn TableProvider + Send + Sync>) {
-        let mut guard = self.provider.write();
-        *guard = Some(CachedProvider::System(provider));
+        *guard = Some(provider);
     }
 
     /// Clear the cached provider (used during table invalidation)
