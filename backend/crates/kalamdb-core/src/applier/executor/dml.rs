@@ -492,6 +492,45 @@ impl DmlExecutor {
         transaction_id: &TransactionId,
         mutations: &[StagedMutation],
     ) -> Result<(), ApplierError> {
+        if let Some(first_mutation) = mutations.first() {
+            if let Some(user_id) = first_mutation.user_id.as_ref() {
+                let all_inserts_same_table_and_user = mutations.iter().all(|mutation| {
+                    &mutation.transaction_id == transaction_id
+                        && mutation.operation_kind == OperationKind::Insert
+                        && mutation.table_id == first_mutation.table_id
+                        && mutation.user_id.as_ref() == Some(user_id)
+                });
+
+                if all_inserts_same_table_and_user {
+                    let provider_arc = self.load_provider(&first_mutation.table_id, "Table provider").await?;
+                    let provider = provider_arc
+                        .as_any()
+                        .downcast_ref::<UserTableProvider>()
+                        .ok_or_else(|| {
+                            ApplierError::Execution(format!(
+                                "Provider type mismatch for user table {}",
+                                first_mutation.table_id
+                            ))
+                        })?;
+
+                    provider
+                        .validate_insert_batch_rows(
+                            user_id,
+                            mutations.iter().map(|mutation| &mutation.payload),
+                        )
+                        .await
+                        .map_err(|error| {
+                            ApplierError::Execution(format!(
+                                "Failed to insert batch row: {}",
+                                error
+                            ))
+                        })?;
+
+                    return Ok(());
+                }
+            }
+        }
+
         let mut seen_insert_keys = HashSet::with_capacity(mutations.len());
         let mut cached_provider: Option<(
             TableId,

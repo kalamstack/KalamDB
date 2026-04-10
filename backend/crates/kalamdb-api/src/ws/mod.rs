@@ -47,6 +47,7 @@ mod tests {
     use kalamdb_commons::Role;
     use kalamdb_core::app_context::AppContext;
     use kalamdb_core::test_helpers::test_app_context_simple;
+    use kalamdb_live::ConnectionsManager;
     use kalamdb_system::providers::storages::models::StorageMode;
     use kalamdb_system::{AuthType, User};
     use std::collections::HashMap;
@@ -59,7 +60,7 @@ mod tests {
     struct WsTestContext {
         server: actix_web::dev::ServerHandle,
         base_url: String,
-        registry: Arc<kalamdb_core::live::ConnectionsManager>,
+        registry: Arc<ConnectionsManager>,
         user_id: UserId,
         token: String,
     }

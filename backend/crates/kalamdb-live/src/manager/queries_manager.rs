@@ -11,16 +11,15 @@
 //! When data is applied on any node (leader or follower), the provider's methods
 //! fire local notifications - no need for separate HTTP cluster broadcast.
 
-use crate::error::KalamDbError;
-use crate::live::helpers::filter_eval::parse_where_clause;
-use crate::live::helpers::initial_data::{
+use crate::error::LiveError;
+use crate::helpers::filter_eval::parse_where_clause;
+use crate::helpers::initial_data::{
     InitialDataFetcher, InitialDataOptions, InitialDataResult,
 };
-use crate::live::manager::ConnectionsManager;
-use crate::live::models::{SharedConnectionState, SubscriptionResult};
-use crate::live::subscription::SubscriptionService;
-use crate::sql::executor::SqlExecutor;
-use datafusion::execution::context::SessionContext;
+use crate::manager::ConnectionsManager;
+use crate::models::{SharedConnectionState, SubscriptionResult};
+use crate::subscription::SubscriptionService;
+use crate::traits::LiveSchemaLookup;
 use datafusion::sql::sqlparser::ast::Expr;
 use kalamdb_commons::ids::SeqId;
 use kalamdb_commons::models::{ConnectionId, LiveQueryId, NamespaceId, TableId, TableName, UserId};
@@ -36,7 +35,7 @@ pub struct LiveQueryManager {
     /// Unified connections manager using DashMap for lock-free concurrent access
     registry: Arc<ConnectionsManager>,
     initial_data_fetcher: Arc<InitialDataFetcher>,
-    schema_registry: Arc<crate::schema_registry::SchemaRegistry>,
+    schema_lookup: Arc<dyn LiveSchemaLookup>,
     node_id: NodeId,
 
     // Delegated services
@@ -48,7 +47,7 @@ impl LiveQueryManager {
         user_role: Role,
         table_def: &TableDefinition,
         table_id: &TableId,
-    ) -> Result<(), KalamDbError> {
+    ) -> Result<(), LiveError> {
         let is_admin = matches!(user_role, Role::Dba | Role::System);
         match table_def.table_type {
             kalamdb_commons::TableType::User => {
@@ -56,7 +55,7 @@ impl LiveQueryManager {
                 // Row-level security filters data to only their rows during query execution
                 Ok(())
             },
-            kalamdb_commons::TableType::System if !is_admin => Err(KalamDbError::PermissionDenied(
+            kalamdb_commons::TableType::System if !is_admin => Err(LiveError::PermissionDenied(
                 format!("Cannot subscribe to system table '{}': insufficient privileges. Only DBA and system roles can subscribe to system tables.", table_id)
             )),
             kalamdb_commons::TableType::Shared => {
@@ -67,7 +66,7 @@ impl LiveQueryManager {
                 if kalamdb_session::permissions::can_access_shared_table(access_level, user_role) {
                     Ok(())
                 } else {
-                    Err(KalamDbError::PermissionDenied(format!(
+                    Err(LiveError::PermissionDenied(format!(
                         "Cannot subscribe to shared table '{}': access level '{}' requires elevated privileges.",
                         table_id, access_level
                     )))
@@ -107,34 +106,35 @@ impl LiveQueryManager {
     ///
     /// The ConnectionsManager is shared across all WebSocket handlers for
     /// centralized connection/subscription management.
+    ///
+    /// The SQL executor is wired later via `set_sql_executor` because of
+    /// bootstrap ordering.
     pub fn new(
-        schema_registry: Arc<crate::schema_registry::SchemaRegistry>,
+        schema_lookup: Arc<dyn LiveSchemaLookup>,
         registry: Arc<ConnectionsManager>,
-        base_session_context: Arc<SessionContext>,
     ) -> Self {
         let node_id = *registry.node_id();
-        let initial_data_fetcher =
-            Arc::new(InitialDataFetcher::new(base_session_context, schema_registry.clone()));
-
         let subscription_service = Arc::new(SubscriptionService::new(registry.clone()));
+        let initial_data_fetcher =
+            Arc::new(InitialDataFetcher::new(Arc::clone(&schema_lookup)));
 
         Self {
             registry,
             initial_data_fetcher,
-            schema_registry,
+            schema_lookup,
             node_id,
             subscription_service,
         }
     }
 
+    /// Wire the SQL executor (called once during bootstrap after SqlExecutor is created).
+    pub fn set_sql_executor(&self, executor: Arc<dyn crate::traits::LiveSqlExecutor>) {
+        self.initial_data_fetcher.set_sql_executor(executor);
+    }
+
     /// Get the node_id for this manager
     pub fn node_id(&self) -> &NodeId {
         &self.node_id
-    }
-
-    /// Provide shared SqlExecutor so initial data fetches reuse common execution path
-    pub fn set_sql_executor(&self, executor: Arc<SqlExecutor>) {
-        self.initial_data_fetcher.set_sql_executor(executor);
     }
 
     /// Register a live query subscription
@@ -157,7 +157,7 @@ impl LiveQueryManager {
         batch_size: usize,
         enable_initial_load: bool,
         table_type: kalamdb_commons::TableType,
-    ) -> Result<LiveQueryId, KalamDbError> {
+    ) -> Result<LiveQueryId, LiveError> {
         self.subscription_service
             .register_subscription(
                 connection_state,
@@ -187,14 +187,14 @@ impl LiveQueryManager {
         connection_state: &SharedConnectionState,
         request: &SubscriptionRequest,
         initial_data_options: Option<InitialDataOptions>,
-    ) -> Result<SubscriptionResult, KalamDbError> {
+    ) -> Result<SubscriptionResult, LiveError> {
         // Get user_id from connection state
         let (user_id, user_role) = {
             let user_id = connection_state.user_id().cloned().ok_or_else(|| {
-                KalamDbError::InvalidOperation("Connection not authenticated".to_string())
+                LiveError::InvalidOperation("Connection not authenticated".to_string())
             })?;
             let user_role = connection_state.user_role().ok_or_else(|| {
-                KalamDbError::InvalidOperation(
+                LiveError::InvalidOperation(
                     "Connection authenticated without role context".to_string(),
                 )
             })?;
@@ -206,7 +206,7 @@ impl LiveQueryManager {
         // Parse table name from SQL
         let raw_table = parsed_query.table_name.clone();
         let (namespace, table) = raw_table.split_once('.').ok_or_else(|| {
-            KalamDbError::InvalidSql("Query must use namespace.table format".to_string())
+            LiveError::InvalidSql("Query must use namespace.table format".to_string())
         })?;
 
         let namespace_id = NamespaceId::from(namespace);
@@ -214,7 +214,7 @@ impl LiveQueryManager {
         let table_id = TableId::new(namespace_id.clone(), table_name);
 
         if namespace_id.is_system_namespace() && !matches!(user_role, Role::Dba | Role::System) {
-            return Err(KalamDbError::PermissionDenied(
+            return Err(LiveError::PermissionDenied(
                 format!(
                     "Cannot subscribe to system table '{}': insufficient privileges. Only DBA and system roles can subscribe to system tables.",
                     table_id
@@ -225,10 +225,9 @@ impl LiveQueryManager {
         // Look up table definition from in-memory cache.
         // Live queries require the table to be registered in the schema registry.
         let table_def = self
-            .schema_registry
-            .get(&table_id)
-            .map(|cached| Arc::clone(&cached.table))
-            .ok_or_else(|| KalamDbError::NotFound(format!("Table not found: {}", table_id)))?;
+            .schema_lookup
+            .get_table_definition(&table_id)
+            .ok_or_else(|| LiveError::NotFound(format!("Table not found: {}", table_id)))?;
 
         // Permission check
         // - USER tables: Accessible to any authenticated user (RLS filters data to their rows)
@@ -283,7 +282,7 @@ impl LiveQueryManager {
         // we must unregister the subscription to avoid orphaned entries in
         // system.live and the in-memory registry.
         let initial_data = if let Some(mut fetch_options) = initial_data_options {
-            let fetch_result: Result<InitialDataResult, KalamDbError> = async {
+            let fetch_result: Result<InitialDataResult, LiveError> = async {
                 // Compute snapshot boundary (MAX(_seq)) before initial load unless a
                 // reconnect already supplied the original boundary.
                 let snapshot_seq = if let Some(snapshot_seq) = fetch_options.until_seq {
@@ -368,30 +367,29 @@ impl LiveQueryManager {
         connection_state: &SharedConnectionState,
         subscription_id: &str,
         since_seq: Option<SeqId>,
-    ) -> Result<InitialDataResult, KalamDbError> {
+    ) -> Result<InitialDataResult, LiveError> {
         // Get subscription state from connection
         let sub_state = connection_state.get_subscription(subscription_id).ok_or_else(|| {
-            KalamDbError::NotFound(format!("Subscription not found: {}", subscription_id))
+            LiveError::NotFound(format!("Subscription not found: {}", subscription_id))
         })?;
         let initial_load = sub_state.initial_load.as_ref().ok_or_else(|| {
-            KalamDbError::InvalidOperation(format!(
+            LiveError::InvalidOperation(format!(
                 "Subscription {} was created without initial data loading",
                 subscription_id
             ))
         })?;
 
         let user_role = connection_state.user_role().ok_or_else(|| {
-            KalamDbError::InvalidOperation(
+            LiveError::InvalidOperation(
                 "Connection authenticated without role context".to_string(),
             )
         })?;
 
         let table_def = self
-            .schema_registry
-            .get(&sub_state.table_id)
-            .map(|cached| Arc::clone(&cached.table))
+            .schema_lookup
+            .get_table_definition(&sub_state.table_id)
             .ok_or_else(|| {
-                KalamDbError::NotFound(format!(
+                LiveError::NotFound(format!(
                     "Table {} not found for batch fetch",
                     sub_state.table_id
                 ))
@@ -428,7 +426,7 @@ impl LiveQueryManager {
         &self,
         user_id: &UserId,
         connection_id: &ConnectionId,
-    ) -> Result<Vec<LiveQueryId>, KalamDbError> {
+    ) -> Result<Vec<LiveQueryId>, LiveError> {
         self.subscription_service.unregister_connection(user_id, connection_id).await
     }
 
@@ -438,7 +436,7 @@ impl LiveQueryManager {
         connection_state: &SharedConnectionState,
         subscription_id: &str,
         live_id: &LiveQueryId,
-    ) -> Result<(), KalamDbError> {
+    ) -> Result<(), LiveError> {
         self.subscription_service
             .unregister_subscription(connection_state, subscription_id, live_id)
             .await
@@ -451,11 +449,11 @@ impl LiveQueryManager {
     pub async fn unregister_subscription_by_id(
         &self,
         live_id: &LiveQueryId,
-    ) -> Result<(), KalamDbError> {
+    ) -> Result<(), LiveError> {
         // Get connection from registry
         let connection_state =
             self.registry.get_connection(&live_id.connection_id).ok_or_else(|| {
-                KalamDbError::NotFound(format!("Connection not found for live query: {}", live_id))
+                LiveError::NotFound(format!("Connection not found for live query: {}", live_id))
             })?;
 
         // Extract subscription_id from live_id
@@ -475,7 +473,7 @@ impl LiveQueryManager {
 #[cfg(test)]
 mod tests {
     use super::LiveQueryManager;
-    use crate::error::KalamDbError;
+    use crate::error::LiveError;
     use kalamdb_commons::models::{NamespaceId, TableId, TableName};
     use kalamdb_commons::schemas::table_options::{SharedTableOptions, SystemTableOptions};
     use kalamdb_commons::schemas::{TableDefinition, TableOptions};
@@ -542,7 +540,7 @@ mod tests {
         let result =
             LiveQueryManager::validate_table_subscription_permission(Role::User, &def, &table_id());
         assert!(
-            matches!(result, Err(KalamDbError::PermissionDenied(_))),
+            matches!(result, Err(LiveError::PermissionDenied(_))),
             "private shared table subscriptions should be denied for regular users"
         );
     }
@@ -560,7 +558,7 @@ mod tests {
         let def = system_table_def();
         let result =
             LiveQueryManager::validate_table_subscription_permission(Role::User, &def, &table_id());
-        assert!(matches!(result, Err(KalamDbError::PermissionDenied(_))));
+        assert!(matches!(result, Err(LiveError::PermissionDenied(_))));
     }
 
     #[test]

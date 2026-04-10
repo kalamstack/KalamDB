@@ -7,6 +7,3 @@ pub mod queries_manager;
 
 pub use connections_manager::ConnectionsManager;
 pub use queries_manager::LiveQueryManager;
-
-#[cfg(test)]
-mod tests;

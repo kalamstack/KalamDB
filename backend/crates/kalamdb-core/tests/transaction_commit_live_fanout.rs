@@ -7,7 +7,7 @@ use kalamdb_commons::models::rows::Row;
 use kalamdb_commons::models::{ConnectionId, LiveQueryId, OperationKind, TransactionOrigin, UserId};
 use kalamdb_commons::websocket::ChangeType;
 use kalamdb_commons::TableType;
-use kalamdb_core::live::models::{
+use kalamdb_live::models::{
     NotificationSender, SubscriptionFlowControl, SubscriptionHandle, SubscriptionRuntimeMetadata,
 };
 use kalamdb_core::transactions::{ExecutionOwnerKey, StagedMutation};

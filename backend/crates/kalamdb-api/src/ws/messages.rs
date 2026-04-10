@@ -4,7 +4,7 @@ use flate2::read::GzDecoder;
 use kalamdb_auth::UserRepository;
 use kalamdb_commons::models::ConnectionInfo;
 use kalamdb_commons::websocket::{ClientMessage, SerializationType};
-use kalamdb_core::live::SharedConnectionState;
+use kalamdb_live::{LiveQueryManager, SharedConnectionState};
 use std::io::Read;
 use std::sync::Arc;
 
@@ -26,7 +26,7 @@ pub(super) async fn handle_text_message(
     session: &mut Session,
     app_context: &Arc<kalamdb_core::app_context::AppContext>,
     rate_limiter: &Arc<RateLimiter>,
-    live_query_manager: &Arc<kalamdb_core::live::LiveQueryManager>,
+    live_query_manager: &Arc<LiveQueryManager>,
     user_repo: &Arc<dyn UserRepository>,
     compression_enabled: bool,
 ) -> Result<(), String> {
@@ -55,7 +55,7 @@ pub(super) async fn handle_binary_message(
     session: &mut Session,
     app_context: &Arc<kalamdb_core::app_context::AppContext>,
     rate_limiter: &Arc<RateLimiter>,
-    live_query_manager: &Arc<kalamdb_core::live::LiveQueryManager>,
+    live_query_manager: &Arc<LiveQueryManager>,
     user_repo: &Arc<dyn UserRepository>,
     compression_enabled: bool,
 ) -> Result<(), String> {
@@ -110,7 +110,7 @@ async fn handle_client_message(
     session: &mut Session,
     app_context: &Arc<kalamdb_core::app_context::AppContext>,
     rate_limiter: &Arc<RateLimiter>,
-    live_query_manager: &Arc<kalamdb_core::live::LiveQueryManager>,
+    live_query_manager: &Arc<LiveQueryManager>,
     user_repo: &Arc<dyn UserRepository>,
     compression_enabled: bool,
 ) -> Result<(), String> {

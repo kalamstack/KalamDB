@@ -1,21 +1,23 @@
-//! Live query and consumer module for subscription management
+//! KalamDB Live Query Subsystem
 //!
-//! This module handles:
+//! This crate handles:
 //! - WebSocket-based live query subscriptions
 //! - Topic consumer sessions (long polling)
 //! - Real-time change notifications
-//! - Topic pub/sub message publishing
+//! - Post-commit notification fanout
 //!
-//! Live query notifications are now handled through Raft-replicated data appliers.
+//! Live query notifications are handled through Raft-replicated data appliers.
 //! When data is applied on any node (leader or follower), the provider's insert/update/delete
 //! methods fire local notifications to connected clients.
 
-pub mod cluster_handler;
+pub mod error;
+pub mod fanout;
 pub mod helpers;
 pub mod manager;
-pub mod models; // Consolidated model definitions
+pub mod models;
 pub mod notification;
 pub mod subscription;
+pub mod traits;
 
 // Re-export types from kalamdb-commons (canonical source)
 pub use kalamdb_commons::models::{ConnectionId, LiveQueryId, TableId, UserId};
@@ -25,9 +27,8 @@ pub use kalamdb_commons::NodeId;
 pub use models::{
     BufferedNotification, ChangeNotification, ChangeType, ConnectionEvent, ConnectionRegistration,
     ConnectionState, EventReceiver, EventSender, InitialLoadState, NotificationReceiver,
-    NotificationSender, SharedConnectionState,
-    SubscriptionFlowControl, SubscriptionHandle, SubscriptionResult, SubscriptionState,
-    EVENT_CHANNEL_CAPACITY, NOTIFICATION_CHANNEL_CAPACITY,
+    NotificationSender, SharedConnectionState, SubscriptionFlowControl, SubscriptionHandle,
+    SubscriptionResult, SubscriptionState, EVENT_CHANNEL_CAPACITY, NOTIFICATION_CHANNEL_CAPACITY,
 };
 
 // Re-export from manager modules
@@ -40,9 +41,13 @@ pub use helpers::{
 };
 
 // Re-export from other modules
-pub use cluster_handler::CoreClusterHandler;
 pub use notification::NotificationService;
 pub use subscription::SubscriptionService;
 
-// Re-export from kalamdb-publisher crate (extracted from former topic_publisher.rs)
+// Re-export fanout types
+pub use fanout::{
+    CommitSideEffectPlan, FanoutDispatchPlan, FanoutOwnerScope, TransactionSideEffects,
+};
+
+// Re-export from kalamdb-publisher crate
 pub use kalamdb_publisher::{TopicCacheStats, TopicPublisherService};

@@ -13,7 +13,7 @@ use kalamdb_commons::models::{ConnectionInfo, UserId};
 use kalamdb_commons::websocket::{ProtocolOptions, WsAuthCredentials};
 use kalamdb_commons::{Role, WebSocketMessage};
 use kalamdb_core::app_context::AppContext;
-use kalamdb_core::live::SharedConnectionState;
+use kalamdb_live::SharedConnectionState;
 use log::debug;
 use std::sync::Arc;
 use tracing::Instrument;

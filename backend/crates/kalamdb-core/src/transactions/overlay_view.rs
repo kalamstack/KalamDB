@@ -79,6 +79,16 @@ impl TransactionMutationSink for CoordinatorMutationSink {
             )
             .map_err(map_transaction_access_error)
     }
+
+    fn stage_batch(
+        &self,
+        transaction_id: &TransactionId,
+        mutations: Vec<StagedMutation>,
+    ) -> Result<(), TransactionAccessError> {
+        self.coordinator
+            .stage_batch(transaction_id, mutations)
+            .map_err(map_transaction_access_error)
+    }
 }
 
 #[derive(Debug)]

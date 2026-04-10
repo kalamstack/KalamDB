@@ -1,8 +1,15 @@
 use std::collections::HashMap;
 
-use kalamdb_commons::models::{TableId, TransactionId};
+use kalamdb_commons::models::{TableId, TransactionId, UserId};
 
 use super::{StagedMutation, TransactionOverlay};
+
+fn scoped_table_key(user_id: Option<&UserId>, primary_key: &str) -> String {
+    match user_id {
+        Some(user_id) => format!("u{}:{}:{}", user_id.as_str().len(), user_id.as_str(), primary_key),
+        None => format!("s:{}", primary_key),
+    }
+}
 
 /// Cold staged-write state allocated lazily on the first transaction write.
 #[derive(Debug, Clone)]
@@ -45,7 +52,7 @@ impl TransactionWriteSet {
 
         let overlay_entry = mutation.overlay_entry();
         let table_id = mutation.table_id.clone();
-        let primary_key = mutation.primary_key.clone();
+        let table_key = scoped_table_key(mutation.user_id.as_ref(), mutation.primary_key.as_str());
         self.buffer_bytes += estimated_bytes;
 
         let mutation_index = self.ordered_mutations.len();
@@ -53,7 +60,7 @@ impl TransactionWriteSet {
         self.latest_by_table_key
             .entry(table_id.clone())
             .or_default()
-            .insert(primary_key, mutation_index);
+            .insert(table_key, mutation_index);
         self.overlay_cache
             .entry(table_id.clone())
             .or_insert_with(|| TransactionOverlay::new(self.transaction_id.clone()))
@@ -73,7 +80,17 @@ impl TransactionWriteSet {
     }
 
     pub fn latest_mutation(&self, table_id: &TableId, primary_key: &str) -> Option<&StagedMutation> {
-        let mutation_index = *self.latest_by_table_key.get(table_id)?.get(primary_key)?;
+        self.latest_mutation_for_scope(table_id, None, primary_key)
+    }
+
+    pub fn latest_mutation_for_scope(
+        &self,
+        table_id: &TableId,
+        user_id: Option<&UserId>,
+        primary_key: &str,
+    ) -> Option<&StagedMutation> {
+        let table_key = scoped_table_key(user_id, primary_key);
+        let mutation_index = *self.latest_by_table_key.get(table_id)?.get(table_key.as_str())?;
         self.ordered_mutations.get(mutation_index)
     }
 
@@ -100,6 +117,14 @@ mod tests {
     use kalamdb_commons::models::{OperationKind, TableName};
     use kalamdb_commons::models::{NamespaceId, TableId};
     use kalamdb_commons::TableType;
+
+    fn row(values: &[(&'static str, ScalarValue)]) -> Row {
+        let mut fields = BTreeMap::new();
+        for (name, value) in values {
+            fields.insert((*name).to_string(), value.clone());
+        }
+        Row::new(fields)
+    }
 
     #[test]
     fn merged_overlay_keeps_latest_state_per_primary_key() {
@@ -200,5 +225,62 @@ mod tests {
             entry.payload.values.get("color"),
             Some(&ScalarValue::Utf8(Some("red".to_string())))
         );
+    }
+
+    #[test]
+    fn merged_overlay_preserves_distinct_user_scope_for_same_primary_key() {
+        let transaction_id = TransactionId::new("01960f7b-3d15-7d6d-b26c-7e4db6f25f8d");
+        let table_id = TableId::new(NamespaceId::new("app"), TableName::new("items"));
+        let first_user = UserId::new("user-a");
+        let second_user = UserId::new("user-b");
+        let mut write_set = TransactionWriteSet::new(transaction_id.clone());
+
+        write_set.stage(StagedMutation::new(
+            transaction_id.clone(),
+            table_id.clone(),
+            TableType::User,
+            Some(first_user.clone()),
+            OperationKind::Insert,
+            "1",
+            row(&[("id", ScalarValue::Int64(Some(1))), ("name", ScalarValue::Utf8(Some("alice".to_string())))]),
+            false,
+        ));
+        write_set.stage(StagedMutation::new(
+            transaction_id,
+            table_id.clone(),
+            TableType::User,
+            Some(second_user.clone()),
+            OperationKind::Insert,
+            "1",
+            row(&[("id", ScalarValue::Int64(Some(1))), ("name", ScalarValue::Utf8(Some("bob".to_string())))]),
+            false,
+        ));
+
+        let overlay = write_set.merged_overlay();
+        assert_eq!(overlay.table_entries(&table_id).expect("table entries").len(), 2);
+        assert_eq!(
+            overlay
+                .latest_visible_entry_for_scope(&table_id, Some(&first_user), "1")
+                .expect("first user entry")
+                .payload
+                .values
+                .get("name"),
+            Some(&ScalarValue::Utf8(Some("alice".to_string())))
+        );
+        assert_eq!(
+            overlay
+                .latest_visible_entry_for_scope(&table_id, Some(&second_user), "1")
+                .expect("second user entry")
+                .payload
+                .values
+                .get("name"),
+            Some(&ScalarValue::Utf8(Some("bob".to_string())))
+        );
+        assert!(write_set
+            .latest_mutation_for_scope(&table_id, Some(&first_user), "1")
+            .is_some());
+        assert!(write_set
+            .latest_mutation_for_scope(&table_id, Some(&second_user), "1")
+            .is_some());
     }
 }

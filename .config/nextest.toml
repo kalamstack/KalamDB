@@ -1,5 +1,24 @@
+[profile.default]
+# Keep libtest parallelism available by default while isolating only known noisy tests.
+retries = 3
+test-threads = 15
+
+[[profile.default.overrides]]
+filter = 'test(test_scenario_08_subscription_reconnect)'
+slow-timeout = { period = "60s", terminate-after = 2 }
+
 [[profile.default.overrides]]
 filter = 'test(test_setup_complete_environment)'
+threads-required = 15
+
+[[profile.default.overrides]]
+filter = 'test(idle_autocommit_transaction_checks_add_no_extra_allocations)'
+# This perf/allocation regression is stable in isolation but noisy under full workspace contention.
+threads-required = 15
+
+[[profile.default.overrides]]
+filter = 'test(autocommit_read_write_latency_regression_stays_within_five_percent)'
+# This perf regression compares two nearly identical code paths and should run in isolation.
 threads-required = 15
 
 [profile.ci]

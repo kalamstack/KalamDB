@@ -5,7 +5,7 @@ use kalamdb_commons::models::UserId;
 use kalamdb_commons::websocket::ProtocolOptions;
 use kalamdb_commons::Role;
 use kalamdb_core::app_context::AppContext;
-use kalamdb_core::live::{ConnectionsManager, LiveQueryManager};
+use kalamdb_live::{ConnectionsManager, LiveQueryManager};
 
 use crate::limiter::RateLimiter;
 

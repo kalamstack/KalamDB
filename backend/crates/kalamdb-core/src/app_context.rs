@@ -5,10 +5,7 @@
 
 use crate::applier::UnifiedApplier;
 use crate::job_waker::JobWaker;
-use crate::live::notification::NotificationService;
-use crate::live::ConnectionsManager;
-use crate::live::LiveQueryManager;
-use crate::live::TopicPublisherService;
+use crate::live_adapters::SchemaRegistryLookup;
 use crate::schema_registry::SchemaRegistry;
 use crate::sql::datafusion_session::DataFusionSessionFactory;
 use crate::sql::executor::SqlExecutor;
@@ -23,6 +20,7 @@ use kalamdb_commons::models::{NamespaceId, TransactionOrigin, UserId};
 use kalamdb_commons::{constants::ColumnFamilyNames, NodeId};
 use kalamdb_configs::ServerConfig;
 use kalamdb_filestore::StorageRegistry;
+use kalamdb_live::{ConnectionsManager, LiveQueryManager, NotificationService, TopicPublisherService};
 use kalamdb_pg::{KalamPgService, LivePgTransaction};
 use kalamdb_raft::CommandExecutor;
 use kalamdb_sharding::{GroupId, ShardRouter};
@@ -492,7 +490,7 @@ impl AppContext {
                 app_ctx.executor().as_any().downcast_ref::<kalamdb_raft::RaftExecutor>()
             {
                 let cluster_handler =
-                    Arc::new(crate::live::CoreClusterHandler::new(Arc::clone(&app_ctx)));
+                    Arc::new(crate::cluster_handler::CoreClusterHandler::new(Arc::clone(&app_ctx)));
                 raft_executor.set_cluster_handler(cluster_handler);
                 let pg_executor =
                     Arc::new(crate::operations::OperationService::new(Arc::clone(&app_ctx)));
@@ -587,9 +585,8 @@ impl AppContext {
             transactions_view.set_snapshot_callback(transactions_snapshot_callback);
 
             let live_query_manager = Arc::new(LiveQueryManager::new(
-                app_ctx.schema_registry(),
+                Arc::new(SchemaRegistryLookup::new(app_ctx.schema_registry())),
                 app_ctx.connection_registry(),
-                Arc::clone(&app_ctx.base_session_context),
             ));
             if app_ctx.live_query_manager.set(live_query_manager).is_err() {
                 panic!("LiveQueryManager already initialized");
@@ -865,9 +862,8 @@ impl AppContext {
         app_ctx.transaction_coordinator().start_timeout_sweeper();
 
         let live_query_manager = Arc::new(LiveQueryManager::new(
-            app_ctx.schema_registry(),
+            Arc::new(SchemaRegistryLookup::new(app_ctx.schema_registry())),
             app_ctx.connection_registry(),
-            Arc::clone(&app_ctx.base_session_context),
         ));
         if app_ctx.live_query_manager.set(live_query_manager).is_err() {
             panic!("LiveQueryManager already initialized");
@@ -1165,6 +1161,15 @@ impl AppContext {
 
     /// Register the shared SqlExecutor (called once during bootstrap)
     pub fn set_sql_executor(&self, executor: Arc<SqlExecutor>) {
+        // Wire live query manager's InitialDataFetcher with the SQL executor adapter
+        if let Some(lqm) = self.live_query_manager.get() {
+            let adapter = Arc::new(crate::live_adapters::SqlExecutorAdapter::new(
+                Arc::clone(&executor),
+                Arc::clone(&self.base_session_context),
+            ));
+            lqm.set_sql_executor(adapter);
+        }
+
         if self.sql_executor.set(executor).is_err() {
             log::warn!(
                 "SqlExecutor already initialized in AppContext; ignoring duplicate registration"

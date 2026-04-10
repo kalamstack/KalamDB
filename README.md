@@ -52,6 +52,27 @@ This is what lets chat UIs and agent apps read/write state directly and receive 
 - Distributed clustering with Multi-Raft replication and failover for resilient production deployments.
 - First-party tooling for operators and app teams: Admin UI, `kalam` CLI, and official TypeScript and Dart SDKs.
 
+## Feature & Status
+
+- **User Tables**: First-class `USER` tables provide per-user isolation so the same SQL can safely serve frontend and backend clients.
+- **Shared Tables and SQL Storage**: Standard SQL tables support application state, relational data modeling, and transactional reads and writes.
+- **Streams and Pub/Sub**: Built-in topics, consumer groups, `CONSUME`, and `ACK` support event-driven backends and AI agent workflows.
+- **Live Queries**: WebSocket-backed subscriptions keep clients synchronized in realtime without polling.
+- **Cluster Replication**: Multi-Raft clustering enables multi-node deployments, failover, and replicated state.
+- **Vector Workloads**: Native `EMBEDDING(dimension)` support enables vector storage and semantic retrieval workflows.
+- **PostgreSQL Extension**: `pg_kalam` integrates PostgreSQL with a running KalamDB instance through the bundled FDW.
+- **Admin and Developer Tooling**: KalamDB ships with an Admin UI, the `kalam` CLI, and official TypeScript and Dart SDKs.
+
+| Feature                     | Status       | Feature                 | Status       |
+| :-------------------------- | :----------- | :---------------------- | :----------- |
+| **User Tables**             | ✅ Available | **Shared Tables**       | ✅ Available |
+| **Streams**                 | ✅ Available | **Pub/Sub Topics**      | ✅ Available |
+| **Live Queries**            | ✅ Available | **Consumer Groups**     | ✅ Available |
+| **Cluster Replication**     | ✅ Available | **Vector Embeddings**   | ✅ Available |
+| **PostgreSQL Extension**    | ✅ Available | **Admin UI**            | ✅ Available |
+| **Kalam CLI**               | ✅ Available | **TypeScript SDK**      | ✅ Available |
+| **Dart/Flutter SDK**        | ✅ Available | **Object Storage**      | ✅ Available |
+
 ## 60-Second Quick Start (Docker)
 
 ### Single node

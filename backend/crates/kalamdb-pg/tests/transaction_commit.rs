@@ -76,11 +76,33 @@ async fn transaction_commit_preserves_user_scope_for_same_primary_keys() {
     open_session(&service, session_id).await;
 
     let transaction_id = begin_transaction(&service, session_id).await;
+    let parsed_transaction_id = parse_transaction_id(&transaction_id);
 
     insert_user_row(&service, &table_ids[0], session_id, &first_user_id, 1, "alpha-a").await;
     insert_user_row(&service, &table_ids[0], session_id, &first_user_id, 2, "beta-a").await;
     insert_user_row(&service, &table_ids[0], session_id, &second_user_id, 1, "alpha-b").await;
     insert_user_row(&service, &table_ids[0], session_id, &second_user_id, 2, "beta-b").await;
+
+    let overlay = app_ctx
+        .transaction_coordinator()
+        .get_overlay(&parsed_transaction_id)
+        .expect("overlay exists before commit");
+    let table_entries = overlay.table_entries(&table_ids[0]).expect("table overlay entries");
+    assert_eq!(table_entries.len(), 4);
+    assert_eq!(
+        table_entries
+            .values()
+            .filter(|entry| entry.user_id.as_ref().map(UserId::as_str) == Some(first_user_id.as_str()))
+            .count(),
+        2
+    );
+    assert_eq!(
+        table_entries
+            .values()
+            .filter(|entry| entry.user_id.as_ref().map(UserId::as_str) == Some(second_user_id.as_str()))
+            .count(),
+        2
+    );
 
     let committed_transaction_id = commit_transaction(&service, session_id, &transaction_id).await;
     assert_eq!(committed_transaction_id, transaction_id);

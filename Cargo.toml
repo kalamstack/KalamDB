@@ -22,6 +22,7 @@ members = [
     "backend/crates/kalamdb-observability",
     "backend/crates/kalamdb-vector",
     "backend/crates/kalamdb-core",
+    "backend/crates/kalamdb-live",
     "backend/crates/kalamdb-handlers",
     "backend/crates/kalamdb-handlers/crates/support",
     "backend/crates/kalamdb-handlers/crates/admin",
@@ -77,6 +78,8 @@ tokio-stream = { version = "0.1", features = ["net"] }
 # HTTP client (with HTTP/2 support) - using rustls-tls for cross-compilation compatibility
 # Note: native-tls requires OpenSSL which is difficult to cross-compile for aarch64
 reqwest = { version = "0.13.2", default-features = false, features = ["json", "rustls", "http2", "multipart", "stream", "form"] }
+hyper = { version = "1.8.1", default-features = false, features = ["client", "http1"] }
+hyper-util = { version = "0.1.20", default-features = false, features = ["client", "client-legacy", "http1", "tokio"] }
 url = "2.5.8"
 
 # WebSocket

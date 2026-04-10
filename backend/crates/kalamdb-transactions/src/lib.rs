@@ -20,4 +20,4 @@ pub use query_context::{
 	TransactionMutationSink, TransactionOverlayView, TransactionQueryContext,
 };
 pub use query_extension::{extract_transaction_query_context, TransactionQueryExtension};
-pub use staged_mutation::StagedMutation;
+pub use staged_mutation::{build_insert_staged_mutations, StagedInsertBuildError, StagedMutation};

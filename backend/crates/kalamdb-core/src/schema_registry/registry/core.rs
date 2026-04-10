@@ -3,7 +3,6 @@
 use crate::app_context::AppContext;
 use crate::error::KalamDbError;
 use crate::error_extensions::KalamDbResultExt;
-use crate::live::models::ChangeNotification;
 use crate::schema_registry::cached_table_data::CachedTableData;
 use chrono::Utc;
 use dashmap::DashMap;
@@ -11,6 +10,7 @@ use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::datasource::TableProvider;
 use datafusion::logical_expr::expr::ScalarFunction as ScalarFunctionExpr;
 use datafusion::logical_expr::Expr;
+use kalamdb_live::models::ChangeNotification;
 use kalamdb_commons::constants::SystemColumnNames;
 use kalamdb_commons::conversions::json_value_to_scalar;
 use kalamdb_commons::datatypes::KalamDataType;

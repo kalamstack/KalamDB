@@ -139,9 +139,8 @@ impl TransactionCoordinator {
         }
 
         if let Err(error) = self.ensure_bound_leadership_is_current(transaction_id, &mut handle) {
-            let owner_key = handle.owner_key;
             drop(handle);
-            self.abort_transaction(transaction_id, owner_key);
+            self.mark_transaction_aborted(transaction_id);
             return Err(error);
         }
 
@@ -239,9 +238,8 @@ impl TransactionCoordinator {
         }
 
         if let Err(error) = self.ensure_bound_leadership_is_current(transaction_id, &mut handle) {
-            let owner_key = handle.owner_key;
             drop(handle);
-            self.abort_transaction(transaction_id, owner_key);
+            self.mark_transaction_aborted(transaction_id);
             return Err(error);
         }
 
@@ -299,9 +297,8 @@ impl TransactionCoordinator {
             }
 
             if let Err(error) = self.ensure_bound_leadership_is_current(transaction_id, &mut handle) {
-                let owner_key = handle.owner_key;
                 drop(handle);
-                self.abort_transaction(transaction_id, owner_key);
+                self.mark_transaction_aborted(transaction_id);
                 return Err(error);
             }
 
@@ -577,15 +574,10 @@ impl TransactionCoordinator {
         Duration::from_secs((timeout_secs / 2).clamp(1, 5))
     }
 
-    fn abort_transaction(
-        &self,
-        transaction_id: &TransactionId,
-        owner_key: ExecutionOwnerKey,
-    ) {
+    fn mark_transaction_aborted(&self, transaction_id: &TransactionId) {
         self.write_sets.remove(transaction_id);
-        self.active_by_owner.remove(&owner_key);
-        if let Some((_, mut sealed_handle)) = self.active_by_id.remove(transaction_id) {
-            sealed_handle.mark_state(TransactionState::Aborted);
+        if let Some(mut handle) = self.active_by_id.get_mut(transaction_id) {
+            handle.mark_state(TransactionState::Aborted);
         }
     }
 

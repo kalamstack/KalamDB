@@ -6,6 +6,7 @@ use kalamdb_commons::TableType;
 
 use crate::access::{TransactionAccessError, TransactionAccessValidator};
 use crate::overlay::TransactionOverlay;
+use crate::staged_mutation::StagedMutation;
 
 /// Lightweight view trait exposed to query providers for transaction-local reads.
 pub trait TransactionOverlayView: std::fmt::Debug + Send + Sync {
@@ -26,6 +27,46 @@ pub trait TransactionMutationSink: std::fmt::Debug + Send + Sync {
         row: Row,
         is_deleted: bool,
     ) -> Result<(), TransactionAccessError>;
+
+    fn stage_batch(
+        &self,
+        transaction_id: &TransactionId,
+        mutations: Vec<StagedMutation>,
+    ) -> Result<(), TransactionAccessError> {
+        for mutation in mutations {
+            let StagedMutation {
+                transaction_id: mutation_transaction_id,
+                table_id,
+                table_type,
+                user_id,
+                operation_kind,
+                primary_key,
+                payload,
+                tombstone,
+                ..
+            } = mutation;
+
+            if &mutation_transaction_id != transaction_id {
+                return Err(TransactionAccessError::invalid_operation(format!(
+                    "staged mutation transaction mismatch: expected '{}', got '{}'",
+                    transaction_id, mutation_transaction_id
+                )));
+            }
+
+            self.stage_mutation(
+                transaction_id,
+                &table_id,
+                table_type,
+                user_id,
+                operation_kind,
+                primary_key,
+                payload,
+                tombstone,
+            )?;
+        }
+
+        Ok(())
+    }
 }
 
 /// Query-time transaction context shared between the coordinator and providers.

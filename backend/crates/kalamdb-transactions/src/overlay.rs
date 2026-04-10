@@ -6,6 +6,13 @@ use kalamdb_commons::TableType;
 
 use crate::query_context::TransactionOverlayView;
 
+fn scoped_entry_key(user_id: Option<&UserId>, primary_key: &str) -> String {
+	match user_id {
+		Some(user_id) => format!("u{}:{}:{}", user_id.as_str().len(), user_id.as_str(), primary_key),
+		None => format!("s:{}", primary_key),
+	}
+}
+
 /// Shared overlay entry exposed across crate boundaries for transaction-local reads.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransactionOverlayEntry {
@@ -52,14 +59,17 @@ impl TransactionOverlay {
 	pub fn apply_entry(&mut self, entry: TransactionOverlayEntry) {
 		let table_id = entry.table_id.clone();
 		let primary_key = entry.primary_key.clone();
-		let effective_entry = self.merge_visible_entry(&table_id, &primary_key, entry);
+		let user_id = entry.user_id.clone();
+		let entry_key = scoped_entry_key(user_id.as_ref(), primary_key.as_str());
+		let effective_entry =
+			self.merge_visible_entry(&table_id, user_id.as_ref(), primary_key.as_str(), entry);
 
 		self.entries_by_table
 			.entry(table_id.clone())
 			.or_default()
-			.insert(primary_key.clone(), effective_entry.clone());
+			.insert(entry_key.clone(), effective_entry.clone());
 
-		self.clear_key_membership(&table_id, primary_key.as_str());
+		self.clear_key_membership(&table_id, entry_key.as_str());
 
 		let target_map = if effective_entry.is_deleted() {
 			&mut self.deleted_keys
@@ -71,7 +81,7 @@ impl TransactionOverlay {
 			}
 		};
 
-		target_map.entry(table_id).or_default().insert(primary_key);
+		target_map.entry(table_id).or_default().insert(entry_key);
 	}
 
 	pub fn merge_from(&mut self, other: &TransactionOverlay) {
@@ -88,7 +98,18 @@ impl TransactionOverlay {
 		table_id: &TableId,
 		primary_key: &str,
 	) -> Option<&TransactionOverlayEntry> {
-		self.entries_by_table.get(table_id)?.get(primary_key)
+		self.latest_visible_entry_for_scope(table_id, None, primary_key)
+	}
+
+	#[inline]
+	pub fn latest_visible_entry_for_scope(
+		&self,
+		table_id: &TableId,
+		user_id: Option<&UserId>,
+		primary_key: &str,
+	) -> Option<&TransactionOverlayEntry> {
+		let entry_key = scoped_entry_key(user_id, primary_key);
+		self.entries_by_table.get(table_id)?.get(entry_key.as_str())
 	}
 
 	#[inline]
@@ -118,10 +139,10 @@ impl TransactionOverlay {
 		Some(overlay)
 	}
 
-	fn clear_key_membership(&mut self, table_id: &TableId, primary_key: &str) {
+	fn clear_key_membership(&mut self, table_id: &TableId, entry_key: &str) {
 		for key_set in [&mut self.inserted_keys, &mut self.deleted_keys, &mut self.updated_keys] {
 			if let Some(keys) = key_set.get_mut(table_id) {
-				keys.remove(primary_key);
+				keys.remove(entry_key);
 				if keys.is_empty() {
 					key_set.remove(table_id);
 				}
@@ -132,6 +153,7 @@ impl TransactionOverlay {
 	fn merge_visible_entry(
 		&self,
 		table_id: &TableId,
+		user_id: Option<&UserId>,
 		primary_key: &str,
 		mut next: TransactionOverlayEntry,
 	) -> TransactionOverlayEntry {
@@ -139,10 +161,12 @@ impl TransactionOverlay {
 			return next;
 		}
 
+		let entry_key = scoped_entry_key(user_id, primary_key);
+
 		let Some(current) = self
 			.entries_by_table
 			.get(table_id)
-			.and_then(|entries| entries.get(primary_key))
+			.and_then(|entries| entries.get(entry_key.as_str()))
 		else {
 			return next;
 		};
@@ -236,6 +260,59 @@ mod tests {
 		assert_eq!(
 			entry.payload.values.get("color"),
 			Some(&ScalarValue::Utf8(Some("red".to_string())))
+		);
+	}
+
+	#[test]
+	fn preserves_distinct_user_scopes_for_same_primary_key() {
+		let transaction_id = TransactionId::new("01960f7b-3d15-7d6d-b26c-7e4db6f25f8d");
+		let table_id = TableId::new(NamespaceId::new("app"), TableName::new("items"));
+		let first_user = UserId::new("user-a");
+		let second_user = UserId::new("user-b");
+		let mut overlay = TransactionOverlay::new(transaction_id.clone());
+
+		overlay.apply_entry(TransactionOverlayEntry {
+			transaction_id: transaction_id.clone(),
+			mutation_order: 0,
+			table_id: table_id.clone(),
+			table_type: TableType::User,
+			user_id: Some(first_user.clone()),
+			operation_kind: OperationKind::Insert,
+			primary_key: "1".to_string(),
+			payload: row(&[("name", ScalarValue::Utf8(Some("alice".to_string())))]),
+			tombstone: false,
+		});
+
+		overlay.apply_entry(TransactionOverlayEntry {
+			transaction_id,
+			mutation_order: 1,
+			table_id: table_id.clone(),
+			table_type: TableType::User,
+			user_id: Some(second_user.clone()),
+			operation_kind: OperationKind::Insert,
+			primary_key: "1".to_string(),
+			payload: row(&[("name", ScalarValue::Utf8(Some("bob".to_string())))]),
+			tombstone: false,
+		});
+
+		assert_eq!(overlay.table_entries(&table_id).expect("table entries").len(), 2);
+		assert_eq!(
+			overlay
+				.latest_visible_entry_for_scope(&table_id, Some(&first_user), "1")
+				.expect("first user entry")
+				.payload
+				.values
+				.get("name"),
+			Some(&ScalarValue::Utf8(Some("alice".to_string())))
+		);
+		assert_eq!(
+			overlay
+				.latest_visible_entry_for_scope(&table_id, Some(&second_user), "1")
+				.expect("second user entry")
+				.payload
+				.values
+				.get("name"),
+			Some(&ScalarValue::Utf8(Some("bob".to_string())))
 		);
 	}
 }

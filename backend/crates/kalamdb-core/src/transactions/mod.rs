@@ -10,8 +10,8 @@ pub mod staged_mutation;
 pub mod write_set;
 
 pub use commit_result::{
-    CommitSideEffectPlan, FanoutDispatchPlan, FanoutOwnerScope, TransactionCommitOutcome,
-    TransactionCommitResult, TransactionSideEffects,
+    commit_side_effect_plan_from_write_set, CommitSideEffectPlan, FanoutDispatchPlan,
+    FanoutOwnerScope, TransactionCommitOutcome, TransactionCommitResult, TransactionSideEffects,
 };
 pub use binding::TransactionRaftBinding;
 pub use commit_sequence::CommitSequenceTracker;

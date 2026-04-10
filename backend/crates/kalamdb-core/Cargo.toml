@@ -13,6 +13,7 @@ repository.workspace = true
 kalamdb-commons = { path = "../kalamdb-commons", features = ["full"] }
 kalamdb-configs = { path = "../kalamdb-configs" }
 kalamdb-filestore = { path = "../kalamdb-filestore" }
+kalamdb-live = { path = "../kalamdb-live" }
 kalamdb-observability = { path = "../kalamdb-observability" }
 kalamdb-plan-cache = { workspace = true }
 kalamdb-pg = { path = "../kalamdb-pg" }
@@ -99,7 +100,7 @@ kalamdb-jobs = { path = "../kalamdb-jobs" }
 # Feature to run expensive/slow tests (disabled by default)
 expensive_tests = []
 # Expose test helpers to other crates' test code (dev-dependencies)
-test-helpers = []
+test-helpers = ["kalamdb-live/test-helpers"]
 mimalloc = ["kalamdb-observability/mimalloc", "kalamdb-raft/mimalloc"]
 
 [lib]

@@ -17,6 +17,7 @@ use futures_util::{stream, TryStreamExt};
 
 use kalamdb_commons::conversions::arrow_json_conversion::json_rows_to_arrow_batch;
 use kalamdb_commons::models::rows::Row;
+use kalamdb_commons::models::UserId;
 use kalamdb_commons::TableId;
 
 use crate::overlay::TransactionOverlay;
@@ -28,6 +29,7 @@ pub struct TransactionOverlayExec {
 	table_id: TableId,
 	primary_key_column: Arc<str>,
 	overlay: TransactionOverlay,
+	user_scope: Option<UserId>,
 	final_projection: Option<Vec<usize>>,
 	fetch: Option<usize>,
 	cache: Arc<PlanProperties>,
@@ -39,6 +41,7 @@ impl TransactionOverlayExec {
 		table_id: TableId,
 		primary_key_column: impl Into<Arc<str>>,
 		overlay: TransactionOverlay,
+		user_scope: Option<UserId>,
 		final_projection: Option<Vec<usize>>,
 		fetch: Option<usize>,
 	) -> DataFusionResult<Self> {
@@ -55,6 +58,7 @@ impl TransactionOverlayExec {
 			table_id,
 			primary_key_column: primary_key_column.into(),
 			overlay,
+			user_scope,
 			final_projection,
 			fetch,
 			cache,
@@ -116,6 +120,7 @@ impl ExecutionPlan for TransactionOverlayExec {
 			self.table_id.clone(),
 			Arc::clone(&self.primary_key_column),
 			self.overlay.clone(),
+			self.user_scope.clone(),
 			self.final_projection.clone(),
 			self.fetch,
 		)?))
@@ -133,6 +138,7 @@ impl ExecutionPlan for TransactionOverlayExec {
 		let final_projection = self.final_projection.clone();
 		let input_schema = input.schema();
 		let output_schema = self.schema();
+		let user_scope = self.user_scope.clone();
 		let fetch = self.fetch;
 
 		let stream = stream::once(async move {
@@ -143,6 +149,7 @@ impl ExecutionPlan for TransactionOverlayExec {
 				&table_id,
 				primary_key_column.as_ref(),
 				&overlay,
+				user_scope.as_ref(),
 				&batches,
 				final_projection.as_ref(),
 				fetch,
@@ -171,6 +178,7 @@ fn merge_batches_with_overlay(
 	table_id: &TableId,
 	primary_key_column: &str,
 	overlay: &TransactionOverlay,
+	overlay_user_scope: Option<&UserId>,
 	batches: &[RecordBatch],
 	final_projection: Option<&Vec<usize>>,
 	fetch: Option<usize>,
@@ -192,7 +200,17 @@ fn merge_batches_with_overlay(
 
 	let mut overlay_entries = overlay
 		.table_entries(table_id)
-		.map(|entries| entries.values().cloned().collect::<Vec<_>>())
+		.map(|entries| {
+			entries
+				.values()
+				.filter(|entry| {
+					overlay_user_scope
+						.map(|user_id| entry.user_id.as_ref() == Some(user_id))
+						.unwrap_or(true)
+				})
+				.cloned()
+				.collect::<Vec<_>>()
+		})
 		.unwrap_or_default();
 	overlay_entries.sort_by_key(|entry| entry.mutation_order);
 
@@ -342,6 +360,7 @@ mod tests {
 			&table_id,
 			"id",
 			&overlay,
+			None,
 			&[base_batch],
 			None,
 			None,
@@ -359,6 +378,93 @@ mod tests {
 		assert_eq!(
 			rows[1].values.get("name"),
 			Some(&ScalarValue::Utf8(Some("inserted".to_string())))
+		);
+	}
+
+	#[test]
+	fn overlay_merge_honors_user_scope_for_same_primary_key() {
+		let schema = Arc::new(Schema::new(vec![
+			Field::new("id", DataType::Int64, false),
+			Field::new("name", DataType::Utf8, true),
+		]));
+		let empty_batch = RecordBatch::try_new(
+			Arc::clone(&schema),
+			vec![
+				Arc::new(Int64Array::from(Vec::<i64>::new())),
+				Arc::new(StringArray::from(Vec::<Option<&str>>::new())),
+			],
+		)
+		.expect("empty batch");
+
+		let transaction_id = TransactionId::new("01960f7b-3d15-7d6d-b26c-7e4db6f25f8d");
+		let table_id = TableId::new(NamespaceId::new("app"), TableName::new("items"));
+		let first_user = UserId::new("user-a");
+		let second_user = UserId::new("user-b");
+		let mut overlay = TransactionOverlay::new(transaction_id.clone());
+
+		overlay.apply_entry(TransactionOverlayEntry {
+			transaction_id: transaction_id.clone(),
+			mutation_order: 0,
+			table_id: table_id.clone(),
+			table_type: TableType::User,
+			user_id: Some(first_user.clone()),
+			operation_kind: OperationKind::Insert,
+			primary_key: "1".to_string(),
+			payload: row(&[
+				("id", ScalarValue::Int64(Some(1))),
+				("name", ScalarValue::Utf8(Some("alice".to_string()))),
+			]),
+			tombstone: false,
+		});
+		overlay.apply_entry(TransactionOverlayEntry {
+			transaction_id,
+			mutation_order: 1,
+			table_id: table_id.clone(),
+			table_type: TableType::User,
+			user_id: Some(second_user.clone()),
+			operation_kind: OperationKind::Insert,
+			primary_key: "1".to_string(),
+			payload: row(&[
+				("id", ScalarValue::Int64(Some(1))),
+				("name", ScalarValue::Utf8(Some("bob".to_string()))),
+			]),
+			tombstone: false,
+		});
+
+		let first_merged = merge_batches_with_overlay(
+			&schema,
+			&table_id,
+			"id",
+			&overlay,
+			Some(&first_user),
+			&[empty_batch.clone()],
+			None,
+			None,
+		)
+		.expect("first user merged batch");
+		let second_merged = merge_batches_with_overlay(
+			&schema,
+			&table_id,
+			"id",
+			&overlay,
+			Some(&second_user),
+			&[empty_batch],
+			None,
+			None,
+		)
+		.expect("second user merged batch");
+
+		let first_rows = record_batch_to_rows(&first_merged).expect("first rows");
+		let second_rows = record_batch_to_rows(&second_merged).expect("second rows");
+		assert_eq!(first_rows.len(), 1);
+		assert_eq!(second_rows.len(), 1);
+		assert_eq!(
+			first_rows[0].values.get("name"),
+			Some(&ScalarValue::Utf8(Some("alice".to_string())))
+		);
+		assert_eq!(
+			second_rows[0].values.get("name"),
+			Some(&ScalarValue::Utf8(Some("bob".to_string())))
 		);
 	}
 }

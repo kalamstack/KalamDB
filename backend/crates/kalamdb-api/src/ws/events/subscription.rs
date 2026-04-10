@@ -5,8 +5,8 @@
 use actix_ws::Session;
 use kalamdb_commons::websocket::{BatchControl, SubscriptionRequest, MAX_ROWS_PER_BATCH};
 use kalamdb_commons::WebSocketMessage;
-use kalamdb_core::live::{InitialDataOptions, LiveQueryManager, SharedConnectionState};
 use kalamdb_core::providers::arrow_json_conversion::row_to_json_map;
+use kalamdb_live::{InitialDataOptions, LiveQueryManager, SharedConnectionState};
 use log::{debug, error, warn};
 use std::sync::Arc;
 
@@ -185,10 +185,10 @@ pub async fn handle_subscribe(
         Err(e) => {
             // Map error types to appropriate WebSocket error codes
             let code = match &e {
-                kalamdb_core::error::KalamDbError::PermissionDenied(_) => WsErrorCode::Unauthorized,
-                kalamdb_core::error::KalamDbError::NotFound(_) => WsErrorCode::NotFound,
-                kalamdb_core::error::KalamDbError::InvalidSql(_) => WsErrorCode::InvalidSql,
-                kalamdb_core::error::KalamDbError::InvalidOperation(_) => WsErrorCode::Unsupported,
+                kalamdb_live::error::LiveError::PermissionDenied(_) => WsErrorCode::Unauthorized,
+                kalamdb_live::error::LiveError::NotFound(_) => WsErrorCode::NotFound,
+                kalamdb_live::error::LiveError::InvalidSql(_) => WsErrorCode::InvalidSql,
+                kalamdb_live::error::LiveError::InvalidOperation(_) => WsErrorCode::Unsupported,
                 _ => WsErrorCode::SubscriptionFailed,
             };
             let message = e.to_string();

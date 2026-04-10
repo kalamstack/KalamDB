@@ -43,11 +43,11 @@ use kalamdb_session_datafusion::{
     check_shared_table_access, check_shared_table_write_access, session_error_to_datafusion,
 };
 use kalamdb_store::EntityStore;
-use kalamdb_system::VectorMetric;
-use kalamdb_transactions::{extract_transaction_query_context, TransactionOverlayExec};
+use kalamdb_transactions::{
+    extract_transaction_query_context, StagedMutation, TransactionOverlayExec,
+};
 use kalamdb_vector::{
-    new_indexed_shared_vector_hot_store, SharedVectorHotOpId, SharedVectorHotStore, VectorHotOp,
-    VectorHotOpType,
+    new_indexed_shared_vector_hot_store, SharedVectorHotOpId, SharedVectorHotStore,
 };
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
@@ -196,8 +196,32 @@ impl SharedTableProvider {
         Arc::clone(&self.store)
     }
 
-    fn extract_embedding_vector(value: &ScalarValue, expected_dimensions: u32) -> Option<Vec<f32>> {
-        base::extract_embedding_vector(value, expected_dimensions)
+    async fn ensure_shared_write_leader(&self) -> Result<(), KalamDbError> {
+        if self.core.services.cluster_coordinator.is_cluster_mode().await {
+            let is_leader = self.core.services.cluster_coordinator.is_leader_for_shared().await;
+            if !is_leader {
+                let leader_addr = self.core.services.cluster_coordinator.leader_addr_for_shared().await;
+                return Err(KalamDbError::NotLeader { leader_addr });
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn ensure_shared_write_route(&self, state: &dyn Session) -> DataFusionResult<()> {
+        if extract_transaction_query_context(state).is_some() {
+            self.validate_transaction_table_access(state)?;
+            return Ok(());
+        }
+
+        self.ensure_shared_write_leader()
+            .await
+            .map_err(|error| match error {
+                KalamDbError::NotLeader { leader_addr } => {
+                    DataFusionError::External(Box::new(NotLeaderError::new(leader_addr)))
+                },
+                other => DataFusionError::Execution(other.to_string()),
+            })
     }
 
     async fn stage_vector_upsert(
@@ -209,40 +233,20 @@ impl SharedTableProvider {
             return Ok(());
         }
 
-        let pk =
-            crate::utils::unified_dml::extract_user_pk_value(row, self.primary_key_field_name())?;
-
-        for (column_name, dimensions) in &self.vector_columns {
-            let Some(value) = row.get(column_name.as_str()) else {
-                continue;
-            };
-            let Some(vector) = Self::extract_embedding_vector(value, *dimensions) else {
-                continue;
-            };
-
-            let store = self.vector_stores.get(column_name).ok_or_else(|| {
-                KalamDbError::InvalidOperation(format!(
-                    "Missing cached vector store for column '{}'",
-                    column_name
-                ))
-            })?;
-            let key = SharedVectorHotOpId::new(seq, pk.clone());
-            let op = VectorHotOp::new(
-                self.core.table_id().clone(),
-                column_name.clone(),
-                pk.clone(),
-                VectorHotOpType::Upsert,
-                Some(vector),
-                None,
-                *dimensions,
-                VectorMetric::Cosine,
-            );
-            store.insert_async(key, op).await.map_err(|e| {
-                KalamDbError::InvalidOperation(format!("Failed to stage vector upsert op: {}", e))
-            })?;
-        }
-
-        Ok(())
+        let ops_by_column = crate::utils::vector_staging::build_vector_upsert_batch_ops(
+            self.core.table_id(),
+            self.primary_key_field_name(),
+            &self.vector_columns,
+            std::iter::once((seq, row)),
+            |(_, row)| row,
+            |(seq, _), pk| SharedVectorHotOpId::new(*seq, pk.to_string()),
+        )?;
+        crate::utils::vector_staging::stage_vector_ops_by_column(
+            &self.vector_stores,
+            ops_by_column,
+            "stage vector upsert",
+        )
+        .await
     }
 
     async fn stage_vector_upsert_batch(
@@ -253,55 +257,20 @@ impl SharedTableProvider {
             return Ok(());
         }
 
-        let mut ops_by_column: HashMap<String, Vec<(SharedVectorHotOpId, VectorHotOp)>> =
-            HashMap::new();
-
-        for (row_key, entity) in entries {
-            let pk = crate::utils::unified_dml::extract_user_pk_value(
-                &entity.fields,
-                self.primary_key_field_name(),
-            )?;
-
-            for (column_name, dimensions) in &self.vector_columns {
-                let Some(value) = entity.fields.get(column_name.as_str()) else {
-                    continue;
-                };
-                let Some(vector) = Self::extract_embedding_vector(value, *dimensions) else {
-                    continue;
-                };
-
-                ops_by_column.entry(column_name.clone()).or_default().push((
-                    SharedVectorHotOpId::new(*row_key, pk.clone()),
-                    VectorHotOp::new(
-                        self.core.table_id().clone(),
-                        column_name.clone(),
-                        pk.clone(),
-                        VectorHotOpType::Upsert,
-                        Some(vector),
-                        None,
-                        *dimensions,
-                        VectorMetric::Cosine,
-                    ),
-                ));
-            }
-        }
-
-        for (column_name, ops) in ops_by_column {
-            let store = self.vector_stores.get(&column_name).ok_or_else(|| {
-                KalamDbError::InvalidOperation(format!(
-                    "Missing cached vector store for column '{}'",
-                    column_name
-                ))
-            })?;
-            store.insert_batch_async(ops).await.map_err(|e| {
-                KalamDbError::InvalidOperation(format!(
-                    "Failed to batch stage vector upsert ops for column '{}': {}",
-                    column_name, e
-                ))
-            })?;
-        }
-
-        Ok(())
+        let ops_by_column = crate::utils::vector_staging::build_vector_upsert_batch_ops(
+            self.core.table_id(),
+            self.primary_key_field_name(),
+            &self.vector_columns,
+            entries.iter(),
+            |(_, entity)| &entity.fields,
+            |(row_key, _), pk| SharedVectorHotOpId::new(*row_key, pk.to_string()),
+        )?;
+        crate::utils::vector_staging::stage_vector_ops_by_column(
+            &self.vector_stores,
+            ops_by_column,
+            "batch stage vector upsert",
+        )
+        .await
     }
 
     async fn stage_vector_delete(
@@ -313,30 +282,18 @@ impl SharedTableProvider {
             return Ok(());
         }
 
-        for (column_name, dimensions) in &self.vector_columns {
-            let store = self.vector_stores.get(column_name).ok_or_else(|| {
-                KalamDbError::InvalidOperation(format!(
-                    "Missing cached vector store for column '{}'",
-                    column_name
-                ))
-            })?;
-            let key = SharedVectorHotOpId::new(seq, pk.to_string());
-            let op = VectorHotOp::new(
-                self.core.table_id().clone(),
-                column_name.clone(),
-                pk.to_string(),
-                VectorHotOpType::Delete,
-                None,
-                None,
-                *dimensions,
-                VectorMetric::Cosine,
-            );
-            store.insert_async(key, op).await.map_err(|e| {
-                KalamDbError::InvalidOperation(format!("Failed to stage vector delete op: {}", e))
-            })?;
-        }
-
-        Ok(())
+        let ops_by_column = crate::utils::vector_staging::build_vector_delete_ops(
+            self.core.table_id(),
+            &self.vector_columns,
+            pk,
+            |primary_key| SharedVectorHotOpId::new(seq, primary_key.to_string()),
+        );
+        crate::utils::vector_staging::stage_vector_ops_by_column(
+            &self.vector_stores,
+            ops_by_column,
+            "stage vector delete",
+        )
+        .await
     }
 
     /// Scan Parquet files from cold storage for shared table
@@ -2210,35 +2167,27 @@ impl TableProvider for SharedTableProvider {
             return self.base_scan(state, projection, filters, limit).await;
         };
 
-        let schema = self.schema_ref();
-        let pk_index = schema
-            .index_of(self.primary_key_field_name())
-            .map_err(|error| DataFusionError::ArrowError(Box::new(error), None))?;
-        let needs_pk_projection = projection.is_some_and(|columns| !columns.contains(&pk_index));
-        let overlay_projection = projection.map(|columns| {
-            if needs_pk_projection {
-                let mut augmented = columns.clone();
-                augmented.push(pk_index);
-                augmented
-            } else {
-                columns.clone()
-            }
-        });
-        let final_projection = if needs_pk_projection {
-            projection.map(|columns| (0..columns.len()).collect::<Vec<_>>())
-        } else {
-            None
-        };
-        let effective_projection = overlay_projection.as_ref().or(projection);
-
-        let base_plan = self.base_scan(state, effective_projection, filters, limit).await?;
+        let overlay_projection = crate::utils::datafusion_dml::prepare_overlay_scan_projection(
+            &self.schema_ref(),
+            projection,
+            self.primary_key_field_name(),
+        )?;
+        let base_plan = self
+            .base_scan(
+                state,
+                overlay_projection.effective_projection.as_ref(),
+                filters,
+                limit,
+            )
+            .await?;
 
         Ok(Arc::new(TransactionOverlayExec::try_new(
             base_plan,
             self.core.table_id().clone(),
             self.primary_key_field_name().to_string(),
             table_overlay,
-            final_projection,
+            None,
+            overlay_projection.final_projection,
             None,
         )?))
     }
@@ -2259,37 +2208,18 @@ impl TableProvider for SharedTableProvider {
             )));
         }
 
-        if extract_transaction_query_context(state).is_some() {
-            self.validate_transaction_table_access(state)?;
-        } else if self.core.services.cluster_coordinator.is_cluster_mode().await {
-            let is_leader = self.core.services.cluster_coordinator.is_leader_for_shared().await;
-            if !is_leader {
-                let leader_addr =
-                    self.core.services.cluster_coordinator.leader_addr_for_shared().await;
-                return Err(DataFusionError::External(Box::new(NotLeaderError::new(leader_addr))));
-            }
-        }
+        self.ensure_shared_write_route(state).await?;
 
         let rows = crate::utils::datafusion_dml::collect_input_rows(state, input).await?;
         if let Some(transaction_query_context) = extract_transaction_query_context(state) {
-            let inserted = rows.len() as u64;
-            let pk_column = self.primary_key_field_name().to_string();
-            for row in rows {
-                let pk_value = crate::utils::datafusion_dml::extract_pk_value(&row, &pk_column)?;
-                transaction_query_context
-                    .mutation_sink
-                    .stage_mutation(
-                        &transaction_query_context.transaction_id,
-                        self.core.table_id(),
-                        TableType::Shared,
-                        None,
-                        OperationKind::Insert,
-                        pk_value,
-                        row,
-                        false,
-                    )
-                    .map_err(base::transaction_access_error_to_datafusion)?;
-            }
+            let inserted = crate::utils::datafusion_dml::stage_insert_rows(
+                transaction_query_context,
+                self.core.table_id(),
+                TableType::Shared,
+                None,
+                self.primary_key_field_name(),
+                rows,
+            )?;
 
             return crate::utils::datafusion_dml::rows_affected_plan(state, inserted).await;
         }
@@ -2318,16 +2248,7 @@ impl TableProvider for SharedTableProvider {
             .map_err(session_error_to_datafusion)?;
         crate::utils::datafusion_dml::validate_where_clause(&filters, "DELETE")?;
 
-        if extract_transaction_query_context(state).is_some() {
-            self.validate_transaction_table_access(state)?;
-        } else if self.core.services.cluster_coordinator.is_cluster_mode().await {
-            let is_leader = self.core.services.cluster_coordinator.is_leader_for_shared().await;
-            if !is_leader {
-                let leader_addr =
-                    self.core.services.cluster_coordinator.leader_addr_for_shared().await;
-                return Err(DataFusionError::External(Box::new(NotLeaderError::new(leader_addr))));
-            }
-        }
+        self.ensure_shared_write_route(state).await?;
 
         let pk_column = self.primary_key_field_name().to_string();
         let schema = self.schema_ref();
@@ -2354,6 +2275,7 @@ impl TableProvider for SharedTableProvider {
         let commit_seq = transaction_query_context
             .is_none()
             .then(|| self.core.services.commit_sequence_source.allocate_next());
+        let mut staged_mutations = transaction_query_context.map(|_| Vec::with_capacity(rows.len()));
 
         for row in rows {
             let pk_value = crate::utils::datafusion_dml::extract_pk_value(&row, &pk_column)?;
@@ -2361,20 +2283,20 @@ impl TableProvider for SharedTableProvider {
                 continue;
             }
 
-            if let Some(transaction_query_context) = transaction_query_context {
-                transaction_query_context
-                    .mutation_sink
-                    .stage_mutation(
-                        &transaction_query_context.transaction_id,
-                        self.core.table_id(),
-                        TableType::Shared,
-                        None,
-                        OperationKind::Delete,
-                        pk_value,
-                        Row::new(std::collections::BTreeMap::new()),
-                        true,
-                    )
-                    .map_err(base::transaction_access_error_to_datafusion)?;
+            if let Some(staged_mutations) = staged_mutations.as_mut() {
+                staged_mutations.push(StagedMutation::new(
+                    transaction_query_context
+                        .expect("transaction_query_context must exist when staging DELETE")
+                        .transaction_id
+                        .clone(),
+                    self.core.table_id().clone(),
+                    TableType::Shared,
+                    None,
+                    OperationKind::Delete,
+                    pk_value,
+                    Row::new(std::collections::BTreeMap::new()),
+                    true,
+                ));
                 deleted += 1;
                 continue;
             }
@@ -2399,6 +2321,15 @@ impl TableProvider for SharedTableProvider {
             }
         }
 
+        if let (Some(transaction_query_context), Some(staged_mutations)) =
+            (transaction_query_context, staged_mutations)
+        {
+            crate::utils::datafusion_dml::stage_transaction_mutations(
+                transaction_query_context,
+                staged_mutations,
+            )?;
+        }
+
         crate::utils::datafusion_dml::rows_affected_plan(state, deleted).await
     }
 
@@ -2412,16 +2343,7 @@ impl TableProvider for SharedTableProvider {
             .map_err(session_error_to_datafusion)?;
         crate::utils::datafusion_dml::validate_where_clause(&filters, "UPDATE")?;
 
-        if extract_transaction_query_context(state).is_some() {
-            self.validate_transaction_table_access(state)?;
-        } else if self.core.services.cluster_coordinator.is_cluster_mode().await {
-            let is_leader = self.core.services.cluster_coordinator.is_leader_for_shared().await;
-            if !is_leader {
-                let leader_addr =
-                    self.core.services.cluster_coordinator.leader_addr_for_shared().await;
-                return Err(DataFusionError::External(Box::new(NotLeaderError::new(leader_addr))));
-            }
-        }
+        self.ensure_shared_write_route(state).await?;
 
         let pk_column = self.primary_key_field_name().to_string();
         crate::utils::datafusion_dml::validate_update_assignments(&assignments, &pk_column)?;
@@ -2450,6 +2372,7 @@ impl TableProvider for SharedTableProvider {
         let commit_seq = transaction_query_context
             .is_none()
             .then(|| self.core.services.commit_sequence_source.allocate_next());
+        let mut staged_mutations = transaction_query_context.map(|_| Vec::with_capacity(rows.len()));
 
         for row in rows {
             let pk_value = crate::utils::datafusion_dml::extract_pk_value(&row, &pk_column)?;
@@ -2464,20 +2387,20 @@ impl TableProvider for SharedTableProvider {
                 &assignments,
             )?;
 
-            if let Some(transaction_query_context) = transaction_query_context {
-                transaction_query_context
-                    .mutation_sink
-                    .stage_mutation(
-                        &transaction_query_context.transaction_id,
-                        self.core.table_id(),
-                        TableType::Shared,
-                        None,
-                        OperationKind::Update,
-                        pk_value,
-                        evaluated_updates,
-                        false,
-                    )
-                    .map_err(base::transaction_access_error_to_datafusion)?;
+            if let Some(staged_mutations) = staged_mutations.as_mut() {
+                staged_mutations.push(StagedMutation::new(
+                    transaction_query_context
+                        .expect("transaction_query_context must exist when staging UPDATE")
+                        .transaction_id
+                        .clone(),
+                    self.core.table_id().clone(),
+                    TableType::Shared,
+                    None,
+                    OperationKind::Update,
+                    pk_value,
+                    evaluated_updates,
+                    false,
+                ));
                 updated += 1;
                 continue;
             }
@@ -2499,6 +2422,15 @@ impl TableProvider for SharedTableProvider {
             }
         }
 
+        if let (Some(transaction_query_context), Some(staged_mutations)) =
+            (transaction_query_context, staged_mutations)
+        {
+            crate::utils::datafusion_dml::stage_transaction_mutations(
+                transaction_query_context,
+                staged_mutations,
+            )?;
+        }
+
         crate::utils::datafusion_dml::rows_affected_plan(state, updated).await
     }
 
@@ -2518,17 +2450,7 @@ impl TableProvider for SharedTableProvider {
 #[async_trait]
 impl crate::utils::dml_provider::KalamTableProvider for SharedTableProvider {
     async fn insert_rows(&self, user_id: &UserId, rows: Vec<Row>) -> Result<usize, KalamDbError> {
-        // In cluster mode, ensure we're on the shared shard leader.
-        // This path bypasses DataFusion's insert_into(), which has its own
-        // leadership check.
-        if self.core.services.cluster_coordinator.is_cluster_mode().await {
-            let is_leader = self.core.services.cluster_coordinator.is_leader_for_shared().await;
-            if !is_leader {
-                let leader_addr =
-                    self.core.services.cluster_coordinator.leader_addr_for_shared().await;
-                return Err(KalamDbError::NotLeader { leader_addr });
-            }
-        }
+        self.ensure_shared_write_leader().await?;
         let keys = self.insert_batch(user_id, rows).await?;
         Ok(keys.len())
     }
@@ -2539,14 +2461,7 @@ impl crate::utils::dml_provider::KalamTableProvider for SharedTableProvider {
         pk_value: &str,
         updates: Row,
     ) -> Result<bool, KalamDbError> {
-        if self.core.services.cluster_coordinator.is_cluster_mode().await {
-            let is_leader = self.core.services.cluster_coordinator.is_leader_for_shared().await;
-            if !is_leader {
-                let leader_addr =
-                    self.core.services.cluster_coordinator.leader_addr_for_shared().await;
-                return Err(KalamDbError::NotLeader { leader_addr });
-            }
-        }
+        self.ensure_shared_write_leader().await?;
 
         match self.update_by_pk_value(base::system_user_id(), pk_value, updates).await {
             Ok(Some(_)) => Ok(true),
@@ -2561,14 +2476,7 @@ impl crate::utils::dml_provider::KalamTableProvider for SharedTableProvider {
         _user_id: &UserId,
         pk_value: &str,
     ) -> Result<bool, KalamDbError> {
-        if self.core.services.cluster_coordinator.is_cluster_mode().await {
-            let is_leader = self.core.services.cluster_coordinator.is_leader_for_shared().await;
-            if !is_leader {
-                let leader_addr =
-                    self.core.services.cluster_coordinator.leader_addr_for_shared().await;
-                return Err(KalamDbError::NotLeader { leader_addr });
-            }
-        }
+        self.ensure_shared_write_leader().await?;
 
         self.delete_by_pk_value(base::system_user_id(), pk_value).await
     }
@@ -2578,14 +2486,7 @@ impl crate::utils::dml_provider::KalamTableProvider for SharedTableProvider {
         user_id: &UserId,
         rows: Vec<Row>,
     ) -> Result<Vec<ScalarValue>, KalamDbError> {
-        if self.core.services.cluster_coordinator.is_cluster_mode().await {
-            let is_leader = self.core.services.cluster_coordinator.is_leader_for_shared().await;
-            if !is_leader {
-                let leader_addr =
-                    self.core.services.cluster_coordinator.leader_addr_for_shared().await;
-                return Err(KalamDbError::NotLeader { leader_addr });
-            }
-        }
+        self.ensure_shared_write_leader().await?;
         let keys = self.insert_batch(user_id, rows).await?;
         Ok(keys.into_iter().map(|k| ScalarValue::Int64(Some(k.as_i64()))).collect())
     }

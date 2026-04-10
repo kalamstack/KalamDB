@@ -161,6 +161,30 @@ pub enum KalamDbError {
     Other(String),
 }
 
+// Convert kalamdb_live::LiveError to KalamDbError
+impl From<kalamdb_live::error::LiveError> for KalamDbError {
+    fn from(err: kalamdb_live::error::LiveError) -> Self {
+        match err {
+            kalamdb_live::error::LiveError::InvalidSql(msg) => KalamDbError::InvalidSql(msg),
+            kalamdb_live::error::LiveError::InvalidOperation(msg) => {
+                KalamDbError::InvalidOperation(msg)
+            },
+            kalamdb_live::error::LiveError::NotFound(msg) => KalamDbError::NotFound(msg),
+            kalamdb_live::error::LiveError::TableNotFound(msg) => KalamDbError::TableNotFound(msg),
+            kalamdb_live::error::LiveError::PermissionDenied(msg) => {
+                KalamDbError::PermissionDenied(msg)
+            },
+            kalamdb_live::error::LiveError::SerializationError(msg) => {
+                KalamDbError::SerializationError(msg)
+            },
+            kalamdb_live::error::LiveError::ExecutionError(msg) => {
+                KalamDbError::ExecutionError(msg)
+            },
+            kalamdb_live::error::LiveError::Other(msg) => KalamDbError::Other(msg),
+        }
+    }
+}
+
 // Convert kalamdb_store::StorageError to KalamDbError
 impl From<kalamdb_store::StorageError> for KalamDbError {
     fn from(err: kalamdb_store::StorageError) -> Self {

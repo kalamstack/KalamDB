@@ -1071,6 +1071,50 @@ impl KalamPgService {
         }
     }
 
+    async fn handle_statement_transaction_result<T>(
+        &self,
+        session_id: &str,
+        rpc_name: &str,
+        result: Result<T, Status>,
+    ) -> Result<T, Status> {
+        match result {
+            Ok(value) => Ok(value),
+            Err(status) if Self::should_reconcile_local_transaction_state(&status) => {
+                self.cleanup_current_transaction_after_terminal_error(
+                    session_id,
+                    rpc_name,
+                    &status,
+                )
+                .await;
+                Err(status)
+            },
+            Err(status) => Err(status),
+        }
+    }
+
+    async fn handle_explicit_transaction_result<T>(
+        &self,
+        session_id: &str,
+        transaction_id: &str,
+        rpc_name: &str,
+        result: Result<T, Status>,
+    ) -> Result<T, Status> {
+        match result {
+            Ok(value) => Ok(value),
+            Err(status) if Self::should_reconcile_local_transaction_state(&status) => {
+                self.cleanup_after_terminal_transaction_error(
+                    session_id,
+                    transaction_id,
+                    rpc_name,
+                    &status,
+                )
+                .await;
+                Err(status)
+            },
+            Err(status) => Err(status),
+        }
+    }
+
     fn record_session_activity<T>(
         &self,
         session_id: &str,
@@ -1185,19 +1229,13 @@ impl PgService for KalamPgService {
         let inner = request.into_inner();
         log::debug!("PG scan: {}.{} type={}", inner.namespace, inner.table_name, inner.table_type);
         let domain_req = operation_executor::scan_request_from_rpc(&inner)?;
-        let domain_result = match self.operation_executor()?.execute_scan(domain_req).await {
-            Ok(domain_result) => domain_result,
-            Err(status) if Self::should_reconcile_local_transaction_state(&status) => {
-                self.cleanup_current_transaction_after_terminal_error(
-                    session_id.as_str(),
-                    "scan",
-                    &status,
-                )
-                .await;
-                return Err(status);
-            },
-            Err(status) => return Err(status),
-        };
+        let domain_result = self
+            .handle_statement_transaction_result(
+                session_id.as_str(),
+                "scan",
+                self.operation_executor()?.execute_scan(domain_req).await,
+            )
+            .await?;
         let response = operation_executor::scan_result_to_rpc(domain_result)?;
         Ok(Response::new(response))
     }
@@ -1221,19 +1259,13 @@ impl PgService for KalamPgService {
             inner.rows_json.len()
         );
         let domain_req = operation_executor::insert_request_from_rpc(&inner)?;
-        let result = match self.operation_executor()?.execute_insert(domain_req).await {
-            Ok(result) => result,
-            Err(status) if Self::should_reconcile_local_transaction_state(&status) => {
-                self.cleanup_current_transaction_after_terminal_error(
-                    session_id.as_str(),
-                    "insert",
-                    &status,
-                )
-                .await;
-                return Err(status);
-            },
-            Err(status) => return Err(status),
-        };
+        let result = self
+            .handle_statement_transaction_result(
+                session_id.as_str(),
+                "insert",
+                self.operation_executor()?.execute_insert(domain_req).await,
+            )
+            .await?;
         Ok(Response::new(InsertRpcResponse {
             affected_rows: result.affected_rows,
         }))
@@ -1253,19 +1285,13 @@ impl PgService for KalamPgService {
         let inner = request.into_inner();
         log::debug!("PG update: {}.{}", inner.namespace, inner.table_name);
         let domain_req = operation_executor::update_request_from_rpc(&inner)?;
-        let result = match self.operation_executor()?.execute_update(domain_req).await {
-            Ok(result) => result,
-            Err(status) if Self::should_reconcile_local_transaction_state(&status) => {
-                self.cleanup_current_transaction_after_terminal_error(
-                    session_id.as_str(),
-                    "update",
-                    &status,
-                )
-                .await;
-                return Err(status);
-            },
-            Err(status) => return Err(status),
-        };
+        let result = self
+            .handle_statement_transaction_result(
+                session_id.as_str(),
+                "update",
+                self.operation_executor()?.execute_update(domain_req).await,
+            )
+            .await?;
         Ok(Response::new(UpdateRpcResponse {
             affected_rows: result.affected_rows,
         }))
@@ -1285,19 +1311,13 @@ impl PgService for KalamPgService {
         let inner = request.into_inner();
         log::debug!("PG delete: {}.{}", inner.namespace, inner.table_name);
         let domain_req = operation_executor::delete_request_from_rpc(&inner)?;
-        let result = match self.operation_executor()?.execute_delete(domain_req).await {
-            Ok(result) => result,
-            Err(status) if Self::should_reconcile_local_transaction_state(&status) => {
-                self.cleanup_current_transaction_after_terminal_error(
-                    session_id.as_str(),
-                    "delete",
-                    &status,
-                )
-                .await;
-                return Err(status);
-            },
-            Err(status) => return Err(status),
-        };
+        let result = self
+            .handle_statement_transaction_result(
+                session_id.as_str(),
+                "delete",
+                self.operation_executor()?.execute_delete(domain_req).await,
+            )
+            .await?;
         Ok(Response::new(DeleteRpcResponse {
             affected_rows: result.affected_rows,
         }))
@@ -1397,20 +1417,17 @@ impl PgService for KalamPgService {
         );
 
         let committed_id = if let Some(executor) = self.operation_executor.as_deref() {
-            let committed_id = match executor.commit_transaction(session_id, transaction_id).await {
-                Ok(Some(committed_id)) => committed_id,
-                Ok(None) => transaction_id.to_string(),
-                Err(status) if Self::should_reconcile_local_transaction_state(&status) => {
-                    self.cleanup_after_terminal_transaction_error(
-                        session_id,
-                        transaction_id,
-                        "commit_transaction",
-                        &status,
-                    )
-                    .await;
-                    return Err(status);
-                },
-                Err(status) => return Err(status),
+            let committed_id = match self
+                .handle_explicit_transaction_result(
+                    session_id,
+                    transaction_id,
+                    "commit_transaction",
+                    executor.commit_transaction(session_id, transaction_id).await,
+                )
+                .await?
+            {
+                Some(committed_id) => committed_id,
+                None => transaction_id.to_string(),
             };
             self.session_registry
                 .commit_transaction(session_id, committed_id.as_str())
@@ -1449,22 +1466,18 @@ impl PgService for KalamPgService {
         );
 
         let rolled_back_id = if let Some(executor) = self.operation_executor.as_deref() {
-            let rolled_back_id =
-                match executor.rollback_transaction(session_id, transaction_id).await {
-                    Ok(Some(rolled_back_id)) => rolled_back_id,
-                    Ok(None) => transaction_id.to_string(),
-                    Err(status) if Self::should_reconcile_local_transaction_state(&status) => {
-                        self.cleanup_after_terminal_transaction_error(
-                            session_id,
-                            transaction_id,
-                            "rollback_transaction",
-                            &status,
-                        )
-                        .await;
-                        return Err(status);
-                    },
-                    Err(status) => return Err(status),
-                };
+            let rolled_back_id = match self
+                .handle_explicit_transaction_result(
+                    session_id,
+                    transaction_id,
+                    "rollback_transaction",
+                    executor.rollback_transaction(session_id, transaction_id).await,
+                )
+                .await?
+            {
+                Some(rolled_back_id) => rolled_back_id,
+                None => transaction_id.to_string(),
+            };
             self.session_registry
                 .rollback_transaction(session_id, rolled_back_id.as_str())
                 .map_err(Status::failed_precondition)?

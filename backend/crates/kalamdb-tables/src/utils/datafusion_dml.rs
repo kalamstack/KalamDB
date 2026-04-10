@@ -15,8 +15,20 @@ use kalamdb_commons::conversions::arrow_json_conversion::{
 };
 use kalamdb_commons::conversions::scalar_to_pk_string;
 use kalamdb_commons::models::rows::Row;
+use kalamdb_commons::models::UserId;
+use kalamdb_commons::NotLeaderError;
+use kalamdb_commons::{TableId, TableType};
+use kalamdb_transactions::{
+    build_insert_staged_mutations, StagedMutation, TransactionAccessError,
+    TransactionQueryContext,
+};
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
+
+pub struct OverlayScanProjection {
+    pub effective_projection: Option<Vec<usize>>,
+    pub final_projection: Option<Vec<usize>>,
+}
 
 /// DataFusion requires DML providers to return an execution plan that yields one row
 /// with a single `count` column (`UInt64`) containing affected rows.
@@ -32,6 +44,75 @@ pub async fn rows_affected_plan(
 
     let mem = MemTable::try_new(schema, vec![vec![batch]])?;
     mem.scan(state, None, &[], None).await
+}
+
+pub fn prepare_overlay_scan_projection(
+    schema: &SchemaRef,
+    projection: Option<&Vec<usize>>,
+    pk_column: &str,
+) -> DataFusionResult<OverlayScanProjection> {
+    let pk_index = schema
+        .index_of(pk_column)
+        .map_err(|error| DataFusionError::ArrowError(Box::new(error), None))?;
+    let needs_pk_projection = projection.is_some_and(|columns| !columns.contains(&pk_index));
+    let effective_projection = projection.map(|columns| {
+        if needs_pk_projection {
+            let mut augmented = columns.clone();
+            augmented.push(pk_index);
+            augmented
+        } else {
+            columns.clone()
+        }
+    });
+    let final_projection = if needs_pk_projection {
+        projection.map(|columns| (0..columns.len()).collect::<Vec<_>>())
+    } else {
+        None
+    };
+
+    Ok(OverlayScanProjection {
+        effective_projection,
+        final_projection,
+    })
+}
+
+pub fn stage_transaction_mutations(
+    transaction_query_context: &TransactionQueryContext,
+    mutations: Vec<StagedMutation>,
+) -> DataFusionResult<()> {
+    transaction_query_context
+        .mutation_sink
+        .stage_batch(&transaction_query_context.transaction_id, mutations)
+        .map_err(|error| match error {
+            TransactionAccessError::NotLeader { leader_addr } => {
+                DataFusionError::External(Box::new(NotLeaderError::new(leader_addr)))
+            },
+            TransactionAccessError::InvalidOperation(message) => {
+                DataFusionError::Execution(message)
+            },
+        })
+}
+
+pub fn stage_insert_rows(
+    transaction_query_context: &TransactionQueryContext,
+    table_id: &TableId,
+    table_type: TableType,
+    user_id: Option<UserId>,
+    pk_column: &str,
+    rows: Vec<Row>,
+) -> DataFusionResult<u64> {
+    let inserted = rows.len() as u64;
+    let mutations = build_insert_staged_mutations(
+        &transaction_query_context.transaction_id,
+        table_id,
+        table_type,
+        user_id,
+        pk_column,
+        rows,
+    )
+    .map_err(|error| DataFusionError::Execution(error.to_string()))?;
+    stage_transaction_mutations(transaction_query_context, mutations)?;
+    Ok(inserted)
 }
 
 pub async fn collect_input_rows(

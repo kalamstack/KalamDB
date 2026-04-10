@@ -11,6 +11,9 @@ build = "build.rs"
 name = "pg_kalam"
 crate-type = ["cdylib", "lib"]
 doctest = false
+# The extension library itself is not linkable as a plain Rust lib test binary;
+# Postgres-backed testing runs through pg/tests and pg/test.sh instead.
+test = false
 
 [[bin]]
 name = "pgrx_embed_pg_kalam"
@@ -43,6 +46,9 @@ tokio = { version = "1", default-features = false, features = ["rt"] }
 
 [dev-dependencies]
 bytes = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
 kalamdb-commons = { path = "../backend/crates/kalamdb-commons", default-features = false, features = ["rows"] }
 kalamdb-pg = { path = "../backend/crates/kalamdb-pg", features = ["server"] }
 ntest = { workspace = true }
@@ -55,5 +61,4 @@ tokio-stream = { workspace = true }
 tokio-postgres = { workspace = true }
 tonic = { workspace = true }
 futures-util = { workspace = true }
-reqwest = { workspace = true }
 serde_json = { workspace = true }

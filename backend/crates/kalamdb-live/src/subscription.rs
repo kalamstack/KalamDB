@@ -14,8 +14,7 @@ use super::models::{
     InitialLoadState, SharedConnectionState, SubscriptionFlowControl, SubscriptionHandle,
     SubscriptionRuntimeMetadata, SubscriptionState,
 };
-use crate::error::KalamDbError;
-use crate::error_extensions::KalamDbResultExt;
+use crate::error::{LiveError, LiveResultExt};
 use chrono::Utc;
 use datafusion::sql::sqlparser::ast::Expr;
 use kalamdb_commons::ids::SeqId;
@@ -63,17 +62,17 @@ impl SubscriptionService {
         batch_size: usize,
         enable_initial_load: bool,
         table_type: TableType,
-    ) -> Result<LiveQueryId, KalamDbError> {
+    ) -> Result<LiveQueryId, LiveError> {
         // Read connection info from state and check subscription limit
         let (connection_id, user_id, notification_tx) = {
             let user_id = connection_state.user_id().cloned().ok_or_else(|| {
-                KalamDbError::InvalidOperation("Connection not authenticated".to_string())
+                LiveError::InvalidOperation("Connection not authenticated".to_string())
             })?;
 
             // Prevent DoS via excessive subscriptions per connection
             const MAX_SUBSCRIPTIONS_PER_CONNECTION: usize = 100;
             if connection_state.subscription_count() >= MAX_SUBSCRIPTIONS_PER_CONNECTION {
-                return Err(KalamDbError::InvalidOperation(format!(
+                return Err(LiveError::InvalidOperation(format!(
                     "Maximum subscriptions ({}) per connection exceeded",
                     MAX_SUBSCRIPTIONS_PER_CONNECTION
                 )));
@@ -185,7 +184,7 @@ impl SubscriptionService {
         connection_state: &SharedConnectionState,
         subscription_id: &str,
         live_id: &LiveQueryId,
-    ) -> Result<(), KalamDbError> {
+    ) -> Result<(), LiveError> {
         // Get user_id and subscription details, then remove from connection state.
         // Try the raw subscription_id first; if it looks like a full LiveQueryId
         // ("user-conn-sub"), also try extracting just the trailing subscription part.
@@ -193,7 +192,7 @@ impl SubscriptionService {
         // LiveQueryId as the subscription_id and the client echoes it back.
         let (connection_id, user_id, table_id, is_shared) = {
             let user_id = connection_state.user_id().cloned().ok_or_else(|| {
-                KalamDbError::InvalidOperation("Connection not authenticated".to_string())
+                LiveError::InvalidOperation("Connection not authenticated".to_string())
             })?;
             let subscription =
                 connection_state.remove_subscription_with_fallback(subscription_id, || {
@@ -234,7 +233,7 @@ impl SubscriptionService {
         &self,
         _user_id: &UserId,
         connection_id: &ConnectionId,
-    ) -> Result<Vec<LiveQueryId>, KalamDbError> {
+    ) -> Result<Vec<LiveQueryId>, LiveError> {
         // Unregister from connections manager (removes connection and returns live_ids)
         let live_ids = self.registry.unregister_connection(connection_id);
 

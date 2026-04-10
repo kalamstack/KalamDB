@@ -125,11 +125,11 @@ async fn e2e_transaction_duplicate_primary_key_commit_fails() {
 #[ntest::timeout(10000)]
 async fn e2e_transaction_switching_user_id_keeps_rows_in_separate_user_scopes() {
     let env = TestEnv::global().await;
-    let pg = env.pg_connect().await;
     let table = unique_name("profiles_tx_user_scope");
     let qualified_table = format!("e2e.{table}");
     let (first_user_id, second_user_id) =
         same_user_shard_pair("txn-scope-user-a", "txn-scope-user-b").await;
+    let pg = env.pg_connect().await;
 
     create_user_foreign_table(
         &pg,
@@ -138,24 +138,84 @@ async fn e2e_transaction_switching_user_id_keeps_rows_in_separate_user_scopes() 
     )
     .await;
 
-        await_user_shard_leader(&first_user_id).await;
-        await_user_shard_leader(&second_user_id).await;
+    await_user_shard_leader(&first_user_id).await;
+    await_user_shard_leader(&second_user_id).await;
 
-    let multi_user_tx = format!(
-        "BEGIN; \
-            SET LOCAL kalam.user_id = '{first_user_id}'; \
-         INSERT INTO {qualified_table} (id, name, age) VALUES ('profile-1', 'Alice', 30); \
-         INSERT INTO {qualified_table} (id, name, age) VALUES ('profile-2', 'Ava', 31); \
-            SET LOCAL kalam.user_id = '{second_user_id}'; \
-         INSERT INTO {qualified_table} (id, name, age) VALUES ('profile-1', 'Bob', 40); \
-         INSERT INTO {qualified_table} (id, name, age) VALUES ('profile-2', 'Bea', 41); \
-         COMMIT;"
-    );
+    let (visible_a_in_tx, visible_b_in_tx) = retry_transient_user_leader_error(
+        "multi-user transaction inflight visibility",
+        || {
+            let env = &env;
+            let qualified_table = qualified_table.clone();
+            let first_user_id = first_user_id.clone();
+            let second_user_id = second_user_id.clone();
 
-    retry_transient_user_leader_error("multi-user transaction insert", || {
-        pg.batch_execute(&multi_user_tx)
-    })
+            async move {
+                let mut pg = env.pg_connect().await;
+                let tx = pg.transaction().await?;
+
+                tx.batch_execute(&format!("SET LOCAL kalam.user_id = '{first_user_id}'"))
+                    .await?;
+                tx.execute(
+                    &format!("INSERT INTO {qualified_table} (id, name, age) VALUES ($1, $2, $3)"),
+                    &[&"profile-1", &"Alice", &30_i32],
+                )
+                .await?;
+                tx.execute(
+                    &format!("INSERT INTO {qualified_table} (id, name, age) VALUES ($1, $2, $3)"),
+                    &[&"profile-2", &"Ava", &31_i32],
+                )
+                .await?;
+
+                tx.batch_execute(&format!("SET LOCAL kalam.user_id = '{second_user_id}'"))
+                    .await?;
+                tx.execute(
+                    &format!("INSERT INTO {qualified_table} (id, name, age) VALUES ($1, $2, $3)"),
+                    &[&"profile-1", &"Bob", &40_i32],
+                )
+                .await?;
+                tx.execute(
+                    &format!("INSERT INTO {qualified_table} (id, name, age) VALUES ($1, $2, $3)"),
+                    &[&"profile-2", &"Bea", &41_i32],
+                )
+                .await?;
+
+                let visible_b = tx
+                    .query(
+                        &format!("SELECT id, name FROM {qualified_table} ORDER BY id"),
+                        &[],
+                    )
+                    .await?
+                    .iter()
+                    .map(|row| (row.get::<_, String>(0), row.get::<_, String>(1)))
+                    .collect::<Vec<_>>();
+
+                tx.batch_execute(&format!("SET LOCAL kalam.user_id = '{first_user_id}'"))
+                    .await?;
+                let visible_a = tx
+                    .query(
+                        &format!("SELECT id, name FROM {qualified_table} ORDER BY id"),
+                        &[],
+                    )
+                    .await?
+                    .iter()
+                    .map(|row| (row.get::<_, String>(0), row.get::<_, String>(1)))
+                    .collect::<Vec<_>>();
+
+                tx.commit().await?;
+                Ok((visible_a, visible_b))
+            }
+        },
+    )
     .await;
+
+    assert_eq!(visible_a_in_tx, vec![
+        ("profile-1".to_string(), "Alice".to_string()),
+        ("profile-2".to_string(), "Ava".to_string()),
+    ]);
+    assert_eq!(visible_b_in_tx, vec![
+        ("profile-1".to_string(), "Bob".to_string()),
+        ("profile-2".to_string(), "Bea".to_string()),
+    ]);
 
     let reader_a = env.pg_connect().await;
     set_user_id(&reader_a, &first_user_id).await;

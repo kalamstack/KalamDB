@@ -1,10 +1,10 @@
 use actix_ws::{CloseCode, CloseReason, Message, Session};
 use futures_util::StreamExt;
 use kalamdb_commons::{websocket::SerializationType, WebSocketMessage};
-use kalamdb_core::live::{ConnectionEvent, ConnectionRegistration};
 use kalamdb_jobs::health_monitor::{
     decrement_websocket_sessions, increment_websocket_sessions, record_activity_now,
 };
+use kalamdb_live::{ConnectionEvent, ConnectionRegistration};
 use log::{debug, error, info, warn};
 
 use super::context::{UpgradeAuth, WsHandlerContext};

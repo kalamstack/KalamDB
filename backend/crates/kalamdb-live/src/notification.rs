@@ -12,8 +12,8 @@
 use super::helpers::filter_eval::matches as filter_matches;
 use super::manager::ConnectionsManager;
 use super::models::{ChangeNotification, ChangeType, SubscriptionHandle};
-use crate::error::KalamDbError;
-use crate::transactions::{CommitSideEffectPlan, FanoutOwnerScope};
+use crate::error::LiveError;
+use crate::fanout::{CommitSideEffectPlan, FanoutOwnerScope};
 use kalamdb_commons::constants::SystemColumnNames;
 use kalamdb_commons::conversions::arrow_json_conversion::scalar_value_to_json;
 use kalamdb_commons::ids::SeqId;
@@ -76,7 +76,7 @@ fn extract_seq(change_notification: &ChangeNotification) -> Option<SeqId> {
 
 /// Convert a Row to a projected RowData map (`HashMap<String, KalamCellValue>`).
 /// Includes `_seq` always. When `projections` is `None`, includes all columns.
-fn project_row(row: &Row, projections: &Option<Arc<Vec<String>>>) -> Result<RowData, KalamDbError> {
+fn project_row(row: &Row, projections: &Option<Arc<Vec<String>>>) -> Result<RowData, LiveError> {
     let mut map = HashMap::new();
     for (col, sv) in &row.values {
         let include = match projections {
@@ -85,7 +85,7 @@ fn project_row(row: &Row, projections: &Option<Arc<Vec<String>>>) -> Result<RowD
         };
         if include {
             let cell = scalar_value_to_json(sv)
-                .map_err(|e| KalamDbError::SerializationError(e.to_string()))?;
+                .map_err(|e| LiveError::SerializationError(e.to_string()))?;
             map.insert(col.clone(), cell);
         }
     }
@@ -100,7 +100,7 @@ fn project_update_delta(
     new_row: &Row,
     pk_columns: &[String],
     projections: &Option<Arc<Vec<String>>>,
-) -> Result<(RowData, RowData), KalamDbError> {
+) -> Result<(RowData, RowData), LiveError> {
     let mut new_map = HashMap::new();
     let mut old_map = HashMap::new();
 
@@ -111,14 +111,14 @@ fn project_update_delta(
             new_map.insert(
                 key.to_string(),
                 scalar_value_to_json(sv)
-                    .map_err(|e| KalamDbError::SerializationError(e.to_string()))?,
+                    .map_err(|e| LiveError::SerializationError(e.to_string()))?,
             );
         }
         if let Some(sv) = old_row.values.get(key) {
             old_map.insert(
                 key.to_string(),
                 scalar_value_to_json(sv)
-                    .map_err(|e| KalamDbError::SerializationError(e.to_string()))?,
+                    .map_err(|e| LiveError::SerializationError(e.to_string()))?,
             );
         }
     }
@@ -143,7 +143,7 @@ fn project_update_delta(
                 new_map.insert(
                     col.to_string(),
                     scalar_value_to_json(nv)
-                        .map_err(|e| KalamDbError::SerializationError(e.to_string()))?,
+                        .map_err(|e| LiveError::SerializationError(e.to_string()))?,
                 );
             }
         }
@@ -157,7 +157,7 @@ fn project_update_delta(
                 old_map.insert(
                     col.to_string(),
                     scalar_value_to_json(ov)
-                        .map_err(|e| KalamDbError::SerializationError(e.to_string()))?,
+                        .map_err(|e| LiveError::SerializationError(e.to_string()))?,
                 );
             }
         }
@@ -177,7 +177,7 @@ fn build_shared_payload(
     old_row: Option<&Row>,
     pk_columns: &[String],
     projections: &Option<Arc<Vec<String>>>,
-) -> Result<SharedChangePayload, KalamDbError> {
+) -> Result<SharedChangePayload, LiveError> {
     match change_type {
         ChangeType::Insert => Ok(SharedChangePayload::new(
             kalamdb_commons::websocket::ChangeType::Insert,
@@ -400,7 +400,7 @@ impl NotificationService {
         table_id: &TableId,
         change_notification: ChangeNotification,
         all_handles: Arc<dashmap::DashMap<LiveQueryId, SubscriptionHandle>>,
-    ) -> Result<usize, KalamDbError> {
+    ) -> Result<usize, LiveError> {
         let seq_value = extract_seq(&change_notification);
         let change_type = change_notification.change_type.clone();
         let pk_columns = Arc::new(change_notification.pk_columns);
@@ -473,7 +473,7 @@ fn dispatch_chunk<I>(
     change_type: &ChangeType,
     pk_columns: &[String],
     seq_value: Option<SeqId>,
-) -> Result<usize, KalamDbError>
+) -> Result<usize, LiveError>
 where
     I: IntoIterator<Item = SubscriptionHandle>,
 {
@@ -553,8 +553,8 @@ impl NotificationServiceTrait for NotificationService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::live::helpers::filter_eval::parse_where_clause;
-    use crate::live::models::{
+    use crate::helpers::filter_eval::parse_where_clause;
+    use crate::models::{
         SubscriptionFlowControl, SubscriptionHandle, SubscriptionRuntimeMetadata,
     };
     use datafusion::scalar::ScalarValue;
@@ -578,7 +578,7 @@ mod tests {
 
     fn make_shared_handle(
         subscription_id: &str,
-        tx: crate::live::models::NotificationSender,
+        tx: crate::models::NotificationSender,
         flow_control: Arc<SubscriptionFlowControl>,
         filter_expr: Option<&str>,
         projections: Option<Vec<&str>>,

@@ -10,7 +10,9 @@ use kalamdb_commons::models::pg_operations::{
 use kalamdb_commons::{NamespaceId, TableType};
 use kalamdb_pg::OperationExecutor;
 use kalamdb_session_datafusion::SessionUserContext;
-use kalamdb_transactions::{TransactionQueryContext, TransactionQueryExtension};
+use kalamdb_transactions::{
+    build_insert_staged_mutations, TransactionQueryContext, TransactionQueryExtension,
+};
 use std::collections::BTreeMap;
 use tonic::Status;
 
@@ -139,23 +141,19 @@ impl OperationService {
         let coordinator = self.app_context.transaction_coordinator();
         let affected_rows = request.rows.len() as u64;
 
-        for row in request.rows {
-            let primary_key = primary_key_from_row(&row)?;
-            let mutation = StagedMutation::new(
-                transaction_id.clone(),
-                request.table_id.clone(),
-                request.table_type,
-                request.user_id.clone(),
-                OperationKind::Insert,
-                primary_key,
-                row,
-                false,
-            );
+        let mutations = build_insert_staged_mutations(
+            transaction_id,
+            &request.table_id,
+            request.table_type,
+            request.user_id.clone(),
+            "id",
+            request.rows,
+        )
+        .map_err(|e| Status::invalid_argument(e.to_string()))?;
 
-            coordinator
-                .stage(transaction_id, mutation)
-                .map_err(|e| Status::failed_precondition(e.to_string()))?;
-        }
+        coordinator
+            .stage_batch(transaction_id, mutations)
+            .map_err(|e| Status::failed_precondition(e.to_string()))?;
 
         Ok(MutationResult { affected_rows })
     }
@@ -436,13 +434,6 @@ impl OperationExecutor for OperationService {
             other => Ok((format!("OK (affected: {})", other.affected_rows()), Vec::new())),
         }
     }
-}
-
-fn primary_key_from_row(row: &Row) -> Result<String, Status> {
-    row.values
-        .get("id")
-        .map(|value| value.to_string())
-        .ok_or_else(|| Status::invalid_argument("transactional inserts require an 'id' primary key in the typed pg path"))
 }
 
 fn require_user_id(user_id: Option<UserId>, operation: &str) -> Result<UserId, Status> {

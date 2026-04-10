@@ -14,6 +14,7 @@ mimalloc = { version = "0.1", default-features = false, optional = true }
 
 # Core library
 kalamdb-core = { path = "crates/kalamdb-core" }
+kalamdb-live = { path = "crates/kalamdb-live" }
 kalamdb-handlers = { path = "crates/kalamdb-handlers" }
 kalamdb-jobs = { path = "crates/kalamdb-jobs" }
 kalamdb-api = { path = "crates/kalamdb-api", default-features = false }

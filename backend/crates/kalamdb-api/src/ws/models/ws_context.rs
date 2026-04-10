@@ -2,7 +2,7 @@
 
 use kalamdb_auth::UserRepository;
 use kalamdb_core::app_context::AppContext;
-use kalamdb_core::live::{ConnectionsManager, LiveQueryManager};
+use kalamdb_live::{ConnectionsManager, LiveQueryManager};
 use std::sync::Arc;
 
 use crate::limiter::RateLimiter;

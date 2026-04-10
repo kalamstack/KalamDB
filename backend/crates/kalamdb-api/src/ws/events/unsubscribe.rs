@@ -3,7 +3,7 @@
 //! Handles the Unsubscribe message for live query subscriptions.
 
 use kalamdb_commons::models::LiveQueryId;
-use kalamdb_core::live::{LiveQueryManager, SharedConnectionState};
+use kalamdb_live::{LiveQueryManager, SharedConnectionState};
 use log::debug;
 use std::sync::Arc;
 

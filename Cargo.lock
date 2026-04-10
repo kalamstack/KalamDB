@@ -3868,6 +3868,9 @@ dependencies = [
  "bytes",
  "datafusion-common",
  "futures-util",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "kalam-pg-api",
  "kalam-pg-client",
  "kalam-pg-common",
@@ -3877,7 +3880,6 @@ dependencies = [
  "ntest",
  "pgrx",
  "regex",
- "reqwest 0.13.2",
  "serde_json",
  "tokio",
  "tokio-postgres",
@@ -3927,6 +3929,7 @@ dependencies = [
  "kalamdb-dialect",
  "kalamdb-filestore",
  "kalamdb-jobs",
+ "kalamdb-live",
  "kalamdb-raft",
  "kalamdb-session",
  "kalamdb-store",
@@ -4034,6 +4037,7 @@ dependencies = [
  "kalamdb-filestore",
  "kalamdb-handlers",
  "kalamdb-jobs",
+ "kalamdb-live",
  "kalamdb-observability",
  "kalamdb-pg",
  "kalamdb-plan-cache",
@@ -4271,6 +4275,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "kalamdb-live"
+version = "0.4.2-rc1"
+dependencies = [
+ "arrow",
+ "async-trait",
+ "chrono",
+ "dashmap 6.1.0",
+ "datafusion",
+ "datafusion-common",
+ "kalamdb-commons",
+ "kalamdb-dialect",
+ "kalamdb-publisher",
+ "kalamdb-session",
+ "kalamdb-system",
+ "log",
+ "ntest",
+ "once_cell",
+ "parking_lot",
+ "regex",
+ "serde",
+ "serde_json",
+ "sqlparser",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "kalamdb-macros"
 version = "0.4.2-rc1"
 dependencies = [
@@ -4404,6 +4436,7 @@ dependencies = [
  "kalamdb-dialect",
  "kalamdb-handlers",
  "kalamdb-jobs",
+ "kalamdb-live",
  "kalamdb-observability",
  "kalamdb-raft",
  "kalamdb-sharding",

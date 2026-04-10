@@ -13,12 +13,15 @@
 //   cargo nextest run --features e2e -p kalam-pg-extension -E 'test(e2e_ddl)'
 #![allow(dead_code)]
 
+#[path = "../support/http_client.rs"]
+mod http_client;
+
 use std::ops::{Deref, DerefMut};
 use std::sync::OnceLock;
 use std::time::Duration;
 use std::{env, fmt};
 
-use reqwest::Client;
+use http_client::TestHttpClient;
 use serde_json::Value;
 use tokio_postgres::{Config, NoTls};
 
@@ -114,7 +117,7 @@ fn kalamdb_grpc_target() -> (String, u16) {
 
 pub struct DdlTestEnv {
     pub bearer_token: String,
-    http_client: Client,
+    http_client: TestHttpClient,
     pg_user: String,
 }
 
@@ -195,14 +198,11 @@ impl DdlTestEnv {
         let body = serde_json::json!({ "sql": sql });
         let resp = self
             .http_client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.bearer_token))
-            .json(&body)
-            .send()
+            .post_json(&url, &body, Some(&self.bearer_token))
             .await
             .expect("KalamDB SQL request");
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
+        let status = resp.status;
+        let text = resp.body;
         if !status.is_success() {
             return Err(format!("({status}): {text}"));
         }
@@ -218,13 +218,10 @@ impl DdlTestEnv {
         let body = serde_json::json!({ "sql": sql });
         let resp = self
             .http_client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.bearer_token))
-            .json(&body)
-            .send()
+            .post_json(&url, &body, Some(&self.bearer_token))
             .await
             .expect("KalamDB table exists check");
-        resp.status().is_success()
+        resp.status.is_success()
     }
 
     /// Get column names for a KalamDB table (returns empty vec on error).
@@ -235,16 +232,13 @@ impl DdlTestEnv {
         let body = serde_json::json!({ "sql": sql });
         let resp = self
             .http_client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.bearer_token))
-            .json(&body)
-            .send()
+            .post_json(&url, &body, Some(&self.bearer_token))
             .await
             .expect("KalamDB columns check");
-        if !resp.status().is_success() {
+        if !resp.status.is_success() {
             return Vec::new();
         }
-        let text = resp.text().await.unwrap_or_default();
+        let text = resp.body;
         let val: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
         // Response format: { "results": [{ "schema": [{"name": "col1", ...}, ...], "rows": [...] }] }
         val["results"][0]["schema"]
@@ -312,7 +306,7 @@ impl DdlTestEnv {
     // -- lifecycle ----------------------------------------------------------
 
     async fn start() -> Self {
-        let http_client = Client::builder().timeout(Duration::from_secs(15)).build().unwrap();
+        let http_client = TestHttpClient::new(Duration::from_secs(15));
 
         // 1. Verify KalamDB is reachable
         Self::wait_for_kalamdb(&http_client).await;
@@ -337,15 +331,14 @@ impl DdlTestEnv {
         env
     }
 
-    async fn wait_for_kalamdb(client: &Client) {
+    async fn wait_for_kalamdb(client: &TestHttpClient) {
         let config = kalamdb_auth_config();
         let url = format!("{}/health", config.base_url);
         for i in 0..10 {
             if client
                 .get(&url)
-                .send()
                 .await
-                .map(|response| response.status().is_success())
+                .map(|response| response.status.is_success())
                 .unwrap_or(false)
             {
                 return;
@@ -469,7 +462,7 @@ impl DdlTestEnv {
         Ok(OwnedPgClient::new(client, connection_task))
     }
 
-    async fn authenticate(client: &Client) -> String {
+    async fn authenticate(client: &TestHttpClient) -> String {
         let config = kalamdb_auth_config();
 
         if let Some(token) =
@@ -480,13 +473,11 @@ impl DdlTestEnv {
         }
 
         let _ = client
-            .post(format!("{}/v1/api/auth/setup", config.base_url))
-            .json(&serde_json::json!({
+            .post_json(&format!("{}/v1/api/auth/setup", config.base_url), &serde_json::json!({
                 "username": config.setup_username,
                 "password": config.setup_password,
                 "root_password": config.root_password,
-            }))
-            .send()
+            }), None)
             .await;
 
         if let Some(token) =
@@ -512,23 +503,21 @@ impl DdlTestEnv {
 }
 
 async fn try_login(
-    client: &Client,
+    client: &TestHttpClient,
     base_url: &str,
     username: &str,
     password: &str,
 ) -> Option<String> {
     let resp = client
-        .post(format!("{base_url}/v1/api/auth/login"))
-        .json(&serde_json::json!({
+        .post_json(&format!("{base_url}/v1/api/auth/login"), &serde_json::json!({
             "username": username,
             "password": password,
-        }))
-        .send()
+        }), None)
         .await
         .ok()?;
-    if !resp.status().is_success() {
+    if !resp.status.is_success() {
         return None;
     }
-    let body: Value = resp.json().await.ok()?;
+    let body: Value = serde_json::from_str(&resp.body).ok()?;
     body["access_token"].as_str().map(ToString::to_string)
 }

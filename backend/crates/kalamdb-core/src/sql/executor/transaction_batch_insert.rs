@@ -6,16 +6,16 @@ use crate::sql::plan_cache::{
     InsertMetadataCacheKey, SqlCacheRegistry,
 };
 use crate::sql::ExecutionContext;
-use crate::transactions::StagedMutation;
 use chrono::Utc;
 use kalamdb_commons::conversions::arrow_json_conversion::coerce_rows;
 use datafusion::scalar::ScalarValue;
 use kalamdb_commons::conversions::json_value_to_scalar;
 use kalamdb_commons::ids::SnowflakeGenerator;
 use kalamdb_commons::models::rows::row::Row;
-use kalamdb_commons::models::{OperationKind, TransactionId, UserId};
+use kalamdb_commons::models::{TransactionId, UserId};
 use kalamdb_commons::schemas::{ColumnDefault, TableType};
 use kalamdb_commons::TableId;
+use kalamdb_transactions::build_insert_staged_mutations;
 use sqlparser::ast::{Expr, SetExpr, Statement};
 use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
@@ -96,37 +96,6 @@ fn staged_mutation_user_id(table_type: TableType, exec_ctx: &ExecutionContext) -
         TableType::User | TableType::Stream => Some(exec_ctx.user_id().clone()),
         TableType::Shared | TableType::System => None,
     }
-}
-
-fn build_insert_staged_mutations(
-    transaction_id: &TransactionId,
-    table_id: &TableId,
-    table_type: TableType,
-    user_id: Option<UserId>,
-    pk_column: &str,
-    rows: Vec<Row>,
-) -> Result<Vec<StagedMutation>, KalamDbError> {
-    rows.into_iter()
-        .map(|row| {
-            let primary_key = row.values.get(pk_column).ok_or_else(|| {
-                KalamDbError::InvalidOperation(format!(
-                    "transactional INSERT requires primary key column '{}'",
-                    pk_column
-                ))
-            })?;
-
-            Ok(StagedMutation::new(
-                transaction_id.clone(),
-                table_id.clone(),
-                table_type,
-                user_id.clone(),
-                OperationKind::Insert,
-                primary_key.to_string(),
-                row,
-                false,
-            ))
-        })
-        .collect()
 }
 
 enum PreparedDefaultValue {
@@ -483,7 +452,8 @@ pub(crate) fn try_batch_inserts_in_transaction(
             user_id.clone(),
             pk_column,
             rows,
-        )?;
+        )
+        .map_err(|error| KalamDbError::InvalidOperation(error.to_string()))?;
         all_mutations.extend(mutations);
     }
 

@@ -1,6 +1,6 @@
 //! Subscription and notification result models
 
-use crate::live::helpers::initial_data::InitialDataResult;
+use crate::helpers::initial_data::InitialDataResult;
 use kalamdb_commons::models::LiveQueryId;
 use kalamdb_commons::schemas::SchemaField;
 pub use kalamdb_commons::websocket::{ChangeNotification, ChangeType};

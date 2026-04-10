@@ -446,6 +446,9 @@ build_test_cmd() {
         fi
     else
         TEST_CMD+=(--workspace)
+        # The PostgreSQL extension crate is tested via the dedicated pgrx workflow,
+        # not through generic cargo test/nextest targets.
+        TEST_CMD+=(--exclude "kalam-pg-extension")
         TEST_CMD+=(--features "kalam-cli/e2e-tests")
     fi
 

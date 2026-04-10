@@ -6,7 +6,7 @@
 use super::token_bucket::TokenBucket;
 use kalamdb_commons::models::{ConnectionInfo, UserId};
 use kalamdb_configs::RateLimitSettings;
-use kalamdb_core::live::ConnectionId;
+use kalamdb_live::ConnectionId;
 use moka::sync::Cache;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};

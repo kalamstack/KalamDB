@@ -8,7 +8,7 @@
 //! and stored in SubscriptionState. This module provides evaluation functions
 //! to match row data against the expression.
 
-use crate::error::KalamDbError;
+use crate::error::LiveError;
 use datafusion::scalar::ScalarValue;
 use datafusion::sql::sqlparser::ast::{BinaryOperator, Expr, Statement, Value};
 use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
@@ -25,17 +25,17 @@ use regex::RegexBuilder;
 /// # Returns
 ///
 /// Parsed expression ready for evaluation
-pub fn parse_where_clause(where_clause: &str) -> Result<Expr, KalamDbError> {
+pub fn parse_where_clause(where_clause: &str) -> Result<Expr, LiveError> {
     // Parse as a SELECT with WHERE to extract the expression
     let sql = format!("SELECT * FROM t WHERE {}", where_clause);
 
     let dialect = PostgreSqlDialect {};
     let statements = Parser::parse_sql(&dialect, &sql).map_err(|e| {
-        KalamDbError::InvalidOperation(format!("Failed to parse WHERE clause: {}", e))
+        LiveError::InvalidOperation(format!("Failed to parse WHERE clause: {}", e))
     })?;
 
     if statements.is_empty() {
-        return Err(KalamDbError::InvalidOperation("Empty WHERE clause".to_string()));
+        return Err(LiveError::InvalidOperation("Empty WHERE clause".to_string()));
     }
 
     // Extract WHERE expression from parsed SELECT
@@ -44,10 +44,10 @@ pub fn parse_where_clause(where_clause: &str) -> Result<Expr, KalamDbError> {
             if let Some(selection) = &query.body.as_select().and_then(|s| s.selection.as_ref()) {
                 Ok((*selection).clone())
             } else {
-                Err(KalamDbError::InvalidOperation("No WHERE clause found".to_string()))
+                Err(LiveError::InvalidOperation("No WHERE clause found".to_string()))
             }
         },
-        _ => Err(KalamDbError::InvalidOperation("Invalid WHERE clause syntax".to_string())),
+        _ => Err(LiveError::InvalidOperation("Invalid WHERE clause syntax".to_string())),
     }
 }
 
@@ -65,15 +65,15 @@ const MAX_EXPR_DEPTH: usize = 64;
 ///
 /// `true` if the row matches the filter, `false` otherwise
 #[inline]
-pub fn matches(expr: &Expr, row_data: &Row) -> Result<bool, KalamDbError> {
+pub fn matches(expr: &Expr, row_data: &Row) -> Result<bool, LiveError> {
     evaluate_expr(expr, row_data, 0)
 }
 
 /// Recursively evaluate an expression against row data
 #[inline]
-fn evaluate_expr(expr: &Expr, row_data: &Row, depth: usize) -> Result<bool, KalamDbError> {
+fn evaluate_expr(expr: &Expr, row_data: &Row, depth: usize) -> Result<bool, LiveError> {
     if depth > MAX_EXPR_DEPTH {
-        return Err(KalamDbError::InvalidOperation(
+        return Err(LiveError::InvalidOperation(
             "Filter expression too deeply nested (max 64 levels)".to_string(),
         ));
     }
@@ -120,7 +120,7 @@ fn evaluate_expr(expr: &Expr, row_data: &Row, depth: usize) -> Result<bool, Kala
                 let right_value = extract_value(right, row_data)?;
                 compare_numeric(&left_value, &right_value, ">=")
             },
-            _ => Err(KalamDbError::InvalidOperation(format!("Unsupported operator: {:?}", op))),
+            _ => Err(LiveError::InvalidOperation(format!("Unsupported operator: {:?}", op))),
         },
 
         // Parentheses: (expression)
@@ -133,7 +133,7 @@ fn evaluate_expr(expr: &Expr, row_data: &Row, depth: usize) -> Result<bool, Kala
                 Ok(!result)
             },
             _ => {
-                Err(KalamDbError::InvalidOperation(format!("Unsupported unary operator: {:?}", op)))
+                Err(LiveError::InvalidOperation(format!("Unsupported unary operator: {:?}", op)))
             },
         },
 
@@ -169,7 +169,7 @@ fn evaluate_expr(expr: &Expr, row_data: &Row, depth: usize) -> Result<bool, Kala
             true,
         ),
 
-        _ => Err(KalamDbError::InvalidOperation(format!(
+        _ => Err(LiveError::InvalidOperation(format!(
             "Unsupported expression type: {:?}",
             expr
         ))),
@@ -182,7 +182,7 @@ fn evaluate_comparison<F>(
     right: &Expr,
     row_data: &Row,
     comparator: F,
-) -> Result<bool, KalamDbError>
+) -> Result<bool, LiveError>
 where
     F: Fn(&ScalarValue, &ScalarValue) -> bool,
 {
@@ -229,13 +229,13 @@ fn compare_numeric(
     left: &ScalarValue,
     right: &ScalarValue,
     op: &str,
-) -> Result<bool, KalamDbError> {
+) -> Result<bool, LiveError> {
     let left_num = as_f64(left).ok_or_else(|| {
-        KalamDbError::InvalidOperation(format!("Cannot convert {:?} to number", left))
+        LiveError::InvalidOperation(format!("Cannot convert {:?} to number", left))
     })?;
 
     let right_num = as_f64(right).ok_or_else(|| {
-        KalamDbError::InvalidOperation(format!("Cannot convert {:?} to number", right))
+        LiveError::InvalidOperation(format!("Cannot convert {:?} to number", right))
     })?;
 
     Ok(match op {
@@ -243,7 +243,7 @@ fn compare_numeric(
         ">" => left_num > right_num,
         "<=" => left_num <= right_num,
         ">=" => left_num >= right_num,
-        _ => return Err(KalamDbError::InvalidOperation(format!("Unknown operator: {}", op))),
+        _ => return Err(LiveError::InvalidOperation(format!("Unknown operator: {}", op))),
     })
 }
 
@@ -255,9 +255,9 @@ fn evaluate_like_pattern(
     any: bool,
     escape_char: Option<char>,
     case_insensitive: bool,
-) -> Result<bool, KalamDbError> {
+) -> Result<bool, LiveError> {
     if any {
-        return Err(KalamDbError::InvalidOperation(
+        return Err(LiveError::InvalidOperation(
             "LIKE ANY expressions are not supported in live query filters".to_string(),
         ));
     }
@@ -266,13 +266,13 @@ fn evaluate_like_pattern(
     let pattern_value = extract_value(pattern, row_data)?;
 
     let value_str = as_str(&value).ok_or_else(|| {
-        KalamDbError::InvalidOperation(format!(
+        LiveError::InvalidOperation(format!(
             "Cannot evaluate LIKE against non-string value: {:?}",
             value
         ))
     })?;
     let pattern_str = as_str(&pattern_value).ok_or_else(|| {
-        KalamDbError::InvalidOperation(format!(
+        LiveError::InvalidOperation(format!(
             "LIKE pattern must be a string literal or column value, got: {:?}",
             pattern_value
         ))
@@ -283,7 +283,7 @@ fn evaluate_like_pattern(
         .case_insensitive(case_insensitive)
         .build()
         .map_err(|error| {
-            KalamDbError::InvalidOperation(format!(
+            LiveError::InvalidOperation(format!(
                 "Invalid LIKE pattern {:?}: {}",
                 pattern_str, error
             ))
@@ -296,7 +296,7 @@ fn evaluate_like_pattern(
 fn build_like_regex_pattern(
     pattern: &str,
     escape_char: Option<char>,
-) -> Result<String, KalamDbError> {
+) -> Result<String, LiveError> {
     let mut regex_pattern = String::with_capacity(pattern.len() + 2);
     regex_pattern.push('^');
 
@@ -321,7 +321,7 @@ fn build_like_regex_pattern(
     }
 
     if escaped {
-        return Err(KalamDbError::InvalidOperation(format!(
+        return Err(LiveError::InvalidOperation(format!(
             "LIKE pattern has dangling escape character: {:?}",
             pattern
         )));
@@ -331,23 +331,23 @@ fn build_like_regex_pattern(
     Ok(regex_pattern)
 }
 
-fn parse_like_escape_char(escape_char: Option<&Value>) -> Result<Option<char>, KalamDbError> {
+fn parse_like_escape_char(escape_char: Option<&Value>) -> Result<Option<char>, LiveError> {
     match escape_char {
         None => Ok(None),
         Some(Value::SingleQuotedString(value)) | Some(Value::DoubleQuotedString(value)) => {
             let mut chars = value.chars();
             let ch = chars.next().ok_or_else(|| {
-                KalamDbError::InvalidOperation("LIKE ESCAPE cannot be empty".to_string())
+                LiveError::InvalidOperation("LIKE ESCAPE cannot be empty".to_string())
             })?;
             if chars.next().is_some() {
-                return Err(KalamDbError::InvalidOperation(format!(
+                return Err(LiveError::InvalidOperation(format!(
                     "LIKE ESCAPE must be a single character, got {:?}",
                     value
                 )));
             }
             Ok(Some(ch))
         },
-        Some(other) => Err(KalamDbError::InvalidOperation(format!(
+        Some(other) => Err(LiveError::InvalidOperation(format!(
             "Unsupported LIKE ESCAPE value: {:?}",
             other
         ))),
@@ -359,13 +359,13 @@ fn parse_like_escape_char(escape_char: Option<&Value>) -> Result<Option<char>, K
 /// Handles:
 /// - Column references (e.g., user_id) → lookup in row_data
 /// - Literals (e.g., 'user1', 123, true) → convert to ScalarValue
-fn extract_value(expr: &Expr, row_data: &Row) -> Result<ScalarValue, KalamDbError> {
+fn extract_value(expr: &Expr, row_data: &Row) -> Result<ScalarValue, LiveError> {
     match expr {
         // Column reference: lookup in row_data
         Expr::Identifier(ident) => {
             let column_name = ident.value.as_str();
             lookup_column_value(row_data, column_name).ok_or_else(|| {
-                KalamDbError::InvalidOperation(format!(
+                LiveError::InvalidOperation(format!(
                     "Column not found in row data: {}",
                     column_name
                 ))
@@ -377,13 +377,13 @@ fn extract_value(expr: &Expr, row_data: &Row) -> Result<ScalarValue, KalamDbErro
             if let Some(ident) = parts.last() {
                 let column_name = ident.value.as_str();
                 lookup_column_value(row_data, column_name).ok_or_else(|| {
-                    KalamDbError::InvalidOperation(format!(
+                    LiveError::InvalidOperation(format!(
                         "Column not found in row data: {}",
                         column_name
                     ))
                 })
             } else {
-                Err(KalamDbError::InvalidOperation("Empty compound identifier".to_string()))
+                Err(LiveError::InvalidOperation("Empty compound identifier".to_string()))
             }
         },
 
@@ -399,15 +399,15 @@ fn extract_value(expr: &Expr, row_data: &Row) -> Result<ScalarValue, KalamDbErro
                 } else if let Ok(f) = n.parse::<f64>() {
                     Ok(ScalarValue::Float64(Some(f)))
                 } else {
-                    Err(KalamDbError::InvalidOperation(format!("Invalid number: {}", n)))
+                    Err(LiveError::InvalidOperation(format!("Invalid number: {}", n)))
                 }
             },
             Value::Boolean(b) => Ok(ScalarValue::Boolean(Some(*b))),
             Value::Null => Ok(ScalarValue::Null),
-            _ => Err(KalamDbError::InvalidOperation(format!("Unsupported literal type: {:?}", v))),
+            _ => Err(LiveError::InvalidOperation(format!("Unsupported literal type: {:?}", v))),
         },
 
-        _ => Err(KalamDbError::InvalidOperation(format!(
+        _ => Err(LiveError::InvalidOperation(format!(
             "Unsupported expression in value extraction: {:?}",
             expr
         ))),

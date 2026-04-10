@@ -1,0 +1,59 @@
+[package]
+name = "kalamdb-live"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# Internal crates
+kalamdb-commons = { path = "../kalamdb-commons", features = ["full"] }
+kalamdb-publisher = { path = "../kalamdb-publisher" }
+kalamdb-system = { path = "../kalamdb-system" }
+kalamdb-session = { path = "../kalamdb-session" }
+kalamdb-sql = { package = "kalamdb-dialect", path = "../kalamdb-dialect" }
+
+# Apache Arrow ecosystem
+arrow = { workspace = true }
+datafusion = { workspace = true }
+datafusion-common = { workspace = true }
+sqlparser = { workspace = true }
+
+# Concurrent data structures
+dashmap = { workspace = true }
+parking_lot = { workspace = true }
+
+# Async
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time", "rt"] }
+tokio-util = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Time handling
+chrono = { workspace = true }
+
+# Logging
+log = { workspace = true }
+
+# Regular expressions
+regex = { workspace = true }
+
+# Single-assignment statics
+once_cell = { workspace = true }
+
+[dev-dependencies]
+ntest = { workspace = true }
+
+[features]
+test-helpers = []
+
+[lib]
+doctest = false

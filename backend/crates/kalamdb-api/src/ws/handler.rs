@@ -14,7 +14,7 @@
 use actix_web::{get, web, Error, HttpRequest, HttpResponse};
 use kalamdb_auth::UserRepository;
 use kalamdb_core::app_context::AppContext;
-use kalamdb_core::live::{ConnectionId, ConnectionsManager};
+use kalamdb_live::{ConnectionId, ConnectionsManager, LiveQueryManager};
 use log::{debug, warn};
 use std::sync::Arc;
 
@@ -39,7 +39,7 @@ pub async fn websocket_handler(
     stream: web::Payload,
     app_context: web::Data<Arc<AppContext>>,
     rate_limiter: web::Data<Arc<RateLimiter>>,
-    live_query_manager: web::Data<Arc<kalamdb_core::live::LiveQueryManager>>,
+    live_query_manager: web::Data<Arc<LiveQueryManager>>,
     user_repo: web::Data<Arc<dyn UserRepository>>,
     connection_registry: web::Data<Arc<ConnectionsManager>>,
 ) -> Result<HttpResponse, Error> {
