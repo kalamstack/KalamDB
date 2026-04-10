@@ -127,10 +127,10 @@ const StudioExplorerPanelComponent = ({
       .filter((namespace) => namespace.tables.length > 0 || !normalizedFilter);
   }, [schema, normalizedFilter]);
 
-  const filteredTableCount = useMemo(
-    () => filteredSchema.reduce((total, namespace) => total + namespace.tables.length, 0),
-    [filteredSchema],
-  );
+  // const filteredTableCount = useMemo(
+  //   () => filteredSchema.reduce((total, namespace) => total + namespace.tables.length, 0),
+  //   [filteredSchema],
+  // );
 
   return (
     <TooltipProvider delayDuration={250}>
