@@ -104,12 +104,83 @@ pub(super) fn classify_sql(
     })
 }
 
+fn fast_single_statement_sql(sql: &str) -> Option<&str> {
+    let trimmed = sql.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let statement = trimmed.strip_suffix(';').map(str::trim_end).unwrap_or(trimmed);
+    if statement.is_empty() {
+        return None;
+    }
+
+    if statement.as_bytes().contains(&b';') {
+        return None;
+    }
+
+    if statement.contains("--") || statement.contains("/*") || statement.contains("*/") {
+        return None;
+    }
+
+    Some(statement)
+}
+
+fn prepare_api_statement(
+    raw_statement: &str,
+    exec_ctx: &ExecutionContext,
+    sql_executor: &SqlExecutor,
+    start_time: Instant,
+) -> Result<PreparedApiExecutionStatement, HttpResponse> {
+    let parsed = parse_execute_statement(raw_statement).map_err(|err| {
+        HttpResponse::BadRequest().json(SqlResponse::error(
+            ErrorCode::InvalidInput,
+            &err,
+            took_ms(start_time),
+        ))
+    })?;
+
+    let prepared_statement = sql_executor
+        .prepare_statement_metadata(&parsed.sql, exec_ctx)
+        .map_err(|err| match err {
+            kalamdb_sql::classifier::StatementClassificationError::Unauthorized(msg) => {
+                HttpResponse::Forbidden().json(SqlResponse::error(
+                    ErrorCode::PermissionDenied,
+                    &msg,
+                    took_ms(start_time),
+                ))
+            },
+            kalamdb_sql::classifier::StatementClassificationError::InvalidSql {
+                message,
+                ..
+            } => HttpResponse::BadRequest().json(SqlResponse::error(
+                ErrorCode::InvalidSql,
+                &message,
+                took_ms(start_time),
+            )),
+        })?;
+
+    Ok(PreparedApiExecutionStatement {
+        execute_as_username: parsed.execute_as_username,
+        prepared_statement,
+    })
+}
+
 pub(super) fn split_and_prepare_statements(
     sql: &str,
     exec_ctx: &ExecutionContext,
     sql_executor: &SqlExecutor,
     start_time: Instant,
 ) -> Result<Vec<PreparedApiExecutionStatement>, HttpResponse> {
+    if let Some(single_statement) = fast_single_statement_sql(sql) {
+        return Ok(vec![prepare_api_statement(
+            single_statement,
+            exec_ctx,
+            sql_executor,
+            start_time,
+        )?]);
+    }
+
     let raw_statements = kalamdb_sql::split_statements(sql).map_err(|err| {
         HttpResponse::BadRequest().json(SqlResponse::error(
             ErrorCode::BatchParseError,
@@ -129,38 +200,12 @@ pub(super) fn split_and_prepare_statements(
     let mut prepared = Vec::with_capacity(raw_statements.len());
 
     for raw_statement in &raw_statements {
-        let parsed = parse_execute_statement(raw_statement).map_err(|err| {
-            HttpResponse::BadRequest().json(SqlResponse::error(
-                ErrorCode::InvalidInput,
-                &err,
-                took_ms(start_time),
-            ))
-        })?;
-
-        let prepared_statement = sql_executor
-            .prepare_statement_metadata(&parsed.sql, exec_ctx)
-            .map_err(|err| match err {
-                kalamdb_sql::classifier::StatementClassificationError::Unauthorized(msg) => {
-                    HttpResponse::Forbidden().json(SqlResponse::error(
-                        ErrorCode::PermissionDenied,
-                        &msg,
-                        took_ms(start_time),
-                    ))
-                },
-                kalamdb_sql::classifier::StatementClassificationError::InvalidSql {
-                    message,
-                    ..
-                } => HttpResponse::BadRequest().json(SqlResponse::error(
-                    ErrorCode::InvalidSql,
-                    &message,
-                    took_ms(start_time),
-                )),
-            })?;
-
-        prepared.push(PreparedApiExecutionStatement {
-            execute_as_username: parsed.execute_as_username,
-            prepared_statement,
-        });
+        prepared.push(prepare_api_statement(
+            raw_statement,
+            exec_ctx,
+            sql_executor,
+            start_time,
+        )?);
     }
 
     Ok(prepared)
@@ -168,8 +213,26 @@ pub(super) fn split_and_prepare_statements(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_execute_statement, resolve_result_username};
+    use super::{fast_single_statement_sql, parse_execute_statement, resolve_result_username};
     use kalamdb_commons::models::Username;
+
+    #[test]
+    fn fast_single_statement_sql_trims_optional_trailing_semicolon() {
+        assert_eq!(fast_single_statement_sql(" SELECT 1 ;  "), Some("SELECT 1"));
+        assert_eq!(fast_single_statement_sql("SELECT 1"), Some("SELECT 1"));
+    }
+
+    #[test]
+    fn fast_single_statement_sql_falls_back_for_embedded_semicolons() {
+        assert_eq!(fast_single_statement_sql("SELECT 1; SELECT 2"), None);
+        assert_eq!(fast_single_statement_sql("SELECT ';'"), None);
+    }
+
+    #[test]
+    fn fast_single_statement_sql_falls_back_for_comments() {
+        assert_eq!(fast_single_statement_sql("SELECT 1 -- trailing"), None);
+        assert_eq!(fast_single_statement_sql("SELECT 1 /* comment */"), None);
+    }
 
     #[test]
     fn parse_execute_as_user_wrapper() {

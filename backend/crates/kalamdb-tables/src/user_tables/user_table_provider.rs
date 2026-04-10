@@ -347,6 +347,7 @@ impl UserTableProvider {
         user_id: &UserId,
         rows: Vec<Row>,
         validate_unique_pk: bool,
+        commit_seq: u64,
     ) -> Result<Vec<(UserTableRowId, UserTableRow)>, KalamDbError> {
         if rows.is_empty() {
             return Ok(Vec::new());
@@ -388,7 +389,7 @@ impl UserTableProvider {
             user_rows.push(UserTableRow {
                 user_id: user_id.clone(),
                 _seq: seq_id,
-                _commit_seq: 0,
+                _commit_seq: commit_seq,
                 _deleted: false,
                 fields: row_data,
             });
@@ -887,55 +888,9 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         user_id: &UserId,
         rows: Vec<Row>,
     ) -> Result<Vec<UserTableRowId>, KalamDbError> {
-        let row_count = rows.len();
-        let span = tracing::debug_span!(
-            "table.insert_batch",
-            table_id = %self.core.table_id(),
-            user_id = %user_id.as_str(),
-            row_count
-        );
-        async move {
-            let entries = self.persist_insert_batch_rows(user_id, rows, true).await?;
-            let row_keys: Vec<UserTableRowId> =
-                entries.iter().map(|(row_key, _)| row_key.clone()).collect();
-
-            let notification_service = self.core.services.notification_service.clone();
-            let table_id = self.core.table_id().clone();
-
-            let has_topics = self.core.has_topic_routes(&table_id);
-            let has_live_subs = notification_service.has_subscribers(Some(user_id), &table_id);
-            if has_topics || has_live_subs {
-                let rows: Vec<_> = entries
-                    .iter()
-                    .map(|(_row_key, entity)| Self::build_notification_row(entity))
-                    .collect();
-
-                if has_topics {
-                    self.core
-                        .publish_batch_to_topics(
-                            &table_id,
-                            kalamdb_commons::models::TopicOp::Insert,
-                            &rows,
-                            Some(user_id),
-                        )
-                        .await;
-                }
-                if has_live_subs {
-                    for row in rows {
-                        let notification = ChangeNotification::insert(table_id.clone(), row);
-                        notification_service.notify_table_change(
-                            Some(user_id.clone()),
-                            table_id.clone(),
-                            notification,
-                        );
-                    }
-                }
-            }
-
-            Ok(row_keys)
-        }
-        .instrument(span)
-        .await
+        let commit_seq = self.core.services.commit_sequence_source.allocate_next();
+        self.insert_batch_with_commit_seq(user_id, rows, commit_seq)
+            .await
     }
 
     async fn update(
@@ -1748,10 +1703,80 @@ impl UserTableProvider {
         self.insert_deferred_internal(user_id, row_data, false).await
     }
 
+    pub async fn insert_batch_with_commit_seq(
+        &self,
+        user_id: &UserId,
+        rows: Vec<Row>,
+        commit_seq: u64,
+    ) -> Result<Vec<UserTableRowId>, KalamDbError> {
+        let row_count = rows.len();
+        let span = tracing::debug_span!(
+            "table.insert_batch",
+            table_id = %self.core.table_id(),
+            user_id = %user_id.as_str(),
+            row_count
+        );
+        async move {
+            let entries = self
+                .persist_insert_batch_rows(user_id, rows, true, commit_seq)
+                .await?;
+            let row_keys: Vec<UserTableRowId> =
+                entries.iter().map(|(row_key, _)| row_key.clone()).collect();
+
+            let notification_service = self.core.services.notification_service.clone();
+            let table_id = self.core.table_id().clone();
+
+            let has_topics = self.core.has_topic_routes(&table_id);
+            let has_live_subs = notification_service.has_subscribers(Some(user_id), &table_id);
+            if has_topics || has_live_subs {
+                let rows: Vec<_> = entries
+                    .iter()
+                    .map(|(_row_key, entity)| Self::build_notification_row(entity))
+                    .collect();
+
+                if has_topics {
+                    self.core
+                        .publish_batch_to_topics(
+                            &table_id,
+                            kalamdb_commons::models::TopicOp::Insert,
+                            &rows,
+                            Some(user_id),
+                        )
+                        .await;
+                }
+                if has_live_subs {
+                    for row in rows {
+                        let notification = ChangeNotification::insert(table_id.clone(), row);
+                        notification_service.notify_table_change(
+                            Some(user_id.clone()),
+                            table_id.clone(),
+                            notification,
+                        );
+                    }
+                }
+            }
+
+            Ok(row_keys)
+        }
+        .instrument(span)
+        .await
+    }
+
     pub async fn insert_batch_deferred_prevalidated(
         &self,
         user_id: &UserId,
         rows: Vec<Row>,
+    ) -> Result<Vec<(UserTableRowId, Option<ChangeNotification>)>, KalamDbError> {
+        let commit_seq = self.core.services.commit_sequence_source.allocate_next();
+        self.insert_batch_deferred_prevalidated_with_commit_seq(user_id, rows, commit_seq)
+            .await
+    }
+
+    pub async fn insert_batch_deferred_prevalidated_with_commit_seq(
+        &self,
+        user_id: &UserId,
+        rows: Vec<Row>,
+        commit_seq: u64,
     ) -> Result<Vec<(UserTableRowId, Option<ChangeNotification>)>, KalamDbError> {
         let row_count = rows.len();
         let span = tracing::debug_span!(
@@ -1762,7 +1787,9 @@ impl UserTableProvider {
             deferred_side_effects = true
         );
         async move {
-            let entries = self.persist_insert_batch_rows(user_id, rows, false).await?;
+            let entries = self
+                .persist_insert_batch_rows(user_id, rows, false, commit_seq)
+                .await?;
 
             let notification_service = self.core.services.notification_service.clone();
             let table_id = self.core.table_id().clone();
@@ -2140,13 +2167,6 @@ impl TableProvider for UserTableProvider {
             .insert_batch(user_id, rows)
             .await
             .map_err(|e| DataFusionError::Execution(e.to_string()))?;
-
-        let commit_seq = self.core.services.commit_sequence_source.allocate_next();
-        for row_key in &inserted {
-            self.patch_commit_seq_for_row_key(row_key, commit_seq)
-                .await
-                .map_err(|e| DataFusionError::Execution(e.to_string()))?;
-        }
 
         crate::utils::datafusion_dml::rows_affected_plan(state, inserted.len() as u64).await
     }

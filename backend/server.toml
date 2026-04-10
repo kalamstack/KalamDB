@@ -191,7 +191,7 @@ slow_query_threshold_ms = 1000
 
 [logging.otlp]
 # Export tracing spans to Jaeger OTLP receiver
-enabled = false
+enabled = true
 # Jaeger gRPC OTLP endpoint
 endpoint = "http://127.0.0.1:4317"
 # Protocol: "grpc" or "http"

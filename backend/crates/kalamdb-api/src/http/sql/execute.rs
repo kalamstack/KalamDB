@@ -44,9 +44,29 @@ use super::forward::forward_sql_if_follower;
 use super::helpers::parse_scalar_params;
 use super::models::{ErrorCode, QueryRequest, SqlResponse};
 use super::request::{parse_incoming_payload, took_ms, validate_sql_length};
-use super::statements::{authorized_username, split_and_prepare_statements};
+use super::statements::{
+    authorized_username, split_and_prepare_statements, PreparedApiExecutionStatement,
+};
 use crate::limiter::RateLimiter;
 use kalamdb_jobs::health_monitor::record_activity_now;
+
+#[inline]
+fn batch_requires_request_id(prepared_statements: &[PreparedApiExecutionStatement]) -> bool {
+    prepared_statements.iter().any(|statement| {
+        statement
+            .prepared_statement
+            .classified_statement
+            .as_ref()
+            .is_some_and(|classified| {
+                matches!(
+                    classified.kind(),
+                    &kalamdb_sql::classifier::SqlStatementKind::BeginTransaction
+                        | &kalamdb_sql::classifier::SqlStatementKind::CommitTransaction
+                        | &kalamdb_sql::classifier::SqlStatementKind::RollbackTransaction
+                )
+            })
+    })
+}
 
 // ---------------------------------------------------------------------------
 // Main handler
@@ -106,6 +126,7 @@ pub async fn execute_sql_v1(
     let namespace_id = parsed_payload.namespace_id;
     let files = parsed_payload.files;
     let is_multipart = parsed_payload.is_multipart;
+    let files_present = files.as_ref().is_some_and(|f| !f.is_empty());
 
     // 3. Validate SQL length
     if let Err(resp) = validate_sql_length(&sql, start_time) {
@@ -115,31 +136,27 @@ pub async fn execute_sql_v1(
     // 4. Build execution context
     let default_namespace = namespace_id.clone().unwrap_or_else(|| NamespaceId::new("default"));
     let base_session = app_context.base_session_context();
-    let mut exec_ctx = ExecutionContext::from_session(session, Arc::clone(&base_session))
-        .with_namespace_id(default_namespace.clone());
-    if exec_ctx.request_id().is_none() {
-        exec_ctx = exec_ctx.with_request_id(Uuid::now_v7().to_string());
-    }
-    let auth_username = authorized_username(&exec_ctx);
-    let impersonation_service = SqlImpersonationService::new(Arc::clone(app_context.get_ref()));
+    let mut exec_ctx =
+        ExecutionContext::from_session(session, Arc::clone(&base_session)).with_namespace_id(
+            default_namespace.clone(),
+        );
+    let is_meta_leader = app_context.executor().is_leader(GroupId::Meta).await;
 
     // 5. File uploads must go to the leader
-    let files_present = files.as_ref().map_or(false, |f| !f.is_empty());
-    if files_present {
-        let executor = app_context.executor();
-        if !executor.is_leader(GroupId::Meta).await {
-            return HttpResponse::ServiceUnavailable().json(SqlResponse::error(
-                ErrorCode::NotLeader,
-                "File uploads must be sent to the current leader",
-                took_ms(start_time),
-            ));
-        }
+    if files_present && !is_meta_leader {
+        return HttpResponse::ServiceUnavailable().json(SqlResponse::error(
+            ErrorCode::NotLeader,
+            "File uploads must be sent to the current leader",
+            took_ms(start_time),
+        ));
     }
 
     // 6. Forward to leader if this node is a follower (non-file path).
-    //    Build the forwarding request lazily — only allocates when we
-    //    actually need to forward.
-    if !files_present {
+    if !files_present && !is_meta_leader {
+        if exec_ctx.request_id().is_none() {
+            exec_ctx = exec_ctx.with_request_id(Uuid::now_v7().to_string());
+        }
+
         let req_for_forward = QueryRequest {
             sql: sql.clone(),
             params: params_json.clone(),
@@ -171,7 +188,6 @@ pub async fn execute_sql_v1(
     };
 
     // 8. Split, parse, and classify SQL statements
-    let schema_registry = app_context.schema_registry();
     let prepared_statements = match split_and_prepare_statements(
         &sql,
         &exec_ctx,
@@ -181,6 +197,13 @@ pub async fn execute_sql_v1(
         Ok(stmts) => stmts,
         Err(resp) => return resp,
     };
+
+    if exec_ctx.request_id().is_none() && batch_requires_request_id(&prepared_statements) {
+        exec_ctx = exec_ctx.with_request_id(Uuid::now_v7().to_string());
+    }
+
+    let auth_username = authorized_username(&exec_ctx);
+    let impersonation_service = SqlImpersonationService::new(Arc::clone(app_context.get_ref()));
 
     // 9. Reject params with multi-statement batches
     if !params.is_empty() && prepared_statements.len() > 1 {
@@ -192,10 +215,9 @@ pub async fn execute_sql_v1(
     }
 
     // 10. Dispatch to file-upload or batch execution path.
-    //     `extract_file_placeholders` is called once here; the result is
-    //     passed into `execute_file_upload_path` to avoid a second scan.
     let required_files = extract_file_placeholders(&sql);
     if !required_files.is_empty() || files_present {
+        let schema_registry = app_context.schema_registry();
         return execute_file_upload_path(
             is_multipart,
             files,

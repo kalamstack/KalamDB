@@ -103,14 +103,9 @@ impl DmlExecutor {
         // Try UserTableProvider first, then StreamTableProvider
         if let Some(provider) = provider_arc.as_any().downcast_ref::<UserTableProvider>() {
             let row_ids = provider
-                .insert_batch(user_id, rows.to_vec())
+                .insert_batch_with_commit_seq(user_id, rows.to_vec(), commit_seq)
                 .await
                 .map_err(|e| ApplierError::Execution(format!("Failed to insert batch: {}", e)))?;
-            for row_id in &row_ids {
-                provider.patch_commit_seq_for_row_key(row_id, commit_seq).await.map_err(|e| {
-                    ApplierError::Execution(format!("Failed to stamp commit_seq: {}", e))
-                })?;
-            }
             log::debug!("DmlExecutor: Inserted {} rows into {}", row_ids.len(), table_id);
             Ok(row_ids.len())
         } else if let Some(provider) = provider_arc.as_any().downcast_ref::<StreamTableProvider>() {
@@ -313,16 +308,10 @@ impl DmlExecutor {
         let provider_arc = self.load_provider(table_id, "Shared table provider").await?;
 
         if let Some(provider) = provider_arc.as_any().downcast_ref::<SharedTableProvider>() {
-            let system_user = UserId::system();
             let row_ids = provider
-                .insert_batch(&system_user, rows.to_vec())
+                .insert_batch_with_commit_seq(rows.to_vec(), commit_seq)
                 .await
                 .map_err(|e| ApplierError::Execution(format!("Failed to insert batch: {}", e)))?;
-            for row_id in &row_ids {
-                provider.patch_commit_seq_for_row_key(row_id, commit_seq).await.map_err(|e| {
-                    ApplierError::Execution(format!("Failed to stamp commit_seq: {}", e))
-                })?;
-            }
             log::debug!("DmlExecutor: Inserted {} shared rows into {}", row_ids.len(), table_id);
             Ok(row_ids.len())
         } else {
@@ -707,12 +696,13 @@ impl DmlExecutor {
                         })?;
 
                     let applied = provider
-                        .insert_batch_deferred_prevalidated(
+                        .insert_batch_deferred_prevalidated_with_commit_seq(
                             &user_id,
                             mutations
                                 .iter()
                                 .map(|mutation| mutation.payload.clone())
                                 .collect(),
+                            commit_seq,
                         )
                         .await
                         .map_err(|e| {
@@ -727,18 +717,9 @@ impl DmlExecutor {
                         )));
                     }
 
-                    for (_mutation, (row_key, notification)) in
+                    for (_mutation, (_row_key, notification)) in
                         mutations.iter().zip(applied.into_iter())
                     {
-                        provider.patch_commit_seq_for_row_key(&row_key, commit_seq).await.map_err(
-                            |e| {
-                                ApplierError::Execution(format!(
-                                    "Failed to stamp commit_seq: {}",
-                                    e
-                                ))
-                            },
-                        )?;
-
                         affected_rows += 1;
                         side_effect_plan.record_manifest_update();
 
@@ -937,8 +918,9 @@ impl DmlExecutor {
                     })?;
 
                 let applied = provider
-                    .insert_batch_deferred_prevalidated(
+                    .insert_batch_deferred_prevalidated_with_commit_seq(
                         mutations.iter().map(|mutation| mutation.payload.clone()).collect(),
+                        commit_seq,
                     )
                     .await
                     .map_err(|e| {
@@ -953,11 +935,7 @@ impl DmlExecutor {
                     )));
                 }
 
-                for (_mutation, (row_key, notification)) in mutations.iter().zip(applied.into_iter()) {
-                    provider.patch_commit_seq_for_row_key(&row_key, commit_seq).await.map_err(
-                        |e| ApplierError::Execution(format!("Failed to stamp commit_seq: {}", e)),
-                    )?;
-
+                for (_mutation, (_row_key, notification)) in mutations.iter().zip(applied.into_iter()) {
                     affected_rows += 1;
                     side_effect_plan.record_manifest_update();
 
