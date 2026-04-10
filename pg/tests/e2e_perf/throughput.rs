@@ -337,7 +337,7 @@ async fn e2e_perf_user_table_insert_scan() {
     create_user_foreign_table(
         &pg,
         &table,
-        "id TEXT, data TEXT, _userid TEXT, _seq BIGINT, _deleted BOOLEAN",
+        "id TEXT, data TEXT",
     )
     .await;
     set_user_id(&pg, "perf-user-1").await;

@@ -159,9 +159,7 @@ impl DerefMut for OwnedPgClient {
 impl Drop for OwnedPgClient {
     fn drop(&mut self) {
         self.client.take();
-        if let Some(connection_task) = self.connection_task.take() {
-            connection_task.abort();
-        }
+        let _ = self.connection_task.take();
     }
 }
 

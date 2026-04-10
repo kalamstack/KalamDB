@@ -85,6 +85,7 @@ import {
   createSavedQueryId,
   createTabId,
   resolveResultView,
+  stripAutoSelectLimitForLiveSql,
 } from "@/features/sql-studio/utils/workspaceHelpers";
 import { ExplorerTableContextMenu } from "@/features/sql-studio/components/ExplorerTableContextMenu";
 import {
@@ -523,7 +524,7 @@ export default function SqlStudio() {
   }, [cleanupLiveSubscription, clearWsListeners, dispatch, updateTab]);
 
   const startLiveQuery = useCallback(async (tab: QueryTab, sqlOverride?: string) => {
-    const sqlToRun = sqlOverride ?? tab.sql;
+    const sqlToRun = stripAutoSelectLimitForLiveSql(sqlOverride ?? tab.sql);
 
     if (!sqlToRun.trim()) {
       return;
@@ -1129,7 +1130,10 @@ export default function SqlStudio() {
                       if (!checked && (activeTab.liveStatus === "connected" || activeTab.liveStatus === "connecting")) {
                         stopLiveQuery(activeTab.id);
                       }
-                      updateActiveTab({ isLive: checked, liveStatus: "idle" });
+                      const nextSql = checked
+                        ? stripAutoSelectLimitForLiveSql(activeTab.sql)
+                        : activeTab.sql;
+                      updateActiveTab({ isLive: checked, liveStatus: "idle", sql: nextSql });
                     }}
                     onSubscriptionOptionsChange={(options) => updateActiveTab({ subscriptionOptions: options, isDirty: true })}
                     onRename={renameActiveTab}

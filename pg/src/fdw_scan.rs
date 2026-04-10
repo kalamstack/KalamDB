@@ -151,17 +151,6 @@ pub unsafe extern "C-unwind" fn iterate_foreign_scan(
                 }
                 continue;
             },
-            SEQ_COLUMN => {
-                // _seq not yet available from scan response, return null
-                *(*slot).tts_isnull.add(att_idx) = true;
-                continue;
-            },
-            DELETED_COLUMN => {
-                // Live rows are not deleted
-                *(*slot).tts_values.add(att_idx) = pg_sys::Datum::from(false as usize);
-                *(*slot).tts_isnull.add(att_idx) = false;
-                continue;
-            },
             _ => {},
         }
 
@@ -252,7 +241,8 @@ unsafe fn begin_foreign_scan_impl(node: *mut pg_sys::ForeignScanState) -> Result
     let tupdesc = (*(*node).ss.ss_ScanTupleSlot).tts_tupleDescriptor;
     let natts = (*tupdesc).natts as usize;
 
-    // Collect physical column names for projection
+    // Collect physical column names for projection (sent to KalamDB backend).
+    // _userid is synthesized locally; _seq is injected by the backend automatically.
     let mut physical_columns: Vec<String> = Vec::new();
     for i in 0..natts {
         let att = (*tupdesc).attrs.as_ptr().add(i);
@@ -294,11 +284,13 @@ unsafe fn begin_foreign_scan_impl(node: *mut pg_sys::ForeignScanState) -> Result
         let att = (*tupdesc).attrs.as_ptr().add(i);
         let col_name = CStr::from_ptr((*att).attname.data.as_ptr()).to_string_lossy();
 
-        if col_name == USER_ID_COLUMN || col_name == SEQ_COLUMN || col_name == DELETED_COLUMN {
+        // _userid is synthesized from the session; skip Arrow mapping.
+        if col_name == USER_ID_COLUMN {
             column_mapping.push(None);
             continue;
         }
 
+        // _seq and user columns are mapped from Arrow.
         let arrow_idx = arrow_schema
             .as_ref()
             .and_then(|schema| schema.column_with_name(col_name.as_ref()))

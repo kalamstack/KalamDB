@@ -8,6 +8,8 @@ import type { SqlStudioPersistedQueryTab } from "@/components/sql-studio-v2/work
 
 export const DEFAULT_SQL = "SELECT * FROM system.namespaces LIMIT 100;";
 
+const AUTO_SELECT_LIMIT_SQL_PATTERN = /^\s*(SELECT\s+\*\s+FROM\s+(?:"[^"]+"|[A-Za-z_][\w$]*)\.(?:"[^"]+"|[A-Za-z_][\w$]*))\s+LIMIT\s+100\s*;\s*$/i;
+
 export function createSavedQueryId(): string {
   return `saved-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 }
@@ -81,4 +83,13 @@ export function buildSelectFromTableSql(
 ): string {
   const suffix = withLimit ? " LIMIT 100;" : ";";
   return `SELECT * FROM ${namespace}.${tableName}${suffix}`;
+}
+
+export function stripAutoSelectLimitForLiveSql(sql: string): string {
+  const match = sql.match(AUTO_SELECT_LIMIT_SQL_PATTERN);
+  if (!match) {
+    return sql;
+  }
+
+  return `${match[1]};`;
 }

@@ -19,14 +19,18 @@ fn exposes_guc_name_and_user_id() {
 }
 
 #[test]
-fn tenant_context_rejects_mismatched_explicit_user() {
+fn tenant_context_allows_explicit_override() {
     let settings =
         SessionSettings::from_guc_values(Some("u_session"), Some("public")).expect("parse guc");
-    let err = settings
+    let ctx = settings
         .tenant_context(Some(UserId::new("u_other")))
-        .expect_err("mismatched user should fail");
+        .expect("explicit override should succeed");
 
-    assert!(err.to_string().contains("does not match"));
+    assert_eq!(
+        ctx.effective_user_id(),
+        Some(&UserId::new("u_other")),
+        "explicit user_id should take precedence"
+    );
 }
 
 #[test]

@@ -212,6 +212,52 @@ async fn system_transactions_shows_active_pg_and_sql_transactions_while_sessions
 
 #[tokio::test]
 #[ntest::timeout(12000)]
+async fn stale_idle_pg_sessions_drop_out_of_sessions_view() {
+    let (app_ctx, _test_db) = create_cluster_app_context().await;
+    let executor = create_executor(Arc::clone(&app_ctx));
+    let observer_ctx = observer_exec_ctx(&app_ctx);
+    let session_id = "pg-4202-idlefade";
+
+    let executor_handle = app_ctx.executor();
+    let raft_executor = executor_handle
+        .as_any()
+        .downcast_ref::<RaftExecutor>()
+        .expect("raft executor available");
+    let pg_service = raft_executor.pg_service().expect("pg service is wired");
+
+    open_session(&pg_service, session_id).await;
+
+    let active_session_rows = json_rows(
+        execute_ok(
+            &executor,
+            &observer_ctx,
+            &format!(
+                "SELECT session_id, state FROM system.sessions WHERE session_id = '{session_id}'"
+            ),
+        )
+        .await,
+    );
+    assert_eq!(active_session_rows.len(), 1);
+    assert_eq!(string_field(&active_session_rows[0], "session_id"), session_id);
+    assert_eq!(string_field(&active_session_rows[0], "state"), "idle");
+
+    tokio::time::sleep(Duration::from_millis(5_200)).await;
+
+    let cleared_session_rows = json_rows(
+        execute_ok(
+            &executor,
+            &observer_ctx,
+            &format!(
+                "SELECT session_id FROM system.sessions WHERE session_id = '{session_id}'"
+            ),
+        )
+        .await,
+    );
+    assert!(cleared_session_rows.is_empty());
+}
+
+#[tokio::test]
+#[ntest::timeout(12000)]
 async fn pg_passive_timeout_hides_stale_transaction_fields_from_sessions_view() {
     let mut config = ServerConfig::default();
     config.transaction_timeout_secs = 1;

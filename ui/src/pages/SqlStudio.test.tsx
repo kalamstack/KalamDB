@@ -502,6 +502,40 @@ describe("SqlStudio page", () => {
     expect(screen.getByRole("button", { name: /stop/i })).toBeTruthy();
   });
 
+  it("removes the browser-added limit when live mode is enabled", async () => {
+    renderSqlStudio();
+
+    fireEvent.change(getSqlEditor(), {
+      target: { value: "SELECT * FROM default.events LIMIT 100;" },
+    });
+
+    fireEvent.click(screen.getByRole("switch"));
+
+    expect(screen.getByDisplayValue("SELECT * FROM default.events;")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /subscribe/i }));
+
+    await waitFor(() => {
+      expect(mockSubscribe).toHaveBeenCalledWith(
+        "SELECT * FROM default.events;",
+        expect.any(Function),
+        undefined,
+      );
+    });
+  });
+
+  it("keeps manual limit queries unchanged when live mode is enabled", () => {
+    renderSqlStudio();
+
+    fireEvent.change(getSqlEditor(), {
+      target: { value: "SELECT id FROM default.events LIMIT 100;" },
+    });
+
+    fireEvent.click(screen.getByRole("switch"));
+
+    expect(screen.getByDisplayValue("SELECT id FROM default.events LIMIT 100;")).toBeTruthy();
+  });
+
   it("passes the live subscription from option as an exact string checkpoint", async () => {
     renderSqlStudio();
 

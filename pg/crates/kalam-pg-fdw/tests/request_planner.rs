@@ -59,8 +59,8 @@ fn plan_scan_extracts_user_id_filters_and_virtual_columns() {
 }
 
 #[test]
-fn plan_scan_rejects_conflicting_session_and_filter_user_ids() {
-    let err = RequestPlanner::plan_scan(ScanInput {
+fn plan_scan_allows_filter_user_id_override_of_session() {
+    let plan = RequestPlanner::plan_scan(ScanInput {
         table_id: table_id(),
         table_type: TableType::User,
         projected_columns: vec!["id".to_string()],
@@ -71,9 +71,13 @@ fn plan_scan_rejects_conflicting_session_and_filter_user_ids() {
         limit: None,
         session_user_id: Some(UserId::new("u_session")),
     })
-    .expect_err("mismatched tenant context should fail");
+    .expect("filter user override should succeed");
 
-    assert!(err.to_string().contains("does not match"));
+    assert_eq!(
+        plan.request.tenant_context.effective_user_id(),
+        Some(&UserId::new("u_filter")),
+        "filter _userid should take precedence over session"
+    );
 }
 
 #[test]

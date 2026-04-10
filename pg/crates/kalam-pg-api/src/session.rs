@@ -138,17 +138,11 @@ impl TenantContext {
         self.explicit_user_id.as_ref().or(self.session_user_id.as_ref())
     }
 
-    /// Validate that the explicit and session identities do not conflict.
+    /// Validate the tenant context.
+    ///
+    /// When both explicit and session user ids are present, the explicit value
+    /// takes precedence (override semantics). No conflict error is raised.
     pub fn validate(&self) -> Result<(), KalamPgError> {
-        if let (Some(explicit), Some(session)) = (&self.explicit_user_id, &self.session_user_id) {
-            if explicit != session {
-                return Err(KalamPgError::Validation(format!(
-                    "explicit user_id '{}' does not match session user_id '{}'",
-                    explicit.as_str(),
-                    session.as_str()
-                )));
-            }
-        }
         Ok(())
     }
 }

@@ -134,6 +134,23 @@ impl OwnedPgClient {
             let _ = connection_task.await;
         }
     }
+
+    pub async fn disconnect_and_wait_for_session_cleanup(mut self) {
+        let backend_pid = if let Some(client) = self.client.as_ref() {
+            Some(pg_backend_pid(client).await)
+        } else {
+            None
+        };
+
+        self.client.take();
+        if let Some(connection_task) = self.connection_task.take() {
+            let _ = connection_task.await;
+        }
+
+        if let Some(backend_pid) = backend_pid {
+            wait_for_remote_pg_session_cleanup(backend_pid, Duration::from_secs(5)).await;
+        }
+    }
 }
 
 impl Deref for OwnedPgClient {
@@ -153,9 +170,7 @@ impl DerefMut for OwnedPgClient {
 impl Drop for OwnedPgClient {
     fn drop(&mut self) {
         self.client.take();
-        if let Some(connection_task) = self.connection_task.take() {
-            connection_task.abort();
-        }
+        let _ = self.connection_task.take();
     }
 }
 
@@ -493,6 +508,47 @@ fn sql_row_count(result: &Value) -> i64 {
         .and_then(|results| results.first())
         .and_then(|entry| entry["row_count"].as_i64())
         .unwrap_or_default()
+}
+
+fn sql_first_cell_i64(result: &Value) -> Option<i64> {
+    result["results"]
+        .as_array()
+        .and_then(|results| results.first())
+        .and_then(|entry| entry["rows"].as_array())
+        .and_then(|rows| rows.first())
+        .and_then(|row| row.as_array())
+        .and_then(|columns| columns.first())
+        .and_then(|value| {
+            value
+                .as_i64()
+                .or_else(|| value.as_u64().and_then(|raw| i64::try_from(raw).ok()))
+                .or_else(|| value.as_str().and_then(|raw| raw.parse::<i64>().ok()))
+        })
+}
+
+pub async fn wait_for_remote_pg_session_cleanup(backend_pid: u32, timeout: Duration) {
+    let env = TestEnv::global().await;
+    let deadline = std::time::Instant::now() + timeout;
+
+    loop {
+        let result = env
+            .kalamdb_sql(&format!(
+                "SELECT COUNT(*) AS session_count FROM system.sessions WHERE backend_pid = {backend_pid} LIMIT 1"
+            ))
+            .await;
+        let count = sql_first_cell_i64(&result).unwrap_or_default();
+        if count == 0 {
+            return;
+        }
+
+        if std::time::Instant::now() >= deadline {
+            panic!(
+                "remote pg session for backend_pid {backend_pid} remained visible in system.sessions past timeout"
+            );
+        }
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }
 
 async fn cluster_user_shard_count(env: &TestEnv) -> u32 {

@@ -111,7 +111,7 @@ async fn e2e_user_table_isolation() {
     create_user_foreign_table(
         &pg_a,
         &table,
-        "id TEXT, name TEXT, age INTEGER, _userid TEXT, _seq BIGINT, _deleted BOOLEAN",
+        "id TEXT, name TEXT, age INTEGER",
     )
     .await;
     set_user_id(&pg_a, "user-a").await;

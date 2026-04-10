@@ -94,9 +94,12 @@ fn scan_request_validates_remote_session_context() {
 }
 
 #[test]
-fn tenant_context_still_rejects_conflicting_explicit_and_session_user_ids() {
-    let err = TenantContext::new(Some(UserId::new("u_explicit")), Some(UserId::new("u_session")))
-        .validate()
-        .expect_err("conflicting explicit and session user ids must still fail");
-    assert!(err.to_string().contains("does not match"));
+fn tenant_context_allows_explicit_override_of_session_user_id() {
+    let ctx = TenantContext::new(Some(UserId::new("u_explicit")), Some(UserId::new("u_session")));
+    ctx.validate().expect("explicit override should succeed");
+    assert_eq!(
+        ctx.effective_user_id(),
+        Some(&UserId::new("u_explicit")),
+        "explicit user_id should take precedence"
+    );
 }

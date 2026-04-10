@@ -1,10 +1,13 @@
 use dashmap::DashMap;
 use kalamdb_commons::models::TransactionState;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
+
+const STALE_IDLE_SESSION_TTL_MS: i64 = 5_000;
+const STALE_IDLE_SESSION_PRUNE_INTERVAL_MS: i64 = 1_000;
 
 fn current_timestamp_ms() -> i64 {
     SystemTime::now()
@@ -15,6 +18,10 @@ fn current_timestamp_ms() -> i64 {
 
 fn normalize_optional(value: Option<&str>) -> Option<String> {
     value.map(str::trim).filter(|value| !value.is_empty()).map(ToOwned::to_owned)
+}
+
+fn session_is_stale(last_seen_at_ms: i64, now_ms: i64) -> bool {
+    now_ms.saturating_sub(last_seen_at_ms) >= STALE_IDLE_SESSION_TTL_MS
 }
 
 /// Mutable session state shared across PostgreSQL requests that belong to the same backend.
@@ -178,14 +185,91 @@ fn compare_sessions_for_observability(
 }
 
 /// Concurrent registry for PostgreSQL backend sessions.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SessionRegistry {
     sessions: Arc<DashMap<String, RemotePgSession>>,
     /// Monotonic counter for generating unique transaction IDs.
     tx_counter: AtomicU64,
+    /// Last time an opportunistic stale-session sweep ran.
+    last_pruned_at_ms: AtomicI64,
+}
+
+impl Default for SessionRegistry {
+    fn default() -> Self {
+        Self {
+            sessions: Arc::new(DashMap::new()),
+            tx_counter: AtomicU64::new(0),
+            last_pruned_at_ms: AtomicI64::new(0),
+        }
+    }
 }
 
 impl SessionRegistry {
+    fn maybe_prune_stale_local_idle_sessions(&self, now_ms: i64) {
+        self.maybe_prune_sessions(now_ms, |session| {
+            session.transaction_id().is_none()
+                && session.transaction_state().is_none()
+                && session_is_stale(session.last_seen_at_ms(), now_ms)
+        });
+    }
+
+    fn maybe_prune_stale_observable_sessions(
+        &self,
+        active_transactions: &HashMap<String, LivePgTransaction>,
+        now_ms: i64,
+    ) {
+        self.maybe_prune_sessions(now_ms, |session| {
+            !active_transactions.contains_key(session.session_id())
+                && session_is_stale(session.last_seen_at_ms(), now_ms)
+        });
+    }
+
+    fn maybe_prune_sessions<F>(&self, now_ms: i64, should_prune: F)
+    where
+        F: Fn(&RemotePgSession) -> bool,
+    {
+        let last_pruned_at_ms = self.last_pruned_at_ms.load(Ordering::Relaxed);
+        if now_ms.saturating_sub(last_pruned_at_ms) < STALE_IDLE_SESSION_PRUNE_INTERVAL_MS {
+            return;
+        }
+
+        if self
+            .last_pruned_at_ms
+            .compare_exchange(
+                last_pruned_at_ms,
+                now_ms,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            )
+            .is_err()
+        {
+            return;
+        }
+
+        let stale_session_ids = self
+            .sessions
+            .iter()
+            .filter_map(|entry| {
+                let session = entry.value();
+                should_prune(session).then(|| session.session_id().to_owned())
+            })
+            .collect::<Vec<_>>();
+
+        let mut pruned_count = 0;
+        for session_id in stale_session_ids {
+            if self.sessions.remove(session_id.as_str()).is_some() {
+                pruned_count += 1;
+            }
+        }
+
+        if pruned_count > 0 {
+            log::debug!(
+                "PG session registry pruned {} stale idle session(s)",
+                pruned_count
+            );
+        }
+    }
+
     /// Open a session if missing, or reuse the current one.
     pub fn open_or_get(&self, session_id: &str) -> RemotePgSession {
         let session_id = session_id.trim().to_string();
@@ -205,6 +289,8 @@ impl SessionRegistry {
     ) -> RemotePgSession {
         let session_id = session_id.trim().to_string();
         let now_ms = current_timestamp_ms();
+
+        self.maybe_prune_stale_local_idle_sessions(now_ms);
 
         let mut session = self
             .sessions
@@ -433,6 +519,8 @@ impl SessionRegistry {
             .into_iter()
             .map(|transaction| (transaction.session_id().to_owned(), transaction))
             .collect::<HashMap<_, _>>();
+
+        self.maybe_prune_stale_observable_sessions(&active_transactions, current_timestamp_ms());
 
         let mut snapshot = self
             .snapshot()
@@ -672,5 +760,66 @@ mod tests {
         assert_eq!(session.transaction_id(), Some("live-tx"));
         assert_eq!(session.transaction_state(), Some(TransactionState::OpenWrite));
         assert!(session.transaction_has_writes());
+    }
+
+    #[test]
+    fn open_or_get_with_context_prunes_stale_local_idle_sessions() {
+        let registry = SessionRegistry::default();
+        registry.open_or_get_with_context("pg-stale", None, None, Some("OpenSession"));
+
+        {
+            let mut session = registry.sessions.get_mut("pg-stale").unwrap();
+            session.last_seen_at_ms = current_timestamp_ms() - STALE_IDLE_SESSION_TTL_MS - 10;
+        }
+        registry.last_pruned_at_ms.store(0, Ordering::Relaxed);
+
+        registry.open_or_get_with_context("pg-fresh", None, None, Some("OpenSession"));
+
+        assert!(registry.get("pg-stale").is_none());
+        assert!(registry.get("pg-fresh").is_some());
+    }
+
+    #[test]
+    fn snapshot_with_live_transactions_prunes_stale_idle_sessions() {
+        let registry = SessionRegistry::default();
+        registry.open_or_get_with_context("pg-stale", None, None, Some("OpenSession"));
+
+        {
+            let mut session = registry.sessions.get_mut("pg-stale").unwrap();
+            session.last_seen_at_ms = current_timestamp_ms() - STALE_IDLE_SESSION_TTL_MS - 10;
+        }
+        registry.last_pruned_at_ms.store(0, Ordering::Relaxed);
+
+        let snapshot = registry.snapshot_with_live_transactions(Vec::<LivePgTransaction>::new());
+
+        assert!(snapshot.is_empty());
+        assert!(registry.get("pg-stale").is_none());
+    }
+
+    #[test]
+    fn snapshot_with_live_transactions_keeps_stale_sessions_with_live_transactions() {
+        let registry = SessionRegistry::default();
+        registry.open_or_get_with_context("pg-live", None, None, Some("OpenSession"));
+
+        {
+            let mut session = registry.sessions.get_mut("pg-live").unwrap();
+            session.last_seen_at_ms = current_timestamp_ms() - STALE_IDLE_SESSION_TTL_MS - 10;
+        }
+        registry.last_pruned_at_ms.store(0, Ordering::Relaxed);
+
+        let snapshot = registry.snapshot_with_live_transactions(vec![LivePgTransaction::new(
+            "pg-live",
+            Uuid::now_v7().to_string(),
+            TransactionState::OpenRead,
+            false,
+        )]);
+
+        let session = snapshot
+            .into_iter()
+            .find(|session| session.session_id() == "pg-live")
+            .unwrap();
+
+        assert_eq!(session.transaction_state(), Some(TransactionState::OpenRead));
+        assert!(registry.get("pg-live").is_some());
     }
 }

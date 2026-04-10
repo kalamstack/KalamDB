@@ -46,10 +46,7 @@ async fn e2e_ddl_create_user_table() {
         "CREATE FOREIGN TABLE {ns}.{table} (
             id TEXT,
             name TEXT,
-            age INTEGER,
-            _userid TEXT,
-            _seq BIGINT,
-            _deleted BOOLEAN
+            age INTEGER
         ) SERVER kalam_server
         OPTIONS (namespace '{ns}', \"table\" '{table}', table_type 'user');"
     );

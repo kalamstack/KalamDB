@@ -14,7 +14,7 @@ async fn e2e_duplicate_primary_key_insert_fails() {
     create_user_foreign_table(
         &pg,
         &table,
-        "id TEXT, name TEXT, age INTEGER, _userid TEXT, _seq BIGINT, _deleted BOOLEAN",
+        "id TEXT, name TEXT, age INTEGER",
     )
     .await;
     set_user_id(&pg, "dup-user").await;
@@ -61,10 +61,7 @@ async fn e2e_insert_without_backing_kalamdb_table_fails() {
              CREATE FOREIGN TABLE app.{table} ( \
                  id TEXT, \
                  name TEXT, \
-                 age INTEGER, \
-                 _userid TEXT, \
-                 _seq BIGINT, \
-                 _deleted BOOLEAN \
+                 age INTEGER \
              ) SERVER kalam_server \
              OPTIONS (namespace 'app', \"table\" '{table}', table_type 'user');"
     ))
@@ -102,7 +99,7 @@ async fn e2e_user_table_scan_without_user_id_fails_clearly() {
     create_user_foreign_table(
         &writer,
         &table,
-        "id TEXT, name TEXT, age INTEGER, _userid TEXT, _seq BIGINT, _deleted BOOLEAN",
+        "id TEXT, name TEXT, age INTEGER",
     )
     .await;
     set_user_id(&writer, "scan-user").await;

@@ -14,7 +14,7 @@ async fn e2e_transaction_begin_commit_persists_rows() {
     create_user_foreign_table(
         &pg,
         &table,
-        "id TEXT, name TEXT, age INTEGER, _userid TEXT, _seq BIGINT, _deleted BOOLEAN",
+        "id TEXT, name TEXT, age INTEGER",
     )
     .await;
     set_user_id(&pg, "txn-commit-user").await;
@@ -50,7 +50,7 @@ async fn e2e_transaction_begin_rollback_discards_rows() {
     create_user_foreign_table(
         &pg,
         &table,
-        "id TEXT, name TEXT, age INTEGER, _userid TEXT, _seq BIGINT, _deleted BOOLEAN",
+        "id TEXT, name TEXT, age INTEGER",
     )
     .await;
     set_user_id(&pg, "txn-rollback-user").await;
@@ -80,7 +80,7 @@ async fn e2e_transaction_duplicate_primary_key_commit_fails() {
     create_user_foreign_table(
         &pg,
         &table,
-        "id TEXT, name TEXT, age INTEGER, _userid TEXT, _seq BIGINT, _deleted BOOLEAN",
+        "id TEXT, name TEXT, age INTEGER",
     )
     .await;
     set_user_id(&pg, "txn-duplicate-user").await;
@@ -134,7 +134,7 @@ async fn e2e_transaction_switching_user_id_keeps_rows_in_separate_user_scopes() 
     create_user_foreign_table(
         &pg,
         &table,
-        "id TEXT, name TEXT, age INTEGER, _userid TEXT, _seq BIGINT, _deleted BOOLEAN",
+        "id TEXT, name TEXT, age INTEGER",
     )
     .await;
 

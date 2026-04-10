@@ -44,7 +44,7 @@ pub unsafe extern "C-unwind" fn add_foreign_update_targets(
             continue;
         }
         let col_name = CStr::from_ptr((*att).attname.data.as_ptr()).to_string_lossy();
-        if col_name == USER_ID_COLUMN || col_name == "_seq" || col_name == "_deleted" {
+        if col_name == USER_ID_COLUMN || col_name == SEQ_COLUMN || col_name == DELETED_COLUMN {
             continue;
         }
         // Use this column as the row identity
@@ -280,16 +280,17 @@ unsafe fn exec_foreign_insert_impl(
     slot: *mut pg_sys::TupleTableSlot,
 ) -> Result<(), KalamPgError> {
     let state = &*((*rinfo).ri_FdwState as *mut KalamModifyState);
-    let row = slot_to_row(slot, &state.column_names)?;
+    let (row, explicit_userid) = slot_to_row(slot, &state.column_names)?;
 
-    let user_id_str = crate::current_kalam_user_id();
-    let user_id = user_id_str.clone().map(UserId::new);
+    let session_user_id = crate::current_kalam_user_id().map(UserId::new);
+    let explicit_user_id = explicit_userid.map(UserId::new);
+    let effective = explicit_user_id.or(session_user_id);
 
     crate::write_buffer::buffer_insert(
         &state.session_id,
         &state.table_options.table_id,
         state.table_options.table_type,
-        user_id,
+        effective,
         row,
         &state.executor,
         &state.runtime,
@@ -304,18 +305,19 @@ unsafe fn exec_foreign_batch_insert_impl(
 ) -> Result<(), KalamPgError> {
     let state = &*((*rinfo).ri_FdwState as *mut KalamModifyState);
 
-    let user_id_str = crate::current_kalam_user_id();
-    let user_id = user_id_str.clone().map(UserId::new);
+    let session_user_id = crate::current_kalam_user_id().map(UserId::new);
 
     // Single-row case: buffer for cross-statement batching within transactions
     if num_slots == 1 {
         let slot = *slots.add(0);
-        let row = slot_to_row(slot, &state.column_names)?;
+        let (row, explicit_userid) = slot_to_row(slot, &state.column_names)?;
+        let explicit_user_id = explicit_userid.map(UserId::new);
+        let effective = explicit_user_id.or(session_user_id);
         crate::write_buffer::buffer_insert(
             &state.session_id,
             &state.table_options.table_id,
             state.table_options.table_type,
-            user_id,
+            effective,
             row,
             &state.executor,
             &state.runtime,
@@ -330,16 +332,34 @@ unsafe fn exec_foreign_batch_insert_impl(
         state.table_options.table_type,
     )?;
 
+    // Extract rows and capture the first explicit _userid (all rows in one batch
+    // share the same effective user).
     let mut rows = Vec::with_capacity(num_slots);
+    let mut batch_explicit_userid: Option<UserId> = None;
     for i in 0..num_slots {
         let slot = *slots.add(i);
-        rows.push(slot_to_row(slot, &state.column_names)?);
+        let (row, explicit_userid) = slot_to_row(slot, &state.column_names)?;
+        if let Some(uid) = explicit_userid {
+            let uid = UserId::new(uid);
+            if let Some(ref first) = batch_explicit_userid {
+                if &uid != first {
+                    return Err(KalamPgError::Validation(
+                        "batch INSERT rows must use the same _userid value".to_string(),
+                    ));
+                }
+            } else {
+                batch_explicit_userid = Some(uid);
+            }
+        }
+        rows.push(row);
     }
+
+    let effective = batch_explicit_userid.or(session_user_id);
 
     let request = InsertRequest::new(
         state.table_options.table_id.clone(),
         state.table_options.table_type,
-        TenantContext::new(None, user_id),
+        TenantContext::new(None, effective),
         rows,
     );
 
@@ -360,7 +380,7 @@ unsafe fn exec_foreign_update_impl(
         state.table_options.table_type,
     )?;
     let pk_value = extract_pk_value(plan_slot, &state.pk_column, &state.column_names)?;
-    let updates = slot_to_row(slot, &state.column_names)?;
+    let (updates, _explicit_userid) = slot_to_row(slot, &state.column_names)?;
 
     let user_id_str = crate::current_kalam_user_id();
     let user_id = user_id_str.map(UserId::new);
@@ -409,14 +429,18 @@ unsafe fn exec_foreign_delete_impl(
 // ---------------------------------------------------------------------------
 
 /// Extract column values from a TupleTableSlot into a Kalam Row.
+///
+/// Returns `(row, explicit_userid)` where `explicit_userid` is the value of
+/// the `_userid` column if the user supplied one in the INSERT.
 unsafe fn slot_to_row(
     slot: *mut pg_sys::TupleTableSlot,
     column_names: &[String],
-) -> Result<Row, KalamPgError> {
+) -> Result<(Row, Option<String>), KalamPgError> {
     pg_sys::slot_getallattrs(slot);
     let tupdesc = (*slot).tts_tupleDescriptor;
     let natts = (*tupdesc).natts as usize;
     let mut values = BTreeMap::new();
+    let mut explicit_userid: Option<String> = None;
 
     for i in 0..natts {
         let att = (*tupdesc).attrs.as_ptr().add(i);
@@ -424,21 +448,28 @@ unsafe fn slot_to_row(
             continue;
         }
         let col_name = column_names.get(i).cloned().unwrap_or_default();
-        if col_name.is_empty()
-            || col_name == USER_ID_COLUMN
-            || col_name == "_seq"
-            || col_name == "_deleted"
-        {
+        if col_name.is_empty() || col_name == SEQ_COLUMN || col_name == DELETED_COLUMN {
             continue;
         }
 
         let is_null = *(*slot).tts_isnull.add(i);
+
+        // Capture explicit _userid from the slot but do not include it in the row.
+        if col_name == USER_ID_COLUMN {
+            if !is_null {
+                let datum = *(*slot).tts_values.add(i);
+                let scalar = datum_to_scalar(datum, (*att).atttypid, false);
+                explicit_userid = Some(scalar.to_string());
+            }
+            continue;
+        }
+
         let datum = *(*slot).tts_values.add(i);
         let scalar = datum_to_scalar(datum, (*att).atttypid, is_null);
         values.insert(col_name, scalar);
     }
 
-    Ok(Row::new(values))
+    Ok((Row::new(values), explicit_userid))
 }
 
 /// Extract the primary key value from the plan slot (junk attribute).

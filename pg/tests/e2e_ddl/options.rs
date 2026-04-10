@@ -74,7 +74,6 @@ impl OwnedPgClient {
     async fn disconnect(mut self) {
         drop(self.client);
         if let Some(connection_task) = self.connection_task.take() {
-            connection_task.abort();
             let _ = connection_task.await;
         }
     }

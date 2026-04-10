@@ -34,7 +34,7 @@ async fn e2e_scenario_chat_app_support_workspace_flow() {
         &pg_admin,
         &schema,
         &drafts,
-        "id TEXT, room_id TEXT, body TEXT, last_model TEXT, _userid TEXT, _seq BIGINT, _deleted BOOLEAN",
+        "id TEXT, room_id TEXT, body TEXT, last_model TEXT",
     )
     .await;
 
