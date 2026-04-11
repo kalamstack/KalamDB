@@ -1647,37 +1647,37 @@ impl SharedTableProvider {
             row_keys.iter().copied().zip(shared_rows.into_iter()).collect();
 
         let store = self.store.clone();
-        let entries_for_write = entries.clone();
 
-        tokio::task::spawn_blocking(move || -> Result<(), KalamDbError> {
-            let encode_input: Vec<(
-                kalamdb_commons::ids::SeqId,
-                u64,
-                bool,
-                &kalamdb_commons::models::rows::Row,
-            )> = entries_for_write
-                .iter()
-                .map(|(_, row)| (row._seq, row._commit_seq, row._deleted, &row.fields))
-                .collect();
-            let encoded_values =
-                kalamdb_commons::serialization::row_codec::batch_encode_shared_table_rows(
-                    &encode_input,
-                )
-                .map_err(|e| {
-                    KalamDbError::InvalidOperation(format!(
-                        "Failed to batch encode shared table rows: {}",
-                        e
-                    ))
-                })?;
-            store
-                .insert_batch_preencoded(&entries_for_write, encoded_values)
-                .map_err(|e| {
+        let entries = tokio::task::spawn_blocking(
+            move || -> Result<Vec<(SharedTableRowId, SharedTableRow)>, KalamDbError> {
+                let encode_input: Vec<(
+                    kalamdb_commons::ids::SeqId,
+                    u64,
+                    bool,
+                    &kalamdb_commons::models::rows::Row,
+                )> = entries
+                    .iter()
+                    .map(|(_, row)| (row._seq, row._commit_seq, row._deleted, &row.fields))
+                    .collect();
+                let encoded_values =
+                    kalamdb_commons::serialization::row_codec::batch_encode_shared_table_rows(
+                        &encode_input,
+                    )
+                    .map_err(|e| {
+                        KalamDbError::InvalidOperation(format!(
+                            "Failed to batch encode shared table rows: {}",
+                            e
+                        ))
+                    })?;
+                store.insert_batch_preencoded(&entries, encoded_values).map_err(|e| {
                     KalamDbError::InvalidOperation(format!(
                         "Failed to batch insert shared table rows: {}",
                         e
                     ))
-                })
-        })
+                })?;
+                Ok(entries)
+            },
+        )
         .await
         .map_err(|e| KalamDbError::InvalidOperation(format!("spawn_blocking error: {}", e)))??;
 

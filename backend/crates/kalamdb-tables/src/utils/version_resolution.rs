@@ -689,6 +689,9 @@ struct ParquetBatchDecoder<'a> {
     commit_seq_array: Option<&'a UInt64Array>,
     deleted_array: Option<&'a BooleanArray>,
     pk_idx: Option<usize>,
+    /// Cached downcast of the PK column for fast string extraction without
+    /// going through ScalarValue intermediate.
+    pk_string_array: Option<&'a StringArray>,
     value_columns: Vec<(usize, String)>,
 }
 
@@ -719,6 +722,9 @@ impl<'a> ParquetBatchDecoder<'a> {
             deleted_idx.and_then(|idx| batch.column(idx).as_any().downcast_ref::<BooleanArray>());
         let commit_seq_array = commit_seq_idx
             .and_then(|idx| batch.column(idx).as_any().downcast_ref::<UInt64Array>());
+        // Try to cache the PK column as StringArray for fast extraction.
+        let pk_string_array = pk_idx
+            .and_then(|idx| batch.column(idx).as_any().downcast_ref::<StringArray>());
         let value_columns = schema
             .fields()
             .iter()
@@ -737,6 +743,7 @@ impl<'a> ParquetBatchDecoder<'a> {
             commit_seq_array,
             deleted_array,
             pk_idx,
+            pk_string_array,
             value_columns,
         })
     }
@@ -751,14 +758,27 @@ impl<'a> ParquetBatchDecoder<'a> {
             .commit_seq_array
             .and_then(|arr| (!arr.is_null(row_idx)).then(|| arr.value(row_idx)))
             .unwrap_or(0);
-        let pk_value = self.pk_idx.and_then(|idx| {
-            let array = self.batch.column(idx);
-            arrow_value_to_scalar(array.as_ref(), row_idx).ok().and_then(|sv| match &sv {
-                ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)) => Some(s.clone()),
-                other if other.is_null() => None,
-                other => Some(other.to_string()),
+        let pk_value = if let Some(str_arr) = self.pk_string_array {
+            // Fast path: PK is StringArray, read directly (avoids ScalarValue intermediate).
+            if str_arr.is_null(row_idx) {
+                None
+            } else {
+                let v = str_arr.value(row_idx);
+                if v.is_empty() { None } else { Some(v.to_owned()) }
+            }
+        } else {
+            // Fallback for non-Utf8 PK types (Int64, etc.)
+            self.pk_idx.and_then(|idx| {
+                let array = self.batch.column(idx);
+                arrow_value_to_scalar(array.as_ref(), row_idx).ok().and_then(|sv| match &sv {
+                    ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)) => {
+                        Some(s.clone())
+                    },
+                    other if other.is_null() => None,
+                    other => Some(other.to_string()),
+                })
             })
-        });
+        };
 
         RowMetadata {
             seq,
@@ -959,7 +979,9 @@ where
         }
     }
 
-    let mut best: HashMap<String, Winner<K, R>> = HashMap::new();
+    // Pre-allocate with a reasonable estimate: cold rows are an upper bound on unique PKs.
+    let estimated_capacity = cold_batch.num_rows().max(64);
+    let mut best: HashMap<String, Winner<K, R>> = HashMap::with_capacity(estimated_capacity);
 
     for (key, row) in hot_rows {
         if !is_visible_at_snapshot(row.commit_seq(), snapshot_commit_seq) {

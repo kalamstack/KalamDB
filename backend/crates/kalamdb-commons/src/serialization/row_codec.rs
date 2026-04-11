@@ -712,8 +712,20 @@ fn decode_embedding_payload(payload: fb_row::ScalarValuePayload<'_>) -> Result<S
 /// For N rows this saves N–1 FlatBufferBuilder allocations on the inner
 /// builder side compared to calling `encode_user_table_row` in a loop.
 pub fn batch_encode_user_table_rows(rows: &[UserTableRow]) -> Result<Vec<Vec<u8>>> {
-    let _span = tracing::info_span!("batch_encode_user_table_rows", count = rows.len()).entered();
-    let mut results = Vec::with_capacity(rows.len());
+    batch_encode_user_table_rows_iter(rows.iter(), rows.len())
+}
+
+/// Batch-encode borrowed `UserTableRow`s without cloning owned row payloads.
+pub fn batch_encode_user_table_row_refs(rows: &[&UserTableRow]) -> Result<Vec<Vec<u8>>> {
+    batch_encode_user_table_rows_iter(rows.iter().copied(), rows.len())
+}
+
+fn batch_encode_user_table_rows_iter<'a, I>(rows: I, row_count: usize) -> Result<Vec<Vec<u8>>>
+where
+    I: IntoIterator<Item = &'a UserTableRow>,
+{
+    let _span = tracing::info_span!("batch_encode_user_table_rows", count = row_count).entered();
+    let mut results = Vec::with_capacity(row_count);
     // Reuse inner builder across rows — reset() keeps the allocated capacity
     let mut inner_builder = flatbuffers::FlatBufferBuilder::with_capacity(512);
 

@@ -1,6 +1,7 @@
 use std::process::Command;
 use std::time::Instant;
 
+use crate::benchmarks::enabled_in_default_suite;
 use crate::client::KalamClient;
 use crate::config::Config;
 
@@ -249,33 +250,24 @@ fn check_connection_scale_target_capacity(config: &Config) -> CheckResult {
 }
 
 fn will_run_subscriber_scale(config: &Config) -> bool {
-    if !config.bench.is_empty() {
-        return config.bench.iter().any(|b| b == "subscriber_scale");
-    }
-
-    if let Some(filter) = &config.filter {
-        let f = filter.to_lowercase();
-        let name = "subscriber_scale";
-        let category = "scale";
-        return name.contains(&f) || category.contains(&f);
-    }
-
-    true
+    will_run_named_benchmark(config, "subscriber_scale", "scale")
 }
 
 fn will_run_connection_scale(config: &Config) -> bool {
+    will_run_named_benchmark(config, "connection_scale", "scale")
+}
+
+fn will_run_named_benchmark(config: &Config, name: &str, category: &str) -> bool {
     if !config.bench.is_empty() {
-        return config.bench.iter().any(|b| b == "connection_scale");
+        return config.bench.iter().any(|benchmark| benchmark == name);
     }
 
     if let Some(filter) = &config.filter {
         let f = filter.to_lowercase();
-        let name = "connection_scale";
-        let category = "scale";
         return name.contains(&f) || category.contains(&f);
     }
 
-    true
+    enabled_in_default_suite(name)
 }
 
 fn resolve_ws_targets(urls: &[String]) -> Vec<String> {
@@ -377,7 +369,12 @@ fn check_fd_limit() -> CheckResult {
         match output {
             Ok(out) => {
                 let val = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                if let Ok(n) = val.parse::<u64>() {
+                if val.eq_ignore_ascii_case("unlimited") {
+                    CheckResult::pass(
+                        "File descriptors",
+                        "unlimited (soft limit is not constraining benchmark sockets)",
+                    )
+                } else if let Ok(n) = val.parse::<u64>() {
                     if n >= 8192 {
                         CheckResult::pass("File descriptors", format!("{} (>= 8192)", n))
                     } else if n >= 1024 {

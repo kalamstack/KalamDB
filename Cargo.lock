@@ -4577,6 +4577,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "datafusion",
+ "datafusion-datasource",
  "futures-util",
  "kalamdb-commons",
  "kalamdb-filestore",

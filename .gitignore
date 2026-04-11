@@ -118,3 +118,4 @@ ts-sdk-repro/server.toml
 /link/sdks/typescript/client/.wasm-cargo-home
 /link/sdks/typescript/client/.wasm-target
 /target-pg-e2e-isolated
+/benchv2/logs

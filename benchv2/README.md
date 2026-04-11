@@ -35,7 +35,8 @@ The KalamDB Benchmarking Tool is designed to facilitate performance testing of t
   - **integration.rs**: Integration tests for the benchmarking tool.
   - **reporter_tests.rs**: Unit tests for the reporting functionality.
 
-- **run-benchmarks.sh**: Shell script to run benchmarks in a Unix-like environment.
+- **run-benchmarks.sh**: Shell script to run the default benchmark suite in a Unix-like environment.
+- **run-connection-scale.sh**: Dedicated runner for the opt-in `connection_scale` stress benchmark on macOS/loopback hosts.
 
 - **run-benchmarks.ps1**: PowerShell script to run benchmarks in a Windows environment.
 
@@ -65,18 +66,27 @@ The KalamDB Benchmarking Tool is designed to facilitate performance testing of t
      ```bash
      ./run-benchmarks.sh
      ```
+   - For the dedicated connection-scale stress run on macOS / loopback hosts:
+     ```bash
+     ./run-connection-scale.sh
+     ```
    - For Windows:
      ```powershell
      .\run-benchmarks.ps1
      ```
 
   By default, `run-benchmarks.sh` manages a dedicated local benchmark server for loopback runs.
+  The default suite excludes the opt-in `connection_scale` benchmark because that test often
+  needs extra loopback aliases or an explicit override on single-host macOS runs.
   It will:
   - Verify a release `kalamdb-server` binary exists.
   - Refuse to run if a local server is already listening on the target port.
   - Clear `benchv2/data` before startup.
   - Start the server with `benchv2/server.toml`.
   - Wait for `/health` and then continue into the Rust benchmark pre-flight checks.
+
+  If you explicitly want `connection_scale`, use `./run-connection-scale.sh` or pass
+  `--bench connection_scale` yourself with the required environment/setup.
 
   If you pass a non-loopback or multi-URL `--urls` value, the script skips managed-server startup and uses the supplied servers directly.
 

@@ -423,12 +423,33 @@ pub trait BaseTableProvider<K: StorageKey, V>: Send + Sync + TableProvider {
             Some(filters[1..].iter().cloned().fold(first, |acc, e| acc.and(e)))
         };
 
-        // Optimization: Pass projection to scan_rows ONLY if filters is empty.
-        // If filters exist, we need all columns involved in the filter.
-        // Since we return Inexact for pushdown, DataFusion adds a FilterExec after the Scan.
-        // So the Scan must return columns needed for the filter.
-        // Safest approach: If filters are present, fetch all columns.
-        let effective_projection = if filters.is_empty() { projection } else { None };
+        // Compute a merged projection that includes both the requested projection columns
+        // AND any columns referenced by filters. This avoids reading all columns for wide
+        // tables when only a subset is needed.
+        let merged_projection: Option<Vec<usize>>;
+        let effective_projection = if filters.is_empty() {
+            merged_projection = None;
+            projection
+        } else if let Some(proj) = projection {
+            let schema = self.schema_ref();
+            let mut needed: HashSet<usize> = proj.iter().copied().collect();
+            let mut filter_cols = HashSet::new();
+            for filter in filters {
+                let _ = expr_to_columns(filter, &mut filter_cols);
+            }
+            for col in &filter_cols {
+                if let Some((idx, _)) = schema.column_with_name(&col.name) {
+                    needed.insert(idx);
+                }
+            }
+            let mut indices: Vec<usize> = needed.into_iter().collect();
+            indices.sort_unstable();
+            merged_projection = Some(indices);
+            merged_projection.as_ref()
+        } else {
+            merged_projection = None;
+            None
+        };
 
         let batch = self
             // Provider-level LIMIT pushdown is unsafe here because scan() does not know
@@ -439,9 +460,30 @@ pub trait BaseTableProvider<K: StorageKey, V>: Send + Sync + TableProvider {
 
         let mem = MemTable::try_new(batch.schema(), vec![vec![batch]])?;
 
-        // If filters are empty, batch is already projected, so we scan all columns of MemTable.
-        // If filters are present, batch has all columns, so we apply projection in MemTable scan.
-        let final_projection = if filters.is_empty() { None } else { projection };
+        // When we used a merged projection (proj + filter cols), the batch schema differs
+        // from the original table schema. We need to remap the original projection indices
+        // to the merged batch's column positions for MemTable's final scan.
+        let remapped_projection: Option<Vec<usize>>;
+        let final_projection = if filters.is_empty() {
+            // No filters: batch is already exactly projected → scan all MemTable columns.
+            None
+        } else if let (Some(proj), Some(_)) = (projection, merged_projection.as_ref()) {
+            // Build a mapping from original schema index → merged batch column position.
+            let batch_schema = mem.schema();
+            let original_schema = self.schema_ref();
+            let mut remap = Vec::with_capacity(proj.len());
+            for &orig_idx in proj {
+                let col_name = original_schema.field(orig_idx).name();
+                if let Some((batch_idx, _)) = batch_schema.column_with_name(col_name) {
+                    remap.push(batch_idx);
+                }
+            }
+            remapped_projection = Some(remap);
+            remapped_projection.as_ref()
+        } else {
+            // No projection requested: scan all columns.
+            None
+        };
 
         mem.scan(state, final_projection, filters, None).await
     }
@@ -1432,23 +1474,18 @@ pub fn compute_cold_columns(
     pk_name: &str,
 ) -> Option<Vec<String>> {
     let proj = projection?;
-    let mut cols: Vec<String> = proj.iter().map(|&i| schema.field(i).name().clone()).collect();
+    let mut col_set: HashSet<String> =
+        proj.iter().map(|&i| schema.field(i).name().clone()).collect();
     // Always include columns required for version resolution
     for sys_col in [
         SystemColumnNames::SEQ,
         SystemColumnNames::COMMIT_SEQ,
         SystemColumnNames::DELETED,
     ] {
-        let s = sys_col.to_string();
-        if !cols.contains(&s) {
-            cols.push(s);
-        }
+        col_set.insert(sys_col.to_string());
     }
-    let pk = pk_name.to_string();
-    if !cols.contains(&pk) {
-        cols.push(pk);
-    }
-    Some(cols)
+    col_set.insert(pk_name.to_string());
+    Some(col_set.into_iter().collect())
 }
 
 /// Validate that an UPDATE operation doesn't change the PK to an existing value

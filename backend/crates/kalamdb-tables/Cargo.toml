@@ -26,6 +26,7 @@ kalamdb-vector = { path = "../kalamdb-vector" }
 # Apache Arrow ecosystem
 arrow = { workspace = true }
 datafusion = { workspace = true }
+datafusion-datasource = { workspace = true }
 
 # Async
 async-trait = { workspace = true }

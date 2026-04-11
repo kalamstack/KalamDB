@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use kalam_client::KalamLinkClient;
-use tokio::sync::Semaphore;
+use tokio::sync::{RwLock, Semaphore};
 
 use crate::benchmarks::Benchmark;
 use crate::client::KalamClient;
@@ -13,7 +13,17 @@ use crate::config::Config;
 
 /// Fires 1000 concurrent SQL SELECT queries at once per iteration to measure
 /// RPS degradation and tail latency under extreme concurrency.
-pub struct Sql1kUsersBench;
+pub struct Sql1kUsersBench {
+    query_pool: RwLock<Option<Arc<Vec<KalamLinkClient>>>>,
+}
+
+impl Default for Sql1kUsersBench {
+    fn default() -> Self {
+        Self {
+            query_pool: RwLock::new(None),
+        }
+    }
+}
 
 impl Benchmark for Sql1kUsersBench {
     fn name(&self) -> &str {
@@ -58,6 +68,12 @@ impl Benchmark for Sql1kUsersBench {
                     ))
                     .await?;
             }
+
+            // Keep the isolated query clients alive for the full benchmark run
+            // so repeated iterations do not churn local HTTP sockets.
+            let query_pool = Arc::new(build_sql_query_pool(client)?);
+            *self.query_pool.write().await = Some(query_pool);
+
             Ok(())
         })
     }
@@ -70,7 +86,7 @@ impl Benchmark for Sql1kUsersBench {
     ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
         Box::pin(async move {
             let total_queries = 1000u32;
-            let query_pool = Arc::new(build_sql_query_pool(client)?);
+            let query_pool = self.query_pool(client).await?;
             let mut handles = Vec::with_capacity(total_queries as usize);
             let max_in_flight = sql_burst_in_flight_limit(client, total_queries);
             let semaphore = Arc::new(Semaphore::new(max_in_flight));
@@ -137,9 +153,22 @@ impl Benchmark for Sql1kUsersBench {
         config: &'a Config,
     ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
         Box::pin(async move {
+            self.query_pool.write().await.take();
             let _ = client.sql(&format!("DROP TABLE IF EXISTS {}.load_1k", config.namespace)).await;
             Ok(())
         })
+    }
+}
+
+impl Sql1kUsersBench {
+    async fn query_pool(&self, client: &KalamClient) -> Result<Arc<Vec<KalamLinkClient>>, String> {
+        if let Some(query_pool) = self.query_pool.read().await.clone() {
+            return Ok(query_pool);
+        }
+
+        let query_pool = Arc::new(build_sql_query_pool(client)?);
+        let mut guard = self.query_pool.write().await;
+        Ok(guard.get_or_insert_with(|| query_pool.clone()).clone())
     }
 }
 

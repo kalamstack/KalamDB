@@ -4,12 +4,15 @@ use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::catalog::Session;
 use datafusion::common::DFSchema;
 use datafusion::datasource::memory::MemTable;
+use datafusion::datasource::source::DataSourceExec;
 use datafusion::datasource::TableProvider;
 use datafusion::error::{DataFusionError, Result as DataFusionResult};
 use datafusion::logical_expr::{utils::expr_to_columns, Expr};
 use datafusion::physical_plan::filter::FilterExec;
+use datafusion::physical_plan::projection::ProjectionExec;
 use datafusion::physical_plan::{collect, ExecutionPlan};
 use datafusion::scalar::ScalarValue;
+use datafusion_datasource::memory::MemorySourceConfig;
 use kalamdb_commons::conversions::arrow_json_conversion::{
     arrow_value_to_scalar, json_rows_to_arrow_batch,
 };
@@ -120,6 +123,10 @@ pub async fn collect_input_rows(
     input: Arc<dyn ExecutionPlan>,
 ) -> DataFusionResult<Vec<Row>> {
     tracing::debug!("dml.collect_input_rows");
+    if let Some(rows) = try_collect_memory_input_rows(input.as_ref())? {
+        return Ok(rows);
+    }
+
     let task_ctx = state.task_ctx();
 
     // Try executing the input plan directly.
@@ -142,6 +149,81 @@ pub async fn collect_input_rows(
             Err(e)
         },
     }
+}
+
+fn try_collect_memory_input_rows(
+    input: &dyn ExecutionPlan,
+) -> DataFusionResult<Option<Vec<Row>>> {
+    if let Some(data_source_exec) = input.as_any().downcast_ref::<DataSourceExec>() {
+        return try_collect_rows_from_data_source_exec(data_source_exec);
+    }
+
+    if let Some(projection_exec) = input.as_any().downcast_ref::<ProjectionExec>() {
+        let Some(source_batches) = try_read_memory_source_batches(projection_exec.input().as_ref())?
+        else {
+            return Ok(None);
+        };
+
+        let projection_schema = projection_exec.schema();
+        let projected_batches = source_batches
+            .into_iter()
+            .map(|batch| {
+                let arrays = projection_exec
+                    .expr()
+                    .iter()
+                    .map(|projection| projection.expr.evaluate(&batch)?.into_array(batch.num_rows()))
+                    .collect::<DataFusionResult<Vec<_>>>()?;
+                RecordBatch::try_new(Arc::clone(&projection_schema), arrays)
+                    .map_err(|error| DataFusionError::ArrowError(Box::new(error), None))
+            })
+            .collect::<DataFusionResult<Vec<_>>>()?;
+
+        return record_batches_to_rows(&projected_batches).map(Some);
+    }
+
+    Ok(None)
+}
+
+fn try_collect_rows_from_data_source_exec(
+    data_source_exec: &DataSourceExec,
+) -> DataFusionResult<Option<Vec<Row>>> {
+    let Some(batches) = try_read_memory_source_batches(data_source_exec)? else {
+        return Ok(None);
+    };
+
+    record_batches_to_rows(&batches).map(Some)
+}
+
+fn try_read_memory_source_batches(
+    input: &dyn ExecutionPlan,
+) -> DataFusionResult<Option<Vec<RecordBatch>>> {
+    let Some(data_source_exec) = input.as_any().downcast_ref::<DataSourceExec>() else {
+        return Ok(None);
+    };
+
+    let Some(memory_source) = data_source_exec
+        .data_source()
+        .as_any()
+        .downcast_ref::<MemorySourceConfig>()
+    else {
+        return Ok(None);
+    };
+
+    let mut batches = Vec::new();
+    for partition in memory_source.partitions() {
+        for batch in partition {
+            let projected = if let Some(projection) = memory_source.projection() {
+                batch
+                    .project(projection)
+                    .map_err(|error| DataFusionError::ArrowError(Box::new(error), None))?
+            } else {
+                batch.clone()
+            };
+            batches.push(projected);
+        }
+    }
+
+    Ok(Some(batches))
 }
 
 pub async fn collect_matching_rows(
@@ -335,11 +417,17 @@ fn record_batches_to_rows(batches: &[RecordBatch]) -> DataFusionResult<Vec<Row>>
 
     for batch in batches {
         let schema = batch.schema();
+        let field_names: Vec<String> = schema.fields().iter().map(|field| field.name().to_string()).collect();
+        let columns: Vec<&dyn arrow::array::Array> = batch
+            .columns()
+            .iter()
+            .map(|column| column.as_ref())
+            .collect();
         for row_idx in 0..batch.num_rows() {
             let mut values = BTreeMap::new();
-            for (col_idx, field) in schema.fields().iter().enumerate() {
-                let scalar = arrow_value_to_scalar(batch.column(col_idx).as_ref(), row_idx)?;
-                values.insert(field.name().to_string(), scalar);
+            for (col_idx, field_name) in field_names.iter().enumerate() {
+                let scalar = arrow_value_to_scalar(columns[col_idx], row_idx)?;
+                values.insert(field_name.clone(), scalar);
             }
             rows.push(Row::new(values));
         }

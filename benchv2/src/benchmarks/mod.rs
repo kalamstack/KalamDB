@@ -81,6 +81,14 @@ pub trait Benchmark: Send + Sync {
     }
 }
 
+/// Benchmarks included when no explicit `--bench` or `--filter` selection is provided.
+///
+/// `connection_scale` remains opt-in because single-host runs often need extra
+/// loopback aliases or explicit override flags to avoid macOS ephemeral-port limits.
+pub fn enabled_in_default_suite(name: &str) -> bool {
+    !matches!(name, "connection_scale")
+}
+
 /// Returns all registered benchmarks. Add new benchmarks here.
 pub fn all_benchmarks() -> Vec<Box<dyn Benchmark>> {
     vec![
@@ -125,7 +133,7 @@ pub fn all_benchmarks() -> Vec<Box<dyn Benchmark>> {
         Box::new(load_subscriber_bench::ConcurrentSubscriberBench),
         Box::new(load_publisher_bench::ConcurrentPublisherBench),
         Box::new(load_consumer_bench::ConcurrentConsumerBench),
-        Box::new(load_sql_1k_bench::Sql1kUsersBench),
+        Box::new(load_sql_1k_bench::Sql1kUsersBench::default()),
         Box::new(load_create_user_bench::CreateUserBench {
             counter: std::sync::atomic::AtomicU64::new(0),
         }),

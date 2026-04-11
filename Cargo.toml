@@ -100,6 +100,7 @@ arrow = { version = "58.1.0", default-features = false }
 arrow-ipc = { version = "58.1.0", default-features = false }
 arrow-schema = { version = "58.1.0" }
 datafusion = { version = "53.0.0", default-features = false, features = ["sql", "parquet", "recursive_protection", "nested_expressions"] }
+datafusion-datasource = { version = "53.0.0", default-features = false }
 datafusion-common = { version = "53.0.0" }
 datafusion-expr = { version = "53.0.0" }
 sqlparser = { version = "0.61.0" }

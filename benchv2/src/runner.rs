@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crate::benchmarks::{all_benchmarks, Benchmark};
+use crate::benchmarks::{all_benchmarks, enabled_in_default_suite, Benchmark};
 use crate::client::KalamClient;
 use crate::comparison::{self, PreviousRun};
 use crate::config::Config;
@@ -18,6 +18,13 @@ pub async fn run_all(
 
     let mut selected = Vec::new();
     for bench in benchmarks {
+        if config.bench.is_empty()
+            && config.filter.is_none()
+            && !enabled_in_default_suite(bench.name())
+        {
+            continue;
+        }
+
         if !config.bench.is_empty() {
             let bench_name = bench.name();
             if !config.bench.iter().any(|selected_name| selected_name == bench_name) {

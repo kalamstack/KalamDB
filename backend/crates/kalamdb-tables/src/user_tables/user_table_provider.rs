@@ -398,32 +398,30 @@ impl UserTableProvider {
         let store = self.store.clone();
         let entries: Vec<(UserTableRowId, UserTableRow)> =
             row_keys.iter().cloned().zip(user_rows.into_iter()).collect();
-        let entries_for_write = entries.clone();
 
-        tokio::task::spawn_blocking(move || -> Result<(), KalamDbError> {
-            let encoded_values =
-                kalamdb_commons::serialization::row_codec::batch_encode_user_table_rows(
-                    &entries_for_write
-                        .iter()
-                        .map(|(_, row)| row)
-                        .cloned()
-                        .collect::<Vec<_>>(),
-                )
-                .map_err(|e| {
-                    KalamDbError::InvalidOperation(format!(
-                        "Failed to batch encode user table rows: {}",
-                        e
-                    ))
-                })?;
-            store
-                .insert_batch_preencoded(&entries_for_write, encoded_values)
-                .map_err(|e| {
+        let entries = tokio::task::spawn_blocking(
+            move || -> Result<Vec<(UserTableRowId, UserTableRow)>, KalamDbError> {
+                let encode_input: Vec<&UserTableRow> =
+                    entries.iter().map(|(_, row)| row).collect();
+                let encoded_values =
+                    kalamdb_commons::serialization::row_codec::batch_encode_user_table_row_refs(
+                        &encode_input,
+                    )
+                    .map_err(|e| {
+                        KalamDbError::InvalidOperation(format!(
+                            "Failed to batch encode user table rows: {}",
+                            e
+                        ))
+                    })?;
+                store.insert_batch_preencoded(&entries, encoded_values).map_err(|e| {
                     KalamDbError::InvalidOperation(format!(
                         "Failed to batch insert user table rows: {}",
                         e
                     ))
-                })
-        })
+                })?;
+                Ok(entries)
+            },
+        )
         .await
         .map_err(|e| KalamDbError::InvalidOperation(format!("spawn_blocking error: {}", e)))??;
 
@@ -1460,9 +1458,10 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
             None
         };
 
-        // Calculate scan limit using common helper
-        //  Need to scan more than requested limit because we'll filter by user_id
-        let scan_limit = base::calculate_scan_limit(limit) * 10; // Buffer for filtering
+        // Calculate scan limit using common helper.
+        // The scan is already prefix-scoped to user_id, so the 2× buffer inside
+        // calculate_scan_limit is sufficient (covers version duplicates + tombstones).
+        let scan_limit = base::calculate_scan_limit(limit);
 
         // Run hot storage (RocksDB) and cold storage (Parquet) scans concurrently
         let hot_future = self.store.scan_with_raw_prefix_async(
