@@ -114,6 +114,7 @@ test('README live resume example passes options and exposes typed checkpoints', 
       checkpoints.push(active?.lastSeqId?.toString());
     },
     {
+      limit: 200,
       subscriptionOptions: {
         last_rows: 200,
         from: startFrom,
@@ -122,6 +123,7 @@ test('README live resume example passes options and exposes typed checkpoints', 
   );
 
   assert.deepEqual(JSON.parse(fakeWasmClient.lastLiveQueryOptionsJson), {
+    limit: 200,
     subscription_options: {
       last_rows: 200,
       from: '42',

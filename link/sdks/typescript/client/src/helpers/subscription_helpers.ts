@@ -118,15 +118,21 @@ export function normalizeLiveRowsKeyColumns<T>(
 export function normalizeLiveRowsOptions<T>(
   options: LiveRowsOptions<T>,
 ): {
+  limit?: number;
   key_columns?: string[];
   subscription_options?: { batch_size?: number; last_rows?: number; from?: string };
 } | undefined {
   const keyColumns = normalizeLiveRowsKeyColumns(options);
   const subscriptionOptions = normalizeSubscriptionOptions(options.subscriptionOptions);
   const normalized: {
+    limit?: number;
     key_columns?: string[];
     subscription_options?: { batch_size?: number; last_rows?: number; from?: string };
   } = {};
+
+  if (options.limit !== undefined) {
+    normalized.limit = options.limit;
+  }
 
   if (keyColumns) {
     normalized.key_columns = keyColumns;

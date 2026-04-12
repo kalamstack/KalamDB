@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { Auth, createClient, type RowData } from '@kalamdb/client';
+import { flushSync } from 'react-dom';
+import {
+  Auth,
+  ChangeType,
+  MessageType,
+  createClient,
+  type RowData,
+  type ServerMessage,
+} from '@kalamdb/client';
 import './styles.css';
 
 type ChatMessage = {
@@ -28,7 +36,7 @@ type LiveDraft = {
 };
 
 const MAX_CHAT_MESSAGES = 80;
-const MAX_AGENT_EVENTS = 24;
+const MAX_AGENT_EVENTS = 40;
 
 const ROOM = import.meta.env.VITE_CHAT_ROOM ?? 'main';
 const ROOM_SQL = ROOM.replace(/'/g, "''");
@@ -113,6 +121,24 @@ function sortEvents(rows: AgentEvent[]): AgentEvent[] {
   return [...rows].sort((left, right) => left.sortKey - right.sortKey || left.id.localeCompare(right.id));
 }
 
+function limitEvents(rows: AgentEvent[]): AgentEvent[] {
+  const sorted = sortEvents(rows);
+  return sorted.length > MAX_AGENT_EVENTS ? sorted.slice(-MAX_AGENT_EVENTS) : sorted;
+}
+
+function upsertEvents(current: AgentEvent[], incoming: AgentEvent[]): AgentEvent[] {
+  const next = new Map(current.map((event) => [event.id, event]));
+  for (const event of incoming) {
+    next.set(event.id, event);
+  }
+  return limitEvents(Array.from(next.values()));
+}
+
+function removeEvents(current: AgentEvent[], removed: AgentEvent[]): AgentEvent[] {
+  const removedIds = new Set(removed.map((event) => event.id));
+  return limitEvents(current.filter((event) => !removedIds.has(event.id)));
+}
+
 function deriveLiveDraft(events: AgentEvent[]): LiveDraft | null {
   let activeEvent: AgentEvent | null = null;
 
@@ -153,6 +179,25 @@ function deriveLiveDraft(events: AgentEvent[]): LiveDraft | null {
   };
 }
 
+function deriveFallbackDraft(messages: ChatMessage[]): LiveDraft | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role === 'assistant') {
+      return null;
+    }
+
+    if (message.role === 'user') {
+      return {
+        stage: 'thinking',
+        label: 'KalamDB Copilot is preparing the reply',
+        preview: 'AI reply: waiting for live agent events...',
+      };
+    }
+  }
+
+  return null;
+}
+
 export function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [events, setEvents] = useState<AgentEvent[]>([]);
@@ -161,11 +206,56 @@ export function App() {
   const [status, setStatus] = useState<'connecting' | 'live' | 'error'>('connecting');
   const [error, setError] = useState<string | null>(null);
   const threadRef = useRef<HTMLDivElement | null>(null);
-  const liveDraft = deriveLiveDraft(events);
+  const liveDraft = deriveLiveDraft(events) ?? deriveFallbackDraft(messages);
 
   useEffect(() => {
     let active = true;
+    let bufferedEvents: AgentEvent[] = [];
     const unsubscribers: Array<() => Promise<void>> = [];
+
+    const publishEvents = (nextEvents: AgentEvent[]): void => {
+      bufferedEvents = nextEvents;
+      flushSync(() => {
+        setEvents(nextEvents);
+      });
+    };
+
+    const handleEventSubscription = (event: ServerMessage): void => {
+      if (!active) {
+        return;
+      }
+
+      if (event.type === MessageType.Error) {
+        setStatus('error');
+        setError(`Event subscription failed (${event.code}): ${event.message}`);
+        return;
+      }
+
+      if (event.type === MessageType.SubscriptionAck) {
+        return;
+      }
+
+      if (event.type === MessageType.InitialDataBatch) {
+        publishEvents(upsertEvents(bufferedEvents, (event.rows ?? []).map(toAgentEvent)));
+        return;
+      }
+
+      if (event.type !== MessageType.Change) {
+        return;
+      }
+
+      if (event.change_type === ChangeType.Delete) {
+        publishEvents(removeEvents(bufferedEvents, (event.old_values ?? []).map(toAgentEvent)));
+        return;
+      }
+
+      let nextEvents = bufferedEvents;
+      if (event.change_type === ChangeType.Update) {
+        nextEvents = removeEvents(nextEvents, (event.old_values ?? []).map(toAgentEvent));
+      }
+
+      publishEvents(upsertEvents(nextEvents, (event.rows ?? []).map(toAgentEvent)));
+    };
 
     const start = async (): Promise<void> => {
       try {
@@ -177,6 +267,10 @@ export function App() {
             }
           },
           {
+            // `last_rows` asks the server for a rewind window at subscribe time.
+            // `limit` keeps the materialized client-side live state bounded
+            // after that rewind and across later live changes.
+            limit: MAX_CHAT_MESSAGES,
             mapRow: toMessage,
             subscriptionOptions: { last_rows: MAX_CHAT_MESSAGES },
             onError: (event) => {
@@ -190,24 +284,12 @@ export function App() {
         );
         unsubscribers.push(messagesUnsubscribe);
 
-        const eventsUnsubscribe = await client.live(
+        // The draft rail keeps raw protocol frames so rapid typing bursts can
+        // be reconciled locally instead of waiting for a full live-row view.
+        const eventsUnsubscribe = await client.subscribeWithSql(
           EVENTS_SQL,
-          (nextEvents) => {
-            if (active) {
-              setEvents(sortEvents(nextEvents));
-            }
-          },
-          {
-            mapRow: toAgentEvent,
-            subscriptionOptions: { last_rows: MAX_AGENT_EVENTS },
-            onError: (event) => {
-              if (!active) {
-                return;
-              }
-              setStatus('error');
-              setError(`Event subscription failed (${event.code}): ${event.message}`);
-            },
-          },
+          handleEventSubscription,
+          { last_rows: MAX_AGENT_EVENTS },
         );
         unsubscribers.push(eventsUnsubscribe);
 

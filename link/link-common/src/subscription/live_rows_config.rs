@@ -4,6 +4,8 @@ pub struct LiveRowsConfig {
     /// Maximum number of rows to retain in the materialized result set.
     ///
     /// When set, the newest rows are kept and older rows are discarded.
+    /// This is distinct from startup rewind settings such as `last_rows` and
+    /// `batch_size`, which only affect the initial snapshot sent by the server.
     pub limit: Option<usize>,
     /// Column names that together identify a stable row.
     ///

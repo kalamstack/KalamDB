@@ -135,6 +135,20 @@ impl StreamLogStoreBackend {
             Self::File(store) => store.list_user_ids().map_err(map_stream_error),
         }
     }
+
+    fn flush_all(&self) -> Result<()> {
+        match self {
+            Self::Memory(_) => Ok(()),
+            Self::File(store) => store.flush_all().map_err(map_stream_error),
+        }
+    }
+
+    fn close_idle_segments(&self, max_idle: std::time::Duration) {
+        match self {
+            Self::Memory(_) => {},
+            Self::File(store) => store.close_idle_segments(max_idle),
+        }
+    }
 }
 
 fn map_stream_error(error: kalamdb_streams::StreamLogError) -> StorageError {
@@ -190,6 +204,16 @@ impl StreamTableStore {
         let mut rows = HashMap::new();
         rows.insert(key.clone(), entity.clone());
         self.log_store.append_rows(&self.table_id, key.user_id(), rows)
+    }
+
+    /// Flush all buffered segment writers to the OS page cache.
+    pub fn flush(&self) -> Result<()> {
+        self.log_store.flush_all()
+    }
+
+    /// Close segment writers that have been idle longer than `max_idle`.
+    pub fn close_idle_segments(&self, max_idle: std::time::Duration) {
+        self.log_store.close_idle_segments(max_idle)
     }
 
     /// Retrieve a row by key.

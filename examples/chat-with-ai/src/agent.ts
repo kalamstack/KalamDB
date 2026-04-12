@@ -10,8 +10,8 @@ const KALAMDB_URL = process.env.KALAMDB_URL ?? 'http://127.0.0.1:8080';
 const KALAMDB_USERNAME = process.env.KALAMDB_USERNAME ?? 'admin';
 const KALAMDB_PASSWORD = process.env.KALAMDB_PASSWORD ?? 'kalamdb123';
 const THINKING_DELAY_MS = 250;
-const STREAM_DELAY_MS = 80;
-const STREAM_CHUNK_SIZE = 18;
+const STREAM_DELAY_MS = 120;
+const STREAM_CHUNK_SIZE = 64;
 
 const TOPIC_NAME = 'chat_demo.ai_inbox';
 const CONSUMER_GROUP = process.env.KALAMDB_GROUP ?? 'chat-ai-agent';

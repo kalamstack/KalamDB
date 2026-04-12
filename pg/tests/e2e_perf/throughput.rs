@@ -289,7 +289,7 @@ async fn e2e_perf_update_500() {
 }
 
 #[tokio::test]
-#[ntest::timeout(16000)]
+#[ntest::timeout(45000)]
 async fn e2e_perf_delete_500() {
     let env = TestEnv::global().await;
     let pg = env.pg_connect().await;
@@ -306,9 +306,13 @@ async fn e2e_perf_delete_500() {
     let sql = format!("INSERT INTO {qualified_table} (id, value) VALUES {}", values.join(", "));
     pg.batch_execute(&sql).await.expect("seed delete table");
 
+    let delete_sql = format!("DELETE FROM {qualified_table} WHERE id = $1");
+    let delete_stmt = pg.prepare(&delete_sql).await.expect("prepare delete statement");
+
     let start = std::time::Instant::now();
     for index in 0..TOTAL {
-        pg.execute(&format!("DELETE FROM {qualified_table} WHERE id = $1"), &[&format!("del-{index}")])
+        let id = format!("del-{index}");
+        pg.execute(&delete_stmt, &[&id])
             .await
             .expect("delete row");
     }

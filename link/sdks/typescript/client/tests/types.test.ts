@@ -17,6 +17,7 @@ import {
   type SubscriptionOptions,
   type Unsubscribe,
   type LoginResponse,
+  type LiveRowsOptions,
 } from '../src/index';
 
 // Test: Constructor with Auth.basic
@@ -102,8 +103,19 @@ async function testMethods() {
     opts,
   );
 
+  const liveOpts: LiveRowsOptions<Record<string, unknown>> = {
+    limit: 50,
+    keyColumns: ['id'],
+  };
+  const unsub3 = await client.live(
+    'SELECT * FROM chat.messages',
+    () => {},
+    liveOpts,
+  );
+
   await unsub();
   await unsub2();
+  await unsub3();
 
   // Subscription management
   const count: number = client.getSubscriptionCount();

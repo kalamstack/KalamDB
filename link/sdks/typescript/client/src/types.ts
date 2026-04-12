@@ -172,9 +172,9 @@ export type ServerMessage =
  * the wire format expected by the underlying transport.
  */
 export interface SubscriptionOptions {
-  /** Hint for server-side batch sizing during initial data load. */
+  /** Hint for server-side batch sizing during the initial data load. */
   batch_size?: number;
-  /** Number of newest rows to fetch for the initial snapshot. */
+  /** Number of newest rows to rewind before live changes begin. */
   last_rows?: number;
   /** Resume from a specific sequence ID. */
   from?: WireSeqId;
@@ -301,6 +301,15 @@ export interface LiveRowsOptions<T> {
    */
   mapRow?: (row: import('./cell_value.js').RowData) => T;
   /**
+   * Maximum number of rows retained in the materialized live result set.
+   *
+   * This is separate from the subscription startup controls:
+   * - `subscriptionOptions.batch_size` chunks the initial server snapshot
+   * - `subscriptionOptions.last_rows` chooses how much history to rewind first
+   * - `limit` bounds the reconciled row set that the client keeps afterward
+   */
+  limit?: number;
+  /**
    * Column names that together identify a stable row in Rust-side materialization.
    *
    * Use this when your query does not expose a plain `id` column but does
@@ -320,7 +329,10 @@ export interface LiveRowsOptions<T> {
    */
   getKey?: (row: T) => string | null | undefined;
   /**
-   * Subscription-level options passed through to the server.
+    * Subscription startup options passed through to the server.
+    *
+    * These shape the initial subscribe / resume phase and do not cap the
+    * ongoing materialized row set after live changes begin.
    */
   subscriptionOptions?: SubscriptionOptions;
   /**

@@ -19,6 +19,9 @@ kalamdb-sharding = { path = "../kalamdb-sharding" }
 serde = { workspace = true }
 flexbuffers = { workspace = true }
 
+# Concurrent data structures
+dashmap = { workspace = true }
+
 # Time handling
 chrono = { workspace = true }
 

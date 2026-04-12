@@ -63,7 +63,9 @@ Set<int> _observedIds(Iterable<ChangeEvent> events) {
       InsertEvent(:final rows) => rows,
       UpdateEvent(:final rows) => rows,
       InitialDataBatch(:final rows) => rows,
-      AckEvent() || DeleteEvent() || SubscriptionError() =>
+      AckEvent() ||
+      DeleteEvent() ||
+      SubscriptionError() =>
         const <Map<String, KalamCellValue>>[],
     };
     for (final row in rows) {
@@ -329,6 +331,87 @@ void main() {
         }
       },
       timeout: const Timeout(Duration(seconds: 60)),
+    );
+
+    test(
+      'liveQueryRowsWithSql uses lastRows for rewind and limit for ongoing cap',
+      () async {
+        final baseId =
+            (DateTime.now().millisecondsSinceEpoch % 1000000) * 100 + 800;
+        final rewindIds = [baseId + 1, baseId + 2, baseId + 3];
+        final rewindIdSet = rewindIds.toSet();
+        final postSubscribeId = baseId + 4;
+        final snapshots = <List<Map<String, KalamCellValue>>>[];
+
+        final writer = await connectJwtClient();
+        StreamSubscription<List<Map<String, KalamCellValue>>>? sub;
+        try {
+          for (final id in rewindIds) {
+            await writer.query(
+              "INSERT INTO $tbl (id, body) VALUES ($id, 'rewind-$id')",
+            );
+          }
+
+          final stream =
+              client.liveQueryRowsWithSql<Map<String, KalamCellValue>>(
+            'SELECT id, body FROM $tbl WHERE id >= $baseId',
+            lastRows: 3,
+            limit: 2,
+          );
+          sub = stream.listen(snapshots.add);
+
+          await _waitForCondition(
+            () => snapshots.any((rows) => rows.length == 2),
+            reason: 'Timed out waiting for limited rewind snapshot',
+          );
+
+          final rewindSnapshot =
+              snapshots.firstWhere((rows) => rows.length == 2);
+          final rewindSnapshotIds = rewindSnapshot
+              .map((row) => row['id']?.asInt())
+              .whereType<int>()
+              .toSet();
+
+          expect(rewindSnapshotIds.length, 2,
+              reason: 'limit should cap the rewind snapshot to two rows');
+          expect(
+            rewindSnapshotIds.every(rewindIdSet.contains),
+            isTrue,
+            reason: 'initial rows should come from the lastRows rewind window',
+          );
+
+          await writer.query(
+            "INSERT INTO $tbl (id, body) VALUES ($postSubscribeId, 'live-$postSubscribeId')",
+          );
+
+          await _waitForCondition(
+            () => snapshots.any((rows) {
+              final ids = rows
+                  .map((row) => row['id']?.asInt())
+                  .whereType<int>()
+                  .toSet();
+              return rows.length == 2 && ids.contains(postSubscribeId);
+            }),
+            reason: 'Timed out waiting for limited live snapshot after insert',
+          );
+
+          final latest = snapshots.last;
+          final latestIds =
+              latest.map((row) => row['id']?.asInt()).whereType<int>().toSet();
+
+          expect(latest.length, 2,
+              reason: 'limit should keep the materialized live state bounded');
+          expect(latestIds, contains(postSubscribeId),
+              reason:
+                  'new live rows should still advance the bounded snapshot');
+        } finally {
+          if (sub != null) {
+            await _safeCancel(sub);
+          }
+          await writer.dispose();
+        }
+      },
+      timeout: const Timeout(Duration(seconds: 90)),
     );
 
     test(

@@ -416,8 +416,8 @@ class KalamClient {
   /// - [SubscriptionError] — server-side error
   ///
   /// Options:
-  /// - [batchSize] — hint for server-side batch sizing during initial load.
-  /// - [lastRows] — number of newest rows to fetch for initial data.
+  /// - [batchSize] — hint for server-side batch sizing during the initial load.
+  /// - [lastRows] — number of newest rows to rewind before live changes begin.
   /// - [from] — resume from a specific sequence ID (only changes
   ///   after this seq_id are sent). Typically used after reconnection.
   /// - [subscriptionId] — custom subscription ID (auto-generated if omitted).
@@ -484,9 +484,16 @@ class KalamClient {
   /// insert/update/delete reconciliation.
   ///
   /// The SQL must use the strict live-query shape: `SELECT ... FROM ... WHERE ...`.
-  /// Do not include `ORDER BY` or `LIMIT` here. If you need rewind, use
-  /// [lastRows]. If you need presentation ordering or capping, do that in Dart
-  /// after receiving the materialized row set.
+  /// Do not include `ORDER BY` or `LIMIT` here.
+  ///
+  /// The controls are intentionally separate:
+  /// - [batchSize] chunks the initial snapshot delivered by the server.
+  /// - [lastRows] chooses how much history to rewind before live changes begin.
+  /// - [limit] caps the materialized live row set that the SDK keeps after
+  ///   startup, including future inserts and updates.
+  ///
+  /// Keep using Dart-side sorting and grouping after rows arrive. Use [limit]
+  /// only when the materialized live state itself should stay bounded.
   Stream<List<T>> liveQueryRowsWithSql<T>(
     String sql, {
     int? batchSize,

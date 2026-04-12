@@ -38,6 +38,16 @@ Most UIs do not want `subscription_ack`, `initial_data_batch`, `change`, and `er
 - shared behavior with the Rust and Dart clients
 - simpler React, Vue, Svelte, and plain browser code
 
+Use `subscriptionOptions.last_rows` when you want an initial rewind from the
+server. Use `limit` when you want the client to keep the materialized live row
+set bounded over time.
+
+The knobs apply at different layers:
+
+- `subscriptionOptions.batch_size` chunks the initial snapshot from the server
+- `subscriptionOptions.last_rows` chooses how much history to rewind first
+- `limit` caps the materialized live row set the client keeps afterward
+
 Use `subscribeWithSql()` only when you need the raw event protocol.
 
 If your query does not expose an `id` column, prefer declarative `keyColumns`
@@ -104,6 +114,7 @@ const stop = await client.live(
     renderInbox(rows);
   },
   {
+    limit: 200,
     subscriptionOptions: { last_rows: 200 },
     onError: (event) => {
       console.error(event.code, event.message);
@@ -161,6 +172,7 @@ const stop = await client.live(
     }
   },
   {
+    limit: 200,
     subscriptionOptions: {
       last_rows: 200,
       ...(startFrom ? { from: startFrom } : {}),

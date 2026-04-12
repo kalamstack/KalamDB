@@ -254,7 +254,14 @@ Subscribe to any `SELECT` query. The returned `Stream<ChangeEvent>` emits the in
 
 Live SQL must stay within the strict supported shape: `SELECT ... FROM ... WHERE ...`.
 Do not use `ORDER BY` or `LIMIT` inside `subscribe()` or materialized live-query SQL.
-Use `lastRows` for rewind and apply ordering / capping in your app after rows arrive.
+
+The controls apply at different stages:
+
+- `batchSize` chunks the initial snapshot from the server.
+- `lastRows` rewinds N rows before live changes begin.
+- `limit` caps the materialized live row set the SDK keeps after startup.
+
+Keep presentation sorting and grouping in your app after rows arrive.
 
 The Dart SDK keeps this layer intentionally thin:
 
@@ -334,6 +341,7 @@ change events yourself:
 final rowsStream = client.liveQueryRowsWithSql<Map<String, KalamCellValue>>(
   "SELECT id, body FROM chat.messages WHERE room = 'main'",
   lastRows: 20,
+  limit: 20,
 );
 
 await for (final rows in rowsStream) {

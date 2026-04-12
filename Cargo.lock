@@ -4537,6 +4537,7 @@ name = "kalamdb-streams"
 version = "0.4.2-rc1"
 dependencies = [
  "chrono",
+ "dashmap 6.1.0",
  "datafusion",
  "flexbuffers",
  "kalamdb-commons",

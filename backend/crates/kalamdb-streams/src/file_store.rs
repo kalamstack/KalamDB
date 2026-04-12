@@ -5,26 +5,118 @@ use crate::store_trait::StreamLogStore;
 use crate::time_bucket::StreamTimeBucket;
 use crate::utils::{cleanup_empty_dir, parse_log_window, read_dirs, read_files};
 use chrono::{Datelike, TimeZone, Timelike, Utc};
+use dashmap::{DashMap, DashSet};
 use kalamdb_commons::ids::StreamTableRowId;
 use kalamdb_commons::models::{StreamTableRow, TableId, UserId};
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
-/// File-based stream log store.
-#[derive(Debug, Clone)]
+/// Write buffer capacity per segment file handle (256 KB).
+///
+/// Larger buffers amortise `write()` syscalls — with ~500-byte records a 256 KB
+/// buffer holds ~500 records before the OS sees a single `write()`.
+const SEGMENT_BUF_CAPACITY: usize = 256 * 1024;
+
+/// Cached state for an open segment file.
+struct SegmentWriter {
+    writer: BufWriter<File>,
+    record_count: u32,
+    last_write: Instant,
+}
+
+/// File-based stream log store with cached file handles and write buffering.
+///
+/// Optimised for high-throughput concurrent writes:
+///
+/// * **Cached file handles** — open segment files are kept in a sharded
+///   `DashMap`, eliminating open / close syscall overhead per write.
+/// * **Sharded write buffers** — each segment has its own 256 KB `BufWriter`,
+///   reducing flush frequency while enabling per-user parallelism.
+/// * **Directory cache** — avoids repeated `create_dir_all` syscalls.
+/// * **Batch writes** — multiple records targeting the same segment share a
+///   single lock acquisition.
 pub struct FileStreamLogStore {
     config: StreamLogConfig,
+    /// Cached open segment writers keyed by log-file path.
+    segments: DashMap<PathBuf, Arc<Mutex<SegmentWriter>>>,
+    /// Parent directories that have already been created.
+    created_dirs: DashSet<PathBuf>,
+}
+
+impl fmt::Debug for FileStreamLogStore {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FileStreamLogStore")
+            .field("config", &self.config)
+            .field("open_segments", &self.segments.len())
+            .field("cached_dirs", &self.created_dirs.len())
+            .finish()
+    }
 }
 
 impl FileStreamLogStore {
     pub fn new(config: StreamLogConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            segments: DashMap::new(),
+            created_dirs: DashSet::new(),
+        }
     }
 
     pub fn table_id(&self) -> &TableId {
         &self.config.table_id
+    }
+
+    // ── Lifecycle / maintenance ──────────────────────────────────────
+
+    /// Flush all open segment writers to the OS page cache.
+    ///
+    /// This does **not** call `fsync` — stream tables are ephemeral and the
+    /// kernel will write-back dirty pages asynchronously.
+    pub fn flush_all(&self) -> Result<()> {
+        let mut last_err: Option<StreamLogError> = None;
+        for entry in self.segments.iter() {
+            if let Ok(mut g) = entry.value().lock() {
+                if let Err(e) = g.writer.flush() {
+                    last_err = Some(StreamLogError::Io(e.to_string()));
+                }
+            }
+        }
+        match last_err {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+
+    /// Close segment writers that have been idle longer than `max_idle`.
+    ///
+    /// Writers are flushed before being dropped so buffered data is not lost.
+    pub fn close_idle_segments(&self, max_idle: std::time::Duration) {
+        let now = Instant::now();
+        let mut to_remove: Vec<PathBuf> = Vec::new();
+        for entry in self.segments.iter() {
+            if let Ok(g) = entry.value().lock() {
+                if now.duration_since(g.last_write) > max_idle {
+                    to_remove.push(entry.key().clone());
+                }
+            }
+        }
+        for path in to_remove {
+            if let Some((_, writer)) = self.segments.remove(&path) {
+                if let Ok(mut g) = writer.lock() {
+                    let _ = g.writer.flush();
+                }
+            }
+        }
+    }
+
+    /// Number of currently cached segment file handles.
+    pub fn open_segment_count(&self) -> usize {
+        self.segments.len()
     }
 
     pub fn append_delete(
@@ -63,8 +155,16 @@ impl FileStreamLogStore {
                         if let Some(window_start) = parse_log_window(&log_file) {
                             let window_end =
                                 window_start.saturating_add(self.config.bucket.duration_ms());
-                            if window_end < before_time && fs::remove_file(&log_file).is_ok() {
-                                deleted += 1;
+                            if window_end < before_time {
+                                // Flush and drop the cached writer before deleting from disk.
+                                if let Some((_, writer)) = self.segments.remove(&log_file) {
+                                    if let Ok(mut g) = writer.lock() {
+                                        let _ = g.writer.flush();
+                                    }
+                                }
+                                if fs::remove_file(&log_file).is_ok() {
+                                    deleted += 1;
+                                }
                             }
                         }
                     }
@@ -200,27 +300,83 @@ impl FileStreamLogStore {
         user_dir.join(format!("{}.log", window_start_ms))
     }
 
-    fn append_record(&self, path: &Path, record: StreamLogRecord) -> Result<()> {
+    /// Ensure the parent directory of `path` exists, using the dir cache to
+    /// skip redundant `create_dir_all` calls.
+    fn ensure_parent_dir(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|e| StreamLogError::Io(e.to_string()))?;
+            if !self.created_dirs.contains(parent) {
+                fs::create_dir_all(parent).map_err(|e| StreamLogError::Io(e.to_string()))?;
+                self.created_dirs.insert(parent.to_path_buf());
+            }
+        }
+        Ok(())
+    }
+
+    /// Return a cached writer for `path`, creating it (and its parent dirs) on
+    /// first access.
+    fn get_or_create_writer(&self, path: &Path) -> Result<Arc<Mutex<SegmentWriter>>> {
+        // Fast path: already cached.
+        if let Some(entry) = self.segments.get(path) {
+            return Ok(Arc::clone(entry.value()));
         }
 
-        let mut file = BufWriter::new(
-            OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-                .map_err(|e| StreamLogError::Io(e.to_string()))?,
-        );
+        // Slow path: open the file and insert into the cache.
+        self.ensure_parent_dir(path)?;
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .map_err(|e| StreamLogError::Io(e.to_string()))?;
+        let writer = Arc::new(Mutex::new(SegmentWriter {
+            writer: BufWriter::with_capacity(SEGMENT_BUF_CAPACITY, file),
+            record_count: 0,
+            last_write: Instant::now(),
+        }));
 
-        let payload = flexbuffers::to_vec(&record)
+        // Use `entry` API so a concurrent creation by another thread is
+        // handled correctly — whichever was inserted first wins.
+        Ok(self
+            .segments
+            .entry(path.to_path_buf())
+            .or_insert(writer)
+            .value()
+            .clone())
+    }
+
+    /// Serialise `record` and write the length-prefixed frame to `writer`.
+    #[inline]
+    fn write_record_bytes(writer: &mut BufWriter<File>, record: &StreamLogRecord) -> Result<()> {
+        let payload = flexbuffers::to_vec(record)
             .map_err(|e| StreamLogError::Serialization(e.to_string()))?;
         let len = payload.len() as u32;
-        file.write_all(&len.to_le_bytes())
+        writer
+            .write_all(&len.to_le_bytes())
             .map_err(|e| StreamLogError::Io(e.to_string()))?;
-        file.write_all(&payload).map_err(|e| StreamLogError::Io(e.to_string()))?;
-        file.flush().map_err(|e| StreamLogError::Io(e.to_string()))?;
+        writer
+            .write_all(&payload)
+            .map_err(|e| StreamLogError::Io(e.to_string()))?;
         Ok(())
+    }
+
+    fn append_record(&self, path: &Path, record: StreamLogRecord) -> Result<()> {
+        let seg = self.get_or_create_writer(path)?;
+        let mut guard = seg
+            .lock()
+            .map_err(|e| StreamLogError::Io(format!("segment lock poisoned: {}", e)))?;
+        Self::write_record_bytes(&mut guard.writer, &record)?;
+        guard.record_count += 1;
+        guard.last_write = Instant::now();
+        Ok(())
+    }
+
+    /// Flush the writer for a specific segment path (if cached) so that
+    /// subsequent disk reads see all buffered data.
+    fn flush_segment(&self, path: &Path) {
+        if let Some(entry) = self.segments.get(path) {
+            if let Ok(mut g) = entry.value().lock() {
+                let _ = g.writer.flush();
+            }
+        }
     }
 
     fn read_records(path: &Path) -> Result<Vec<StreamLogRecord>> {
@@ -297,8 +453,9 @@ impl FileStreamLogStore {
         let mut results: Vec<(StreamTableRowId, StreamTableRow)> = Vec::new();
         let mut deleted: HashSet<i64> = HashSet::new();
 
-        for (_window_start, path) in entries {
-            let records = Self::read_records(&path)?;
+        for (_window_start, path) in &entries {
+            self.flush_segment(path);
+            let records = Self::read_records(path)?;
             for record in records {
                 match record {
                     StreamLogRecord::Put { row_id, row } => {
@@ -338,8 +495,9 @@ impl FileStreamLogStore {
         let mut results: Vec<(StreamTableRowId, StreamTableRow)> = Vec::new();
         let mut deleted: HashSet<i64> = HashSet::new();
 
-        for (_window_start, path) in entries {
-            let records = Self::read_records(&path)?;
+        for (_window_start, path) in &entries {
+            self.flush_segment(path);
+            let records = Self::read_records(path)?;
             for record in records.into_iter().rev() {
                 match record {
                     StreamLogRecord::Put { row_id, row } => {
@@ -371,12 +529,31 @@ impl StreamLogStore for FileStreamLogStore {
         rows: HashMap<StreamTableRowId, StreamTableRow>,
     ) -> Result<()> {
         self.ensure_table(table_id)?;
+
+        // Group records by target segment so each file handle is locked once.
+        let mut by_segment: HashMap<PathBuf, Vec<StreamLogRecord>> = HashMap::new();
         for (row_id, row) in rows {
             let ts = row_id.seq().timestamp_millis();
             let window_start = self.window_start_ms(ts);
             let path = self.log_path(user_id, window_start);
-            self.append_record(&path, StreamLogRecord::Put { row_id, row })?;
+            by_segment
+                .entry(path)
+                .or_default()
+                .push(StreamLogRecord::Put { row_id, row });
         }
+
+        for (path, records) in by_segment {
+            let seg = self.get_or_create_writer(&path)?;
+            let mut guard = seg
+                .lock()
+                .map_err(|e| StreamLogError::Io(format!("segment lock poisoned: {}", e)))?;
+            for record in &records {
+                Self::write_record_bytes(&mut guard.writer, record)?;
+            }
+            guard.record_count += records.len() as u32;
+            guard.last_write = Instant::now();
+        }
+
         Ok(())
     }
 
@@ -407,6 +584,13 @@ impl StreamLogStore for FileStreamLogStore {
     fn delete_old_logs(&self, before_time: u64) -> Result<()> {
         let _ = self.delete_old_logs_with_count(before_time)?;
         Ok(())
+    }
+}
+
+impl Drop for FileStreamLogStore {
+    fn drop(&mut self) {
+        // Best-effort flush of all open segment writers on shutdown.
+        let _ = self.flush_all();
     }
 }
 
@@ -566,6 +750,101 @@ mod tests {
         let old_bucket_dir = base_dir.join(old_bucket);
         assert!(!old_bucket_dir.exists(), "expected old bucket directory to be removed");
         assert!(base_dir.exists(), "expected base dir to remain");
+
+        let _ = fs::remove_dir_all(&base_dir);
+    }
+
+    #[test]
+    fn test_concurrent_writes_from_multiple_users() {
+        let base_dir = temp_base_dir("kalamdb_streams_concurrent");
+        let table_id = TableId::new(NamespaceId::new("test_ns"), TableName::new("events"));
+        let store = std::sync::Arc::new(FileStreamLogStore::new(StreamLogConfig {
+            base_dir: base_dir.clone(),
+            shard_router: ShardRouter::new(4, 1),
+            bucket: StreamTimeBucket::Hour,
+            table_id: table_id.clone(),
+        }));
+
+        let num_users: usize = 50;
+        let writes_per_user: usize = 100;
+        let mut handles = Vec::new();
+
+        for i in 0..num_users {
+            let store = std::sync::Arc::clone(&store);
+            let tid = table_id.clone();
+            handles.push(std::thread::spawn(move || {
+                let user_id = UserId::new(format!("user-{}", i));
+                for j in 0..writes_per_user {
+                    let seq = SeqId::new((i * 10000 + j + 1) as i64);
+                    let row_id = StreamTableRowId::new(user_id.clone(), seq);
+                    let row = build_row(&user_id, seq);
+                    let mut rows = HashMap::new();
+                    rows.insert(row_id, row);
+                    store.append_rows(&tid, &user_id, rows).unwrap();
+                }
+            }));
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        // Flush before reading so buffered data is visible on disk.
+        store.flush_all().unwrap();
+
+        for i in 0..num_users {
+            let user_id = UserId::new(format!("user-{}", i));
+            let rows = store
+                .read_with_limit(&table_id, &user_id, writes_per_user + 1)
+                .unwrap();
+            assert_eq!(
+                rows.len(),
+                writes_per_user,
+                "user-{} should have {} rows, got {}",
+                i,
+                writes_per_user,
+                rows.len()
+            );
+        }
+
+        assert!(store.open_segment_count() > 0);
+        let _ = fs::remove_dir_all(&base_dir);
+    }
+
+    #[test]
+    fn test_flush_all_and_close_idle() {
+        let base_dir = temp_base_dir("kalamdb_streams_flush");
+        let table_id = TableId::new(NamespaceId::new("test_ns"), TableName::new("events"));
+        let store = FileStreamLogStore::new(StreamLogConfig {
+            base_dir: base_dir.clone(),
+            shard_router: ShardRouter::new(4, 1),
+            bucket: StreamTimeBucket::Hour,
+            table_id: table_id.clone(),
+        });
+
+        let user_id = UserId::new("user-flush");
+        let seq = SeqId::new(42);
+        let row_id = StreamTableRowId::new(user_id.clone(), seq);
+        let row = build_row(&user_id, seq);
+        let mut rows = HashMap::new();
+        rows.insert(row_id, row);
+        store.append_rows(&table_id, &user_id, rows).unwrap();
+
+        assert_eq!(store.open_segment_count(), 1);
+        store.flush_all().unwrap();
+
+        // After flush, segment is still open (not idle yet).
+        assert_eq!(store.open_segment_count(), 1);
+
+        // Closing with zero idle time should close all segments.
+        store.close_idle_segments(std::time::Duration::ZERO);
+        assert_eq!(store.open_segment_count(), 0);
+
+        // Data should still be readable from disk.
+        let read = store
+            .read_with_limit(&table_id, &user_id, 10)
+            .unwrap();
+        assert_eq!(read.len(), 1);
 
         let _ = fs::remove_dir_all(&base_dir);
     }
