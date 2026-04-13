@@ -208,14 +208,14 @@ export function JobList({ initialFilters, compact = false, onJobClick }: JobList
               <div className="space-y-1">
                 <label className="text-sm font-medium">Status</label>
                 <Select
-                  value={draftFilters.status || ''}
-                  onValueChange={(value) => setDraftFilters({ ...draftFilters, status: value || undefined })}
+                  value={draftFilters.status || 'all'}
+                  onValueChange={(value) => setDraftFilters({ ...draftFilters, status: value === 'all' ? undefined : value })}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="All statuses" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All</SelectItem>
+                    <SelectItem value="all">All</SelectItem>
                     <SelectItem value="New">New</SelectItem>
                     <SelectItem value="Queued">Queued</SelectItem>
                     <SelectItem value="Running">Running</SelectItem>
