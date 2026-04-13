@@ -83,7 +83,7 @@ for i in $(seq 1 15); do
 done
 
 echo ""
-echo "Bootstrapping KalamDB namespace 'rmtest' and table 'profiles' ..."
+echo "Bootstrapping KalamDB namespace 'rmtest' ..."
 
 LOGIN_RESP=$(curl -sf "$KALAMDB_API_URL/v1/api/auth/login" \
     -H "Content-Type: application/json" \
@@ -114,17 +114,7 @@ curl -s "$KALAMDB_API_URL/v1/api/sql" \
     -H "Content-Type: application/json" \
     -d '{"sql": "CREATE NAMESPACE IF NOT EXISTS rmtest"}' > /dev/null
 
-curl -s "$KALAMDB_API_URL/v1/api/sql" \
-    -H "Authorization: Bearer $BEARER_TOKEN" \
-    -H "Content-Type: application/json" \
-    -d '{"sql": "CREATE USER TABLE IF NOT EXISTS rmtest.profiles (id TEXT PRIMARY KEY, name TEXT, age INTEGER)"}' > /dev/null
-
-curl -s "$KALAMDB_API_URL/v1/api/sql" \
-    -H "Authorization: Bearer $BEARER_TOKEN" \
-    -H "Content-Type: application/json" \
-    -d '{"sql": "CREATE SHARED TABLE IF NOT EXISTS rmtest.shared_items (id TEXT PRIMARY KEY, title TEXT, value INTEGER)"}' > /dev/null
-
-echo "KalamDB tables bootstrapped (rmtest.profiles, rmtest.shared_items)."
+echo "KalamDB namespace bootstrapped (rmtest)."
 
 echo "Waiting for PostgreSQL to be ready..."
 for i in $(seq 1 30); do
