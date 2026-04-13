@@ -131,11 +131,18 @@ stop_pg() {
 install_extension() {
     info "Building and installing pg_kalam extension..."
     cd "$PG_CRATE"
-    cargo pgrx install \
+
+    # Ensure config.toml exists (cargo pgrx install requires it even with --pg-config)
+    local config_toml="$PGRX_HOME/config.toml"
+    if [[ ! -f "$config_toml" ]]; then
+        info "Creating pgrx config.toml (pg${PG_MAJOR} → $PG_CONFIG)..."
+        printf '[configs]\npg%s = "%s"\n' "$PG_MAJOR" "$PG_CONFIG" > "$config_toml"
+    fi
+
+    RUST_BACKTRACE=1 cargo pgrx install \
         --pg-config="$PG_CONFIG" \
         --no-default-features \
-        -F "$PG_EXTENSION_FLAVOR" \
-        2>&1 | tail -3
+        -F "$PG_EXTENSION_FLAVOR"
     info "Extension installed"
 }
 

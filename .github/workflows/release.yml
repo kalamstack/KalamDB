@@ -1236,6 +1236,7 @@ jobs:
         with:
           path: |
             ~/.pgrx/${{ env.PG_EXTENSION_MAJOR }}.*
+            ~/.pgrx/config.toml
           key: ${{ runner.os }}-pgrx-install-${{ env.PGRX_VERSION }}-pg${{ env.PG_EXTENSION_MAJOR }}
 
       - name: Install cargo-nextest and cargo-pgrx
