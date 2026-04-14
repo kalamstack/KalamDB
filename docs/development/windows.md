@@ -33,7 +33,7 @@ clang --version
 cargo --version
 
 # 5. Clone and build
-git clone https://github.com/jamals86/KalamDB.git
+git clone https://github.com/kalamstack/KalamDB.git
 cd KalamDB\backend
 cargo build
 
@@ -199,7 +199,7 @@ winget install --id Git.Git -e --source winget
 
 ```powershell
 # Clone the repository
-git clone https://github.com/jamals86/KalamDB.git
+git clone https://github.com/kalamstack/KalamDB.git
 cd KalamDB\backend
 
 # First build (takes 15-30 minutes on Windows - compiles RocksDB, Arrow, Parquet)

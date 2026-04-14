@@ -44,7 +44,7 @@ RUN apt-get update && \
 ARG OCI_IMAGE_TITLE="KalamDB"
 ARG OCI_IMAGE_DESCRIPTION="SQL-first realtime state database for AI agents, chat products, and multi-tenant SaaS"
 ARG OCI_IMAGE_URL="https://kalamdb.org"
-ARG OCI_IMAGE_SOURCE="https://github.com/jamals86/KalamDB"
+ARG OCI_IMAGE_SOURCE="https://github.com/kalamstack/KalamDB"
 ARG OCI_IMAGE_DOCUMENTATION="https://kalamdb.org/docs"
 ARG OCI_IMAGE_VENDOR="KalamDB"
 ARG OCI_IMAGE_AUTHORS="Jamal Saad"

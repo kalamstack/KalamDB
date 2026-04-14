@@ -1,17 +1,17 @@
 {
   "name": "@kalamdb/client",
   "type": "module",
-  "version": "0.4.2-rc.2",
+  "version": "0.4.2-rc.2.1",
   "description": "WebAssembly-compatible KalamDB client library with TypeScript support",
   "license": "Apache-2.0",
   "author": "KalamDB Team",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jamals86/KalamDB"
+    "url": "https://github.com/kalamstack/KalamDB"
   },
-  "homepage": "https://github.com/jamals86/KalamDB#readme",
+  "homepage": "https://github.com/kalamstack/KalamDB#readme",
   "bugs": {
-    "url": "https://github.com/jamals86/KalamDB/issues"
+    "url": "https://github.com/kalamstack/KalamDB/issues"
   },
   "main": "dist/src/index.js",
   "module": "dist/src/index.js",

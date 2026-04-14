@@ -331,7 +331,7 @@ RUST_BACKTRACE=1 cargo build -vv
 ### Get Help
 
 1. Check [Full Troubleshooting Guide](DEVELOPMENT_SETUP.md#troubleshooting)
-2. Search [GitHub Issues](https://github.com/jamals86/KalamDB/issues)
+2. Search [GitHub Issues](https://github.com/kalamstack/KalamDB/issues)
 3. Open a new issue with:
    - Your OS and version
    - Rust version (`rustc --version`)

@@ -120,3 +120,4 @@ ts-sdk-repro/server.toml
 /target-pg-e2e-isolated
 /benchv2/logs
 /benchv2/logs
+link/sdks/typescript/client/.npmrc

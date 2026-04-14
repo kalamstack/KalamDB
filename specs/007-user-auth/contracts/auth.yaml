@@ -14,7 +14,7 @@ info:
   version: 1.0.0
   contact:
     name: KalamDB Team
-    url: https://github.com/jamals86/KalamDB
+    url: https://github.com/kalamstack/KalamDB
 
 servers:
   - url: http://localhost:3000

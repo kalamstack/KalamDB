@@ -491,7 +491,7 @@ kalam --csv
 ## Support
 
 For issues, questions, or contributions:
-- GitHub: [github.com/jamals86/KalamDB](https://github.com/jamals86/KalamDB)
+- GitHub: [github.com/kalamstack/KalamDB](https://github.com/kalamstack/KalamDB)
 - Documentation: [docs/README.md](../README.md)
 
 ---

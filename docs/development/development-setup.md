@@ -142,7 +142,7 @@ $env:LIBCLANG_PATH
 
 ```powershell
 # Clone the repository
-git clone https://github.com/jamals86/KalamDB.git
+git clone https://github.com/kalamstack/KalamDB.git
 cd KalamDB\backend
 
 # Build the project (first build will take 10-20 minutes)
@@ -226,7 +226,7 @@ brew install pkg-config
 
 ```bash
 # Clone the repository
-git clone https://github.com/jamals86/KalamDB.git
+git clone https://github.com/kalamstack/KalamDB.git
 cd KalamDB/backend
 
 # Build the project (first build will take 10-20 minutes)
@@ -282,7 +282,7 @@ cargo --version
 
 ```bash
 # Clone the repository
-git clone https://github.com/jamals86/KalamDB.git
+git clone https://github.com/kalamstack/KalamDB.git
 cd KalamDB/backend
 
 # Build the project (first build will take 10-20 minutes)
@@ -330,7 +330,7 @@ cargo --version
 
 ```bash
 # Clone the repository
-git clone https://github.com/jamals86/KalamDB.git
+git clone https://github.com/kalamstack/KalamDB.git
 cd KalamDB/backend
 
 # Build the project
@@ -374,7 +374,7 @@ cargo --version
 
 ```bash
 # Clone the repository
-git clone https://github.com/jamals86/KalamDB.git
+git clone https://github.com/kalamstack/KalamDB.git
 cd KalamDB/backend
 
 # Build the project
@@ -692,7 +692,7 @@ If you encounter issues not covered here:
   - [macOS Setup Guide](macos.md#troubleshooting)
   - [Linux Setup Guide](linux.md#troubleshooting)
   - [Windows Setup Guide](windows.md#troubleshooting)
-2. **Check GitHub Issues**: [KalamDB Issues](https://github.com/jamals86/KalamDB/issues)
+2. **Check GitHub Issues**: [KalamDB Issues](https://github.com/kalamstack/KalamDB/issues)
 3. **Search Rust Forums**: Many dependency issues are common across Rust projects
 4. **Enable Verbose Output**: `cargo build -vv` for detailed error messages
 5. **Check Dependencies**: Ensure all system dependencies are installed
