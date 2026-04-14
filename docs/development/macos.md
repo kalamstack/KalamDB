@@ -31,7 +31,7 @@ echo 'export DYLD_FALLBACK_LIBRARY_PATH="/Applications/Xcode.app/Contents/Develo
 source ~/.zshrc
 
 # 5. Clone and build
-git clone https://github.com/jamals86/KalamDB.git
+git clone https://github.com/kalamstack/KalamDB.git
 cd KalamDB/backend
 cargo build
 ```
@@ -187,7 +187,7 @@ brew install openssl@3
 
 ```bash
 # Clone the repository
-git clone https://github.com/jamals86/KalamDB.git
+git clone https://github.com/kalamstack/KalamDB.git
 cd KalamDB/backend
 
 # First build (takes 10-20 minutes - compiles RocksDB, Arrow, Parquet)

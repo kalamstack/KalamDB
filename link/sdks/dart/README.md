@@ -8,7 +8,7 @@ KalamDB is a SQL-first realtime database. The current Dart SDK focuses on the ap
 
 Topic consumer / ACK worker APIs and initial server bootstrap flows are intentionally outside the Dart SDK surface.
 
-→ **[kalamdb.org](https://kalamdb.org)** · [Docs](https://kalamdb.org/docs) · [Dart setup](https://kalamdb.org/docs/sdk/dart/setup) · [Authentication](https://kalamdb.org/docs/sdk/dart/auth) · [Auth-aware client](https://kalamdb.org/docs/sdk/dart/auth-aware-client) · [Subscriptions](https://kalamdb.org/docs/sdk/dart/subscriptions) · [GitHub](https://github.com/jamals86/KalamDB)
+→ **[kalamdb.org](https://kalamdb.org)** · [Docs](https://kalamdb.org/docs) · [Dart setup](https://kalamdb.org/docs/sdk/dart/setup) · [Authentication](https://kalamdb.org/docs/sdk/dart/auth) · [Auth-aware client](https://kalamdb.org/docs/sdk/dart/auth-aware-client) · [Subscriptions](https://kalamdb.org/docs/sdk/dart/subscriptions) · [GitHub](https://github.com/kalamstack/KalamDB)
 
 ## Features
 
@@ -42,7 +42,7 @@ Before using the Dart SDK, you need a running KalamDB server.
 The quickest local setup is the maintained Docker Compose flow:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/jamals86/KalamDB/main/docker/run/single/docker-compose.yml -o docker-compose.yml
+curl -sSL https://raw.githubusercontent.com/kalamstack/KalamDB/main/docker/run/single/docker-compose.yml -o docker-compose.yml
 KALAMDB_JWT_SECRET="$(openssl rand -base64 32)" docker compose up -d
 ```
 
@@ -526,7 +526,7 @@ Apache-2.0
 - WebSocket protocol: [https://kalamdb.org/docs/api/websocket-protocol](https://kalamdb.org/docs/api/websocket-protocol)
 - Live query architecture: [https://kalamdb.org/docs/architecture/live-query](https://kalamdb.org/docs/architecture/live-query)
 - Getting started auth: [https://kalamdb.org/docs/getting-started/authentication](https://kalamdb.org/docs/getting-started/authentication)
-- GitHub: [https://github.com/jamals86/KalamDB](https://github.com/jamals86/KalamDB)
+- GitHub: [https://github.com/kalamstack/KalamDB](https://github.com/kalamstack/KalamDB)
 
 ---
 

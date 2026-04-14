@@ -3,7 +3,7 @@ Pod::Spec.new do |s|
   s.version          = '0.1.3'
   s.summary          = 'KalamDB client SDK – iOS native (flutter_rust_bridge).'
   s.description      = 'Pre-built static library for the kalam_link Flutter plugin.'
-  s.homepage         = 'https://github.com/jamals86/KalamDB'
+  s.homepage         = 'https://github.com/kalamstack/KalamDB'
   s.license          = { :type => 'MIT', :file => '../LICENSE' }
   s.author           = { 'KalamDB' => 'info@kalamdb.com' }
   s.source           = { :path => '.' }

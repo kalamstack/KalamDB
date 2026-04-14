@@ -26,7 +26,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source $HOME/.cargo/env
 
 # 3. Clone and build
-git clone https://github.com/jamals86/KalamDB.git
+git clone https://github.com/kalamstack/KalamDB.git
 cd KalamDB/backend
 cargo build
 ```
@@ -43,7 +43,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source $HOME/.cargo/env
 
 # 3. Clone and build
-git clone https://github.com/jamals86/KalamDB.git
+git clone https://github.com/kalamstack/KalamDB.git
 cd KalamDB/backend
 cargo build
 ```
@@ -60,7 +60,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source $HOME/.cargo/env
 
 # 3. Clone and build
-git clone https://github.com/jamals86/KalamDB.git
+git clone https://github.com/kalamstack/KalamDB.git
 cd KalamDB/backend
 cargo build
 ```
@@ -77,7 +77,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source $HOME/.cargo/env
 
 # 3. Clone and build
-git clone https://github.com/jamals86/KalamDB.git
+git clone https://github.com/kalamstack/KalamDB.git
 cd KalamDB/backend
 cargo build
 ```
@@ -273,7 +273,7 @@ export CARGO_BUILD_JOBS=4
 
 ```bash
 # Clone the repository
-git clone https://github.com/jamals86/KalamDB.git
+git clone https://github.com/kalamstack/KalamDB.git
 cd KalamDB/backend
 
 # First build (takes 10-20 minutes - compiles RocksDB, Arrow, Parquet)
@@ -457,7 +457,7 @@ sudo chown -R $USER:$USER ~/KalamDB
 # Or reclone without sudo
 cd ~
 rm -rf KalamDB
-git clone https://github.com/jamals86/KalamDB.git
+git clone https://github.com/kalamstack/KalamDB.git
 ```
 
 ---

@@ -11,7 +11,7 @@ This guide helps you get started with the schema consolidation codebase, underst
 ## Prerequisites
 
 - Rust 1.90+ installed (`rustup update stable`)
-- Git repository cloned: `git clone https://github.com/jamals86/KalamDB.git`
+- Git repository cloned: `git clone https://github.com/kalamstack/KalamDB.git`
 - Familiarity with:
   - Rust 2021 edition
   - Apache Arrow & DataFusion

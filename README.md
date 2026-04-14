@@ -5,9 +5,9 @@
 <p align="center">
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-1.92%2B-orange.svg" alt="Rust" /></a>
   <a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License" /></a>
-  <a href="https://github.com/jamals86/KalamDB/actions/workflows/ci.yml"><img src="https://github.com/jamals86/KalamDB/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <a href="https://github.com/jamals86/KalamDB/actions/workflows/ci.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jamals86/KalamDB/main/.github/badges/tests.json" alt="Overall Tests" /></a>
-  <a href="https://github.com/jamals86/KalamDB/releases"><img src="https://img.shields.io/github/v/release/jamals86/KalamDB?display_name=tag" alt="Release" /></a>
+  <a href="https://github.com/kalamstack/KalamDB/actions/workflows/ci.yml"><img src="https://github.com/kalamstack/KalamDB/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/kalamstack/KalamDB/actions/workflows/ci.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/kalamstack/KalamDB/main/.github/badges/tests.json" alt="Overall Tests" /></a>
+  <a href="https://github.com/kalamstack/KalamDB/releases"><img src="https://img.shields.io/github/v/release/kalamstack/KalamDB?display_name=tag" alt="Release" /></a>
   <a href="https://hub.docker.com/r/jamals86/kalamdb"><img src="https://img.shields.io/docker/pulls/jamals86/kalamdb" alt="Docker Pulls" /></a>
   <a href="https://hub.docker.com/r/jamals86/pg-kalam"><img src="https://img.shields.io/docker/pulls/jamals86/pg-kalam?label=pg-kalam%20docker" alt="pg-kalam Docker Pulls" /></a>
 </p>
@@ -15,8 +15,8 @@
 <p align="center"><strong>SDKs</strong></p>
 
 <p align="center">
-  <a href="https://github.com/jamals86/KalamDB/actions/workflows/sdks.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jamals86/KalamDB/main/.github/badges/sdk-typescript-tests.json" alt="TypeScript SDK Tests" /></a>
-  <a href="https://github.com/jamals86/KalamDB/actions/workflows/sdks.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jamals86/KalamDB/main/.github/badges/sdk-dart-tests.json" alt="Dart SDK Tests" /></a>
+  <a href="https://github.com/kalamstack/KalamDB/actions/workflows/sdks.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/kalamstack/KalamDB/main/.github/badges/sdk-typescript-tests.json" alt="TypeScript SDK Tests" /></a>
+  <a href="https://github.com/kalamstack/KalamDB/actions/workflows/sdks.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/kalamstack/KalamDB/main/.github/badges/sdk-dart-tests.json" alt="Dart SDK Tests" /></a>
   <a href="https://www.npmjs.com/package/@kalamdb/client"><img src="https://img.shields.io/npm/v/%40kalamdb%2Fclient?label=typescript%20sdk" alt="TypeScript SDK" /></a>
   <a href="https://pub.dev/packages/kalam_link"><img src="https://img.shields.io/pub/v/kalam_link?label=dart%20sdk" alt="Dart SDK" /></a>
 </p>
@@ -54,15 +54,6 @@ This is what lets chat UIs and agent apps read/write state directly and receive 
 
 ## Feature & Status
 
-- **User Tables**: First-class `USER` tables provide per-user isolation so the same SQL can safely serve frontend and backend clients.
-- **Shared Tables and SQL Storage**: Standard SQL tables support application state, relational data modeling, and transactional reads and writes.
-- **Streams and Pub/Sub**: Built-in topics, consumer groups, `CONSUME`, and `ACK` support event-driven backends and AI agent workflows.
-- **Live Queries**: WebSocket-backed subscriptions keep clients synchronized in realtime without polling.
-- **Cluster Replication**: Multi-Raft clustering enables multi-node deployments, failover, and replicated state.
-- **Vector Workloads**: Native `EMBEDDING(dimension)` support enables vector storage and semantic retrieval workflows.
-- **PostgreSQL Extension**: `pg_kalam` integrates PostgreSQL with a running KalamDB instance through the bundled FDW.
-- **Admin and Developer Tooling**: KalamDB ships with an Admin UI, the `kalam` CLI, and official TypeScript and Dart SDKs.
-
 | Feature                     | Status       | Feature                 | Status       |
 | :-------------------------- | :----------- | :---------------------- | :----------- |
 | **User Tables**             | ✅ Available | **Shared Tables**       | ✅ Available |
@@ -79,20 +70,20 @@ This is what lets chat UIs and agent apps read/write state directly and receive 
 
 ```bash
 KALAMDB_JWT_SECRET="$(openssl rand -base64 32)" \
-curl -sSL https://raw.githubusercontent.com/jamals86/KalamDB/main/docker/run/single/docker-compose.yml | docker-compose -f - up -d
+curl -sSL https://raw.githubusercontent.com/kalamstack/KalamDB/main/docker/run/single/docker-compose.yml | docker-compose -f - up -d
 ```
 
 ### 3-node cluster
 
 ```bash
 KALAMDB_JWT_SECRET="$(openssl rand -base64 32)" \
-curl -sSL https://raw.githubusercontent.com/jamals86/KalamDB/main/docker/run/cluster/docker-compose.yml | docker-compose -f - up -d
+curl -sSL https://raw.githubusercontent.com/kalamstack/KalamDB/main/docker/run/cluster/docker-compose.yml | docker-compose -f - up -d
 ```
 
 ### Local run
 
 ```bash
-git clone https://github.com/jamals86/KalamDB.git
+git clone https://github.com/kalamstack/KalamDB.git
 cd KalamDB/backend
 cargo run --bin kalamdb-server
 ```

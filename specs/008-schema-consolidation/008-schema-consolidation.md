@@ -473,7 +473,7 @@ cargo test --workspace
 **Not Applicable**: This feature includes only internal refactoring with full backward compatibility. No rollback needed.
 
 If you encounter issues:
-1. File a bug report: https://github.com/jamals86/KalamDB/issues
+1. File a bug report: https://github.com/kalamstack/KalamDB/issues
 2. Check troubleshooting section above
 3. Reach out on Discord: https://discord.gg/kalamdb
 
@@ -501,7 +501,7 @@ If you encounter issues:
 
 ### Support
 
-- **GitHub Issues**: https://github.com/jamals86/KalamDB/issues
+- **GitHub Issues**: https://github.com/kalamstack/KalamDB/issues
 - **Discord Community**: https://discord.gg/kalamdb
 - **Email**: support@kalamdb.com
 

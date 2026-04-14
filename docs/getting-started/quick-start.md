@@ -13,7 +13,7 @@ For full setup and troubleshooting, see [Development Setup](../development/devel
 ## 2. Clone and build
 
 ```bash
-git clone https://github.com/jamals86/KalamDB.git
+git clone https://github.com/kalamstack/KalamDB.git
 cd KalamDB/backend
 
 cargo build --release --bin kalamdb-server
