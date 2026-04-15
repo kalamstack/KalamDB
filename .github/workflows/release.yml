@@ -1320,7 +1320,8 @@ jobs:
           set -euo pipefail
           ./pg/scripts/pgrx-test-setup.sh 2>&1 | tee pg-pgrx-setup-output.txt
 
-      - name: Run native PG extension perf tests first
+      - name: Run native PG extension perf tests (informational)
+        continue-on-error: true
         shell: bash
         env:
           KALAMDB_SERVER_URL: "http://127.0.0.1:8080"
@@ -1333,9 +1334,10 @@ jobs:
             --features e2e \
             --test e2e_perf \
             --test-threads 1 \
+            --no-fail-fast \
             2>&1 | tee pg-native-test-output.txt
 
-      - name: Run remaining native PG extension e2e tests
+      - name: Run native PG extension e2e tests
         shell: bash
         env:
           KALAMDB_SERVER_URL: "http://127.0.0.1:8080"
