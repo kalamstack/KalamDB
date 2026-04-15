@@ -13,9 +13,9 @@ use crate::models::{
 };
 
 use super::auth::WasmAuthProvider;
-use super::wasm_debug_log;
 use super::helpers::{create_promise, send_ws_message, ws_url_from_http_opts};
 use super::state::SubscriptionState;
+use super::wasm_debug_log;
 
 /// Resolve a `WasmAuthProvider` from an optional JS async callback.
 ///

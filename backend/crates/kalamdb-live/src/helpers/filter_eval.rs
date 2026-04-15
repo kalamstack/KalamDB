@@ -30,9 +30,8 @@ pub fn parse_where_clause(where_clause: &str) -> Result<Expr, LiveError> {
     let sql = format!("SELECT * FROM t WHERE {}", where_clause);
 
     let dialect = PostgreSqlDialect {};
-    let statements = Parser::parse_sql(&dialect, &sql).map_err(|e| {
-        LiveError::InvalidOperation(format!("Failed to parse WHERE clause: {}", e))
-    })?;
+    let statements = Parser::parse_sql(&dialect, &sql)
+        .map_err(|e| LiveError::InvalidOperation(format!("Failed to parse WHERE clause: {}", e)))?;
 
     if statements.is_empty() {
         return Err(LiveError::InvalidOperation("Empty WHERE clause".to_string()));
@@ -132,9 +131,7 @@ fn evaluate_expr(expr: &Expr, row_data: &Row, depth: usize) -> Result<bool, Live
                 let result = evaluate_expr(expr, row_data, depth + 1)?;
                 Ok(!result)
             },
-            _ => {
-                Err(LiveError::InvalidOperation(format!("Unsupported unary operator: {:?}", op)))
-            },
+            _ => Err(LiveError::InvalidOperation(format!("Unsupported unary operator: {:?}", op))),
         },
 
         Expr::Like {
@@ -169,10 +166,7 @@ fn evaluate_expr(expr: &Expr, row_data: &Row, depth: usize) -> Result<bool, Live
             true,
         ),
 
-        _ => Err(LiveError::InvalidOperation(format!(
-            "Unsupported expression type: {:?}",
-            expr
-        ))),
+        _ => Err(LiveError::InvalidOperation(format!("Unsupported expression type: {:?}", expr))),
     }
 }
 
@@ -225,11 +219,7 @@ fn as_str(v: &ScalarValue) -> Option<&str> {
 }
 
 /// Helper to compare two ScalarValues for numeric comparisons
-fn compare_numeric(
-    left: &ScalarValue,
-    right: &ScalarValue,
-    op: &str,
-) -> Result<bool, LiveError> {
+fn compare_numeric(left: &ScalarValue, right: &ScalarValue, op: &str) -> Result<bool, LiveError> {
     let left_num = as_f64(left).ok_or_else(|| {
         LiveError::InvalidOperation(format!("Cannot convert {:?} to number", left))
     })?;
@@ -293,10 +283,7 @@ fn evaluate_like_pattern(
     Ok(if negated { !matches } else { matches })
 }
 
-fn build_like_regex_pattern(
-    pattern: &str,
-    escape_char: Option<char>,
-) -> Result<String, LiveError> {
+fn build_like_regex_pattern(pattern: &str, escape_char: Option<char>) -> Result<String, LiveError> {
     let mut regex_pattern = String::with_capacity(pattern.len() + 2);
     regex_pattern.push('^');
 

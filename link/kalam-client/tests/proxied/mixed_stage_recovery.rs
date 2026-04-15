@@ -177,13 +177,7 @@ async fn test_shared_connection_recovers_subscriptions_in_different_stages() {
 
         let expected_connects = connect_count.load(Ordering::SeqCst) + 1;
         proxy.simulate_server_up();
-        wait_for_reconnect(
-            &client,
-            &connect_count,
-            expected_connects,
-            "mixed-stage outage",
-        )
-        .await;
+        wait_for_reconnect(&client, &connect_count, expected_connects, "mixed-stage outage").await;
 
         writer
             .execute_query(

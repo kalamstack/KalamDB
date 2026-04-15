@@ -9,7 +9,7 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jamals86/KalamDB"
+    "url": "https://github.com/kalamstack/KalamDB"
   },
   "files": [
     "kalam_link_dart_bg.wasm",

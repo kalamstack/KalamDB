@@ -75,8 +75,7 @@ impl DmlExecutor {
     fn table_has_file_columns(&self, table_id: &TableId) -> bool {
         match self.app_context.schema_registry().get_table_if_exists(table_id) {
             Ok(Some(table_def)) => table_def.columns.iter().any(|column| {
-                column.data_type
-                    == kalamdb_commons::models::datatypes::KalamDataType::File
+                column.data_type == kalamdb_commons::models::datatypes::KalamDataType::File
             }),
             Ok(None) => false,
             Err(error) => {
@@ -103,14 +102,14 @@ impl DmlExecutor {
         let scoped_user = user_id.cloned();
         let table_id = notification.table_id.clone();
 
-        let _ = self
-            .publish_transaction_notification(user_id, &notification)
-            .await;
+        let _ = self.publish_transaction_notification(user_id, &notification).await;
 
         if has_live_subscribers {
-            self.app_context
-                .notification_service()
-                .notify_table_change(scoped_user, table_id, notification);
+            self.app_context.notification_service().notify_table_change(
+                scoped_user,
+                table_id,
+                notification,
+            );
         }
     }
 
@@ -219,8 +218,7 @@ impl DmlExecutor {
 
             if let Some((_row_key, notification)) = updated {
                 if let Some(notification) = notification {
-                    self.emit_autocommit_notification(Some(user_id), notification)
-                        .await;
+                    self.emit_autocommit_notification(Some(user_id), notification).await;
                 }
                 delete_file_refs_best_effort(
                     self.app_context.as_ref(),
@@ -293,8 +291,7 @@ impl DmlExecutor {
                     .map_err(|e| ApplierError::Execution(format!("Failed to delete row: {}", e)))?
                 {
                     if let Some(notification) = notification {
-                        self.emit_autocommit_notification(Some(user_id), notification)
-                            .await;
+                        self.emit_autocommit_notification(Some(user_id), notification).await;
                     }
                     deleted_count += 1;
                     delete_file_refs_best_effort(
@@ -461,8 +458,7 @@ impl DmlExecutor {
         pk_values: Option<&[String]>,
     ) -> Result<usize, ApplierError> {
         let commit_seq = self.app_context.commit_sequence_tracker().allocate_next();
-        self.delete_shared_data_with_commit_seq(table_id, pk_values, commit_seq)
-            .await
+        self.delete_shared_data_with_commit_seq(table_id, pk_values, commit_seq).await
     }
 
     pub async fn delete_shared_data_with_commit_seq(
@@ -540,7 +536,8 @@ impl DmlExecutor {
                 });
 
                 if all_inserts_same_table_and_user {
-                    let provider_arc = self.load_provider(&first_mutation.table_id, "Table provider").await?;
+                    let provider_arc =
+                        self.load_provider(&first_mutation.table_id, "Table provider").await?;
                     let provider = provider_arc
                         .as_any()
                         .downcast_ref::<UserTableProvider>()
@@ -604,22 +601,16 @@ impl DmlExecutor {
                 cached_provider = Some((mutation.table_id.clone(), Arc::clone(&provider_arc)));
                 provider_arc
             };
-            let provider = provider_arc
-                .as_any()
-                .downcast_ref::<UserTableProvider>()
-                .ok_or_else(|| {
+            let provider =
+                provider_arc.as_any().downcast_ref::<UserTableProvider>().ok_or_else(|| {
                     ApplierError::Execution(format!(
                         "Provider type mismatch for user table {}",
                         mutation.table_id
                     ))
                 })?;
 
-            let batch_key = format!(
-                "{}|{}|{}",
-                mutation.table_id,
-                user_id.as_str(),
-                mutation.primary_key
-            );
+            let batch_key =
+                format!("{}|{}|{}", mutation.table_id, user_id.as_str(), mutation.primary_key);
             if !seen_insert_keys.insert(batch_key) {
                 return Err(ApplierError::Execution(format!(
                     "Failed to insert batch row: Already exists: Primary key violation: value '{}' appears multiple times in the transaction batch for column '{}'",
@@ -631,10 +622,7 @@ impl DmlExecutor {
             table_base::ensure_unique_pk_value(provider, Some(&user_id), &mutation.payload)
                 .await
                 .map_err(|error| {
-                    ApplierError::Execution(format!(
-                        "Failed to insert batch row: {}",
-                        error
-                    ))
+                    ApplierError::Execution(format!("Failed to insert batch row: {}", error))
                 })?;
         }
 
@@ -671,16 +659,13 @@ impl DmlExecutor {
             {
                 Arc::clone(&cached_provider.as_ref().expect("cached provider").1)
             } else {
-                let provider_arc = self
-                    .load_provider(&mutation.table_id, "Shared table provider")
-                    .await?;
+                let provider_arc =
+                    self.load_provider(&mutation.table_id, "Shared table provider").await?;
                 cached_provider = Some((mutation.table_id.clone(), Arc::clone(&provider_arc)));
                 provider_arc
             };
-            let provider = provider_arc
-                .as_any()
-                .downcast_ref::<SharedTableProvider>()
-                .ok_or_else(|| {
+            let provider =
+                provider_arc.as_any().downcast_ref::<SharedTableProvider>().ok_or_else(|| {
                     ApplierError::Execution(format!(
                         "Provider type mismatch for shared table {}",
                         mutation.table_id
@@ -699,10 +684,7 @@ impl DmlExecutor {
             table_base::ensure_unique_pk_value(provider, None, &mutation.payload)
                 .await
                 .map_err(|error| {
-                    ApplierError::Execution(format!(
-                        "Failed to insert batch row: {}",
-                        error
-                    ))
+                    ApplierError::Execution(format!("Failed to insert batch row: {}", error))
                 })?;
         }
 
@@ -714,8 +696,7 @@ impl DmlExecutor {
         transaction_id: &TransactionId,
         mutations: &[StagedMutation],
     ) -> Result<TransactionApplyResult, ApplierError> {
-        self.prevalidate_user_transaction_batch(transaction_id, mutations)
-            .await?;
+        self.prevalidate_user_transaction_batch(transaction_id, mutations).await?;
 
         let commit_seq = self.app_context.commit_sequence_tracker().allocate_next();
         let mut affected_rows = 0;
@@ -731,9 +712,8 @@ impl DmlExecutor {
                 });
 
                 if all_inserts_same_table_and_user {
-                    let provider_arc = self
-                        .load_provider(&first_mutation.table_id, "Table provider")
-                        .await?;
+                    let provider_arc =
+                        self.load_provider(&first_mutation.table_id, "Table provider").await?;
                     let provider = provider_arc
                         .as_any()
                         .downcast_ref::<UserTableProvider>()
@@ -747,10 +727,7 @@ impl DmlExecutor {
                     let applied = provider
                         .insert_batch_deferred_prevalidated_with_commit_seq(
                             &user_id,
-                            mutations
-                                .iter()
-                                .map(|mutation| mutation.payload.clone())
-                                .collect(),
+                            mutations.iter().map(|mutation| mutation.payload.clone()).collect(),
                             commit_seq,
                         )
                         .await
@@ -823,7 +800,9 @@ impl DmlExecutor {
             }
 
             let user_id = mutation.user_id.clone().ok_or_else(|| {
-                ApplierError::Validation("user transaction batch mutation missing user_id".to_string())
+                ApplierError::Validation(
+                    "user transaction batch mutation missing user_id".to_string(),
+                )
             })?;
 
             let provider_arc = if cached_provider
@@ -837,10 +816,8 @@ impl DmlExecutor {
                 cached_provider = Some((mutation.table_id.clone(), Arc::clone(&provider_arc)));
                 provider_arc
             };
-            let provider = provider_arc
-                .as_any()
-                .downcast_ref::<UserTableProvider>()
-                .ok_or_else(|| {
+            let provider =
+                provider_arc.as_any().downcast_ref::<UserTableProvider>().ok_or_else(|| {
                     ApplierError::Execution(format!(
                         "Provider type mismatch for user table {}",
                         mutation.table_id
@@ -860,31 +837,23 @@ impl DmlExecutor {
                     )?;
                     Some((row_key, notification))
                 },
-                OperationKind::Update => {
-                    provider
-                        .update_by_pk_value_deferred(
-                            &user_id,
-                            mutation.primary_key.as_str(),
-                            mutation.payload.clone(),
-                            commit_seq,
-                        )
-                        .await
-                        .map_err(|e| {
-                            ApplierError::Execution(format!("Failed to update row: {}", e))
-                        })?
-                },
-                OperationKind::Delete => {
-                    provider
-                        .delete_by_pk_value_deferred(
-                            &user_id,
-                            mutation.primary_key.as_str(),
-                            commit_seq,
-                        )
-                        .await
-                        .map_err(|e| {
-                            ApplierError::Execution(format!("Failed to delete row: {}", e))
-                        })?
-                },
+                OperationKind::Update => provider
+                    .update_by_pk_value_deferred(
+                        &user_id,
+                        mutation.primary_key.as_str(),
+                        mutation.payload.clone(),
+                        commit_seq,
+                    )
+                    .await
+                    .map_err(|e| ApplierError::Execution(format!("Failed to update row: {}", e)))?,
+                OperationKind::Delete => provider
+                    .delete_by_pk_value_deferred(
+                        &user_id,
+                        mutation.primary_key.as_str(),
+                        commit_seq,
+                    )
+                    .await
+                    .map_err(|e| ApplierError::Execution(format!("Failed to delete row: {}", e)))?,
             };
 
             let Some((_row_key, notification)) = applied else {
@@ -895,10 +864,7 @@ impl DmlExecutor {
             side_effect_plan.record_manifest_update();
 
             if let Some(notification) = notification {
-                if self
-                    .publish_transaction_notification(Some(&user_id), &notification)
-                    .await
-                {
+                if self.publish_transaction_notification(Some(&user_id), &notification).await {
                     side_effect_plan.record_publisher_event();
                 }
 
@@ -907,18 +873,14 @@ impl DmlExecutor {
                     Some(&user_id),
                     &mutation.table_id,
                 ) {
-                    side_effect_plan.push_notification(
-                        FanoutOwnerScope::User(user_id.clone()),
-                        notification,
-                    );
+                    side_effect_plan
+                        .push_notification(FanoutOwnerScope::User(user_id.clone()), notification);
                 }
             }
         }
 
-        let notifications_sent = self
-            .app_context
-            .notification_service()
-            .dispatch_commit_plan(&side_effect_plan);
+        let notifications_sent =
+            self.app_context.notification_service().dispatch_commit_plan(&side_effect_plan);
 
         Ok(TransactionApplyResult {
             rows_affected: affected_rows,
@@ -934,8 +896,7 @@ impl DmlExecutor {
         transaction_id: &TransactionId,
         mutations: &[StagedMutation],
     ) -> Result<TransactionApplyResult, ApplierError> {
-        self.prevalidate_shared_transaction_batch(transaction_id, mutations)
-            .await?;
+        self.prevalidate_shared_transaction_batch(transaction_id, mutations).await?;
 
         let commit_seq = self.app_context.commit_sequence_tracker().allocate_next();
         let mut affected_rows = 0;
@@ -949,9 +910,8 @@ impl DmlExecutor {
             });
 
             if all_inserts_same_table {
-                let provider_arc = self
-                    .load_provider(&first_mutation.table_id, "Shared table provider")
-                    .await?;
+                let provider_arc =
+                    self.load_provider(&first_mutation.table_id, "Shared table provider").await?;
                 let provider = provider_arc
                     .as_any()
                     .downcast_ref::<SharedTableProvider>()
@@ -980,7 +940,9 @@ impl DmlExecutor {
                     )));
                 }
 
-                for (_mutation, (_row_key, notification)) in mutations.iter().zip(applied.into_iter()) {
+                for (_mutation, (_row_key, notification)) in
+                    mutations.iter().zip(applied.into_iter())
+                {
                     affected_rows += 1;
                     side_effect_plan.record_manifest_update();
 
@@ -994,15 +956,14 @@ impl DmlExecutor {
                             None,
                             &notification.table_id,
                         ) {
-                            side_effect_plan.push_notification(FanoutOwnerScope::Shared, notification);
+                            side_effect_plan
+                                .push_notification(FanoutOwnerScope::Shared, notification);
                         }
                     }
                 }
 
-                let notifications_sent = self
-                    .app_context
-                    .notification_service()
-                    .dispatch_commit_plan(&side_effect_plan);
+                let notifications_sent =
+                    self.app_context.notification_service().dispatch_commit_plan(&side_effect_plan);
 
                 return Ok(TransactionApplyResult {
                     rows_affected: affected_rows,
@@ -1034,16 +995,13 @@ impl DmlExecutor {
             {
                 Arc::clone(&cached_provider.as_ref().expect("cached provider").1)
             } else {
-                let provider_arc = self
-                    .load_provider(&mutation.table_id, "Shared table provider")
-                    .await?;
+                let provider_arc =
+                    self.load_provider(&mutation.table_id, "Shared table provider").await?;
                 cached_provider = Some((mutation.table_id.clone(), Arc::clone(&provider_arc)));
                 provider_arc
             };
-            let provider = provider_arc
-                .as_any()
-                .downcast_ref::<SharedTableProvider>()
-                .ok_or_else(|| {
+            let provider =
+                provider_arc.as_any().downcast_ref::<SharedTableProvider>().ok_or_else(|| {
                     ApplierError::Execution(format!(
                         "Provider type mismatch for shared table {}",
                         mutation.table_id
@@ -1063,26 +1021,18 @@ impl DmlExecutor {
                     )?;
                     Some((row_key, notification))
                 },
-                OperationKind::Update => {
-                    provider
-                        .update_by_pk_value_deferred(
-                            mutation.primary_key.as_str(),
-                            mutation.payload.clone(),
-                            commit_seq,
-                        )
-                        .await
-                        .map_err(|e| {
-                            ApplierError::Execution(format!("Failed to update row: {}", e))
-                        })?
-                },
-                OperationKind::Delete => {
-                    provider
-                        .delete_by_pk_value_deferred(mutation.primary_key.as_str(), commit_seq)
-                        .await
-                        .map_err(|e| {
-                            ApplierError::Execution(format!("Failed to delete row: {}", e))
-                        })?
-                },
+                OperationKind::Update => provider
+                    .update_by_pk_value_deferred(
+                        mutation.primary_key.as_str(),
+                        mutation.payload.clone(),
+                        commit_seq,
+                    )
+                    .await
+                    .map_err(|e| ApplierError::Execution(format!("Failed to update row: {}", e)))?,
+                OperationKind::Delete => provider
+                    .delete_by_pk_value_deferred(mutation.primary_key.as_str(), commit_seq)
+                    .await
+                    .map_err(|e| ApplierError::Execution(format!("Failed to delete row: {}", e)))?,
             };
 
             let Some((_row_key, notification)) = applied else {
@@ -1107,10 +1057,8 @@ impl DmlExecutor {
             }
         }
 
-        let notifications_sent = self
-            .app_context
-            .notification_service()
-            .dispatch_commit_plan(&side_effect_plan);
+        let notifications_sent =
+            self.app_context.notification_service().dispatch_commit_plan(&side_effect_plan);
 
         Ok(TransactionApplyResult {
             rows_affected: affected_rows,
@@ -1153,9 +1101,12 @@ impl DmlExecutor {
         }
 
         let op = Self::topic_op_for_change(&notification.change_type);
-        if let Err(error) =
-            topic_publisher.publish_for_table(&notification.table_id, op, &notification.row_data, user_id)
-        {
+        if let Err(error) = topic_publisher.publish_for_table(
+            &notification.table_id,
+            op,
+            &notification.row_data,
+            user_id,
+        ) {
             log::warn!(
                 "Topic publish failed for transaction change on table {}: {}",
                 notification.table_id,
@@ -1317,9 +1268,7 @@ impl DmlExecutor {
                         StreamTableRow,
                     >>::update(provider, user_id, &key, updates)
                     .await
-                    .map_err(|e| {
-                        ApplierError::Execution(format!("Failed to update row: {}", e))
-                    })?;
+                    .map_err(|e| ApplierError::Execution(format!("Failed to update row: {}", e)))?;
                     Ok(usize::from(updated.is_some()))
                 } else {
                     Ok(0)

@@ -64,12 +64,8 @@ impl LiveSqlExecutor for SqlExecutorAdapter {
         role: Role,
         read_context: ReadContext,
     ) -> Result<Vec<RecordBatch>, LiveError> {
-        let exec_ctx = ExecutionContext::new(
-            user_id,
-            role,
-            Arc::clone(&self.base_session_context),
-        )
-        .with_read_context(read_context);
+        let exec_ctx = ExecutionContext::new(user_id, role, Arc::clone(&self.base_session_context))
+            .with_read_context(read_context);
 
         let result = self
             .executor

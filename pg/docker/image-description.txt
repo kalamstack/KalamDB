@@ -1,1 +1,1 @@
-PostgreSQL with the pg_kalam extension preinstalled so you can connect PostgreSQL Kalam-backed tables to a remote KalamDB server.
+PostgreSQL with the pg_kalam extension and pgvector preinstalled so you can connect PostgreSQL Kalam-backed tables to a remote KalamDB server.

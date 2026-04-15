@@ -35,8 +35,8 @@ fn fast_link_client() -> Result<KalamLinkClient, Box<dyn std::error::Error + Sen
 fn wait_live_query(marker: &str, expect_present: bool, deadline: Duration) -> bool {
     let start = std::time::Instant::now();
     loop {
-        let output = execute_sql_as_root_via_client("SELECT query FROM system.live")
-            .unwrap_or_default();
+        let output =
+            execute_sql_as_root_via_client("SELECT query FROM system.live").unwrap_or_default();
         let found = output.contains(marker);
         if found == expect_present {
             return true;

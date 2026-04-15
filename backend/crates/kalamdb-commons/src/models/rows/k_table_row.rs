@@ -21,7 +21,13 @@ pub struct KTableRow {
 }
 
 impl KTableRow {
-    pub fn new(user_id: UserId, _seq: SeqId, _commit_seq: u64, fields: Row, _deleted: bool) -> Self {
+    pub fn new(
+        user_id: UserId,
+        _seq: SeqId,
+        _commit_seq: u64,
+        fields: Row,
+        _deleted: bool,
+    ) -> Self {
         Self {
             user_id,
             _seq,

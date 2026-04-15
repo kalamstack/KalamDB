@@ -76,8 +76,7 @@ impl TransactionHandle {
         table_ids: I,
         write_count: usize,
         write_bytes: usize,
-    )
-    where
+    ) where
         I: IntoIterator<Item = TableId>,
     {
         self.last_activity_at = Instant::now();

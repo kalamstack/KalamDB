@@ -62,11 +62,9 @@ impl DataResponse {
 
     pub fn committed_side_effect_counts(&self) -> Option<(usize, usize, usize)> {
         match self {
-            DataResponse::TransactionCommitted(result) => Some((
-                result.notifications_sent,
-                result.manifest_updates,
-                result.publisher_events,
-            )),
+            DataResponse::TransactionCommitted(result) => {
+                Some((result.notifications_sent, result.manifest_updates, result.publisher_events))
+            },
             _ => None,
         }
     }

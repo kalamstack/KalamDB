@@ -17,9 +17,8 @@ pub mod validation;
 
 pub use batch_execution::{
     parse_batch_statements, parse_execution_batch, parse_execution_statement,
-    prepare_execution_batch, BatchParseError, ExecutionBatchParseError,
+    prepare_execution_batch, split_statements, BatchParseError, ExecutionBatchParseError,
     ExecutionBatchPrepareError, ParsedExecutionStatement, PreparedExecutionBatchStatement,
-    split_statements,
 };
 pub use classifier::{SqlStatement, SqlStatementKind, StatementClassificationError};
 pub use compatibility::{

@@ -20,7 +20,9 @@ use kalamdb_commons::models::{NamespaceId, TransactionOrigin, UserId};
 use kalamdb_commons::{constants::ColumnFamilyNames, NodeId};
 use kalamdb_configs::ServerConfig;
 use kalamdb_filestore::StorageRegistry;
-use kalamdb_live::{ConnectionsManager, LiveQueryManager, NotificationService, TopicPublisherService};
+use kalamdb_live::{
+    ConnectionsManager, LiveQueryManager, NotificationService, TopicPublisherService,
+};
 use kalamdb_pg::{KalamPgService, LivePgTransaction};
 use kalamdb_raft::CommandExecutor;
 use kalamdb_sharding::{GroupId, ShardRouter};
@@ -434,8 +436,7 @@ impl AppContext {
             let notification_service = NotificationService::new(Arc::clone(&connection_registry));
 
             // Create unified topic publisher service for pub/sub infrastructure
-            let visibility_timeout =
-                Duration::from_secs(config.topics.visibility_timeout_secs);
+            let visibility_timeout = Duration::from_secs(config.topics.visibility_timeout_secs);
             let topic_publisher = Arc::new(TopicPublisherService::with_visibility_timeout(
                 storage_backend.clone(),
                 visibility_timeout,
@@ -586,27 +587,28 @@ impl AppContext {
             app_ctx.transaction_coordinator().start_timeout_sweeper();
 
             let app_ctx_for_transactions = Arc::clone(&app_ctx);
-            let transactions_snapshot_callback: TransactionsSnapshotCallback = Arc::new(move || {
-                app_ctx_for_transactions
-                    .transaction_coordinator()
-                    .active_metrics()
-                    .into_iter()
-                    .map(|metric| TransactionSnapshot {
-                        transaction_id: metric.transaction_id.to_string(),
-                        owner_id: metric.owner_id.to_string(),
-                        origin: metric.origin.as_str().to_string(),
-                        state: metric.state.lifecycle_str().to_string(),
-                        age_ms: metric.age_ms.min(i64::MAX as u64) as i64,
-                        idle_ms: metric.idle_ms.min(i64::MAX as u64) as i64,
-                        write_count: metric.write_count.min(i64::MAX as usize) as i64,
-                        write_bytes: metric.write_bytes.min(i64::MAX as usize) as i64,
-                        touched_tables_count: metric.touched_tables_count.min(i64::MAX as usize)
-                            as i64,
-                        snapshot_commit_seq: metric.snapshot_commit_seq.min(i64::MAX as u64)
-                            as i64,
-                    })
-                    .collect()
-            });
+            let transactions_snapshot_callback: TransactionsSnapshotCallback =
+                Arc::new(move || {
+                    app_ctx_for_transactions
+                        .transaction_coordinator()
+                        .active_metrics()
+                        .into_iter()
+                        .map(|metric| TransactionSnapshot {
+                            transaction_id: metric.transaction_id.to_string(),
+                            owner_id: metric.owner_id.to_string(),
+                            origin: metric.origin.as_str().to_string(),
+                            state: metric.state.lifecycle_str().to_string(),
+                            age_ms: metric.age_ms.min(i64::MAX as u64) as i64,
+                            idle_ms: metric.idle_ms.min(i64::MAX as u64) as i64,
+                            write_count: metric.write_count.min(i64::MAX as usize) as i64,
+                            write_bytes: metric.write_bytes.min(i64::MAX as usize) as i64,
+                            touched_tables_count: metric.touched_tables_count.min(i64::MAX as usize)
+                                as i64,
+                            snapshot_commit_seq: metric.snapshot_commit_seq.min(i64::MAX as u64)
+                                as i64,
+                        })
+                        .collect()
+                });
             transactions_view.set_snapshot_callback(transactions_snapshot_callback);
 
             let live_query_manager = Arc::new(LiveQueryManager::new(
@@ -825,8 +827,7 @@ impl AppContext {
         let notification_service = NotificationService::new(Arc::clone(&connection_registry));
 
         // Create unified topic publisher service for tests
-        let visibility_timeout =
-            Duration::from_secs(config.topics.visibility_timeout_secs);
+        let visibility_timeout = Duration::from_secs(config.topics.visibility_timeout_secs);
         let topic_publisher = Arc::new(TopicPublisherService::with_visibility_timeout(
             storage_backend.clone(),
             visibility_timeout,

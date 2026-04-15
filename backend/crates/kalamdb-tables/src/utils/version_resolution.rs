@@ -720,11 +720,11 @@ impl<'a> ParquetBatchDecoder<'a> {
             .ok_or_else(|| KalamDbError::Other("_seq column is not Int64Array".to_string()))?;
         let deleted_array =
             deleted_idx.and_then(|idx| batch.column(idx).as_any().downcast_ref::<BooleanArray>());
-        let commit_seq_array = commit_seq_idx
-            .and_then(|idx| batch.column(idx).as_any().downcast_ref::<UInt64Array>());
+        let commit_seq_array =
+            commit_seq_idx.and_then(|idx| batch.column(idx).as_any().downcast_ref::<UInt64Array>());
         // Try to cache the PK column as StringArray for fast extraction.
-        let pk_string_array = pk_idx
-            .and_then(|idx| batch.column(idx).as_any().downcast_ref::<StringArray>());
+        let pk_string_array =
+            pk_idx.and_then(|idx| batch.column(idx).as_any().downcast_ref::<StringArray>());
         let value_columns = schema
             .fields()
             .iter()
@@ -764,16 +764,18 @@ impl<'a> ParquetBatchDecoder<'a> {
                 None
             } else {
                 let v = str_arr.value(row_idx);
-                if v.is_empty() { None } else { Some(v.to_owned()) }
+                if v.is_empty() {
+                    None
+                } else {
+                    Some(v.to_owned())
+                }
             }
         } else {
             // Fallback for non-Utf8 PK types (Int64, etc.)
             self.pk_idx.and_then(|idx| {
                 let array = self.batch.column(idx);
                 arrow_value_to_scalar(array.as_ref(), row_idx).ok().and_then(|sv| match &sv {
-                    ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)) => {
-                        Some(s.clone())
-                    },
+                    ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)) => Some(s.clone()),
                     other if other.is_null() => None,
                     other => Some(other.to_string()),
                 })

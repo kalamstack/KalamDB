@@ -75,15 +75,13 @@ impl FanoutDispatchPlan {
     }
 
     fn observe_notification_seq(&mut self, notification: &ChangeNotification) {
-        let seq_value = notification
-            .row_data
-            .values
-            .get(SystemColumnNames::SEQ)
-            .and_then(|value| match value {
+        let seq_value = notification.row_data.values.get(SystemColumnNames::SEQ).and_then(
+            |value| match value {
                 ScalarValue::Int64(Some(seq)) => Some(SeqId::from(*seq)),
                 ScalarValue::UInt64(Some(seq)) => Some(SeqId::from(*seq as i64)),
                 _ => None,
-            });
+            },
+        );
 
         if let Some(seq_value) = seq_value {
             match self.seq_upper_bound {
@@ -126,14 +124,9 @@ impl CommitSideEffectPlan {
         owner_scope: FanoutOwnerScope,
         notification: ChangeNotification,
     ) {
-        if let Some(dispatch) = self
-            .notifications
-            .iter_mut()
-            .find(|dispatch| {
-                dispatch.table_id == notification.table_id
-                    && dispatch.owner_scope == owner_scope
-            })
-        {
+        if let Some(dispatch) = self.notifications.iter_mut().find(|dispatch| {
+            dispatch.table_id == notification.table_id && dispatch.owner_scope == owner_scope
+        }) {
             dispatch.push_notification(notification);
             return;
         }
@@ -153,11 +146,7 @@ impl CommitSideEffectPlan {
         self.manifest_updates += 1;
     }
 
-    pub fn record_notification_group(
-        &mut self,
-        table_id: TableId,
-        owner_scope: FanoutOwnerScope,
-    ) {
+    pub fn record_notification_group(&mut self, table_id: TableId, owner_scope: FanoutOwnerScope) {
         if let Some(dispatch) = self
             .notifications
             .iter_mut()
@@ -174,9 +163,7 @@ impl CommitSideEffectPlan {
 
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.notifications.is_empty()
-            && self.publisher_events == 0
-            && self.manifest_updates == 0
+        self.notifications.is_empty() && self.publisher_events == 0 && self.manifest_updates == 0
     }
 
     #[inline]

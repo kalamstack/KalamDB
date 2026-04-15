@@ -63,10 +63,7 @@ pub struct PlanCache {
 
 impl PlanCache {
     pub fn new() -> Self {
-        Self::with_config(
-            DEFAULT_PLAN_MAX_ENTRIES,
-            Duration::from_secs(DEFAULT_IDLE_TTL_SECS),
-        )
+        Self::with_config(DEFAULT_PLAN_MAX_ENTRIES, Duration::from_secs(DEFAULT_IDLE_TTL_SECS))
     }
 
     pub fn with_config(max_entries: u64, idle_ttl: Duration) -> Self {
@@ -166,11 +163,7 @@ impl InsertMetadataCache {
         self.cache.get(cache_key)
     }
 
-    pub fn insert_arc(
-        &self,
-        cache_key: InsertMetadataCacheKey,
-        metadata: Arc<FastInsertMetadata>,
-    ) {
+    pub fn insert_arc(&self, cache_key: InsertMetadataCacheKey, metadata: Arc<FastInsertMetadata>) {
         self.cache.insert(cache_key, metadata);
     }
 
@@ -179,7 +172,6 @@ impl InsertMetadataCache {
         self.cache.run_pending_tasks();
     }
 }
-
 
 pub struct SqlCacheRegistry {
     plan_cache: PlanCache,

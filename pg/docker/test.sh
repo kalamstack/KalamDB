@@ -131,6 +131,22 @@ for i in $(seq 1 30); do
 done
 
 echo ""
+echo "Verifying pgvector extension availability ..."
+
+PGVECTOR_VERSION=$(PAGER=cat "$PSQL_BIN" -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" \
+    -v ON_ERROR_STOP=1 \
+    -P pager=off \
+    -t -A \
+    -c "CREATE EXTENSION IF NOT EXISTS vector; SELECT extversion FROM pg_extension WHERE extname = 'vector';" | tail -n 1 | tr -d '[:space:]')
+
+if [ -z "$PGVECTOR_VERSION" ]; then
+    echo "ERROR: pgvector is not available in this PostgreSQL image."
+    exit 1
+fi
+
+echo "pgvector is available (version $PGVECTOR_VERSION)."
+
+echo ""
 echo "Running test.sql ..."
 echo ""
 

@@ -9,7 +9,8 @@ use tokio::sync::Barrier;
 type SqlRow = BTreeMap<String, Value>;
 
 fn sql_result_rows(result: &Value) -> Vec<SqlRow> {
-    let Some(result_entry) = result["results"].as_array().and_then(|results| results.first()) else {
+    let Some(result_entry) = result["results"].as_array().and_then(|results| results.first())
+    else {
         return Vec::new();
     };
 
@@ -29,11 +30,7 @@ fn sql_result_rows(result: &Value) -> Vec<SqlRow> {
             rows.iter()
                 .filter_map(|row| row.as_array())
                 .map(|row| {
-                    columns
-                        .iter()
-                        .cloned()
-                        .zip(row.iter().cloned())
-                        .collect::<BTreeMap<_, _>>()
+                    columns.iter().cloned().zip(row.iter().cloned()).collect::<BTreeMap<_, _>>()
                 })
                 .collect::<Vec<_>>()
         })
@@ -79,21 +76,24 @@ fn row_i64(row: &SqlRow, column: &str) -> i64 {
     let value = row
         .get(column)
         .unwrap_or_else(|| panic!("missing column {column} in row {row:?}"));
-    value_as_i64(value).unwrap_or_else(|| panic!("column {column} is not an i64-compatible value: {value:?}"))
+    value_as_i64(value)
+        .unwrap_or_else(|| panic!("column {column} is not an i64-compatible value: {value:?}"))
 }
 
 fn row_f64(row: &SqlRow, column: &str) -> f64 {
     let value = row
         .get(column)
         .unwrap_or_else(|| panic!("missing column {column} in row {row:?}"));
-    value_as_f64(value).unwrap_or_else(|| panic!("column {column} is not an f64-compatible value: {value:?}"))
+    value_as_f64(value)
+        .unwrap_or_else(|| panic!("column {column} is not an f64-compatible value: {value:?}"))
 }
 
 fn row_bool(row: &SqlRow, column: &str) -> bool {
     let value = row
         .get(column)
         .unwrap_or_else(|| panic!("missing column {column} in row {row:?}"));
-    value_as_bool(value).unwrap_or_else(|| panic!("column {column} is not a bool-compatible value: {value:?}"))
+    value_as_bool(value)
+        .unwrap_or_else(|| panic!("column {column} is not a bool-compatible value: {value:?}"))
 }
 
 async fn wait_for_api_sql_rows(sql: &str, expected_count: usize, timeout: Duration) -> Vec<SqlRow> {
@@ -220,9 +220,7 @@ async fn e2e_bidirectional_typed_roundtrip_between_pg_and_api() {
 
     let api_updated_in_pg = pg
         .query_one(
-            &format!(
-                "SELECT label, qty, active, notes FROM {qualified_table} WHERE id = $1"
-            ),
+            &format!("SELECT label, qty, active, notes FROM {qualified_table} WHERE id = $1"),
             &[&"pg-typed-1"],
         )
         .await
@@ -257,16 +255,12 @@ async fn e2e_bidirectional_typed_roundtrip_between_pg_and_api() {
 
     env.kalamdb_sql(&format!("DELETE FROM {qualified_table} WHERE id = 'pg-typed-2'"))
         .await;
-    let deleted_in_api = count_rows(&pg, &qualified_table, Some("id = 'pg-typed-2'"))
-        .await;
+    let deleted_in_api = count_rows(&pg, &qualified_table, Some("id = 'pg-typed-2'")).await;
     assert_eq!(deleted_in_api, 0, "API delete should be visible in PostgreSQL");
 
-    pg.execute(
-        &format!("DELETE FROM {qualified_table} WHERE id = $1"),
-        &[&"api-typed-1"],
-    )
-    .await
-    .expect("delete API-created row through PostgreSQL");
+    pg.execute(&format!("DELETE FROM {qualified_table} WHERE id = $1"), &[&"api-typed-1"])
+        .await
+        .expect("delete API-created row through PostgreSQL");
 
     let remaining_rows = wait_for_api_sql_rows(
         &format!("SELECT id FROM {qualified_table} ORDER BY id"),
@@ -387,7 +381,9 @@ async fn e2e_parallel_transactional_inserts_and_updates_stay_consistent() {
     assert_eq!(row_i64(&api_total[0], "total_rows"), expected_total);
 
     let api_inserted = wait_for_api_sql_rows(
-        &format!("SELECT COUNT(*) AS inserted_rows FROM {qualified_table} WHERE id LIKE 'wrk-%' LIMIT 1"),
+        &format!(
+            "SELECT COUNT(*) AS inserted_rows FROM {qualified_table} WHERE id LIKE 'wrk-%' LIMIT 1"
+        ),
         1,
         Duration::from_secs(5),
     )
@@ -471,7 +467,10 @@ async fn e2e_transaction_rollback_discards_insert_update_delete_in_pg_and_api() 
         .await
         .expect("count rows inside rollback transaction")
         .get(0);
-    assert_eq!(visible_inside_tx, 2, "transactional view should include insert and delete effects");
+    assert_eq!(
+        visible_inside_tx, 2,
+        "transactional view should include insert and delete effects"
+    );
 
     tx.rollback().await.expect("rollback full transactional mutation set");
 
@@ -518,8 +517,7 @@ async fn e2e_disconnect_abort_discards_uncommitted_changes_in_pg_and_api() {
     let table = unique_name("disconnect_abort");
     let qualified_table = format!("e2e.{table}");
 
-    create_shared_kalam_table(&coordinator, &table, "id TEXT, title TEXT, value INTEGER")
-        .await;
+    create_shared_kalam_table(&coordinator, &table, "id TEXT, title TEXT, value INTEGER").await;
 
     coordinator
         .batch_execute(&format!(
@@ -547,16 +545,16 @@ async fn e2e_disconnect_abort_discards_uncommitted_changes_in_pg_and_api() {
         .await
         .expect("count rows inside SQL transaction")
         .get(0);
-    assert_eq!(visible_inside_tx, 2, "transactional session should observe its uncommitted state");
+    assert_eq!(
+        visible_inside_tx, 2,
+        "transactional session should observe its uncommitted state"
+    );
 
     pg.disconnect_and_wait_for_session_cleanup().await;
 
     wait_for_pg_count(&coordinator, &qualified_table, 2, Duration::from_secs(5)).await;
     let pg_rows = coordinator
-        .query(
-            &format!("SELECT id, title, value FROM {qualified_table} ORDER BY id"),
-            &[],
-        )
+        .query(&format!("SELECT id, title, value FROM {qualified_table} ORDER BY id"), &[])
         .await
         .expect("query rows after disconnect abort");
     assert_eq!(pg_rows.len(), 2);

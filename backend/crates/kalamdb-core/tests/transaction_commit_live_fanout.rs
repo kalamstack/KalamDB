@@ -4,13 +4,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::{ConnectionId, LiveQueryId, OperationKind, TransactionOrigin, UserId};
+use kalamdb_commons::models::{
+    ConnectionId, LiveQueryId, OperationKind, TransactionOrigin, UserId,
+};
 use kalamdb_commons::websocket::ChangeType;
 use kalamdb_commons::TableType;
+use kalamdb_core::transactions::{ExecutionOwnerKey, StagedMutation};
 use kalamdb_live::models::{
     NotificationSender, SubscriptionFlowControl, SubscriptionHandle, SubscriptionRuntimeMetadata,
 };
-use kalamdb_core::transactions::{ExecutionOwnerKey, StagedMutation};
 use tokio::sync::mpsc;
 
 use support::{create_cluster_app_context, create_shared_table, row, unique_namespace};
@@ -56,16 +58,14 @@ fn insert_mutation(
 #[ntest::timeout(8000)]
 async fn explicit_commit_releases_live_notification_after_commit() {
     let (app_ctx, _test_db) = create_cluster_app_context().await;
-    let table_id = create_shared_table(&app_ctx, &unique_namespace("tx_live_commit"), "items").await;
+    let table_id =
+        create_shared_table(&app_ctx, &unique_namespace("tx_live_commit"), "items").await;
     let registry = app_ctx.connection_registry();
 
     let connection_id = ConnectionId::new("conn-live-commit");
     let subscriber_user = UserId::new("watcher-commit");
-    let live_id = LiveQueryId::new(
-        subscriber_user,
-        connection_id.clone(),
-        "sub-live-commit".to_string(),
-    );
+    let live_id =
+        LiveQueryId::new(subscriber_user, connection_id.clone(), "sub-live-commit".to_string());
     let (tx, mut rx) = mpsc::channel(8);
     let flow_control = Arc::new(SubscriptionFlowControl::new());
     flow_control.mark_initial_complete();
@@ -93,16 +93,11 @@ async fn explicit_commit_releases_live_notification_after_commit() {
         .expect("stage succeeds");
 
     assert!(
-        tokio::time::timeout(Duration::from_millis(150), rx.recv())
-            .await
-            .is_err(),
+        tokio::time::timeout(Duration::from_millis(150), rx.recv()).await.is_err(),
         "staged transaction should not fan out before commit"
     );
 
-    coordinator
-        .commit(&transaction_id)
-        .await
-        .expect("commit succeeds");
+    coordinator.commit(&transaction_id).await.expect("commit succeeds");
 
     let delivered = tokio::time::timeout(Duration::from_secs(1), rx.recv())
         .await
@@ -121,16 +116,14 @@ async fn explicit_commit_releases_live_notification_after_commit() {
 #[ntest::timeout(8000)]
 async fn explicit_rollback_emits_no_live_notification() {
     let (app_ctx, _test_db) = create_cluster_app_context().await;
-    let table_id = create_shared_table(&app_ctx, &unique_namespace("tx_live_rollback"), "items").await;
+    let table_id =
+        create_shared_table(&app_ctx, &unique_namespace("tx_live_rollback"), "items").await;
     let registry = app_ctx.connection_registry();
 
     let connection_id = ConnectionId::new("conn-live-rollback");
     let subscriber_user = UserId::new("watcher-rollback");
-    let live_id = LiveQueryId::new(
-        subscriber_user,
-        connection_id.clone(),
-        "sub-live-rollback".to_string(),
-    );
+    let live_id =
+        LiveQueryId::new(subscriber_user, connection_id.clone(), "sub-live-rollback".to_string());
     let (tx, mut rx) = mpsc::channel(8);
     let flow_control = Arc::new(SubscriptionFlowControl::new());
     flow_control.mark_initial_complete();
@@ -160,9 +153,7 @@ async fn explicit_rollback_emits_no_live_notification() {
     coordinator.rollback(&transaction_id).expect("rollback succeeds");
 
     assert!(
-        tokio::time::timeout(Duration::from_millis(250), rx.recv())
-            .await
-            .is_err(),
+        tokio::time::timeout(Duration::from_millis(250), rx.recv()).await.is_err(),
         "rollback should not fan out any live notification"
     );
 }

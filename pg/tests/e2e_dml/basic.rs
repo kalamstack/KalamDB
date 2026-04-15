@@ -108,12 +108,7 @@ async fn e2e_user_table_isolation() {
     let qualified_table = format!("e2e.{table}");
 
     let pg_a = env.pg_connect().await;
-    create_user_kalam_table(
-        &pg_a,
-        &table,
-        "id TEXT, name TEXT, age INTEGER",
-    )
-    .await;
+    create_user_kalam_table(&pg_a, &table, "id TEXT, name TEXT, age INTEGER").await;
     set_user_id(&pg_a, "user-a").await;
     await_user_shard_leader("user-a").await;
 
@@ -121,17 +116,17 @@ async fn e2e_user_table_isolation() {
     set_user_id(&pg_b, "user-b").await;
     await_user_shard_leader("user-b").await;
 
-        let user_a_insert = format!(
+    let user_a_insert = format!(
         "INSERT INTO {qualified_table} (id, name, age) VALUES \
             ('a1', 'Alice', 30), ('a2', 'Ada', 25);"
-        );
-        retry_transient_user_leader_error("user-a insert", || pg_a.batch_execute(&user_a_insert)).await;
+    );
+    retry_transient_user_leader_error("user-a insert", || pg_a.batch_execute(&user_a_insert)).await;
 
-        let user_b_insert = format!(
+    let user_b_insert = format!(
         "INSERT INTO {qualified_table} (id, name, age) VALUES \
             ('b1', 'Bob', 40), ('b2', 'Blake', 35), ('b3', 'Bea', 28);"
-        );
-        retry_transient_user_leader_error("user-b insert", || pg_b.batch_execute(&user_b_insert)).await;
+    );
+    retry_transient_user_leader_error("user-b insert", || pg_b.batch_execute(&user_b_insert)).await;
 
     let count_a = count_rows(&pg_a, &qualified_table, None).await;
     assert_eq!(count_a, 2, "user-a should see 2 rows");

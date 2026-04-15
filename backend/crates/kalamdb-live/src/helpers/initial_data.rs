@@ -130,9 +130,7 @@ impl InitialDataFetcher {
     ///
     /// The SQL executor is set later via `set_sql_executor` because of
     /// bootstrap ordering (LiveQueryManager is created before SqlExecutor).
-    pub fn new(
-        schema_lookup: Arc<dyn LiveSchemaLookup>,
-    ) -> Self {
+    pub fn new(schema_lookup: Arc<dyn LiveSchemaLookup>) -> Self {
         Self {
             schema_lookup,
             sql_executor: Arc::new(OnceCell::new()),
@@ -377,11 +375,7 @@ impl InitialDataFetcher {
         Ok(where_clauses)
     }
 
-    fn table_has_column(
-        &self,
-        table_id: &TableId,
-        column_name: &str,
-    ) -> Result<bool, LiveError> {
+    fn table_has_column(&self, table_id: &TableId, column_name: &str) -> Result<bool, LiveError> {
         let schema = self.schema_lookup.get_arrow_schema(table_id)?;
         Ok(schema.field_with_name(column_name).is_ok())
     }
@@ -429,4 +423,3 @@ mod tests {
         assert!(options.include_deleted);
     }
 }
-

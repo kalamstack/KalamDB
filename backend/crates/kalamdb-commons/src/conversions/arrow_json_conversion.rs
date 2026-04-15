@@ -207,8 +207,7 @@ fn build_array_from_scalars(field: &Field, values: Vec<ScalarValue>) -> Result<A
         DataType::FixedSizeList(child, len) if matches!(child.data_type(), DataType::Float32) => {
             build_embedding_array(child.clone(), *len, values)
         },
-        _ => ScalarValue::iter_to_array(values.into_iter())
-            .map_err(|e| format!("{}", e)),
+        _ => ScalarValue::iter_to_array(values.into_iter()).map_err(|e| format!("{}", e)),
     }
 }
 
@@ -286,7 +285,13 @@ fn numeric_array_to_vec(array: &dyn Array, dimensions: usize) -> Option<Vec<f32>
 
     Some(
         (0..float_array.len())
-            .map(|idx| if float_array.is_null(idx) { 0.0 } else { float_array.value(idx) })
+            .map(|idx| {
+                if float_array.is_null(idx) {
+                    0.0
+                } else {
+                    float_array.value(idx)
+                }
+            })
             .collect(),
     )
 }

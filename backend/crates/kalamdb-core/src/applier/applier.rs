@@ -496,31 +496,29 @@ impl UnifiedApplier for RaftApplier {
 
     // =========================================================================
 
-        async fn commit_transaction(
-            &self,
-            transaction_id: TransactionId,
-            mutations: Vec<StagedMutation>,
-        ) -> Result<DataResponse, ApplierError> {
-            let app_ctx = self.executor().app_context();
-            let executor = app_ctx.executor();
-            let raft_exec = executor
-                .as_any()
-                .downcast_ref::<RaftExecutor>()
-                .ok_or(ApplierError::NoLeader)?;
-            let raft_mgr = raft_exec.manager();
+    async fn commit_transaction(
+        &self,
+        transaction_id: TransactionId,
+        mutations: Vec<StagedMutation>,
+    ) -> Result<DataResponse, ApplierError> {
+        let app_ctx = self.executor().app_context();
+        let executor = app_ctx.executor();
+        let raft_exec =
+            executor.as_any().downcast_ref::<RaftExecutor>().ok_or(ApplierError::NoLeader)?;
+        let raft_mgr = raft_exec.manager();
 
-            let group_id = self.transaction_group_id(raft_mgr, &mutations)?;
-            let response = raft_mgr
-                .propose_transaction_commit(group_id, transaction_id, mutations)
-                .await
-                .map_err(|e| ApplierError::Raft(e.to_string()))?;
+        let group_id = self.transaction_group_id(raft_mgr, &mutations)?;
+        let response = raft_mgr
+            .propose_transaction_commit(group_id, transaction_id, mutations)
+            .await
+            .map_err(|e| ApplierError::Raft(e.to_string()))?;
 
-            if let DataResponse::Error { message } = &response {
-                return Err(ApplierError::Raft(message.clone()));
-            }
-
-            Ok(response)
+        if let DataResponse::Error { message } = &response {
+            return Err(ApplierError::Raft(message.clone()));
         }
+
+        Ok(response)
+    }
     // Status Methods
     // =========================================================================
 

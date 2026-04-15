@@ -22,7 +22,11 @@ const UNIX_TO_PG_EPOCH_MICROSECONDS: i64 = 946_684_800_000_000;
 ///
 /// # Safety
 /// Must be called within a valid PostgreSQL memory context (e.g., per-tuple context).
-pub unsafe fn arrow_value_to_datum(array: &dyn Array, row: usize) -> (pg_sys::Datum, bool) {
+pub unsafe fn arrow_value_to_datum(
+    array: &dyn Array,
+    row: usize,
+    target_type_oid: pg_sys::Oid,
+) -> (pg_sys::Datum, bool) {
     if array.is_null(row) {
         return (pg_sys::Datum::from(0usize), true);
     }
@@ -55,23 +59,17 @@ pub unsafe fn arrow_value_to_datum(array: &dyn Array, row: usize) -> (pg_sys::Da
         DataType::Utf8 => {
             let arr = array.as_any().downcast_ref::<StringArray>().unwrap();
             let val = arr.value(row);
-            match CString::new(val) {
-                Ok(cstr) => {
-                    let pg_text = pg_sys::cstring_to_text(cstr.as_ptr());
-                    (pg_sys::Datum::from(pg_text as usize), false)
-                },
-                Err(_) => (pg_sys::Datum::from(0usize), true),
+            match datum_from_str_for_target_type(val, target_type_oid) {
+                Some(datum) => (datum, false),
+                None => (pg_sys::Datum::from(0usize), true),
             }
         },
         DataType::LargeUtf8 => {
             let arr = array.as_any().downcast_ref::<LargeStringArray>().unwrap();
             let val = arr.value(row);
-            match CString::new(val) {
-                Ok(cstr) => {
-                    let pg_text = pg_sys::cstring_to_text(cstr.as_ptr());
-                    (pg_sys::Datum::from(pg_text as usize), false)
-                },
-                Err(_) => (pg_sys::Datum::from(0usize), true),
+            match datum_from_str_for_target_type(val, target_type_oid) {
+                Some(datum) => (datum, false),
+                None => (pg_sys::Datum::from(0usize), true),
             }
         },
         DataType::Binary => {
@@ -105,18 +103,48 @@ pub unsafe fn arrow_value_to_datum(array: &dyn Array, row: usize) -> (pg_sys::Da
             match scalar {
                 Ok(s) => {
                     let text = s.to_string();
-                    match CString::new(text) {
-                        Ok(cstr) => {
-                            let pg_text = pg_sys::cstring_to_text(cstr.as_ptr());
-                            (pg_sys::Datum::from(pg_text as usize), false)
-                        },
-                        Err(_) => (pg_sys::Datum::from(0usize), true),
+                    match datum_from_str_for_target_type(&text, target_type_oid) {
+                        Some(datum) => (datum, false),
+                        None => (pg_sys::Datum::from(0usize), true),
                     }
                 },
                 Err(_) => (pg_sys::Datum::from(0usize), true),
             }
         },
     }
+}
+
+unsafe fn datum_from_str_for_target_type(
+    value: &str,
+    target_type_oid: pg_sys::Oid,
+) -> Option<pg_sys::Datum> {
+    match target_type_oid {
+        pg_sys::JSONOID | pg_sys::JSONBOID => parse_text_via_type_input(value, target_type_oid),
+        _ => text_datum_from_str(value),
+    }
+}
+
+unsafe fn text_datum_from_str(value: &str) -> Option<pg_sys::Datum> {
+    let cstr = CString::new(value).ok()?;
+    let pg_text = pg_sys::cstring_to_text(cstr.as_ptr());
+    Some(pg_sys::Datum::from(pg_text as usize))
+}
+
+unsafe fn parse_text_via_type_input(
+    value: &str,
+    target_type_oid: pg_sys::Oid,
+) -> Option<pg_sys::Datum> {
+    let cstr = CString::new(value).ok()?;
+    let mut typinput = pg_sys::Oid::INVALID;
+    let mut typioparam = pg_sys::Oid::INVALID;
+    pg_sys::getTypeInputInfo(target_type_oid, &mut typinput, &mut typioparam);
+
+    Some(pg_sys::OidInputFunctionCall(
+        typinput,
+        cstr.as_ptr() as *mut std::ffi::c_char,
+        typioparam,
+        -1,
+    ))
 }
 
 /// Allocate a PostgreSQL `bytea` from a byte slice.

@@ -77,12 +77,7 @@ impl TestHttpClient {
         let status = response.status();
         let body = tokio::time::timeout(self.timeout, response.into_body().collect())
             .await
-            .map_err(|_| {
-                format!(
-                    "reading response from {url} timed out after {:?}",
-                    self.timeout
-                )
-            })?
+            .map_err(|_| format!("reading response from {url} timed out after {:?}", self.timeout))?
             .map_err(|error| format!("reading response from {url} failed: {error}"))?
             .to_bytes();
 

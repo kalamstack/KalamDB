@@ -13,8 +13,8 @@ use crate::applier::executor::CommandExecutorImpl;
 use kalamdb_commons::models::rows::Row;
 use kalamdb_commons::models::{TransactionId, UserId};
 use kalamdb_commons::TableId;
-use kalamdb_transactions::StagedMutation;
 use kalamdb_raft::{RaftError, TransactionApplyResult, UserDataApplier};
+use kalamdb_transactions::StagedMutation;
 
 /// UserDataApplier implementation using Unified Command Executor
 ///

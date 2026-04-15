@@ -117,37 +117,18 @@ fn smoke_chat_ai_example_from_readme() {
     assert!(history.contains(sender_username), "expected sender username in history");
 
     // 4. Subscribe to the STREAM table used for live agent draft events.
-    let agent_events_query = format!(
-        "SELECT * FROM {} WHERE room = {}",
-        agent_events_table,
-        sql_literal(room)
-    );
+    let agent_events_query =
+        format!("SELECT * FROM {} WHERE room = {}", agent_events_table, sql_literal(room));
     let mut listener = SubscriptionListener::start(&agent_events_query)
         .expect("failed to start subscription for agent events");
     std::thread::sleep(Duration::from_secs(2));
 
     // 5. Insert streamed agent lifecycle events and the final assistant reply.
     let events = vec![
-        (
-            "thinking",
-            "",
-            "Planning assistant reply",
-        ),
-        (
-            "typing",
-            typing_preview.as_str(),
-            "Streaming the first characters of the reply",
-        ),
-        (
-            "message_saved",
-            assistant_reply.as_str(),
-            "Assistant reply committed",
-        ),
-        (
-            "complete",
-            assistant_reply.as_str(),
-            "Live stream finished",
-        ),
+        ("thinking", "", "Planning assistant reply"),
+        ("typing", typing_preview.as_str(), "Streaming the first characters of the reply"),
+        ("message_saved", assistant_reply.as_str(), "Assistant reply committed"),
+        ("complete", assistant_reply.as_str(), "Live stream finished"),
     ];
 
     for (stage, preview, message) in &events {
@@ -258,12 +239,10 @@ fn smoke_chat_ai_example_from_readme() {
     .expect("failed to observe final assistant reply in message history");
     let escaped_assistant_reply = assistant_reply.replace('"', "\\\"");
 
+    assert!(final_history.contains(user_message), "expected user message in final history");
     assert!(
-        final_history.contains(user_message),
-        "expected user message in final history"
-    );
-    assert!(
-        final_history.contains(&assistant_reply) || final_history.contains(&escaped_assistant_reply),
+        final_history.contains(&assistant_reply)
+            || final_history.contains(&escaped_assistant_reply),
         "expected assistant reply in final history"
     );
 

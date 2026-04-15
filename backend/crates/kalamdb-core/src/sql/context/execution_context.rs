@@ -109,7 +109,11 @@ impl ExecutionContext {
     }
     #[inline]
     pub fn username(&self) -> Option<&str> {
-        self.auth_session.user_context().username.as_ref().map(|username| username.as_str())
+        self.auth_session
+            .user_context()
+            .username
+            .as_ref()
+            .map(|username| username.as_str())
     }
     #[inline]
     pub fn request_id(&self) -> Option<&str> {

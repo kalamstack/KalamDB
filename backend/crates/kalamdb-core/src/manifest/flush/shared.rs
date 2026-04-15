@@ -18,6 +18,7 @@ use kalamdb_commons::models::rows::Row;
 use kalamdb_commons::models::TableId;
 use kalamdb_commons::schemas::TableType;
 use kalamdb_commons::StorageKey;
+use kalamdb_store::EntityStore;
 use kalamdb_tables::{SharedTableIndexedStore, SharedTableRow};
 use std::sync::Arc;
 
@@ -342,16 +343,9 @@ impl TableFlush for SharedTableFlushJob {
         );
         self.delete_flushed_rows(&all_keys_to_delete)?;
 
-        // Compact RocksDB column family after flush to free space and optimize reads
-        use kalamdb_store::entity_store::EntityStore;
-        log::debug!(
-            "🔧 Compacting RocksDB column family after flush: {}",
-            self.store.partition().name()
-        );
-        if let Err(e) = self.store.compact() {
-            log::warn!("⚠️  Failed to compact partition after flush: {}", e);
-            // Non-fatal: flush succeeded, compaction is optimization
-        }
+        // Note: RocksDB compaction is handled by the FlushExecutor (fire-and-forget)
+        // to avoid blocking job completion. Removing the inline compact() call here
+        // eliminates a redundant double-compaction.
 
         let parquet_path = destination_path;
 

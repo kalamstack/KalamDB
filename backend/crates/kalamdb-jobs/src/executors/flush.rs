@@ -241,62 +241,83 @@ impl FlushExecutor {
             result.parquet_files.len()
         );
 
-        // Compact RocksDB partition after flush to reclaim space from tombstones
-        ctx.log_trace("Running RocksDB compaction to clean up tombstones...");
-        let backend = app_ctx.storage_backend();
-        let partition_name = match table_type {
-            TableType::User => {
-                use kalamdb_commons::constants::ColumnFamilyNames;
-                format!(
-                    "{}{}",
-                    ColumnFamilyNames::USER_TABLE_PREFIX,
-                    table_id // TableId Display: "namespace:table"
-                )
-            },
-            TableType::Shared => {
-                use kalamdb_commons::constants::ColumnFamilyNames;
-                format!(
-                    "{}{}",
-                    ColumnFamilyNames::SHARED_TABLE_PREFIX,
-                    table_id // TableId Display: "namespace:table"
-                )
-            },
-            _ => {
-                // For Stream/System tables, skip compaction
-                return Ok(JobDecision::Completed {
-                    message: Some(format!(
-                        "Flushed {} successfully ({} rows, {} files)",
-                        table_id,
-                        result.rows_flushed,
-                        result.parquet_files.len()
-                    )),
-                });
-            },
-        };
-
-        use kalamdb_store::storage_trait::Partition;
-        let partition = Partition::new(partition_name);
-
-        // Run RocksDB compaction in blocking thread pool to avoid blocking async runtime
-        let compact_result =
-            tokio::task::spawn_blocking(move || backend.compact_partition(&partition))
+        // Fire-and-forget: compact RocksDB partition after flush to reclaim
+        // space from tombstones.  Compaction is an optimisation, not a
+        // correctness requirement, so we must not block the job from being
+        // marked "completed".  With max_background_jobs=2, synchronous
+        // compaction under concurrent flush load was the root cause of
+        // 90-120 s stalls observed in smoke tests.
+        let compact_table_type = table_type;
+        let compact_table_id = table_id.clone();
+        let compact_backend = app_ctx.storage_backend();
+        if matches!(compact_table_type, TableType::User | TableType::Shared) {
+            tokio::task::spawn(async move {
+                let partition_name = match compact_table_type {
+                    TableType::User => {
+                        use kalamdb_commons::constants::ColumnFamilyNames;
+                        format!(
+                            "{}{}",
+                            ColumnFamilyNames::USER_TABLE_PREFIX,
+                            compact_table_id
+                        )
+                    },
+                    TableType::Shared => {
+                        use kalamdb_commons::constants::ColumnFamilyNames;
+                        format!(
+                            "{}{}",
+                            ColumnFamilyNames::SHARED_TABLE_PREFIX,
+                            compact_table_id
+                        )
+                    },
+                    _ => return,
+                };
+                use kalamdb_store::storage_trait::Partition;
+                let partition = Partition::new(partition_name);
+                match tokio::task::spawn_blocking(move || {
+                    compact_backend.compact_partition(&partition)
+                })
                 .await
-                .map_err(|e| {
-                    KalamDbError::InvalidOperation(format!("Compaction task panicked: {}", e))
-                })?;
-
-        match compact_result {
-            Ok(()) => {
-                ctx.log_trace("RocksDB compaction completed successfully");
-            },
-            Err(e) => {
-                // Log compaction failure but don't fail the flush job
-                ctx.log_warn(&format!("RocksDB compaction failed (non-critical): {}", e));
-            },
+                {
+                    Ok(Ok(())) => {
+                        log::trace!(
+                            "Post-flush compaction completed for {}",
+                            compact_table_id
+                        );
+                    },
+                    Ok(Err(e)) => {
+                        log::warn!("Post-flush compaction failed (non-critical): {}", e);
+                    },
+                    Err(e) => {
+                        log::warn!("Post-flush compaction task panicked: {}", e);
+                    },
+                }
+            });
         }
 
+        // Fire-and-forget: check if the shared table scope is empty and clean
+        // up cold segments if so.  Also non-blocking to avoid stalling.
         if matches!(table_type, TableType::Shared) {
-            cleanup_empty_shared_scope_if_needed(ctx, table_id.as_ref()).await?;
+            let cleanup_app_ctx = app_ctx.clone();
+            let cleanup_table_id = (*table_id).clone();
+            let cleanup_job_id = ctx.job_id.clone();
+            tokio::task::spawn(async move {
+                // Build a minimal JobContext just for the helper
+                let params = FlushParams {
+                    table_id: cleanup_table_id.clone(),
+                    table_type: TableType::Shared,
+                    flush_threshold: None,
+                };
+                let ctx =
+                    crate::executors::JobContext::new(cleanup_app_ctx, cleanup_job_id, params);
+                if let Err(e) =
+                    cleanup_empty_shared_scope_if_needed(&ctx, &cleanup_table_id).await
+                {
+                    log::warn!(
+                        "Post-flush shared scope cleanup failed (non-critical): {}",
+                        e
+                    );
+                }
+            });
         }
 
         Ok(JobDecision::Completed {

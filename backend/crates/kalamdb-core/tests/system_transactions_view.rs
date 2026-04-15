@@ -6,9 +6,9 @@ use std::time::Duration;
 
 use datafusion_common::ScalarValue;
 use kalamdb_commons::conversions::arrow_json_conversion::record_batch_to_json_rows;
-use kalamdb_commons::models::KalamCellValue;
-use kalamdb_commons::models::rows::Row;
 use kalamdb_commons::models::pg_operations::InsertRequest;
+use kalamdb_commons::models::rows::Row;
+use kalamdb_commons::models::KalamCellValue;
 use kalamdb_commons::models::TransactionId;
 use kalamdb_commons::TableType;
 use kalamdb_configs::ServerConfig;
@@ -48,14 +48,13 @@ fn string_field(row: &HashMap<String, KalamCellValue>, field: &str) -> String {
 
 fn i64_field(row: &HashMap<String, KalamCellValue>, field: &str) -> i64 {
     row.get(field)
-    .and_then(|value| value.as_i64().or_else(|| value.as_str().and_then(|raw| raw.parse().ok())))
+        .and_then(|value| {
+            value.as_i64().or_else(|| value.as_str().and_then(|raw| raw.parse().ok()))
+        })
         .unwrap_or_else(|| panic!("missing i64 field {field}: {row:?}"))
 }
 
-fn optional_string_field(
-    row: &HashMap<String, KalamCellValue>,
-    field: &str,
-) -> Option<String> {
+fn optional_string_field(row: &HashMap<String, KalamCellValue>, field: &str) -> Option<String> {
     row.get(field).and_then(|value| value.as_str()).map(ToString::to_string)
 }
 
@@ -116,8 +115,8 @@ async fn rollback_transaction(service: &KalamPgService, session_id: &str, transa
 #[ntest::timeout(10000)]
 async fn system_transactions_shows_active_pg_and_sql_transactions_while_sessions_remain_pg_only() {
     let (app_ctx, _test_db) = create_cluster_app_context().await;
-    let table_id = create_shared_table(&app_ctx, &unique_namespace("system_transactions"), "items")
-        .await;
+    let table_id =
+        create_shared_table(&app_ctx, &unique_namespace("system_transactions"), "items").await;
     let executor = create_executor(Arc::clone(&app_ctx));
     let operation_service = OperationService::new(Arc::clone(&app_ctx));
     let observer_ctx = observer_exec_ctx(&app_ctx);
@@ -200,12 +199,8 @@ async fn system_transactions_shows_active_pg_and_sql_transactions_while_sessions
     execute_ok(&executor, &request_ctx, "ROLLBACK").await;
 
     let cleared_rows = json_rows(
-        execute_ok(
-            &executor,
-            &observer_ctx,
-            "SELECT transaction_id FROM system.transactions",
-        )
-        .await,
+        execute_ok(&executor, &observer_ctx, "SELECT transaction_id FROM system.transactions")
+            .await,
     );
     assert!(cleared_rows.is_empty());
 }
@@ -247,9 +242,7 @@ async fn stale_idle_pg_sessions_drop_out_of_sessions_view() {
         execute_ok(
             &executor,
             &observer_ctx,
-            &format!(
-                "SELECT session_id FROM system.sessions WHERE session_id = '{session_id}'"
-            ),
+            &format!("SELECT session_id FROM system.sessions WHERE session_id = '{session_id}'"),
         )
         .await,
     );
@@ -313,10 +306,7 @@ async fn pg_passive_timeout_hides_stale_transaction_fields_from_sessions_view() 
     assert_eq!(timed_out_session_rows.len(), 1);
     assert_eq!(string_field(&timed_out_session_rows[0], "state"), "idle");
     assert_eq!(optional_string_field(&timed_out_session_rows[0], "transaction_id"), None);
-    assert_eq!(
-        optional_string_field(&timed_out_session_rows[0], "transaction_state"),
-        None
-    );
+    assert_eq!(optional_string_field(&timed_out_session_rows[0], "transaction_state"), None);
 
     let timed_out_transaction_rows = json_rows(
         execute_ok(
@@ -342,8 +332,8 @@ async fn pg_timeout_after_write_clears_sessions_and_transactions_views() {
     config.transaction_timeout_secs = 1;
 
     let (app_ctx, _test_db) = create_cluster_app_context_with_config(config).await;
-    let table_id = create_shared_table(&app_ctx, &unique_namespace("pg_timeout_write"), "items")
-        .await;
+    let table_id =
+        create_shared_table(&app_ctx, &unique_namespace("pg_timeout_write"), "items").await;
     let executor = create_executor(Arc::clone(&app_ctx));
     let observer_ctx = observer_exec_ctx(&app_ctx);
     let session_id = "pg-4301-deadbeef";
@@ -359,12 +349,7 @@ async fn pg_timeout_after_write_clears_sessions_and_transactions_views() {
     let transaction_id = begin_transaction(&pg_service, session_id).await;
 
     pg_service
-        .insert(Request::new(shared_insert_request(
-            &table_id,
-            session_id,
-            1,
-            "pending",
-        )))
+        .insert(Request::new(shared_insert_request(&table_id, session_id, 1, "pending")))
         .await
         .expect("initial staged write succeeds");
 
@@ -406,12 +391,7 @@ async fn pg_timeout_after_write_clears_sessions_and_transactions_views() {
     tokio::time::sleep(Duration::from_millis(2200)).await;
 
     let timeout_error = pg_service
-        .insert(Request::new(shared_insert_request(
-            &table_id,
-            session_id,
-            2,
-            "late",
-        )))
+        .insert(Request::new(shared_insert_request(&table_id, session_id, 2, "late")))
         .await
         .expect_err("follow-up write should fail after timeout");
     assert_eq!(timeout_error.code(), tonic::Code::FailedPrecondition);
@@ -423,17 +403,11 @@ async fn pg_timeout_after_write_clears_sessions_and_transactions_views() {
         TransactionId::try_new(transaction_id.clone()).expect("transaction id should parse");
     assert!(app_ctx.transaction_coordinator().active_for_owner(&owner_key).is_none());
     assert!(
-        app_ctx
-            .transaction_coordinator()
-            .get_handle(&parsed_transaction_id)
-            .is_none(),
+        app_ctx.transaction_coordinator().get_handle(&parsed_transaction_id).is_none(),
         "timed out PG write should not leave a handle behind"
     );
     assert!(
-        app_ctx
-            .transaction_coordinator()
-            .get_overlay(&parsed_transaction_id)
-            .is_none(),
+        app_ctx.transaction_coordinator().get_overlay(&parsed_transaction_id).is_none(),
         "timed out PG write should not leave staged rows behind"
     );
 
@@ -450,10 +424,7 @@ async fn pg_timeout_after_write_clears_sessions_and_transactions_views() {
     assert_eq!(cleared_session_rows.len(), 1);
     assert_eq!(string_field(&cleared_session_rows[0], "state"), "idle");
     assert_eq!(optional_string_field(&cleared_session_rows[0], "transaction_id"), None);
-    assert_eq!(
-        optional_string_field(&cleared_session_rows[0], "transaction_state"),
-        None
-    );
+    assert_eq!(optional_string_field(&cleared_session_rows[0], "transaction_state"), None);
 
     let cleared_transaction_rows = json_rows(
         execute_ok(
@@ -479,8 +450,8 @@ async fn pg_timeout_after_read_clears_sessions_and_transactions_views() {
     config.transaction_timeout_secs = 1;
 
     let (app_ctx, _test_db) = create_cluster_app_context_with_config(config).await;
-    let table_id = create_shared_table(&app_ctx, &unique_namespace("pg_timeout_read"), "items")
-        .await;
+    let table_id =
+        create_shared_table(&app_ctx, &unique_namespace("pg_timeout_read"), "items").await;
     let executor = create_executor(Arc::clone(&app_ctx));
     let observer_ctx = observer_exec_ctx(&app_ctx);
     let session_id = "pg-4302-cafef00d";
@@ -519,6 +490,7 @@ async fn pg_timeout_after_read_clears_sessions_and_transactions_views() {
             session_id: session_id.to_string(),
             user_id: None,
             columns: vec![],
+            filters: vec![],
             limit: None,
         }))
         .await
@@ -536,10 +508,7 @@ async fn pg_timeout_after_read_clears_sessions_and_transactions_views() {
         TransactionId::try_new(transaction_id.clone()).expect("transaction id should parse");
     assert!(app_ctx.transaction_coordinator().active_for_owner(&owner_key).is_none());
     assert!(
-        app_ctx
-            .transaction_coordinator()
-            .get_handle(&parsed_transaction_id)
-            .is_none(),
+        app_ctx.transaction_coordinator().get_handle(&parsed_transaction_id).is_none(),
         "timed out PG read should not leave a handle behind"
     );
 
@@ -556,10 +525,7 @@ async fn pg_timeout_after_read_clears_sessions_and_transactions_views() {
     assert_eq!(cleared_session_rows.len(), 1);
     assert_eq!(string_field(&cleared_session_rows[0], "state"), "idle");
     assert_eq!(optional_string_field(&cleared_session_rows[0], "transaction_id"), None);
-    assert_eq!(
-        optional_string_field(&cleared_session_rows[0], "transaction_state"),
-        None
-    );
+    assert_eq!(optional_string_field(&cleared_session_rows[0], "transaction_state"), None);
 
     let cleared_transaction_rows = json_rows(
         execute_ok(

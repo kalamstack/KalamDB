@@ -201,8 +201,8 @@ fn smoke_test_system_live_queries() {
 
     // Query system.live
     let query_sql = "SELECT live_id, query, user_id FROM system.live";
-    let output = execute_sql_as_root_via_client_json(query_sql)
-        .expect("Failed to query system.live");
+    let output =
+        execute_sql_as_root_via_client_json(query_sql).expect("Failed to query system.live");
 
     println!("system.live output:\n{}", output);
 

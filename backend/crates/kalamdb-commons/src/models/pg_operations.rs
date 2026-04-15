@@ -18,6 +18,10 @@ pub struct ScanRequest {
     pub columns: Vec<String>,
     pub limit: Option<usize>,
     pub user_id: Option<UserId>,
+    /// Equality filters pushed down from the FDW WHERE clause.
+    /// Each pair is `(column_name, string_value)`. The server converts
+    /// string values to the correct Arrow type using the table schema.
+    pub filters: Vec<(String, String)>,
 }
 
 /// Domain-typed insert request.

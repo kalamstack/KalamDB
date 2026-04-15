@@ -55,8 +55,8 @@ impl ServerConfig {
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            let valid_scheme = public_origin.starts_with("http://")
-                || public_origin.starts_with("https://");
+            let valid_scheme =
+                public_origin.starts_with("http://") || public_origin.starts_with("https://");
             if !valid_scheme {
                 return Err(anyhow::anyhow!(
                     "server.public_origin must start with http:// or https://"
@@ -153,16 +153,26 @@ mod tests {
         let mut config = ServerConfig::default();
         config.server.port = 9090;
 
-        assert_eq!(
-            config.server.effective_public_origin(),
-            "http://localhost:9090"
-        );
+        assert_eq!(config.server.effective_public_origin(), "http://localhost:9090");
+
+        config.server.public_origin = Some("https://db.example.com/".to_string());
+
+        assert_eq!(config.server.effective_public_origin(), "https://db.example.com");
+    }
+
+    #[test]
+    fn test_configured_public_origin_treats_blank_as_unset() {
+        let mut config = ServerConfig::default();
+
+        config.server.public_origin = Some("   ".to_string());
+
+        assert_eq!(config.server.configured_public_origin(), None);
 
         config.server.public_origin = Some("https://db.example.com/".to_string());
 
         assert_eq!(
-            config.server.effective_public_origin(),
-            "https://db.example.com"
+            config.server.configured_public_origin().as_deref(),
+            Some("https://db.example.com")
         );
     }
 

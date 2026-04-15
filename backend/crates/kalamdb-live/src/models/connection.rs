@@ -316,9 +316,9 @@ pub struct SubscriptionState {
 ///
 /// Identity and channel fields are immutable after construction.
 /// Auth fields use set-once primitives (OnceLock + AtomicBool).
-    /// Subscriptions use a compact per-connection map.
-    /// Notification fanout reads from manager-level indices, so connection-local
-    /// subscription access is low-contention and does not need a sharded map.
+/// Subscriptions use a compact per-connection map.
+/// Notification fanout reads from manager-level indices, so connection-local
+/// subscription access is low-contention and does not need a sharded map.
 /// Heartbeat uses AtomicU64 for zero-contention updates.
 ///
 /// Used for both WebSocket live query connections and topic consumer connections.
@@ -500,9 +500,9 @@ impl ConnectionState {
         F: FnOnce() -> Option<String>,
     {
         let mut subscriptions = self.subscriptions.write();
-        subscriptions.remove_entry(primary_key).or_else(|| {
-            fallback_fn().and_then(|key| subscriptions.remove_entry(key.as_str()))
-        })
+        subscriptions
+            .remove_entry(primary_key)
+            .or_else(|| fallback_fn().and_then(|key| subscriptions.remove_entry(key.as_str())))
     }
 
     /// Get a subscription by ID (cloned out of the connection map).

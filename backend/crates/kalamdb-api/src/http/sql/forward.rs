@@ -214,13 +214,6 @@ pub async fn handle_not_leader_error(
         );
     }
 
-    forward_sql_grpc(
-        ForwardTarget::Leader,
-        http_req,
-        req,
-        app_context,
-        request_id,
-        start_time,
-    )
-    .await
+    forward_sql_grpc(ForwardTarget::Leader, http_req, req, app_context, request_id, start_time)
+        .await
 }

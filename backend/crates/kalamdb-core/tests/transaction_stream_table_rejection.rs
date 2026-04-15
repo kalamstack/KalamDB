@@ -34,7 +34,9 @@ async fn explicit_transaction_rejects_stream_table_writes() {
         .await
         .expect_err("stream-table write should be rejected");
     assert!(
-        error.message().contains("stream tables are not supported inside explicit transactions"),
+        error
+            .message()
+            .contains("stream tables are not supported inside explicit transactions"),
         "{error}"
     );
 

@@ -15,11 +15,9 @@ pub enum StagedInsertBuildError {
 impl fmt::Display for StagedInsertBuildError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MissingPrimaryKey { column_name } => write!(
-                f,
-                "transactional INSERT requires primary key column '{}'",
-                column_name
-            ),
+            Self::MissingPrimaryKey { column_name } => {
+                write!(f, "transactional INSERT requires primary key column '{}'", column_name)
+            },
         }
     }
 }

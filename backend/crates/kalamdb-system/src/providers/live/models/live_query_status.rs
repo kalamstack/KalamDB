@@ -86,10 +86,7 @@ mod tests {
     fn test_status_from_str() {
         assert_eq!("active".parse::<LiveQueryStatus>().unwrap(), LiveQueryStatus::Active);
         assert_eq!("paused".parse::<LiveQueryStatus>().unwrap(), LiveQueryStatus::Paused);
-        assert_eq!(
-            "completed".parse::<LiveQueryStatus>().unwrap(),
-            LiveQueryStatus::Completed
-        );
+        assert_eq!("completed".parse::<LiveQueryStatus>().unwrap(), LiveQueryStatus::Completed);
         assert_eq!("error".parse::<LiveQueryStatus>().unwrap(), LiveQueryStatus::Error);
 
         assert_eq!("ACTIVE".parse::<LiveQueryStatus>().unwrap(), LiveQueryStatus::Active);

@@ -26,9 +26,8 @@ struct ProxyImpairments {
 impl TcpDisconnectProxy {
     pub async fn start(target_base_url: &str) -> Self {
         let target_addr = extract_host_port(target_base_url);
-        let listener = bind_loopback_listener()
-            .await
-            .expect("proxy should bind to an ephemeral port");
+        let listener =
+            bind_loopback_listener().await.expect("proxy should bind to an ephemeral port");
         let bind_addr = listener.local_addr().expect("proxy should have a local addr");
         let paused = Arc::new(AtomicBool::new(false));
         let impairments = Arc::new(ProxyImpairments::default());
@@ -92,22 +91,16 @@ impl TcpDisconnectProxy {
     }
 
     pub fn blackhole(&self) {
-        self.impairments
-            .blackhole_traffic
-            .store(true, Ordering::SeqCst);
+        self.impairments.blackhole_traffic.store(true, Ordering::SeqCst);
     }
 
     pub fn restore_traffic(&self) {
-        self.impairments
-            .blackhole_traffic
-            .store(false, Ordering::SeqCst);
+        self.impairments.blackhole_traffic.store(false, Ordering::SeqCst);
     }
 
     pub fn set_chunk_delay(&self, delay: Duration) {
         let delay_ms = delay.as_millis().min(u64::MAX as u128) as u64;
-        self.impairments
-            .chunk_delay_ms
-            .store(delay_ms, Ordering::SeqCst);
+        self.impairments.chunk_delay_ms.store(delay_ms, Ordering::SeqCst);
     }
 
     pub fn clear_chunk_delay(&self) {

@@ -253,6 +253,7 @@ unsafe fn begin_foreign_modify_impl(rinfo: *mut pg_sys::ResultRelInfo) -> Result
         runtime,
         column_names,
         pk_column,
+        flushed_for_modify: false,
     });
 
     (*rinfo).ri_FdwState = Box::into_raw(modify_state) as *mut std::ffi::c_void;
@@ -372,13 +373,16 @@ unsafe fn exec_foreign_update_impl(
     slot: *mut pg_sys::TupleTableSlot,
     plan_slot: *mut pg_sys::TupleTableSlot,
 ) -> Result<(), KalamPgError> {
-    let state = &*((*rinfo).ri_FdwState as *mut KalamModifyState);
-    // Flush pending inserts so the update sees all rows
-    crate::write_buffer::flush_table(
-        &state.session_id,
-        &state.table_options.table_id,
-        state.table_options.table_type,
-    )?;
+    let state = &mut *((*rinfo).ri_FdwState as *mut KalamModifyState);
+    // Flush pending inserts once per modify lifecycle so updates see all rows
+    if !state.flushed_for_modify {
+        crate::write_buffer::flush_table(
+            &state.session_id,
+            &state.table_options.table_id,
+            state.table_options.table_type,
+        )?;
+        state.flushed_for_modify = true;
+    }
     let pk_value = extract_pk_value(plan_slot, &state.pk_column, &state.column_names)?;
     let (updates, _explicit_userid) = slot_to_row(slot, &state.column_names)?;
 
@@ -401,13 +405,16 @@ unsafe fn exec_foreign_delete_impl(
     rinfo: *mut pg_sys::ResultRelInfo,
     plan_slot: *mut pg_sys::TupleTableSlot,
 ) -> Result<(), KalamPgError> {
-    let state = &*((*rinfo).ri_FdwState as *mut KalamModifyState);
-    // Flush pending inserts so the delete sees all rows
-    crate::write_buffer::flush_table(
-        &state.session_id,
-        &state.table_options.table_id,
-        state.table_options.table_type,
-    )?;
+    let state = &mut *((*rinfo).ri_FdwState as *mut KalamModifyState);
+    // Flush pending inserts once per modify lifecycle so deletes see all rows
+    if !state.flushed_for_modify {
+        crate::write_buffer::flush_table(
+            &state.session_id,
+            &state.table_options.table_id,
+            state.table_options.table_type,
+        )?;
+        state.flushed_for_modify = true;
+    }
     let pk_value = extract_pk_value(plan_slot, &state.pk_column, &state.column_names)?;
 
     let user_id_str = crate::current_kalam_user_id();

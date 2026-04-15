@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::Arc;
 
 use chrono::Utc;
 use datafusion_common::ScalarValue;
@@ -75,11 +75,7 @@ pub async fn create_cluster_app_context_with_config(
         config,
     );
     app_ctx.executor().start().await.expect("start raft");
-    app_ctx
-        .executor()
-        .initialize_cluster()
-        .await
-        .expect("initialize raft cluster");
+    app_ctx.executor().initialize_cluster().await.expect("initialize raft cluster");
     app_ctx.wire_raft_appliers();
 
     let storages = app_ctx.system_tables().storages();
@@ -282,9 +278,7 @@ pub fn row(id: i64, name: &str) -> Row {
     ]))
 }
 
-pub fn request_transaction_state(
-    exec_ctx: &ExecutionContext,
-) -> RequestTransactionState {
+pub fn request_transaction_state(exec_ctx: &ExecutionContext) -> RequestTransactionState {
     RequestTransactionState::from_execution_context(exec_ctx)
         .expect("request transaction state")
         .expect("request transaction state present")

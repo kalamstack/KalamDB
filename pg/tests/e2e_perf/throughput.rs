@@ -139,8 +139,11 @@ async fn e2e_perf_sequential_insert_1k() {
     sql.push_str("BEGIN;");
     for index in 0..TOTAL {
         use std::fmt::Write;
-        write!(sql, "INSERT INTO {qualified_table} (id, value) VALUES ('pipe-{index}', {index});")
-            .unwrap();
+        write!(
+            sql,
+            "INSERT INTO {qualified_table} (id, value) VALUES ('pipe-{index}', {index});"
+        )
+        .unwrap();
     }
     sql.push_str("COMMIT;");
     let start = std::time::Instant::now();
@@ -179,12 +182,15 @@ async fn e2e_perf_scan_5k() {
             let value_index = batch * BATCH + index;
             values.push(format!("('scan-{value_index}', 'Title {value_index}', {value_index})"));
         }
-        let sql =
-            format!("INSERT INTO {qualified_table} (id, title, value) VALUES {}", values.join(", "));
+        let sql = format!(
+            "INSERT INTO {qualified_table} (id, title, value) VALUES {}",
+            values.join(", ")
+        );
         pg.batch_execute(&sql).await.expect("seed insert");
     }
 
-    let (rows, scan_ms) = timed_query(&pg, &format!("SELECT id, title, value FROM {qualified_table}")).await;
+    let (rows, scan_ms) =
+        timed_query(&pg, &format!("SELECT id, title, value FROM {qualified_table}")).await;
     let rows_per_sec = rows.len() as f64 / (scan_ms / 1000.0);
 
     eprintln!(
@@ -219,8 +225,10 @@ async fn e2e_perf_point_select() {
     for index in 0..TOTAL {
         values.push(format!("('pt-{index}', 'data-{index}', {index})"));
     }
-    let sql =
-        format!("INSERT INTO {qualified_table} (id, payload, value) VALUES {}", values.join(", "));
+    let sql = format!(
+        "INSERT INTO {qualified_table} (id, payload, value) VALUES {}",
+        values.join(", ")
+    );
     pg.batch_execute(&sql).await.expect("seed point table");
 
     let _ = pg
@@ -313,9 +321,7 @@ async fn e2e_perf_delete_500() {
     let start = std::time::Instant::now();
     for index in 0..TOTAL {
         let id = format!("del-{index}");
-        pg.execute(&delete_stmt, &[&id])
-            .await
-            .expect("delete row");
+        pg.execute(&delete_stmt, &[&id]).await.expect("delete row");
     }
     let delete_ms = start.elapsed().as_secs_f64() * 1000.0;
     let rows_per_sec = TOTAL as f64 / (delete_ms / 1000.0);
@@ -339,12 +345,7 @@ async fn e2e_perf_user_table_insert_scan() {
     let table = unique_name("perf_user");
     let qualified_table = format!("e2e.{table}");
 
-    create_user_kalam_table(
-        &pg,
-        &table,
-        "id TEXT, data TEXT",
-    )
-    .await;
+    create_user_kalam_table(&pg, &table, "id TEXT, data TEXT").await;
     set_user_id(&pg, "perf-user-1").await;
     await_user_shard_leader("perf-user-1").await;
 
@@ -363,7 +364,8 @@ async fn e2e_perf_user_table_insert_scan() {
     }
     let insert_ms = start.elapsed().as_secs_f64() * 1000.0;
 
-    let (rows, scan_ms) = timed_query(&pg, &format!("SELECT id, data FROM {qualified_table}")).await;
+    let (rows, scan_ms) =
+        timed_query(&pg, &format!("SELECT id, data FROM {qualified_table}")).await;
 
     eprintln!(
         "[PERF] User table: INSERT {TOTAL} rows in {insert_ms:.0}ms, SCAN returned {} rows in {scan_ms:.1}ms",
@@ -403,8 +405,8 @@ async fn e2e_perf_cross_verify_latency() {
             &format!("INSERT INTO {qualified_table} (id, value) VALUES ($1, $2)"),
             &[&id, &(index as i32)],
         )
-            .await
-            .expect("xv insert");
+        .await
+        .expect("xv insert");
 
         let result = env
             .kalamdb_sql(&format!("SELECT id, value FROM e2e.{table} WHERE id = '{id}'"))

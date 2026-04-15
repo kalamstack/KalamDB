@@ -850,8 +850,8 @@ mod tests {
         values.insert("name".to_string(), ScalarValue::Utf8(Some("shared".to_string())));
         let fields = Row { values };
 
-        let encoded = encode_shared_table_row(SeqId::new(456), 77, true, &fields)
-            .expect("encode shared row");
+        let encoded =
+            encode_shared_table_row(SeqId::new(456), 77, true, &fields).expect("encode shared row");
         let (seq, commit_seq, deleted, decoded_fields) =
             decode_shared_table_row(&encoded).expect("decode shared row");
         assert_eq!(seq, SeqId::new(456));

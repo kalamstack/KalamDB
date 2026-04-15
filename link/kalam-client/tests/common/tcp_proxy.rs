@@ -74,9 +74,8 @@ impl TcpDisconnectProxy {
     /// Binds to an ephemeral port on 127.0.0.1.
     pub async fn start(target_base_url: &str) -> Self {
         let target_addr = extract_host_port(target_base_url);
-        let listener = bind_loopback_listener()
-            .await
-            .expect("proxy should bind to an ephemeral port");
+        let listener =
+            bind_loopback_listener().await.expect("proxy should bind to an ephemeral port");
         let bind_addr = listener.local_addr().expect("proxy should have a local addr");
         let paused = Arc::new(AtomicBool::new(false));
         let impairments = Arc::new(ProxyImpairments::new());

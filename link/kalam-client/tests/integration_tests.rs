@@ -15,7 +15,9 @@
 //! ```
 
 use kalam_client::models::{BatchControl, BatchStatus, KalamDataType, ResponseStatus, SchemaField};
-use kalam_client::{AuthProvider, ChangeEvent, KalamLinkClient, KalamLinkError, SubscriptionConfig};
+use kalam_client::{
+    AuthProvider, ChangeEvent, KalamLinkClient, KalamLinkError, SubscriptionConfig,
+};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;

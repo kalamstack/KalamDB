@@ -244,12 +244,16 @@ pub struct ServerSettings {
 }
 
 impl ServerSettings {
-    pub fn effective_public_origin(&self) -> String {
+    pub fn configured_public_origin(&self) -> Option<String> {
         self.public_origin
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(|value| value.trim_end_matches('/').to_string())
+    }
+
+    pub fn effective_public_origin(&self) -> String {
+        self.configured_public_origin()
             .unwrap_or_else(|| format!("http://localhost:{}", self.port))
     }
 }

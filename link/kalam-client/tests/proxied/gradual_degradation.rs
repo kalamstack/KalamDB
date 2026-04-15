@@ -119,13 +119,8 @@ async fn test_gradual_latency_ramp_forces_reconnect_then_recovers() {
         // ── Clear latency and allow recovery ────────────────────────────
         proxy.clear_latency();
         let expected_connects = connect_count.load(Ordering::SeqCst) + 1;
-        wait_for_reconnect(
-            &client,
-            &connect_count,
-            expected_connects,
-            "gradual latency recovery",
-        )
-        .await;
+        wait_for_reconnect(&client, &connect_count, expected_connects, "gradual latency recovery")
+            .await;
 
         // Insert a post-recovery marker.
         writer

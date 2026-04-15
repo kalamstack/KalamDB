@@ -2,311 +2,364 @@
 // @generated
 extern crate alloc;
 
-
 #[allow(unused_imports, dead_code)]
 pub mod kalamdb {
 
-#[allow(unused_imports, dead_code)]
-pub mod serialization {
+    #[allow(unused_imports, dead_code)]
+    pub mod serialization {
 
+        #[deprecated(
+            since = "2.0.0",
+            note = "Use associated constants instead. This will no longer be generated in 2021."
+        )]
+        pub const ENUM_MIN_CODEC_KIND: u8 = 0;
+        #[deprecated(
+            since = "2.0.0",
+            note = "Use associated constants instead. This will no longer be generated in 2021."
+        )]
+        pub const ENUM_MAX_CODEC_KIND: u8 = 1;
+        #[deprecated(
+            since = "2.0.0",
+            note = "Use associated constants instead. This will no longer be generated in 2021."
+        )]
+        #[allow(non_camel_case_types)]
+        pub const ENUM_VALUES_CODEC_KIND: [CodecKind; 2] =
+            [CodecKind::FlatBuffers, CodecKind::FlexBuffers];
 
-#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
-pub const ENUM_MIN_CODEC_KIND: u8 = 0;
-#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
-pub const ENUM_MAX_CODEC_KIND: u8 = 1;
-#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
-#[allow(non_camel_case_types)]
-pub const ENUM_VALUES_CODEC_KIND: [CodecKind; 2] = [
-  CodecKind::FlatBuffers,
-  CodecKind::FlexBuffers,
-];
+        #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+        #[repr(transparent)]
+        pub struct CodecKind(pub u8);
+        #[allow(non_upper_case_globals)]
+        impl CodecKind {
+            pub const FlatBuffers: Self = Self(0);
+            pub const FlexBuffers: Self = Self(1);
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-#[repr(transparent)]
-pub struct CodecKind(pub u8);
-#[allow(non_upper_case_globals)]
-impl CodecKind {
-  pub const FlatBuffers: Self = Self(0);
-  pub const FlexBuffers: Self = Self(1);
+            pub const ENUM_MIN: u8 = 0;
+            pub const ENUM_MAX: u8 = 1;
+            pub const ENUM_VALUES: &'static [Self] = &[Self::FlatBuffers, Self::FlexBuffers];
+            /// Returns the variant's name or "" if unknown.
+            pub fn variant_name(self) -> Option<&'static str> {
+                match self {
+                    Self::FlatBuffers => Some("FlatBuffers"),
+                    Self::FlexBuffers => Some("FlexBuffers"),
+                    _ => None,
+                }
+            }
+        }
+        impl ::core::fmt::Debug for CodecKind {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
+                if let Some(name) = self.variant_name() {
+                    f.write_str(name)
+                } else {
+                    f.write_fmt(format_args!("<UNKNOWN {:?}>", self.0))
+                }
+            }
+        }
+        impl<'a> ::flatbuffers::Follow<'a> for CodecKind {
+            type Inner = Self;
+            #[inline]
+            unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+                let b = unsafe { ::flatbuffers::read_scalar_at::<u8>(buf, loc) };
+                Self(b)
+            }
+        }
 
-  pub const ENUM_MIN: u8 = 0;
-  pub const ENUM_MAX: u8 = 1;
-  pub const ENUM_VALUES: &'static [Self] = &[
-    Self::FlatBuffers,
-    Self::FlexBuffers,
-  ];
-  /// Returns the variant's name or "" if unknown.
-  pub fn variant_name(self) -> Option<&'static str> {
-    match self {
-      Self::FlatBuffers => Some("FlatBuffers"),
-      Self::FlexBuffers => Some("FlexBuffers"),
-      _ => None,
-    }
-  }
-}
-impl ::core::fmt::Debug for CodecKind {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
-    if let Some(name) = self.variant_name() {
-      f.write_str(name)
-    } else {
-      f.write_fmt(format_args!("<UNKNOWN {:?}>", self.0))
-    }
-  }
-}
-impl<'a> ::flatbuffers::Follow<'a> for CodecKind {
-  type Inner = Self;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    let b = unsafe { ::flatbuffers::read_scalar_at::<u8>(buf, loc) };
-    Self(b)
-  }
-}
+        impl ::flatbuffers::Push for CodecKind {
+            type Output = CodecKind;
+            #[inline]
+            unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
+                unsafe { ::flatbuffers::emplace_scalar::<u8>(dst, self.0) };
+            }
+        }
 
-impl ::flatbuffers::Push for CodecKind {
-    type Output = CodecKind;
-    #[inline]
-    unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
-        unsafe { ::flatbuffers::emplace_scalar::<u8>(dst, self.0) };
-    }
-}
+        impl ::flatbuffers::EndianScalar for CodecKind {
+            type Scalar = u8;
+            #[inline]
+            fn to_little_endian(self) -> u8 {
+                self.0.to_le()
+            }
+            #[inline]
+            #[allow(clippy::wrong_self_convention)]
+            fn from_little_endian(v: u8) -> Self {
+                let b = u8::from_le(v);
+                Self(b)
+            }
+        }
 
-impl ::flatbuffers::EndianScalar for CodecKind {
-  type Scalar = u8;
-  #[inline]
-  fn to_little_endian(self) -> u8 {
-    self.0.to_le()
-  }
-  #[inline]
-  #[allow(clippy::wrong_self_convention)]
-  fn from_little_endian(v: u8) -> Self {
-    let b = u8::from_le(v);
-    Self(b)
-  }
-}
+        impl<'a> ::flatbuffers::Verifiable for CodecKind {
+            #[inline]
+            fn run_verifier(
+                v: &mut ::flatbuffers::Verifier,
+                pos: usize,
+            ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+                u8::run_verifier(v, pos)
+            }
+        }
 
-impl<'a> ::flatbuffers::Verifiable for CodecKind {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    u8::run_verifier(v, pos)
-  }
-}
+        impl ::flatbuffers::SimpleToVerifyInSlice for CodecKind {}
+        pub enum EntityEnvelopeOffset {}
+        #[derive(Copy, Clone, PartialEq)]
 
-impl ::flatbuffers::SimpleToVerifyInSlice for CodecKind {}
-pub enum EntityEnvelopeOffset {}
-#[derive(Copy, Clone, PartialEq)]
+        pub struct EntityEnvelope<'a> {
+            pub _tab: ::flatbuffers::Table<'a>,
+        }
 
-pub struct EntityEnvelope<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
-}
+        impl<'a> ::flatbuffers::Follow<'a> for EntityEnvelope<'a> {
+            type Inner = EntityEnvelope<'a>;
+            #[inline]
+            unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+                Self {
+                    _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+                }
+            }
+        }
 
-impl<'a> ::flatbuffers::Follow<'a> for EntityEnvelope<'a> {
-  type Inner = EntityEnvelope<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
-}
+        impl<'a> EntityEnvelope<'a> {
+            pub const VT_CODEC_KIND: ::flatbuffers::VOffsetT = 4;
+            pub const VT_SCHEMA_VERSION: ::flatbuffers::VOffsetT = 6;
+            pub const VT_PAYLOAD: ::flatbuffers::VOffsetT = 8;
 
-impl<'a> EntityEnvelope<'a> {
-  pub const VT_CODEC_KIND: ::flatbuffers::VOffsetT = 4;
-  pub const VT_SCHEMA_VERSION: ::flatbuffers::VOffsetT = 6;
-  pub const VT_PAYLOAD: ::flatbuffers::VOffsetT = 8;
+            #[inline]
+            pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+                EntityEnvelope { _tab: table }
+            }
+            #[allow(unused_mut)]
+            pub fn create<
+                'bldr: 'args,
+                'args: 'mut_bldr,
+                'mut_bldr,
+                A: ::flatbuffers::Allocator + 'bldr,
+            >(
+                _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+                args: &'args EntityEnvelopeArgs<'args>,
+            ) -> ::flatbuffers::WIPOffset<EntityEnvelope<'bldr>> {
+                let mut builder = EntityEnvelopeBuilder::new(_fbb);
+                if let Some(x) = args.payload {
+                    builder.add_payload(x);
+                }
+                builder.add_schema_version(args.schema_version);
+                builder.add_codec_kind(args.codec_kind);
+                builder.finish()
+            }
 
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    EntityEnvelope { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args EntityEnvelopeArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<EntityEnvelope<'bldr>> {
-    let mut builder = EntityEnvelopeBuilder::new(_fbb);
-    if let Some(x) = args.payload { builder.add_payload(x); }
-    builder.add_schema_version(args.schema_version);
-    builder.add_codec_kind(args.codec_kind);
-    builder.finish()
-  }
+            #[inline]
+            pub fn codec_kind(&self) -> CodecKind {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<CodecKind>(
+                            EntityEnvelope::VT_CODEC_KIND,
+                            Some(CodecKind::FlatBuffers),
+                        )
+                        .unwrap()
+                }
+            }
+            #[inline]
+            pub fn schema_version(&self) -> u16 {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe { self._tab.get::<u16>(EntityEnvelope::VT_SCHEMA_VERSION, Some(1)).unwrap() }
+            }
+            #[inline]
+            pub fn payload(&self) -> Option<::flatbuffers::Vector<'a, u8>> {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, u8>>>(
+                        EntityEnvelope::VT_PAYLOAD,
+                        None,
+                    )
+                }
+            }
+        }
 
+        impl ::flatbuffers::Verifiable for EntityEnvelope<'_> {
+            #[inline]
+            fn run_verifier(
+                v: &mut ::flatbuffers::Verifier,
+                pos: usize,
+            ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+                v.visit_table(pos)?
+                    .visit_field::<CodecKind>("codec_kind", Self::VT_CODEC_KIND, false)?
+                    .visit_field::<u16>("schema_version", Self::VT_SCHEMA_VERSION, false)?
+                    .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, u8>>>(
+                        "payload",
+                        Self::VT_PAYLOAD,
+                        false,
+                    )?
+                    .finish();
+                Ok(())
+            }
+        }
+        pub struct EntityEnvelopeArgs<'a> {
+            pub codec_kind: CodecKind,
+            pub schema_version: u16,
+            pub payload: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, u8>>>,
+        }
+        impl<'a> Default for EntityEnvelopeArgs<'a> {
+            #[inline]
+            fn default() -> Self {
+                EntityEnvelopeArgs {
+                    codec_kind: CodecKind::FlatBuffers,
+                    schema_version: 1,
+                    payload: None,
+                }
+            }
+        }
 
-  #[inline]
-  pub fn codec_kind(&self) -> CodecKind {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<CodecKind>(EntityEnvelope::VT_CODEC_KIND, Some(CodecKind::FlatBuffers)).unwrap()}
-  }
-  #[inline]
-  pub fn schema_version(&self) -> u16 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u16>(EntityEnvelope::VT_SCHEMA_VERSION, Some(1)).unwrap()}
-  }
-  #[inline]
-  pub fn payload(&self) -> Option<::flatbuffers::Vector<'a, u8>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, u8>>>(EntityEnvelope::VT_PAYLOAD, None)}
-  }
-}
+        pub struct EntityEnvelopeBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
+            fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+        }
+        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> EntityEnvelopeBuilder<'a, 'b, A> {
+            #[inline]
+            pub fn add_codec_kind(&mut self, codec_kind: CodecKind) {
+                self.fbb_.push_slot::<CodecKind>(
+                    EntityEnvelope::VT_CODEC_KIND,
+                    codec_kind,
+                    CodecKind::FlatBuffers,
+                );
+            }
+            #[inline]
+            pub fn add_schema_version(&mut self, schema_version: u16) {
+                self.fbb_.push_slot::<u16>(EntityEnvelope::VT_SCHEMA_VERSION, schema_version, 1);
+            }
+            #[inline]
+            pub fn add_payload(
+                &mut self,
+                payload: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b, u8>>,
+            ) {
+                self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+                    EntityEnvelope::VT_PAYLOAD,
+                    payload,
+                );
+            }
+            #[inline]
+            pub fn new(
+                _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            ) -> EntityEnvelopeBuilder<'a, 'b, A> {
+                let start = _fbb.start_table();
+                EntityEnvelopeBuilder {
+                    fbb_: _fbb,
+                    start_: start,
+                }
+            }
+            #[inline]
+            pub fn finish(self) -> ::flatbuffers::WIPOffset<EntityEnvelope<'a>> {
+                let o = self.fbb_.end_table(self.start_);
+                ::flatbuffers::WIPOffset::new(o.value())
+            }
+        }
 
-impl ::flatbuffers::Verifiable for EntityEnvelope<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<CodecKind>("codec_kind", Self::VT_CODEC_KIND, false)?
-     .visit_field::<u16>("schema_version", Self::VT_SCHEMA_VERSION, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, u8>>>("payload", Self::VT_PAYLOAD, false)?
-     .finish();
-    Ok(())
-  }
-}
-pub struct EntityEnvelopeArgs<'a> {
-    pub codec_kind: CodecKind,
-    pub schema_version: u16,
-    pub payload: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, u8>>>,
-}
-impl<'a> Default for EntityEnvelopeArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    EntityEnvelopeArgs {
-      codec_kind: CodecKind::FlatBuffers,
-      schema_version: 1,
-      payload: None,
-    }
-  }
-}
+        impl ::core::fmt::Debug for EntityEnvelope<'_> {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                let mut ds = f.debug_struct("EntityEnvelope");
+                ds.field("codec_kind", &self.codec_kind());
+                ds.field("schema_version", &self.schema_version());
+                ds.field("payload", &self.payload());
+                ds.finish()
+            }
+        }
+        #[inline]
+        /// Verifies that a buffer of bytes contains a `EntityEnvelope`
+        /// and returns it.
+        /// Note that verification is still experimental and may not
+        /// catch every error, or be maximally performant. For the
+        /// previous, unchecked, behavior use
+        /// `root_as_entity_envelope_unchecked`.
+        pub fn root_as_entity_envelope(
+            buf: &[u8],
+        ) -> Result<EntityEnvelope<'_>, ::flatbuffers::InvalidFlatbuffer> {
+            ::flatbuffers::root::<EntityEnvelope>(buf)
+        }
+        #[inline]
+        /// Verifies that a buffer of bytes contains a size prefixed
+        /// `EntityEnvelope` and returns it.
+        /// Note that verification is still experimental and may not
+        /// catch every error, or be maximally performant. For the
+        /// previous, unchecked, behavior use
+        /// `size_prefixed_root_as_entity_envelope_unchecked`.
+        pub fn size_prefixed_root_as_entity_envelope(
+            buf: &[u8],
+        ) -> Result<EntityEnvelope<'_>, ::flatbuffers::InvalidFlatbuffer> {
+            ::flatbuffers::size_prefixed_root::<EntityEnvelope>(buf)
+        }
+        #[inline]
+        /// Verifies, with the given options, that a buffer of bytes
+        /// contains a `EntityEnvelope` and returns it.
+        /// Note that verification is still experimental and may not
+        /// catch every error, or be maximally performant. For the
+        /// previous, unchecked, behavior use
+        /// `root_as_entity_envelope_unchecked`.
+        pub fn root_as_entity_envelope_with_opts<'b, 'o>(
+            opts: &'o ::flatbuffers::VerifierOptions,
+            buf: &'b [u8],
+        ) -> Result<EntityEnvelope<'b>, ::flatbuffers::InvalidFlatbuffer> {
+            ::flatbuffers::root_with_opts::<EntityEnvelope<'b>>(opts, buf)
+        }
+        #[inline]
+        /// Verifies, with the given verifier options, that a buffer of
+        /// bytes contains a size prefixed `EntityEnvelope` and returns
+        /// it. Note that verification is still experimental and may not
+        /// catch every error, or be maximally performant. For the
+        /// previous, unchecked, behavior use
+        /// `root_as_entity_envelope_unchecked`.
+        pub fn size_prefixed_root_as_entity_envelope_with_opts<'b, 'o>(
+            opts: &'o ::flatbuffers::VerifierOptions,
+            buf: &'b [u8],
+        ) -> Result<EntityEnvelope<'b>, ::flatbuffers::InvalidFlatbuffer> {
+            ::flatbuffers::size_prefixed_root_with_opts::<EntityEnvelope<'b>>(opts, buf)
+        }
+        #[inline]
+        /// Assumes, without verification, that a buffer of bytes contains a EntityEnvelope and returns it.
+        /// # Safety
+        /// Callers must trust the given bytes do indeed contain a valid `EntityEnvelope`.
+        pub unsafe fn root_as_entity_envelope_unchecked(buf: &[u8]) -> EntityEnvelope<'_> {
+            unsafe { ::flatbuffers::root_unchecked::<EntityEnvelope>(buf) }
+        }
+        #[inline]
+        /// Assumes, without verification, that a buffer of bytes contains a size prefixed EntityEnvelope and returns it.
+        /// # Safety
+        /// Callers must trust the given bytes do indeed contain a valid size prefixed `EntityEnvelope`.
+        pub unsafe fn size_prefixed_root_as_entity_envelope_unchecked(
+            buf: &[u8],
+        ) -> EntityEnvelope<'_> {
+            unsafe { ::flatbuffers::size_prefixed_root_unchecked::<EntityEnvelope>(buf) }
+        }
+        pub const ENTITY_ENVELOPE_IDENTIFIER: &str = "KENV";
 
-pub struct EntityEnvelopeBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
-}
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> EntityEnvelopeBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_codec_kind(&mut self, codec_kind: CodecKind) {
-    self.fbb_.push_slot::<CodecKind>(EntityEnvelope::VT_CODEC_KIND, codec_kind, CodecKind::FlatBuffers);
-  }
-  #[inline]
-  pub fn add_schema_version(&mut self, schema_version: u16) {
-    self.fbb_.push_slot::<u16>(EntityEnvelope::VT_SCHEMA_VERSION, schema_version, 1);
-  }
-  #[inline]
-  pub fn add_payload(&mut self, payload: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b , u8>>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(EntityEnvelope::VT_PAYLOAD, payload);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> EntityEnvelopeBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    EntityEnvelopeBuilder {
-      fbb_: _fbb,
-      start_: start,
-    }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<EntityEnvelope<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
-}
+        #[inline]
+        pub fn entity_envelope_buffer_has_identifier(buf: &[u8]) -> bool {
+            ::flatbuffers::buffer_has_identifier(buf, ENTITY_ENVELOPE_IDENTIFIER, false)
+        }
 
-impl ::core::fmt::Debug for EntityEnvelope<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("EntityEnvelope");
-      ds.field("codec_kind", &self.codec_kind());
-      ds.field("schema_version", &self.schema_version());
-      ds.field("payload", &self.payload());
-      ds.finish()
-  }
-}
-#[inline]
-/// Verifies that a buffer of bytes contains a `EntityEnvelope`
-/// and returns it.
-/// Note that verification is still experimental and may not
-/// catch every error, or be maximally performant. For the
-/// previous, unchecked, behavior use
-/// `root_as_entity_envelope_unchecked`.
-pub fn root_as_entity_envelope(buf: &[u8]) -> Result<EntityEnvelope<'_>, ::flatbuffers::InvalidFlatbuffer> {
-  ::flatbuffers::root::<EntityEnvelope>(buf)
-}
-#[inline]
-/// Verifies that a buffer of bytes contains a size prefixed
-/// `EntityEnvelope` and returns it.
-/// Note that verification is still experimental and may not
-/// catch every error, or be maximally performant. For the
-/// previous, unchecked, behavior use
-/// `size_prefixed_root_as_entity_envelope_unchecked`.
-pub fn size_prefixed_root_as_entity_envelope(buf: &[u8]) -> Result<EntityEnvelope<'_>, ::flatbuffers::InvalidFlatbuffer> {
-  ::flatbuffers::size_prefixed_root::<EntityEnvelope>(buf)
-}
-#[inline]
-/// Verifies, with the given options, that a buffer of bytes
-/// contains a `EntityEnvelope` and returns it.
-/// Note that verification is still experimental and may not
-/// catch every error, or be maximally performant. For the
-/// previous, unchecked, behavior use
-/// `root_as_entity_envelope_unchecked`.
-pub fn root_as_entity_envelope_with_opts<'b, 'o>(
-  opts: &'o ::flatbuffers::VerifierOptions,
-  buf: &'b [u8],
-) -> Result<EntityEnvelope<'b>, ::flatbuffers::InvalidFlatbuffer> {
-  ::flatbuffers::root_with_opts::<EntityEnvelope<'b>>(opts, buf)
-}
-#[inline]
-/// Verifies, with the given verifier options, that a buffer of
-/// bytes contains a size prefixed `EntityEnvelope` and returns
-/// it. Note that verification is still experimental and may not
-/// catch every error, or be maximally performant. For the
-/// previous, unchecked, behavior use
-/// `root_as_entity_envelope_unchecked`.
-pub fn size_prefixed_root_as_entity_envelope_with_opts<'b, 'o>(
-  opts: &'o ::flatbuffers::VerifierOptions,
-  buf: &'b [u8],
-) -> Result<EntityEnvelope<'b>, ::flatbuffers::InvalidFlatbuffer> {
-  ::flatbuffers::size_prefixed_root_with_opts::<EntityEnvelope<'b>>(opts, buf)
-}
-#[inline]
-/// Assumes, without verification, that a buffer of bytes contains a EntityEnvelope and returns it.
-/// # Safety
-/// Callers must trust the given bytes do indeed contain a valid `EntityEnvelope`.
-pub unsafe fn root_as_entity_envelope_unchecked(buf: &[u8]) -> EntityEnvelope<'_> {
-  unsafe { ::flatbuffers::root_unchecked::<EntityEnvelope>(buf) }
-}
-#[inline]
-/// Assumes, without verification, that a buffer of bytes contains a size prefixed EntityEnvelope and returns it.
-/// # Safety
-/// Callers must trust the given bytes do indeed contain a valid size prefixed `EntityEnvelope`.
-pub unsafe fn size_prefixed_root_as_entity_envelope_unchecked(buf: &[u8]) -> EntityEnvelope<'_> {
-  unsafe { ::flatbuffers::size_prefixed_root_unchecked::<EntityEnvelope>(buf) }
-}
-pub const ENTITY_ENVELOPE_IDENTIFIER: &str = "KENV";
+        #[inline]
+        pub fn entity_envelope_size_prefixed_buffer_has_identifier(buf: &[u8]) -> bool {
+            ::flatbuffers::buffer_has_identifier(buf, ENTITY_ENVELOPE_IDENTIFIER, true)
+        }
 
-#[inline]
-pub fn entity_envelope_buffer_has_identifier(buf: &[u8]) -> bool {
-  ::flatbuffers::buffer_has_identifier(buf, ENTITY_ENVELOPE_IDENTIFIER, false)
-}
+        #[inline]
+        pub fn finish_entity_envelope_buffer<'a, 'b, A: ::flatbuffers::Allocator + 'a>(
+            fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            root: ::flatbuffers::WIPOffset<EntityEnvelope<'a>>,
+        ) {
+            fbb.finish(root, Some(ENTITY_ENVELOPE_IDENTIFIER));
+        }
 
-#[inline]
-pub fn entity_envelope_size_prefixed_buffer_has_identifier(buf: &[u8]) -> bool {
-  ::flatbuffers::buffer_has_identifier(buf, ENTITY_ENVELOPE_IDENTIFIER, true)
-}
-
-#[inline]
-pub fn finish_entity_envelope_buffer<'a, 'b, A: ::flatbuffers::Allocator + 'a>(
-    fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-    root: ::flatbuffers::WIPOffset<EntityEnvelope<'a>>) {
-  fbb.finish(root, Some(ENTITY_ENVELOPE_IDENTIFIER));
-}
-
-#[inline]
-pub fn finish_size_prefixed_entity_envelope_buffer<'a, 'b, A: ::flatbuffers::Allocator + 'a>(fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>, root: ::flatbuffers::WIPOffset<EntityEnvelope<'a>>) {
-  fbb.finish_size_prefixed(root, Some(ENTITY_ENVELOPE_IDENTIFIER));
-}
-}  // pub mod serialization
-}  // pub mod kalamdb
-
+        #[inline]
+        pub fn finish_size_prefixed_entity_envelope_buffer<
+            'a,
+            'b,
+            A: ::flatbuffers::Allocator + 'a,
+        >(
+            fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            root: ::flatbuffers::WIPOffset<EntityEnvelope<'a>>,
+        ) {
+            fbb.finish_size_prefixed(root, Some(ENTITY_ENVELOPE_IDENTIFIER));
+        }
+    } // pub mod serialization
+} // pub mod kalamdb

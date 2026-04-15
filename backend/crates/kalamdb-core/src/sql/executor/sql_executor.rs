@@ -276,9 +276,7 @@ impl SqlExecutor {
                 transaction_id.clone(),
             )),
             Arc::new(crate::transactions::CoordinatorMutationSink::new(coordinator)),
-            Arc::new(CoordinatorAccessValidator::new(
-                self.app_context.transaction_coordinator(),
-            )),
+            Arc::new(CoordinatorAccessValidator::new(self.app_context.transaction_coordinator())),
         )))
     }
 
@@ -287,7 +285,8 @@ impl SqlExecutor {
         exec_ctx: &ExecutionContext,
     ) -> Result<SessionContext, KalamDbError> {
         let session = exec_ctx.create_session_with_user();
-        let Some(transaction_query_context) = self.transaction_query_context_for_request(exec_ctx)?
+        let Some(transaction_query_context) =
+            self.transaction_query_context_for_request(exec_ctx)?
         else {
             return Ok(session);
         };
@@ -305,13 +304,12 @@ impl SqlExecutor {
         &self,
         exec_ctx: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
-        let mut request_state = RequestTransactionState::from_execution_context(exec_ctx)?.ok_or_else(
-            || {
+        let mut request_state = RequestTransactionState::from_execution_context(exec_ctx)?
+            .ok_or_else(|| {
                 KalamDbError::InvalidOperation(
                     "BEGIN requires a request-scoped execution context".to_string(),
                 )
-            },
-        )?;
+            })?;
         request_state.sync_from_coordinator(&self.app_context);
         let transaction_id = request_state.begin(&self.app_context)?;
         Ok(ExecutionResult::Success {
@@ -323,13 +321,12 @@ impl SqlExecutor {
         &self,
         exec_ctx: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
-        let mut request_state = RequestTransactionState::from_execution_context(exec_ctx)?.ok_or_else(
-            || {
+        let mut request_state = RequestTransactionState::from_execution_context(exec_ctx)?
+            .ok_or_else(|| {
                 KalamDbError::InvalidOperation(
                     "COMMIT requires a request-scoped execution context".to_string(),
                 )
-            },
-        )?;
+            })?;
         request_state.sync_from_coordinator(&self.app_context);
         let transaction_id = request_state.commit(&self.app_context).await?;
         Ok(ExecutionResult::Success {
@@ -341,13 +338,12 @@ impl SqlExecutor {
         &self,
         exec_ctx: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
-        let mut request_state = RequestTransactionState::from_execution_context(exec_ctx)?.ok_or_else(
-            || {
+        let mut request_state = RequestTransactionState::from_execution_context(exec_ctx)?
+            .ok_or_else(|| {
                 KalamDbError::InvalidOperation(
                     "ROLLBACK requires a request-scoped execution context".to_string(),
                 )
-            },
-        )?;
+            })?;
         request_state.sync_from_coordinator(&self.app_context);
         let transaction_id = request_state.rollback(&self.app_context)?;
         Ok(ExecutionResult::Success {
@@ -439,8 +435,7 @@ impl SqlExecutor {
             exec_ctx,
             table_id,
             transaction_id,
-        )?
-        {
+        )? {
             Some(counts) => Ok(Some(
                 counts
                     .into_iter()
@@ -553,7 +548,9 @@ impl SqlExecutor {
 
             // Step 2: Route based on statement type
             let result = match classified.kind() {
-                SqlStatementKind::BeginTransaction => self.execute_begin_transaction(exec_ctx).await,
+                SqlStatementKind::BeginTransaction => {
+                    self.execute_begin_transaction(exec_ctx).await
+                },
                 SqlStatementKind::CommitTransaction => {
                     self.execute_commit_transaction(exec_ctx).await
                 },
@@ -717,7 +714,8 @@ impl SqlExecutor {
                                 load_err
                             );
                         }
-                        let retry_session = self.create_session_with_transaction_context(exec_ctx)?;
+                        let retry_session =
+                            self.create_session_with_transaction_context(exec_ctx)?;
                         retry_session
                             .sql(execution_sql)
                             .await
@@ -1005,9 +1003,7 @@ impl SqlExecutor {
             let ordered_template =
                 apply_default_order_by(planned_df.logical_plan().clone(), &self.app_context)
                     .await?;
-            self.sql_cache_registry
-                .plan_cache()
-                .insert(cache_key, ordered_template.clone());
+            self.sql_cache_registry.plan_cache().insert(cache_key, ordered_template.clone());
 
             let executable_plan = if params.is_empty() {
                 ordered_template

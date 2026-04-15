@@ -167,7 +167,11 @@ fn create_simple_app_context() -> (Arc<AppContext>, TestDb) {
     (app_ctx, test_db)
 }
 
-fn make_shared_insert_request(table_id: &TableId, session_id: Option<&str>, id: i64) -> InsertRequest {
+fn make_shared_insert_request(
+    table_id: &TableId,
+    session_id: Option<&str>,
+    id: i64,
+) -> InsertRequest {
     InsertRequest {
         table_id: table_id.clone(),
         table_type: TableType::Shared,
@@ -195,6 +199,7 @@ fn make_scan_request(table_id: &TableId, session_id: Option<&str>) -> ScanReques
         columns: vec![],
         limit: None,
         user_id: None,
+    filters: vec![],
     }
 }
 
@@ -238,10 +243,7 @@ async fn measure_insert_round(
         .collect::<Vec<_>>();
     let start = Instant::now();
     for request in requests {
-        service
-            .execute_insert(request)
-            .await
-            .expect("autocommit insert succeeds");
+        service.execute_insert(request).await.expect("autocommit insert succeeds");
     }
     start.elapsed().as_nanos() / ops as u128
 }
@@ -252,15 +254,10 @@ async fn measure_scan_round(
     session_id: Option<&str>,
     ops: usize,
 ) -> u128 {
-    let requests = (0..ops)
-        .map(|_| make_scan_request(table_id, session_id))
-        .collect::<Vec<_>>();
+    let requests = (0..ops).map(|_| make_scan_request(table_id, session_id)).collect::<Vec<_>>();
     let start = Instant::now();
     for request in requests {
-        service
-            .execute_scan(request)
-            .await
-            .expect("autocommit scan succeeds");
+        service.execute_scan(request).await.expect("autocommit scan succeeds");
     }
     start.elapsed().as_nanos() / ops as u128
 }
@@ -342,8 +339,8 @@ async fn measure_allocations_for_rejected_write(
 async fn idle_autocommit_transaction_checks_add_no_extra_allocations() {
     let (app_ctx, _test_db) = create_simple_app_context();
     let service = OperationService::new(Arc::clone(&app_ctx));
-    let scan_table = create_shared_table(&app_ctx, &unique_namespace("autocommit_alloc"), "items")
-        .await;
+    let scan_table =
+        create_shared_table(&app_ctx, &unique_namespace("autocommit_alloc"), "items").await;
 
     service
         .execute_scan(make_scan_request(&scan_table, None))
@@ -394,20 +391,13 @@ async fn autocommit_read_write_latency_regression_stays_within_five_percent() {
     let (app_ctx, _test_db) = create_cluster_app_context().await;
     let service = OperationService::new(Arc::clone(&app_ctx));
 
-    let write_baseline_table = create_shared_table(
-        &app_ctx,
-        &unique_namespace("autocommit_write_base"),
-        "items",
-    )
-    .await;
-    let write_candidate_table = create_shared_table(
-        &app_ctx,
-        &unique_namespace("autocommit_write_candidate"),
-        "items",
-    )
-    .await;
-    let read_table = create_shared_table(&app_ctx, &unique_namespace("autocommit_read"), "items")
-        .await;
+    let write_baseline_table =
+        create_shared_table(&app_ctx, &unique_namespace("autocommit_write_base"), "items").await;
+    let write_candidate_table =
+        create_shared_table(&app_ctx, &unique_namespace("autocommit_write_candidate"), "items")
+            .await;
+    let read_table =
+        create_shared_table(&app_ctx, &unique_namespace("autocommit_read"), "items").await;
 
     seed_shared_table(&service, &read_table, 10_000, READ_SEED_ROWS).await;
 
@@ -478,7 +468,8 @@ async fn autocommit_read_write_latency_regression_stays_within_five_percent() {
 
     for round in 0..READ_ROUNDS {
         if round % 2 == 0 {
-            read_baseline_samples.push(measure_scan_round(&service, &read_table, None, READ_OPS_PER_ROUND).await);
+            read_baseline_samples
+                .push(measure_scan_round(&service, &read_table, None, READ_OPS_PER_ROUND).await);
             read_candidate_samples.push(
                 measure_scan_round(
                     &service,
@@ -498,7 +489,8 @@ async fn autocommit_read_write_latency_regression_stays_within_five_percent() {
                 )
                 .await,
             );
-            read_baseline_samples.push(measure_scan_round(&service, &read_table, None, READ_OPS_PER_ROUND).await);
+            read_baseline_samples
+                .push(measure_scan_round(&service, &read_table, None, READ_OPS_PER_ROUND).await);
         }
     }
 

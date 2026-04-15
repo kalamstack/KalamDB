@@ -92,14 +92,18 @@ async fn transaction_commit_preserves_user_scope_for_same_primary_keys() {
     assert_eq!(
         table_entries
             .values()
-            .filter(|entry| entry.user_id.as_ref().map(UserId::as_str) == Some(first_user_id.as_str()))
+            .filter(
+                |entry| entry.user_id.as_ref().map(UserId::as_str) == Some(first_user_id.as_str())
+            )
             .count(),
         2
     );
     assert_eq!(
         table_entries
             .values()
-            .filter(|entry| entry.user_id.as_ref().map(UserId::as_str) == Some(second_user_id.as_str()))
+            .filter(
+                |entry| entry.user_id.as_ref().map(UserId::as_str) == Some(second_user_id.as_str())
+            )
             .count(),
         2
     );

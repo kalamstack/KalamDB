@@ -43,63 +43,23 @@ impl AllocatorMetrics {
         push_u64(&mut pairs, "mimalloc_user_ms", self.user_ms);
         push_u64(&mut pairs, "mimalloc_system_ms", self.system_ms);
         push_u64(&mut pairs, "mimalloc_process_rss_bytes", self.process_rss_bytes);
-        push_u64(
-            &mut pairs,
-            "mimalloc_process_peak_rss_bytes",
-            self.process_peak_rss_bytes,
-        );
-        push_u64(
-            &mut pairs,
-            "mimalloc_process_commit_bytes",
-            self.process_commit_bytes,
-        );
-        push_u64(
-            &mut pairs,
-            "mimalloc_process_peak_commit_bytes",
-            self.process_peak_commit_bytes,
-        );
+        push_u64(&mut pairs, "mimalloc_process_peak_rss_bytes", self.process_peak_rss_bytes);
+        push_u64(&mut pairs, "mimalloc_process_commit_bytes", self.process_commit_bytes);
+        push_u64(&mut pairs, "mimalloc_process_peak_commit_bytes", self.process_peak_commit_bytes);
         push_u64(&mut pairs, "mimalloc_page_faults", self.page_faults);
-        push_u64(
-            &mut pairs,
-            "mimalloc_reserved_current_bytes",
-            self.reserved_current_bytes,
-        );
-        push_u64(
-            &mut pairs,
-            "mimalloc_reserved_peak_bytes",
-            self.reserved_peak_bytes,
-        );
-        push_u64(
-            &mut pairs,
-            "mimalloc_committed_current_bytes",
-            self.committed_current_bytes,
-        );
-        push_u64(
-            &mut pairs,
-            "mimalloc_committed_peak_bytes",
-            self.committed_peak_bytes,
-        );
-        push_u64(
-            &mut pairs,
-            "mimalloc_reset_current_bytes",
-            self.reset_current_bytes,
-        );
-        push_u64(
-            &mut pairs,
-            "mimalloc_purged_current_bytes",
-            self.purged_current_bytes,
-        );
+        push_u64(&mut pairs, "mimalloc_reserved_current_bytes", self.reserved_current_bytes);
+        push_u64(&mut pairs, "mimalloc_reserved_peak_bytes", self.reserved_peak_bytes);
+        push_u64(&mut pairs, "mimalloc_committed_current_bytes", self.committed_current_bytes);
+        push_u64(&mut pairs, "mimalloc_committed_peak_bytes", self.committed_peak_bytes);
+        push_u64(&mut pairs, "mimalloc_reset_current_bytes", self.reset_current_bytes);
+        push_u64(&mut pairs, "mimalloc_purged_current_bytes", self.purged_current_bytes);
         push_u64(
             &mut pairs,
             "mimalloc_page_committed_current_bytes",
             self.page_committed_current_bytes,
         );
         push_u64(&mut pairs, "mimalloc_pages_current", self.pages_current);
-        push_u64(
-            &mut pairs,
-            "mimalloc_pages_abandoned_current",
-            self.pages_abandoned_current,
-        );
+        push_u64(&mut pairs, "mimalloc_pages_abandoned_current", self.pages_abandoned_current);
         push_u64(&mut pairs, "mimalloc_threads_current", self.threads_current);
         push_u64(
             &mut pairs,
@@ -116,29 +76,17 @@ impl AllocatorMetrics {
             "mimalloc_malloc_normal_current_bytes",
             self.malloc_normal_current_bytes,
         );
-        push_u64(
-            &mut pairs,
-            "mimalloc_malloc_huge_current_bytes",
-            self.malloc_huge_current_bytes,
-        );
+        push_u64(&mut pairs, "mimalloc_malloc_huge_current_bytes", self.malloc_huge_current_bytes);
         push_u64(&mut pairs, "mimalloc_segments_current", self.segments_current);
         push_u64(
             &mut pairs,
             "mimalloc_segments_abandoned_current",
             self.segments_abandoned_current,
         );
-        push_u64(
-            &mut pairs,
-            "mimalloc_segments_cache_current",
-            self.segments_cache_current,
-        );
+        push_u64(&mut pairs, "mimalloc_segments_cache_current", self.segments_cache_current);
         push_u64(&mut pairs, "mimalloc_arena_count", self.arena_count);
         push_i64(&mut pairs, "mimalloc_purge_delay_ms", self.purge_delay_ms);
-        push_bool(
-            &mut pairs,
-            "mimalloc_purge_decommits_enabled",
-            self.purge_decommits,
-        );
+        push_bool(&mut pairs, "mimalloc_purge_decommits_enabled", self.purge_decommits);
         push_u64(
             &mut pairs,
             "mimalloc_target_segments_per_thread",
@@ -171,9 +119,8 @@ fn push_bool(pairs: &mut Vec<(String, String)>, key: &str, value: Option<bool>) 
 mod imp {
     use super::AllocatorMetrics;
     use libmimalloc_sys::{
-        mi_collect, mi_option_get, mi_option_is_enabled, mi_process_info, mi_stats_merge,
-        mi_version,
-        mi_option_t,
+        mi_collect, mi_option_get, mi_option_is_enabled, mi_option_t, mi_process_info,
+        mi_stats_merge, mi_version,
     };
     use std::mem::MaybeUninit;
 
@@ -303,9 +250,9 @@ mod imp {
             arena_count: clamp_counter(stats.arena_count.total),
             purge_delay_ms: Some(unsafe { mi_option_get(MI_OPTION_PURGE_DELAY) } as i64),
             purge_decommits: Some(unsafe { mi_option_is_enabled(MI_OPTION_PURGE_DECOMMITS) }),
-            target_segments_per_thread: Some(
-                unsafe { mi_option_get(MI_OPTION_TARGET_SEGMENTS_PER_THREAD) as u64 },
-            ),
+            target_segments_per_thread: Some(unsafe {
+                mi_option_get(MI_OPTION_TARGET_SEGMENTS_PER_THREAD) as u64
+            }),
         })
     }
 

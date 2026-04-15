@@ -9,8 +9,8 @@ use kalamdb_commons::models::NodeId;
 
 use super::cluster_service::cluster_client::ClusterServiceClient;
 use super::models::{
-    ForwardSqlRequest, ForwardSqlResponse, GetNodeInfoRequest, GetNodeInfoResponse,
-    PingRequest, PingResponse,
+    ForwardSqlRequest, ForwardSqlResponse, GetNodeInfoRequest, GetNodeInfoResponse, PingRequest,
+    PingResponse,
 };
 use crate::manager::RaftManager;
 use crate::{GroupId, RaftError};

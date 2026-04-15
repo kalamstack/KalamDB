@@ -11,12 +11,7 @@ async fn e2e_duplicate_primary_key_insert_fails() {
     let table = unique_name("profiles");
     let qualified_table = format!("e2e.{table}");
 
-    create_user_kalam_table(
-        &pg,
-        &table,
-        "id TEXT, name TEXT, age INTEGER",
-    )
-    .await;
+    create_user_kalam_table(&pg, &table, "id TEXT, name TEXT, age INTEGER").await;
     set_user_id(&pg, "dup-user").await;
     await_user_shard_leader("dup-user").await;
 
@@ -65,9 +60,7 @@ async fn e2e_insert_without_backing_kalamdb_table_fails() {
          ) USING kalamdb WITH (type = 'user');"
     );
 
-    pg.batch_execute(&create_sql)
-    .await
-    .expect("create local-only Kalam table");
+    pg.batch_execute(&create_sql).await.expect("create local-only Kalam table");
     env.kalamdb_sql(&format!("DROP USER TABLE IF EXISTS app.{table}")).await;
 
     set_user_id(&pg, "user-1").await;
@@ -97,12 +90,7 @@ async fn e2e_user_table_scan_without_user_id_fails_clearly() {
     let table = unique_name("profiles_missing_uid");
     let writer = env.pg_connect().await;
 
-    create_user_kalam_table(
-        &writer,
-        &table,
-        "id TEXT, name TEXT, age INTEGER",
-    )
-    .await;
+    create_user_kalam_table(&writer, &table, "id TEXT, name TEXT, age INTEGER").await;
     set_user_id(&writer, "scan-user").await;
     await_user_shard_leader("scan-user").await;
     let seed_insert_sql =

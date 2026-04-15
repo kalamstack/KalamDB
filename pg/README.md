@@ -8,7 +8,8 @@ The extension is built with `pgrx` and supports PostgreSQL `pg13` through `pg18`
 
 - `CREATE EXTENSION pg_kalam;`
 - A `pg_kalam` foreign data wrapper registered by the extension install SQL
-- A PostgreSQL-side bridge to a running KalamDB server over gRPC- `pgvector` preinstalled in all Docker images (`pg-kalam:latest`, `Dockerfile`, `Dockerfile.runtime`)
+- A PostgreSQL-side bridge to a running KalamDB server over gRPC
+- `pgvector` preinstalled in Docker images built from `Dockerfile`, `Dockerfile.runtime`, and `Dockerfile.release-pg`; enable it per database with `CREATE EXTENSION vector;`
 
 ## Choose the right workflow
 
@@ -131,6 +132,11 @@ Verify the extension loaded correctly:
 ```sql
 SELECT kalam_version(), kalam_compiled_mode();
 ```
+
+Type note for KalamDB-specific columns:
+
+- `CREATE TABLE ... USING kalamdb (... attachment FILE ...)` keeps `FILE` as the remote KalamDB type, but the mirrored PostgreSQL foreign table column is created as `JSONB`
+- Read and write the column from PostgreSQL as a JSON `FileRef` payload
 
 If you need to reinstall during development:
 

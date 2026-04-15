@@ -554,9 +554,7 @@ impl NotificationServiceTrait for NotificationService {
 mod tests {
     use super::*;
     use crate::helpers::filter_eval::parse_where_clause;
-    use crate::models::{
-        SubscriptionFlowControl, SubscriptionHandle, SubscriptionRuntimeMetadata,
-    };
+    use crate::models::{SubscriptionFlowControl, SubscriptionHandle, SubscriptionRuntimeMetadata};
     use datafusion::scalar::ScalarValue;
     use kalamdb_commons::models::rows::Row;
     use kalamdb_commons::models::{ConnectionId, NamespaceId, TableName};
@@ -793,24 +791,14 @@ mod tests {
         let (tx_a, mut rx_a) = mpsc::channel(8);
         let flow_a = Arc::new(SubscriptionFlowControl::new());
         flow_a.mark_initial_complete();
-        let handle_a = make_shared_handle(
-            "sub_proj_a",
-            tx_a,
-            Arc::clone(&flow_a),
-            None,
-            Some(vec!["id"]),
-        );
+        let handle_a =
+            make_shared_handle("sub_proj_a", tx_a, Arc::clone(&flow_a), None, Some(vec!["id"]));
 
         let (tx_b, mut rx_b) = mpsc::channel(8);
         let flow_b = Arc::new(SubscriptionFlowControl::new());
         flow_b.mark_initial_complete();
-        let handle_b = make_shared_handle(
-            "sub_proj_b",
-            tx_b,
-            Arc::clone(&flow_b),
-            None,
-            Some(vec!["id"]),
-        );
+        let handle_b =
+            make_shared_handle("sub_proj_b", tx_b, Arc::clone(&flow_b), None, Some(vec!["id"]));
 
         let row = make_row(9, "shared", 9);
         let delivered = dispatch_chunk(
@@ -843,13 +831,8 @@ mod tests {
         let (tx_id, mut rx_id) = mpsc::channel(8);
         let flow_id = Arc::new(SubscriptionFlowControl::new());
         flow_id.mark_initial_complete();
-        let handle_id = make_shared_handle(
-            "sub_only_id",
-            tx_id,
-            Arc::clone(&flow_id),
-            None,
-            Some(vec!["id"]),
-        );
+        let handle_id =
+            make_shared_handle("sub_only_id", tx_id, Arc::clone(&flow_id), None, Some(vec!["id"]));
 
         let (tx_body, mut rx_body) = mpsc::channel(8);
         let flow_body = Arc::new(SubscriptionFlowControl::new());

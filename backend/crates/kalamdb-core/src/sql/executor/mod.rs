@@ -12,8 +12,8 @@ pub mod handlers;
 pub mod helpers;
 pub mod parameter_binding;
 pub mod request_transaction_state;
-mod transaction_batch_insert;
 mod sql_executor;
+mod transaction_batch_insert;
 
 use crate::sql::executor::handler_registry::HandlerRegistry;
 use crate::sql::plan_cache::SqlCacheRegistry;

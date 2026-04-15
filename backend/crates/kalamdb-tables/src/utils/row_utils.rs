@@ -9,13 +9,13 @@ use kalamdb_commons::constants::SystemColumnNames;
 use kalamdb_commons::conversions::arrow_json_conversion::json_rows_to_arrow_batch;
 use kalamdb_commons::ids::SeqId;
 use kalamdb_commons::models::rows::Row;
-use std::collections::BTreeMap;
 use kalamdb_commons::models::{ReadContext, Role, UserId};
 use kalamdb_session_datafusion::{
     extract_full_user_context as extract_full_user_context_session,
     extract_user_context as extract_user_context_session,
 };
 use once_cell::sync::Lazy;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 static SYSTEM_USER_ID: Lazy<UserId> = Lazy::new(|| UserId::from("_system"));
@@ -300,13 +300,7 @@ where
             materialized.values.extend(extra.values);
         }
 
-        inject_system_columns(
-            schema,
-            &mut materialized,
-            seq,
-            commit_seq,
-            deleted,
-        );
+        inject_system_columns(schema, &mut materialized, seq, commit_seq, deleted);
         rows.push(materialized);
     }
 

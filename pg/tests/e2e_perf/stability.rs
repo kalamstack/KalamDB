@@ -230,9 +230,7 @@ async fn e2e_perf_multi_session_pg_extension_memory_stays_bounded() {
     );
 
     for client in clients {
-        let client = Arc::try_unwrap(client)
-            .ok()
-            .expect("multi-session client still shared");
+        let client = Arc::try_unwrap(client).ok().expect("multi-session client still shared");
         client.disconnect().await;
     }
     coordinator.disconnect().await;

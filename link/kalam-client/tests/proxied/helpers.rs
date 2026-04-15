@@ -103,7 +103,8 @@ pub fn create_test_client_with_events_for_base_url(
 
 /// Ensure a test table exists with a simple schema.
 pub async fn ensure_table(client: &KalamLinkClient, table: &str) {
-    let create_sql = format!("CREATE TABLE IF NOT EXISTS {} (id TEXT PRIMARY KEY, value TEXT)", table);
+    let create_sql =
+        format!("CREATE TABLE IF NOT EXISTS {} (id TEXT PRIMARY KEY, value TEXT)", table);
     let verify_sql = format!("SELECT COUNT(*) AS row_count FROM {}", table);
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut last_err = String::new();
@@ -127,10 +128,7 @@ pub async fn ensure_table(client: &KalamLinkClient, table: &str) {
         }
     }
 
-    panic!(
-        "timed out waiting for table {} to become queryable: {}",
-        table, last_err
-    );
+    panic!("timed out waiting for table {} to become queryable: {}", table, last_err);
 }
 
 pub async fn query_max_seq(client: &KalamLinkClient, table: &str) -> SeqId {
@@ -271,10 +269,7 @@ pub async fn wait_for_disconnect_count(
         if Instant::now() >= deadline {
             panic!(
                 "{}: disconnect count did not reach {} within {:?} (disconnect_count={})",
-                context,
-                expected_disconnects,
-                RECONNECT_WAIT_TIMEOUT,
-                current_disconnects
+                context, expected_disconnects, RECONNECT_WAIT_TIMEOUT, current_disconnects
             );
         }
 
@@ -293,8 +288,7 @@ pub async fn wait_until_connected(client: &KalamLinkClient, context: &str) {
         if Instant::now() >= deadline {
             panic!(
                 "{}: client did not reach a connected state within {:?}",
-                context,
-                RECONNECT_WAIT_TIMEOUT
+                context, RECONNECT_WAIT_TIMEOUT
             );
         }
 

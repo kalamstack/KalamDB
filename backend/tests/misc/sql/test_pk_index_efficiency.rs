@@ -380,11 +380,7 @@ async fn test_user_table_pk_index_select() {
             .collect();
         server
             .execute_sql_as_user(
-                &format!(
-                    "INSERT INTO {}.records (id, data) VALUES {}",
-                    ns,
-                    values.join(", ")
-                ),
+                &format!("INSERT INTO {}.records (id, data) VALUES {}", ns, values.join(", ")),
                 "select_user",
             )
             .await;
@@ -419,11 +415,7 @@ async fn test_user_table_pk_index_select() {
             .collect();
         server
             .execute_sql_as_user(
-                &format!(
-                    "INSERT INTO {}.records (id, data) VALUES {}",
-                    ns,
-                    values.join(", ")
-                ),
+                &format!("INSERT INTO {}.records (id, data) VALUES {}", ns, values.join(", ")),
                 "select_user",
             )
             .await;

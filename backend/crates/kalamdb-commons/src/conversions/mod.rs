@@ -66,11 +66,11 @@ pub use scalar_numeric::{as_f64, scalar_to_f64, scalar_to_i64};
 pub use scalar_size::estimate_scalar_value_size;
 #[cfg(feature = "conversions")]
 pub use scalar_string::{parse_string_as_scalar, scalar_to_pk_string};
+#[cfg(all(feature = "schema-metadata", feature = "arrow-conversion"))]
+pub use schema_metadata::{mask_sensitive_rows_for_role, schema_fields_from_arrow_schema};
 #[cfg(feature = "schema-metadata")]
 pub use schema_metadata::{
     read_kalam_column_flags_metadata, read_kalam_data_type_metadata,
     with_kalam_column_flags_metadata, with_kalam_data_type_metadata,
     KALAM_COLUMN_FLAGS_METADATA_KEY, KALAM_DATA_TYPE_METADATA_KEY,
 };
-#[cfg(all(feature = "schema-metadata", feature = "arrow-conversion"))]
-pub use schema_metadata::{mask_sensitive_rows_for_role, schema_fields_from_arrow_schema};

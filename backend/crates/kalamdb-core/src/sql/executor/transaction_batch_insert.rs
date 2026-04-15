@@ -2,13 +2,13 @@ use crate::app_context::AppContext;
 use crate::error::KalamDbError;
 use crate::schema_registry::CachedTableData;
 use crate::sql::plan_cache::{
-    FastInsertDefaultEntry, FastInsertDefaultTemplate, FastInsertMetadata,
-    InsertMetadataCacheKey, SqlCacheRegistry,
+    FastInsertDefaultEntry, FastInsertDefaultTemplate, FastInsertMetadata, InsertMetadataCacheKey,
+    SqlCacheRegistry,
 };
 use crate::sql::ExecutionContext;
 use chrono::Utc;
-use kalamdb_commons::conversions::arrow_json_conversion::coerce_rows;
 use datafusion::scalar::ScalarValue;
+use kalamdb_commons::conversions::arrow_json_conversion::coerce_rows;
 use kalamdb_commons::conversions::json_value_to_scalar;
 use kalamdb_commons::ids::SnowflakeGenerator;
 use kalamdb_commons::models::rows::row::Row;
@@ -43,16 +43,10 @@ fn build_insert_metadata(
         .collect();
 
     let column_names = if requested_columns.is_empty() {
-        available_columns
-            .iter()
-            .map(|column| (*column).to_string())
-            .collect()
+        available_columns.iter().map(|column| (*column).to_string()).collect()
     } else {
         for column_name in requested_columns {
-            if !available_columns
-                .iter()
-                .any(|candidate| *candidate == column_name.as_str())
-            {
+            if !available_columns.iter().any(|candidate| *candidate == column_name.as_str()) {
                 return Err(KalamDbError::InvalidOperation(format!(
                     "Column '{}' does not exist",
                     column_name
@@ -217,12 +211,14 @@ pub(crate) fn try_build_literal_insert_rows(
 
     let requested_columns: Vec<String> =
         insert.columns.iter().map(|ident| ident.value.clone()).collect();
-    let metadata_cache_key = InsertMetadataCacheKey::new(table_id.clone(), requested_columns.clone());
+    let metadata_cache_key =
+        InsertMetadataCacheKey::new(table_id.clone(), requested_columns.clone());
     let insert_metadata = match sql_cache_registry.insert_metadata_cache().get(&metadata_cache_key)
     {
         Some(metadata) => metadata,
         None => {
-            let metadata = Arc::new(build_insert_metadata(&requested_columns, cached_table.as_ref())?);
+            let metadata =
+                Arc::new(build_insert_metadata(&requested_columns, cached_table.as_ref())?);
             sql_cache_registry
                 .insert_metadata_cache()
                 .insert_arc(metadata_cache_key, Arc::clone(&metadata));
@@ -299,9 +295,7 @@ fn prepare_statement_default(
                     "CURRENT_USER() default requires an authenticated username".to_string(),
                 )
             })?;
-            Ok(PreparedDefaultValue::Constant(ScalarValue::Utf8(Some(
-                username.to_string(),
-            ))))
+            Ok(PreparedDefaultValue::Constant(ScalarValue::Utf8(Some(username.to_string()))))
         },
         FastInsertDefaultTemplate::SnowflakeId => {
             Ok(PreparedDefaultValue::Volatile(VolatileDefaultFunction::SnowflakeId))
@@ -385,12 +379,14 @@ pub(crate) fn try_batch_inserts_in_transaction(
 
     let requested_columns: Vec<String> =
         first_insert.columns.iter().map(|ident| ident.value.clone()).collect();
-    let metadata_cache_key = InsertMetadataCacheKey::new(table_id.clone(), requested_columns.clone());
+    let metadata_cache_key =
+        InsertMetadataCacheKey::new(table_id.clone(), requested_columns.clone());
     let insert_metadata = match sql_cache_registry.insert_metadata_cache().get(&metadata_cache_key)
     {
         Some(metadata) => metadata,
         None => {
-            let metadata = Arc::new(build_insert_metadata(&requested_columns, cached_table.as_ref())?);
+            let metadata =
+                Arc::new(build_insert_metadata(&requested_columns, cached_table.as_ref())?);
             sql_cache_registry
                 .insert_metadata_cache()
                 .insert_arc(metadata_cache_key, Arc::clone(&metadata));

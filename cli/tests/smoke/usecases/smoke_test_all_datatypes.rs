@@ -248,8 +248,8 @@ fn smoke_all_datatypes_user_shared_stream() {
     // 8) Verify STREAM table row count / contents (no UPDATE/DELETE for stream tables)
     if !is_cluster_mode() {
         let stream_sel = format!("SELECT * FROM {}", stream_full);
-        let stream_out = execute_sql_as_root_via_http(&stream_sel)
-            .expect("select stream should succeed");
+        let stream_out =
+            execute_sql_as_root_via_http(&stream_sel).expect("select stream should succeed");
         assert!(
             stream_out.contains("stream_one") || stream_out.contains("stream_two"),
             "Expected stream row content: {}",

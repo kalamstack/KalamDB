@@ -6,13 +6,13 @@ pub mod models {
     };
 }
 
+#[cfg(feature = "native-sdk")]
+pub use kalam_client::consumer::ConsumerBuilder;
+pub use kalam_client::models::Username;
+#[cfg(feature = "native-sdk")]
+pub use kalam_client::TopicConsumer;
 pub use kalam_client::{
     AckResponse, AutoOffsetReset, CommitMode, CommitResult, ConsumeMessage, ConsumeRequest,
     ConsumeResponse, ConsumerConfig, ConsumerOffsets, ConsumerRecord, PayloadMode, RowData,
     TopicOp,
 };
-pub use kalam_client::models::Username;
-#[cfg(feature = "native-sdk")]
-pub use kalam_client::consumer::ConsumerBuilder;
-#[cfg(feature = "native-sdk")]
-pub use kalam_client::TopicConsumer;

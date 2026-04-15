@@ -77,22 +77,19 @@ mod tests {
 
     #[test]
     fn parse_forward_params_preserves_scalar_types() {
-        let params = Some(vec![json!(null), json!(true), json!(42), json!(3.5), json!("abc")]);
+        let params = Some(vec![
+            json!(null),
+            json!(true),
+            json!(42),
+            json!(3.5),
+            json!("abc"),
+        ]);
 
         let parsed = parse_forward_params(&params).expect("convert forwarded params");
 
-        assert!(matches!(
-            parsed[0].value,
-            Some(forward_sql_param::Value::NullValue(_))
-        ));
-        assert!(matches!(
-            parsed[1].value,
-            Some(forward_sql_param::Value::BoolValue(true))
-        ));
-        assert!(matches!(
-            parsed[2].value,
-            Some(forward_sql_param::Value::Int64Value(42))
-        ));
+        assert!(matches!(parsed[0].value, Some(forward_sql_param::Value::NullValue(_))));
+        assert!(matches!(parsed[1].value, Some(forward_sql_param::Value::BoolValue(true))));
+        assert!(matches!(parsed[2].value, Some(forward_sql_param::Value::Int64Value(42))));
         assert!(matches!(
             parsed[3].value,
             Some(forward_sql_param::Value::Float64Value(value)) if value == 3.5

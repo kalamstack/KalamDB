@@ -199,12 +199,8 @@ impl ConnectionsManager {
         let (event_tx, event_rx) = mpsc::channel(EVENT_CHANNEL_CAPACITY);
         let (notification_tx, notification_rx) = mpsc::channel(NOTIFICATION_CHANNEL_CAPACITY);
 
-        let state = ConnectionState::new(
-            connection_id.clone(),
-            client_ip,
-            notification_tx,
-            event_tx,
-        );
+        let state =
+            ConnectionState::new(connection_id.clone(), client_ip, notification_tx, event_tx);
 
         let shared_state = Arc::new(state);
         self.connections.insert(connection_id.clone(), Arc::clone(&shared_state));
@@ -426,7 +422,6 @@ impl ConnectionsManager {
             .map(|handles| Arc::clone(handles.value()))
             .unwrap_or_else(|| Arc::clone(&self.empty_subscriptions))
     }
-
 
     /// Send a notification directly to all authenticated connections for a user.
     ///
@@ -915,11 +910,8 @@ mod tests {
     ) -> SubscriptionHandle {
         let flow_control = Arc::new(SubscriptionFlowControl::new());
         flow_control.mark_initial_complete();
-        let runtime_metadata = Arc::new(SubscriptionRuntimeMetadata::new(
-            "SELECT * FROM shared.test",
-            None,
-            1,
-        ));
+        let runtime_metadata =
+            Arc::new(SubscriptionRuntimeMetadata::new("SELECT * FROM shared.test", None, 1));
         SubscriptionHandle {
             subscription_id: Arc::from("test-subscription"),
             filter_expr: None,
@@ -1075,7 +1067,7 @@ mod tests {
 
         // Send a notification to all shared table subscribers
         let notification = make_wire_notification("test");
-    notify_shared_table_for_test(&registry, &table_id, notification);
+        notify_shared_table_for_test(&registry, &table_id, notification);
 
         // All subscribers should receive it
         for rx in &mut receivers {
@@ -1119,7 +1111,7 @@ mod tests {
         let notification = make_wire_notification("perf");
 
         let start = std::time::Instant::now();
-    notify_shared_table_for_test(&registry, &table_id, notification);
+        notify_shared_table_for_test(&registry, &table_id, notification);
         let elapsed = start.elapsed();
 
         // Should complete in well under 100ms for 1000 subscribers
@@ -1186,7 +1178,7 @@ mod tests {
         );
 
         let notification = make_wire_notification("parallel");
-    notify_shared_table_for_test(&registry, &table_id, notification);
+        notify_shared_table_for_test(&registry, &table_id, notification);
 
         for mut rx in receivers {
             let msg = tokio::time::timeout(Duration::from_secs(1), rx.recv()).await;

@@ -74,12 +74,13 @@ COPY backend/crates/kalamdb-store/Cargo.toml         backend/crates/kalamdb-stor
 COPY backend/crates/kalamdb-system/Cargo.toml        backend/crates/kalamdb-system/Cargo.toml
 COPY backend/crates/kalamdb-filestore/Cargo.toml     backend/crates/kalamdb-filestore/Cargo.toml
 COPY backend/crates/kalamdb-core/Cargo.toml          backend/crates/kalamdb-core/Cargo.toml
-COPY backend/crates/kalamdb-sql/Cargo.toml           backend/crates/kalamdb-sql/Cargo.toml
 COPY backend/crates/kalamdb-tables/Cargo.toml        backend/crates/kalamdb-tables/Cargo.toml
 COPY backend/crates/kalamdb-streams/Cargo.toml       backend/crates/kalamdb-streams/Cargo.toml
 COPY backend/crates/kalamdb-auth/Cargo.toml          backend/crates/kalamdb-auth/Cargo.toml
 COPY backend/crates/kalamdb-api/Cargo.toml           backend/crates/kalamdb-api/Cargo.toml
 COPY backend/crates/kalamdb-session/Cargo.toml       backend/crates/kalamdb-session/Cargo.toml
+COPY backend/crates/kalamdb-session-datafusion/Cargo.toml backend/crates/kalamdb-session-datafusion/Cargo.toml
+COPY backend/crates/kalamdb-transactions/Cargo.toml  backend/crates/kalamdb-transactions/Cargo.toml
 COPY backend/crates/kalamdb-observability/Cargo.toml backend/crates/kalamdb-observability/Cargo.toml
 COPY backend/crates/kalamdb-publisher/Cargo.toml     backend/crates/kalamdb-publisher/Cargo.toml
 COPY backend/crates/kalamdb-raft/Cargo.toml          backend/crates/kalamdb-raft/Cargo.toml
@@ -87,7 +88,16 @@ COPY backend/crates/kalamdb-sharding/Cargo.toml      backend/crates/kalamdb-shar
 COPY backend/crates/kalamdb-views/Cargo.toml         backend/crates/kalamdb-views/Cargo.toml
 COPY backend/crates/kalamdb-vector/Cargo.toml        backend/crates/kalamdb-vector/Cargo.toml
 COPY backend/crates/kalamdb-dba/Cargo.toml           backend/crates/kalamdb-dba/Cargo.toml
-COPY backend/crates/kalamdb-oidc/Cargo.toml          backend/crates/kalamdb-oidc/Cargo.toml
+COPY backend/crates/kalamdb-live/Cargo.toml          backend/crates/kalamdb-live/Cargo.toml
+COPY backend/crates/kalamdb-handlers/Cargo.toml      backend/crates/kalamdb-handlers/Cargo.toml
+COPY backend/crates/kalamdb-handlers/crates/support/Cargo.toml backend/crates/kalamdb-handlers/crates/support/Cargo.toml
+COPY backend/crates/kalamdb-handlers/crates/admin/Cargo.toml   backend/crates/kalamdb-handlers/crates/admin/Cargo.toml
+COPY backend/crates/kalamdb-handlers/crates/ddl/Cargo.toml     backend/crates/kalamdb-handlers/crates/ddl/Cargo.toml
+COPY backend/crates/kalamdb-handlers/crates/stream/Cargo.toml  backend/crates/kalamdb-handlers/crates/stream/Cargo.toml
+COPY backend/crates/kalamdb-handlers/crates/user/Cargo.toml    backend/crates/kalamdb-handlers/crates/user/Cargo.toml
+COPY backend/crates/kalamdb-jobs/Cargo.toml          backend/crates/kalamdb-jobs/Cargo.toml
+COPY backend/crates/kalamdb-plan-cache/Cargo.toml    backend/crates/kalamdb-plan-cache/Cargo.toml
+COPY backend/crates/kalamdb-dialect/Cargo.toml       backend/crates/kalamdb-dialect/Cargo.toml
 COPY link/link-common/Cargo.toml       link/link-common/Cargo.toml
 COPY link/kalam-client/Cargo.toml      link/kalam-client/Cargo.toml
 COPY link/kalam-consumer/Cargo.toml    link/kalam-consumer/Cargo.toml
@@ -107,11 +117,16 @@ RUN set -e \
     && mkdir -p link/kalam-consumer-wasm/src && touch link/kalam-consumer-wasm/src/lib.rs \
     && mkdir -p link/kalam-link-dart/src && touch link/kalam-link-dart/src/lib.rs \
     && for c in kalamdb-configs kalamdb-store kalamdb-system kalamdb-filestore \
-         kalamdb-core kalamdb-sql kalamdb-tables kalamdb-streams kalamdb-auth \
-         kalamdb-api kalamdb-session kalamdb-observability kalamdb-publisher \
+         kalamdb-core kalamdb-tables kalamdb-streams kalamdb-auth \
+         kalamdb-api kalamdb-session kalamdb-session-datafusion kalamdb-transactions \
+         kalamdb-observability kalamdb-publisher \
          kalamdb-raft kalamdb-sharding kalamdb-views kalamdb-vector kalamdb-dba \
-         kalamdb-oidc; do \
+         kalamdb-live kalamdb-jobs kalamdb-plan-cache kalamdb-dialect; do \
        mkdir -p "backend/crates/$c/src" && touch "backend/crates/$c/src/lib.rs"; \
+    done \
+    && mkdir -p backend/crates/kalamdb-handlers/src && touch backend/crates/kalamdb-handlers/src/lib.rs \
+    && for sc in support admin ddl stream user; do \
+       mkdir -p "backend/crates/kalamdb-handlers/crates/$sc/src" && touch "backend/crates/kalamdb-handlers/crates/$sc/src/lib.rs"; \
     done
 
 # --- Real source for the 9 crates that actually get compiled ---------------

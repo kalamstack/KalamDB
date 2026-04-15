@@ -54,6 +54,18 @@ pub struct CloseSessionResponse {}
 // Scan / Mutation RPC messages
 // ---------------------------------------------------------------------------
 
+/// Equality filter pushed down from PostgreSQL WHERE clauses.
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct ScanFilterExpression {
+    #[prost(string, tag = "1")]
+    pub column: String,
+    /// Operator: "eq" for equality.
+    #[prost(string, tag = "2")]
+    pub op: String,
+    #[prost(string, tag = "3")]
+    pub value: String,
+}
+
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct ScanRpcRequest {
     #[prost(string, tag = "1")]
@@ -71,6 +83,9 @@ pub struct ScanRpcRequest {
     pub columns: Vec<String>,
     #[prost(uint64, optional, tag = "7")]
     pub limit: Option<u64>,
+    /// Equality filters pushed down from PostgreSQL WHERE clauses.
+    #[prost(message, repeated, tag = "8")]
+    pub filters: Vec<ScanFilterExpression>,
 }
 
 #[derive(Clone, PartialEq, prost::Message)]
@@ -937,10 +952,7 @@ impl KalamPgService {
         Arc::clone(&self.session_registry)
     }
 
-    pub fn snapshot_with_live_transactions<I>(
-        &self,
-        active_transactions: I,
-    ) -> Vec<RemotePgSession>
+    pub fn snapshot_with_live_transactions<I>(&self, active_transactions: I) -> Vec<RemotePgSession>
     where
         I: IntoIterator<Item = LivePgTransaction>,
     {
@@ -1081,9 +1093,7 @@ impl KalamPgService {
             Ok(value) => Ok(value),
             Err(status) if Self::should_reconcile_local_transaction_state(&status) => {
                 self.cleanup_current_transaction_after_terminal_error(
-                    session_id,
-                    rpc_name,
-                    &status,
+                    session_id, rpc_name, &status,
                 )
                 .await;
                 Err(status)

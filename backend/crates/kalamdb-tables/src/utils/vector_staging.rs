@@ -132,20 +132,14 @@ mod tests {
                 SeqId::from_i64(1),
                 Row::from_vec(vec![
                     ("id".to_string(), ScalarValue::Utf8(Some("row-1".to_string()))),
-                    (
-                        "embedding".to_string(),
-                        ScalarValue::Utf8(Some("[1.0,2.0]".to_string())),
-                    ),
+                    ("embedding".to_string(), ScalarValue::Utf8(Some("[1.0,2.0]".to_string()))),
                 ]),
             ),
             (
                 SeqId::from_i64(2),
                 Row::from_vec(vec![
                     ("id".to_string(), ScalarValue::Utf8(Some("row-2".to_string()))),
-                    (
-                        "embedding".to_string(),
-                        ScalarValue::Utf8(Some("[3.0,4.0]".to_string())),
-                    ),
+                    ("embedding".to_string(), ScalarValue::Utf8(Some("[3.0,4.0]".to_string()))),
                 ]),
             ),
         ];
@@ -170,16 +164,16 @@ mod tests {
     fn build_vector_delete_ops_builds_one_delete_per_column() {
         let ops = build_vector_delete_ops(
             &table_id(),
-            &[("embedding".to_string(), 2), ("alt_embedding".to_string(), 3)],
+            &[
+                ("embedding".to_string(), 2),
+                ("alt_embedding".to_string(), 3),
+            ],
             "row-1",
             |pk| pk.to_string(),
         );
 
         assert_eq!(ops.len(), 2);
         assert_eq!(ops.get("embedding").expect("embedding")[0].1.pk, "row-1");
-        assert_eq!(
-            ops.get("alt_embedding").expect("alt embedding")[0].1.dimensions,
-            3
-        );
+        assert_eq!(ops.get("alt_embedding").expect("alt embedding")[0].1.dimensions, 3);
     }
 }

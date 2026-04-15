@@ -8,7 +8,7 @@ impl ServerConfig {
     /// Supported environment variables (T030):
     /// - KALAMDB_SERVER_HOST: Override server.host
     /// - KALAMDB_SERVER_PORT: Override server.port
-    /// - KALAMDB_SERVER_PUBLIC_ORIGIN: Override server.public_origin
+    /// - KALAMDB_SERVER_PUBLIC_ORIGIN: Override server.public_origin (empty keeps Admin UI browser-origin fallback)
     /// - KALAMDB_LOG_LEVEL: Override logging.level
     /// - KALAMDB_LOGS_DIR: Override logging.logs_path
     /// - KALAMDB_LOG_TO_CONSOLE: Override logging.log_to_console
@@ -343,6 +343,20 @@ mod tests {
         assert_eq!(config.server.port, 9090);
 
         env::remove_var("KALAMDB_SERVER_PORT");
+    }
+
+    #[test]
+    fn test_env_override_public_origin_allows_blank_browser_fallback() {
+        let _guard = acquire_env_lock();
+        env::set_var("KALAMDB_SERVER_PUBLIC_ORIGIN", "");
+
+        let mut config = ServerConfig::default();
+        config.apply_env_overrides().unwrap();
+
+        assert_eq!(config.server.public_origin.as_deref(), Some(""));
+        assert_eq!(config.server.configured_public_origin(), None);
+
+        env::remove_var("KALAMDB_SERVER_PUBLIC_ORIGIN");
     }
 
     #[test]

@@ -33,4 +33,7 @@ pub struct KalamModifyState {
     pub column_names: Vec<String>,
     /// Name of the primary key column (for UPDATE/DELETE row identification).
     pub pk_column: String,
+    /// Whether pending writes for this table have already been flushed in this
+    /// modify lifecycle. Avoids redundant per-row flush_table calls in UPDATE/DELETE.
+    pub flushed_for_modify: bool,
 }

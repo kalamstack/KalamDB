@@ -335,12 +335,7 @@ impl FileStreamLogStore {
 
         // Use `entry` API so a concurrent creation by another thread is
         // handled correctly — whichever was inserted first wins.
-        Ok(self
-            .segments
-            .entry(path.to_path_buf())
-            .or_insert(writer)
-            .value()
-            .clone())
+        Ok(self.segments.entry(path.to_path_buf()).or_insert(writer).value().clone())
     }
 
     /// Serialise `record` and write the length-prefixed frame to `writer`.
@@ -352,9 +347,7 @@ impl FileStreamLogStore {
         writer
             .write_all(&len.to_le_bytes())
             .map_err(|e| StreamLogError::Io(e.to_string()))?;
-        writer
-            .write_all(&payload)
-            .map_err(|e| StreamLogError::Io(e.to_string()))?;
+        writer.write_all(&payload).map_err(|e| StreamLogError::Io(e.to_string()))?;
         Ok(())
     }
 
@@ -536,10 +529,7 @@ impl StreamLogStore for FileStreamLogStore {
             let ts = row_id.seq().timestamp_millis();
             let window_start = self.window_start_ms(ts);
             let path = self.log_path(user_id, window_start);
-            by_segment
-                .entry(path)
-                .or_default()
-                .push(StreamLogRecord::Put { row_id, row });
+            by_segment.entry(path).or_default().push(StreamLogRecord::Put { row_id, row });
         }
 
         for (path, records) in by_segment {
@@ -794,9 +784,7 @@ mod tests {
 
         for i in 0..num_users {
             let user_id = UserId::new(format!("user-{}", i));
-            let rows = store
-                .read_with_limit(&table_id, &user_id, writes_per_user + 1)
-                .unwrap();
+            let rows = store.read_with_limit(&table_id, &user_id, writes_per_user + 1).unwrap();
             assert_eq!(
                 rows.len(),
                 writes_per_user,
@@ -841,9 +829,7 @@ mod tests {
         assert_eq!(store.open_segment_count(), 0);
 
         // Data should still be readable from disk.
-        let read = store
-            .read_with_limit(&table_id, &user_id, 10)
-            .unwrap();
+        let read = store.read_with_limit(&table_id, &user_id, 10).unwrap();
         assert_eq!(read.len(), 1);
 
         let _ = fs::remove_dir_all(&base_dir);

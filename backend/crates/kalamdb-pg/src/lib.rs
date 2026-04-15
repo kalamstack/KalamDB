@@ -27,7 +27,7 @@ pub use service::{
     ExecuteQueryRpcRequest, ExecuteQueryRpcResponse, ExecuteSqlRpcRequest, ExecuteSqlRpcResponse,
     InsertRpcRequest, InsertRpcResponse, OpenSessionRequest, OpenSessionResponse, PgServiceClient,
     PingRequest, PingResponse, RollbackTransactionRequest, RollbackTransactionResponse,
-    ScanRpcRequest, ScanRpcResponse, UpdateRpcRequest, UpdateRpcResponse,
+    ScanFilterExpression, ScanRpcRequest, ScanRpcResponse, UpdateRpcRequest, UpdateRpcResponse,
 };
 #[cfg(feature = "server")]
 pub use session_registry::{LivePgTransaction, RemotePgSession, SessionRegistry};

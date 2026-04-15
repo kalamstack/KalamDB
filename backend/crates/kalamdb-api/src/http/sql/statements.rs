@@ -151,8 +151,7 @@ fn prepare_api_statement(
                 ))
             },
             kalamdb_sql::classifier::StatementClassificationError::InvalidSql {
-                message,
-                ..
+                message, ..
             } => HttpResponse::BadRequest().json(SqlResponse::error(
                 ErrorCode::InvalidSql,
                 &message,
@@ -200,12 +199,7 @@ pub(super) fn split_and_prepare_statements(
     let mut prepared = Vec::with_capacity(raw_statements.len());
 
     for raw_statement in &raw_statements {
-        prepared.push(prepare_api_statement(
-            raw_statement,
-            exec_ctx,
-            sql_executor,
-            start_time,
-        )?);
+        prepared.push(prepare_api_statement(raw_statement, exec_ctx, sql_executor, start_time)?);
     }
 
     Ok(prepared)

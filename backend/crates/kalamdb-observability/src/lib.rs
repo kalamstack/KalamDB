@@ -22,9 +22,8 @@ pub use allocator_metrics::{
 };
 pub use cpu::{get_cpu_count, get_physical_cpu_count};
 pub use health_monitor::{
-    decrement_websocket_sessions, get_websocket_session_count,
-    get_websocket_session_peak_count, increment_websocket_sessions, HealthCounts,
-    HealthMetrics, HealthMonitor,
+    decrement_websocket_sessions, get_websocket_session_count, get_websocket_session_peak_count,
+    increment_websocket_sessions, HealthCounts, HealthMetrics, HealthMonitor,
 };
 pub use runtime_metrics::{
     collect_runtime_metrics, RuntimeMetrics, BUILD_DATE, GIT_BRANCH, GIT_COMMIT_HASH,

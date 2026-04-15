@@ -59,11 +59,12 @@ pub fn ensure_transaction(session_id: &str) -> Result<String, kalam_pg_common::K
     register_xact_callback();
 
     // Begin a new transaction via the remote client
-    let state = crate::remote_state::get_remote_extension_state_for_session(session_id).ok_or_else(|| {
-        kalam_pg_common::KalamPgError::Execution(
-            "remote extension state not initialized".to_string(),
-        )
-    })?;
+    let state = crate::remote_state::get_remote_extension_state_for_session(session_id)
+        .ok_or_else(|| {
+            kalam_pg_common::KalamPgError::Execution(
+                "remote extension state not initialized".to_string(),
+            )
+        })?;
 
     let transaction_id = state
         .runtime()
@@ -115,12 +116,7 @@ fn take_active_transactions() -> Vec<ActiveTransaction> {
 }
 
 fn active_transactions_snapshot() -> Vec<ActiveTransaction> {
-    CURRENT_TX
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .values()
-        .cloned()
-        .collect()
+    CURRENT_TX.lock().unwrap_or_else(|e| e.into_inner()).values().cloned().collect()
 }
 
 fn clear_active_transactions() {
@@ -131,18 +127,12 @@ fn commit_transactions(transactions: &[ActiveTransaction]) -> Result<(), String>
     for tx in transactions {
         let state = crate::remote_state::get_remote_extension_state_for_session(&tx.session_id)
             .ok_or_else(|| {
-                format!(
-                    "remote extension state not initialized for session '{}'",
-                    tx.session_id
-                )
+                format!("remote extension state not initialized for session '{}'", tx.session_id)
             })?;
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             state.runtime().block_on(async {
-                state
-                    .client()
-                    .commit_transaction(&tx.session_id, &tx.transaction_id)
-                    .await
+                state.client().commit_transaction(&tx.session_id, &tx.transaction_id).await
             })
         }));
 
@@ -155,10 +145,7 @@ fn commit_transactions(transactions: &[ActiveTransaction]) -> Result<(), String>
                 ));
             },
             Err(_panic) => {
-                return Err(format!(
-                    "panic committing KalamDB transaction {}",
-                    tx.transaction_id
-                ));
+                return Err(format!("panic committing KalamDB transaction {}", tx.transaction_id));
             },
         }
     }
@@ -168,17 +155,15 @@ fn commit_transactions(transactions: &[ActiveTransaction]) -> Result<(), String>
 
 fn rollback_transactions(transactions: &[ActiveTransaction]) {
     for tx in transactions {
-        let Some(state) = crate::remote_state::get_remote_extension_state_for_session(&tx.session_id)
+        let Some(state) =
+            crate::remote_state::get_remote_extension_state_for_session(&tx.session_id)
         else {
             continue;
         };
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             state.runtime().block_on(async {
-                state
-                    .client()
-                    .rollback_transaction(&tx.session_id, &tx.transaction_id)
-                    .await
+                state.client().rollback_transaction(&tx.session_id, &tx.transaction_id).await
             })
         }));
 
@@ -191,10 +176,7 @@ fn rollback_transactions(transactions: &[ActiveTransaction]) {
                 );
             },
             Err(_panic) => {
-                eprintln!(
-                    "pg_kalam: panic rolling back KalamDB transaction {}",
-                    tx.transaction_id,
-                );
+                eprintln!("pg_kalam: panic rolling back KalamDB transaction {}", tx.transaction_id,);
             },
         }
     }
@@ -204,18 +186,12 @@ fn try_rollback_transactions(transactions: &[ActiveTransaction]) -> Result<(), S
     for tx in transactions {
         let state = crate::remote_state::get_remote_extension_state_for_session(&tx.session_id)
             .ok_or_else(|| {
-                format!(
-                    "remote extension state not initialized for session '{}'",
-                    tx.session_id
-                )
+                format!("remote extension state not initialized for session '{}'", tx.session_id)
             })?;
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             state.runtime().block_on(async {
-                state
-                    .client()
-                    .rollback_transaction(&tx.session_id, &tx.transaction_id)
-                    .await
+                state.client().rollback_transaction(&tx.session_id, &tx.transaction_id).await
             })
         }));
 
@@ -246,9 +222,8 @@ pub fn commit_explicit_transaction_block() -> Result<(), String> {
         return Ok(());
     }
 
-    crate::write_buffer::flush_all().map_err(|error| {
-        format!("failed to flush writes before explicit COMMIT: {}", error)
-    })?;
+    crate::write_buffer::flush_all()
+        .map_err(|error| format!("failed to flush writes before explicit COMMIT: {}", error))?;
 
     commit_transactions(&transactions)?;
     clear_active_transactions();
@@ -315,10 +290,7 @@ unsafe extern "C-unwind" fn xact_callback(
 
         if let Err(error) = commit_transactions(&transactions) {
             rollback_transactions(&transactions);
-            pgrx::error!(
-                "pg_kalam: {}, aborting transaction before PostgreSQL commit",
-                error
-            );
+            pgrx::error!("pg_kalam: {}, aborting transaction before PostgreSQL commit", error);
         }
 
         return;

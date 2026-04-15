@@ -65,4 +65,3 @@ pub fn strip_nested_expr(expr: &Expr) -> &Expr {
         _ => expr,
     }
 }
-

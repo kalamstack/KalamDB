@@ -49,10 +49,7 @@ fn log_sample(label: &str, sample: &ServerMemorySample) {
             .rss_mb
             .map(|rss| format!("{}MB", rss))
             .unwrap_or_else(|| "n/a".to_string()),
-        sample
-            .pid
-            .map(|pid| pid.to_string())
-            .unwrap_or_else(|| "n/a".to_string())
+        sample.pid.map(|pid| pid.to_string()).unwrap_or_else(|| "n/a".to_string())
     );
 }
 
@@ -113,8 +110,9 @@ fn create_memory_test_table(namespace: &str, table: &str) -> String {
 }
 
 fn flush_and_drop_namespace(namespace: &str, full_table: &str) {
-    let flush_json = execute_sql_as_root_via_client_json(&format!("STORAGE FLUSH TABLE {}", full_table))
-        .expect("flush table should succeed");
+    let flush_json =
+        execute_sql_as_root_via_client_json(&format!("STORAGE FLUSH TABLE {}", full_table))
+            .expect("flush table should succeed");
     let job_id = parse_job_id_from_json_message(&flush_json)
         .or_else(|_| parse_job_id_from_flush_output(&flush_json))
         .expect("flush response should contain a job id");
@@ -145,13 +143,7 @@ fn run_memory_workload(
             if !values.is_empty() {
                 values.push_str(", ");
             }
-            values.push_str(&format!(
-                "({}, '{}', '{}', {})",
-                row_id,
-                tenant,
-                payload,
-                row_id
-            ));
+            values.push_str(&format!("({}, '{}', '{}', {})", row_id, tenant, payload, row_id));
         }
 
         execute_sql_as_root_via_client(&format!(
@@ -214,7 +206,10 @@ fn run_memory_workload(
 #[test]
 fn smoke_test_server_memory_regression() {
     if !is_server_running() {
-        eprintln!("Skipping smoke_test_server_memory_regression: server not running at {}", server_url());
+        eprintln!(
+            "Skipping smoke_test_server_memory_regression: server not running at {}",
+            server_url()
+        );
         return;
     }
 
@@ -226,7 +221,8 @@ fn smoke_test_server_memory_regression() {
     let recovery_budget_mb =
         env_u64("KALAMDB_MEM_TEST_RECOVERY_DELTA_MB", DEFAULT_RECOVERY_DELTA_MB);
     let settle_seconds = env_u64("KALAMDB_MEM_TEST_SETTLE_SECS", DEFAULT_SETTLE_SECONDS).max(1);
-    let baseline_samples = env_usize("KALAMDB_MEM_TEST_BASELINE_SAMPLES", DEFAULT_BASELINE_SAMPLES).max(1);
+    let baseline_samples =
+        env_usize("KALAMDB_MEM_TEST_BASELINE_SAMPLES", DEFAULT_BASELINE_SAMPLES).max(1);
     let enable_warmup = env_bool("KALAMDB_MEM_TEST_WARMUP", true);
     let warmup_rows = env_usize("KALAMDB_MEM_TEST_WARMUP_ROWS", total_rows);
     let warmup_query_loops = env_usize("KALAMDB_MEM_TEST_WARMUP_QUERY_LOOPS", query_loops).max(1);
@@ -251,11 +247,14 @@ fn smoke_test_server_memory_regression() {
     );
 
     if enable_warmup && warmup_rows > 0 {
-        println!("[warmup] priming server memory and query paths before measuring steady-state recovery");
+        println!(
+            "[warmup] priming server memory and query paths before measuring steady-state recovery"
+        );
         let warmup_namespace = generate_unique_namespace("perf_mem_warm_ns");
         let warmup_table = generate_unique_table("perf_mem_warm_table");
         let warmup_full_table = create_memory_test_table(&warmup_namespace, &warmup_table);
-        let mut warmup_peak = capture_server_memory_sample().expect("capture warmup baseline sample");
+        let mut warmup_peak =
+            capture_server_memory_sample().expect("capture warmup baseline sample");
 
         let _ = run_memory_workload(
             &warmup_full_table,

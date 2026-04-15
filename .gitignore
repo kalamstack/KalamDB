@@ -121,3 +121,4 @@ ts-sdk-repro/server.toml
 /benchv2/logs
 /benchv2/logs
 link/sdks/typescript/client/.npmrc
+/target-pg-bench

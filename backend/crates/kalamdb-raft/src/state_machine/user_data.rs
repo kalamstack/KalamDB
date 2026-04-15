@@ -313,7 +313,10 @@ impl UserDataStateMachine {
         }
     }
 
-    async fn apply_decoded_command(&self, cmd: UserApplyCommand) -> Result<DataResponse, RaftError> {
+    async fn apply_decoded_command(
+        &self,
+        cmd: UserApplyCommand,
+    ) -> Result<DataResponse, RaftError> {
         match cmd {
             UserApplyCommand::User(command) => self.apply_command(command).await,
             UserApplyCommand::TransactionCommit {
@@ -343,9 +346,7 @@ impl UserDataStateMachine {
         };
 
         let Some(applier) = applier else {
-            return Ok(DataResponse::error(
-                "No applier set, transaction commit not persisted",
-            ));
+            return Ok(DataResponse::error("No applier set, transaction commit not persisted"));
         };
 
         match applier.apply_transaction_batch(&transaction_id, &mutations).await {
@@ -489,11 +490,11 @@ impl KalamStateMachine for UserDataStateMachine {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use std::collections::BTreeMap;
+    use kalamdb_commons::models::rows::Row;
     use kalamdb_commons::models::NamespaceId;
     use kalamdb_commons::models::OperationKind;
-    use kalamdb_commons::models::rows::Row;
     use kalamdb_commons::{TableId, UserId};
+    use std::collections::BTreeMap;
 
     struct TransactionBatchUserApplier;
 

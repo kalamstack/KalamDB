@@ -7,7 +7,9 @@ use tokio::runtime::Handle;
 use tokio::time::MissedTickBehavior;
 use uuid::Uuid;
 
-use kalamdb_commons::models::{NodeId, TableId, TransactionId, TransactionOrigin, TransactionState, UserId};
+use kalamdb_commons::models::{
+    NodeId, TableId, TransactionId, TransactionOrigin, TransactionState, UserId,
+};
 use kalamdb_commons::TableType;
 use kalamdb_raft::RaftExecutor;
 use kalamdb_sharding::{GroupId, ShardRouter};
@@ -129,10 +131,9 @@ impl TransactionCoordinator {
             mutation.user_id.as_ref(),
         )?;
 
-        let mut handle = self
-            .active_by_id
-            .get_mut(transaction_id)
-            .ok_or_else(|| KalamDbError::NotFound(format!("transaction '{}' not found", transaction_id)))?;
+        let mut handle = self.active_by_id.get_mut(transaction_id).ok_or_else(|| {
+            KalamDbError::NotFound(format!("transaction '{}' not found", transaction_id))
+        })?;
 
         if !handle.state.is_open() {
             return Err(Self::state_error(transaction_id, handle.state, "stage writes in"));
@@ -213,11 +214,7 @@ impl TransactionCoordinator {
             total_estimated_bytes = total_estimated_bytes.saturating_add(estimated_bytes);
             touched_tables.insert(mutation.table_id.clone());
 
-            let target = (
-                mutation.table_id.clone(),
-                mutation.table_type,
-                mutation.user_id.clone(),
-            );
+            let target = (mutation.table_id.clone(), mutation.table_type, mutation.user_id.clone());
             if validated_targets.insert(target) {
                 self.validate_table_access(
                     transaction_id,
@@ -228,10 +225,9 @@ impl TransactionCoordinator {
             }
         }
 
-        let mut handle = self
-            .active_by_id
-            .get_mut(transaction_id)
-            .ok_or_else(|| KalamDbError::NotFound(format!("transaction '{}' not found", transaction_id)))?;
+        let mut handle = self.active_by_id.get_mut(transaction_id).ok_or_else(|| {
+            KalamDbError::NotFound(format!("transaction '{}' not found", transaction_id))
+        })?;
 
         if !handle.state.is_open() {
             return Err(Self::state_error(transaction_id, handle.state, "stage writes in"));
@@ -285,18 +281,16 @@ impl TransactionCoordinator {
         transaction_id: &TransactionId,
     ) -> Result<TransactionCommitResult, KalamDbError> {
         let owner_key = {
-            let mut handle = self
-                .active_by_id
-                .get_mut(transaction_id)
-                .ok_or_else(|| {
-                    KalamDbError::NotFound(format!("transaction '{}' not found", transaction_id))
-                })?;
+            let mut handle = self.active_by_id.get_mut(transaction_id).ok_or_else(|| {
+                KalamDbError::NotFound(format!("transaction '{}' not found", transaction_id))
+            })?;
 
             if !handle.state.is_open() {
                 return Err(Self::state_error(transaction_id, handle.state, "commit"));
             }
 
-            if let Err(error) = self.ensure_bound_leadership_is_current(transaction_id, &mut handle) {
+            if let Err(error) = self.ensure_bound_leadership_is_current(transaction_id, &mut handle)
+            {
                 drop(handle);
                 self.mark_transaction_aborted(transaction_id);
                 return Err(error);
@@ -355,9 +349,8 @@ impl TransactionCoordinator {
                 transaction_id
             ))
         })?;
-        let (notifications_sent, manifest_updates, publisher_events) = response
-            .committed_side_effect_counts()
-            .unwrap_or((0, 0, 0));
+        let (notifications_sent, manifest_updates, publisher_events) =
+            response.committed_side_effect_counts().unwrap_or((0, 0, 0));
 
         self.commit_sequence_tracker.observe_committed(committed_commit_seq);
 
@@ -385,16 +378,15 @@ impl TransactionCoordinator {
 
     pub fn rollback(&self, transaction_id: &TransactionId) -> Result<(), KalamDbError> {
         let owner_key = {
-            let mut handle = self
-                .active_by_id
-                .get_mut(transaction_id)
-                .ok_or_else(|| {
-                    KalamDbError::NotFound(format!("transaction '{}' not found", transaction_id))
-                })?;
+            let mut handle = self.active_by_id.get_mut(transaction_id).ok_or_else(|| {
+                KalamDbError::NotFound(format!("transaction '{}' not found", transaction_id))
+            })?;
 
             if matches!(
                 handle.state,
-                TransactionState::TimedOut | TransactionState::Aborted | TransactionState::RolledBack
+                TransactionState::TimedOut
+                    | TransactionState::Aborted
+                    | TransactionState::RolledBack
             ) {
                 let owner_key = handle.owner_key;
                 drop(handle);
@@ -439,10 +431,9 @@ impl TransactionCoordinator {
         transaction_id: &TransactionId,
         raft_binding: TransactionRaftBinding,
     ) -> Result<(), KalamDbError> {
-        let mut handle = self
-            .active_by_id
-            .get_mut(transaction_id)
-            .ok_or_else(|| KalamDbError::NotFound(format!("transaction '{}' not found", transaction_id)))?;
+        let mut handle = self.active_by_id.get_mut(transaction_id).ok_or_else(|| {
+            KalamDbError::NotFound(format!("transaction '{}' not found", transaction_id))
+        })?;
         handle.raft_binding = raft_binding;
         Ok(())
     }
@@ -454,10 +445,9 @@ impl TransactionCoordinator {
         table_type: TableType,
         user_id: Option<&UserId>,
     ) -> Result<(), KalamDbError> {
-        let mut handle = self
-            .active_by_id
-            .get_mut(transaction_id)
-            .ok_or_else(|| KalamDbError::NotFound(format!("transaction '{}' not found", transaction_id)))?;
+        let mut handle = self.active_by_id.get_mut(transaction_id).ok_or_else(|| {
+            KalamDbError::NotFound(format!("transaction '{}' not found", transaction_id))
+        })?;
 
         if !handle.state.is_open() {
             return Err(Self::state_error(transaction_id, handle.state, "access"));
@@ -581,10 +571,7 @@ impl TransactionCoordinator {
         }
     }
 
-    async fn run_timeout_sweeper(
-        coordinator: Weak<Self>,
-        sweep_interval: Duration,
-    ) {
+    async fn run_timeout_sweeper(coordinator: Weak<Self>, sweep_interval: Duration) {
         let mut interval = tokio::time::interval(sweep_interval);
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
@@ -607,7 +594,8 @@ impl TransactionCoordinator {
             .iter()
             .filter_map(|entry| {
                 let handle = entry.value();
-                if handle.state.is_open() && now.duration_since(handle.last_activity_at) >= timeout {
+                if handle.state.is_open() && now.duration_since(handle.last_activity_at) >= timeout
+                {
                     Some((
                         handle.transaction_id.clone(),
                         now.duration_since(handle.started_at),
@@ -624,12 +612,7 @@ impl TransactionCoordinator {
         }
     }
 
-    fn timeout_transaction(
-        &self,
-        transaction_id: &TransactionId,
-        age: Duration,
-        idle: Duration,
-    ) {
+    fn timeout_transaction(&self, transaction_id: &TransactionId, age: Duration, idle: Duration) {
         let Some(mut handle) = self.active_by_id.get_mut(transaction_id) else {
             return;
         };
@@ -689,7 +672,8 @@ impl TransactionCoordinator {
             return Ok(None);
         }
 
-        let router = ShardRouter::from_optional_cluster_config(self.app_context.config().cluster.as_ref());
+        let router =
+            ShardRouter::from_optional_cluster_config(self.app_context.config().cluster.as_ref());
         let group_id = match table_type {
             TableType::User => router.user_group_id(user_id.ok_or_else(|| {
                 KalamDbError::InvalidOperation(format!(
@@ -737,7 +721,8 @@ impl TransactionCoordinator {
         let TransactionRaftBinding::BoundCluster {
             group_id,
             leader_node_id,
-        } = handle.raft_binding else {
+        } = handle.raft_binding
+        else {
             return Ok(());
         };
 

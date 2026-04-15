@@ -6,7 +6,9 @@ use super::{StagedMutation, TransactionOverlay};
 
 fn scoped_table_key(user_id: Option<&UserId>, primary_key: &str) -> String {
     match user_id {
-        Some(user_id) => format!("u{}:{}:{}", user_id.as_str().len(), user_id.as_str(), primary_key),
+        Some(user_id) => {
+            format!("u{}:{}:{}", user_id.as_str().len(), user_id.as_str(), primary_key)
+        },
         None => format!("s:{}", primary_key),
     }
 }
@@ -79,7 +81,11 @@ impl TransactionWriteSet {
         &self.ordered_mutations
     }
 
-    pub fn latest_mutation(&self, table_id: &TableId, primary_key: &str) -> Option<&StagedMutation> {
+    pub fn latest_mutation(
+        &self,
+        table_id: &TableId,
+        primary_key: &str,
+    ) -> Option<&StagedMutation> {
         self.latest_mutation_for_scope(table_id, None, primary_key)
     }
 
@@ -114,8 +120,8 @@ mod tests {
 
     use super::*;
     use kalamdb_commons::models::rows::Row;
-    use kalamdb_commons::models::{OperationKind, TableName};
     use kalamdb_commons::models::{NamespaceId, TableId};
+    use kalamdb_commons::models::{OperationKind, TableName};
     use kalamdb_commons::TableType;
 
     fn row(values: &[(&'static str, ScalarValue)]) -> Row {
@@ -178,14 +184,8 @@ mod tests {
 
         let mut inserted_values = BTreeMap::new();
         inserted_values.insert("id".to_string(), ScalarValue::Int64(Some(1)));
-        inserted_values.insert(
-            "name".to_string(),
-            ScalarValue::Utf8(Some("before".to_string())),
-        );
-        inserted_values.insert(
-            "color".to_string(),
-            ScalarValue::Utf8(Some("red".to_string())),
-        );
+        inserted_values.insert("name".to_string(), ScalarValue::Utf8(Some("before".to_string())));
+        inserted_values.insert("color".to_string(), ScalarValue::Utf8(Some("red".to_string())));
         write_set.stage(StagedMutation::new(
             transaction_id.clone(),
             table_id.clone(),
@@ -198,10 +198,7 @@ mod tests {
         ));
 
         let mut updated_values = BTreeMap::new();
-        updated_values.insert(
-            "name".to_string(),
-            ScalarValue::Utf8(Some("after".to_string())),
-        );
+        updated_values.insert("name".to_string(), ScalarValue::Utf8(Some("after".to_string())));
         write_set.stage(StagedMutation::new(
             transaction_id,
             table_id.clone(),
@@ -242,7 +239,10 @@ mod tests {
             Some(first_user.clone()),
             OperationKind::Insert,
             "1",
-            row(&[("id", ScalarValue::Int64(Some(1))), ("name", ScalarValue::Utf8(Some("alice".to_string())))]),
+            row(&[
+                ("id", ScalarValue::Int64(Some(1))),
+                ("name", ScalarValue::Utf8(Some("alice".to_string()))),
+            ]),
             false,
         ));
         write_set.stage(StagedMutation::new(
@@ -252,7 +252,10 @@ mod tests {
             Some(second_user.clone()),
             OperationKind::Insert,
             "1",
-            row(&[("id", ScalarValue::Int64(Some(1))), ("name", ScalarValue::Utf8(Some("bob".to_string())))]),
+            row(&[
+                ("id", ScalarValue::Int64(Some(1))),
+                ("name", ScalarValue::Utf8(Some("bob".to_string()))),
+            ]),
             false,
         ));
 
@@ -276,9 +279,7 @@ mod tests {
                 .get("name"),
             Some(&ScalarValue::Utf8(Some("bob".to_string())))
         );
-        assert!(write_set
-            .latest_mutation_for_scope(&table_id, Some(&first_user), "1")
-            .is_some());
+        assert!(write_set.latest_mutation_for_scope(&table_id, Some(&first_user), "1").is_some());
         assert!(write_set
             .latest_mutation_for_scope(&table_id, Some(&second_user), "1")
             .is_some());

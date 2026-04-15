@@ -1,6 +1,9 @@
 mod support;
 
-use support::{execute_ok, insert_sql, observer_exec_ctx, request_exec_ctx, request_transaction_state, select_names, setup_shared_table};
+use support::{
+    execute_ok, insert_sql, observer_exec_ctx, request_exec_ctx, request_transaction_state,
+    select_names, setup_shared_table,
+};
 
 #[tokio::test]
 #[ntest::timeout(15000)]

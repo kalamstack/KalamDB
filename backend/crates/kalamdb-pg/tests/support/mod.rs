@@ -293,6 +293,7 @@ pub async fn scan_shared_rows(
             session_id: session_id.to_string(),
             user_id: None,
             columns: vec![],
+            filters: vec![],
             limit: None,
         }))
         .await
@@ -343,6 +344,7 @@ pub async fn scan_user_rows(
             session_id: session_id.to_string(),
             user_id: Some(user_id.to_string()),
             columns: vec![],
+            filters: vec![],
             limit: None,
         }))
         .await

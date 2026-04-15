@@ -210,15 +210,14 @@ fn table_id_from_parts(parts: &[String], default_namespace: &str) -> Option<Tabl
 }
 
 fn extract_dml_table_id_from_tokens(tokens: &[Token], default_namespace: &str) -> Option<TableId> {
-    let compact_tokens: Vec<&Token> = tokens
-        .iter()
-        .filter(|token| !matches!(token, Token::Whitespace(_)))
-        .collect();
+    let compact_tokens: Vec<&Token> =
+        tokens.iter().filter(|token| !matches!(token, Token::Whitespace(_))).collect();
 
     match *(compact_tokens.first()?) {
         Token::Word(ref word) if word.value.eq_ignore_ascii_case("INSERT") => {
             let into_token = compact_tokens.get(1)?;
-            if !matches!(**into_token, Token::Word(ref word) if word.value.eq_ignore_ascii_case("INTO")) {
+            if !matches!(**into_token, Token::Word(ref word) if word.value.eq_ignore_ascii_case("INTO"))
+            {
                 return None;
             }
             let (parts, _) = extract_object_name_parts(&compact_tokens, 2)?;
@@ -230,7 +229,8 @@ fn extract_dml_table_id_from_tokens(tokens: &[Token], default_namespace: &str) -
         },
         Token::Word(ref word) if word.value.eq_ignore_ascii_case("DELETE") => {
             let from_token = compact_tokens.get(1)?;
-            if !matches!(**from_token, Token::Word(ref word) if word.value.eq_ignore_ascii_case("FROM")) {
+            if !matches!(**from_token, Token::Word(ref word) if word.value.eq_ignore_ascii_case("FROM"))
+            {
                 return None;
             }
             let (parts, _) = extract_object_name_parts(&compact_tokens, 2)?;
@@ -594,23 +594,17 @@ mod tests {
 
     #[test]
     fn test_extract_dml_table_id_fast_insert_update_delete() {
-        let insert = extract_dml_table_id_fast(
-            "INSERT INTO chat.messages (id) VALUES (1)",
-            "default",
-        )
-        .expect("fast insert table id");
+        let insert =
+            extract_dml_table_id_fast("INSERT INTO chat.messages (id) VALUES (1)", "default")
+                .expect("fast insert table id");
         assert_eq!(insert.full_name(), "chat.messages");
 
-        let update =
-            extract_dml_table_id_fast("UPDATE messages SET id = 2 WHERE id = 1", "chat")
-                .expect("fast update table id");
+        let update = extract_dml_table_id_fast("UPDATE messages SET id = 2 WHERE id = 1", "chat")
+            .expect("fast update table id");
         assert_eq!(update.full_name(), "chat.messages");
 
-        let delete = extract_dml_table_id_fast(
-            "DELETE FROM chat.messages WHERE id = 1",
-            "default",
-        )
-        .expect("fast delete table id");
+        let delete = extract_dml_table_id_fast("DELETE FROM chat.messages WHERE id = 1", "default")
+            .expect("fast delete table id");
         assert_eq!(delete.full_name(), "chat.messages");
     }
 

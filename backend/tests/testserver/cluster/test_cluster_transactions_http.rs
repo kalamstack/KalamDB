@@ -12,7 +12,9 @@ fn result_i64(result: &QueryResult, column: &str) -> Result<i64> {
         .ok_or_else(|| anyhow::anyhow!("missing first row for column {}", column))?;
 
     row.get(column)
-        .and_then(|value| value.as_i64().or_else(|| value.as_str().and_then(|raw| raw.parse().ok())))
+        .and_then(|value| {
+            value.as_i64().or_else(|| value.as_str().and_then(|raw| raw.parse().ok()))
+        })
         .ok_or_else(|| anyhow::anyhow!("missing numeric column {} in row {:?}", column, row))
 }
 
@@ -73,7 +75,11 @@ async fn wait_for_table_visible(
                 sleep(Duration::from_millis(50)).await;
             },
             Ok(response) => {
-                anyhow::bail!("table {}.items did not become visible: {:?}", namespace, response.error)
+                anyhow::bail!(
+                    "table {}.items did not become visible: {:?}",
+                    namespace,
+                    response.error
+                )
             },
             Err(error) => {
                 anyhow::bail!("table {}.items did not become visible: {}", namespace, error)
@@ -147,14 +153,22 @@ async fn test_sql_transaction_forwarded_from_follower_preserves_atomic_staging()
         .find(|result| result.row_as_map(0).is_some_and(|row| row.contains_key("visible_rows")))
         .map(|result| result_i64(result, "visible_rows"))
         .transpose()?
-        .ok_or_else(|| anyhow::anyhow!("missing visible_rows result set: {:?}", response.results))?;
-    anyhow::ensure!(visible_rows == 2, "expected in-transaction visibility of 2 rows, got {}", visible_rows);
+        .ok_or_else(|| {
+            anyhow::anyhow!("missing visible_rows result set: {:?}", response.results)
+        })?;
+    anyhow::ensure!(
+        visible_rows == 2,
+        "expected in-transaction visibility of 2 rows, got {}",
+        visible_rows
+    );
 
     let staged_result = response
         .results
         .iter()
         .find(|result| result.row_as_map(0).is_some_and(|row| row.contains_key("staged_writes")))
-        .ok_or_else(|| anyhow::anyhow!("missing staged_writes result set: {:?}", response.results))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!("missing staged_writes result set: {:?}", response.results)
+        })?;
     anyhow::ensure!(result_i64(staged_result, "staged_writes")? == 2);
     anyhow::ensure!(result_i64(staged_result, "staged_tables")? == 1);
 
@@ -172,8 +186,15 @@ async fn test_sql_transaction_forwarded_from_follower_preserves_atomic_staging()
     let committed = shared_leader
         .execute_sql(&format!("SELECT COUNT(*) AS committed_rows FROM {}.items", namespace))
         .await?;
-    anyhow::ensure!(committed.status == ResponseStatus::Success, "post-commit count failed: {:?}", committed.error);
-    anyhow::ensure!(get_count_value(&committed, 0) == 2, "expected 2 committed rows after atomic commit");
+    anyhow::ensure!(
+        committed.status == ResponseStatus::Success,
+        "post-commit count failed: {:?}",
+        committed.error
+    );
+    anyhow::ensure!(
+        get_count_value(&committed, 0) == 2,
+        "expected 2 committed rows after atomic commit"
+    );
 
     let active_transactions = shared_leader
         .execute_sql("SELECT COUNT(*) AS cnt FROM system.transactions WHERE origin = 'SqlBatch'")
@@ -183,7 +204,10 @@ async fn test_sql_transaction_forwarded_from_follower_preserves_atomic_staging()
         "system.transactions verification failed: {:?}",
         active_transactions.error
     );
-    anyhow::ensure!(get_count_value(&active_transactions, -1) == 0, "expected no lingering SqlBatch transactions");
+    anyhow::ensure!(
+        get_count_value(&active_transactions, -1) == 0,
+        "expected no lingering SqlBatch transactions"
+    );
 
     Ok(())
 }

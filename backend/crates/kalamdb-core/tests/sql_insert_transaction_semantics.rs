@@ -18,10 +18,7 @@ async fn load_user_rows(
     user_id: &UserId,
     first_id: i64,
     second_id: i64,
-) -> (
-    kalamdb_tables::UserTableRow,
-    kalamdb_tables::UserTableRow,
-) {
+) -> (kalamdb_tables::UserTableRow, kalamdb_tables::UserTableRow) {
     let provider_arc = app_ctx
         .schema_registry()
         .get_provider(table_id)
@@ -50,9 +47,11 @@ async fn load_user_rows(
 async fn multi_row_insert_statement_uses_one_internal_commit() {
     let (app_ctx, _test_db) = create_cluster_app_context().await;
     let user_id = UserId::from("sql-insert-batch-user");
-    let table_id = create_user_table(&app_ctx, &unique_namespace("sql_insert_batch"), "items").await;
+    let table_id =
+        create_user_table(&app_ctx, &unique_namespace("sql_insert_batch"), "items").await;
     let executor = create_executor(app_ctx.clone());
-    let exec_ctx = ExecutionContext::new(user_id.clone(), Role::User, app_ctx.base_session_context());
+    let exec_ctx =
+        ExecutionContext::new(user_id.clone(), Role::User, app_ctx.base_session_context());
 
     let sql = format!(
         "INSERT INTO {}.{} (id, name) VALUES (1, 'alpha'), (2, 'beta')",
@@ -74,7 +73,8 @@ async fn separate_insert_statements_commit_independently() {
     let table_id =
         create_user_table(&app_ctx, &unique_namespace("sql_insert_separate"), "items").await;
     let executor = create_executor(app_ctx.clone());
-    let exec_ctx = ExecutionContext::new(user_id.clone(), Role::User, app_ctx.base_session_context());
+    let exec_ctx =
+        ExecutionContext::new(user_id.clone(), Role::User, app_ctx.base_session_context());
 
     let first_insert = format!(
         "INSERT INTO {}.{} (id, name) VALUES (1, 'alpha')",

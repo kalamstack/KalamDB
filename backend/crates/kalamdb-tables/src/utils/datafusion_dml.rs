@@ -22,8 +22,7 @@ use kalamdb_commons::models::UserId;
 use kalamdb_commons::NotLeaderError;
 use kalamdb_commons::{TableId, TableType};
 use kalamdb_transactions::{
-    build_insert_staged_mutations, StagedMutation, TransactionAccessError,
-    TransactionQueryContext,
+    build_insert_staged_mutations, StagedMutation, TransactionAccessError, TransactionQueryContext,
 };
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
@@ -151,15 +150,14 @@ pub async fn collect_input_rows(
     }
 }
 
-fn try_collect_memory_input_rows(
-    input: &dyn ExecutionPlan,
-) -> DataFusionResult<Option<Vec<Row>>> {
+fn try_collect_memory_input_rows(input: &dyn ExecutionPlan) -> DataFusionResult<Option<Vec<Row>>> {
     if let Some(data_source_exec) = input.as_any().downcast_ref::<DataSourceExec>() {
         return try_collect_rows_from_data_source_exec(data_source_exec);
     }
 
     if let Some(projection_exec) = input.as_any().downcast_ref::<ProjectionExec>() {
-        let Some(source_batches) = try_read_memory_source_batches(projection_exec.input().as_ref())?
+        let Some(source_batches) =
+            try_read_memory_source_batches(projection_exec.input().as_ref())?
         else {
             return Ok(None);
         };
@@ -171,7 +169,9 @@ fn try_collect_memory_input_rows(
                 let arrays = projection_exec
                     .expr()
                     .iter()
-                    .map(|projection| projection.expr.evaluate(&batch)?.into_array(batch.num_rows()))
+                    .map(|projection| {
+                        projection.expr.evaluate(&batch)?.into_array(batch.num_rows())
+                    })
                     .collect::<DataFusionResult<Vec<_>>>()?;
                 RecordBatch::try_new(Arc::clone(&projection_schema), arrays)
                     .map_err(|error| DataFusionError::ArrowError(Box::new(error), None))
@@ -201,10 +201,8 @@ fn try_read_memory_source_batches(
         return Ok(None);
     };
 
-    let Some(memory_source) = data_source_exec
-        .data_source()
-        .as_any()
-        .downcast_ref::<MemorySourceConfig>()
+    let Some(memory_source) =
+        data_source_exec.data_source().as_any().downcast_ref::<MemorySourceConfig>()
     else {
         return Ok(None);
     };
@@ -417,12 +415,10 @@ fn record_batches_to_rows(batches: &[RecordBatch]) -> DataFusionResult<Vec<Row>>
 
     for batch in batches {
         let schema = batch.schema();
-        let field_names: Vec<String> = schema.fields().iter().map(|field| field.name().to_string()).collect();
-        let columns: Vec<&dyn arrow::array::Array> = batch
-            .columns()
-            .iter()
-            .map(|column| column.as_ref())
-            .collect();
+        let field_names: Vec<String> =
+            schema.fields().iter().map(|field| field.name().to_string()).collect();
+        let columns: Vec<&dyn arrow::array::Array> =
+            batch.columns().iter().map(|column| column.as_ref()).collect();
         for row_idx in 0..batch.num_rows() {
             let mut values = BTreeMap::new();
             for (col_idx, field_name) in field_names.iter().enumerate() {

@@ -876,9 +876,8 @@ async fn wait_for_cluster_ready(nodes: &[HttpTestServer]) -> Result<()> {
         for node in nodes {
             let executor = node.app_context().executor();
             let meta_leader = executor.get_leader(kalamdb_raft::GroupId::Meta).await;
-            let shared_leader = executor
-                .get_leader(kalamdb_raft::GroupId::DataSharedShard(0))
-                .await;
+            let shared_leader =
+                executor.get_leader(kalamdb_raft::GroupId::DataSharedShard(0)).await;
 
             if meta_leader.is_none() || shared_leader.is_none() {
                 ready = false;
@@ -889,10 +888,7 @@ async fn wait_for_cluster_ready(nodes: &[HttpTestServer]) -> Result<()> {
                 meta_leader_count += 1;
             }
 
-            if executor
-                .is_leader(kalamdb_raft::GroupId::DataSharedShard(0))
-                .await
-            {
+            if executor.is_leader(kalamdb_raft::GroupId::DataSharedShard(0)).await {
                 shared_leader_count += 1;
             }
 
@@ -1010,13 +1006,7 @@ async fn start_cluster_server() -> Result<ClusterTestServer> {
 
     let cluster_id = format!("http-test-cluster-{}", std::process::id());
     let node_specs = (1u64..=3)
-        .map(|node_id| {
-            Ok((
-                node_id,
-                reserve_local_port()?,
-                reserve_local_port()?,
-            ))
-        })
+        .map(|node_id| Ok((node_id, reserve_local_port()?, reserve_local_port()?)))
         .collect::<Result<Vec<_>>>()?;
 
     let mut nodes = Vec::new();
@@ -1062,8 +1052,8 @@ async fn start_cluster_server() -> Result<ClusterTestServer> {
             initialize_cluster,
             !initialize_cluster,
         )
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to start cluster node {}: {}", index, e))?;
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to start cluster node {}: {}", index, e))?;
         nodes.push(server);
     }
 

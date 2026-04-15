@@ -3,8 +3,8 @@ mod support;
 use std::sync::Arc;
 
 use datafusion_common::ScalarValue;
-use kalamdb_commons::models::rows::Row;
 use kalamdb_commons::models::pg_operations::InsertRequest;
+use kalamdb_commons::models::rows::Row;
 use kalamdb_commons::models::{OperationKind, TransactionOrigin, UserId};
 use kalamdb_commons::TableType;
 use kalamdb_core::operations::service::OperationService;
@@ -91,10 +91,7 @@ async fn explicit_commit_persists_same_table_same_user_user_inserts() {
         )
         .expect("second stage succeeds");
 
-    let commit_result = coordinator
-        .commit(&transaction_id)
-        .await
-        .expect("commit succeeds");
+    let commit_result = coordinator.commit(&transaction_id).await.expect("commit succeeds");
     let commit_seq = commit_result
         .committed_commit_seq
         .expect("commit should stamp a commit sequence");
@@ -217,7 +214,8 @@ async fn explicit_commit_preserves_user_scope_for_same_primary_keys() {
 async fn operation_service_preserves_user_scope_for_same_primary_keys() {
     let (app_ctx, _test_db) = create_cluster_app_context().await;
     let (first_user_id, second_user_id) = same_user_shard_pair();
-    let table_id = create_user_table(&app_ctx, &unique_namespace("tx_user_scope_service"), "items").await;
+    let table_id =
+        create_user_table(&app_ctx, &unique_namespace("tx_user_scope_service"), "items").await;
     let service = Arc::new(OperationService::new(Arc::clone(&app_ctx)));
     let session_id = "pg-7103-deadbeef";
 

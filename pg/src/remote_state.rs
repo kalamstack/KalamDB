@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -112,12 +112,10 @@ fn session_id_for_config(config: &RemoteServerConfig) -> String {
 fn build_remote_extension_state(
     config: &RemoteServerConfig,
 ) -> Result<RemoteExtensionState, KalamPgError> {
-    let runtime = Arc::new(
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| KalamPgError::Execution(format!("failed to build tokio runtime: {}", e)))?,
-    );
+    let runtime =
+        Arc::new(tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(
+            |e| KalamPgError::Execution(format!("failed to build tokio runtime: {}", e)),
+        )?);
 
     let client = runtime.block_on(async { RemoteKalamClient::connect(config.clone()).await })?;
     let session_id = session_id_for_config(config);
@@ -130,9 +128,7 @@ fn build_remote_extension_state(
     })
 }
 
-fn register_exit_handler_once(
-    registry: &mut RemoteStateRegistry<RemoteExtensionState>,
-) {
+fn register_exit_handler_once(registry: &mut RemoteStateRegistry<RemoteExtensionState>) {
     if registry.exit_handler_registered {
         return;
     }

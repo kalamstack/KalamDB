@@ -53,9 +53,8 @@ impl RequestTransactionState {
     }
 
     pub fn sync_from_coordinator(&mut self, app_context: &AppContext) {
-        self.active_transaction_id = app_context
-            .transaction_coordinator()
-            .active_for_owner(&self.owner_key);
+        self.active_transaction_id =
+            app_context.transaction_coordinator().active_for_owner(&self.owner_key);
     }
 
     pub fn begin(&mut self, app_context: &AppContext) -> Result<TransactionId, KalamDbError> {
@@ -75,17 +74,17 @@ impl RequestTransactionState {
         Ok(transaction_id)
     }
 
-    pub async fn commit(&mut self, app_context: &AppContext) -> Result<TransactionId, KalamDbError> {
+    pub async fn commit(
+        &mut self,
+        app_context: &AppContext,
+    ) -> Result<TransactionId, KalamDbError> {
         let transaction_id = self.active_transaction_id.clone().ok_or_else(|| {
             KalamDbError::InvalidOperation(
                 "COMMIT requires an active explicit SQL transaction".to_string(),
             )
         })?;
 
-        let committed = app_context
-            .transaction_coordinator()
-            .commit(&transaction_id)
-            .await?;
+        let committed = app_context.transaction_coordinator().commit(&transaction_id).await?;
         self.active_transaction_id = None;
         Ok(committed.transaction_id)
     }
@@ -97,9 +96,7 @@ impl RequestTransactionState {
             )
         })?;
 
-        app_context
-            .transaction_coordinator()
-            .rollback(&transaction_id)?;
+        app_context.transaction_coordinator().rollback(&transaction_id)?;
         self.active_transaction_id = None;
         Ok(transaction_id)
     }

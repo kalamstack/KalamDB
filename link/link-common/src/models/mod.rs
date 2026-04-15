@@ -32,9 +32,8 @@ pub use crate::auth::models::{
 
 // ── Connection models ────────────────────────────────────────────────────────
 pub use crate::connection::models::{
-    ClientMessage, ClusterHealthResponse, ClusterNodeHealth, CompressionType,
-    ConnectionOptions, HealthCheckResponse, HttpVersion, ProtocolOptions, SerializationType,
-    ServerMessage,
+    ClientMessage, ClusterHealthResponse, ClusterNodeHealth, CompressionType, ConnectionOptions,
+    HealthCheckResponse, HttpVersion, ProtocolOptions, SerializationType, ServerMessage,
 };
 
 // ── Consumer models ──────────────────────────────────────────────────────────

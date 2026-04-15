@@ -94,7 +94,6 @@ pub trait KalamDbResultExt<T> {
     ///     .into_invalid_operation("Invalid table configuration")?;
     /// ```
     fn into_invalid_operation(self, context: &str) -> Result<T, KalamDbError>;
-
 }
 
 impl<T, E: std::fmt::Display> KalamDbResultExt<T> for Result<T, E> {
@@ -132,7 +131,6 @@ impl<T, E: std::fmt::Display> KalamDbResultExt<T> for Result<T, E> {
     fn into_invalid_operation(self, context: &str) -> Result<T, KalamDbError> {
         self.map_err(|e| KalamDbError::InvalidOperation(format!("{}: {}", context, e)))
     }
-
 }
 
 /// Specialized extension methods for commonly-used types.

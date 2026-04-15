@@ -1,6 +1,4 @@
-use super::common::{
-    create_shared_kalam_table_in_schema, drop_kalam_tables, unique_name, TestEnv,
-};
+use super::common::{create_shared_kalam_table_in_schema, drop_kalam_tables, unique_name, TestEnv};
 
 #[tokio::test]
 #[ntest::timeout(45000)]

@@ -2,10 +2,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use datafusion::prelude::SessionContext;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::{OperationKind, ReadContext, Role, TransactionId, TransactionOrigin, UserId};
 use kalamdb_commons::models::pg_operations::{
     DeleteRequest, InsertRequest, MutationResult, ScanRequest, ScanResult, UpdateRequest,
+};
+use kalamdb_commons::models::rows::Row;
+use kalamdb_commons::models::{
+    OperationKind, ReadContext, Role, TransactionId, TransactionOrigin, UserId,
 };
 use kalamdb_commons::{NamespaceId, TableType};
 use kalamdb_pg::OperationExecutor;
@@ -75,11 +77,16 @@ impl OperationService {
         }
     }
 
-    fn active_transaction_for_session(&self, session_id: Option<&str>) -> Result<Option<TransactionId>, Status> {
+    fn active_transaction_for_session(
+        &self,
+        session_id: Option<&str>,
+    ) -> Result<Option<TransactionId>, Status> {
         // Autocommit typed DML stays on the hot path here: no transaction handle means
         // one session-id parse plus one coordinator owner-key lookup, with no overlay,
         // query-context, or staged-write allocation.
-        let Some(session_id) = session_id.map(str::trim).filter(|session_id| !session_id.is_empty()) else {
+        let Some(session_id) =
+            session_id.map(str::trim).filter(|session_id| !session_id.is_empty())
+        else {
             return Ok(None);
         };
 
@@ -94,7 +101,9 @@ impl OperationService {
     ) -> Result<Option<TransactionQueryContext>, Status> {
         // Autocommit reads return from this helper without constructing an overlay view
         // or mutation sink unless an active transaction handle is actually present.
-        let Some(session_id) = session_id.map(str::trim).filter(|session_id| !session_id.is_empty()) else {
+        let Some(session_id) =
+            session_id.map(str::trim).filter(|session_id| !session_id.is_empty())
+        else {
             return Ok(None);
         };
 
@@ -105,12 +114,12 @@ impl OperationService {
             return Ok(None);
         };
 
-        let handle = coordinator
-            .get_handle(&transaction_id)
-            .ok_or_else(|| Status::failed_precondition(format!(
+        let handle = coordinator.get_handle(&transaction_id).ok_or_else(|| {
+            Status::failed_precondition(format!(
                 "active transaction '{}' has no handle",
                 transaction_id
-            )))?;
+            ))
+        })?;
 
         if !handle.state.is_open() {
             return Err(Status::failed_precondition(format!(
@@ -122,14 +131,9 @@ impl OperationService {
         Ok(Some(TransactionQueryContext::new(
             transaction_id.clone(),
             handle.snapshot_commit_seq,
-            Arc::new(CoordinatorOverlayView::new(
-                Arc::clone(&coordinator),
-                transaction_id.clone(),
-            )),
+            Arc::new(CoordinatorOverlayView::new(Arc::clone(&coordinator), transaction_id.clone())),
             Arc::new(crate::transactions::CoordinatorMutationSink::new(coordinator)),
-            Arc::new(CoordinatorAccessValidator::new(
-                self.app_context.transaction_coordinator(),
-            )),
+            Arc::new(CoordinatorAccessValidator::new(self.app_context.transaction_coordinator())),
         )))
     }
 
@@ -164,11 +168,8 @@ impl OperationService {
         request: UpdateRequest,
     ) -> Result<MutationResult, Status> {
         let coordinator = self.app_context.transaction_coordinator();
-        let payload = request
-            .updates
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| Row::new(BTreeMap::new()));
+        let payload =
+            request.updates.into_iter().next().unwrap_or_else(|| Row::new(BTreeMap::new()));
         let mutation = StagedMutation::new(
             transaction_id.clone(),
             request.table_id,
@@ -272,6 +273,7 @@ impl OperationExecutor for OperationService {
             &request.table_id,
             &request.columns,
             request.limit,
+            &request.filters,
         )
         .await
         .map_err(|e| -> Status { e.into() })?;
@@ -450,8 +452,8 @@ mod tests {
     use arrow::array::{Int64Array, StringArray};
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
-    use datafusion_common::ScalarValue;
     use datafusion::datasource::MemTable;
+    use datafusion_common::ScalarValue;
     use kalamdb_commons::datatypes::KalamDataType;
     use kalamdb_commons::models::rows::Row;
     use kalamdb_commons::models::schemas::{ColumnDefinition, TableDefinition, TableOptions};
@@ -525,6 +527,7 @@ mod tests {
             columns: vec![],
             limit: None,
             user_id: None,
+        filters: vec![],
         };
         let err = svc.execute_scan(req).await.unwrap_err();
         assert_eq!(err.code(), tonic::Code::NotFound);
@@ -544,6 +547,7 @@ mod tests {
                 columns: vec![],
                 limit: None,
                 user_id: None,
+            filters: vec![],
             })
             .await
             .expect("scan should succeed");
@@ -579,6 +583,7 @@ mod tests {
                 columns: vec![],
                 limit: None,
                 user_id: None,
+            filters: vec![],
             })
             .await
             .expect("scan should succeed");
@@ -616,6 +621,7 @@ mod tests {
                 columns: vec!["name".to_string()],
                 limit: None,
                 user_id: None,
+            filters: vec![],
             })
             .await
             .expect("scan with projection");
@@ -637,6 +643,7 @@ mod tests {
                 columns: vec!["nonexistent_col".to_string()],
                 limit: None,
                 user_id: None,
+            filters: vec![],
             })
             .await
             .unwrap_err();
@@ -674,6 +681,7 @@ mod tests {
                 columns: vec![],
                 limit: Some(2),
                 user_id: None,
+                filters: vec![],
             })
             .await
             .expect("scan with limit should succeed");
@@ -820,10 +828,7 @@ mod tests {
 
         let mut values = BTreeMap::new();
         values.insert("id".to_string(), ScalarValue::Int64(Some(42)));
-        values.insert(
-            "name".to_string(),
-            ScalarValue::Utf8(Some("staged item".to_string())),
-        );
+        values.insert("name".to_string(), ScalarValue::Utf8(Some("staged item".to_string())));
 
         let result = svc
             .execute_insert(InsertRequest {

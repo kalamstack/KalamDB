@@ -1,4 +1,63 @@
+use kalam_client::{AuthProvider, KalamLinkClient};
+use std::time::{Duration, Instant};
+
 use super::common::{ensure_schema_exists, require_ddl_env, unique_name};
+
+fn kalamdb_server_url() -> String {
+    std::env::var("KALAMDB_SERVER_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:8080".to_string())
+        .trim_end_matches('/')
+        .to_string()
+}
+
+fn kalamlink_client(bearer_token: &str) -> KalamLinkClient {
+    KalamLinkClient::builder()
+        .base_url(kalamdb_server_url())
+        .auth(AuthProvider::jwt_token(bearer_token.to_string()))
+        .build()
+        .expect("build KalamLink client")
+}
+
+async fn wait_for_postgres_row(
+    pg: &tokio_postgres::Client,
+    select_sql: &str,
+    row_id: &str,
+) -> tokio_postgres::Row {
+    let deadline = Instant::now() + Duration::from_secs(5);
+
+    loop {
+        if let Some(row) = pg
+            .query_opt(select_sql, &[&row_id])
+            .await
+            .expect("query Postgres row")
+        {
+            return row;
+        }
+
+        if Instant::now() >= deadline {
+            panic!("Postgres did not observe row '{row_id}' within timeout");
+        }
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+fn assert_file_json_text(
+    attachment_text: &str,
+    expected_name: &str,
+    expected_mime: &str,
+    expected_size: usize,
+) -> serde_json::Value {
+    let attachment_json: serde_json::Value =
+        serde_json::from_str(attachment_text).expect("parse Postgres jsonb text");
+    assert_eq!(attachment_json["name"].as_str(), Some(expected_name));
+    assert_eq!(attachment_json["mime"].as_str(), Some(expected_mime));
+    assert_eq!(attachment_json["size"].as_u64(), Some(expected_size as u64));
+    assert!(!attachment_json["id"].as_str().unwrap_or_default().is_empty());
+    assert!(!attachment_json["sub"].as_str().unwrap_or_default().is_empty());
+    assert!(!attachment_json["sha256"].as_str().unwrap_or_default().is_empty());
+    attachment_json
+}
 
 #[tokio::test]
 async fn e2e_ddl_create_shared_table() {
@@ -19,7 +78,10 @@ async fn e2e_ddl_create_shared_table() {
     pg.batch_execute(&sql).await.expect("CREATE TABLE USING kalamdb");
     env.wait_for_kalamdb_table_exists(ns, &table).await;
 
-    assert!(env.kalamdb_table_exists(ns, &table).await, "KalamDB table {ns}.{table} should exist after CREATE TABLE USING kalamdb");
+    assert!(
+        env.kalamdb_table_exists(ns, &table).await,
+        "KalamDB table {ns}.{table} should exist after CREATE TABLE USING kalamdb"
+    );
 
     let cols = env.kalamdb_columns(ns, &table).await;
     eprintln!("[DDL] Created {ns}.{table}, columns: {cols:?}");
@@ -51,7 +113,10 @@ async fn e2e_ddl_create_user_table() {
     pg.batch_execute(&sql).await.expect("CREATE TABLE USING kalamdb (user)");
     env.wait_for_kalamdb_table_exists(ns, &table).await;
 
-    assert!(env.kalamdb_table_exists(ns, &table).await, "KalamDB user table {ns}.{table} should exist");
+    assert!(
+        env.kalamdb_table_exists(ns, &table).await,
+        "KalamDB user table {ns}.{table} should exist"
+    );
 
     let cols = env.kalamdb_columns(ns, &table).await;
     eprintln!("[DDL] Created user table {ns}.{table}, columns: {cols:?}");
@@ -60,6 +125,354 @@ async fn e2e_ddl_create_user_table() {
     assert!(cols.contains(&"age".to_string()), "should have 'age' column");
 
     pg.batch_execute(&format!("DROP FOREIGN TABLE IF EXISTS {ns}.{table};"))
+        .await
+        .ok();
+}
+
+#[tokio::test]
+async fn e2e_ddl_create_file_column_mirrors_as_jsonb() {
+    let env = require_ddl_env!();
+    let pg = env.pg_connect().await;
+
+    let ns = "ddl_test";
+    let table = unique_name("file_tbl");
+    ensure_schema_exists(&pg, ns).await;
+
+    let sql = format!(
+        "CREATE TABLE {ns}.{table} (
+            id TEXT,
+            attachment FILE
+        ) USING kalamdb WITH (type = 'shared');"
+    );
+    pg.batch_execute(&sql)
+        .await
+        .expect("CREATE TABLE USING kalamdb with FILE column");
+    env.wait_for_kalamdb_table_exists(ns, &table).await;
+
+    let local_type: String = pg
+        .query_one(
+            "SELECT format_type(a.atttypid, a.atttypmod)
+               FROM pg_attribute a
+               JOIN pg_class c ON a.attrelid = c.oid
+               JOIN pg_namespace n ON c.relnamespace = n.oid
+              WHERE n.nspname = $1
+                AND c.relname = $2
+                AND a.attname = 'attachment'
+                AND a.attnum > 0
+                AND NOT a.attisdropped",
+            &[&ns, &table],
+        )
+        .await
+        .expect("resolve mirrored attachment column type")
+        .get(0);
+
+    assert_eq!(local_type, "jsonb");
+
+    pg.batch_execute(&format!("DROP FOREIGN TABLE IF EXISTS {ns}.{table};"))
+        .await
+        .ok();
+}
+
+#[tokio::test]
+#[ntest::timeout(1200)]
+async fn e2e_ddl_file_column_roundtrip_via_kalamlink() {
+    let env = require_ddl_env!();
+    let pg = env.pg_connect().await;
+
+    let namespace = "ddl_test";
+    let table = unique_name("file_roundtrip");
+    let row_id = unique_name("file_row");
+    let file_name = "hello.txt";
+    let file_mime = "text/plain";
+    let file_bytes = b"hello from kalamlink".to_vec();
+
+    ensure_schema_exists(&pg, namespace).await;
+
+    let create_sql = format!(
+        "CREATE TABLE {namespace}.{table} (
+            id TEXT,
+            attachment FILE
+        ) USING kalamdb WITH (type = 'shared');"
+    );
+    pg.batch_execute(&create_sql)
+        .await
+        .expect("CREATE TABLE USING kalamdb with FILE column for KalamLink roundtrip");
+    env.wait_for_kalamdb_table_exists(namespace, &table).await;
+
+    let client = KalamLinkClient::builder()
+        .base_url(kalamdb_server_url())
+        .auth(AuthProvider::jwt_token(env.bearer_token.clone()))
+        .build()
+        .expect("build KalamLink client");
+
+    let insert_sql = format!(
+        "INSERT INTO {namespace}.{table} (id, attachment) VALUES ('{row_id}', FILE(\"attachment\"))"
+    );
+    let insert_result = client
+        .execute_with_files(
+            &insert_sql,
+            vec![(
+                "attachment",
+                file_name,
+                file_bytes.clone(),
+                Some(file_mime),
+            )],
+            None,
+            None,
+        )
+        .await
+        .expect("insert FILE row via KalamLink");
+    assert!(insert_result.success(), "KalamLink insert should succeed");
+
+    let select_sql = format!(
+        "SELECT attachment::text,
+                jsonb_typeof(attachment),
+                attachment->>'name',
+                attachment->>'mime',
+                (attachment->>'size')::bigint,
+                attachment->>'sha256'
+           FROM {namespace}.{table}
+          WHERE id = $1"
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let row = loop {
+        if let Some(row) = pg
+            .query_opt(&select_sql, &[&row_id])
+            .await
+            .expect("query Postgres FILE row")
+        {
+            break row;
+        }
+
+        if Instant::now() >= deadline {
+            panic!(
+                "Postgres did not observe KalamLink-inserted FILE row for {}.{} within timeout",
+                namespace, table
+            );
+        }
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+
+    let attachment_text: String = row.get(0);
+    let attachment_kind: String = row.get(1);
+    let attachment_name: String = row.get(2);
+    let attachment_mime: String = row.get(3);
+    let attachment_size: i64 = row.get(4);
+    let attachment_sha256: String = row.get(5);
+
+    assert_eq!(attachment_kind, "object");
+    assert_eq!(attachment_name, file_name);
+    assert_eq!(attachment_mime, file_mime);
+    assert_eq!(attachment_size, file_bytes.len() as i64);
+    assert!(!attachment_sha256.is_empty(), "sha256 should be populated");
+
+    let attachment_json: serde_json::Value =
+        serde_json::from_str(&attachment_text).expect("parse Postgres jsonb text");
+    assert_eq!(attachment_json["name"].as_str(), Some(file_name));
+    assert_eq!(attachment_json["mime"].as_str(), Some(file_mime));
+    assert_eq!(attachment_json["size"].as_u64(), Some(file_bytes.len() as u64));
+    assert!(!attachment_json["id"].as_str().unwrap_or_default().is_empty());
+    assert!(!attachment_json["sub"].as_str().unwrap_or_default().is_empty());
+    assert_eq!(attachment_json["sha256"].as_str(), Some(attachment_sha256.as_str()));
+
+    pg.batch_execute(&format!("DROP FOREIGN TABLE IF EXISTS {namespace}.{table};"))
+        .await
+        .ok();
+}
+
+#[tokio::test]
+#[ntest::timeout(1200)]
+async fn e2e_ddl_multiple_file_columns_roundtrip_via_kalamlink() {
+    let env = require_ddl_env!();
+    let pg = env.pg_connect().await;
+
+    let namespace = "ddl_test";
+    let table = unique_name("file_multi");
+    let row_id = unique_name("file_multi_row");
+    let avatar_name = "avatar.png";
+    let avatar_mime = "image/png";
+    let avatar_bytes = b"png-avatar-bytes".to_vec();
+    let contract_name = "contract.pdf";
+    let contract_mime = "application/pdf";
+    let contract_bytes = b"pdf-contract-bytes".to_vec();
+
+    ensure_schema_exists(&pg, namespace).await;
+
+    let create_sql = format!(
+        "CREATE TABLE {namespace}.{table} (
+            id TEXT,
+            avatar FILE,
+            contract FILE
+        ) USING kalamdb WITH (type = 'shared');"
+    );
+    pg.batch_execute(&create_sql)
+        .await
+        .expect("CREATE TABLE USING kalamdb with multiple FILE columns");
+    env.wait_for_kalamdb_table_exists(namespace, &table).await;
+
+    let client = kalamlink_client(&env.bearer_token);
+    let insert_sql = format!(
+        "INSERT INTO {namespace}.{table} (id, avatar, contract) VALUES ('{row_id}', FILE(\"avatar\"), FILE(\"contract\"))"
+    );
+    let insert_result = client
+        .execute_with_files(
+            &insert_sql,
+            vec![
+                ("avatar", avatar_name, avatar_bytes.clone(), Some(avatar_mime)),
+                (
+                    "contract",
+                    contract_name,
+                    contract_bytes.clone(),
+                    Some(contract_mime),
+                ),
+            ],
+            None,
+            None,
+        )
+        .await
+        .expect("insert multi-FILE row via KalamLink");
+    assert!(insert_result.success(), "multi-FILE KalamLink insert should succeed");
+
+    let select_sql = format!(
+        "SELECT avatar::text, contract::text
+           FROM {namespace}.{table}
+          WHERE id = $1"
+    );
+    let row = wait_for_postgres_row(&pg, &select_sql, &row_id).await;
+    let avatar_text: String = row.get(0);
+    let contract_text: String = row.get(1);
+
+    assert_file_json_text(&avatar_text, avatar_name, avatar_mime, avatar_bytes.len());
+    assert_file_json_text(
+        &contract_text,
+        contract_name,
+        contract_mime,
+        contract_bytes.len(),
+    );
+
+    pg.batch_execute(&format!("DROP FOREIGN TABLE IF EXISTS {namespace}.{table};"))
+        .await
+        .ok();
+}
+
+#[tokio::test]
+#[ntest::timeout(1200)]
+async fn e2e_ddl_file_update_via_kalamlink_is_visible_in_postgres() {
+    let env = require_ddl_env!();
+    let pg = env.pg_connect().await;
+
+    let namespace = "ddl_test";
+    let table = unique_name("file_update");
+    let row_id = unique_name("file_update_row");
+    let initial_file_name = "draft.txt";
+    let initial_file_mime = "text/plain";
+    let initial_file_bytes = b"draft file contents".to_vec();
+    let updated_file_name = "final.txt";
+    let updated_file_mime = "text/plain";
+    let updated_file_bytes = b"final file contents with more bytes".to_vec();
+
+    ensure_schema_exists(&pg, namespace).await;
+
+    let create_sql = format!(
+        "CREATE TABLE {namespace}.{table} (
+            id TEXT,
+            attachment FILE
+        ) USING kalamdb WITH (type = 'shared');"
+    );
+    pg.batch_execute(&create_sql)
+        .await
+        .expect("CREATE TABLE USING kalamdb with FILE column for update test");
+    env.wait_for_kalamdb_table_exists(namespace, &table).await;
+
+    let client = kalamlink_client(&env.bearer_token);
+    let insert_sql = format!(
+        "INSERT INTO {namespace}.{table} (id, attachment) VALUES ('{row_id}', FILE(\"attachment\"))"
+    );
+    let insert_result = client
+        .execute_with_files(
+            &insert_sql,
+            vec![(
+                "attachment",
+                initial_file_name,
+                initial_file_bytes.clone(),
+                Some(initial_file_mime),
+            )],
+            None,
+            None,
+        )
+        .await
+        .expect("insert initial FILE row via KalamLink");
+    assert!(insert_result.success(), "initial FILE insert should succeed");
+
+    let select_sql = format!(
+        "SELECT attachment::text
+           FROM {namespace}.{table}
+          WHERE id = $1"
+    );
+    let initial_row = wait_for_postgres_row(&pg, &select_sql, &row_id).await;
+    let initial_text: String = initial_row.get(0);
+    let initial_json = assert_file_json_text(
+        &initial_text,
+        initial_file_name,
+        initial_file_mime,
+        initial_file_bytes.len(),
+    );
+    let initial_sha256 = initial_json["sha256"]
+        .as_str()
+        .expect("initial sha256 should be present")
+        .to_string();
+
+    let update_sql = format!(
+        "UPDATE {namespace}.{table} SET attachment = FILE(\"attachment\") WHERE id = '{row_id}'"
+    );
+    let update_result = client
+        .execute_with_files(
+            &update_sql,
+            vec![(
+                "attachment",
+                updated_file_name,
+                updated_file_bytes.clone(),
+                Some(updated_file_mime),
+            )],
+            None,
+            None,
+        )
+        .await
+        .expect("update FILE row via KalamLink");
+    assert!(update_result.success(), "FILE update should succeed");
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let updated_json = loop {
+        let row = pg
+            .query_one(&select_sql, &[&row_id])
+            .await
+            .expect("query updated Postgres FILE row");
+        let updated_text: String = row.get(0);
+        let updated_json: serde_json::Value =
+            serde_json::from_str(&updated_text).expect("parse updated Postgres jsonb text");
+
+        if updated_json["name"].as_str() == Some(updated_file_name) {
+            break updated_json;
+        }
+
+        if Instant::now() >= deadline {
+            panic!(
+                "Postgres did not observe updated FILE metadata for {}.{} within timeout",
+                namespace, table
+            );
+        }
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+
+    assert_eq!(updated_json["name"].as_str(), Some(updated_file_name));
+    assert_eq!(updated_json["mime"].as_str(), Some(updated_file_mime));
+    assert_eq!(updated_json["size"].as_u64(), Some(updated_file_bytes.len() as u64));
+    assert_ne!(updated_json["sha256"].as_str(), Some(initial_sha256.as_str()));
+
+    pg.batch_execute(&format!("DROP FOREIGN TABLE IF EXISTS {namespace}.{table};"))
         .await
         .ok();
 }
@@ -134,12 +547,9 @@ async fn e2e_ddl_alter_drop_column() {
     let alter_sql = format!("ALTER FOREIGN TABLE {ns}.{table} DROP COLUMN description;");
     pg.batch_execute(&alter_sql).await.expect("ALTER DROP COLUMN");
     let cols_after = env
-        .wait_for_kalamdb_columns(
-            ns,
-            &table,
-            "dropped columns to exclude description",
-            |columns| !columns.iter().any(|column| column == "description"),
-        )
+        .wait_for_kalamdb_columns(ns, &table, "dropped columns to exclude description", |columns| {
+            !columns.iter().any(|column| column == "description")
+        })
         .await;
     eprintln!("[DDL] After DROP COLUMN: columns = {cols_after:?}");
     assert!(
@@ -262,10 +672,15 @@ async fn e2e_ddl_schema_qualified_create() {
             age INTEGER
         ) USING kalamdb WITH (type = 'shared');"
     );
-    pg.batch_execute(&sql).await.expect("CREATE TABLE USING kalamdb (schema-qualified)");
+    pg.batch_execute(&sql)
+        .await
+        .expect("CREATE TABLE USING kalamdb (schema-qualified)");
     env.wait_for_kalamdb_table_exists(&ns, &table).await;
 
-    assert!(env.kalamdb_table_exists(&ns, &table).await, "KalamDB table {ns}.{table} should exist after schema-qualified CREATE");
+    assert!(
+        env.kalamdb_table_exists(&ns, &table).await,
+        "KalamDB table {ns}.{table} should exist after schema-qualified CREATE"
+    );
 
     let cols = env
         .wait_for_kalamdb_columns(&ns, &table, "schema-qualified columns to exist", |columns| {
@@ -283,9 +698,12 @@ async fn e2e_ddl_schema_qualified_create() {
         .await
         .expect("ALTER ADD COLUMN (schema-qualified)");
     let cols_after = env
-        .wait_for_kalamdb_columns(&ns, &table, "schema-qualified alter to include email", |columns| {
-            columns.iter().any(|column| column == "email")
-        })
+        .wait_for_kalamdb_columns(
+            &ns,
+            &table,
+            "schema-qualified alter to include email",
+            |columns| columns.iter().any(|column| column == "email"),
+        )
         .await;
     assert!(
         cols_after.contains(&"email".to_string()),

@@ -88,9 +88,7 @@ fn validate_uuid_v7(id: &str) -> Result<(), TransactionIdValidationError> {
     }
 
     if bytes[14] != b'7' {
-        return Err(TransactionIdValidationError(
-            "transaction id must be a UUID v7".to_string(),
-        ));
+        return Err(TransactionIdValidationError("transaction id must be a UUID v7".to_string()));
     }
 
     let variant = bytes[19].to_ascii_lowercase();

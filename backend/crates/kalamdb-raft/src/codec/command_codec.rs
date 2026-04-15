@@ -198,18 +198,20 @@ mod tests {
         .expect("encode retired user data command");
 
         let err = decode_user_data_command(&bytes).expect_err("retired command must be rejected");
-        assert!(err.to_string().contains("Unknown variant index") || err.to_string().contains("unknown variant"));
+        assert!(
+            err.to_string().contains("Unknown variant index")
+                || err.to_string().contains("unknown variant")
+        );
     }
 
     #[test]
     fn option_none_serializes_compactly() {
-        let none_bytes = flexbuffers::to_vec(&Option::<kalamdb_commons::models::TransactionId>::None)
-            .expect("encode none option");
-        let some_bytes = flexbuffers::to_vec(&Some(
-            kalamdb_commons::models::TransactionId::new(
-                "01960f7b-3d15-7d6d-b26c-7e4db6f25f8d",
-            ),
-        ))
+        let none_bytes =
+            flexbuffers::to_vec(&Option::<kalamdb_commons::models::TransactionId>::None)
+                .expect("encode none option");
+        let some_bytes = flexbuffers::to_vec(&Some(kalamdb_commons::models::TransactionId::new(
+            "01960f7b-3d15-7d6d-b26c-7e4db6f25f8d",
+        )))
         .expect("encode some option");
 
         assert!(none_bytes.len() <= 3);
@@ -276,9 +278,7 @@ mod tests {
                 "01960f7b-3d15-7d6d-b26c-7e4db6f25f8d",
             ),
             mutations: vec![StagedMutation::new(
-                kalamdb_commons::models::TransactionId::new(
-                    "01960f7b-3d15-7d6d-b26c-7e4db6f25f8d",
-                ),
+                kalamdb_commons::models::TransactionId::new("01960f7b-3d15-7d6d-b26c-7e4db6f25f8d"),
                 TableId::new(NamespaceId::from("ns"), TableName::from("items")),
                 TableType::Shared,
                 None,

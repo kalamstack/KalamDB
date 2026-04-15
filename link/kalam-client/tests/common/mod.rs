@@ -138,14 +138,15 @@ async fn ensure_server_setup(
     let mut last_err = String::new();
 
     while Instant::now() < deadline {
-        let status_response = match client.get(format!("{}/v1/api/auth/status", base_url)).send().await {
-            Ok(response) => response,
-            Err(err) => {
-                last_err = format!("auth status request failed: {}", err);
-                sleep(AUTO_SERVER_RETRY_INTERVAL).await;
-                continue;
-            },
-        };
+        let status_response =
+            match client.get(format!("{}/v1/api/auth/status", base_url)).send().await {
+                Ok(response) => response,
+                Err(err) => {
+                    last_err = format!("auth status request failed: {}", err);
+                    sleep(AUTO_SERVER_RETRY_INTERVAL).await;
+                    continue;
+                },
+            };
 
         if !status_response.status().is_success() {
             last_err = format!("auth status returned {}", status_response.status());

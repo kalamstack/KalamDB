@@ -1277,6 +1277,7 @@ jobs:
           sed -i 's|default_storage_path = "./data/storage"|default_storage_path = "./test-data/storage"|g' server.toml
           sed -i 's|logs_path = "./logs"|logs_path = "./test-data/logs"|g' server.toml
           sed -i 's|jwt_secret = ".*"|jwt_secret = "pg-native-test-secret-key-minimum-32-characters-long"|g' server.toml
+          printf '\n[cluster]\ncluster_id = "pg-native-tests"\nnode_id = 1\nrpc_addr = "127.0.0.1:9188"\napi_addr = "http://127.0.0.1:8080"\nuser_shards = 1\nshared_shards = 1\n' >> server.toml
 
       - name: Start server
         shell: bash
@@ -1285,7 +1286,7 @@ jobs:
           KALAMDB_ROOT_PASSWORD: "kalamdb123"
           KALAMDB_JWT_SECRET: "pg-native-test-secret-key-minimum-32-characters-long"
           KALAMDB_NODE_ID: "1"
-          KALAMDB_CLUSTER_RPC_ADDR: "0.0.0.0:9188"
+          KALAMDB_CLUSTER_RPC_ADDR: "127.0.0.1:9188"
           KALAMDB_CLUSTER_API_ADDR: "http://127.0.0.1:8080"
         run: |
           set -euo pipefail
@@ -1319,6 +1320,23 @@ jobs:
           set -euo pipefail
           ./pg/scripts/pgrx-test-setup.sh 2>&1 | tee pg-pgrx-setup-output.txt
 
+      - name: Run native PG extension perf tests (informational)
+        continue-on-error: true
+        shell: bash
+        env:
+          KALAMDB_SERVER_URL: "http://127.0.0.1:8080"
+          KALAMDB_ROOT_PASSWORD: "kalamdb123"
+        run: |
+          set -euo pipefail
+          : > pg-native-test-output.txt
+          cargo nextest run \
+            -p kalam-pg-extension \
+            --features e2e \
+            --test e2e_perf \
+            --test-threads 1 \
+            --no-fail-fast \
+            2>&1 | tee pg-native-test-output.txt
+
       - name: Run native PG extension e2e tests
         shell: bash
         env:
@@ -1329,9 +1347,13 @@ jobs:
           cargo nextest run \
             -p kalam-pg-extension \
             --features e2e \
-            -E 'test(e2e)' \
+            --test e2e_ddl \
+            --test e2e_dml \
+            --test e2e_scenarios \
+            --test extension_metadata \
+            --test session_settings \
             --test-threads 1 \
-            2>&1 | tee pg-native-test-output.txt
+            2>&1 | tee -a pg-native-test-output.txt
 
       - name: Stop pgrx PostgreSQL
         if: always()
@@ -1826,6 +1848,8 @@ jobs:
           push: true
           platforms: linux/amd64
           build-args: |
+            PG_MAJOR=${{ env.PG_EXTENSION_MAJOR }}
+            POSTGRES_BASE_IMAGE=public.ecr.aws/docker/library/postgres:${{ env.PG_EXTENSION_MAJOR }}-bookworm
             OCI_IMAGE_DESCRIPTION=${{ steps.pg_image_description.outputs.value }}
           labels: |
             org.opencontainers.image.title=pg-kalam

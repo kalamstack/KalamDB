@@ -143,11 +143,11 @@ impl RemotePgSession {
     }
 
     fn with_live_transaction(mut self, live_transaction: Option<&LivePgTransaction>) -> Self {
-        self.transaction_id = live_transaction.map(|transaction| transaction.transaction_id().to_owned());
+        self.transaction_id =
+            live_transaction.map(|transaction| transaction.transaction_id().to_owned());
         self.transaction_state = live_transaction.map(LivePgTransaction::transaction_state);
-        self.transaction_has_writes = live_transaction
-            .map(LivePgTransaction::transaction_has_writes)
-            .unwrap_or(false);
+        self.transaction_has_writes =
+            live_transaction.map(LivePgTransaction::transaction_has_writes).unwrap_or(false);
         self
     }
 
@@ -235,12 +235,7 @@ impl SessionRegistry {
 
         if self
             .last_pruned_at_ms
-            .compare_exchange(
-                last_pruned_at_ms,
-                now_ms,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            )
+            .compare_exchange(last_pruned_at_ms, now_ms, Ordering::Relaxed, Ordering::Relaxed)
             .is_err()
         {
             return;
@@ -263,10 +258,7 @@ impl SessionRegistry {
         }
 
         if pruned_count > 0 {
-            log::debug!(
-                "PG session registry pruned {} stale idle session(s)",
-                pruned_count
-            );
+            log::debug!("PG session registry pruned {} stale idle session(s)", pruned_count);
         }
     }
 
@@ -508,10 +500,7 @@ impl SessionRegistry {
 
     /// Return a point-in-time snapshot of tracked sessions with transaction state
     /// reconciled against the live coordinator view for pg-owned transactions.
-    pub fn snapshot_with_live_transactions<I>(
-        &self,
-        active_transactions: I,
-    ) -> Vec<RemotePgSession>
+    pub fn snapshot_with_live_transactions<I>(&self, active_transactions: I) -> Vec<RemotePgSession>
     where
         I: IntoIterator<Item = LivePgTransaction>,
     {
@@ -730,10 +719,7 @@ mod tests {
         registry.mark_transaction_writes("pg-1");
 
         let snapshot = registry.snapshot_with_live_transactions(Vec::<LivePgTransaction>::new());
-        let session = snapshot
-            .into_iter()
-            .find(|session| session.session_id() == "pg-1")
-            .unwrap();
+        let session = snapshot.into_iter().find(|session| session.session_id() == "pg-1").unwrap();
 
         assert_eq!(session.transaction_id(), None);
         assert_eq!(session.transaction_state(), None);
@@ -752,10 +738,7 @@ mod tests {
             TransactionState::OpenWrite,
             true,
         )]);
-        let session = snapshot
-            .into_iter()
-            .find(|session| session.session_id() == "pg-1")
-            .unwrap();
+        let session = snapshot.into_iter().find(|session| session.session_id() == "pg-1").unwrap();
 
         assert_eq!(session.transaction_id(), Some("live-tx"));
         assert_eq!(session.transaction_state(), Some(TransactionState::OpenWrite));
@@ -814,10 +797,8 @@ mod tests {
             false,
         )]);
 
-        let session = snapshot
-            .into_iter()
-            .find(|session| session.session_id() == "pg-live")
-            .unwrap();
+        let session =
+            snapshot.into_iter().find(|session| session.session_id() == "pg-live").unwrap();
 
         assert_eq!(session.transaction_state(), Some(TransactionState::OpenRead));
         assert!(registry.get("pg-live").is_some());

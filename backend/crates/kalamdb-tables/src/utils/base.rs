@@ -79,9 +79,9 @@ use kalamdb_commons::NotLeaderError;
 use kalamdb_commons::{StorageKey, TableId};
 use kalamdb_filestore::registry::ListResult;
 use kalamdb_system::ClusterCoordinator as ClusterCoordinatorTrait;
-use kalamdb_transactions::{extract_transaction_query_context, TransactionAccessError};
 use kalamdb_system::Manifest;
 use kalamdb_system::SchemaRegistry as SchemaRegistryTrait;
+use kalamdb_transactions::{extract_transaction_query_context, TransactionAccessError};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -409,9 +409,7 @@ pub trait BaseTableProvider<K: StorageKey, V>: Send + Sync + TableProvider {
         limit: Option<usize>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
         self.validate_transaction_table_access(state)?;
-        self.ensure_leader_read(state)
-            .await
-            .map_err(kalam_error_to_datafusion)?;
+        self.ensure_leader_read(state).await.map_err(kalam_error_to_datafusion)?;
 
         let _ = limit;
 
@@ -1642,10 +1640,7 @@ pub fn extract_embedding_vector(value: &ScalarValue, expected_dimensions: u32) -
 pub fn build_notification_row(fields: &Row, seq: SeqId, commit_seq: u64, deleted: bool) -> Row {
     let mut values = fields.values.clone();
     values.insert(SystemColumnNames::SEQ.to_string(), ScalarValue::Int64(Some(seq.as_i64())));
-    values.insert(
-        SystemColumnNames::COMMIT_SEQ.to_string(),
-        ScalarValue::UInt64(Some(commit_seq)),
-    );
+    values.insert(SystemColumnNames::COMMIT_SEQ.to_string(), ScalarValue::UInt64(Some(commit_seq)));
     values.insert(SystemColumnNames::DELETED.to_string(), ScalarValue::Boolean(Some(deleted)));
     Row::new(values)
 }

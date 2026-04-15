@@ -14,8 +14,7 @@ use kalamdb_commons::schemas::SchemaField;
 use kalamdb_commons::Role;
 use kalamdb_raft::{
     forward_sql_param, ClusterMessageHandler, ForwardSqlParam, ForwardSqlRequest,
-    ForwardSqlResponsePayload, GetNodeInfoRequest, GetNodeInfoResponse, PingRequest,
-    RaftExecutor,
+    ForwardSqlResponsePayload, GetNodeInfoRequest, GetNodeInfoResponse, PingRequest, RaftExecutor,
 };
 use kalamdb_session::{AuthMethod, AuthSession};
 use serde::Serialize;
@@ -23,8 +22,8 @@ use serde::Serialize;
 use crate::app_context::AppContext;
 use crate::sql::context::ExecutionContext;
 use crate::sql::executor::PreparedExecutionStatement;
-use crate::sql::SqlImpersonationService;
 use crate::sql::ExecutionResult;
+use crate::sql::SqlImpersonationService;
 
 // ── Response types (match SqlResponse JSON shape, no intermediate Value tree) ──
 
@@ -75,7 +74,10 @@ impl CoreClusterHandler {
             status: "error",
             results: &[],
             took: started_at.elapsed().as_secs_f64() * 1000.0,
-            error: Some(ForwardedError { code: error_code, message }),
+            error: Some(ForwardedError {
+                code: error_code,
+                message,
+            }),
         };
         let body = serde_json::to_vec(&resp).unwrap_or_else(|_| {
             b"{\"status\":\"error\",\"results\":[],\"took\":0,\"error\":{\"code\":\"INTERNAL_ERROR\",\"message\":\"Failed to serialize error payload\"}}".to_vec()
@@ -87,11 +89,21 @@ impl CoreClusterHandler {
         param: &ForwardSqlParam,
     ) -> Result<datafusion::scalar::ScalarValue, String> {
         match param.value.as_ref() {
-            Some(forward_sql_param::Value::NullValue(_)) => Ok(datafusion::scalar::ScalarValue::Utf8(None)),
-            Some(forward_sql_param::Value::BoolValue(v)) => Ok(datafusion::scalar::ScalarValue::Boolean(Some(*v))),
-            Some(forward_sql_param::Value::Int64Value(v)) => Ok(datafusion::scalar::ScalarValue::Int64(Some(*v))),
-            Some(forward_sql_param::Value::Float64Value(v)) => Ok(datafusion::scalar::ScalarValue::Float64(Some(*v))),
-            Some(forward_sql_param::Value::StringValue(v)) => Ok(datafusion::scalar::ScalarValue::Utf8(Some(v.clone()))),
+            Some(forward_sql_param::Value::NullValue(_)) => {
+                Ok(datafusion::scalar::ScalarValue::Utf8(None))
+            },
+            Some(forward_sql_param::Value::BoolValue(v)) => {
+                Ok(datafusion::scalar::ScalarValue::Boolean(Some(*v)))
+            },
+            Some(forward_sql_param::Value::Int64Value(v)) => {
+                Ok(datafusion::scalar::ScalarValue::Int64(Some(*v)))
+            },
+            Some(forward_sql_param::Value::Float64Value(v)) => {
+                Ok(datafusion::scalar::ScalarValue::Float64(Some(*v)))
+            },
+            Some(forward_sql_param::Value::StringValue(v)) => {
+                Ok(datafusion::scalar::ScalarValue::Utf8(Some(v.clone())))
+            },
             None => Err("Missing parameter value".to_string()),
         }
     }
@@ -109,12 +121,14 @@ impl CoreClusterHandler {
                 message: Some(message),
                 as_user: as_user.clone(),
             }),
-            ExecutionResult::Rows { batches, row_count, schema } => {
+            ExecutionResult::Rows {
+                batches,
+                row_count,
+                schema,
+            } => {
                 let arrow_schema = batches.first().map(|b| b.schema()).or(schema);
-                let schema_fields = arrow_schema
-                    .as_ref()
-                    .map(schema_fields_from_arrow_schema)
-                    .unwrap_or_default();
+                let schema_fields =
+                    arrow_schema.as_ref().map(schema_fields_from_arrow_schema).unwrap_or_default();
 
                 let mut rows = Vec::new();
                 for batch in &batches {
@@ -154,18 +168,32 @@ impl CoreClusterHandler {
                 message: Some(format!("Deleted {} row(s)", rows_affected)),
                 as_user: as_user.clone(),
             }),
-            ExecutionResult::Flushed { tables, bytes_written } => Ok(ForwardedResult {
+            ExecutionResult::Flushed {
+                tables,
+                bytes_written,
+            } => Ok(ForwardedResult {
                 schema: Vec::new(),
                 rows: None,
                 row_count: tables.len(),
-                message: Some(format!("Flushed {} table(s), {} bytes written", tables.len(), bytes_written)),
+                message: Some(format!(
+                    "Flushed {} table(s), {} bytes written",
+                    tables.len(),
+                    bytes_written
+                )),
                 as_user: as_user.clone(),
             }),
-            ExecutionResult::Subscription { subscription_id, channel, select_query } => Ok(ForwardedResult {
+            ExecutionResult::Subscription {
+                subscription_id,
+                channel,
+                select_query,
+            } => Ok(ForwardedResult {
                 schema: Vec::new(),
                 rows: None,
                 row_count: 1,
-                message: Some(format!("Subscription {} on channel {} for query: {}", subscription_id, channel, select_query)),
+                message: Some(format!(
+                    "Subscription {} on channel {} for query: {}",
+                    subscription_id, channel, select_query
+                )),
                 as_user: as_user.clone(),
             }),
             ExecutionResult::JobKilled { job_id, status } => Ok(ForwardedResult {
@@ -182,9 +210,7 @@ impl CoreClusterHandler {
         authenticated_username: &Username,
         execute_as_username: Option<&Username>,
     ) -> Username {
-        execute_as_username
-            .cloned()
-            .unwrap_or_else(|| authenticated_username.clone())
+        execute_as_username.cloned().unwrap_or_else(|| authenticated_username.clone())
     }
 
     fn prepare_forwarded_statement(
@@ -198,7 +224,8 @@ impl CoreClusterHandler {
             return Err("Empty SQL statement".to_string());
         }
 
-        let (sql, execute_as_username) = match kalamdb_sql::execute_as::parse_execute_as(statement)? {
+        let (sql, execute_as_username) = match kalamdb_sql::execute_as::parse_execute_as(statement)?
+        {
             Some(envelope) => {
                 let execute_as_username = Username::try_new(&envelope.username)
                     .map_err(|e| format!("Invalid execute-as username: {}", e))?;
@@ -213,10 +240,7 @@ impl CoreClusterHandler {
             .prepare_statement_metadata_for_role(&sql, default_namespace, actor_role)
             .map_err(|err| err.to_string())?;
 
-        Ok((
-            prepared_statement,
-            execute_as_username,
-        ))
+        Ok((prepared_statement, execute_as_username))
     }
 }
 
@@ -395,7 +419,8 @@ impl ClusterMessageHandler for CoreClusterHandler {
             };
 
             if execute_as_user.is_some()
-                && prepared_statement.table_type == Some(kalamdb_commons::schemas::TableType::Shared)
+                && prepared_statement.table_type
+                    == Some(kalamdb_commons::schemas::TableType::Shared)
             {
                 let table_name = prepared_statement
                     .table_id
@@ -433,8 +458,10 @@ impl ClusterMessageHandler for CoreClusterHandler {
                     ));
                 },
             };
-            let effective_username =
-                Self::resolve_result_username(&authenticated_username, execute_as_username.as_ref());
+            let effective_username = Self::resolve_result_username(
+                &authenticated_username,
+                execute_as_username.as_ref(),
+            );
             let effective_role = if execute_as_user.is_some() {
                 Role::User
             } else {

@@ -9,8 +9,8 @@ use crate::execute_as::parse_execute_as;
 use crate::parser::utils::parse_single_statement;
 use crate::parser::utils::parse_sql_statements;
 use kalamdb_commons::models::Username;
-use sqlparser::ast::Statement;
 use sqlparser::ast::Spanned;
+use sqlparser::ast::Statement;
 use sqlparser::tokenizer::{Location, Span};
 
 /// Error produced when parsing a batch SQL string fails.
@@ -53,7 +53,10 @@ pub struct PreparedExecutionBatchStatement<T> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExecutionBatchParseError {
     Batch(BatchParseError),
-    Statement { statement_index: usize, message: String },
+    Statement {
+        statement_index: usize,
+        message: String,
+    },
 }
 
 impl std::fmt::Display for ExecutionBatchParseError {
@@ -146,12 +149,11 @@ where
     let mut prepared = Vec::with_capacity(parsed_statements.len());
 
     for (idx, statement) in parsed_statements.into_iter().enumerate() {
-        let prepared_statement = prepare_statement(&statement).map_err(|error| {
-            ExecutionBatchPrepareError::Prepare {
+        let prepared_statement =
+            prepare_statement(&statement).map_err(|error| ExecutionBatchPrepareError::Prepare {
                 statement_index: idx + 1,
                 error,
-            }
-        })?;
+            })?;
 
         prepared.push(PreparedExecutionBatchStatement {
             execute_as_username: statement.execute_as_username,
@@ -173,11 +175,7 @@ fn line_start_offsets(sql: &str) -> Vec<usize> {
     starts
 }
 
-fn byte_index_for_location(
-    sql: &str,
-    line_starts: &[usize],
-    location: Location,
-) -> Option<usize> {
+fn byte_index_for_location(sql: &str, line_starts: &[usize], location: Location) -> Option<usize> {
     if location.line == 0 || location.column == 0 {
         return None;
     }
@@ -255,8 +253,8 @@ fn tail_has_separator_or_eof(mut tail: &str) -> bool {
 
 fn parse_batch_with_sqlparser(sql: &str) -> Result<Vec<ParsedExecutionStatement>, BatchParseError> {
     let dialect = KalamDbDialect::default();
-    let statements = parse_sql_statements(sql, &dialect)
-        .map_err(|err| BatchParseError::new(err.to_string()))?;
+    let statements =
+        parse_sql_statements(sql, &dialect).map_err(|err| BatchParseError::new(err.to_string()))?;
 
     if statements.is_empty() {
         return Ok(Vec::new());
@@ -567,11 +565,11 @@ mod tests {
 
     #[test]
     fn prepare_execution_batch_preserves_execute_as_username() {
-        let prepared = prepare_execution_batch(
-            "SELECT 1; EXECUTE AS USER alice (SELECT 2)",
-            |statement| Ok::<_, String>(statement.sql.clone()),
-        )
-        .unwrap();
+        let prepared =
+            prepare_execution_batch("SELECT 1; EXECUTE AS USER alice (SELECT 2)", |statement| {
+                Ok::<_, String>(statement.sql.clone())
+            })
+            .unwrap();
 
         assert_eq!(prepared.len(), 2);
         assert_eq!(prepared[0].prepared_statement, "SELECT 1".to_string());

@@ -28,6 +28,16 @@ use kalamdb_commons::{TableId, TableType};
 /// Maximum rows to buffer before auto-flushing.
 const FLUSH_THRESHOLD: usize = 256;
 
+/// Fast check: returns true if the global write buffer has any entries at all.
+/// Uses a try_lock to avoid blocking — if the lock is contended, conservatively
+/// returns true so the caller proceeds with the full flush path.
+pub fn has_any_pending_writes() -> bool {
+    match WRITE_BUFFER.try_lock() {
+        Ok(guard) => guard.as_ref().is_some_and(|map| !map.is_empty()),
+        Err(_) => true, // conservatively assume writes pending
+    }
+}
+
 /// A pending batch of rows for a specific table + user context.
 struct PendingBatch {
     session_id: String,
@@ -68,13 +78,7 @@ fn pending_batch_key(
     user_id: Option<&UserId>,
 ) -> String {
     let user_scope = user_id.map(UserId::as_str).unwrap_or("_");
-    format!(
-        "{}|{}|{}|{}",
-        session_id,
-        table_type.as_str(),
-        table_id.full_name(),
-        user_scope
-    )
+    format!("{}|{}|{}|{}", session_id, table_type.as_str(), table_id.full_name(), user_scope)
 }
 
 /// Global write buffer keyed by table full name.
@@ -135,6 +139,11 @@ pub fn flush_table(
     table_id: &TableId,
     table_type: TableType,
 ) -> Result<(), KalamPgError> {
+    // Fast path: skip mutex + iteration when no writes are buffered at all
+    if !has_any_pending_writes() {
+        return Ok(());
+    }
+
     let mut guard = WRITE_BUFFER.lock().unwrap_or_else(|e| e.into_inner());
     let Some(map) = guard.as_mut() else {
         return Ok(());
@@ -221,17 +230,11 @@ mod tests {
             })
         }
 
-        async fn update(
-            &self,
-            _request: UpdateRequest,
-        ) -> Result<MutationResponse, KalamPgError> {
+        async fn update(&self, _request: UpdateRequest) -> Result<MutationResponse, KalamPgError> {
             Ok(MutationResponse { affected_rows: 0 })
         }
 
-        async fn delete(
-            &self,
-            _request: DeleteRequest,
-        ) -> Result<MutationResponse, KalamPgError> {
+        async fn delete(&self, _request: DeleteRequest) -> Result<MutationResponse, KalamPgError> {
             Ok(MutationResponse { affected_rows: 0 })
         }
     }
@@ -297,8 +300,14 @@ mod tests {
         });
 
         assert_eq!(inserts.len(), 2);
-        assert_eq!(inserts[0].tenant_context.effective_user_id().map(UserId::as_str), Some("user-a"));
-        assert_eq!(inserts[1].tenant_context.effective_user_id().map(UserId::as_str), Some("user-b"));
+        assert_eq!(
+            inserts[0].tenant_context.effective_user_id().map(UserId::as_str),
+            Some("user-a")
+        );
+        assert_eq!(
+            inserts[1].tenant_context.effective_user_id().map(UserId::as_str),
+            Some("user-b")
+        );
         assert_eq!(inserts[0].rows.len(), 1);
         assert_eq!(inserts[1].rows.len(), 1);
 

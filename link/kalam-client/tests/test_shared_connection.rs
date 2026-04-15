@@ -81,7 +81,8 @@ fn create_test_client_with_events_for_base_url(
 
 /// Ensure a test table exists with a simple schema.
 async fn ensure_table(client: &KalamLinkClient, table: &str) {
-    let create_sql = format!("CREATE TABLE IF NOT EXISTS {} (id TEXT PRIMARY KEY, value TEXT)", table);
+    let create_sql =
+        format!("CREATE TABLE IF NOT EXISTS {} (id TEXT PRIMARY KEY, value TEXT)", table);
     let verify_sql = format!("SELECT COUNT(*) AS row_count FROM {}", table);
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut last_err = String::new();
@@ -105,10 +106,7 @@ async fn ensure_table(client: &KalamLinkClient, table: &str) {
         }
     }
 
-    panic!(
-        "timed out waiting for table {} to become queryable: {}",
-        table, last_err
-    );
+    panic!("timed out waiting for table {} to become queryable: {}", table, last_err);
 }
 
 async fn query_max_seq(client: &KalamLinkClient, table: &str) -> SeqId {

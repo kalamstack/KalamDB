@@ -232,20 +232,20 @@ async fn test_chat_app_endurance_with_100_parallel_users() -> Result<()> {
     let server = get_global_server().await;
     let namespace = unique_namespace("endurance_chat");
 
-    let duration = Duration::from_secs(env_u64(
-        "KALAMDB_ENDURANCE_DURATION_SECS",
-        DEFAULT_DURATION_SECS,
-    ));
+    let duration =
+        Duration::from_secs(env_u64("KALAMDB_ENDURANCE_DURATION_SECS", DEFAULT_DURATION_SECS));
     let user_count = env_usize("KALAMDB_ENDURANCE_USER_COUNT", DEFAULT_USER_COUNT);
-    let subscriber_count = env_usize(
-        "KALAMDB_ENDURANCE_SUBSCRIBER_COUNT",
-        DEFAULT_SUBSCRIBER_COUNT.min(user_count),
-    )
-    .min(user_count);
+    let subscriber_count =
+        env_usize("KALAMDB_ENDURANCE_SUBSCRIBER_COUNT", DEFAULT_SUBSCRIBER_COUNT.min(user_count))
+            .min(user_count);
     let conversation_count = env_usize("KALAMDB_ENDURANCE_ROOM_COUNT", DEFAULT_ROOM_COUNT);
 
     let create_namespace = server.execute_sql(&format!("CREATE NAMESPACE {}", namespace)).await?;
-    assert!(create_namespace.success(), "CREATE NAMESPACE failed: {:?}", create_namespace.error);
+    assert!(
+        create_namespace.success(),
+        "CREATE NAMESPACE failed: {:?}",
+        create_namespace.error
+    );
 
     let create_conversations = server
         .execute_sql(&format!(
@@ -280,11 +280,7 @@ async fn test_chat_app_endurance_with_100_parallel_users() -> Result<()> {
             namespace
         ))
         .await?;
-    assert!(
-        create_messages.success(),
-        "CREATE messages failed: {:?}",
-        create_messages.error
-    );
+    assert!(create_messages.success(), "CREATE messages failed: {:?}", create_messages.error);
 
     let create_typing_events = server
         .execute_sql(&format!(
@@ -350,10 +346,8 @@ async fn test_chat_app_endurance_with_100_parallel_users() -> Result<()> {
         .context("expected at least one endurance user")?;
 
     let assistant_namespace = namespace.clone();
-    let assistant_users = user_clients
-        .iter()
-        .map(|(username, _)| username.clone())
-        .collect::<Vec<_>>();
+    let assistant_users =
+        user_clients.iter().map(|(username, _)| username.clone()).collect::<Vec<_>>();
     let assistant_errors = Arc::clone(&errors);
     let assistant_message_ids = Arc::clone(&next_message_id);
     let assistant_task = tokio::spawn(async move {
@@ -501,11 +495,7 @@ async fn test_chat_app_endurance_with_100_parallel_users() -> Result<()> {
             namespace
         ))
         .await?;
-    assert!(
-        duplicate_check.success(),
-        "duplicate check failed: {:?}",
-        duplicate_check.error
-    );
+    assert!(duplicate_check.success(), "duplicate check failed: {:?}", duplicate_check.error);
 
     let totals = duplicate_check.rows_as_maps();
     let total_rows = totals
@@ -570,11 +560,7 @@ async fn test_chat_app_endurance_with_100_parallel_users() -> Result<()> {
         update_count,
         delete_count
     );
-    assert_eq!(
-        error_count,
-        0,
-        "endurance workload recorded backend errors"
-    );
+    assert_eq!(error_count, 0, "endurance workload recorded backend errors");
 
     let _ = server.execute_sql(&format!("DROP NAMESPACE {} CASCADE", namespace)).await;
     Ok(())

@@ -13,9 +13,7 @@
 
 use crate::error::LiveError;
 use crate::helpers::filter_eval::parse_where_clause;
-use crate::helpers::initial_data::{
-    InitialDataFetcher, InitialDataOptions, InitialDataResult,
-};
+use crate::helpers::initial_data::{InitialDataFetcher, InitialDataOptions, InitialDataResult};
 use crate::manager::ConnectionsManager;
 use crate::models::{SharedConnectionState, SubscriptionResult};
 use crate::subscription::SubscriptionService;
@@ -115,8 +113,7 @@ impl LiveQueryManager {
     ) -> Self {
         let node_id = *registry.node_id();
         let subscription_service = Arc::new(SubscriptionService::new(registry.clone()));
-        let initial_data_fetcher =
-            Arc::new(InitialDataFetcher::new(Arc::clone(&schema_lookup)));
+        let initial_data_fetcher = Arc::new(InitialDataFetcher::new(Arc::clone(&schema_lookup)));
 
         Self {
             registry,
@@ -380,15 +377,11 @@ impl LiveQueryManager {
         })?;
 
         let user_role = connection_state.user_role().ok_or_else(|| {
-            LiveError::InvalidOperation(
-                "Connection authenticated without role context".to_string(),
-            )
+            LiveError::InvalidOperation("Connection authenticated without role context".to_string())
         })?;
 
-        let table_def = self
-            .schema_lookup
-            .get_table_definition(&sub_state.table_id)
-            .ok_or_else(|| {
+        let table_def =
+            self.schema_lookup.get_table_definition(&sub_state.table_id).ok_or_else(|| {
                 LiveError::NotFound(format!(
                     "Table {} not found for batch fetch",
                     sub_state.table_id

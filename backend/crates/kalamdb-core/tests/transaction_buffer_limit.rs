@@ -8,8 +8,8 @@ use kalamdb_configs::ServerConfig;
 use kalamdb_core::operations::service::OperationService;
 use kalamdb_pg::OperationExecutor;
 use support::{
-    create_cluster_app_context_with_config, create_executor, create_shared_table, observer_exec_ctx,
-    row, select_names, unique_namespace,
+    create_cluster_app_context_with_config, create_executor, create_shared_table,
+    observer_exec_ctx, row, select_names, unique_namespace,
 };
 
 #[tokio::test]
@@ -19,7 +19,8 @@ async fn transaction_buffer_limit_aborts_transaction_and_rejects_follow_up_write
     config.max_transaction_buffer_bytes = 256;
 
     let (app_ctx, _test_db) = create_cluster_app_context_with_config(config).await;
-    let table_id = create_shared_table(&app_ctx, &unique_namespace("tx_buffer_limit"), "items").await;
+    let table_id =
+        create_shared_table(&app_ctx, &unique_namespace("tx_buffer_limit"), "items").await;
     let service = OperationService::new(Arc::clone(&app_ctx));
     let executor = create_executor(Arc::clone(&app_ctx));
     let observer_ctx = observer_exec_ctx(&app_ctx);

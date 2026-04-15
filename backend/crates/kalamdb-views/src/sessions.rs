@@ -50,8 +50,8 @@ fn sessions_schema() -> SchemaRef {
 fn parse_backend_pid(session_id: &str) -> Option<i64> {
     session_id
         .strip_prefix("pg-")
-    .and_then(|value| value.split('-').next())
-    .and_then(|value| value.parse::<i64>().ok())
+        .and_then(|value| value.split('-').next())
+        .and_then(|value| value.parse::<i64>().ok())
 }
 
 fn derive_state(snapshot: &PgSessionSnapshot) -> &'static str {
@@ -230,9 +230,7 @@ impl SessionsView {
             TableType::System,
             columns,
             TableOptions::system(),
-            Some(
-                "Active PostgreSQL gRPC sessions tracked by the pg extension bridge".to_string(),
-            ),
+            Some("Active PostgreSQL gRPC sessions tracked by the pg extension bridge".to_string()),
         )
         .expect("Failed to create system.sessions view definition")
     }

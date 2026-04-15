@@ -1,12 +1,13 @@
 # pg-kalam on Docker Hub
 
-PostgreSQL with the pg_kalam extension preinstalled so you can connect PostgreSQL Kalam-backed tables to a remote KalamDB server.
+PostgreSQL with the pg_kalam extension and pgvector preinstalled so you can connect PostgreSQL Kalam-backed tables to a remote KalamDB server.
 
-This image packages stock PostgreSQL with the `pg_kalam` foreign data wrapper extension already installed.
+This image packages stock PostgreSQL with the `pg_kalam` foreign data wrapper extension and the `pgvector` package already installed.
 
 ## What you get
 
 - A PostgreSQL runtime image with `pg_kalam.so`, `pg_kalam.control`, and the extension SQL files already installed
+- `pgvector` preinstalled so `CREATE EXTENSION vector;` works without extra package installation
 - `CREATE EXTENSION pg_kalam;` support without a separate extension build step in the container
 - A ready-to-run base for local testing, CI, and production images that need PostgreSQL to talk to KalamDB
 
@@ -33,6 +34,7 @@ Then enable the extension:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS pg_kalam;
+CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
 ## Connect to KalamDB

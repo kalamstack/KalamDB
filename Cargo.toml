@@ -85,6 +85,11 @@ url = "2.5.8"
 # WebSocket
 tokio-tungstenite = { version = "0.29.0", features = ["rustls-tls-webpki-roots"] }
 
+# Security floor pins for vulnerable transitive TLS/QUIC crates.
+aws-lc-rs = { version = "1.16.2", default-features = false }
+quinn-proto = { version = "0.11.14", default-features = false }
+rustls-webpki = { version = "0.103.10", default-features = false }
+
 # Time handling
 chrono = { version = "0.4.44", features = ["serde"] }
 
@@ -118,7 +123,7 @@ actix-multipart = "0.7"
 uuid = { version = "1.23.0", features = ["v4", "v7", "serde"] }
 
 # NanoID generation (21-char URL-safe unique IDs)
-nanoid = "0.4.0"
+nanoid = "0.5.0"
 
 # ULID generation
 ulid = "1.1"
@@ -195,7 +200,7 @@ quote = "1.0.44"
 syn = { version = "2.0.117", features = ["full", "extra-traits"] }
 
 # Object storage abstraction (S3/GCS/Azure/local)
-object_store = { version = "0.13.1" }
+object_store = { version = "0.13.2" }
  
 # Vector ANN engines
 usearch = "2.24.0"

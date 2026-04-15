@@ -1,4 +1,6 @@
-use super::common::{ensure_schema_exists, pg_kalam_exec, require_ddl_env, unique_name, DdlTestEnv};
+use super::common::{
+    ensure_schema_exists, pg_kalam_exec, require_ddl_env, unique_name, DdlTestEnv,
+};
 use std::env;
 use tokio_postgres::{Config, NoTls};
 
@@ -33,9 +35,7 @@ async fn wait_for_backend_session_cleanup(env: &DdlTestEnv, backend_pid: i32, co
         }
 
         if std::time::Instant::now() >= deadline {
-            panic!(
-                "backend pid {backend_pid} remained in system.sessions after {context}"
-            );
+            panic!("backend pid {backend_pid} remained in system.sessions after {context}");
         }
 
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -90,7 +90,7 @@ async fn e2e_ddl_create_table_using_kalamdb_forwards_shared_options() {
     ensure_schema_exists(&pg, &ns).await;
 
     pg.batch_execute(&format!(
-          "CREATE TABLE {ns}.{table} (
+        "CREATE TABLE {ns}.{table} (
             id BIGINT,
             title TEXT
             ) USING kalamdb WITH (
@@ -100,7 +100,7 @@ async fn e2e_ddl_create_table_using_kalamdb_forwards_shared_options() {
             );"
     ))
     .await
-     .expect("create shared Kalam table with forwarded options");
+    .expect("create shared Kalam table with forwarded options");
     env.wait_for_kalamdb_table_exists(&ns, &table).await;
 
     let metadata = env
@@ -151,7 +151,7 @@ async fn e2e_ddl_create_table_using_kalamdb_forwards_stream_ttl() {
     ensure_schema_exists(&pg, &ns).await;
 
     pg.batch_execute(&format!(
-          "CREATE TABLE {ns}.{table} (
+        "CREATE TABLE {ns}.{table} (
             event_type TEXT,
             payload TEXT
             ) USING kalamdb WITH (
@@ -160,7 +160,7 @@ async fn e2e_ddl_create_table_using_kalamdb_forwards_stream_ttl() {
             );"
     ))
     .await
-     .expect("create stream Kalam table with ttl");
+    .expect("create stream Kalam table with ttl");
     env.wait_for_kalamdb_table_exists(&ns, &table).await;
 
     let metadata = env
@@ -326,8 +326,12 @@ async fn e2e_ddl_create_table_using_kalamdb_disconnect_cleans_session_row() {
         .expect("create shared Kalam table");
 
     pg.disconnect().await;
-    wait_for_backend_session_cleanup(env, backend_pid, "disconnect after CREATE TABLE USING kalamdb")
-        .await;
+    wait_for_backend_session_cleanup(
+        env,
+        backend_pid,
+        "disconnect after CREATE TABLE USING kalamdb",
+    )
+    .await;
 
     let cleanup = env.pg_connect().await;
     cleanup
@@ -352,7 +356,7 @@ async fn e2e_ddl_rejects_unsafe_option_keys() {
 
     let error = pg
         .batch_execute(&format!(
-                "CREATE TABLE {ns}.{table} (
+            "CREATE TABLE {ns}.{table} (
                 id BIGINT,
                 title TEXT
                  ) USING kalamdb WITH (
@@ -377,9 +381,7 @@ async fn e2e_ddl_rejects_unsafe_option_keys() {
     pg.batch_execute(&format!("DROP FOREIGN TABLE IF EXISTS {ns}.{table};"))
         .await
         .ok();
-    pg.batch_execute(&format!("DROP SCHEMA IF EXISTS {ns} CASCADE;"))
-        .await
-        .ok();
+    pg.batch_execute(&format!("DROP SCHEMA IF EXISTS {ns} CASCADE;")).await.ok();
 }
 
 #[tokio::test]
@@ -398,6 +400,5 @@ async fn e2e_ddl_kalam_exec_disconnect_cleans_session_row() {
     assert!(result.contains("1"), "unexpected kalam_exec SELECT response: {result}");
 
     pg.disconnect().await;
-    wait_for_backend_session_cleanup(env, backend_pid, "disconnect after kalam_exec")
-        .await;
+    wait_for_backend_session_cleanup(env, backend_pid, "disconnect after kalam_exec").await;
 }

@@ -8,21 +8,31 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct UiRuntimeConfig {
-    backend_origin: String,
+    backend_origin: Option<String>,
 }
 
 impl UiRuntimeConfig {
-    pub fn new(backend_origin: String) -> Self {
-        Self { backend_origin }
+    pub fn new(backend_origin: Option<String>) -> Self {
+        Self {
+            backend_origin: backend_origin
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| value.trim_end_matches('/').to_string()),
+        }
     }
 
     fn script_body(&self) -> String {
-        let payload = serde_json::json!({
-            "backendOrigin": self.backend_origin,
-        });
-        format!(
-            "window.__KALAMDB_RUNTIME_CONFIG__ = Object.freeze({payload});"
-        )
+        let mut payload = serde_json::Map::new();
+        if let Some(backend_origin) = &self.backend_origin {
+            payload.insert(
+                "backendOrigin".to_string(),
+                serde_json::Value::String(backend_origin.clone()),
+            );
+        }
+
+        let payload = serde_json::Value::Object(payload);
+        format!("window.__KALAMDB_RUNTIME_CONFIG__ = Object.freeze({payload});")
     }
 }
 
@@ -72,10 +82,29 @@ pub fn configure_filesystem_ui_routes(
                 .default_handler(web::to(move |data: web::Data<String>| {
                     let content = data.get_ref().clone();
                     async move {
-                        HttpResponse::Ok()
-                            .content_type("text/html; charset=utf-8")
-                            .body(content)
+                        HttpResponse::Ok().content_type("text/html; charset=utf-8").body(content)
                     }
                 })),
         );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UiRuntimeConfig;
+
+    #[test]
+    fn test_runtime_config_script_includes_backend_origin_when_configured() {
+        let script =
+            UiRuntimeConfig::new(Some("https://kalamdb.masky.app/".to_string())).script_body();
+
+        assert!(script.contains("backendOrigin"));
+        assert!(script.contains("https://kalamdb.masky.app"));
+    }
+
+    #[test]
+    fn test_runtime_config_script_omits_backend_origin_when_unset() {
+        let script = UiRuntimeConfig::new(Some("   ".to_string())).script_body();
+
+        assert_eq!(script, "window.__KALAMDB_RUNTIME_CONFIG__ = Object.freeze({});");
+    }
 }

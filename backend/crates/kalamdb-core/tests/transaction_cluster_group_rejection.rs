@@ -5,8 +5,8 @@ use ntest::timeout;
 
 use support::{
     create_cluster_app_context, create_executor, create_shared_table, create_user_table,
-    execute_err, execute_ok, insert_sql, request_exec_ctx, request_transaction_state,
-    select_names, unique_namespace,
+    execute_err, execute_ok, insert_sql, request_exec_ctx, request_transaction_state, select_names,
+    unique_namespace,
 };
 
 #[tokio::test]
@@ -44,7 +44,10 @@ async fn sql_request_transaction_rejects_cross_group_access_without_aborting_bou
         error.contains("already bound to data raft group"),
         "expected cross-group rejection, got: {error}"
     );
-    assert!(error.contains(&bound_group.to_string()), "expected bound group in error: {error}");
+    assert!(
+        error.contains(&bound_group.to_string()),
+        "expected bound group in error: {error}"
+    );
     assert!(
         error.contains("data:shared:00"),
         "expected requested shared group in error: {error}"

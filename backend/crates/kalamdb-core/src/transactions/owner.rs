@@ -14,10 +14,7 @@ fn parse_u32_decimal(value: &[u8], session_id: &str) -> Result<u32, KalamDbError
     let mut parsed = 0u32;
     for &byte in value {
         if !byte.is_ascii_digit() {
-            return Err(invalid_pg_session_id(
-                session_id,
-                "backend pid must be numeric",
-            ));
+            return Err(invalid_pg_session_id(session_id, "backend pid must be numeric"));
         }
 
         parsed = parsed
@@ -42,10 +39,7 @@ fn parse_u64_hex(value: &[u8], session_id: &str) -> Result<u64, KalamDbError> {
             b'a'..=b'f' => (byte - b'a' + 10) as u64,
             b'A'..=b'F' => (byte - b'A' + 10) as u64,
             _ => {
-                return Err(invalid_pg_session_id(
-                    session_id,
-                    "config hash must be hexadecimal",
-                ));
+                return Err(invalid_pg_session_id(session_id, "config hash must be hexadecimal"));
             },
         };
 
@@ -81,10 +75,7 @@ impl ExecutionOwnerKey {
     pub fn from_pg_session_id(session_id: &str) -> Result<Self, KalamDbError> {
         let bytes = session_id.as_bytes();
         if !bytes.starts_with(b"pg-") {
-            return Err(invalid_pg_session_id(
-                session_id,
-                "expected pg-<pid>-<config_hash>",
-            ));
+            return Err(invalid_pg_session_id(session_id, "expected pg-<pid>-<config_hash>"));
         }
 
         let rest = &bytes[3..];
@@ -149,8 +140,6 @@ mod tests {
     #[test]
     fn rejects_non_numeric_backend_pid() {
         let error = ExecutionOwnerKey::from_pg_session_id("pg-abc-deadbeef").unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("backend pid must be numeric"));
+        assert!(error.to_string().contains("backend pid must be numeric"));
     }
 }

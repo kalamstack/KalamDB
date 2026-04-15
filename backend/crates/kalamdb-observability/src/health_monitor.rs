@@ -217,24 +217,14 @@ impl HealthMonitor {
         let namespaces = metric_map.get("total_namespaces").copied().unwrap_or("n/a");
         let tables = metric_map.get("total_tables").copied().unwrap_or("n/a");
         let subscriptions = metric_map.get("active_subscriptions").copied().unwrap_or("n/a");
-        let subscriptions_peak = metric_map
-            .get("active_subscriptions_peak")
-            .copied()
-            .unwrap_or("n/a");
+        let subscriptions_peak =
+            metric_map.get("active_subscriptions_peak").copied().unwrap_or("n/a");
         let connections = metric_map.get("active_connections").copied().unwrap_or("n/a");
-        let connections_peak = metric_map
-            .get("active_connections_peak")
-            .copied()
-            .unwrap_or("n/a");
-        let connection_limit = metric_map
-            .get("max_connections_configured")
-            .copied()
-            .unwrap_or("n/a");
+        let connections_peak = metric_map.get("active_connections_peak").copied().unwrap_or("n/a");
+        let connection_limit =
+            metric_map.get("max_connections_configured").copied().unwrap_or("n/a");
         let ws_sessions = metric_map.get("websocket_sessions").copied().unwrap_or("n/a");
-        let ws_sessions_peak = metric_map
-            .get("websocket_sessions_peak")
-            .copied()
-            .unwrap_or("n/a");
+        let ws_sessions_peak = metric_map.get("websocket_sessions_peak").copied().unwrap_or("n/a");
         let jobs_running = metric_map.get("jobs_running").copied().unwrap_or("n/a");
         let jobs_queued = metric_map.get("jobs_queued").copied().unwrap_or("n/a");
         let jobs_failed = metric_map.get("jobs_failed").copied().unwrap_or("n/a");
@@ -483,10 +473,7 @@ mod tests {
     fn format_log_from_pairs_includes_memory_source_details_when_present() {
         let metrics = vec![
             ("memory_usage_mb".to_string(), "109".to_string()),
-            (
-                "memory_usage_source".to_string(),
-                "physical_footprint".to_string(),
-            ),
+            ("memory_usage_source".to_string(), "physical_footprint".to_string()),
             ("memory_rss_mb".to_string(), "141".to_string()),
             ("memory_rss_gap_mb".to_string(), "32".to_string()),
         ];

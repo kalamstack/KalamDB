@@ -5,6 +5,8 @@ use crate::arrow_to_pg::arrow_value_to_datum;
 use crate::fdw_options::parse_options;
 use crate::fdw_state::KalamScanState;
 use crate::relation_table_options::resolve_table_options_for_relation;
+use datafusion_common::ScalarValue;
+use kalam_pg_api::ScanFilter;
 use kalam_pg_common::{KalamPgError, DELETED_COLUMN, SEQ_COLUMN, USER_ID_COLUMN};
 use pgrx::pg_guard;
 use pgrx::pg_sys;
@@ -157,7 +159,7 @@ pub unsafe extern "C-unwind" fn iterate_foreign_scan(
         // Map to Arrow column
         if let Some(Some(arrow_idx)) = state.column_mapping.get(att_idx) {
             let array = batch.column(*arrow_idx);
-            let (datum, is_null) = arrow_value_to_datum(array.as_ref(), row);
+            let (datum, is_null) = arrow_value_to_datum(array.as_ref(), row, (*att).atttypid);
             *(*slot).tts_values.add(att_idx) = datum;
             *(*slot).tts_isnull.add(att_idx) = is_null;
         } else {
@@ -263,13 +265,17 @@ unsafe fn begin_foreign_scan_impl(node: *mut pg_sys::ForeignScanState) -> Result
 
     let tenant_context = kalam_pg_api::TenantContext::new(None, user_id.clone());
 
+    // Extract pushdown-safe equality filters from plan quals.
+    // PG still applies all quals locally, so this is a pure optimization.
+    let pushdown_filters = extract_pushdown_filters(node);
+
     let request = kalam_pg_api::ScanRequest {
         table_id: table_options.table_id.clone(),
         table_type: table_options.table_type,
         tenant_context,
         remote_session: None,
         projection,
-        filters: Vec::new(),
+        filters: pushdown_filters,
         limit: None,
     };
     request.validate()?;
@@ -310,4 +316,168 @@ unsafe fn begin_foreign_scan_impl(node: *mut pg_sys::ForeignScanState) -> Result
 
     (*node).fdw_state = Box::into_raw(scan_state) as *mut std::ffi::c_void;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// WHERE clause pushdown: extract simple `column = value` predicates
+// ---------------------------------------------------------------------------
+
+/// Extract simple `column = constant` filters from plan quals for remote pushdown.
+///
+/// Only extracts filters that are safe to push to the remote server:
+/// - Equality operator (`=`)
+/// - One side is a column reference (Var)
+/// - Other side is a Const or resolved external Param
+///
+/// PG still applies all quals locally, so incomplete extraction is safe —
+/// it only reduces the data transferred from the remote server.
+unsafe fn extract_pushdown_filters(node: *mut pg_sys::ForeignScanState) -> Vec<ScanFilter> {
+    let mut filters = Vec::new();
+
+    let qual_list = (*(*node).ss.ps.plan).qual;
+    if qual_list.is_null() {
+        return filters;
+    }
+
+    let tupdesc = (*(*node).ss.ss_ScanTupleSlot).tts_tupleDescriptor;
+
+    // Parameter list for resolving $1, $2, ... in prepared statements
+    let param_list = if !(*node).ss.ps.state.is_null() {
+        (*(*node).ss.ps.state).es_param_list_info
+    } else {
+        std::ptr::null_mut()
+    };
+
+    let length = (*qual_list).length as usize;
+    for i in 0..length {
+        let element = (*qual_list).elements.add(i);
+        let expr_node = (*element).ptr_value as *mut pg_sys::Node;
+
+        if let Some(filter) = try_extract_eq_filter(expr_node, tupdesc, param_list) {
+            filters.push(filter);
+        }
+    }
+
+    filters
+}
+
+/// Try to extract an equality filter from a single qual expression.
+///
+/// Returns `Some(ScanFilter::Eq { ... })` for `column = value` patterns,
+/// `None` for anything else (complex expressions, non-equality ops, etc.).
+unsafe fn try_extract_eq_filter(
+    node: *mut pg_sys::Node,
+    tupdesc: pg_sys::TupleDesc,
+    params: pg_sys::ParamListInfo,
+) -> Option<ScanFilter> {
+    if (*node).type_ != pg_sys::NodeTag::T_OpExpr {
+        return None;
+    }
+
+    let opexpr = node as *mut pg_sys::OpExpr;
+
+    // Verify this is an equality operator by checking the operator name.
+    let opname_ptr = pg_sys::get_opname((*opexpr).opno);
+    if opname_ptr.is_null() {
+        return None;
+    }
+    let opname = CStr::from_ptr(opname_ptr).to_str().ok()?;
+    if opname != "=" {
+        return None;
+    }
+
+    // Must have exactly 2 arguments (binary operator)
+    let args = (*opexpr).args;
+    if args.is_null() || (*args).length != 2 {
+        return None;
+    }
+
+    let first = (*(*args).elements.add(0)).ptr_value as *mut pg_sys::Node;
+    let second = (*(*args).elements.add(1)).ptr_value as *mut pg_sys::Node;
+
+    // Try both orderings: Var = Value and Value = Var
+    try_var_value_pair(first, second, tupdesc, params)
+        .or_else(|| try_var_value_pair(second, first, tupdesc, params))
+}
+
+/// Try to match a (Var, Const|Param) pair and extract column name + value.
+unsafe fn try_var_value_pair(
+    maybe_var: *mut pg_sys::Node,
+    maybe_value: *mut pg_sys::Node,
+    tupdesc: pg_sys::TupleDesc,
+    params: pg_sys::ParamListInfo,
+) -> Option<ScanFilter> {
+    if (*maybe_var).type_ != pg_sys::NodeTag::T_Var {
+        return None;
+    }
+
+    let var = maybe_var as *mut pg_sys::Var;
+
+    // Get column name from attribute number
+    let attnum = (*var).varattno;
+    if attnum <= 0 || attnum as i32 > (*tupdesc).natts {
+        return None;
+    }
+    let att = (*tupdesc).attrs.as_ptr().add((attnum - 1) as usize);
+    if (*att).attisdropped {
+        return None;
+    }
+    let col_name = CStr::from_ptr((*att).attname.data.as_ptr())
+        .to_string_lossy()
+        .into_owned();
+
+    // Skip virtual columns — they are handled separately by the FDW
+    match col_name.as_str() {
+        USER_ID_COLUMN | SEQ_COLUMN | DELETED_COLUMN => return None,
+        _ => {},
+    }
+
+    // Extract scalar value from Const or external Param node
+    let scalar = extract_node_value(maybe_value, params)?;
+
+    Some(ScanFilter::eq(col_name, scalar))
+}
+
+/// Convert a Const or external Param node to a DataFusion ScalarValue.
+unsafe fn extract_node_value(
+    node: *mut pg_sys::Node,
+    params: pg_sys::ParamListInfo,
+) -> Option<ScalarValue> {
+    match (*node).type_ {
+        pg_sys::NodeTag::T_Const => {
+            let konst = node as *mut pg_sys::Const;
+            if (*konst).constisnull {
+                return None;
+            }
+            Some(crate::pg_to_kalam::datum_to_scalar(
+                (*konst).constvalue,
+                (*konst).consttype,
+                false,
+            ))
+        },
+        pg_sys::NodeTag::T_Param => {
+            let param = node as *mut pg_sys::Param;
+            // Only external params (from prepared statements: $1, $2, ...)
+            if (*param).paramkind != pg_sys::ParamKind::PARAM_EXTERN {
+                return None;
+            }
+            if params.is_null() {
+                return None;
+            }
+            let param_id = (*param).paramid;
+            if param_id < 1 || param_id > (*params).numParams {
+                return None;
+            }
+            let prm = &*(*params).params.as_ptr().add((param_id - 1) as usize);
+            if prm.isnull {
+                return None;
+            }
+            Some(crate::pg_to_kalam::datum_to_scalar(
+                prm.value,
+                (*param).paramtype,
+                false,
+            ))
+        },
+        _ => None,
+    }
 }

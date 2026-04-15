@@ -395,9 +395,7 @@ impl SharedDataStateMachine {
         };
 
         let Some(applier) = applier else {
-            return Ok(DataResponse::error(
-                "No applier set, transaction commit not persisted",
-            ));
+            return Ok(DataResponse::error("No applier set, transaction commit not persisted"));
         };
 
         match applier.apply_transaction_batch(&transaction_id, &mutations).await {
@@ -546,11 +544,11 @@ impl KalamStateMachine for SharedDataStateMachine {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use std::collections::BTreeMap;
+    use kalamdb_commons::models::rows::Row;
     use kalamdb_commons::models::NamespaceId;
     use kalamdb_commons::models::OperationKind;
-    use kalamdb_commons::models::rows::Row;
     use kalamdb_commons::TableId;
+    use std::collections::BTreeMap;
 
     struct TransactionBatchSharedApplier;
 

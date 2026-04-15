@@ -11,12 +11,7 @@ async fn e2e_transaction_begin_commit_persists_rows() {
     let table = unique_name("profiles_tx_commit");
     let qualified_table = format!("e2e.{table}");
 
-    create_user_kalam_table(
-        &pg,
-        &table,
-        "id TEXT, name TEXT, age INTEGER",
-    )
-    .await;
+    create_user_kalam_table(&pg, &table, "id TEXT, name TEXT, age INTEGER").await;
     set_user_id(&pg, "txn-commit-user").await;
     await_user_shard_leader("txn-commit-user").await;
 
@@ -47,12 +42,7 @@ async fn e2e_transaction_begin_rollback_discards_rows() {
     let table = unique_name("profiles_tx_rollback");
     let qualified_table = format!("e2e.{table}");
 
-    create_user_kalam_table(
-        &pg,
-        &table,
-        "id TEXT, name TEXT, age INTEGER",
-    )
-    .await;
+    create_user_kalam_table(&pg, &table, "id TEXT, name TEXT, age INTEGER").await;
     set_user_id(&pg, "txn-rollback-user").await;
     await_user_shard_leader("txn-rollback-user").await;
 
@@ -77,12 +67,7 @@ async fn e2e_transaction_duplicate_primary_key_commit_fails() {
     let table = unique_name("profiles_tx_duplicate");
     let qualified_table = format!("e2e.{table}");
 
-    create_user_kalam_table(
-        &pg,
-        &table,
-        "id TEXT, name TEXT, age INTEGER",
-    )
-    .await;
+    create_user_kalam_table(&pg, &table, "id TEXT, name TEXT, age INTEGER").await;
     set_user_id(&pg, "txn-duplicate-user").await;
     await_user_shard_leader("txn-duplicate-user").await;
 
@@ -117,7 +102,7 @@ async fn e2e_transaction_duplicate_primary_key_commit_fails() {
     let reader = env.pg_connect().await;
     set_user_id(&reader, "txn-duplicate-user").await;
     await_user_shard_leader("txn-duplicate-user").await;
-    let count = count_rows(&reader, &qualified_table, Some("id = 'dup-1'")) .await;
+    let count = count_rows(&reader, &qualified_table, Some("id = 'dup-1'")).await;
     assert_eq!(count, 0, "failed commit should leave no committed rows");
 }
 
@@ -131,19 +116,13 @@ async fn e2e_transaction_switching_user_id_keeps_rows_in_separate_user_scopes() 
         same_user_shard_pair("txn-scope-user-a", "txn-scope-user-b").await;
     let pg = env.pg_connect().await;
 
-    create_user_kalam_table(
-        &pg,
-        &table,
-        "id TEXT, name TEXT, age INTEGER",
-    )
-    .await;
+    create_user_kalam_table(&pg, &table, "id TEXT, name TEXT, age INTEGER").await;
 
     await_user_shard_leader(&first_user_id).await;
     await_user_shard_leader(&second_user_id).await;
 
-    let (visible_a_in_tx, visible_b_in_tx) = retry_transient_user_leader_error(
-        "multi-user transaction inflight visibility",
-        || {
+    let (visible_a_in_tx, visible_b_in_tx) =
+        retry_transient_user_leader_error("multi-user transaction inflight visibility", || {
             let env = &env;
             let qualified_table = qualified_table.clone();
             let first_user_id = first_user_id.clone();
@@ -180,10 +159,7 @@ async fn e2e_transaction_switching_user_id_keeps_rows_in_separate_user_scopes() 
                 .await?;
 
                 let visible_b = tx
-                    .query(
-                        &format!("SELECT id, name FROM {qualified_table} ORDER BY id"),
-                        &[],
-                    )
+                    .query(&format!("SELECT id, name FROM {qualified_table} ORDER BY id"), &[])
                     .await?
                     .iter()
                     .map(|row| (row.get::<_, String>(0), row.get::<_, String>(1)))
@@ -192,10 +168,7 @@ async fn e2e_transaction_switching_user_id_keeps_rows_in_separate_user_scopes() 
                 tx.batch_execute(&format!("SET LOCAL kalam.user_id = '{first_user_id}'"))
                     .await?;
                 let visible_a = tx
-                    .query(
-                        &format!("SELECT id, name FROM {qualified_table} ORDER BY id"),
-                        &[],
-                    )
+                    .query(&format!("SELECT id, name FROM {qualified_table} ORDER BY id"), &[])
                     .await?
                     .iter()
                     .map(|row| (row.get::<_, String>(0), row.get::<_, String>(1)))
@@ -204,54 +177,59 @@ async fn e2e_transaction_switching_user_id_keeps_rows_in_separate_user_scopes() 
                 tx.commit().await?;
                 Ok((visible_a, visible_b))
             }
-        },
-    )
-    .await;
+        })
+        .await;
 
-    assert_eq!(visible_a_in_tx, vec![
-        ("profile-1".to_string(), "Alice".to_string()),
-        ("profile-2".to_string(), "Ava".to_string()),
-    ]);
-    assert_eq!(visible_b_in_tx, vec![
-        ("profile-1".to_string(), "Bob".to_string()),
-        ("profile-2".to_string(), "Bea".to_string()),
-    ]);
+    assert_eq!(
+        visible_a_in_tx,
+        vec![
+            ("profile-1".to_string(), "Alice".to_string()),
+            ("profile-2".to_string(), "Ava".to_string()),
+        ]
+    );
+    assert_eq!(
+        visible_b_in_tx,
+        vec![
+            ("profile-1".to_string(), "Bob".to_string()),
+            ("profile-2".to_string(), "Bea".to_string()),
+        ]
+    );
 
     let reader_a = env.pg_connect().await;
     set_user_id(&reader_a, &first_user_id).await;
     await_user_shard_leader(&first_user_id).await;
     let rows_a = reader_a
-        .query(
-            &format!("SELECT id, name FROM {qualified_table} ORDER BY id"),
-            &[],
-        )
+        .query(&format!("SELECT id, name FROM {qualified_table} ORDER BY id"), &[])
         .await
         .expect("query user-a rows");
     let visible_a = rows_a
         .iter()
         .map(|row| (row.get::<_, String>(0), row.get::<_, String>(1)))
         .collect::<Vec<_>>();
-    assert_eq!(visible_a, vec![
-        ("profile-1".to_string(), "Alice".to_string()),
-        ("profile-2".to_string(), "Ava".to_string()),
-    ]);
+    assert_eq!(
+        visible_a,
+        vec![
+            ("profile-1".to_string(), "Alice".to_string()),
+            ("profile-2".to_string(), "Ava".to_string()),
+        ]
+    );
 
     let reader_b = env.pg_connect().await;
     set_user_id(&reader_b, &second_user_id).await;
     await_user_shard_leader(&second_user_id).await;
     let rows_b = reader_b
-        .query(
-            &format!("SELECT id, name FROM {qualified_table} ORDER BY id"),
-            &[],
-        )
+        .query(&format!("SELECT id, name FROM {qualified_table} ORDER BY id"), &[])
         .await
         .expect("query user-b rows");
     let visible_b = rows_b
         .iter()
         .map(|row| (row.get::<_, String>(0), row.get::<_, String>(1)))
         .collect::<Vec<_>>();
-    assert_eq!(visible_b, vec![
-        ("profile-1".to_string(), "Bob".to_string()),
-        ("profile-2".to_string(), "Bea".to_string()),
-    ]);
+    assert_eq!(
+        visible_b,
+        vec![
+            ("profile-1".to_string(), "Bob".to_string()),
+            ("profile-2".to_string(), "Bea".to_string()),
+        ]
+    );
 }

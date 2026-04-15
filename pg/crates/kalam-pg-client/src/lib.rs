@@ -8,7 +8,8 @@ use kalam_pg_common::{KalamPgError, RemoteServerConfig};
 use kalamdb_pg::{
     BeginTransactionRequest, CloseSessionRequest, CommitTransactionRequest, DeleteRpcRequest,
     ExecuteQueryRpcRequest, ExecuteSqlRpcRequest, InsertRpcRequest, OpenSessionRequest,
-    PgServiceClient, PingRequest, RollbackTransactionRequest, ScanRpcRequest, UpdateRpcRequest,
+    PgServiceClient, PingRequest, RollbackTransactionRequest, ScanFilterExpression,
+    ScanRpcRequest, UpdateRpcRequest,
 };
 #[cfg(feature = "tls")]
 use tonic::transport::{Certificate, ClientTlsConfig, Identity};
@@ -76,14 +77,14 @@ impl RemoteKalamClient {
             .map_err(|error| Self::connect_err(&error, &server_addr))?;
 
         let auth_header = match config.auth_header.as_deref().filter(|v| !v.is_empty()) {
-            Some(value) => Some(value.parse::<tonic::metadata::MetadataValue<_>>().map_err(
-                |error| {
+            Some(value) => {
+                Some(value.parse::<tonic::metadata::MetadataValue<_>>().map_err(|error| {
                     KalamPgError::Validation(format!(
                         "invalid auth_header metadata value: {}",
                         error
                     ))
-                },
-            )?),
+                })?)
+            },
             None => None,
         };
 
@@ -278,8 +279,17 @@ impl RemoteKalamClient {
         user_id: Option<&str>,
         columns: Vec<String>,
         limit: Option<u64>,
+        filters: Vec<(String, String)>,
     ) -> Result<ScanResponse, KalamPgError> {
         let mut client = PgServiceClient::new(self.channel.clone());
+        let grpc_filters = filters
+            .into_iter()
+            .map(|(column, value)| ScanFilterExpression {
+                column,
+                op: "eq".to_string(),
+                value,
+            })
+            .collect();
         let request = self.authorized_request(ScanRpcRequest {
             namespace: namespace.to_string(),
             table_name: table_name.to_string(),
@@ -288,6 +298,7 @@ impl RemoteKalamClient {
             user_id: user_id.map(str::to_string),
             columns,
             limit,
+            filters: grpc_filters,
         });
         let response = client
             .scan(request)
@@ -450,10 +461,7 @@ impl RemoteKalamClient {
             session_id: session_id.to_string(),
             transaction_id: transaction_id.to_string(),
         });
-        let response = client
-            .rollback_transaction(request)
-            .await?
-            .into_inner();
+        let response = client.rollback_transaction(request).await?.into_inner();
         Ok(response.transaction_id)
     }
 

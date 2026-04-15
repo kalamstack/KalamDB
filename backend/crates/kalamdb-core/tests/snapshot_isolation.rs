@@ -87,6 +87,7 @@ async fn scan_names(
             columns: vec![],
             limit: None,
             user_id: None,
+        filters: vec![],
         })
         .await
         .expect("scan succeeds");

@@ -24,7 +24,8 @@ fn parse_transaction_id(transaction_id: &str) -> TransactionId {
 #[ntest::timeout(6000)]
 async fn repeated_commit_vs_rollback_clears_coordinator_state() {
     let (app_ctx, _test_db) = create_cluster_app_context().await;
-    let table_id = create_shared_table(&app_ctx, &unique_namespace("tx_race_commit_rb"), "items").await;
+    let table_id =
+        create_shared_table(&app_ctx, &unique_namespace("tx_race_commit_rb"), "items").await;
     let service = Arc::new(OperationService::new(Arc::clone(&app_ctx)));
     let session_id = "pg-7101-deadbeef";
     let owner_key =
@@ -56,10 +57,10 @@ async fn repeated_commit_vs_rollback_clears_coordinator_state() {
         let commit_tx = parsed_transaction_id.clone();
         let rollback_tx = parsed_transaction_id.clone();
 
-        let (commit_result, rollback_result) = tokio::join!(
-            async move { commit_coordinator.commit(&commit_tx).await },
-            async move { rollback_coordinator.rollback(&rollback_tx) },
-        );
+        let (commit_result, rollback_result) =
+            tokio::join!(async move { commit_coordinator.commit(&commit_tx).await }, async move {
+                rollback_coordinator.rollback(&rollback_tx)
+            },);
 
         let commit_ok = commit_result.is_ok();
         let rollback_ok = rollback_result.is_ok();
@@ -70,24 +71,15 @@ async fn repeated_commit_vs_rollback_clears_coordinator_state() {
 
         assert!(app_ctx.transaction_coordinator().active_metrics().is_empty());
         assert!(
-            app_ctx
-                .transaction_coordinator()
-                .active_for_owner(&owner_key)
-                .is_none(),
+            app_ctx.transaction_coordinator().active_for_owner(&owner_key).is_none(),
             "owner mapping should be cleared after commit/rollback race"
         );
         assert!(
-            app_ctx
-                .transaction_coordinator()
-                .get_handle(&parsed_transaction_id)
-                .is_none(),
+            app_ctx.transaction_coordinator().get_handle(&parsed_transaction_id).is_none(),
             "terminal race should not leave an active handle behind"
         );
         assert!(
-            app_ctx
-                .transaction_coordinator()
-                .get_overlay(&parsed_transaction_id)
-                .is_none(),
+            app_ctx.transaction_coordinator().get_overlay(&parsed_transaction_id).is_none(),
             "terminal race should not leave an orphaned staged overlay"
         );
     }
@@ -100,7 +92,8 @@ async fn repeated_timeout_cleanup_drops_staged_state() {
     config.transaction_timeout_secs = 1;
 
     let (app_ctx, _test_db) = create_cluster_app_context_with_config(config).await;
-    let table_id = create_shared_table(&app_ctx, &unique_namespace("tx_race_timeout"), "items").await;
+    let table_id =
+        create_shared_table(&app_ctx, &unique_namespace("tx_race_timeout"), "items").await;
     let service = Arc::new(OperationService::new(Arc::clone(&app_ctx)));
     let executor = create_executor(Arc::clone(&app_ctx));
     let observer_ctx = observer_exec_ctx(&app_ctx);
@@ -143,10 +136,7 @@ async fn repeated_timeout_cleanup_drops_staged_state() {
         let parsed_transaction_id = parse_transaction_id(&transaction_id);
         assert!(app_ctx.transaction_coordinator().active_metrics().is_empty());
         assert!(
-            app_ctx
-                .transaction_coordinator()
-                .get_overlay(&parsed_transaction_id)
-                .is_none(),
+            app_ctx.transaction_coordinator().get_overlay(&parsed_transaction_id).is_none(),
             "timed out transaction should not retain staged writes"
         );
 
@@ -157,17 +147,11 @@ async fn repeated_timeout_cleanup_drops_staged_state() {
             .expect("rollback returns transaction id");
 
         assert!(
-            app_ctx
-                .transaction_coordinator()
-                .active_for_owner(&owner_key)
-                .is_none(),
+            app_ctx.transaction_coordinator().active_for_owner(&owner_key).is_none(),
             "timeout cleanup should clear owner mapping"
         );
         assert!(
-            app_ctx
-                .transaction_coordinator()
-                .get_handle(&parsed_transaction_id)
-                .is_none(),
+            app_ctx.transaction_coordinator().get_handle(&parsed_transaction_id).is_none(),
             "timeout cleanup should clear the terminal transaction handle"
         );
     }
@@ -214,17 +198,11 @@ async fn repeated_request_cleanup_rolls_back_without_leaking_state() {
             "request cleanup should clear owner mapping"
         );
         assert!(
-            app_ctx
-                .transaction_coordinator()
-                .get_handle(&transaction_id)
-                .is_none(),
+            app_ctx.transaction_coordinator().get_handle(&transaction_id).is_none(),
             "request cleanup should clear the transaction handle"
         );
         assert!(
-            app_ctx
-                .transaction_coordinator()
-                .get_overlay(&transaction_id)
-                .is_none(),
+            app_ctx.transaction_coordinator().get_overlay(&transaction_id).is_none(),
             "request cleanup should not leave staged overlays behind"
         );
     }

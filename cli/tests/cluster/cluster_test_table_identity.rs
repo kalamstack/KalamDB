@@ -14,7 +14,8 @@ use std::time::Duration;
 
 fn query_with_verification_limit(sql: &str, expected_rows: usize) -> String {
     let trimmed = sql.trim().trim_end_matches(';');
-    if expected_rows == 0 || trimmed.split_whitespace().any(|part| part.eq_ignore_ascii_case("LIMIT"))
+    if expected_rows == 0
+        || trimmed.split_whitespace().any(|part| part.eq_ignore_ascii_case("LIMIT"))
     {
         trimmed.to_string()
     } else {

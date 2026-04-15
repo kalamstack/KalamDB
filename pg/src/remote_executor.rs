@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use datafusion_common::ScalarValue;
 use kalam_pg_api::request::{DeleteRequest, InsertRequest, ScanRequest, UpdateRequest};
 use kalam_pg_api::response::{MutationResponse, ScanResponse};
 use kalam_pg_api::KalamBackendExecutor;
@@ -26,6 +27,17 @@ impl KalamBackendExecutor for RemoteBackendExecutor {
         let columns = request.projection.unwrap_or_default();
         let limit = request.limit.map(|l| l as u64);
 
+        // Convert ScanFilter::Eq to (column, value) pairs for gRPC pushdown
+        let filters: Vec<(String, String)> = request
+            .filters
+            .iter()
+            .filter_map(|f| match f {
+                kalam_pg_api::ScanFilter::Eq { column, value } => {
+                    scalar_to_string(value).map(|v| (column.clone(), v))
+                },
+            })
+            .collect();
+
         self.client
             .scan(
                 request.table_id.namespace_id().as_str(),
@@ -35,6 +47,7 @@ impl KalamBackendExecutor for RemoteBackendExecutor {
                 user_id.as_deref(),
                 columns,
                 limit,
+                filters,
             )
             .await
     }
@@ -109,5 +122,24 @@ impl KalamBackendExecutor for RemoteBackendExecutor {
                 &request.pk_value,
             )
             .await
+    }
+}
+
+/// Convert a DataFusion ScalarValue to a plain string for gRPC filter transport.
+fn scalar_to_string(value: &ScalarValue) -> Option<String> {
+    match value {
+        ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)) => Some(s.clone()),
+        ScalarValue::Boolean(Some(b)) => Some(b.to_string()),
+        ScalarValue::Int8(Some(v)) => Some(v.to_string()),
+        ScalarValue::Int16(Some(v)) => Some(v.to_string()),
+        ScalarValue::Int32(Some(v)) => Some(v.to_string()),
+        ScalarValue::Int64(Some(v)) => Some(v.to_string()),
+        ScalarValue::UInt8(Some(v)) => Some(v.to_string()),
+        ScalarValue::UInt16(Some(v)) => Some(v.to_string()),
+        ScalarValue::UInt32(Some(v)) => Some(v.to_string()),
+        ScalarValue::UInt64(Some(v)) => Some(v.to_string()),
+        ScalarValue::Float32(Some(v)) => Some(v.to_string()),
+        ScalarValue::Float64(Some(v)) => Some(v.to_string()),
+        _ => None,
     }
 }

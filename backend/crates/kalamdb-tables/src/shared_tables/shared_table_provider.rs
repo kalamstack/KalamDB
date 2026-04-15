@@ -32,8 +32,8 @@ use datafusion::scalar::ScalarValue;
 use kalamdb_commons::conversions::arrow_json_conversion::{coerce_rows, coerce_updates};
 use kalamdb_commons::ids::SharedTableRowId;
 use kalamdb_commons::models::datatypes::KalamDataType;
-use kalamdb_commons::models::OperationKind;
 use kalamdb_commons::models::rows::Row;
+use kalamdb_commons::models::OperationKind;
 use kalamdb_commons::models::UserId;
 use kalamdb_commons::websocket::ChangeNotification;
 use kalamdb_commons::NotLeaderError;
@@ -200,7 +200,8 @@ impl SharedTableProvider {
         if self.core.services.cluster_coordinator.is_cluster_mode().await {
             let is_leader = self.core.services.cluster_coordinator.is_leader_for_shared().await;
             if !is_leader {
-                let leader_addr = self.core.services.cluster_coordinator.leader_addr_for_shared().await;
+                let leader_addr =
+                    self.core.services.cluster_coordinator.leader_addr_for_shared().await;
                 return Err(KalamDbError::NotLeader { leader_addr });
             }
         }
@@ -214,14 +215,12 @@ impl SharedTableProvider {
             return Ok(());
         }
 
-        self.ensure_shared_write_leader()
-            .await
-            .map_err(|error| match error {
-                KalamDbError::NotLeader { leader_addr } => {
-                    DataFusionError::External(Box::new(NotLeaderError::new(leader_addr)))
-                },
-                other => DataFusionError::Execution(other.to_string()),
-            })
+        self.ensure_shared_write_leader().await.map_err(|error| match error {
+            KalamDbError::NotLeader { leader_addr } => {
+                DataFusionError::External(Box::new(NotLeaderError::new(leader_addr)))
+            },
+            other => DataFusionError::Execution(other.to_string()),
+        })
     }
 
     async fn stage_vector_upsert(
@@ -371,10 +370,9 @@ impl SharedTableProvider {
                 ))
             })?;
         row._commit_seq = commit_seq;
-        self.store
-            .insert_async(*row_key, row)
-            .await
-            .map_err(|e| KalamDbError::InvalidOperation(format!("Failed to patch commit_seq: {}", e)))
+        self.store.insert_async(*row_key, row).await.map_err(|e| {
+            KalamDbError::InvalidOperation(format!("Failed to patch commit_seq: {}", e))
+        })
     }
 
     pub async fn patch_latest_commit_seq_by_pk(
@@ -383,14 +381,12 @@ impl SharedTableProvider {
         commit_seq: u64,
     ) -> Result<bool, KalamDbError> {
         let schema = self.schema_ref();
-        let pk_field = schema
-            .field_with_name(self.primary_key_field_name())
-            .map_err(|e| KalamDbError::InvalidOperation(format!("PK column lookup failed: {}", e)))?;
-        let pk_scalar = kalamdb_commons::conversions::parse_string_as_scalar(
-            pk_value,
-            pk_field.data_type(),
-        )
-        .map_err(KalamDbError::InvalidOperation)?;
+        let pk_field = schema.field_with_name(self.primary_key_field_name()).map_err(|e| {
+            KalamDbError::InvalidOperation(format!("PK column lookup failed: {}", e))
+        })?;
+        let pk_scalar =
+            kalamdb_commons::conversions::parse_string_as_scalar(pk_value, pk_field.data_type())
+                .map_err(KalamDbError::InvalidOperation)?;
 
         let Some((row_key, _)) = self.latest_hot_pk_entry(&pk_scalar).await? else {
             return Ok(false);
@@ -1163,77 +1159,78 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
         if snapshot_commit_seq.is_none() {
             if let Some(expr) = filter {
                 if let Some(pk_literal) = base::extract_pk_equality_literal(expr, pk_name) {
-                // Coerce the literal to the PK column's Arrow data type
-                let pk_field = schema.field_with_name(pk_name).ok();
-                let pk_scalar = if let Some(field) = pk_field {
-                    kalamdb_commons::conversions::parse_string_as_scalar(
-                        &pk_literal.to_string(),
-                        field.data_type(),
-                    )
-                    .ok()
-                    .unwrap_or(pk_literal)
-                } else {
-                    pk_literal
-                };
+                    // Coerce the literal to the PK column's Arrow data type
+                    let pk_field = schema.field_with_name(pk_name).ok();
+                    let pk_scalar = if let Some(field) = pk_field {
+                        kalamdb_commons::conversions::parse_string_as_scalar(
+                            &pk_literal.to_string(),
+                            field.data_type(),
+                        )
+                        .ok()
+                        .unwrap_or(pk_literal)
+                    } else {
+                        pk_literal
+                    };
 
-                // Try hot storage PK index (O(1))
-                let found = self.find_by_pk(&pk_scalar).await?;
-                if let Some((row_id, row)) = found {
-                    log::debug!(
-                        "[SharedProvider] PK fast-path hit for {}={}, _seq={}",
-                        pk_name,
-                        pk_scalar,
-                        row_id.as_i64()
-                    );
-                    return crate::utils::base::rows_to_arrow_batch(
-                        &schema,
-                        vec![(row_id, row)],
-                        projection,
-                        |_, _| {},
-                    );
-                }
+                    // Try hot storage PK index (O(1))
+                    let found = self.find_by_pk(&pk_scalar).await?;
+                    if let Some((row_id, row)) = found {
+                        log::debug!(
+                            "[SharedProvider] PK fast-path hit for {}={}, _seq={}",
+                            pk_name,
+                            pk_scalar,
+                            row_id.as_i64()
+                        );
+                        return crate::utils::base::rows_to_arrow_batch(
+                            &schema,
+                            vec![(row_id, row)],
+                            projection,
+                            |_, _| {},
+                        );
+                    }
 
-                // Not in hot storage — check if it is tombstoned before trying cold storage.
-                // A tombstone in hot storage means the row was deleted; falling back to Parquet
-                // would surface a stale version and violate MVCC visibility rules.
-                if self.pk_tombstoned_in_hot(&pk_scalar).await? {
-                    log::debug!(
-                        "[SharedProvider] PK fast-path tombstone for {}={}",
-                        pk_name,
-                        pk_scalar
-                    );
+                    // Not in hot storage — check if it is tombstoned before trying cold storage.
+                    // A tombstone in hot storage means the row was deleted; falling back to Parquet
+                    // would surface a stale version and violate MVCC visibility rules.
+                    if self.pk_tombstoned_in_hot(&pk_scalar).await? {
+                        log::debug!(
+                            "[SharedProvider] PK fast-path tombstone for {}={}",
+                            pk_name,
+                            pk_scalar
+                        );
+                        return crate::utils::base::rows_to_arrow_batch(
+                            &schema,
+                            Vec::<(SharedTableRowId, SharedTableRow)>::new(),
+                            projection,
+                            |_, _| {},
+                        );
+                    }
+
+                    // Not in hot storage — check cold storage via manifest-based lookup
+                    let cold_found =
+                        base::find_row_by_pk(self, None, &pk_scalar.to_string()).await?;
+                    if let Some((row_id, row)) = cold_found {
+                        log::debug!(
+                            "[SharedProvider] PK fast-path cold hit for {}={}",
+                            pk_name,
+                            pk_scalar
+                        );
+                        return crate::utils::base::rows_to_arrow_batch(
+                            &schema,
+                            vec![(row_id, row)],
+                            projection,
+                            |_, _| {},
+                        );
+                    }
+
+                    // PK not found anywhere — return empty batch
+                    log::debug!("[SharedProvider] PK fast-path miss for {}={}", pk_name, pk_scalar);
                     return crate::utils::base::rows_to_arrow_batch(
                         &schema,
                         Vec::<(SharedTableRowId, SharedTableRow)>::new(),
                         projection,
                         |_, _| {},
                     );
-                }
-
-                // Not in hot storage — check cold storage via manifest-based lookup
-                let cold_found = base::find_row_by_pk(self, None, &pk_scalar.to_string()).await?;
-                if let Some((row_id, row)) = cold_found {
-                    log::debug!(
-                        "[SharedProvider] PK fast-path cold hit for {}={}",
-                        pk_name,
-                        pk_scalar
-                    );
-                    return crate::utils::base::rows_to_arrow_batch(
-                        &schema,
-                        vec![(row_id, row)],
-                        projection,
-                        |_, _| {},
-                    );
-                }
-
-                // PK not found anywhere — return empty batch
-                log::debug!("[SharedProvider] PK fast-path miss for {}={}", pk_name, pk_scalar);
-                return crate::utils::base::rows_to_arrow_batch(
-                    &schema,
-                    Vec::<(SharedTableRowId, SharedTableRow)>::new(),
-                    projection,
-                    |_, _| {},
-                );
                 }
             }
         }
@@ -1492,10 +1489,7 @@ impl SharedTableProvider {
             let has_topics = self.core.has_topic_routes(&table_id);
             let has_live_subs = notification_service.has_subscribers(None, &table_id);
             let notification = if has_topics || has_live_subs {
-                Some(ChangeNotification::insert(
-                    table_id,
-                    Self::build_notification_row(&entity),
-                ))
+                Some(ChangeNotification::insert(table_id, Self::build_notification_row(&entity)))
             } else {
                 None
             };
@@ -1573,12 +1567,11 @@ impl SharedTableProvider {
                     .collect();
 
                 let store = self.store.clone();
-                let hot_duplicate = tokio::task::spawn_blocking(
-                    move || -> Result<Option<String>, KalamDbError> {
+                let hot_duplicate =
+                    tokio::task::spawn_blocking(move || -> Result<Option<String>, KalamDbError> {
                         for (pk_str, prefix) in &pk_prefixes {
-                            if let Some((_row_id, row)) = store
-                                .get_latest_by_index_prefix(0, prefix)
-                                .map_err(|e| {
+                            if let Some((_row_id, row)) =
+                                store.get_latest_by_index_prefix(0, prefix).map_err(|e| {
                                     KalamDbError::InvalidOperation(format!(
                                         "PK index scan failed: {}",
                                         e
@@ -1591,10 +1584,11 @@ impl SharedTableProvider {
                             }
                         }
                         Ok(None)
-                    },
-                )
-                .await
-                .map_err(|e| KalamDbError::InvalidOperation(format!("spawn_blocking error: {}", e)))??;
+                    })
+                    .await
+                    .map_err(|e| {
+                        KalamDbError::InvalidOperation(format!("spawn_blocking error: {}", e))
+                    })??;
 
                 if let Some(dup_pk) = hot_duplicate {
                     return Err(KalamDbError::AlreadyExists(format!(
@@ -1769,8 +1763,7 @@ impl SharedTableProvider {
         rows: Vec<Row>,
     ) -> Result<Vec<(SharedTableRowId, Option<ChangeNotification>)>, KalamDbError> {
         let commit_seq = self.core.services.commit_sequence_source.allocate_next();
-        self.insert_batch_deferred_prevalidated_with_commit_seq(rows, commit_seq)
-            .await
+        self.insert_batch_deferred_prevalidated_with_commit_seq(rows, commit_seq).await
     }
 
     pub async fn insert_batch_deferred_prevalidated_with_commit_seq(
@@ -1787,9 +1780,7 @@ impl SharedTableProvider {
             deferred_side_effects = true
         );
         async move {
-            let entries = self
-                .persist_insert_batch_rows(rows, false, commit_seq)
-                .await?;
+            let entries = self.persist_insert_batch_rows(rows, false, commit_seq).await?;
 
             let notification_service = self.core.services.notification_service.clone();
             let table_id = self.core.table_id().clone();
@@ -1830,8 +1821,9 @@ impl SharedTableProvider {
         );
         async move {
             let schema = self.schema();
-            let updates = coerce_updates(updates, &schema)
-                .map_err(|e| KalamDbError::InvalidOperation(format!("Schema coercion failed: {}", e)))?;
+            let updates = coerce_updates(updates, &schema).map_err(|e| {
+                KalamDbError::InvalidOperation(format!("Schema coercion failed: {}", e))
+            })?;
 
             let pk_name = self.primary_key_field_name().to_string();
             let pk_field = schema.field_with_name(&pk_name).map_err(|e| {
@@ -2101,9 +2093,8 @@ impl TableProvider for SharedTableProvider {
         let Some(transaction_query_context) = extract_transaction_query_context(state) else {
             return self.base_scan(state, projection, filters, limit).await;
         };
-        let Some(table_overlay) = transaction_query_context
-            .overlay_view
-            .overlay_for_table(self.core.table_id())
+        let Some(table_overlay) =
+            transaction_query_context.overlay_view.overlay_for_table(self.core.table_id())
         else {
             return self.base_scan(state, projection, filters, limit).await;
         };
@@ -2114,12 +2105,7 @@ impl TableProvider for SharedTableProvider {
             self.primary_key_field_name(),
         )?;
         let base_plan = self
-            .base_scan(
-                state,
-                overlay_projection.effective_projection.as_ref(),
-                filters,
-                limit,
-            )
+            .base_scan(state, overlay_projection.effective_projection.as_ref(), filters, limit)
             .await?;
 
         Ok(Arc::new(TransactionOverlayExec::try_new(
@@ -2209,7 +2195,8 @@ impl TableProvider for SharedTableProvider {
         let commit_seq = transaction_query_context
             .is_none()
             .then(|| self.core.services.commit_sequence_source.allocate_next());
-        let mut staged_mutations = transaction_query_context.map(|_| Vec::with_capacity(rows.len()));
+        let mut staged_mutations =
+            transaction_query_context.map(|_| Vec::with_capacity(rows.len()));
 
         for row in rows {
             let pk_value = crate::utils::datafusion_dml::extract_pk_value(&row, &pk_column)?;
@@ -2306,7 +2293,8 @@ impl TableProvider for SharedTableProvider {
         let commit_seq = transaction_query_context
             .is_none()
             .then(|| self.core.services.commit_sequence_source.allocate_next());
-        let mut staged_mutations = transaction_query_context.map(|_| Vec::with_capacity(rows.len()));
+        let mut staged_mutations =
+            transaction_query_context.map(|_| Vec::with_capacity(rows.len()));
 
         for row in rows {
             let pk_value = crate::utils::datafusion_dml::extract_pk_value(&row, &pk_column)?;
@@ -2340,11 +2328,7 @@ impl TableProvider for SharedTableProvider {
             }
 
             let result = self
-                .update_by_pk_value(
-                    base::system_user_id(),
-                    &pk_value,
-                    evaluated_updates,
-                )
+                .update_by_pk_value(base::system_user_id(), &pk_value, evaluated_updates)
                 .await
                 .map_err(|e| DataFusionError::Execution(e.to_string()))?;
             if let Some(row_key) = result {

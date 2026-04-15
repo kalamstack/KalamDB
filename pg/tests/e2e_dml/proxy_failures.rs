@@ -1,5 +1,8 @@
 use std::time::{Duration, Instant};
-use std::{env, ops::{Deref, DerefMut}};
+use std::{
+    env,
+    ops::{Deref, DerefMut},
+};
 
 use serde_json::Value;
 use tokio_postgres::{Config, NoTls};
@@ -115,7 +118,9 @@ async fn wait_for_pg_backend_exit(backend_pid: u32, timeout: Duration) {
         }
 
         if Instant::now() >= deadline {
-            panic!("backend pid {backend_pid} remained in pg_stat_activity past disconnect timeout");
+            panic!(
+                "backend pid {backend_pid} remained in pg_stat_activity past disconnect timeout"
+            );
         }
 
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -157,10 +162,7 @@ async fn create_proxy_shared_foreign_table(
         .await
         .expect("create proxy foreign table");
 
-    TestEnv::global()
-        .await
-        .wait_for_kalamdb_table_exists("e2e", table)
-        .await;
+    TestEnv::global().await.wait_for_kalamdb_table_exists("e2e", table).await;
 }
 
 async fn cleanup_proxy_table(env: &TestEnv, table: &str, server_name: &str) {
@@ -202,17 +204,14 @@ async fn wait_for_row_count(
     let deadline = Instant::now() + timeout;
 
     loop {
-        match client
-            .query_one(&format!("SELECT COUNT(*) FROM {qualified_table}"), &[])
-            .await
-        {
+        match client.query_one(&format!("SELECT COUNT(*) FROM {qualified_table}"), &[]).await {
             Ok(row) => {
                 let count: i64 = row.get(0);
                 if count == expected_count {
                     return;
                 }
-            }
-            Err(_) => {}
+            },
+            Err(_) => {},
         }
 
         if Instant::now() >= deadline {
@@ -267,7 +266,11 @@ async fn wait_for_transaction_row(
     }
 }
 
-async fn wait_for_session_rows(env: &TestEnv, backend_pid: u32, timeout: Duration) -> Vec<Vec<Value>> {
+async fn wait_for_session_rows(
+    env: &TestEnv,
+    backend_pid: u32,
+    timeout: Duration,
+) -> Vec<Vec<Value>> {
     let deadline = Instant::now() + timeout;
 
     loop {
@@ -316,10 +319,7 @@ fn proxy_host_port(base_url: &str) -> (String, u16) {
     let address = base_url.trim_start_matches("http://").trim_start_matches("https://");
     let mut parts = address.split(':');
     let host = parts.next().unwrap_or("127.0.0.1").to_string();
-    let port = parts
-        .next()
-        .and_then(|value| value.parse::<u16>().ok())
-        .unwrap_or(9188);
+    let port = parts.next().and_then(|value| value.parse::<u16>().ok()).unwrap_or(9188);
     (host, port)
 }
 
@@ -339,18 +339,18 @@ async fn run_terminal_proxy_cleanup_scenario(action: TerminalAction) {
     let backend_pid = pg_backend_pid(&pg).await;
     let tx = pg.transaction().await.expect("begin transaction through proxy");
     tx.execute(
-        &format!(
-            "INSERT INTO {qualified_table} (id, title, value) VALUES ($1, $2, $3)"
-        ),
-        &[&format!("{}-1", action.label()), &format!("{} row", action.label()), &7_i32],
+        &format!("INSERT INTO {qualified_table} (id, title, value) VALUES ($1, $2, $3)"),
+        &[
+            &format!("{}-1", action.label()),
+            &format!("{} row", action.label()),
+            &7_i32,
+        ],
     )
     .await
     .expect("stage row through proxy-backed foreign table");
 
     assert!(
-        proxy
-            .wait_for_active_connections(1, Duration::from_secs(3))
-            .await,
+        proxy.wait_for_active_connections(1, Duration::from_secs(3)).await,
         "proxy should observe the gRPC connection before transport failure"
     );
 
@@ -358,8 +358,10 @@ async fn run_terminal_proxy_cleanup_scenario(action: TerminalAction) {
     assert_eq!(session_rows.len(), 1);
     assert_eq!(string_cell(&session_rows[0], 1).as_deref(), Some("idle in transaction"));
     assert_eq!(string_cell(&session_rows[0], 3).as_deref(), Some("active"));
-    let transaction_id = string_cell(&session_rows[0], 2).expect("transaction id in system.sessions");
-    let transaction_row = wait_for_transaction_row(env, &transaction_id, Duration::from_secs(3)).await;
+    let transaction_id =
+        string_cell(&session_rows[0], 2).expect("transaction id in system.sessions");
+    let transaction_row =
+        wait_for_transaction_row(env, &transaction_id, Duration::from_secs(3)).await;
     assert_eq!(string_cell(&transaction_row, 2).as_deref(), Some("PgRpc"));
     assert!(matches!(
         string_cell(&transaction_row, 3).as_deref(),
@@ -370,10 +372,8 @@ async fn run_terminal_proxy_cleanup_scenario(action: TerminalAction) {
 
     match action {
         TerminalAction::Commit => {
-            let terminal_error = tx
-                .commit()
-                .await
-                .expect_err("commit should fail while proxy is down");
+            let terminal_error =
+                tx.commit().await.expect_err("commit should fail while proxy is down");
             let message = postgres_error_text(&terminal_error);
             assert_transport_or_timeout_error(&message, action.label());
 
@@ -399,10 +399,7 @@ async fn run_terminal_proxy_cleanup_scenario(action: TerminalAction) {
     wait_for_transaction_cleanup(env, &transaction_id, Duration::from_secs(5)).await;
 
     let final_rows = env
-        .kalamdb_sql(&format!(
-            "SELECT id FROM {qualified_table} WHERE id = '{}-1'",
-            action.label()
-        ))
+        .kalamdb_sql(&format!("SELECT id FROM {qualified_table} WHERE id = '{}-1'", action.label()))
         .await;
     let final_text = serde_json::to_string(&final_rows).unwrap_or_default();
     assert!(

@@ -5,8 +5,8 @@ use kalamdb_commons::schemas::TableType;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::schema_registry::SchemaRegistry;
 use kalamdb_core::sql::context::ExecutionContext;
-use kalamdb_core::sql::executor::{PreparedExecutionStatement, ScalarValue, SqlExecutor};
 use kalamdb_core::sql::executor::request_transaction_state::RequestTransactionState;
+use kalamdb_core::sql::executor::{PreparedExecutionStatement, ScalarValue, SqlExecutor};
 use kalamdb_core::sql::SqlImpersonationService;
 use kalamdb_sql::classifier::SqlStatementKind;
 use kalamdb_system::FileSubfolderState;
@@ -256,17 +256,17 @@ pub(super) async fn execute_batch_path(
     let mut total_updated = 0usize;
     let mut total_deleted = 0usize;
     let mut params_remaining = Some(params);
-    let mut request_transaction_state = match RequestTransactionState::from_execution_context(exec_ctx)
-    {
-        Ok(state) => state,
-        Err(err) => {
-            return HttpResponse::BadRequest().json(SqlResponse::error(
-                ErrorCode::SqlExecutionError,
-                &err.to_string(),
-                took_ms(start_time),
-            ));
-        },
-    };
+    let mut request_transaction_state =
+        match RequestTransactionState::from_execution_context(exec_ctx) {
+            Ok(state) => state,
+            Err(err) => {
+                return HttpResponse::BadRequest().json(SqlResponse::error(
+                    ErrorCode::SqlExecutionError,
+                    &err.to_string(),
+                    took_ms(start_time),
+                ));
+            },
+        };
     if let Some(state) = request_transaction_state.as_mut() {
         state.sync_from_coordinator(app_context);
     }
@@ -294,20 +294,18 @@ pub(super) async fn execute_batch_path(
                     let batch_len = batch_end - idx;
 
                     if batch_len > 1 {
-                        let batch_stmts: Vec<&PreparedExecutionStatement> =
-                            prepared_statements[idx..batch_end]
-                                .iter()
-                                .map(|s| &s.prepared_statement)
-                                .collect();
+                        let batch_stmts: Vec<&PreparedExecutionStatement> = prepared_statements
+                            [idx..batch_end]
+                            .iter()
+                            .map(|s| &s.prepared_statement)
+                            .collect();
                         let batch_start = Instant::now();
 
-                        match sql_executor
-                            .try_batch_insert_in_transaction(
-                                &batch_stmts,
-                                exec_ctx,
-                                transaction_id,
-                            )
-                        {
+                        match sql_executor.try_batch_insert_in_transaction(
+                            &batch_stmts,
+                            exec_ctx,
+                            transaction_id,
+                        ) {
                             Ok(Some(results)) => {
                                 let batch_rows: usize =
                                     results.iter().map(|r| r.affected_rows()).sum();
@@ -334,11 +332,7 @@ pub(super) async fn execute_batch_path(
                                 return HttpResponse::BadRequest().json(
                                     SqlResponse::error_with_details(
                                         ErrorCode::SqlExecutionError,
-                                        &format!(
-                                            "Statement {} failed: {}",
-                                            idx + 1,
-                                            err
-                                        ),
+                                        &format!("Statement {} failed: {}", idx + 1, err),
                                         &prepared_statements[idx].prepared_statement.sql,
                                         took_ms(start_time),
                                     ),
@@ -595,10 +589,7 @@ fn is_batchable_insert(stmt: &PreparedApiExecutionStatement) -> bool {
         return false;
     }
     matches!(
-        stmt.prepared_statement
-            .classified_statement
-            .as_ref()
-            .map(|c| c.kind()),
+        stmt.prepared_statement.classified_statement.as_ref().map(|c| c.kind()),
         Some(SqlStatementKind::Insert(_))
     )
 }

@@ -184,13 +184,13 @@ impl DdlTestEnv {
             Ok(env) => {
                 SKIP_REASON.get_or_init(|| None);
                 Some(ENV.get_or_init(|| env))
-            }
+            },
             Err(reason) => {
                 eprintln!("  [SKIP] DDL tests skipped: {reason}");
                 SKIP_REASON.get_or_init(|| Some(reason));
                 // Store a dummy env so subsequent calls don't re-init.
                 None
-            }
+            },
         }
     }
 
@@ -310,9 +310,7 @@ impl DdlTestEnv {
 
             if std::time::Instant::now() >= deadline {
                 let expectation = if should_exist { "exist" } else { "be removed" };
-                panic!(
-                    "KalamDB table {namespace}.{table} did not {expectation} within timeout"
-                );
+                panic!("KalamDB table {namespace}.{table} did not {expectation} within timeout");
             }
 
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -371,7 +369,10 @@ impl DdlTestEnv {
     }
 
     async fn ensure_test_db(&self) -> Result<(), String> {
-        let postgres = self.pg_connect_to("postgres").await.map_err(|e| format!("connect to postgres database: {e}"))?;
+        let postgres = self
+            .pg_connect_to("postgres")
+            .await
+            .map_err(|e| format!("connect to postgres database: {e}"))?;
 
         let exists = postgres
             .query_opt("SELECT 1 FROM pg_database WHERE datname = $1", &[&TEST_DB])
@@ -434,8 +435,7 @@ impl DdlTestEnv {
         }
         .await;
 
-        let _ = pg.execute("SELECT pg_advisory_unlock($1)", &[&BOOTSTRAP_LOCK_ID])
-            .await;
+        let _ = pg.execute("SELECT pg_advisory_unlock($1)", &[&BOOTSTRAP_LOCK_ID]).await;
 
         pg.disconnect().await;
 
@@ -448,7 +448,7 @@ impl DdlTestEnv {
                 Ok(client) => {
                     client.disconnect().await;
                     return Ok(());
-                }
+                },
                 Err(_) => {
                     if i == 0 {
                         eprintln!("  waiting for PostgreSQL on port {PG_PORT}...");
@@ -463,10 +463,7 @@ impl DdlTestEnv {
         ))
     }
 
-    async fn pg_connect_to(
-        &self,
-        dbname: &str,
-    ) -> Result<OwnedPgClient, tokio_postgres::Error> {
+    async fn pg_connect_to(&self, dbname: &str) -> Result<OwnedPgClient, tokio_postgres::Error> {
         let (client, conn) = Config::new()
             .host(PG_HOST)
             .port(PG_PORT)
@@ -493,11 +490,15 @@ impl DdlTestEnv {
         }
 
         let _ = client
-            .post_json(&format!("{}/v1/api/auth/setup", config.base_url), &serde_json::json!({
-                "username": config.setup_username,
-                "password": config.setup_password,
-                "root_password": config.root_password,
-            }), None)
+            .post_json(
+                &format!("{}/v1/api/auth/setup", config.base_url),
+                &serde_json::json!({
+                    "username": config.setup_username,
+                    "password": config.setup_password,
+                    "root_password": config.root_password,
+                }),
+                None,
+            )
             .await;
 
         if let Some(token) =
@@ -529,10 +530,14 @@ async fn try_login(
     password: &str,
 ) -> Option<String> {
     let resp = client
-        .post_json(&format!("{base_url}/v1/api/auth/login"), &serde_json::json!({
-            "username": username,
-            "password": password,
-        }), None)
+        .post_json(
+            &format!("{base_url}/v1/api/auth/login"),
+            &serde_json::json!({
+                "username": username,
+                "password": password,
+            }),
+            None,
+        )
         .await
         .ok()?;
     if !resp.status.is_success() {

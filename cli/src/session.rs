@@ -14,10 +14,9 @@ use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use kalam_client::{
     credentials::{CredentialStore, Credentials},
-    AuthProvider, AuthRefreshCallback, ClusterHealthResponse, ClusterNodeHealth,
-    ConnectionOptions, KalamLinkClient, KalamLinkError, KalamLinkTimeouts,
-    SubscriptionConfig, SubscriptionOptions, TimestampFormatter, UploadProgress,
-    UploadProgressCallback,
+    AuthProvider, AuthRefreshCallback, ClusterHealthResponse, ClusterNodeHealth, ConnectionOptions,
+    KalamLinkClient, KalamLinkError, KalamLinkTimeouts, SubscriptionConfig, SubscriptionOptions,
+    TimestampFormatter, UploadProgress, UploadProgressCallback,
 };
 use rustyline::completion::Completer;
 use rustyline::error::ReadlineError;
@@ -2500,12 +2499,12 @@ impl CLISession {
                 self.connected = true;
                 self.server_version = Self::normalize_server_field(health.version.clone());
                 self.server_api_version = Self::normalize_server_field(health.api_version.clone());
-                self.server_build_date = health
-                    .build_date
-                    .clone()
-                    .and_then(Self::normalize_server_field);
+                self.server_build_date =
+                    health.build_date.clone().and_then(Self::normalize_server_field);
             },
-            Err(KalamLinkError::ServerError { status_code: 403, .. }) => {
+            Err(KalamLinkError::ServerError {
+                status_code: 403, ..
+            }) => {
                 // Localhost-only endpoint; fall back to authenticated SQL-based cluster info.
             },
             Err(_) => {
@@ -2524,12 +2523,16 @@ impl CLISession {
             if info.is_cluster_mode {
                 match self.client.cluster_health_check().await {
                     Ok(cluster_health) => {
-                        self.server_version = Self::normalize_server_field(cluster_health.version.clone());
-                        self.server_build_date = Self::normalize_server_field(cluster_health.build_date.clone());
+                        self.server_version =
+                            Self::normalize_server_field(cluster_health.version.clone());
+                        self.server_build_date =
+                            Self::normalize_server_field(cluster_health.build_date.clone());
                         self.render_cluster_health_response(&cluster_health);
                         return Ok(());
                     },
-                    Err(KalamLinkError::ServerError { status_code: 403, .. }) => {
+                    Err(KalamLinkError::ServerError {
+                        status_code: 403, ..
+                    }) => {
                         self.render_cluster_health_fallback(
                             info,
                             Some("Cluster health endpoint is localhost-only; using system.cluster"),
@@ -2551,7 +2554,9 @@ impl CLISession {
                     println!("✓ Server is healthy");
                     return Ok(());
                 },
-                Err(KalamLinkError::ServerError { status_code: 403, .. }) => {
+                Err(KalamLinkError::ServerError {
+                    status_code: 403, ..
+                }) => {
                     println!("{} Server is reachable", "✓".green());
                     println!("  {}", "Health endpoint is restricted to localhost".yellow());
                     return Ok(());

@@ -115,6 +115,12 @@ pub fn encode_batches(
 pub fn scan_request_from_rpc(rpc: &ScanRpcRequest) -> Result<ScanRequest, Status> {
     let table_id = parse_table_id(&rpc.namespace, &rpc.table_name)?;
     let table_type = parse_table_type(&rpc.table_type)?;
+    let filters = rpc
+        .filters
+        .iter()
+        .filter(|f| f.op == "eq")
+        .map(|f| (f.column.clone(), f.value.clone()))
+        .collect();
     Ok(ScanRequest {
         table_id,
         table_type,
@@ -122,6 +128,7 @@ pub fn scan_request_from_rpc(rpc: &ScanRpcRequest) -> Result<ScanRequest, Status
         columns: rpc.columns.clone(),
         limit: rpc.limit.map(|l| l as usize),
         user_id: parse_user_id(rpc.user_id.as_deref()),
+        filters,
     })
 }
 

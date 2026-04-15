@@ -136,10 +136,8 @@ pub async fn execute_sql_v1(
     // 4. Build execution context
     let default_namespace = namespace_id.clone().unwrap_or_else(|| NamespaceId::new("default"));
     let base_session = app_context.base_session_context();
-    let mut exec_ctx =
-        ExecutionContext::from_session(session, Arc::clone(&base_session)).with_namespace_id(
-            default_namespace.clone(),
-        );
+    let mut exec_ctx = ExecutionContext::from_session(session, Arc::clone(&base_session))
+        .with_namespace_id(default_namespace.clone());
     let is_meta_leader = app_context.executor().is_leader(GroupId::Meta).await;
 
     // 5. File uploads must go to the leader
@@ -188,15 +186,11 @@ pub async fn execute_sql_v1(
     };
 
     // 8. Split, parse, and classify SQL statements
-    let prepared_statements = match split_and_prepare_statements(
-        &sql,
-        &exec_ctx,
-        sql_executor.get_ref(),
-        start_time,
-    ) {
-        Ok(stmts) => stmts,
-        Err(resp) => return resp,
-    };
+    let prepared_statements =
+        match split_and_prepare_statements(&sql, &exec_ctx, sql_executor.get_ref(), start_time) {
+            Ok(stmts) => stmts,
+            Err(resp) => return resp,
+        };
 
     if exec_ctx.request_id().is_none() && batch_requires_request_id(&prepared_statements) {
         exec_ctx = exec_ctx.with_request_id(Uuid::now_v7().to_string());

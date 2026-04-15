@@ -47,10 +47,7 @@ impl RuntimeMetrics {
         if let Some(mb) = self.memory_mb {
             pairs.push(("memory_usage_mb".to_string(), mb.to_string()));
         }
-        pairs.push((
-            "memory_usage_source".to_string(),
-            self.memory_usage_source.to_string(),
-        ));
+        pairs.push(("memory_usage_source".to_string(), self.memory_usage_source.to_string()));
         if let Some(bytes) = self.memory_rss_bytes {
             pairs.push(("memory_rss_bytes".to_string(), bytes.to_string()));
         }
@@ -70,16 +67,10 @@ impl RuntimeMetrics {
             pairs.push(("memory_rss_gap_mb".to_string(), mb.to_string()));
         }
         if let Some(bytes) = self.memory_physical_footprint_bytes {
-            pairs.push((
-                "memory_physical_footprint_bytes".to_string(),
-                bytes.to_string(),
-            ));
+            pairs.push(("memory_physical_footprint_bytes".to_string(), bytes.to_string()));
         }
         if let Some(mb) = self.memory_physical_footprint_mb {
-            pairs.push((
-                "memory_physical_footprint_mb".to_string(),
-                mb.to_string(),
-            ));
+            pairs.push(("memory_physical_footprint_mb".to_string(), mb.to_string()));
         }
         if let Some(cpu) = self.cpu_usage_percent {
             pairs.push(("cpu_usage_percent".to_string(), format!("{:.2}", cpu)));

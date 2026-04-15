@@ -70,9 +70,6 @@ async fn sql_request_transaction_aborts_when_bound_leader_changes_before_commit(
     let mut cleaned_state = request_transaction_state(&request_ctx);
     cleaned_state.sync_from_coordinator(&app_ctx);
     assert!(cleaned_state.active_transaction_id().is_none());
-    assert!(app_ctx
-        .transaction_coordinator()
-        .get_handle(&transaction_id)
-        .is_none());
+    assert!(app_ctx.transaction_coordinator().get_handle(&transaction_id).is_none());
     assert!(select_names(&executor, &observer_ctx, &table_id).await.is_empty());
 }

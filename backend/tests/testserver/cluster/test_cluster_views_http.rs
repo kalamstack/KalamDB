@@ -34,10 +34,7 @@ async fn test_system_cluster_views_over_http() -> Result<()> {
             first.contains_key("uptime_seconds"),
             "system.cluster missing uptime_seconds"
         );
-        anyhow::ensure!(
-            first.contains_key("uptime_human"),
-            "system.cluster missing uptime_human"
-        );
+        anyhow::ensure!(first.contains_key("uptime_human"), "system.cluster missing uptime_human");
 
         let resp = server.execute_sql("SELECT * FROM system.cluster_groups").await?;
         anyhow::ensure!(

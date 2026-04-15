@@ -194,16 +194,7 @@ unsafe extern "C-unwind" fn kalam_process_utility(
                 _ => {},
             }
 
-            call_prev(
-                pstmt,
-                query_string,
-                read_only_tree,
-                context,
-                params,
-                query_env,
-                dest,
-                qc,
-            );
+            call_prev(pstmt, query_string, read_only_tree, context, params, query_env, dest, qc);
 
             match tx_kind {
                 pg_sys::TransactionStmtKind::TRANS_STMT_BEGIN
@@ -265,10 +256,7 @@ unsafe fn report_sql_error(message: &str) -> ! {
     unsafe extern "C-unwind" {
         fn errcode(sqlerrcode: std::os::raw::c_int) -> std::os::raw::c_int;
         fn errmsg(fmt: *const std::os::raw::c_char, ...) -> std::os::raw::c_int;
-        fn errstart(
-            elevel: std::os::raw::c_int,
-            domain: *const std::os::raw::c_char,
-        ) -> bool;
+        fn errstart(elevel: std::os::raw::c_int, domain: *const std::os::raw::c_char) -> bool;
         fn errfinish(
             filename: *const std::os::raw::c_char,
             lineno: std::os::raw::c_int,
@@ -292,10 +280,7 @@ unsafe fn report_sql_error(message: &str) -> ! {
 // CREATE TABLE ... USING kalamdb → CREATE FOREIGN TABLE + propagate
 // ---------------------------------------------------------------------------
 
-unsafe fn handle_create_table_using_kalamdb(
-    stmt: *mut pg_sys::CreateStmt,
-    statement_sql: &str,
-) {
+unsafe fn handle_create_table_using_kalamdb(stmt: *mut pg_sys::CreateStmt, statement_sql: &str) {
     let rv = (*stmt).relation;
     if rv.is_null() {
         pgrx::error!("pg_kalam DDL: CREATE TABLE USING kalamdb requires a table name");
@@ -307,7 +292,9 @@ unsafe fn handle_create_table_using_kalamdb(
     }
 
     let namespace = resolve_create_namespace(rv).unwrap_or_else(|| {
-        pgrx::error!("pg_kalam DDL: could not determine target schema for CREATE TABLE USING kalamdb")
+        pgrx::error!(
+            "pg_kalam DDL: could not determine target schema for CREATE TABLE USING kalamdb"
+        )
     });
 
     let if_not_exists = create_statement_has_if_not_exists(statement_sql).unwrap_or(false);
@@ -335,10 +322,7 @@ unsafe fn handle_create_table_using_kalamdb(
             pgrx::error!("pg_kalam DDL: no user columns found in CREATE TABLE USING kalamdb");
         },
         Err(error) => {
-            pgrx::error!(
-                "pg_kalam DDL: failed to parse CREATE TABLE USING kalamdb: {}",
-                error
-            );
+            pgrx::error!("pg_kalam DDL: failed to parse CREATE TABLE USING kalamdb: {}", error);
         },
     };
 
@@ -385,11 +369,7 @@ unsafe fn handle_create_table_using_kalamdb(
     );
 
     if let Err(error) = execute_remote_sql(&create_ns_sql, DEFAULT_KALAM_SERVER) {
-        pgrx::warning!(
-            "pg_kalam DDL: failed to create namespace '{}': {}",
-            namespace,
-            error
-        );
+        pgrx::warning!("pg_kalam DDL: failed to create namespace '{}': {}", namespace, error);
     }
     if let Err(error) = execute_remote_sql(&create_table_sql, DEFAULT_KALAM_SERVER) {
         pgrx::error!(
@@ -401,13 +381,10 @@ unsafe fn handle_create_table_using_kalamdb(
     }
 
     if !namespace_exists(&namespace) {
-        let create_schema_sql = format!("CREATE SCHEMA IF NOT EXISTS {}", quote_ident_pg(&namespace));
+        let create_schema_sql =
+            format!("CREATE SCHEMA IF NOT EXISTS {}", quote_ident_pg(&namespace));
         if let Err(error) = pgrx::Spi::run(&create_schema_sql) {
-            pgrx::error!(
-                "pg_kalam DDL: failed to ensure local schema '{}': {}",
-                namespace,
-                error
-            );
+            pgrx::error!("pg_kalam DDL: failed to ensure local schema '{}': {}", namespace, error);
         }
     }
 
@@ -419,9 +396,10 @@ unsafe fn handle_create_table_using_kalamdb(
         if key == "type" {
             continue;
         }
-        let assignment = format_foreign_table_option_assignment(key, value).unwrap_or_else(|error| {
-            pgrx::error!("pg_kalam DDL: invalid local foreign table option: {}", error)
-        });
+        let assignment =
+            format_foreign_table_option_assignment(key, value).unwrap_or_else(|error| {
+                pgrx::error!("pg_kalam DDL: invalid local foreign table option: {}", error)
+            });
         ft_options.push(assignment);
     }
 
@@ -1046,26 +1024,16 @@ fn format_kalam_option_assignment(key: &str, value: &str) -> Result<String, Kala
     let key = key.trim();
     let mut bytes = key.bytes();
     let Some(first_byte) = bytes.next() else {
-        return Err(KalamPgError::Validation(format!(
-            "unsupported KalamDB option name '{}'",
-            key
-        )));
+        return Err(KalamPgError::Validation(format!("unsupported KalamDB option name '{}'", key)));
     };
 
     if !(first_byte.is_ascii_alphabetic() || first_byte == b'_')
         || !bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
     {
-        return Err(KalamPgError::Validation(format!(
-            "unsupported KalamDB option name '{}'",
-            key
-        )));
+        return Err(KalamPgError::Validation(format!("unsupported KalamDB option name '{}'", key)));
     }
 
-    Ok(format!(
-        "{} = '{}'",
-        key.to_ascii_uppercase(),
-        value.replace('\'', "''")
-    ))
+    Ok(format!("{} = '{}'", key.to_ascii_uppercase(), value.replace('\'', "''")))
 }
 
 fn format_foreign_table_option_assignment(key: &str, value: &str) -> Result<String, KalamPgError> {
@@ -1087,11 +1055,7 @@ fn format_foreign_table_option_assignment(key: &str, value: &str) -> Result<Stri
         )));
     }
 
-    Ok(format!(
-        "{} '{}'",
-        key.to_ascii_lowercase(),
-        value.replace('\'', "''")
-    ))
+    Ok(format!("{} '{}'", key.to_ascii_lowercase(), value.replace('\'', "''")))
 }
 
 fn is_internal_column_entry(entry: &str) -> bool {
@@ -1481,6 +1445,7 @@ fn strip_for_foreign_table(column_defs: &[String]) -> Vec<String> {
         .filter(|def| !table_pk_re.is_match(def))
         .map(|def| {
             let result = pk_re.replace_all(def, "").into_owned();
+            let result = rewrite_local_foreign_table_column_type(&result);
             result
                 .split_whitespace()
                 .collect::<Vec<_>>()
@@ -1490,6 +1455,18 @@ fn strip_for_foreign_table(column_defs: &[String]) -> Vec<String> {
                 .to_string()
         })
         .collect()
+}
+
+fn rewrite_local_foreign_table_column_type(definition: &str) -> String {
+    if first_sql_identifier(definition).is_none() {
+        return definition.to_string();
+    }
+
+    let file_type_re =
+        regex::Regex::new(r#"(?i)^(\s*(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_]*)\s+)FILE\b"#)
+            .unwrap();
+
+    file_type_re.replace(definition, "${1}JSONB").into_owned()
 }
 
 #[cfg(test)]
@@ -1643,6 +1620,22 @@ mod tests {
     }
 
     #[test]
+    fn strip_for_foreign_table_rewrites_file_type_to_jsonb() {
+        let defs = vec![
+            "\"attachment\" FILE DEFAULT '{}'::jsonb NOT NULL".to_string(),
+            "metadata JSONB".to_string(),
+        ];
+        let stripped = super::strip_for_foreign_table(&defs);
+        assert_eq!(
+            stripped,
+            vec![
+                "\"attachment\" JSONB DEFAULT '{}'::jsonb NOT NULL".to_string(),
+                "metadata JSONB".to_string(),
+            ]
+        );
+    }
+
+    #[test]
     fn create_statement_has_if_not_exists_detects_clause() {
         let sql = "CREATE TABLE IF NOT EXISTS app.items (id BIGINT) USING kalamdb WITH (type = 'shared');";
         assert!(super::create_statement_has_if_not_exists(sql).expect("parse IF NOT EXISTS"));
@@ -1653,21 +1646,24 @@ mod tests {
 
     #[test]
     fn format_kalam_option_assignment_rejects_numeric_prefix() {
-        let error = format_kalam_option_assignment("9evil", "value").expect_err("numeric prefix should be rejected");
+        let error = format_kalam_option_assignment("9evil", "value")
+            .expect_err("numeric prefix should be rejected");
         assert!(matches!(error, KalamPgError::Validation(_)));
         assert!(error.to_string().contains("unsupported KalamDB option name '9evil'"));
     }
 
     #[test]
     fn validate_no_system_columns_rejects_userid() {
-        let sql = "CREATE FOREIGN TABLE t (id TEXT, _userid TEXT) SERVER s OPTIONS (table_type 'user');";
+        let sql =
+            "CREATE FOREIGN TABLE t (id TEXT, _userid TEXT) SERVER s OPTIONS (table_type 'user');";
         let err = validate_no_system_columns(sql).expect_err("should reject _userid");
         assert!(err.to_string().contains("_userid"));
     }
 
     #[test]
     fn validate_no_system_columns_rejects_seq() {
-        let sql = "CREATE FOREIGN TABLE t (id TEXT, _seq BIGINT) SERVER s OPTIONS (table_type 'shared');";
+        let sql =
+            "CREATE FOREIGN TABLE t (id TEXT, _seq BIGINT) SERVER s OPTIONS (table_type 'shared');";
         let err = validate_no_system_columns(sql).expect_err("should reject _seq");
         assert!(err.to_string().contains("_seq"));
     }
@@ -1681,7 +1677,8 @@ mod tests {
 
     #[test]
     fn validate_no_system_columns_allows_clean_sql() {
-        let sql = "CREATE FOREIGN TABLE t (id TEXT, name TEXT) SERVER s OPTIONS (table_type 'shared');";
+        let sql =
+            "CREATE FOREIGN TABLE t (id TEXT, name TEXT) SERVER s OPTIONS (table_type 'shared');";
         validate_no_system_columns(sql).expect("clean SQL should pass");
     }
 }
@@ -1693,10 +1690,7 @@ fn execute_remote_sql(sql: &str, server_name: &str) -> Result<String, KalamPgErr
     let c_name = std::ffi::CString::new(server_name).unwrap_or_default();
     let server = unsafe { pg_sys::GetForeignServerByName(c_name.as_ptr(), true) };
     if server.is_null() {
-        return Err(KalamPgError::Execution(format!(
-            "foreign server '{}' not found",
-            server_name
-        )));
+        return Err(KalamPgError::Execution(format!("foreign server '{}' not found", server_name)));
     }
     let server_options = parse_options(unsafe { (*server).options });
     let parsed_server = ServerOptions::parse(&server_options)?;

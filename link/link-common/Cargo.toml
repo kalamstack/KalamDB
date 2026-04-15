@@ -10,7 +10,7 @@ description = "Shared Rust implementation for KalamDB link crates"
 
 [dependencies]
 tokio = { workspace = true, optional = true }
-reqwest = { version = "0.13.2", default-features = false, features = ["json", "rustls"], optional = true }
+reqwest = { workspace = true, default-features = false, features = ["json", "rustls"], optional = true }
 tokio-tungstenite = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -46,9 +46,14 @@ web-sys = { workspace = true, features = [
 	"BlobPropertyBag",
 ], optional = true }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+aws-lc-rs = { workspace = true, optional = true }
+quinn-proto = { workspace = true, optional = true }
+rustls-webpki = { workspace = true, optional = true }
+
 [features]
 default = []
-tokio-runtime = ["tokio", "reqwest", "tokio-tungstenite", "bytes"]
+tokio-runtime = ["tokio", "reqwest", "tokio-tungstenite", "bytes", "dep:aws-lc-rs", "dep:quinn-proto", "dep:rustls-webpki"]
 auth-flows = []
 setup = []
 healthcheck = []

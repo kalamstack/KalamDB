@@ -178,8 +178,10 @@ impl CLISession {
                 self.show_session_info().await;
             },
             Command::Sessions => {
-                self.execute("SELECT * FROM system.sessions ORDER BY last_seen_at DESC, session_id")
-                    .await?;
+                self.execute(
+                    "SELECT * FROM system.sessions ORDER BY last_seen_at DESC, session_id",
+                )
+                .await?;
             },
             Command::Stats => {
                 self.execute(

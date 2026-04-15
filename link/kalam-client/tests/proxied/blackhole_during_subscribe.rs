@@ -54,9 +54,7 @@ async fn test_blackhole_during_subscribe_handshake_recovers() {
         client.connect().await.expect("connect through proxy");
         wait_for_reconnect(&client, &connect_count, 1, "blackhole initial connect").await;
         assert!(
-            proxy
-                .wait_for_active_connections(1, RECONNECT_WAIT_TIMEOUT)
-                .await,
+            proxy.wait_for_active_connections(1, RECONNECT_WAIT_TIMEOUT).await,
             "proxy should see at least one active connection"
         );
 
