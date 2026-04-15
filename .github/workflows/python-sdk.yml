@@ -1,0 +1,139 @@
+name: Python SDK
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - 'link/sdks/python/**'
+      - 'link/kalam-client/**'
+      - 'link/link-common/**'
+      - '.github/workflows/python-sdk.yml'
+  pull_request:
+    paths:
+      - 'link/sdks/python/**'
+      - 'link/kalam-client/**'
+      - 'link/link-common/**'
+      - '.github/workflows/python-sdk.yml'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish wheels to PyPI"
+        type: boolean
+        required: false
+        default: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.92.0"
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: link/sdks/python -> target
+
+      - name: Install maturin and pytest
+        run: pip install maturin pytest pytest-asyncio
+
+      - name: Build SDK in develop mode
+        working-directory: link/sdks/python
+        run: maturin develop --release
+
+      - name: Run unit tests (no server required)
+        working-directory: link/sdks/python
+        run: pytest tests/test_auth.py tests/test_exceptions.py tests/test_agent.py -v
+
+  build-wheels:
+    name: Build wheels (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: test
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: link/sdks/python
+          command: build
+          args: --release --strip --out dist
+          rust-toolchain: "1.92.0"
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: link/sdks/python/dist/*.whl
+
+  build-sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: link/sdks/python
+          command: sdist
+          args: --out dist
+
+      - name: Upload sdist
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: link/sdks/python/dist/*.tar.gz
+
+  publish:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: [build-wheels, build-sdist]
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'true'
+    environment: pypi
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download all wheels
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: wheels-*
+          merge-multiple: true
+
+      - name: Download sdist
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist

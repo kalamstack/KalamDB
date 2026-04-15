@@ -1,0 +1,21 @@
+[workspace]
+
+[package]
+name = "kalamdb-python"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Python SDK for KalamDB — SQL-first realtime database"
+keywords = ["kalamdb", "database", "python", "sdk"]
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+kalam-client = { path = "../../kalam-client", default-features = false, features = ["native-sdk", "consumer", "file-uploads"] }
+pyo3 = { version = "0.25", features = ["extension-module"] }
+pyo3-async-runtimes = { version = "0.25", features = ["tokio-runtime"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+serde = "1"
+serde_json = "1"
