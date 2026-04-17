@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Job } from '@/services/jobService';
-import type { JobFilters } from '@/services/sql/queries/jobQueries';
+import type { JobFilters, JobSortKey } from '@/services/sql/queries/jobQueries';
 import { useGetJobsFilteredQuery } from '@/store/apiSlice';
 import {
   Table,
@@ -29,8 +29,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Loader2, RefreshCw, Filter, X, Eye, Play, CheckCircle, XCircle, Clock, AlertCircle } from 'lucide-react';
+import { Loader2, RefreshCw, Filter, X, Eye, Play, CheckCircle, XCircle, Clock, AlertCircle, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { formatTimestamp, toMilliseconds } from '@/lib/formatters';
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '@/lib/config';
 
 const STATUS_COLORS: Record<string, string> = {
   'New': 'bg-gray-100 text-gray-800',
@@ -65,7 +66,8 @@ function parseJobParams(parameters: string | null): { namespace_id?: string; tab
 }
 
 function getStatusColor(status: string): string {
-  return STATUS_COLORS[status] || 'bg-gray-100 text-gray-800';
+  const capitalized = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+  return STATUS_COLORS[capitalized] || STATUS_COLORS[status] || 'bg-gray-100 text-gray-800';
 }
 
 function formatDuration(startedAt: string | null, finishedAt: string | null): string {
@@ -113,11 +115,18 @@ interface JobListProps {
 export function JobList({ initialFilters, compact = false, onJobClick }: JobListProps) {
   const [showFilters, setShowFilters] = useState(false);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [page, setPage] = useState(0);
+  const [sortBy, setSortBy] = useState<JobSortKey>("created_at");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [draftFilters, setDraftFilters] = useState<JobFilters>(initialFilters || {
-    limit: 100,
+    limit: DEFAULT_PAGE_SIZE,
   });
   const [appliedFilters, setAppliedFilters] = useState<JobFilters>(initialFilters || {
-    limit: 100,
+    limit: DEFAULT_PAGE_SIZE,
+    offset: 0,
+    sortBy: "created_at",
+    sortDirection: "desc",
   });
   const { data: jobs = [], isLoading, error, refetch } = useGetJobsFilteredQuery(appliedFilters);
   const errorMessage =
@@ -128,15 +137,37 @@ export function JobList({ initialFilters, compact = false, onJobClick }: JobList
         : null;
 
   const handleApplyFilters = () => {
-    setAppliedFilters(draftFilters);
+    setPage(0);
+    setAppliedFilters({ ...draftFilters, limit: pageSize, offset: 0, sortBy, sortDirection });
     setShowFilters(false);
   };
 
   const handleClearFilters = () => {
-    const clearedFilters = { limit: 100 };
-    setDraftFilters(clearedFilters);
-    setAppliedFilters(clearedFilters);
+    setPage(0);
+    setDraftFilters({ limit: pageSize });
+    setAppliedFilters({ limit: pageSize, offset: 0, sortBy, sortDirection });
     setShowFilters(false);
+  };
+
+  const handlePageChange = (newPage: number) => {
+    setPage(newPage);
+    setAppliedFilters((prev) => ({ ...prev, offset: newPage * pageSize }));
+  };
+
+  const handlePageSizeChange = (newSize: number) => {
+    setPageSize(newSize);
+    setPage(0);
+    setAppliedFilters((prev) => ({ ...prev, limit: newSize, offset: 0 }));
+  };
+
+  const handleSort = (key: JobSortKey) => {
+    const newDirection = sortBy === key
+      ? (sortDirection === "asc" ? "desc" : "asc")
+      : "asc";
+    setSortBy(key);
+    setSortDirection(newDirection);
+    setPage(0);
+    setAppliedFilters((prev) => ({ ...prev, sortBy: key, sortDirection: newDirection, offset: 0 }));
   };
 
   const hasActiveFilters = appliedFilters.status || appliedFilters.job_type;
@@ -165,7 +196,7 @@ export function JobList({ initialFilters, compact = false, onJobClick }: JobList
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col h-full min-h-0 gap-4">
       {/* Toolbar */}
       {!compact && (
         <div className="flex items-center justify-between">
@@ -189,11 +220,35 @@ export function JobList({ initialFilters, compact = false, onJobClick }: JobList
               </Button>
             )}
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">
-              {jobs.length} job{jobs.length !== 1 ? 's' : ''}
-            </span>
-            <Button variant="outline" size="icon" onClick={() => refetch()} disabled={isLoading} aria-label="Refresh jobs">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Select
+                value={String(pageSize)}
+                onValueChange={(v) => handlePageSizeChange(Number(v))}
+              >
+                <SelectTrigger className="h-8 w-[70px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PAGE_SIZE_OPTIONS.map((size) => (
+                    <SelectItem key={size} value={String(size)}>
+                      {size}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <span>per page</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="icon" className="h-8 w-8" disabled={page === 0} onClick={() => handlePageChange(page - 1)}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-sm text-muted-foreground px-2">{page + 1}</span>
+              <Button variant="outline" size="icon" className="h-8 w-8" disabled={jobs.length < pageSize} onClick={() => handlePageChange(page + 1)}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+            <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => refetch()} disabled={isLoading} aria-label="Refresh jobs">
               <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             </Button>
           </div>
@@ -262,17 +317,44 @@ export function JobList({ initialFilters, compact = false, onJobClick }: JobList
           </CardHeader>
         </Card>
       ) : (
-        <div className="border rounded-lg">
-          <Table>
+        <div className="border rounded-lg flex-1 min-h-0 overflow-hidden [&>div]:h-full [&>div]:overflow-auto">
+          <Table className="border-separate border-spacing-0 [&_td]:border-b [&_td]:border-border">
             <TableHeader>
               <TableRow>
-                <TableHead>Status</TableHead>
-                <TableHead>Job Type</TableHead>
-                <TableHead>Namespace / Table</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead>Duration</TableHead>
-                {!compact && <TableHead>Node</TableHead>}
-                <TableHead className="w-[50px]"></TableHead>
+                {([
+                  ["status", "Status"],
+                  ["job_type", "Job Type"],
+                  [null, "Namespace / Table"],
+                  ["created_at", "Created"],
+                  [null, "Duration"],
+                ] as [JobSortKey | null, string][]).map(([key, label], i) => (
+                  <TableHead
+                    key={key ?? `col-${i}`}
+                    className={`sticky top-0 bg-background z-10 border-b border-border ${key ? "cursor-pointer select-none hover:text-foreground" : ""}`}
+                    onClick={key ? () => handleSort(key) : undefined}
+                  >
+                    <span className="inline-flex items-center gap-1">
+                      {label}
+                      {key && (sortBy === key
+                        ? (sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)
+                        : <ArrowUpDown className="h-3 w-3 opacity-30" />)}
+                    </span>
+                  </TableHead>
+                ))}
+                {!compact && (
+                  <TableHead
+                    className="sticky top-0 bg-background z-10 border-b border-border cursor-pointer select-none hover:text-foreground"
+                    onClick={() => handleSort("node_id")}
+                  >
+                    <span className="inline-flex items-center gap-1">
+                      Node
+                      {sortBy === "node_id"
+                        ? (sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)
+                        : <ArrowUpDown className="h-3 w-3 opacity-30" />}
+                    </span>
+                  </TableHead>
+                )}
+                <TableHead className="sticky top-0 bg-background z-10 border-b border-border w-[50px]"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -284,7 +366,7 @@ export function JobList({ initialFilters, compact = false, onJobClick }: JobList
                 >
                   <TableCell>
                     <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(job.status)}`}>
-                      {STATUS_ICONS[job.status]}
+                      {STATUS_ICONS[job.status.charAt(0).toUpperCase() + job.status.slice(1).toLowerCase()] || STATUS_ICONS[job.status]}
                       {job.status}
                     </span>
                   </TableCell>
@@ -339,7 +421,7 @@ export function JobList({ initialFilters, compact = false, onJobClick }: JobList
               Job Details
               {selectedJob && (
                 <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(selectedJob.status)}`}>
-                  {STATUS_ICONS[selectedJob.status]}
+                  {STATUS_ICONS[selectedJob.status.charAt(0).toUpperCase() + selectedJob.status.slice(1).toLowerCase()] || STATUS_ICONS[selectedJob.status]}
                   {selectedJob.status}
                 </span>
               )}

@@ -1,3 +1,5 @@
+export type AuditLogSortKey = "timestamp" | "actor_username" | "action" | "target" | "ip_address";
+
 export interface AuditLogFilters {
   username?: string;
   action?: string;
@@ -5,6 +7,9 @@ export interface AuditLogFilters {
   startDate?: string;
   endDate?: string;
   limit?: number;
+  offset?: number;
+  sortBy?: AuditLogSortKey;
+  sortDirection?: "asc" | "desc";
 }
 
 function escapeSqlLiteral(value: string): string {
@@ -43,10 +48,21 @@ export function buildAuditLogsSubscriptionQuery(filters?: AuditLogFilters): stri
   return `${buildAuditLogsSelect()}${buildAuditLogsWhereClause(filters)}`;
 }
 
+const VALID_SORT_COLUMNS = new Set<AuditLogSortKey>([
+  "timestamp", "actor_username", "action", "target", "ip_address",
+]);
+
 export function buildAuditLogsQuery(filters?: AuditLogFilters): string {
   let sql = buildAuditLogsSubscriptionQuery(filters);
 
-  sql += " ORDER BY timestamp DESC";
+  const sortCol = filters?.sortBy && VALID_SORT_COLUMNS.has(filters.sortBy)
+    ? filters.sortBy
+    : "timestamp";
+  const sortDir = filters?.sortDirection === "asc" ? "ASC" : "DESC";
+  sql += ` ORDER BY ${sortCol} ${sortDir}`;
   sql += ` LIMIT ${filters?.limit ?? 1000}`;
+  if (filters?.offset) {
+    sql += ` OFFSET ${filters.offset}`;
+  }
   return sql;
 }

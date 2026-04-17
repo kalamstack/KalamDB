@@ -1,7 +1,12 @@
+export type JobSortKey = "created_at" | "job_type" | "status" | "started_at" | "finished_at" | "node_id";
+
 export interface JobFilters {
   status?: string;
   job_type?: string;
   limit?: number;
+  offset?: number;
+  sortBy?: JobSortKey;
+  sortDirection?: "asc" | "desc";
 }
 
 function escapeSqlLiteral(value: string): string {
@@ -27,7 +32,13 @@ export function buildSystemJobsQuery(filters?: JobFilters): string {
     sql += ` WHERE ${conditions.join(" AND ")}`;
   }
 
-  sql += " ORDER BY created_at DESC";
+  const validSortColumns = new Set<JobSortKey>(["created_at", "job_type", "status", "started_at", "finished_at", "node_id"]);
+  const sortCol = filters?.sortBy && validSortColumns.has(filters.sortBy) ? filters.sortBy : "created_at";
+  const sortDir = filters?.sortDirection === "asc" ? "ASC" : "DESC";
+  sql += ` ORDER BY ${sortCol} ${sortDir}`;
   sql += ` LIMIT ${filters?.limit ?? 1000}`;
+  if (filters?.offset) {
+    sql += ` OFFSET ${filters.offset}`;
+  }
   return sql;
 }
