@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "drizzle-orm": ["../../ui/node_modules/drizzle-orm"],
+      "drizzle-orm/*": ["../../ui/node_modules/drizzle-orm/*"],
+      "@kalamdb/client": ["../../link/sdks/typescript/client/dist/src/index.d.ts"]
+    }
+  },
+  "include": ["src"]
+}

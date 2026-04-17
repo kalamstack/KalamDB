@@ -36,12 +36,12 @@ function formatMemory(memoryMb: number | null): string {
   return `${memoryMb.toFixed(precision)} MB memory`;
 }
 
-function formatCpu(cpuUsagePercent: number | null): string {
-  if (cpuUsagePercent === null || !Number.isFinite(cpuUsagePercent)) {
+function formatCpu(cpuUsagePercent: string | number | null): string {
+  if (cpuUsagePercent === null || !Number.isFinite(Number(cpuUsagePercent))) {
     return "CPU n/a";
   }
 
-  return `${cpuUsagePercent.toFixed(1)}% CPU`;
+  return `${Number(cpuUsagePercent).toFixed(1)}% CPU`;
 }
 
 function formatUptime(uptimeHuman: string | null): string {

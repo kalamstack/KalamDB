@@ -1,37 +1,48 @@
-import { executeSql } from "@/lib/kalam-client";
-import { buildSystemJobsQuery, type JobFilters } from "@/services/sql/queries/jobQueries";
+import { getDb } from "@/lib/db";
+import { system_jobs } from "@/lib/schema";
+import { eq, asc, desc, and, type SQL, type InferSelectModel } from "drizzle-orm";
 
-export interface Job {
-  job_id: string;
-  job_type: string;
-  status: string;
-  parameters: string | null;
-  result: string | null;
-  trace: string | null;
-  error_message: string | null;
-  memory_used: number | null;
-  cpu_used: number | null;
-  created_at: string;
-  started_at: string | null;
-  finished_at: string | null;
-  node_id: string;
+export type Job = InferSelectModel<typeof system_jobs>;
+
+export type JobSortKey = "created_at" | "job_type" | "status" | "started_at" | "finished_at" | "node_id";
+
+export interface JobFilters {
+  status?: string;
+  job_type?: string;
+  limit?: number;
+  offset?: number;
+  sortBy?: JobSortKey;
+  sortDirection?: "asc" | "desc";
 }
 
-export async function fetchJobs(filters?: JobFilters): Promise<Job[]> {
-  const rows = await executeSql(buildSystemJobsQuery(filters));
-  return rows.map((row) => ({
-    job_id: String(row.job_id ?? ""),
-    job_type: String(row.job_type ?? ""),
-    status: String(row.status ?? ""),
-    parameters: row.parameters as string | null,
-    result: row.result as string | null,
-    trace: row.trace as string | null,
-    error_message: row.error_message as string | null,
-    memory_used: row.memory_used as number | null,
-    cpu_used: row.cpu_used as number | null,
-    created_at: String(row.created_at ?? ""),
-    started_at: row.started_at as string | null,
-    finished_at: row.finished_at as string | null,
-    node_id: String(row.node_id ?? ""),
-  }));
+const sortColumnMap = {
+  created_at: system_jobs.created_at,
+  job_type: system_jobs.job_type,
+  status: system_jobs.status,
+  started_at: system_jobs.started_at,
+  finished_at: system_jobs.finished_at,
+  node_id: system_jobs.node_id,
+} as const;
+
+export async function fetchJobs(filters?: JobFilters) {
+  const db = getDb();
+  const conditions: SQL[] = [];
+
+  if (filters?.status) {
+    conditions.push(eq(system_jobs.status, filters.status));
+  }
+  if (filters?.job_type) {
+    conditions.push(eq(system_jobs.job_type, filters.job_type));
+  }
+
+  const sortCol = sortColumnMap[filters?.sortBy ?? "created_at"];
+  const sortDir = filters?.sortDirection === "asc" ? asc : desc;
+
+  return db
+    .select()
+    .from(system_jobs)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(sortDir(sortCol))
+    .limit(filters?.limit ?? 1000)
+    .offset(filters?.offset ?? 0);
 }

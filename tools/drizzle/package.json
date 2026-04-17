@@ -1,0 +1,14 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.41.0"
+  },
+  "devDependencies": {
+    "@kalamdb/client": "file:../../link/sdks/typescript/client",
+    "typescript": "^5.8.0"
+  }
+}

@@ -83,9 +83,9 @@ export function ClusterNodesList({ nodes, isLoading, onRefresh }: ClusterNodesLi
     return `${memoryMb.toFixed(precision)} MB`;
   };
 
-  const formatCpu = (cpuPercent: number | null) => {
+  const formatCpu = (cpuPercent: string | number | null) => {
     if (cpuPercent === null) return '—';
-    return `${cpuPercent.toFixed(1)}%`;
+    return `${Number(cpuPercent).toFixed(1)}%`;
   };
 
   const formatUptime = (uptime: string | null) => uptime ?? '—';
