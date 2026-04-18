@@ -131,8 +131,7 @@ function generateTableDefinition(table: TableInfo, columns: ColumnInfo[]): strin
 }
 
 export interface GenerateOptions {
-  namespaces?: string[];
-  excludeSystem?: boolean;
+  includeSystem?: boolean;
 }
 
 const HIDDEN_TABLES = ['system.live', 'system.server_logs', 'system.cluster', 'system.settings', 'system.stats'];
@@ -141,10 +140,6 @@ export async function generateSchema(
   client: KalamDBClient,
   options?: GenerateOptions,
 ): Promise<string> {
-  if (options?.excludeSystem && options?.namespaces?.some((ns) => ns === 'system' || ns === 'dba')) {
-    throw new Error('Cannot use excludeSystem with system/dba namespaces');
-  }
-
   const tables = await fetchTables(client);
 
   for (const qualifiedName of HIDDEN_TABLES) {
@@ -160,10 +155,7 @@ export async function generateSchema(
   }
 
   const filtered = tables.filter((t) => {
-    if (options?.excludeSystem && (t.namespaceId === 'system' || t.namespaceId === 'dba')) {
-      return false;
-    }
-    if (options?.namespaces && !options.namespaces.includes(t.namespaceId)) {
+    if (!options?.includeSystem && (t.namespaceId === 'system' || t.namespaceId === 'dba')) {
       return false;
     }
     return true;

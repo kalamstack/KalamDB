@@ -17,7 +17,7 @@ before(async () => {
   await client.query('CREATE TABLE IF NOT EXISTS test_gen.with_defaults (id BIGINT PRIMARY KEY DEFAULT SNOWFLAKE_ID(), name TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW())');
   await client.query("CREATE TABLE IF NOT EXISTS test_gen.with_literal_default (id BIGINT PRIMARY KEY DEFAULT SNOWFLAKE_ID(), status TEXT DEFAULT 'pending' NOT NULL)");
 
-  fullSchema = await generateSchema(client);
+  fullSchema = await generateSchema(client, { includeSystem: true });
 });
 
 after(async () => {
@@ -115,33 +115,22 @@ describe('generateSchema', () => {
     assert.ok(!uploadLines[0].includes('.default('));
   });
 
-  it('excludes system tables when excludeSystem is true', async () => {
+  it('excludes system tables by default', async () => {
     await new Promise((r) => setTimeout(r, 1000));
-    const excluded = await generateSchema(client, { excludeSystem: true });
-    assert.ok(!excluded.includes("system_users"));
-    assert.ok(!excluded.includes("system_audit_log"));
-    assert.ok(!excluded.includes("dba_"));
+    const schema = await generateSchema(client);
+    assert.ok(!schema.includes("system_users"));
+    assert.ok(!schema.includes("system_audit_log"));
+    assert.ok(!schema.includes("dba_"));
+    assert.ok(schema.includes("test_gen_uploads"));
+    assert.ok(schema.includes("test_gen_with_defaults"));
   });
 
-  it('excludeSystem still includes user tables', async () => {
+  it('includes system tables when includeSystem is true', async () => {
     await new Promise((r) => setTimeout(r, 1000));
-    const excluded = await generateSchema(client, { excludeSystem: true });
-    assert.ok(excluded.includes("test_gen_uploads"));
-    assert.ok(excluded.includes("test_gen_with_defaults"));
-  });
-
-  it('filters by namespace', async () => {
-    await new Promise((r) => setTimeout(r, 1000));
-    const dbaOnly = await generateSchema(client, { namespaces: ['dba'] });
-    assert.ok(dbaOnly.includes("dba_"));
-    assert.ok(!dbaOnly.includes("system_users"));
-    assert.ok(!dbaOnly.includes("test_gen_"));
-  });
-
-  it('throws when excludeSystem conflicts with system namespace filter', async () => {
-    await assert.rejects(
-      () => generateSchema(client, { excludeSystem: true, namespaces: ['system'] }),
-      { message: 'Cannot use excludeSystem with system/dba namespaces' },
-    );
+    const schema = await generateSchema(client, { includeSystem: true });
+    assert.ok(schema.includes("system_users"));
+    assert.ok(schema.includes("system_audit_log"));
+    assert.ok(schema.includes("dba_"));
+    assert.ok(schema.includes("test_gen_uploads"));
   });
 });

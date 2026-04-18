@@ -35,7 +35,7 @@ async function main() {
   });
   await client.initialize();
 
-  const options = includeSystem ? undefined : { excludeSystem: true as const };
+  const options = { includeSystem };
   const schema = await generateSchema(client, options);
   writeFileSync(out, schema);
   console.log(`Generated ${(schema.match(/pgTable/g) || []).length} tables → ${out}`);
