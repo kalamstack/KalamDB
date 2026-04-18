@@ -80,7 +80,14 @@ const handle = client.consumer({
 });
 
 await handle.run(async (ctx) => {
-  console.log(ctx.message.topic, ctx.message.offset, ctx.message.value);
+  console.log(
+    ctx.message.topic,
+    ctx.message.partition_id,
+    ctx.message.offset,
+    ctx.message.op,
+    ctx.message.user,
+    ctx.message.payload,
+  );
 });
 ```
 
@@ -95,7 +102,7 @@ const batch = await client.consumeBatch({
 });
 
 for (const message of batch.messages) {
-  console.log(message.offset, message.value);
+  console.log(message.offset, message.key, message.timestamp_ms, message.payload);
 }
 
 if (batch.messages.length > 0) {
@@ -104,9 +111,69 @@ if (batch.messages.length > 0) {
 }
 ```
 
+## Message Shape
+
+Each consumed message includes the current backend topic envelope fields:
+
+```ts
+{
+  topic: 'support.inbox_events',
+  group_id: 'support-worker',
+  partition_id: 0,
+  offset: 42,
+  key: '{"id":"01HS..."}',
+  timestamp_ms: 1730000000000,
+  user: 'user_123',
+  op: 'Insert',
+  payload: {
+    id: '01HS...',
+    author: 'user',
+    body: 'Please summarize this support thread',
+    _table: 'support.inbox',
+  },
+}
+```
+
+If you know your payload shape, you can type the whole consumer flow directly:
+
+```ts
+type SupportInboxPayload = {
+  id: string;
+  author: string;
+  body: string;
+  _table: string;
+};
+
+const batch = await client.consumeBatch<SupportInboxPayload>({
+  topic: 'support.inbox_events',
+  group_id: 'support-worker',
+  start: 'earliest',
+});
+
+for (const message of batch.messages) {
+  console.log(message.payload.body);
+}
+
+const handle = client.consumer<SupportInboxPayload>({
+  topic: 'support.inbox_events',
+  group_id: 'support-worker',
+});
+
+await handle.run(async (ctx) => {
+  console.log(ctx.message.payload.body);
+});
+```
+
+Notes:
+
+- `payload` is already decoded from the HTTP API's base64 `payload` field.
+- For `WITH (payload = 'full')`, `payload` is usually the changed row JSON plus `_table` metadata.
+- `value` is still present as a deprecated alias for `payload` while older callers migrate.
+- `key` is the backend topic key string. It is not a separate message id.
+
 ## Notes
 
 - `Auth.basic(user, password)` is exchanged on `POST /v1/api/auth/login` before topic requests.
-- Topic payloads are decoded from the HTTP API's base64 payload field.
+- Topic payloads are decoded from the HTTP API's base64 payload field and exposed as `message.payload`.
 - When you only need browser/app features, install `@kalamdb/client` alone.
 - Low-level worker bindings are also available at `@kalamdb/consumer/wasm`.

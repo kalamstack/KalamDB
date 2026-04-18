@@ -30,7 +30,7 @@ impl TypedStatementHandler<ConsumeStatement> for ConsumeHandler {
     ) -> Result<ExecutionResult, KalamDbError> {
         let topic_id = TopicId::new(&statement.topic_name);
         let topics_provider = self.app_context.system_tables().topics();
-        let topic = topics_provider.get_topic_by_id_async(&topic_id).await?.ok_or_else(|| {
+        let _topic = topics_provider.get_topic_by_id_async(&topic_id).await?.ok_or_else(|| {
             KalamDbError::NotFound(format!("Topic '{}' does not exist", statement.topic_name))
         })?;
 
@@ -62,17 +62,18 @@ impl TypedStatementHandler<ConsumeStatement> for ConsumeHandler {
 
         let schema = topic_message_schema();
         let num_messages = messages.len();
-        let mut topics_builder = StringBuilder::new();
-        let mut partitions = Vec::with_capacity(num_messages);
+        let mut topic_ids_builder = StringBuilder::new();
+        let mut partition_ids = Vec::with_capacity(num_messages);
         let mut offsets = Vec::with_capacity(num_messages);
         let mut keys_builder = StringBuilder::new();
         let mut payloads_builder = BinaryBuilder::new();
         let mut timestamps = Vec::with_capacity(num_messages);
+        let mut user_ids_builder = StringBuilder::new();
         let mut ops_builder = StringBuilder::new();
 
         for msg in &messages {
-            topics_builder.append_value(topic.topic_id.as_str());
-            partitions.push(msg.partition_id as i32);
+            topic_ids_builder.append_value(msg.topic_id.as_str());
+            partition_ids.push(msg.partition_id as i32);
             offsets.push(msg.offset as i64);
 
             match &msg.key {
@@ -82,18 +83,25 @@ impl TypedStatementHandler<ConsumeStatement> for ConsumeHandler {
 
             payloads_builder.append_value(&msg.payload);
             timestamps.push(msg.timestamp_ms);
+
+            match &msg.user_id {
+                Some(user_id) => user_ids_builder.append_value(user_id.as_str()),
+                None => user_ids_builder.append_null(),
+            }
+
             ops_builder.append_value(msg.op.as_str());
         }
 
         let batch = RecordBatch::try_new(
             schema.clone(),
             vec![
-                Arc::new(topics_builder.finish()) as ArrayRef,
-                Arc::new(Int32Array::from(partitions)) as ArrayRef,
+                Arc::new(topic_ids_builder.finish()) as ArrayRef,
+                Arc::new(Int32Array::from(partition_ids)) as ArrayRef,
                 Arc::new(Int64Array::from(offsets)) as ArrayRef,
                 Arc::new(keys_builder.finish()) as ArrayRef,
                 Arc::new(payloads_builder.finish()) as ArrayRef,
                 Arc::new(Int64Array::from(timestamps)) as ArrayRef,
+                Arc::new(user_ids_builder.finish()) as ArrayRef,
                 Arc::new(ops_builder.finish()) as ArrayRef,
             ],
         )

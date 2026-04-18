@@ -155,7 +155,7 @@ export default function SetupWizard() {
 
     dispatch(
       submitSetup({
-        username: formData.username,
+        user: formData.username,
         password: formData.password,
         root_password: formData.rootPassword,
         email: formData.email || undefined,

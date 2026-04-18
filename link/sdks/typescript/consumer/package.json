@@ -35,7 +35,8 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "clean": "node -e \"const fs=require('fs');const rm=d=>{try{fs.rmSync(d,{recursive:true,force:true})}catch{}};rm('dist');rm('wasm');rm('.wasm-target');rm('.wasm-cargo-home')\"",
+    "clean": "node -e \"const fs=require('fs');const rm=d=>{try{fs.rmSync(d,{recursive:true,force:true})}catch{}};rm('dist');rm('wasm')\"",
+    "clean:all": "node -e \"const fs=require('fs');const rm=d=>{try{fs.rmSync(d,{recursive:true,force:true})}catch{}};rm('dist');rm('wasm');rm('.wasm-target');rm('.wasm-cargo-home')\"",
     "build:link": "npm --prefix ../client run build && npm install --no-package-lock --no-save ../client",
     "build:wasm": "node -e \"const {execSync,spawnSync}=require('child_process');process.chdir('../../..');const env={...process.env,CARGO_ENCODED_RUSTFLAGS:'',RUSTFLAGS:'',RUSTC_WRAPPER:'',CARGO_BUILD_RUSTC_WRAPPER:'',CARGO_TARGET_DIR:'sdks/typescript/consumer/.wasm-target',CARGO_HOME:'sdks/typescript/consumer/.wasm-cargo-home'};execSync('wasm-pack build kalam-consumer-wasm --target web --out-dir ../sdks/typescript/consumer/wasm --out-name kalam_consumer --no-opt --profile release-dist',{stdio:'inherit',env});const wasmPath='sdks/typescript/consumer/wasm/kalam_consumer_bg.wasm';const opt=spawnSync('wasm-opt',['-Oz','--all-features','--strip-debug','--strip-dwarf','-o',wasmPath,wasmPath],{stdio:'inherit',env});if(opt.error&&opt.error.code==='ENOENT'){console.warn('wasm-opt not found; skipping post-build size optimization')}else if(opt.status!==0){process.exit(opt.status||1)}\"",
     "build:prepare-wasm-dts": "node ../scripts/prepare-wasm-dts.mjs .",

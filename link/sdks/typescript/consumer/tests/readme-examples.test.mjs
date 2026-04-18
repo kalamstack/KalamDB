@@ -46,10 +46,13 @@ test('README runAgent example writes back through executeAsUser inside the user 
     partition_id: 0,
     topic: 'support.inbox_events',
     group_id: 'support-summary-agent',
+    payload: {
+      body: 'Please summarize this support thread',
+      _table: 'support.inbox',
+    },
     value: {
-      row: {
-        body: 'Please summarize this support thread',
-      },
+      body: 'Please summarize this support thread',
+      _table: 'support.inbox',
     },
   };
 

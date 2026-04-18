@@ -176,7 +176,7 @@ jobs:
           if-no-files-found: error
 
   build_ui:
-    name: Build Admin UI
+    name: Test and Build Admin UI
     runs-on: ubuntu-latest
 
     steps:
@@ -215,12 +215,29 @@ jobs:
           npm install
           npm run build
 
-      - name: Build Admin UI
+      - name: Install Admin UI dependencies
         shell: bash
         run: |
           set -euo pipefail
           cd ui
           npm install
+
+      - name: Run Admin UI tests
+        shell: bash
+        env:
+          CI: "true"
+        run: |
+          set -euo pipefail
+          cd ui
+          npm test -- --run
+
+      - name: Build Admin UI
+        shell: bash
+        env:
+          CI: "true"
+        run: |
+          set -euo pipefail
+          cd ui
           npm run build
 
       - name: Upload UI dist
