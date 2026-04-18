@@ -43,25 +43,58 @@ pub fn parser_options() -> ParserOptions {
 /// `sqlparser-rs` treats `CURRENT_USER` and `CURRENT_ROLE` as reserved keywords,
 /// not regular zero-argument function calls. Queries like `SELECT CURRENT_USER()`
 /// therefore fail parsing unless the empty parentheses are stripped first.
-pub fn normalize_context_keyword_calls_for_sqlparser(sql: &str) -> String {
-    let sql = CURRENT_USER_CALL_RE.replace_all(sql, "CURRENT_USER");
-    CURRENT_ROLE_CALL_RE.replace_all(&sql, "CURRENT_ROLE").into_owned()
+pub fn normalize_context_keyword_calls_for_sqlparser(sql: &str) -> std::borrow::Cow<'_, str> {
+    use std::borrow::Cow;
+    let s1 = CURRENT_USER_CALL_RE.replace_all(sql, "CURRENT_USER");
+    let s2 = CURRENT_ROLE_CALL_RE.replace_all(&s1, "CURRENT_ROLE");
+    match s2 {
+        Cow::Borrowed(_) if matches!(s1, Cow::Borrowed(_)) => Cow::Borrowed(sql),
+        _ => Cow::Owned(s2.into_owned()),
+    }
 }
 
 /// Rewrite public context function spellings to KalamDB's internal DataFusion UDFs.
 ///
 /// These aliases let user-facing SQL use `CURRENT_USER()`, `CURRENT_USER_ID()`, and
 /// `CURRENT_ROLE()` while execution resolves to the registered `KDB_*` functions.
-pub fn rewrite_context_functions_for_datafusion(sql: &str) -> String {
-    let sql = CURRENT_USER_ID_CALL_RE.replace_all(sql, "KDB_CURRENT_USER_ID()");
-    let sql = CURRENT_USER_CALL_RE.replace_all(&sql, "KDB_CURRENT_USER()");
-    let sql = CURRENT_ROLE_CALL_RE.replace_all(&sql, "KDB_CURRENT_ROLE()");
-    let sql = CURRENT_USER_KEYWORD_RE.replace_all(&sql, "${1}KDB_CURRENT_USER()${3}");
-    let sql = CURRENT_ROLE_KEYWORD_RE
-        .replace_all(&sql, "${1}KDB_CURRENT_ROLE()${3}")
-        .into_owned();
+///
+/// Returns `Cow::Borrowed` when no rewriting was needed, avoiding allocation.
+pub fn rewrite_context_functions_for_datafusion(sql: &str) -> std::borrow::Cow<'_, str> {
+    use std::borrow::Cow;
 
-    rewrite_json_operators_for_datafusion(&sql)
+    // Perform all context-function regex rewrites on an owned String.
+    // The chain of replacements is cheap (no allocation when nothing matches),
+    // but we materialise to String once any regex matches to avoid lifetime
+    // issues with the intermediate Cow chain.
+    let s1 = CURRENT_USER_ID_CALL_RE.replace_all(sql, "KDB_CURRENT_USER_ID()");
+    let s2 = CURRENT_USER_CALL_RE.replace_all(&s1, "KDB_CURRENT_USER()");
+    let s3 = CURRENT_ROLE_CALL_RE.replace_all(&s2, "KDB_CURRENT_ROLE()");
+    let s4 = CURRENT_USER_KEYWORD_RE.replace_all(&s3, "${1}KDB_CURRENT_USER()${3}");
+    let s5 = CURRENT_ROLE_KEYWORD_RE.replace_all(&s4, "${1}KDB_CURRENT_ROLE()${3}");
+
+    // The Cow variant of s5 only reflects the LAST replacement step.
+    // Earlier steps (s1–s3) may have produced Owned results, but if s4/s5
+    // found no further matches they return Borrowed (pointing into an owned
+    // intermediate). Compare the string content to detect any change.
+    let result: &str = &s5;
+    if needs_json_operator_rewrite(result) {
+        Cow::Owned(rewrite_json_operators_for_datafusion(result))
+    } else if result == sql {
+        Cow::Borrowed(sql)
+    } else {
+        Cow::Owned(s5.into_owned())
+    }
+}
+
+/// Quick check for JSON operator tokens that would need rewriting.
+/// Avoids the full SQL re-parse when none are present.
+#[inline]
+fn needs_json_operator_rewrite(sql: &str) -> bool {
+    // Look for -> or ->> or standalone ? that might be a JSON contains operator.
+    // This is a cheap scan that avoids false negatives; false positives (e.g. `?` in
+    // a string literal or `->` in a comment) just cause an unnecessary but correct
+    // re-parse.
+    sql.contains("->") || sql.contains('?')
 }
 
 fn rewrite_json_operators_for_datafusion(sql: &str) -> String {

@@ -9,7 +9,7 @@ use kalamdb_auth::{authenticate, AuthRequest, CoreUsersRepo, UserRepository};
 use kalamdb_commons::conversions::{
     mask_sensitive_rows_for_role, record_batch_to_json_arrays, schema_fields_from_arrow_schema,
 };
-use kalamdb_commons::models::{ConnectionInfo, KalamCellValue, NamespaceId, UserId, Username};
+use kalamdb_commons::models::{ConnectionInfo, KalamCellValue, NamespaceId, UserId};
 use kalamdb_commons::schemas::SchemaField;
 use kalamdb_commons::Role;
 use kalamdb_raft::{
@@ -45,7 +45,7 @@ struct ForwardedResult {
     row_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     message: Option<String>,
-    as_user: Username,
+    as_user: String,
 }
 
 #[derive(Serialize)]
@@ -110,7 +110,7 @@ impl CoreClusterHandler {
 
     fn execution_result_to_forwarded(
         result: ExecutionResult,
-        as_user: &Username,
+        as_user: &str,
         user_role: Role,
     ) -> Result<ForwardedResult, String> {
         match result {
@@ -119,7 +119,7 @@ impl CoreClusterHandler {
                 rows: None,
                 row_count: 0,
                 message: Some(message),
-                as_user: as_user.clone(),
+                as_user: as_user.to_string(),
             }),
             ExecutionResult::Rows {
                 batches,
@@ -144,7 +144,7 @@ impl CoreClusterHandler {
                     rows: Some(rows),
                     row_count,
                     message: None,
-                    as_user: as_user.clone(),
+                    as_user: as_user.to_string(),
                 })
             },
             ExecutionResult::Inserted { rows_affected } => Ok(ForwardedResult {
@@ -152,21 +152,21 @@ impl CoreClusterHandler {
                 rows: None,
                 row_count: rows_affected,
                 message: Some(format!("Inserted {} row(s)", rows_affected)),
-                as_user: as_user.clone(),
+                as_user: as_user.to_string(),
             }),
             ExecutionResult::Updated { rows_affected } => Ok(ForwardedResult {
                 schema: Vec::new(),
                 rows: None,
                 row_count: rows_affected,
                 message: Some(format!("Updated {} row(s)", rows_affected)),
-                as_user: as_user.clone(),
+                as_user: as_user.to_string(),
             }),
             ExecutionResult::Deleted { rows_affected } => Ok(ForwardedResult {
                 schema: Vec::new(),
                 rows: None,
                 row_count: rows_affected,
                 message: Some(format!("Deleted {} row(s)", rows_affected)),
-                as_user: as_user.clone(),
+                as_user: as_user.to_string(),
             }),
             ExecutionResult::Flushed {
                 tables,
@@ -180,7 +180,7 @@ impl CoreClusterHandler {
                     tables.len(),
                     bytes_written
                 )),
-                as_user: as_user.clone(),
+                as_user: as_user.to_string(),
             }),
             ExecutionResult::Subscription {
                 subscription_id,
@@ -194,25 +194,25 @@ impl CoreClusterHandler {
                     "Subscription {} on channel {} for query: {}",
                     subscription_id, channel, select_query
                 )),
-                as_user: as_user.clone(),
+                as_user: as_user.to_string(),
             }),
             ExecutionResult::JobKilled { job_id, status } => Ok(ForwardedResult {
                 schema: Vec::new(),
                 rows: None,
                 row_count: 1,
                 message: Some(format!("Job {} killed: {}", job_id, status)),
-                as_user: as_user.clone(),
+                as_user: as_user.to_string(),
             }),
         }
     }
 
     fn resolve_result_username(
         authenticated_user_id: &UserId,
-        execute_as_username: Option<&Username>,
-    ) -> Username {
+        execute_as_username: Option<&str>,
+    ) -> String {
         execute_as_username
-            .cloned()
-            .unwrap_or_else(|| Username::from(authenticated_user_id.as_str()))
+            .map(str::to_string)
+            .unwrap_or_else(|| authenticated_user_id.as_str().to_string())
     }
 
     fn prepare_forwarded_statement(
@@ -220,7 +220,7 @@ impl CoreClusterHandler {
         statement: &str,
         default_namespace: &NamespaceId,
         actor_role: Role,
-    ) -> Result<(PreparedExecutionStatement, Option<Username>), String> {
+    ) -> Result<(PreparedExecutionStatement, Option<String>), String> {
         let trimmed = statement.trim().trim_end_matches(';').trim();
         if trimmed.is_empty() {
             return Err("Empty SQL statement".to_string());
@@ -229,9 +229,7 @@ impl CoreClusterHandler {
         let (sql, execute_as_username) = match kalamdb_sql::execute_as::parse_execute_as(statement)?
         {
             Some(envelope) => {
-                let execute_as_username = Username::try_new(&envelope.username)
-                    .map_err(|e| format!("Invalid execute-as username: {}", e))?;
-                (envelope.inner_sql, Some(execute_as_username))
+                (envelope.inner_sql, Some(envelope.username))
             },
             None => (trimmed.to_string(), None),
         };
@@ -401,7 +399,7 @@ impl ClusterMessageHandler for CoreClusterHandler {
                     .resolve_execute_as_user(
                         exec_ctx.user_id(),
                         exec_ctx.user_role(),
-                        target_username.as_str(),
+                        target_username,
                     )
                     .await
                 {
@@ -458,8 +456,9 @@ impl ClusterMessageHandler for CoreClusterHandler {
                     ));
                 },
             };
+            let execute_as_username = execute_as_username.as_ref().map(|value| value.as_str());
             let effective_username =
-                Self::resolve_result_username(exec_ctx.user_id(), execute_as_username.as_ref());
+                Self::resolve_result_username(exec_ctx.user_id(), execute_as_username);
             let effective_role = if execute_as_user.is_some() {
                 Role::User
             } else {
@@ -560,7 +559,6 @@ mod tests {
     use kalamdb_commons::conversions::with_kalam_data_type_metadata;
     use kalamdb_commons::models::datatypes::KalamDataType;
     use kalamdb_commons::models::Role;
-    use kalamdb_commons::models::Username;
     use kalamdb_raft::ForwardSqlParam;
     use std::sync::Arc;
 
@@ -582,7 +580,7 @@ mod tests {
                 row_count: 1,
                 schema: Some(schema),
             },
-            &Username::from("root"),
+            "root",
             Role::System,
         )
         .expect("serialize rows result");
@@ -612,7 +610,7 @@ mod tests {
                 row_count: 1,
                 schema: Some(schema),
             },
-            &Username::from("alice"),
+            "alice",
             Role::User,
         )
         .expect("serialize masked rows result");

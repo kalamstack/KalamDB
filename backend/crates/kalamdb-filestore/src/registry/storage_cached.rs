@@ -456,7 +456,9 @@ impl StorageCached {
         user_id: Option<&UserId>,
         manifest: &serde_json::Value,
     ) -> Result<()> {
-        let data = serde_json::to_vec_pretty(manifest)
+        // Use compact serialization — pretty-printing adds ~30% overhead
+        // for manifests with many segments and provides no runtime benefit.
+        let data = serde_json::to_vec(manifest)
             .map_err(|e| FilestoreError::Format(format!("Failed to serialize manifest: {}", e)))?;
         self.put_sync(table_type, table_id, user_id, "manifest.json", Bytes::from(data))?;
         Ok(())

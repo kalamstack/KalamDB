@@ -242,6 +242,78 @@ impl FlushManifestHelper {
 
         Ok(updated_manifest)
     }
+
+    /// Update manifest with pre-extracted stats (avoids needing the RecordBatch).
+    ///
+    /// Use this when stats have been extracted before the batch was consumed
+    /// (e.g., moved into write_parquet_sync to avoid cloning).
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_manifest_after_flush_with_stats(
+        &self,
+        table_id: &TableId,
+        user_id: Option<&UserId>,
+        batch_filename: String,
+        min_seq: SeqId,
+        max_seq: SeqId,
+        column_stats: HashMap<u64, ColumnStats>,
+        row_count: u64,
+        file_size_bytes: u64,
+        schema_version: u32,
+    ) -> Result<Manifest, KalamDbError> {
+        let segment_id = batch_filename.clone();
+        let relative_path = batch_filename;
+
+        let segment = SegmentMetadata::with_schema_version(
+            segment_id,
+            relative_path,
+            column_stats,
+            min_seq,
+            max_seq,
+            row_count,
+            file_size_bytes,
+            schema_version,
+        );
+
+        let updated_manifest =
+            self.manifest_service.update_manifest(table_id, user_id, segment).map_err(|e| {
+                KalamDbError::Other(format!(
+                    "Failed to update manifest for {} (user_id={:?}): {}",
+                    table_id,
+                    user_id.map(|u| u.as_str()),
+                    e
+                ))
+            })?;
+
+        self.manifest_service.flush_manifest(table_id, user_id).map_err(|e| {
+            KalamDbError::Other(format!(
+                "Failed to flush manifest for {} (user_id={:?}): {}",
+                table_id,
+                user_id.map(|u| u.as_str()),
+                e
+            ))
+        })?;
+
+        self.manifest_service
+            .update_after_flush(table_id, user_id, &updated_manifest, None)
+            .map_err(|e| {
+                KalamDbError::Other(format!(
+                    "Failed to update manifest cache for {} (user_id={:?}): {}",
+                    table_id,
+                    user_id.map(|u| u.as_str()),
+                    e
+                ))
+            })?;
+
+        log::debug!(
+            "[MANIFEST] ✅ Updated manifest and cache: {} (user_id={:?}, rows={}, size={} bytes)",
+            table_id,
+            user_id.map(|u| u.as_str()),
+            row_count,
+            file_size_bytes
+        );
+
+        Ok(updated_manifest)
+    }
 }
 
 #[cfg(test)]

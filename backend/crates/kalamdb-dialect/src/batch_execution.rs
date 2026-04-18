@@ -8,7 +8,6 @@ use crate::dialect::KalamDbDialect;
 use crate::execute_as::parse_execute_as;
 use crate::parser::utils::parse_single_statement;
 use crate::parser::utils::parse_sql_statements;
-use kalamdb_commons::models::Username;
 use sqlparser::ast::Spanned;
 use sqlparser::ast::Statement;
 use sqlparser::tokenizer::{Location, Span};
@@ -39,13 +38,13 @@ impl std::error::Error for BatchParseError {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedExecutionStatement {
     pub sql: String,
-    pub execute_as_username: Option<Username>,
+    pub execute_as_username: Option<String>,
     pub parsed_statement: Option<Statement>,
 }
 
 #[derive(Debug, Clone)]
 pub struct PreparedExecutionBatchStatement<T> {
-    pub execute_as_username: Option<Username>,
+    pub execute_as_username: Option<String>,
     pub parsed_statement: Option<Statement>,
     pub prepared_statement: T,
 }
@@ -106,10 +105,7 @@ pub fn parse_execution_statement(statement: &str) -> Result<ParsedExecutionState
     match parse_execute_as(statement)? {
         Some(envelope) => Ok(ParsedExecutionStatement {
             sql: envelope.inner_sql.clone(),
-            execute_as_username: Some(
-                Username::try_new(&envelope.username)
-                    .map_err(|e| format!("Invalid execute-as username: {}", e))?,
-            ),
+            execute_as_username: Some(envelope.username),
             parsed_statement: parse_single_statement(&envelope.inner_sql).ok().flatten(),
         }),
         None => Ok(ParsedExecutionStatement {
@@ -436,7 +432,6 @@ mod tests {
         parse_batch_statements, parse_execution_batch, parse_execution_statement,
         prepare_execution_batch, split_statements, ExecutionBatchParseError,
     };
-    use kalamdb_commons::models::Username;
 
     #[test]
     fn splits_simple_statements() {
@@ -546,7 +541,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(parsed.execute_as_username, Some(Username::from("alice")));
+        assert_eq!(parsed.execute_as_username, Some("alice".to_string()));
         assert_eq!(parsed.sql, "SELECT * FROM default.todos WHERE id = 1");
         assert!(parsed.parsed_statement.is_some());
     }
@@ -576,7 +571,7 @@ mod tests {
         assert_eq!(prepared[0].execute_as_username, None);
         assert!(prepared[0].parsed_statement.is_some());
         assert_eq!(prepared[1].prepared_statement, "SELECT 2".to_string());
-        assert_eq!(prepared[1].execute_as_username, Some(Username::from("alice")));
+        assert_eq!(prepared[1].execute_as_username, Some("alice".to_string()));
         assert!(prepared[1].parsed_statement.is_some());
     }
 }

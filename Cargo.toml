@@ -182,7 +182,7 @@ rpassword = "7.3"
 dirs = "6.0"
 term_size = "0.3"
 crossterm = "0.29.0"
-assert_cmd = "2.2.0"
+assert_cmd = "2.2.1"
 predicates = "3.1.4"
 futures-util = { version = "0.3.32", default-features = false }
 base64 = "0.22"
@@ -232,8 +232,9 @@ rust-embed = { version = "8.11.0", features = ["compression", "include-exclude"]
 mime_guess = "2.0"
 kalamdb-configs = { path = "backend/crates/kalamdb-configs" }
 kalamdb-server = { path = "backend" }
-pgrx = "=0.17.0"
-pgrx-tests = "=0.17.0"
+pgrx = "=0.18.0"
+pgrx-bench = "=0.18.0"
+pgrx-tests = "=0.18.0"
 tokio-postgres = "0.7.17"
 
 # Tracing / observability

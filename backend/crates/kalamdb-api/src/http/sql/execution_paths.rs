@@ -1,6 +1,6 @@
 use actix_web::{http::StatusCode, HttpRequest, HttpResponse};
 use bytes::Bytes;
-use kalamdb_commons::models::{NamespaceId, Username};
+use kalamdb_commons::models::NamespaceId;
 use kalamdb_commons::schemas::TableType;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::error::KalamDbError;
@@ -190,7 +190,7 @@ pub(super) async fn execute_file_upload_path(
     sql_executor: &Arc<SqlExecutor>,
     exec_ctx: &ExecutionContext,
     impersonation_service: &SqlImpersonationService,
-    authorized_username: &Username,
+    authorized_username: &str,
     default_namespace: &NamespaceId,
     params: Vec<ScalarValue>,
     schema_registry: &SchemaRegistry,
@@ -355,7 +355,7 @@ pub(super) async fn execute_file_upload_path(
     );
 
     let effective_username =
-        resolve_result_username(authorized_username, stmt.execute_as_username.as_ref());
+        resolve_result_username(authorized_username, stmt.execute_as_username.as_deref());
 
     match execute_single_statement(
         &modified_metadata,
@@ -403,7 +403,7 @@ pub(super) async fn execute_batch_path(
     sql_executor: &Arc<SqlExecutor>,
     exec_ctx: &ExecutionContext,
     impersonation_service: &SqlImpersonationService,
-    authorized_username: &Username,
+    authorized_username: &str,
     params: Vec<ScalarValue>,
     http_req: &HttpRequest,
     req_for_forward: &QueryRequest,
@@ -535,7 +535,7 @@ pub(super) async fn execute_batch_path(
 
         let stmt_start = Instant::now();
         let effective_username =
-            resolve_result_username(authorized_username, stmt.execute_as_username.as_ref());
+            resolve_result_username(authorized_username, stmt.execute_as_username.as_deref());
 
         let is_last = idx + 1 == stmt_count;
 
@@ -719,7 +719,7 @@ pub(super) async fn execute_batch_path(
                     total_inserted,
                     Some(format!("Inserted {} row(s)", total_inserted)),
                 )
-                .with_as_user(authorized_username.clone()),
+                .with_as_user(authorized_username.to_string()),
             );
         }
         if total_updated > 0 {
@@ -728,7 +728,7 @@ pub(super) async fn execute_batch_path(
                     total_updated,
                     Some(format!("Updated {} row(s)", total_updated)),
                 )
-                .with_as_user(authorized_username.clone()),
+                .with_as_user(authorized_username.to_string()),
             );
         }
         if total_deleted > 0 {
@@ -737,7 +737,7 @@ pub(super) async fn execute_batch_path(
                     total_deleted,
                     Some(format!("Deleted {} row(s)", total_deleted)),
                 )
-                .with_as_user(authorized_username.clone()),
+                .with_as_user(authorized_username.to_string()),
             );
         }
     }

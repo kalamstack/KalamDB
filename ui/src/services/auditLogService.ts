@@ -9,7 +9,6 @@ export interface AuditLog {
   audit_id: string;
   timestamp: string;
   actor_user_id: string;
-  actor_username: string;
   action: string;
   target: string;
   details: string | null;
@@ -24,7 +23,6 @@ export async function fetchAuditLogs(filters?: AuditLogFilters): Promise<AuditLo
     audit_id: String(row.audit_id ?? ""),
     timestamp: String(row.timestamp ?? ""),
     actor_user_id: String(row.actor_user_id ?? ""),
-    actor_username: String(row.actor_username ?? ""),
     action: String(row.action ?? ""),
     target: String(row.target ?? ""),
     details: row.details as string | null,

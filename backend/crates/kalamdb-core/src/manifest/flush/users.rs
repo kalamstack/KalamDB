@@ -165,7 +165,13 @@ impl UserTableFlushJob {
             );
         }
 
-        // Step 2: Write Parquet to TEMP location first
+        // Extract manifest stats from the batch BEFORE writing Parquet,
+        // so we can move the batch into write_parquet_sync without cloning.
+        let (min_seq, max_seq) = FlushManifestHelper::extract_seq_range(&batch);
+        let column_stats = FlushManifestHelper::extract_column_stats(&batch, indexed_columns);
+        let row_count = batch.num_rows() as u64;
+
+        // Step 2: Write Parquet to TEMP location first (consumes batch — no clone)
         log::debug!("📝 [ATOMIC] Writing Parquet to temp path: {}, rows={}", temp_path, rows_count);
         let result = storage_cached
             .write_parquet_sync(
@@ -174,7 +180,7 @@ impl UserTableFlushJob {
                 Some(&user_id_typed),
                 &temp_filename,
                 self.schema.clone(),
-                vec![batch.clone()],
+                vec![batch],
                 Some(bloom_filter_columns.to_vec()),
             )
             .into_kalamdb_error("Filestore error")?;
@@ -193,18 +199,17 @@ impl UserTableFlushJob {
 
         let size_bytes = result.size_bytes;
 
-        // Update manifest and cache using helper (with row-group stats)
-        // Note: For remote storage, we don't have a local path; pass destination_path for stats
-        // Phase 16: Include schema version to link Parquet file to specific schema
+        // Update manifest using pre-extracted stats (batch was consumed above)
         let schema_version = self.get_schema_version();
-        self.manifest_helper.update_manifest_after_flush(
+        self.manifest_helper.update_manifest_after_flush_with_stats(
             &self.table_id,
             Some(&user_id_typed),
             batch_filename.clone(),
-            &std::path::PathBuf::from(&destination_path),
-            &batch,
+            min_seq,
+            max_seq,
+            column_stats,
+            row_count,
             size_bytes,
-            indexed_columns,
             schema_version,
         )?;
 
@@ -235,19 +240,20 @@ impl UserTableFlushJob {
             return Ok(());
         }
 
-        let mut parsed_keys = Vec::new();
-        for key_bytes in keys {
-            let key = kalamdb_commons::ids::UserTableRowId::from_storage_key(key_bytes)
-                .into_invalid_operation("Invalid key bytes")?;
-            parsed_keys.push(key);
-        }
+        let parsed_keys: Result<Vec<_>, _> = keys
+            .iter()
+            .map(|key_bytes| {
+                kalamdb_commons::ids::UserTableRowId::from_storage_key(key_bytes)
+                    .into_invalid_operation("Invalid key bytes")
+            })
+            .collect();
+        let parsed_keys = parsed_keys?;
 
-        // Delete each key individually using IndexedEntityStore::delete
-        // IMPORTANT: Must use self.store.delete() instead of EntityStore::delete()
-        // to ensure both the entity AND its index entries are removed atomically.
-        for key in &parsed_keys {
-            self.store.delete(key).into_kalamdb_error("Failed to delete flushed row")?;
-        }
+        // Batch delete: single RocksDB batch write for all main + index entries.
+        // Much faster than per-key delete() which does get+batch per key.
+        self.store
+            .delete_batch(&parsed_keys)
+            .into_kalamdb_error("Failed to delete flushed rows")?;
 
         log::debug!("Deleted {} flushed rows from storage", keys.len());
         Ok(())

@@ -699,7 +699,7 @@ get_access_token() {
 
     response=$(curl -fsS -X POST "$base_url/v1/api/auth/login" \
         -H "Content-Type: application/json" \
-        -d "{\"username\":\"root\",\"password\":\"$ROOT_PASSWORD\"}") || return 1
+        -d "{\"user\":\"root\",\"password\":\"$ROOT_PASSWORD\"}") || return 1
 
     python3 - "$response" << 'PY'
 import json

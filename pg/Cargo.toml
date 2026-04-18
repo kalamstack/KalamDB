@@ -15,10 +15,6 @@ doctest = false
 # Postgres-backed testing runs through pg/tests and pg/test.sh instead.
 test = false
 
-[[bin]]
-name = "pgrx_embed_pg_kalam"
-path = "./src/bin/pgrx_embed.rs"
-
 [features]
 default = ["pg16"]
 pg13 = ["pgrx/pg13"]
@@ -27,6 +23,7 @@ pg15 = ["pgrx/pg15"]
 pg16 = ["pgrx/pg16"]
 pg17 = ["pgrx/pg17"]
 pg18 = ["pgrx/pg18"]
+pg_bench = ["dep:pgrx-bench"]
 pg_test = []
 e2e = []
 
@@ -40,6 +37,7 @@ kalam-pg-common = { path = "crates/kalam-pg-common", default-features = false }
 kalam-pg-fdw = { path = "crates/kalam-pg-fdw" }
 kalamdb-commons = { path = "../backend/crates/kalamdb-commons", default-features = false, features = ["rows"] }
 pgrx = { workspace = true }
+pgrx-bench = { workspace = true, optional = true }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

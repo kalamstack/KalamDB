@@ -1231,6 +1231,23 @@ pub fn row_to_json_map(
     Ok(json_row)
 }
 
+/// Zero-clone variant of [`row_to_json_map`] that takes ownership of the Row,
+/// reusing the existing String allocations for column names instead of cloning.
+///
+/// Prefer this over `row_to_json_map(&row)` when the Row is no longer needed.
+pub fn row_into_json_map(
+    row: Row,
+) -> Result<std::collections::HashMap<String, KalamCellValue>, CommonError> {
+    let mut json_row = std::collections::HashMap::with_capacity(row.values.len());
+
+    for (col_name, scalar_value) in row.values {
+        let json_value = scalar_value_to_json(&scalar_value)?;
+        json_row.insert(col_name, json_value);
+    }
+
+    Ok(json_row)
+}
+
 /// Coerce a single row of updates to match the schema types.
 ///
 /// Unlike `coerce_rows`, this does NOT fill in default values for missing columns.

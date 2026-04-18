@@ -2,7 +2,7 @@ use actix_web::{error::ErrorInternalServerError, HttpResponse};
 use bytes::Bytes;
 use futures_util::stream;
 use kalamdb_commons::conversions::{mask_sensitive_rows_for_role, schema_fields_from_arrow_schema};
-use kalamdb_commons::models::{KalamCellValue, Role, Username};
+use kalamdb_commons::models::{KalamCellValue, Role};
 use kalamdb_commons::schemas::SchemaField;
 use kalamdb_core::providers::arrow_json_conversion::record_batch_to_json_arrays;
 
@@ -42,7 +42,7 @@ pub fn stream_sql_rows_response(
     batches: Vec<arrow::record_batch::RecordBatch>,
     schema: Option<arrow::datatypes::SchemaRef>,
     user_role: Option<Role>,
-    as_user: Username,
+    as_user: String,
     row_count: usize,
     took: f64,
 ) -> Result<HttpResponse, actix_web::Error> {

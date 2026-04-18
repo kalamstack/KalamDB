@@ -4,7 +4,6 @@
 
 use kalamdb_commons::models::datatypes::KalamDataType;
 use kalamdb_commons::models::KalamCellValue;
-use kalamdb_commons::models::Username;
 use kalamdb_commons::schemas::SchemaField;
 use serde::{Deserialize, Serialize, Serializer};
 use std::fmt;
@@ -242,8 +241,8 @@ pub struct QueryResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 
-    /// Effective username this statement executed as.
-    pub as_user: Username,
+    /// Effective user identifier this statement executed as.
+    pub as_user: String,
 }
 
 /// Error details for failed SQL execution
@@ -342,7 +341,7 @@ impl QueryResult {
             rows: Some(rows),
             row_count,
             message: None,
-            as_user: Username::from("unknown"),
+            as_user: "unknown".to_string(),
         }
     }
 
@@ -353,7 +352,7 @@ impl QueryResult {
             rows: None,
             row_count,
             message,
-            as_user: Username::from("unknown"),
+            as_user: "unknown".to_string(),
         }
     }
 
@@ -364,7 +363,7 @@ impl QueryResult {
             rows: None,
             row_count: 0,
             message: Some(message),
-            as_user: Username::from("unknown"),
+            as_user: "unknown".to_string(),
         }
     }
 
@@ -400,7 +399,7 @@ impl QueryResult {
             rows: Some(vec![row]),
             row_count: 1,
             message: None,
-            as_user: Username::from("unknown"),
+            as_user: "unknown".to_string(),
         }
     }
 
@@ -410,7 +409,7 @@ impl QueryResult {
     }
 
     /// Set the effective execution username for this result.
-    pub fn with_as_user(mut self, as_user: Username) -> Self {
+    pub fn with_as_user(mut self, as_user: String) -> Self {
         self.as_user = as_user;
         self
     }
@@ -419,7 +418,6 @@ impl QueryResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kalamdb_commons::models::Username;
 
     #[test]
     fn test_success_response_serialization() {
@@ -548,7 +546,7 @@ mod tests {
         assert!(result.rows.is_none());
         assert!(result.schema.is_empty());
         assert_eq!(result.message, Some("Table created successfully".to_string()));
-        assert_eq!(result.as_user, Username::from("unknown"));
+        assert_eq!(result.as_user, "unknown".to_string());
     }
 
     #[test]
@@ -559,14 +557,13 @@ mod tests {
         assert!(result.rows.is_none());
         assert!(result.schema.is_empty());
         assert_eq!(result.message, Some("5 rows inserted".to_string()));
-        assert_eq!(result.as_user, Username::from("unknown"));
+        assert_eq!(result.as_user, "unknown".to_string());
     }
 
     #[test]
     fn test_query_result_with_as_user() {
-        let result =
-            QueryResult::with_message("ok".to_string()).with_as_user(Username::from("alice"));
+        let result = QueryResult::with_message("ok".to_string()).with_as_user("alice".to_string());
 
-        assert_eq!(result.as_user, Username::from("alice"));
+        assert_eq!(result.as_user, "alice".to_string());
     }
 }

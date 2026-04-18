@@ -101,8 +101,6 @@ pub use models::{
     TransactionOrigin,
     TransactionState,
     UserId,
-    UserName,
-    Username,
 };
 pub use schemas::{TableAccess, TableName, TableType};
 #[cfg(feature = "serialization")]

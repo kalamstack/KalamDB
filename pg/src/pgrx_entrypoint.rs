@@ -1,11 +1,13 @@
 use kalam_pg_common::USER_ID_GUC;
 use pgrx::guc::{GucContext, GucFlags, GucRegistry, GucSetting};
 use pgrx::prelude::*;
-use std::ffi::{c_void, CStr, CString};
+use std::ffi::{CStr, CString};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(feature = "e2e")]
 use arrow::array::StringArray;
+#[cfg(feature = "e2e")]
+use std::ffi::c_void;
 
 #[cfg(feature = "e2e")]
 #[derive(serde::Serialize)]
@@ -204,6 +206,57 @@ REVOKE EXECUTE ON FUNCTION kalam_exec(text) FROM PUBLIC;
     name = "kalam_exec_revoke",
     finalize,
 );
+
+#[cfg(feature = "pg_bench")]
+#[pg_schema]
+mod benches {
+    use pgrx::prelude::*;
+    use pgrx_bench::{black_box, BatchSize, Bencher};
+
+    fn prepare_generated_id_sink() {
+        Spi::run(
+            "CREATE UNLOGGED TABLE IF NOT EXISTS kalam_bench_sink (\
+                value bigint NOT NULL\
+            )",
+        )
+        .expect("create kalam_bench_sink");
+        Spi::run("TRUNCATE kalam_bench_sink").expect("truncate kalam_bench_sink");
+    }
+
+    #[pg_bench]
+    fn bench_session_settings_parse(b: &mut Bencher) {
+        let user_id = "u_bench";
+        let schema_name = "tenant_bench";
+
+        b.iter(|| {
+            let settings = crate::SessionSettings::from_guc_values(
+                Some(black_box(user_id)),
+                Some(black_box(schema_name)),
+            )
+            .expect("parse bench guc values");
+            black_box(settings.current_schema());
+        });
+    }
+
+    #[pg_bench(
+        setup = prepare_generated_id_sink,
+        transaction = "subtransaction_per_batch",
+        sample_size = 50,
+        measurement_time_ms = 2_000
+    )]
+    fn bench_spi_insert_generated_ids(b: &mut Bencher) {
+        b.iter_batched(
+            || black_box(32usize),
+            |row_count| {
+                for _ in 0..row_count {
+                    Spi::run("INSERT INTO kalam_bench_sink VALUES (snowflake_id())")
+                        .expect("insert generated snowflake id");
+                }
+            },
+            BatchSize::SmallInput,
+        );
+    }
+}
 
 #[cfg(feature = "e2e")]
 #[pg_extern]

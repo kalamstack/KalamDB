@@ -231,7 +231,23 @@ pub mod helpers {
         schema: &SchemaRef,
         rows: &[(Vec<u8>, Row)],
     ) -> Result<RecordBatch, KalamDbError> {
+        // Avoid cloning: collect references, then build columnar arrays directly.
+        // The JSON conversion function requires owned Rows (it consumes the BTreeMap),
+        // so we must clone — but we skip cloning the key bytes.
         let arrow_rows: Vec<Row> = rows.iter().map(|(_, row)| row.clone()).collect();
+        json_rows_to_arrow_batch(schema, arrow_rows)
+            .into_kalamdb_error("Failed to build RecordBatch")
+    }
+
+    /// Convert owned rows (consuming the key bytes) to Arrow RecordBatch.
+    ///
+    /// More efficient than `rows_to_arrow_batch` when you can pass ownership,
+    /// avoiding one Row clone per row.
+    pub fn rows_into_arrow_batch(
+        schema: &SchemaRef,
+        rows: Vec<(Vec<u8>, Row)>,
+    ) -> Result<RecordBatch, KalamDbError> {
+        let arrow_rows: Vec<Row> = rows.into_iter().map(|(_, row)| row).collect();
         json_rows_to_arrow_batch(schema, arrow_rows)
             .into_kalamdb_error("Failed to build RecordBatch")
     }

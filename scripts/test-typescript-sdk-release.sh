@@ -102,7 +102,7 @@ ensure_test_auth_ready() {
         "$SERVER_URL/v1/api/sql" >/dev/null
 
     local repair_sql
-    if grep -q "\"username\":\"$SERVER_USER\"" "$user_check_body"; then
+    if grep -q "\"user\":\"$SERVER_USER\"" "$user_check_body"; then
         repair_sql="ALTER USER '$user_sql' SET PASSWORD '$password_sql'; ALTER USER '$user_sql' SET ROLE 'dba';"
     else
         repair_sql="CREATE USER '$user_sql' WITH PASSWORD '$password_sql' ROLE 'dba'"

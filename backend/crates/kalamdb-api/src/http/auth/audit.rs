@@ -1,6 +1,6 @@
 use chrono::Utc;
 use kalamdb_commons::models::{AuditLogId, ConnectionInfo};
-use kalamdb_commons::{UserId, UserName};
+use kalamdb_commons::UserId;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_system::AuditLogEntry;
 use std::sync::Arc;
@@ -16,7 +16,6 @@ pub(crate) async fn record_admin_login(
         audit_id: AuditLogId::from(format!("audit_{}_{}", timestamp, Uuid::new_v4().simple())),
         timestamp,
         actor_user_id: user_id.clone(),
-        actor_username: UserName::from(user_id.as_str()),
         action: "LOGIN".to_string(),
         target: format!("user:{}", user_id.as_str()),
         details: None,

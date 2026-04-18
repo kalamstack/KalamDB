@@ -1,5 +1,5 @@
 use actix_web::HttpResponse;
-use kalamdb_commons::models::{NamespaceId, UserId, Username};
+use kalamdb_commons::models::{NamespaceId, UserId};
 use kalamdb_core::error::KalamDbError;
 use kalamdb_core::sql::context::ExecutionContext;
 use kalamdb_core::sql::executor::{PreparedExecutionStatement, SqlExecutor};
@@ -12,25 +12,27 @@ use super::request::took_ms;
 #[derive(Debug)]
 pub(super) struct ParsedExecutionStatement {
     pub(super) sql: String,
-    pub(super) execute_as_username: Option<Username>,
+    pub(super) execute_as_username: Option<String>,
 }
 
 #[derive(Debug)]
 pub(super) struct PreparedApiExecutionStatement {
-    pub(super) execute_as_username: Option<Username>,
+    pub(super) execute_as_username: Option<String>,
     pub(super) prepared_statement: PreparedExecutionStatement,
 }
 
-pub(super) fn authorized_username(exec_ctx: &ExecutionContext) -> Username {
-    Username::from(exec_ctx.user_id().as_str())
+pub(super) fn authorized_username(exec_ctx: &ExecutionContext) -> String {
+    exec_ctx.user_id().as_str().to_string()
 }
 
 #[inline]
 pub(super) fn resolve_result_username(
-    authorized_username: &Username,
-    execute_as_username: Option<&Username>,
-) -> Username {
-    execute_as_username.cloned().unwrap_or_else(|| authorized_username.clone())
+    authorized_username: &str,
+    execute_as_username: Option<&str>,
+) -> String {
+    execute_as_username
+        .map(str::to_string)
+        .unwrap_or_else(|| authorized_username.to_string())
 }
 
 pub(super) async fn resolve_execute_as_user(
@@ -43,7 +45,7 @@ pub(super) async fn resolve_execute_as_user(
             .resolve_execute_as_user(
                 exec_ctx.user_id(),
                 exec_ctx.user_role(),
-                target_username.as_str(),
+                target_username,
             )
             .await
             .map(Some),
@@ -60,10 +62,7 @@ pub(super) fn parse_execute_statement(statement: &str) -> Result<ParsedExecution
     match kalamdb_sql::execute_as::parse_execute_as(statement)? {
         Some(envelope) => Ok(ParsedExecutionStatement {
             sql: envelope.inner_sql,
-            execute_as_username: Some(
-                Username::try_new(&envelope.username)
-                    .map_err(|e| format!("Invalid execute-as username: {}", e))?,
-            ),
+            execute_as_username: Some(envelope.username),
         }),
         None => Ok(ParsedExecutionStatement {
             sql: trimmed.to_string(),
@@ -212,7 +211,6 @@ pub(super) fn split_and_prepare_statements(
 #[cfg(test)]
 mod tests {
     use super::{fast_single_statement_sql, parse_execute_statement, resolve_result_username};
-    use kalamdb_commons::models::Username;
 
     #[test]
     fn fast_single_statement_sql_trims_optional_trailing_semicolon() {
@@ -239,7 +237,7 @@ mod tests {
         )
         .expect("wrapper should parse");
 
-        assert_eq!(parsed.execute_as_username, Some(Username::from("alice")));
+        assert_eq!(parsed.execute_as_username, Some("alice".to_string()));
         assert_eq!(parsed.sql, "SELECT * FROM default.todos WHERE id = 1");
     }
 
@@ -257,7 +255,7 @@ mod tests {
         )
         .expect("bare username should parse");
 
-        assert_eq!(parsed.execute_as_username, Some(Username::from("alice")));
+        assert_eq!(parsed.execute_as_username, Some("alice".to_string()));
         assert_eq!(parsed.sql, "SELECT * FROM default.todos WHERE id = 1");
     }
 
@@ -267,7 +265,7 @@ mod tests {
             parse_execute_statement("execute as user bob (INSERT INTO default.t VALUES (1))")
                 .expect("case-insensitive bare username should parse");
 
-        assert_eq!(parsed.execute_as_username, Some(Username::from("bob")));
+        assert_eq!(parsed.execute_as_username, Some("bob".to_string()));
         assert_eq!(parsed.sql, "INSERT INTO default.t VALUES (1)");
     }
 
@@ -276,7 +274,7 @@ mod tests {
         let parsed = parse_execute_statement("EXECUTE AS USER alice(SELECT 1)")
             .expect("bare username immediately followed by '(' should parse");
 
-        assert_eq!(parsed.execute_as_username, Some(Username::from("alice")));
+        assert_eq!(parsed.execute_as_username, Some("alice".to_string()));
         assert_eq!(parsed.sql, "SELECT 1");
     }
 
@@ -290,15 +288,15 @@ mod tests {
 
     #[test]
     fn resolve_result_username_uses_authorized_when_no_execute_as() {
-        let authorized = Username::from("admin_user");
+        let authorized = "admin_user".to_string();
         let actual = resolve_result_username(&authorized, None);
         assert_eq!(actual, authorized);
     }
 
     #[test]
     fn resolve_result_username_uses_execute_as_when_present() {
-        let authorized = Username::from("admin_user");
-        let execute_as = Username::from("alice");
+        let authorized = "admin_user".to_string();
+        let execute_as = "alice".to_string();
         let actual = resolve_result_username(&authorized, Some(&execute_as));
         assert_eq!(actual, execute_as);
     }

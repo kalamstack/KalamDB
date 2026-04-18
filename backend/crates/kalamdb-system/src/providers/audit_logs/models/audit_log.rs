@@ -1,10 +1,7 @@
 //! Audit log entry for administrative actions.
 
 use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::models::{
-    ids::{AuditLogId, UserId},
-    UserName,
-};
+use kalamdb_commons::models::ids::{AuditLogId, UserId};
 use kalamdb_macros::table;
 use serde::{Deserialize, Serialize};
 
@@ -56,22 +53,12 @@ pub struct AuditLogEntry {
         nullable = false,
         primary_key = false,
         default = "None",
-        comment = "Username who performed the action"
-    )]
-    pub actor_username: UserName,
-    #[column(
-        id = 5,
-        ordinal = 5,
-        data_type(KalamDataType::Text),
-        nullable = false,
-        primary_key = false,
-        default = "None",
         comment = "Action performed (CREATE, UPDATE, DELETE, LOGIN, etc.)"
     )]
     pub action: String,
     #[column(
-        id = 6,
-        ordinal = 6,
+        id = 5,
+        ordinal = 5,
         data_type(KalamDataType::Text),
         nullable = false,
         primary_key = false,
@@ -80,8 +67,8 @@ pub struct AuditLogEntry {
     )]
     pub target: String,
     #[column(
-        id = 7,
-        ordinal = 7,
+        id = 6,
+        ordinal = 6,
         data_type(KalamDataType::Text),
         nullable = true,
         primary_key = false,
@@ -90,8 +77,8 @@ pub struct AuditLogEntry {
     )]
     pub details: Option<String>, // JSON blob for additional context
     #[column(
-        id = 8,
-        ordinal = 8,
+        id = 7,
+        ordinal = 7,
         data_type(KalamDataType::Text),
         nullable = true,
         primary_key = false,
@@ -100,8 +87,8 @@ pub struct AuditLogEntry {
     )]
     pub ip_address: Option<String>, // Connection source (if available)
     #[column(
-        id = 9,
-        ordinal = 9,
+        id = 8,
+        ordinal = 8,
         data_type(KalamDataType::Text),
         nullable = true,
         primary_key = false,

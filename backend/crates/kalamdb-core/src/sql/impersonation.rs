@@ -2,7 +2,7 @@ use crate::app_context::AppContext;
 use crate::error::KalamDbError;
 use chrono::Utc;
 use kalamdb_commons::models::{AuditLogId, UserId};
-use kalamdb_commons::{Role, UserName};
+use kalamdb_commons::Role;
 use kalamdb_session::can_impersonate_role;
 use kalamdb_system::AuditLogEntry;
 use serde_json::json;
@@ -49,7 +49,6 @@ impl SqlImpersonationService {
             audit_id,
             timestamp,
             actor_user_id: actor_user_id.clone(),
-            actor_username: UserName::from(actor_user_id.as_str()),
             action: action.to_string(),
             target: format!("user:{}", target_user),
             details: Some(details),

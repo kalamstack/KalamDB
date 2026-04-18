@@ -23,7 +23,7 @@ The extension is built with `pgrx` and supports PostgreSQL `pg13` through `pg18`
 ### Native source build
 
 - Rust toolchain compatible with this workspace
-- `cargo-pgrx` version `0.17.0`
+- `cargo-pgrx` version `0.18.0`
 - PostgreSQL server and development headers for the major version you want to target
 - A working `pg_config` for the PostgreSQL instance you want to install into
 
@@ -60,7 +60,7 @@ PG_MAJOR=16
 PG_FEATURE="pg${PG_MAJOR}"
 PG_CONFIG="$(command -v pg_config)"
 
-cargo install cargo-pgrx --version "=0.17.0" --locked
+cargo install cargo-pgrx --version "=0.18.0" --locked
 cargo pgrx init "--pg${PG_MAJOR}=${PG_CONFIG}"
 
 cargo pgrx install \
@@ -87,6 +87,49 @@ What `cargo pgrx install` does:
 - copies `pg_kalam.control` and the generated upgrade SQL into PostgreSQL's extension directory
 
 After changing extension code, rerun the same `cargo pgrx install` command.
+
+## Benchmark the extension with `cargo pgrx bench`
+
+`pgrx 0.18.0` adds in-process benchmarking via `#[pg_bench]`. This extension now
+ships a feature-gated bench module, so you can measure both pure extension code
+and SPI-backed paths without leaving the Postgres backend.
+
+From the repository root:
+
+```bash
+PG_MAJOR=16
+cargo pgrx bench \
+  --manifest-path pg/Cargo.toml \
+  "pg${PG_MAJOR}" \
+  --group-name baseline
+```
+
+Useful variants:
+
+```bash
+# List discovered benchmarks and their settings
+cargo pgrx bench --manifest-path pg/Cargo.toml --list
+
+# Compare against a named previous run
+cargo pgrx bench --manifest-path pg/Cargo.toml pg16 \
+  --group-name after-change \
+  --compare-group baseline
+
+# Emit machine-readable output for CI or scripts
+cargo pgrx bench --manifest-path pg/Cargo.toml pg16 --json
+
+# Render the persisted benchmark history report
+cargo pgrx bench --manifest-path pg/Cargo.toml pg16 --report
+
+# Pause after printing the backend PID so a profiler can attach
+cargo pgrx bench --manifest-path pg/Cargo.toml pg16 --wait 10
+```
+
+Notes:
+
+- `cargo pgrx bench` automatically enables the `pg_bench` Cargo feature
+- benchmark history is stored in the managed `pgrx_bench` schema/database and survives extension reinstalls
+- keep `pg_bench` out of normal release builds; it is intended for local perf work and CI perf lanes
 
 ## Start KalamDB from source for local development
 
@@ -223,7 +266,7 @@ Equivalent raw Docker command:
 docker build \
   --build-arg PG_MAJOR=17 \
   --build-arg PG_EXTENSION_FLAVOR=pg17 \
-  --build-arg PGRX_VERSION=0.17.0 \
+  --build-arg PGRX_VERSION=0.18.0 \
   --build-arg RUST_BASE_IMAGE=public.ecr.aws/docker/library/rust:1.92-bookworm \
   --build-arg POSTGRES_BASE_IMAGE=public.ecr.aws/docker/library/postgres:17-bookworm \
   -f pg/docker/Dockerfile \

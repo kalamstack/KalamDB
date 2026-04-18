@@ -2,7 +2,7 @@
 //!
 //! Each provider has a deterministic 3-character prefix used in
 //! `oidc:{prefix}:{subject}` usernames. This lives in `kalamdb-commons`
-//! so that both `UserName` (commons) and `AuthData` (system) can
+//! so that shared auth models and system auth data can
 //! reference it without circular dependencies.
 
 use std::fmt;

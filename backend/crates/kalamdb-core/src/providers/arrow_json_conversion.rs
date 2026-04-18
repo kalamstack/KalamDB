@@ -20,6 +20,10 @@ pub fn row_to_json_map(row: &Row) -> Result<HashMap<String, KalamCellValue>, Kal
     commons::row_to_json_map(row).map_err(map_error)
 }
 
+pub fn row_into_json_map(row: Row) -> Result<HashMap<String, KalamCellValue>, KalamDbError> {
+    commons::row_into_json_map(row).map_err(map_error)
+}
+
 pub use commons::{
     arrow_value_to_scalar, coerce_rows, coerce_updates, json_rows_to_arrow_batch, json_to_row,
     json_value_to_scalar, json_value_to_scalar_strict,

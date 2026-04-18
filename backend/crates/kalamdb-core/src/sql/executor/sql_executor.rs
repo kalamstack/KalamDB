@@ -186,14 +186,16 @@ impl SqlExecutor {
     }
 
     fn is_table_not_found_error(e: &datafusion::error::DataFusionError) -> bool {
-        let msg = e.to_string().to_lowercase();
+        Self::is_table_not_found_msg(&e.to_string().to_lowercase())
+    }
+
+    fn is_table_not_found_msg(msg: &str) -> bool {
         (msg.contains("table") && msg.contains("not found"))
             || (msg.contains("relation") && msg.contains("does not exist"))
             || msg.contains("unknown table")
     }
 
-    fn is_permission_error(e: &datafusion::error::DataFusionError) -> bool {
-        let msg = e.to_string().to_lowercase();
+    fn is_permission_msg(msg: &str) -> bool {
         msg.contains("access denied")
             || msg.contains("permission denied")
             || msg.contains("unauthorized")
@@ -202,16 +204,14 @@ impl SqlExecutor {
             || msg.contains("insufficient privileges")
     }
 
-    fn is_column_not_found_error(e: &datafusion::error::DataFusionError) -> bool {
-        let msg = e.to_string().to_lowercase();
+    fn is_column_not_found_msg(msg: &str) -> bool {
         (msg.contains("column") && msg.contains("not found"))
             || (msg.contains("field") && msg.contains("not found"))
             || msg.contains("no field named")
             || msg.contains("schema error: no field named")
     }
 
-    fn is_constraint_violation_error(e: &datafusion::error::DataFusionError) -> bool {
-        let msg = e.to_string().to_lowercase();
+    fn is_constraint_violation_msg(msg: &str) -> bool {
         msg.contains("primary key")
             || msg.contains("constraint violation")
             || msg.contains("already exists")
@@ -220,26 +220,29 @@ impl SqlExecutor {
             || msg.contains("unique index")
     }
 
+    /// Classify a DataFusionError into a KalamDbError with a single `to_string()`
+    /// call, avoiding redundant allocations on the error path.
     fn classify_datafusion_error(e: &datafusion::error::DataFusionError) -> KalamDbError {
         if let Some(not_leader) = Self::try_not_leader_error(e) {
             return not_leader;
         }
 
         let error_msg = e.to_string();
+        let lower = error_msg.to_lowercase();
 
-        if Self::is_table_not_found_error(e) {
+        if Self::is_table_not_found_msg(&lower) {
             return KalamDbError::TableNotFound(error_msg);
         }
 
-        if Self::is_permission_error(e) {
+        if Self::is_permission_msg(&lower) {
             return KalamDbError::PermissionDenied(error_msg);
         }
 
-        if Self::is_column_not_found_error(e) {
+        if Self::is_column_not_found_msg(&lower) {
             return KalamDbError::InvalidOperation(error_msg);
         }
 
-        if Self::is_constraint_violation_error(e) {
+        if Self::is_constraint_violation_msg(&lower) {
             return KalamDbError::AlreadyExists(error_msg);
         }
 
@@ -735,7 +738,7 @@ impl SqlExecutor {
         self.block_system_namespace_dml(metadata.table_id.as_ref(), dml_kind)?;
 
         let execution_sql = kalamdb_sql::rewrite_context_functions_for_datafusion(sql);
-        let execution_sql = execution_sql.as_str();
+        let execution_sql: &str = &execution_sql;
 
         use crate::sql::executor::parameter_binding::{
             replace_placeholders_in_plan, validate_params,
@@ -915,7 +918,7 @@ impl SqlExecutor {
         exec_ctx: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
         let execution_sql = kalamdb_sql::rewrite_context_functions_for_datafusion(sql);
-        let execution_sql = execution_sql.as_str();
+        let execution_sql: &str = &execution_sql;
         use crate::sql::executor::default_ordering::apply_default_order_by;
         use crate::sql::executor::parameter_binding::{
             replace_placeholders_in_plan, validate_params,
@@ -1117,7 +1120,7 @@ impl SqlExecutor {
         exec_ctx: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
         let execution_sql = kalamdb_sql::rewrite_context_functions_for_datafusion(sql);
-        let execution_sql = execution_sql.as_str();
+        let execution_sql: &str = &execution_sql;
         // Create per-request SessionContext with user_id injected
         let session = self.create_session_with_transaction_context(exec_ctx)?;
 
