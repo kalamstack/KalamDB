@@ -321,3 +321,7 @@ export function formatCellValue(
   // Default: string
   return { formatted: String(value), isTimestamp: false, isNull: false };
 }
+
+export function formatUtcTimestamp(value: number | string | null | undefined): string {
+  return formatTimestamp(value, undefined, "iso8601-datetime", "utc");
+}

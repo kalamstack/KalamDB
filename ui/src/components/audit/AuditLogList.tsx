@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
-import type { AuditLog, AuditLogFilters } from '@/services/auditLogService';
+import type { AuditLog, AuditLogFilters, AuditLogSortKey } from '@/services/auditLogService';
 import { useGetAuditLogsQuery } from '@/store/apiSlice';
+import { formatUtcTimestamp } from '@/lib/formatters';
 import {
   Table,
   TableBody,
@@ -19,7 +20,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Loader2, RefreshCw, Filter, X, Eye } from 'lucide-react';
+import { Loader2, RefreshCw, Filter, X, Eye, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from '@/lib/config';
 
 const ACTION_COLORS: Record<string, string> = {
   'CREATE': 'bg-green-100 text-green-800',
@@ -44,24 +47,38 @@ function getActionColor(action: string): string {
   return 'bg-gray-100 text-gray-800';
 }
 
-function formatTimestamp(timestamp: string): string {
-  try {
-    const date = new Date(timestamp);
-    return date.toLocaleString();
-  } catch {
-    return timestamp;
-  }
-}
 
   export function AuditLogList() {
     const [showFilters, setShowFilters] = useState(false);
     const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
+    const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+    const [page, setPage] = useState(0);
+    const [sortBy, setSortBy] = useState<AuditLogSortKey>("timestamp");
+    const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
     const [draftFilters, setDraftFilters] = useState<AuditLogFilters>({
-      limit: 100,
+      limit: DEFAULT_PAGE_SIZE,
     });
     const [appliedFilters, setAppliedFilters] = useState<AuditLogFilters>({
-      limit: 100,
+      limit: DEFAULT_PAGE_SIZE,
+      offset: 0,
+      sortBy: "timestamp",
+      sortDirection: "desc",
     });
+
+    const handleSort = (key: AuditLogSortKey) => {
+      const newDirection = sortBy === key
+        ? (sortDirection === "asc" ? "desc" : "asc")
+        : "asc";
+      setSortBy(key);
+      setSortDirection(newDirection);
+      setPage(0);
+      setAppliedFilters((prev) => ({
+        ...prev,
+        sortBy: key,
+        sortDirection: newDirection,
+        offset: 0,
+      }));
+    };
     const { data: fetchedLogs, isLoading, error: queryError, refetch } = useGetAuditLogsQuery(appliedFilters, {
       pollingInterval: 5000,
     });
@@ -75,15 +92,28 @@ function formatTimestamp(timestamp: string): string {
         : null;
   
     const handleApplyFilters = () => {
-      setAppliedFilters({ ...draftFilters });
+      setPage(0);
+      setAppliedFilters({ ...draftFilters, limit: pageSize, offset: 0 });
       setShowFilters(false);
     };
-  
+
     const handleClearFilters = () => {
-      const clearedFilters = { limit: 100 };
-      setDraftFilters(clearedFilters);
+      const clearedFilters = { limit: pageSize, offset: 0 };
+      setPage(0);
+      setDraftFilters({ limit: pageSize });
       setAppliedFilters(clearedFilters);
       setShowFilters(false);
+    };
+
+    const handlePageChange = (newPage: number) => {
+      setPage(newPage);
+      setAppliedFilters((prev) => ({ ...prev, offset: newPage * pageSize }));
+    };
+
+    const handlePageSizeChange = (newSize: number) => {
+      setPageSize(newSize);
+      setPage(0);
+      setAppliedFilters((prev) => ({ ...prev, limit: newSize, offset: 0 }));
     };
   
     const handleRefresh = () => {
@@ -116,7 +146,7 @@ function formatTimestamp(timestamp: string): string {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col h-full min-h-0 gap-4">
       {/* Toolbar */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -139,11 +169,49 @@ function formatTimestamp(timestamp: string): string {
             </Button>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">
-            {logs.length} log{logs.length !== 1 ? 's' : ''}
-          </span>
-          <Button variant="outline" size="icon" onClick={handleRefresh} disabled={isLoading} aria-label="Refresh audit logs">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Select
+              value={String(pageSize)}
+              onValueChange={(v) => handlePageSizeChange(Number(v))}
+            >
+              <SelectTrigger className="h-8 w-[70px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span>per page</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              disabled={page === 0}
+              onClick={() => handlePageChange(page - 1)}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-sm text-muted-foreground px-2">
+              {page + 1}
+            </span>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              disabled={logs.length < pageSize}
+              onClick={() => handlePageChange(page + 1)}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+          <Button variant="outline" size="icon" className="h-8 w-8" onClick={handleRefresh} disabled={isLoading} aria-label="Refresh audit logs">
             <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
           </Button>
         </div>
@@ -178,15 +246,6 @@ function formatTimestamp(timestamp: string): string {
                   onChange={(e) => setDraftFilters({ ...draftFilters, target: e.target.value || undefined })}
                 />
               </div>
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Limit</label>
-                <Input
-                  type="number"
-                  placeholder="100"
-                  value={draftFilters.limit || ''}
-                  onChange={(e) => setDraftFilters({ ...draftFilters, limit: parseInt(e.target.value, 10) || undefined })}
-                />
-              </div>
               <div className="flex items-end">
                 <Button onClick={handleApplyFilters} className="w-full">
                   <Filter className="mr-2 h-4 w-4" />
@@ -215,23 +274,38 @@ function formatTimestamp(timestamp: string): string {
           </CardHeader>
         </Card>
       ) : (
-        <div className="border rounded-lg">
-          <Table>
+        <div className="border rounded-lg flex-1 min-h-0 overflow-hidden [&>div]:h-full [&>div]:overflow-auto">
+          <Table className="border-separate border-spacing-0 [&_td]:border-b [&_td]:border-border">
             <TableHeader>
               <TableRow>
-                <TableHead>Timestamp</TableHead>
-                <TableHead>User</TableHead>
-                <TableHead>Action</TableHead>
-                <TableHead>Target</TableHead>
-                <TableHead>IP Address</TableHead>
-                <TableHead className="w-[80px]">Details</TableHead>
+                {([
+                  ["timestamp", "Timestamp"],
+                  ["actor_username", "User"],
+                  ["action", "Action"],
+                  ["target", "Target"],
+                  ["ip_address", "IP Address"],
+                ] as [AuditLogSortKey, string][]).map(([key, label]) => (
+                  <TableHead
+                    key={key}
+                    className="sticky top-0 bg-background z-10 border-b border-border cursor-pointer select-none hover:text-foreground"
+                    onClick={() => handleSort(key)}
+                  >
+                    <span className="inline-flex items-center gap-1">
+                      {label}
+                      {sortBy === key
+                        ? (sortDirection === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)
+                        : <ArrowUpDown className="h-3 w-3 opacity-30" />}
+                    </span>
+                  </TableHead>
+                ))}
+                <TableHead className="sticky top-0 bg-background z-10 border-b border-border w-[80px]">Details</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {logs.map((log) => (
                 <TableRow key={log.audit_id}>
                   <TableCell className="font-mono text-sm">
-                    {formatTimestamp(log.timestamp)}
+                    {formatUtcTimestamp(log.timestamp)}
                   </TableCell>
                   <TableCell>
                     <div>
@@ -278,7 +352,7 @@ function formatTimestamp(timestamp: string): string {
           <DialogHeader>
             <DialogTitle>Audit Log Details</DialogTitle>
             <DialogDescription>
-              {selectedLog && formatTimestamp(selectedLog.timestamp)}
+              {selectedLog && formatUtcTimestamp(selectedLog.timestamp)}
             </DialogDescription>
           </DialogHeader>
           {selectedLog && (
