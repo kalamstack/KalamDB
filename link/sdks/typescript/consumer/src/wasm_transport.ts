@@ -2,8 +2,36 @@ import initConsumerWasm, { KalamConsumerClient as WasmConsumerClient } from '../
 
 import type {
   AckResponse,
+  ConsumeMessage,
+  ConsumePayload,
   ConsumeResponse,
 } from './types.js';
+
+export interface ConsumeTransportRequest {
+  topic_id: string;
+  group_id: string;
+  start: 'Latest' | 'Earliest' | { Offset: number };
+  limit: number;
+  partition_id: number;
+  timeout_seconds?: number;
+}
+
+export interface AckTransportRequest {
+  topic_id: string;
+  group_id: string;
+  partition_id: number;
+  upto_offset: number;
+}
+
+export type ConsumeWireMessage<TPayload extends ConsumePayload = ConsumePayload> = Omit<
+  ConsumeMessage<TPayload>,
+  'value'
+>;
+
+export interface ConsumeWireResponse<TPayload extends ConsumePayload = ConsumePayload>
+  extends Omit<ConsumeResponse<TPayload>, 'messages'> {
+  messages: ConsumeWireMessage<TPayload>[];
+}
 
 type DynamicImport = (specifier: string) => Promise<Record<string, unknown>>;
 
@@ -65,17 +93,17 @@ export class ConsumerWasmTransport {
     this.wasmUrl = wasmUrl;
   }
 
-  async consume(
+  async consume<TPayload extends ConsumePayload = ConsumePayload>(
     authHeader: string | undefined,
-    request: unknown,
-  ): Promise<ConsumeResponse> {
+    request: ConsumeTransportRequest,
+  ): Promise<ConsumeWireResponse<TPayload>> {
     await this.initialize();
-    return this.wasmClient!.consume(authHeader, request) as Promise<ConsumeResponse>;
+    return this.wasmClient!.consume(authHeader, request) as Promise<ConsumeWireResponse<TPayload>>;
   }
 
   async ack(
     authHeader: string | undefined,
-    request: unknown,
+    request: AckTransportRequest,
   ): Promise<AckResponse> {
     await this.initialize();
     return this.wasmClient!.ack(authHeader, request) as Promise<AckResponse>;

@@ -27,13 +27,15 @@ fn is_topic_authorized(session: &AuthSession) -> bool {
 /// Long polling endpoint that waits for messages or timeout.
 ///
 /// # Schema
-/// Response messages follow the standard `topic_message_schema()` field structure:
-/// - topic: Utf8 (NOT NULL) - Topic name
-/// - partition: Int32 (NOT NULL) - Partition ID  
+/// Response messages are derived from the internal topic message envelope:
+/// - topic_id: Utf8 (NOT NULL) - Topic identifier
+/// - partition_id: Int32 (NOT NULL) - Partition ID
 /// - offset: Int64 (NOT NULL) - Message offset
 /// - key: Utf8 (NULLABLE) - Optional message key
 /// - payload: Binary (NOT NULL) - Message payload bytes (base64-encoded in JSON)
 /// - timestamp_ms: Int64 (NOT NULL) - Message timestamp in milliseconds
+/// - user_id: Utf8 (NULLABLE) - Producer user id (resolved to `user` in HTTP JSON)
+/// - op: Utf8 (NOT NULL) - Operation type
 ///
 /// # Authentication
 /// Requires Bearer token authentication.
@@ -131,8 +133,8 @@ pub async fn consume_handler(
         },
     };
 
-    // Convert to response format (matching topic_message_schema fields)
-    // Schema fields: topic, partition, offset, key, payload, timestamp_ms
+    // Convert to response format from the internal topic message envelope.
+    // Envelope fields: topic_id, partition_id, offset, key, payload, timestamp_ms, user_id, op
     // Cache user_id → username lookups to avoid redundant RocksDB reads within a single batch.
     let mut user_cache: std::collections::HashMap<kalamdb_commons::models::UserId, Option<String>> =
         std::collections::HashMap::new();

@@ -946,7 +946,7 @@ dependencies = [
 
 [[package]]
 name = "kalam-client"
-version = "0.4.2-rc2"
+version = "0.4.2-rc.3"
 dependencies = [
  "link-common",
 ]
@@ -969,7 +969,7 @@ dependencies = [
 
 [[package]]
 name = "kalamdb-commons"
-version = "0.4.2-rc2"
+version = "0.4.2-rc.3"
 dependencies = [
  "dashmap",
  "hex",
@@ -997,7 +997,7 @@ checksum = "48f5d2a454e16a5ea0f4ced81bd44e4cfc7bd3a507b61887c99fd3538b28e4af"
 
 [[package]]
 name = "link-common"
-version = "0.4.2-rc2"
+version = "0.4.2-rc.3"
 dependencies = [
  "aws-lc-rs",
  "base64",

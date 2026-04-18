@@ -4,8 +4,10 @@
 //! - TopicMessageId: Composite key for message identification
 //! - TopicMessage: Message envelope with payload and metadata
 
+use kalamdb_commons::datatypes::KalamDataType;
 use kalamdb_commons::models::{TopicId, TopicOp, UserId};
 use kalamdb_commons::{decode_key, encode_key, encode_prefix, KSerializable, StorageKey};
+use kalamdb_macros::table;
 use serde::{Deserialize, Serialize};
 
 /// Composite key for topic messages: topic_id + partition_id + offset
@@ -58,24 +60,102 @@ impl StorageKey for TopicMessageId {
 /// - Serialized using binary codec for efficiency
 /// - Contains full message envelope (not just payload)
 /// - Immutable once written (append-only)
+#[table(
+    name = "topic_messages",
+    namespace = "system",
+    table_type = "system",
+    comment = "Internal durable topic message envelopes"
+)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TopicMessage {
     /// Topic identifier
+    #[column(
+        id = 1,
+        ordinal = 1,
+        data_type(KalamDataType::Text),
+        nullable = false,
+        primary_key = true,
+        default = "None",
+        comment = "Topic identifier"
+    )]
     pub topic_id: TopicId,
     /// Partition ID (0-based)
+    #[column(
+        id = 2,
+        ordinal = 2,
+        data_type(KalamDataType::Int),
+        nullable = false,
+        primary_key = true,
+        default = "None",
+        comment = "Partition identifier"
+    )]
     pub partition_id: u32,
     /// Sequential offset within partition (0-based)
+    #[column(
+        id = 3,
+        ordinal = 3,
+        data_type(KalamDataType::BigInt),
+        nullable = false,
+        primary_key = true,
+        default = "None",
+        comment = "Sequential offset within the partition"
+    )]
     pub offset: u64,
     /// Message payload (serialized JSON, Avro, or raw bytes)
+    #[column(
+        id = 4,
+        ordinal = 5,
+        data_type(KalamDataType::Bytes),
+        nullable = false,
+        primary_key = false,
+        default = "None",
+        comment = "Message payload bytes"
+    )]
     pub payload: Vec<u8>,
     /// Optional message key for ordering/deduplication
+    #[column(
+        id = 5,
+        ordinal = 4,
+        data_type(KalamDataType::Text),
+        nullable = true,
+        primary_key = false,
+        default = "None",
+        comment = "Optional message key for ordering or deduplication"
+    )]
     pub key: Option<String>,
     /// Timestamp when message was published (milliseconds since epoch)
+    #[column(
+        id = 6,
+        ordinal = 6,
+        data_type(KalamDataType::BigInt),
+        nullable = false,
+        primary_key = false,
+        default = "None",
+        comment = "Publish timestamp in milliseconds since epoch"
+    )]
     pub timestamp_ms: i64,
     /// User who triggered the event that produced this message
+    #[column(
+        id = 7,
+        ordinal = 7,
+        data_type(KalamDataType::Text),
+        nullable = true,
+        primary_key = false,
+        default = "None",
+        comment = "User identifier that triggered the published event"
+    )]
     #[serde(default)]
     pub user_id: Option<UserId>,
     /// Operation type that produced this message (INSERT, UPDATE, DELETE)
+    #[column(
+        id = 8,
+        ordinal = 8,
+        data_type(KalamDataType::Text),
+        nullable = false,
+        primary_key = false,
+        default = "None",
+        comment = "Operation that produced this message"
+    )]
     #[serde(default)]
     pub op: TopicOp,
 }

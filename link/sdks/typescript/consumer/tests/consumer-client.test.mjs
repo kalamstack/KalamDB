@@ -28,6 +28,11 @@ function readHeader(headers, name) {
 test('consumeBatch maps options to the topic HTTP API and decodes payloads', async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
+  const payload = {
+    id: 9,
+    status: 'new',
+    _table: 'orders',
+  };
 
   globalThis.fetch = async (url, options) => {
     calls.push({ url, options });
@@ -36,9 +41,11 @@ test('consumeBatch maps options to the topic HTTP API and decodes payloads', asy
         topic_id: 'orders',
         partition_id: 2,
         offset: 9,
-        username: 'alice',
+        key: '{"id":9}',
+        user: 'alice',
         op: 'Insert',
-        payload: Buffer.from(JSON.stringify({ row: { id: 9, status: 'new' } }), 'utf8').toString('base64'),
+        timestamp_ms: 1730000000000,
+        payload: Buffer.from(JSON.stringify(payload), 'utf8').toString('base64'),
       }],
       next_offset: 10,
       has_more: false,
@@ -65,7 +72,12 @@ test('consumeBatch maps options to the topic HTTP API and decodes payloads', asy
     assert.equal(batch.messages.length, 1);
     assert.equal(batch.messages[0].topic, 'orders');
     assert.equal(batch.messages[0].group_id, 'billing');
-    assert.deepEqual(batch.messages[0].value, { row: { id: 9, status: 'new' } });
+  assert.equal(batch.messages[0].key, '{"id":9}');
+  assert.equal(batch.messages[0].op, 'Insert');
+  assert.equal(batch.messages[0].timestamp_ms, 1730000000000);
+  assert.equal(batch.messages[0].user, 'alice');
+  assert.deepEqual(batch.messages[0].payload, payload);
+  assert.deepEqual(batch.messages[0].value, payload);
 
     const request = calls[0];
     assert.equal(request.url, 'http://127.0.0.1:8080/v1/api/topics/consume');
@@ -150,7 +162,7 @@ test('consumer run preserves the latest cursor after an empty poll', async () =>
             topic_id: 'events',
             partition_id: 0,
             offset: 41,
-            payload: Buffer.from(JSON.stringify({ row: { status: 'live' } }), 'utf8').toString('base64'),
+            payload: Buffer.from(JSON.stringify({ status: 'live', _table: 'events' }), 'utf8').toString('base64'),
           }],
           next_offset: 42,
           has_more: false,
@@ -183,6 +195,8 @@ test('consumer run preserves the latest cursor after an empty poll', async () =>
     await handle.run(async (ctx) => {
       calls += 1;
       assert.equal(ctx.message.offset, 41);
+      assert.deepEqual(ctx.message.payload, { status: 'live', _table: 'events' });
+      assert.deepEqual(ctx.message.value, { status: 'live', _table: 'events' });
       await ctx.ack();
       handle.stop();
     });
@@ -223,7 +237,7 @@ test('consumer run supports manual and auto acknowledgments', async () => {
         topic_id: 'events',
         partition_id: 0,
         offset: 20,
-        payload: Buffer.from(JSON.stringify({ row: { status: 'manual' } }), 'utf8').toString('base64'),
+        payload: Buffer.from(JSON.stringify({ status: 'manual' }), 'utf8').toString('base64'),
       }],
       next_offset: 21,
       has_more: true,
@@ -233,7 +247,7 @@ test('consumer run supports manual and auto acknowledgments', async () => {
         topic_id: 'events',
         partition_id: 1,
         offset: 30,
-        payload: Buffer.from(JSON.stringify({ row: { status: 'auto' } }), 'utf8').toString('base64'),
+        payload: Buffer.from(JSON.stringify({ status: 'auto' }), 'utf8').toString('base64'),
       }],
       next_offset: 31,
       has_more: true,
@@ -274,6 +288,7 @@ test('consumer run supports manual and auto acknowledgments', async () => {
     await manualHandle.run(async (ctx) => {
       manualCalls += 1;
       assert.equal(ctx.message.offset, 20);
+      assert.deepEqual(ctx.message.payload, { status: 'manual' });
       await ctx.ack();
       manualHandle.stop();
     });
@@ -289,6 +304,7 @@ test('consumer run supports manual and auto acknowledgments', async () => {
     await autoHandle.run(async (ctx) => {
       autoCalls += 1;
       assert.equal(ctx.message.partition_id, 1);
+      assert.deepEqual(ctx.message.payload, { status: 'auto' });
       autoHandle.stop();
     });
 

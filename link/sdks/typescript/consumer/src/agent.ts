@@ -4,6 +4,7 @@ import type {
   AgentLLMAdapter,
   AgentLLMContext,
   AgentLLMInput,
+  ConsumePayload,
   AgentRetryPolicy,
   AgentRunKeyFactory,
   AgentRowParser,
@@ -68,8 +69,10 @@ function defaultRunKeyFactory({ name, message }: { name: string; message: Consum
   return `${name}:${message.topic}:${message.partition_id}:${message.offset}`;
 }
 
-function defaultRowParser(message: ConsumeMessage): Record<string, unknown> | null {
-  const payload = message.value;
+function defaultRowParser<TPayload extends ConsumePayload>(
+  message: ConsumeMessage<TPayload>,
+): Record<string, unknown> | null {
+  const payload = message.payload ?? message.value;
   if (!payload || typeof payload !== 'object') {
     return null;
   }
@@ -217,8 +220,11 @@ export function createLangChainAdapter(model: LangChainChatModelLike): AgentLLMA
   };
 }
 
-export async function runAgent<TRow extends Record<string, unknown> = Record<string, unknown>>(
-  options: RunAgentOptions<TRow>,
+export async function runAgent<
+  TRow extends Record<string, unknown> = Record<string, unknown>,
+  TPayload extends ConsumePayload = ConsumePayload,
+>(
+  options: RunAgentOptions<TRow, TPayload>,
 ): Promise<void> {
   if (!options.name.trim()) {
     throw new Error('runAgent: name is required');
@@ -232,7 +238,7 @@ export async function runAgent<TRow extends Record<string, unknown> = Record<str
 
   const retryPolicy = normalizeRetryPolicy(options.retry);
   const runKeyFactory = options.runKeyFactory ?? defaultRunKeyFactory;
-  const rowParser = (options.rowParser ?? defaultRowParser) as AgentRowParser<TRow>;
+  const rowParser = (options.rowParser ?? defaultRowParser) as AgentRowParser<TRow, TPayload>;
   const consumerOptions = {
     topic: options.topic,
     group_id: options.groupId,
@@ -243,7 +249,7 @@ export async function runAgent<TRow extends Record<string, unknown> = Record<str
     auto_ack: false,
   };
 
-  const consumer = options.client.consumer(consumerOptions);
+  const consumer = options.client.consumer<TPayload>(consumerOptions);
   const abortHandler = () => consumer.stop();
   options.stopSignal?.addEventListener('abort', abortHandler, { once: true });
 
@@ -270,7 +276,7 @@ export async function runAgent<TRow extends Record<string, unknown> = Record<str
 
       let lastError: unknown;
       for (let attempt = 1; attempt <= retryPolicy.maxAttempts; attempt += 1) {
-        const ctx: AgentContext<TRow> = {
+        const ctx: AgentContext<TRow, TPayload> = {
           name: options.name,
           topic: options.topic,
           groupId: options.groupId,
@@ -329,7 +335,7 @@ export async function runAgent<TRow extends Record<string, unknown> = Record<str
         return;
       }
 
-      const failedCtx: AgentFailureContext<TRow> = {
+      const failedCtx: AgentFailureContext<TRow, TPayload> = {
         name: options.name,
         topic: options.topic,
         groupId: options.groupId,
@@ -377,7 +383,9 @@ export async function runAgent<TRow extends Record<string, unknown> = Record<str
   }
 }
 
-export async function runConsumer(options: RunConsumerOptions): Promise<void> {
+export async function runConsumer<TPayload extends ConsumePayload = ConsumePayload>(
+  options: RunConsumerOptions<TPayload>,
+): Promise<void> {
   await runAgent({
     client: options.client,
     name: options.name,

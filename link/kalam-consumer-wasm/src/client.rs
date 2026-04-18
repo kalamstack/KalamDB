@@ -138,15 +138,11 @@ fn decode_consume_message(
     fallback_partition: u32,
 ) -> ConsumeMessage {
     ConsumeMessage {
-        message_id: raw
-            .get("message_id")
+        key: raw
+            .get("key")
             .and_then(serde_json::Value::as_str)
             .map(ToOwned::to_owned)
-            .or_else(|| raw.get("key").and_then(serde_json::Value::as_str).map(ToOwned::to_owned)),
-        source_table: raw
-            .get("source_table")
-            .and_then(serde_json::Value::as_str)
-            .map(ToOwned::to_owned),
+            .or_else(|| raw.get("message_id").and_then(serde_json::Value::as_str).map(ToOwned::to_owned)),
         op: raw.get("op").and_then(serde_json::Value::as_str).map(ToOwned::to_owned),
         timestamp_ms: raw
             .get("timestamp_ms")
@@ -163,8 +159,12 @@ fn decode_consume_message(
             .unwrap_or(topic)
             .to_string(),
         group_id: group_id.to_string(),
-        user: raw.get("user").and_then(serde_json::Value::as_str).map(UserId::from),
-        value: decode_payload_value(raw.get("payload")),
+        user: raw
+            .get("user")
+            .or_else(|| raw.get("username"))
+            .and_then(serde_json::Value::as_str)
+            .map(UserId::from),
+        payload: decode_payload_value(raw.get("payload").or_else(|| raw.get("value"))),
     }
 }
 

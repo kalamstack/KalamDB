@@ -8,7 +8,7 @@ export interface SetupStatusResponse {
 }
 
 export interface SetupRequest {
-  username: string;
+  user: string;
   password: string;
   root_password: string;
   email?: string;
@@ -17,7 +17,6 @@ export interface SetupRequest {
 export interface SetupResponse {
   user: {
     id: string;
-    username: string;
     role: string;
     email: string | null;
     created_at: string;
@@ -114,7 +113,7 @@ const setupSlice = createSlice({
         state.isSubmitting = false;
         state.setupComplete = true;
         state.needsSetup = false;
-        state.createdUsername = action.payload.user.username;
+        state.createdUsername = action.payload.user.id;
       })
       .addCase(submitSetup.rejected, (state, action) => {
         state.isSubmitting = false;
