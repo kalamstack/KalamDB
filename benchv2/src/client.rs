@@ -504,7 +504,16 @@ fn derive_loopback_bind_addresses(urls: &[String]) -> Vec<String> {
             }
         }
     }
-    bind_addrs
+
+    // Only force a local bind when there is an actual pool to rotate through.
+    // Pinning every WebSocket to a single loopback address can reduce the usable
+    // socket fanout on macOS even when the benchmark is spreading load across
+    // multiple destination ports.
+    if bind_addrs.len() > 1 {
+        bind_addrs
+    } else {
+        Vec::new()
+    }
 }
 
 fn extract_url_host(url: &str) -> Option<String> {

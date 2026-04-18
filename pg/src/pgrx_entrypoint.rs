@@ -1,8 +1,59 @@
 use kalam_pg_common::USER_ID_GUC;
 use pgrx::guc::{GucContext, GucFlags, GucRegistry, GucSetting};
 use pgrx::prelude::*;
-use std::ffi::{CStr, CString};
+use std::ffi::{c_void, CStr, CString};
 use std::sync::atomic::{AtomicU64, Ordering};
+
+#[cfg(feature = "e2e")]
+use arrow::array::StringArray;
+
+#[cfg(feature = "e2e")]
+#[derive(serde::Serialize)]
+struct ConversionProbeResult {
+    matched: bool,
+    allocations: crate::test_alloc::AllocationSnapshot,
+    counters: crate::conversion_test_stats::ConversionTestStats,
+}
+
+#[cfg(feature = "e2e")]
+fn reset_conversion_probe_state() {
+    crate::test_alloc::reset();
+    crate::conversion_test_stats::reset();
+}
+
+#[cfg(feature = "e2e")]
+fn conversion_probe_result(matched: bool) -> String {
+    serde_json::to_string(&ConversionProbeResult {
+        matched,
+        allocations: crate::test_alloc::snapshot(),
+        counters: crate::conversion_test_stats::snapshot(),
+    })
+    .expect("serialize conversion probe result")
+}
+
+#[cfg(feature = "e2e")]
+fn normalize_jsonb_text(value: &str) -> String {
+    let cstr = CString::new(value).expect("jsonb probe input must not contain interior nulls");
+    let datum = unsafe {
+        pg_sys::OidInputFunctionCall(
+            pg_sys::Oid::from(pg_sys::F_JSONB_IN),
+            cstr.as_ptr() as *mut _,
+            pg_sys::Oid::INVALID,
+            -1,
+        )
+    };
+    let output_cstr = unsafe {
+        pg_sys::OidOutputFunctionCall(pg_sys::Oid::from(pg_sys::F_JSONB_OUT), datum)
+    };
+    let text = unsafe {
+        CStr::from_ptr(output_cstr)
+            .to_str()
+            .expect("jsonb output should be utf-8")
+            .to_owned()
+    };
+    unsafe { pg_sys::pfree(output_cstr as *mut c_void) };
+    text
+}
 
 static KALAM_USER_ID_SETTING: GucSetting<Option<CString>> =
     GucSetting::<Option<CString>>::new(None::<&'static CStr>);
@@ -153,4 +204,80 @@ REVOKE EXECUTE ON FUNCTION kalam_exec(text) FROM PUBLIC;
     name = "kalam_exec_revoke",
     finalize,
 );
+
+#[cfg(feature = "e2e")]
+#[pg_extern]
+pub fn kalam_test_probe_text_to_pg(value: &str) -> String {
+    let array = StringArray::from(vec![value]);
+
+    reset_conversion_probe_state();
+    let (datum, is_null) = unsafe { crate::arrow_to_pg::arrow_value_to_datum(&array, 0, pg_sys::TEXTOID) };
+    let matched = !is_null
+        && unsafe { pgrx::text_to_rust_str_unchecked(datum.cast_mut_ptr::<pg_sys::varlena>()) == value };
+
+    conversion_probe_result(matched)
+}
+
+#[cfg(feature = "e2e")]
+#[pg_extern]
+pub fn kalam_test_probe_jsonb_to_pg(value: &str) -> String {
+    let array = StringArray::from(vec![value]);
+    let expected = normalize_jsonb_text(value);
+
+    reset_conversion_probe_state();
+    let (datum, is_null) = unsafe { crate::arrow_to_pg::arrow_value_to_datum(&array, 0, pg_sys::JSONBOID) };
+    let output_cstr = unsafe {
+        pg_sys::OidOutputFunctionCall(pg_sys::Oid::from(pg_sys::F_JSONB_OUT), datum)
+    };
+    let matched = !is_null
+        && unsafe {
+            CStr::from_ptr(output_cstr)
+                .to_str()
+                .expect("jsonb output should be utf-8")
+                == expected
+        };
+    unsafe { pg_sys::pfree(output_cstr as *mut c_void) };
+
+    conversion_probe_result(matched)
+}
+
+#[cfg(feature = "e2e")]
+#[pg_extern]
+pub fn kalam_test_probe_json_to_scalar(value: &str) -> String {
+    use pgrx::{datum::JsonString, IntoDatum};
+
+    let datum = JsonString(value.to_owned())
+        .into_datum()
+        .expect("json datum should be created");
+
+    reset_conversion_probe_state();
+    let scalar = unsafe { crate::pg_to_kalam::datum_to_scalar(datum, pg_sys::JSONOID, false) };
+    let matched = matches!(
+        scalar,
+        datafusion_common::ScalarValue::Utf8(Some(text)) if text == value
+    );
+
+    conversion_probe_result(matched)
+}
+
+#[cfg(feature = "e2e")]
+#[pg_extern]
+pub fn kalam_test_probe_jsonb_to_scalar(value: &str) -> String {
+    use pgrx::{IntoDatum, JsonB};
+
+    let expected = normalize_jsonb_text(value);
+    let parsed = serde_json::from_str::<serde_json::Value>(value).expect("valid jsonb text");
+    let datum = JsonB(parsed)
+        .into_datum()
+        .expect("jsonb datum should be created");
+
+    reset_conversion_probe_state();
+    let scalar = unsafe { crate::pg_to_kalam::datum_to_scalar(datum, pg_sys::JSONBOID, false) };
+    let matched = matches!(
+        scalar,
+        datafusion_common::ScalarValue::Utf8(Some(text)) if text == expected
+    );
+
+    conversion_probe_result(matched)
+}
 

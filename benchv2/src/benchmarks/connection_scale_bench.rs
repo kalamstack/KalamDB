@@ -54,24 +54,24 @@ impl Benchmark for ConnectionScaleBench {
         config: &'a Config,
     ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
         Box::pin(async move {
-            client
-                .sql_ok(&format!("CREATE NAMESPACE IF NOT EXISTS {}", config.namespace))
-                .await?;
-            let _ = client
-                .sql(&format!("DROP SHARED TABLE IF EXISTS {}.conn_scale", config.namespace))
-                .await;
-            client
-                .sql_ok(&format!(
-                    "CREATE SHARED TABLE {}.conn_scale (id INT PRIMARY KEY, payload TEXT)",
+            run_sql_ok_on_all_urls(
+                client,
+                &format!("CREATE NAMESPACE IF NOT EXISTS {}", config.namespace),
+            )
+            .await?;
+            let _ = run_sql_ok_on_all_urls(
+                client,
+                &format!("DROP SHARED TABLE IF EXISTS {}.conn_scale", config.namespace),
+            )
+            .await;
+            run_sql_ok_on_all_urls(
+                client,
+                &format!(
+                    "CREATE SHARED TABLE IF NOT EXISTS {}.conn_scale (id INT PRIMARY KEY, payload TEXT)",
                     config.namespace
-                ))
-                .await?;
-            client
-                .sql_ok(&format!(
-                    "INSERT INTO {}.conn_scale (id, payload) VALUES (1, 'seed')",
-                    config.namespace
-                ))
-                .await?;
+                ),
+            )
+            .await?;
             Ok(())
         })
     }
@@ -83,9 +83,11 @@ impl Benchmark for ConnectionScaleBench {
         iteration: u32,
     ) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
         Box::pin(async move {
-            let _ = client
-                .sql(&format!("DELETE FROM {}.conn_scale WHERE id >= 1000000", config.namespace))
-                .await;
+            let _ = run_sql_ok_on_all_urls(
+                client,
+                &format!("DELETE FROM {}.conn_scale WHERE id >= 1000000", config.namespace),
+            )
+            .await;
 
             let max_connections = config.max_subscribers;
             let connect_batch = connect_batch_limit();
@@ -406,13 +408,12 @@ impl Benchmark for ConnectionScaleBench {
                     delivered.store(0, Ordering::Relaxed);
                     probe_epoch.store((checkpoint_index + 1) as u32, Ordering::Relaxed);
 
-                    let write_id = 1_000_000 + checkpoint_target;
-                    let write_result = client
-                        .sql_ok(&format!(
-                            "INSERT INTO {}.conn_scale (id, payload) VALUES ({}, 'checkpoint_{}')",
-                            config.namespace, write_id, checkpoint_target
-                        ))
-                        .await;
+                    let write_result = insert_checkpoint_probe_rows(
+                        client,
+                        &config.namespace,
+                        checkpoint_target,
+                    )
+                    .await;
 
                     if let Err(err) = write_result {
                         checkpoint_error = Some(format!(
@@ -645,8 +646,8 @@ impl Benchmark for ConnectionScaleBench {
                     config.namespace
                 );
 
-                let active = match client.sql(&count_sql).await {
-                    Ok(resp) => extract_first_count(&resp).unwrap_or(0),
+                let active = match live_query_count_across_urls(client, &count_sql).await {
+                    Ok(resp) => resp,
                     Err(_) => break,
                 };
 
@@ -665,11 +666,87 @@ impl Benchmark for ConnectionScaleBench {
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
 
-            let _ = client
-                .sql(&format!("DROP SHARED TABLE IF EXISTS {}.conn_scale", config.namespace))
-                .await;
+            let _ = run_sql_ok_on_all_urls(
+                client,
+                &format!("DROP SHARED TABLE IF EXISTS {}.conn_scale", config.namespace),
+            )
+            .await;
             Ok(())
         })
+    }
+}
+
+async fn run_sql_ok_on_all_urls(client: &KalamClient, sql: &str) -> Result<(), String> {
+    let mut failures = Vec::new();
+
+    for url in client.urls() {
+        if let Err(err) = client.sql_ok_on_url(&url, sql).await {
+            failures.push(format!("{} -> {}", url, err));
+        }
+    }
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "SQL failed on {} URL(s):\n  - {}",
+            failures.len(),
+            failures.join("\n  - ")
+        ))
+    }
+}
+
+async fn insert_checkpoint_probe_rows(
+    client: &KalamClient,
+    namespace: &str,
+    checkpoint_target: u32,
+) -> Result<(), String> {
+    let mut failures = Vec::new();
+    let base_write_id = 1_000_000 + checkpoint_target.saturating_mul(100);
+
+    for (index, url) in client.urls().into_iter().enumerate() {
+        let sql = format!(
+            "INSERT INTO {}.conn_scale (id, payload) VALUES ({}, 'checkpoint_{}')",
+            namespace,
+            base_write_id + index as u32,
+            checkpoint_target
+        );
+        if let Err(err) = client.sql_ok_on_url(&url, &sql).await {
+            failures.push(format!("{} -> {}", url, err));
+        }
+    }
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "checkpoint {} failed to insert probe row on {} URL(s):\n  - {}",
+            format_num(checkpoint_target),
+            failures.len(),
+            failures.join("\n  - ")
+        ))
+    }
+}
+
+async fn live_query_count_across_urls(client: &KalamClient, sql: &str) -> Result<u64, String> {
+    let mut failures = Vec::new();
+    let mut total = 0u64;
+
+    for url in client.urls() {
+        match client.sql_on_url(&url, sql).await {
+            Ok(resp) => total += extract_first_count(&resp).unwrap_or(0),
+            Err(err) => failures.push(format!("{} -> {}", url, err)),
+        }
+    }
+
+    if failures.is_empty() {
+        Ok(total)
+    } else {
+        Err(format!(
+            "failed to count live queries on {} URL(s):\n  - {}",
+            failures.len(),
+            failures.join("\n  - ")
+        ))
     }
 }
 

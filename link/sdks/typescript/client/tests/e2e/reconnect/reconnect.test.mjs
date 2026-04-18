@@ -110,7 +110,7 @@ async function reconnectViaSubscription(client, tableName) {
   return { unsub, events };
 }
 
-describe('Reconnect & Resume', { timeout: 120_000 }, () => {
+describe('Reconnect & Resume E2E replay coverage', { timeout: 120_000 }, () => {
   let client;
   const ns = uniqueName('ts_recon');
   const tbl = `${ns}.events`;
@@ -328,7 +328,6 @@ describe('Reconnect & Resume', { timeout: 120_000 }, () => {
 
     // Disconnect.
     await client.disconnect();
-    await sleep(500);
 
     // Re-subscribe after disconnect; subscriptions should reconnect automatically.
     const postEvents1 = [];

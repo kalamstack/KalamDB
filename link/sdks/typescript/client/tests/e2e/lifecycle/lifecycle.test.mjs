@@ -14,6 +14,16 @@ import {
 } from '../helpers.mjs';
 import { createClient, Auth } from '../../../dist/src/index.js';
 
+async function waitFor(predicate, timeoutMs = 5_000, intervalMs = 50) {
+  const started = Date.now();
+  while (!predicate()) {
+    if (Date.now() - started > timeoutMs) {
+      throw new Error('Timed out waiting for condition');
+    }
+    await sleep(intervalMs);
+  }
+}
+
 describe('Client Lifecycle', { timeout: 30_000 }, () => {
   // -----------------------------------------------------------------------
   // Connect / disconnect
@@ -100,7 +110,7 @@ describe('Client Lifecycle', { timeout: 30_000 }, () => {
     });
 
     await client.initialize();
-    await sleep(500);
+    await waitFor(() => connectFired);
 
     assert.ok(connectFired, 'onConnect should fire');
     await client.disconnect();

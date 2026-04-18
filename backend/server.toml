@@ -318,6 +318,8 @@ strict_ws_origin_check = false
 # Bind-to-all-interfaces still needs an explicit browser allowlist.
 # Add your public hostname(s) here for reverse-proxy or production deployments.
 allowed_origins = [
+	"http://localhost:4173",
+	"http://127.0.0.1:4173",
 	"http://localhost:5173",
 	"http://127.0.0.1:5173",
 	"http://localhost:5174",
@@ -546,6 +548,12 @@ max_snapshots_to_keep = 1
 # 
 # # Peer nodes (list all OTHER nodes in the cluster)
 # # [[cluster.peers]]
+
+[topics]
+# Visibility timeout for topic consumer claims (seconds).
+# After this period, un-acked messages become available to other consumers.
+# Lower values speed up ack-failure-recovery smoke tests.
+visibility_timeout_secs = 10
 # # node_id = 2
 # # rpc_addr = "10.0.0.2:9188"
 # # api_addr = "http://10.0.0.2:8080"

@@ -86,7 +86,7 @@ async function shutdownClient(client) {
   await client.disconnect();
 }
 
-describe('Resume from checkpoint after disconnect', { timeout: 120_000 }, () => {
+describe('Checkpoint resume after disconnect (E2E)', { timeout: 120_000 }, () => {
   let client;
   const ns = uniqueName('ts_resume');
 
@@ -337,7 +337,7 @@ describe('Resume from checkpoint after disconnect', { timeout: 120_000 }, () => 
       // Brief reconnect then immediate second disconnect
       const tempEvents = [];
       const tempUnsub = await client.subscribeWithSql(sql, (ev) => tempEvents.push(ev));
-      await sleep(300);
+      await waitFor(() => tempEvents.some((e) => e.type === 'subscription_ack'));
       await tempUnsub();
       await client.disconnect();
 

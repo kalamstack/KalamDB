@@ -142,7 +142,7 @@ install_extension() {
     RUST_BACKTRACE=1 cargo pgrx install \
         --pg-config="$PG_CONFIG" \
         --no-default-features \
-        -F "$PG_EXTENSION_FLAVOR"
+        -F "e2e,$PG_EXTENSION_FLAVOR"
     info "Extension installed"
 }
 

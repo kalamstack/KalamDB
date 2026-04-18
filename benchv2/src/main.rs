@@ -113,9 +113,11 @@ async fn main() {
     }
 
     // Create fresh namespace for this run
-    let _ = client
-        .sql_ok(&format!("CREATE NAMESPACE IF NOT EXISTS {}", config.namespace))
-        .await;
+    let _ = run_sql_ok_on_all_urls(
+        &client,
+        &format!("CREATE NAMESPACE IF NOT EXISTS {}", config.namespace),
+    )
+    .await;
 
     // Run benchmarks
     let overall_start = Instant::now();
@@ -186,7 +188,11 @@ async fn main() {
     }
 
     // Clean up the benchmark namespace
-    let _ = client.sql(&format!("DROP NAMESPACE IF EXISTS {}", config.namespace)).await;
+    let _ = run_sql_ok_on_all_urls(
+        &client,
+        &format!("DROP NAMESPACE IF EXISTS {}", config.namespace),
+    )
+    .await;
 
     println!();
     if failed > 0 {
@@ -204,6 +210,22 @@ fn load_kalamdb_version() -> String {
     };
 
     parse_workspace_version(&content).unwrap_or(fallback)
+}
+
+async fn run_sql_ok_on_all_urls(client: &KalamClient, sql: &str) -> Result<(), Vec<String>> {
+    let mut failures = Vec::new();
+
+    for url in client.urls() {
+        if let Err(err) = client.sql_ok_on_url(&url, sql).await {
+            failures.push(format!("{} -> {}", url, err));
+        }
+    }
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures)
+    }
 }
 
 fn parse_workspace_version(manifest_content: &str) -> Option<String> {
