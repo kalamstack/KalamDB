@@ -100,6 +100,23 @@ describe('generateSchema', () => {
     assert.ok(!nameDef.includes('.default('), 'name should not have default');
   });
 
+  it('maps BIGINT columns to text (KalamDB returns them as strings)', () => {
+    const lines = fullSchema.split('\n');
+    const tableStart = lines.findIndex((l) => l.includes('test_gen_with_defaults'));
+    const tableLines = lines.slice(tableStart, tableStart + 6);
+    const idDef = tableLines.find((l) => l.trim().startsWith('id:'));
+    assert.ok(idDef.includes("text('id')"), 'BIGINT should be text');
+    assert.ok(!idDef.includes("bigint("), 'BIGINT should not use bigint type');
+  });
+
+  it('keeps TIMESTAMP as bigint with mode number', () => {
+    const lines = fullSchema.split('\n');
+    const tableStart = lines.findIndex((l) => l.includes('test_gen_with_defaults'));
+    const tableLines = lines.slice(tableStart, tableStart + 6);
+    const createdDef = tableLines.find((l) => l.trim().startsWith('created_at:'));
+    assert.ok(createdDef.includes("bigint('created_at', { mode: 'number' })"), 'timestamp should stay bigint');
+  });
+
   it('marks literal default columns', () => {
     assert.ok(fullSchema.includes('test_gen_with_literal_default'));
     const lines = fullSchema.split('\n');

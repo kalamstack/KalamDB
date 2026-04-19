@@ -253,6 +253,35 @@ describe('kalamDriver', () => {
     await client.query('DROP NAMESPACE IF EXISTS test_orm_insert');
   });
 
+  it('preserves SNOWFLAKE_ID precision when using text type', async () => {
+    await client.query('CREATE NAMESPACE IF NOT EXISTS test_orm_insert');
+    await client.query('DROP TABLE IF EXISTS test_orm_insert.precision');
+    await client.query(`
+      CREATE TABLE test_orm_insert.precision (
+        id BIGINT PRIMARY KEY DEFAULT SNOWFLAKE_ID(),
+        name TEXT NOT NULL
+      )
+    `);
+
+    const table = pgTable('test_orm_insert.precision', {
+      id: text('id'),
+      name: text('name'),
+    });
+
+    await db.insert(table).values({ name: 'precision-test' });
+    const rows = await db.select().from(table);
+    assert.equal(rows.length, 1);
+    assert.equal(typeof rows[0].id, 'string', 'id should be a string');
+    assert.ok(rows[0].id.length > 15, 'id should be a long snowflake id');
+
+    const rawResult = await client.query('SELECT id FROM test_orm_insert.precision');
+    const rawId = String(rawResult.results[0]?.named_rows[0]?.id);
+    assert.equal(rows[0].id, rawId, 'id should match raw query exactly (no precision loss)');
+
+    await client.query('DROP TABLE IF EXISTS test_orm_insert.precision');
+    await client.query('DROP NAMESPACE IF EXISTS test_orm_insert');
+  });
+
   it('throws when querying a non-existent table', async () => {
     const fake = pgTable('nonexistent.fake_table', {
       id: bigint('id', { mode: 'number' }),

@@ -27,13 +27,14 @@ function formatLabel(value: string): string {
     .join(" ");
 }
 
-function formatMemory(memoryMb: number | null): string {
-  if (memoryMb === null || !Number.isFinite(memoryMb)) {
+function formatMemory(memoryMb: string | number | null): string {
+  const val = memoryMb !== null ? Number(memoryMb) : null;
+  if (val === null || !Number.isFinite(val)) {
     return "Memory n/a";
   }
 
-  const precision = memoryMb >= 100 ? 0 : 1;
-  return `${memoryMb.toFixed(precision)} MB memory`;
+  const precision = val >= 100 ? 0 : 1;
+  return `${val.toFixed(precision)} MB memory`;
 }
 
 function formatCpu(cpuUsagePercent: string | number | null): string {

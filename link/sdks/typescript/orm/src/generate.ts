@@ -17,7 +17,7 @@ interface ColumnInfo {
 function mapKalamTypeToDrizzle(dataType: string): string {
   const normalized = dataType.toLowerCase();
   if (normalized.startsWith('timestamp')) return 'bigint';
-  if (normalized === 'int64' || normalized === 'bigint') return 'bigint';
+  if (normalized === 'int64' || normalized === 'bigint') return 'text';
   if (normalized === 'int32' || normalized === 'int') return 'integer';
   if (normalized === 'float64' || normalized === 'double') return 'doublePrecision';
   if (normalized === 'boolean' || normalized === 'bool') return 'boolean';
