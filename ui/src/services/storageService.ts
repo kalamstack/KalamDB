@@ -1,26 +1,16 @@
 import { executeSql } from "@/lib/kalam-client";
+import { getDb } from "@/lib/db";
+import { system_storages } from "@/lib/schema";
+import type { InferSelectModel } from "drizzle-orm";
 import {
   buildCreateStorageSql,
   buildStorageHealthCheckSql,
   buildUpdateStorageSql,
-  SYSTEM_STORAGES_QUERY,
   type CreateStorageInput,
   type UpdateStorageInput,
 } from "@/services/sql/queries/storageQueries";
 
-export interface Storage {
-  storage_id: string;
-  storage_name: string;
-  description: string | null;
-  storage_type: string;
-  base_directory: string;
-  credentials: string | null;
-  config_json: string | null;
-  shared_tables_template: string | null;
-  user_tables_template: string | null;
-  created_at: string;
-  updated_at: string;
-}
+export type Storage = InferSelectModel<typeof system_storages>;
 
 export interface StorageHealthResult {
   storage_id: string;
@@ -38,21 +28,9 @@ export interface StorageHealthResult {
 
 export type { CreateStorageInput, UpdateStorageInput };
 
-export async function fetchStorages(): Promise<Storage[]> {
-  const rows = await executeSql(SYSTEM_STORAGES_QUERY);
-  return rows.map((row) => ({
-    storage_id: String(row.storage_id ?? ""),
-    storage_name: String(row.storage_name ?? ""),
-    description: row.description as string | null,
-    storage_type: String(row.storage_type ?? ""),
-    base_directory: String(row.base_directory ?? ""),
-    credentials: row.credentials as string | null,
-    config_json: row.config_json as string | null,
-    shared_tables_template: row.shared_tables_template as string | null,
-    user_tables_template: row.user_tables_template as string | null,
-    created_at: String(row.created_at ?? ""),
-    updated_at: String(row.updated_at ?? ""),
-  }));
+export async function fetchStorages() {
+  const db = getDb();
+  return db.select().from(system_storages);
 }
 
 export async function createStorage(input: CreateStorageInput): Promise<void> {

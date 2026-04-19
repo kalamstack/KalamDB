@@ -70,7 +70,7 @@ function getStatusColor(status: string): string {
   return STATUS_COLORS[capitalized] || STATUS_COLORS[status] || 'bg-gray-100 text-gray-800';
 }
 
-function formatDuration(startedAt: string | null, finishedAt: string | null): string {
+function formatDuration(startedAt: string | number | null, finishedAt: string | number | null): string {
   if (!startedAt) return '-';
   
   // Parse timestamps - they could be ISO strings or numeric timestamps
@@ -473,14 +473,14 @@ export function JobList({ initialFilters, compact = false, onJobClick }: JobList
                 </div>
               </div>
               
-              {selectedJob.error_message && (
+              {selectedJob.message && selectedJob.status?.toLowerCase() === 'failed' && (
                 <div>
                   <Alert variant="destructive">
                     <AlertCircle className="h-4 w-4" />
                     <AlertTitle>Execution error</AlertTitle>
                     <AlertDescription className="mt-2">
                       <CodeBlock
-                        value={selectedJob.error_message}
+                        value={selectedJob.message}
                         jsonPreferred
                         maxHeightClassName="max-h-[260px]"
                         className="border-destructive/40 bg-destructive/5"
@@ -489,25 +489,24 @@ export function JobList({ initialFilters, compact = false, onJobClick }: JobList
                   </Alert>
                 </div>
               )}
-              
-              {selectedJob.result && (
+              {selectedJob.message && selectedJob.status?.toLowerCase() !== 'failed' && (
                 <div>
-                  <label className="text-sm font-medium text-muted-foreground">Result</label>
-                  <CodeBlock value={selectedJob.result} jsonPreferred maxHeightClassName="max-h-[260px]" />
+                  <label className="text-sm font-medium text-muted-foreground">Message</label>
+                  <CodeBlock value={selectedJob.message} jsonPreferred maxHeightClassName="max-h-[260px]" />
                 </div>
               )}
-              
+
               {selectedJob.parameters && (
                 <div>
                   <label className="text-sm font-medium text-muted-foreground">Parameters</label>
                   <CodeBlock value={selectedJob.parameters} jsonPreferred maxHeightClassName="max-h-[260px]" />
                 </div>
               )}
-              
-              {selectedJob.trace && (
+
+              {selectedJob.exception_trace && (
                 <div>
                   <label className="text-sm font-medium text-muted-foreground">Stack Trace</label>
-                  <CodeBlock value={selectedJob.trace} maxHeightClassName="max-h-[260px]" />
+                  <CodeBlock value={selectedJob.exception_trace} maxHeightClassName="max-h-[260px]" />
                 </div>
               )}
             </div>

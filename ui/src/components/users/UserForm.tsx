@@ -46,14 +46,14 @@ interface FormData {
   storageId: string;
 }
 
-function formatSystemValue(value: string | null | undefined): string {
-  if (!value) {
+function formatSystemValue(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) {
     return "N/A";
   }
-  return value;
+  return String(value);
 }
 
-function formatTimestampValue(value: string | null | undefined): string {
+function formatTimestampValue(value: string | number | null | undefined): string {
   if (!value) {
     return "N/A";
   }
@@ -67,7 +67,7 @@ function FieldHelp({ text }: { text: string }) {
 
 interface SystemFieldProps {
   label: string;
-  value: string | null | undefined;
+  value: string | number | null | undefined;
   description: string;
   monospace?: boolean;
   breakAll?: boolean;

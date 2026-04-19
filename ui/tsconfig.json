@@ -17,7 +17,8 @@
     "noFallthroughCasesInSwitch": true,
     "paths": {
       "@/*": ["./src/*"],
-      "@kalamdb/client": ["../link/sdks/typescript/client/dist/src/index.d.ts"]
+      "@kalamdb/client": ["../link/sdks/typescript/client/dist/src/index.d.ts"],
+      "@kalamdb/orm": ["../link/sdks/typescript/orm/src/index.ts"]
     }
   },
   "include": ["src"],

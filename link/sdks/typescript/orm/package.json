@@ -1,0 +1,36 @@
+{
+  "name": "@kalamdb/orm",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Drizzle ORM driver for KalamDB",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "license": "Apache-2.0",
+  "keywords": ["kalamdb", "drizzle", "orm", "database", "driver"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kalamstack/KalamDB"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "kalamdb-orm": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node --test tests/file-column.test.mjs tests/strip-defaults.test.mjs"
+  },
+  "peerDependencies": {
+    "@kalamdb/client": ">=0.4.0",
+    "drizzle-orm": ">=0.36.0"
+  },
+  "devDependencies": {
+    "@kalamdb/client": "file:../client",
+    "drizzle-orm": "^0.41.0",
+    "typescript": "^5.8.0"
+  },
+  "files": [
+    "dist"
+  ]
+}
