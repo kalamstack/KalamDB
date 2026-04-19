@@ -1,7 +1,7 @@
 {
   "name": "@kalamdb/orm",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.4.2-rc.3",
   "description": "Drizzle ORM driver and schema generator for KalamDB",
   "license": "Apache-2.0",
   "author": "KalamDB Team",

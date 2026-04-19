@@ -141,12 +141,13 @@ if [[ "$VERSION" == *"-"* ]]; then
 fi
 
 # ─── Check peer dependency is already published ───────────────────────────────
-if ! npm view "$CLIENT_PACKAGE_NAME@$VERSION" version --silent >/dev/null 2>&1; then
-  echo "❌ ${CLIENT_PACKAGE_NAME}@$VERSION is not published yet. Publish the main package first."
+# ORM has independent versioning from @kalamdb/client; just verify the package exists on npm.
+if ! npm view "$CLIENT_PACKAGE_NAME" version --silent >/dev/null 2>&1; then
+  echo "❌ ${CLIENT_PACKAGE_NAME} is not published on npm. Publish the client package first."
   echo "   registry API: $CLIENT_REGISTRY_URL"
   exit 1
 fi
-echo "✅ Peer dependency ${CLIENT_PACKAGE_NAME}@$VERSION is published."
+echo "✅ Peer dependency ${CLIENT_PACKAGE_NAME} is available on npm."
 
 # ─── Dry-run early exit ───────────────────────────────────────────────────────
 if [[ "$DRY_RUN" == "true" ]]; then
