@@ -10,7 +10,7 @@
 use super::test_support::TestServer;
 use kalam_client::models::ResponseStatus;
 use kalamdb_commons::models::ConnectionInfo;
-use kalamdb_commons::{AuthType, OAuthProvider, Role};
+use kalamdb_commons::{AuthType, OAuthProvider, Role, UserId};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static UNIQUE_USER_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -48,7 +48,7 @@ async fn test_oauth_google_success() {
     // Verify user was created with correct auth_type and auth_data
     let users_provider = server.app_context.system_tables().users();
     let user = users_provider
-        .get_user_by_username(oauth_username.as_str())
+        .get_user_by_id(&UserId::new(oauth_username.as_str()))
         .expect("Failed to get user")
         .unwrap();
     assert_eq!(user.auth_type, AuthType::OAuth);
@@ -92,7 +92,7 @@ async fn test_oauth_user_password_rejected() {
 
     // Attempt credential auth (login flow)
     let auth_request = AuthRequest::Credentials {
-        username: oauth_username.clone(),
+        user: oauth_username.clone(),
         password: "somepassword".to_string(),
     };
 
@@ -135,8 +135,14 @@ async fn test_oauth_subject_matching() {
 
     // Verify both users exist with different subjects
     let users_provider = server.app_context.system_tables().users();
-    let user1 = users_provider.get_user_by_username(user1_name.as_str()).unwrap().unwrap();
-    let user2 = users_provider.get_user_by_username(user2_name.as_str()).unwrap().unwrap();
+    let user1 = users_provider
+        .get_user_by_id(&UserId::new(user1_name.as_str()))
+        .unwrap()
+        .unwrap();
+    let user2 = users_provider
+        .get_user_by_id(&UserId::new(user2_name.as_str()))
+        .unwrap()
+        .unwrap();
 
     let auth_data1 = user1.auth_data.as_ref().unwrap();
     let auth_data2 = user2.auth_data.as_ref().unwrap();
@@ -227,7 +233,10 @@ async fn test_oauth_azure_provider() {
 
     // Verify user was created with Azure provider
     let users_provider = server.app_context.system_tables().users();
-    let user = users_provider.get_user_by_username(oauth_username.as_str()).unwrap().unwrap();
+    let user = users_provider
+        .get_user_by_id(&UserId::new(oauth_username.as_str()))
+        .unwrap()
+        .unwrap();
     let auth_data = user.auth_data.as_ref().unwrap();
 
     assert_eq!(auth_data.provider_type, OAuthProvider::AzureAd);

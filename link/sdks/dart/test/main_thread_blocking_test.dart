@@ -145,7 +145,7 @@ class _MockRustLibApi extends MockRustLibApi {
   @override
   Future<gen.DartLoginResponse> crateApiDartLogin({
     required DartKalamClient client,
-    required String username,
+    required String user,
     required String password,
   }) async {
     throw UnimplementedError();

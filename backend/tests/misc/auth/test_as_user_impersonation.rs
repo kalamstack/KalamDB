@@ -9,8 +9,9 @@
 
 use super::test_support::TestServer;
 use kalam_client::models::ResponseStatus;
-use kalamdb_commons::models::{AuthType, Role, UserId, UserName};
+use kalamdb_commons::models::{AuthType, Role, UserId};
 use kalamdb_system::providers::storages::models::StorageMode;
+use uuid::Uuid;
 
 async fn insert_user(server: &TestServer, username: &str, role: Role) -> UserId {
     let user_id = UserId::new(username);
@@ -24,7 +25,6 @@ async fn insert_user(server: &TestServer, username: &str, role: Role) -> UserId 
     let now = chrono::Utc::now().timestamp_millis();
     let user = kalamdb_system::User {
         user_id: user_id.clone(),
-        username: UserName::new(username),
         password_hash: "".to_string(),
         role,
         email: Some(format!("{}@test.local", username)),
@@ -44,6 +44,30 @@ async fn insert_user(server: &TestServer, username: &str, role: Role) -> UserId 
     // Best-effort: ignore AlreadyExists from races
     let _ = users.create_user(user);
     user_id
+}
+
+fn find_impersonation_audit_entry<'a>(
+    entries: &'a [kalamdb_system::AuditLogEntry],
+    action: &str,
+    target: &str,
+    actor_user_id: &UserId,
+) -> &'a kalamdb_system::AuditLogEntry {
+    entries
+        .iter()
+        .rev()
+        .find(|entry| {
+            entry.action == action
+                && entry.target == target
+                && &entry.actor_user_id == actor_user_id
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "Audit entry {} for actor {} and target {} not found",
+                action,
+                actor_user_id.as_str(),
+                target
+            )
+        })
 }
 
 /// T168: Regular user role attempting AS USER is blocked (CRITICAL TEST)
@@ -130,6 +154,55 @@ async fn test_as_user_with_service_role() {
         1,
         "Target user should see their record"
     );
+}
+
+/// T167.1: Successful AS USER operations are written to the audit log.
+#[actix_web::test]
+#[ntest::timeout(45000)]
+async fn test_as_user_success_is_audited() {
+    let server = TestServer::new_shared().await;
+    let ns = format!("test_as_user_audit_{}", Uuid::new_v4().simple());
+
+    let service_user = insert_user(&server, "svc_audit_actor", Role::Service).await;
+    let target_user = insert_user(&server, "svc_audit_target", Role::User).await;
+
+    let ns_resp = server.execute_sql_as_user(&format!("CREATE NAMESPACE {}", ns), "root").await;
+    assert_eq!(ns_resp.status, ResponseStatus::Success, "CREATE NAMESPACE failed");
+
+    let create_table = format!(
+        "CREATE TABLE {}.audit_items (id VARCHAR PRIMARY KEY, value VARCHAR) WITH (TYPE = 'USER', STORAGE_ID = 'local')",
+        ns
+    );
+    let create_resp = server.execute_sql_as_user(&create_table, "root").await;
+    assert_eq!(create_resp.status, ResponseStatus::Success, "CREATE TABLE failed");
+
+    let insert_sql = format!(
+        "EXECUTE AS USER '{}' (INSERT INTO {}.audit_items (id, value) VALUES ('A1', 'ok'))",
+        target_user.as_str(),
+        ns
+    );
+    let resp = server.execute_sql_as_user(&insert_sql, service_user.as_str()).await;
+    assert_eq!(resp.status, ResponseStatus::Success, "EXECUTE AS USER insert failed");
+
+    let logs = server
+        .app_context
+        .system_tables()
+        .audit_logs()
+        .scan_all()
+        .expect("Failed to read audit log");
+    let entry = find_impersonation_audit_entry(
+        &logs,
+        "EXECUTE_AS_USER",
+        &format!("user:{}", target_user.as_str()),
+        &service_user,
+    );
+
+    assert_eq!(entry.subject_user_id.as_ref(), Some(&target_user));
+    assert!(entry
+        .details
+        .as_ref()
+        .expect("impersonation audit should include details")
+        .contains("\"success\":true"));
 }
 
 /// T167: DBA role can successfully use AS USER

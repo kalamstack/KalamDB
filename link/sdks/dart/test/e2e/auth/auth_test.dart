@@ -29,7 +29,8 @@ void main() {
             expect(resp.accessToken, isNotEmpty);
             expect(resp.refreshToken, isNotNull);
             expect(resp.user.id, isNotEmpty);
-            expect(resp.user.username, isNotEmpty);
+            expect(resp.user.role, isA<Role>());
+            expect(resp.adminUiAccess, isA<bool>());
             expect(resp.expiresAt, isNotEmpty);
           } finally {
             await anonClient.dispose();
@@ -171,7 +172,7 @@ void main() {
       'Auth sealed class constructors work',
       () async {
         const basic = BasicAuth('user', 'pass');
-        expect(basic.username, 'user');
+        expect(basic.user, 'user');
         expect(basic.password, 'pass');
 
         const jwt = JwtAuth('token123');

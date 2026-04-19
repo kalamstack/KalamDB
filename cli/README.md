@@ -10,7 +10,7 @@ Interactive command-line client for KalamDB - a real-time database with WebSocke
 - 🎨 **Syntax Highlighting** - Beautiful colored SQL syntax
 - 📝 **Command History** - Persistent history with arrow key navigation and interactive menu
 - ⚡ **Auto-completion** - TAB completion for SQL keywords, tables, and columns
-- 🔐 **Authentication** - JWT tokens, username/password, and stored credentials
+- 🔐 **Authentication** - JWT tokens, user/password login, and stored credentials
 - 📁 **Batch Execution** - Run SQL scripts from files
 - 🎭 **Progress Indicators** - Visual feedback for long-running queries
 
@@ -132,8 +132,8 @@ CONNECTION:
 
 AUTHENTICATION:
     --token <TOKEN>                 JWT authentication token
-    --username <USERNAME>           HTTP Basic Auth username
-    --password [PASSWORD]           HTTP Basic Auth password (prompts if flag is present without value)
+    --user <USER>                   User/password login identifier
+    --password [PASSWORD]           User/password login secret (prompts if flag is present without value)
     --instance <INSTANCE>           Credential instance name (default: local)
     --save-credentials              Save credentials after successful login
 
@@ -190,7 +190,7 @@ kalam --file setup.sql
 kalam --subscribe "SUBSCRIBE TO app.messages WHERE user_id = 'alice'"
 
 # Manage stored credentials
-kalam --update-credentials --instance local --username root --password ""
+kalam --update-credentials --instance local --user root --password ""
 kalam --show-credentials --instance local
 kalam --list-instances
 ```
@@ -351,14 +351,14 @@ kalam  # Uses default user on localhost
 kalam --token eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
-### Username/Password + Stored Credentials
+### User/Password Login + Stored Credentials
 
 ```bash
 # Login and store credentials
-kalam --username root --password "" --save-credentials
+kalam --user root --password "" --save-credentials
 
 # Update stored credentials explicitly
-kalam --update-credentials --instance local --username root --password ""
+kalam --update-credentials --instance local --user root --password ""
 ```
 
 ## Advanced Features

@@ -1463,8 +1463,7 @@ fn rewrite_local_foreign_table_column_type(definition: &str) -> String {
     }
 
     let file_type_re =
-        regex::Regex::new(r#"(?i)^(\s*(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_]*)\s+)FILE\b"#)
-            .unwrap();
+        regex::Regex::new(r#"(?i)^(\s*(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_]*)\s+)FILE\b"#).unwrap();
 
     file_type_re.replace(definition, "${1}JSONB").into_owned()
 }

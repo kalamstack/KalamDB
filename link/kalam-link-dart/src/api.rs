@@ -349,13 +349,13 @@ pub async fn dart_execute_query(
 // Auth endpoints
 // ---------------------------------------------------------------------------
 
-/// Log in with username and password. Returns tokens and user info.
+/// Log in with user and password. Returns tokens and user info.
 pub async fn dart_login(
     client: &DartKalamClient,
-    username: String,
+    user: String,
     password: String,
 ) -> anyhow::Result<DartLoginResponse> {
-    let response = client.inner.login(&username, &password).await?;
+    let response = client.inner.login(&user, &password).await?;
     Ok(DartLoginResponse::from(response))
 }
 

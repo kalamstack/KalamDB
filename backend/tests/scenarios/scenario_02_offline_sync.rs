@@ -18,7 +18,7 @@ use super::helpers::*;
 
 use futures_util::StreamExt;
 use kalam_client::models::ChangeEvent;
-use kalamdb_commons::{Role, UserName};
+use kalamdb_commons::Role;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -103,7 +103,7 @@ async fn test_scenario_02_offline_sync_parallel() -> anyhow::Result<()> {
             let server_base = server.base_url().to_string();
             let success_count = Arc::clone(&sync_success_count);
             let username = format!("{}_{}", user_prefix, user_idx);
-            let token = server.create_jwt_token(&UserName::new(username));
+            let token = server.create_jwt_token(&username);
 
             tokio::spawn(async move {
                 // Create client for this user

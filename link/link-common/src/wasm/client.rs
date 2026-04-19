@@ -841,6 +841,12 @@ impl KalamClient {
         // Strict Mode re-mount) restores the expected reconnection behavior.
         self.connection_options.borrow_mut().auto_reconnect = true;
 
+        if self.auth_provider_cb.borrow().is_none()
+            && matches!(&*self.auth.borrow(), WasmAuthProvider::Basic { .. })
+        {
+            self.reauthenticate_for_http().await?;
+        }
+
         // Resolve auth: dynamic provider takes precedence over static auth.
         let resolved_auth = if let Some(cb) = self.auth_provider_cb.borrow().as_ref() {
             // Call the JS async callback and await the Promise it returns.
@@ -1078,7 +1084,7 @@ impl KalamClient {
             if !*auth_handled_clone.borrow() {
                 match &event {
                     ServerMessage::AuthSuccess {
-                        user_id: _user_id,
+                        user: _user_id,
                         role: _role,
                         protocol,
                     } => {
@@ -1538,7 +1544,7 @@ impl KalamClient {
 
     /// Login with current Basic Auth credentials and switch to JWT authentication
     ///
-    /// Sends a POST request to `/v1/api/auth/login` with the stored username/password
+    /// Sends a POST request to `/v1/api/auth/login` with the stored user/password
     /// and updates the client to use JWT authentication on success.
     ///
     /// # Returns
@@ -1557,16 +1563,16 @@ impl KalamClient {
     /// await client.connect(); // Now uses JWT for WebSocket
     /// ```
     pub async fn login(&mut self) -> Result<JsValue, JsValue> {
-        let (username, password) = match &*self.auth.borrow() {
+        let (user, password) = match &*self.auth.borrow() {
             WasmAuthProvider::Basic { username, password } => (username.clone(), password.clone()),
             _ => {
                 return Err(JsValue::from_str(
-                    "login() requires Basic Auth credentials. Create client with new KalamClient(url, username, password)",
+                    "login() requires user/password credentials. Create client with new KalamClient(url, user, password)",
                 ))
             },
         };
 
-        let login_response = self.perform_basic_login(&username, &password).await?;
+        let login_response = self.perform_basic_login(&user, &password).await?;
 
         // Switch to JWT auth
         *self.auth.borrow_mut() = WasmAuthProvider::Jwt {
@@ -1642,6 +1648,10 @@ impl KalamClient {
         sql: &str,
         params: Option<Vec<serde_json::Value>>,
     ) -> Result<String, JsValue> {
+        if matches!(&*self.auth.borrow(), WasmAuthProvider::Basic { .. }) {
+            self.reauthenticate_for_http().await?;
+        }
+
         let result = self.execute_sql_http(sql, &params).await;
 
         match result {
@@ -1785,11 +1795,11 @@ impl KalamClient {
     /// Perform HTTP POST to /v1/api/auth/login and return the parsed response.
     async fn perform_basic_login(
         &self,
-        username: &str,
+        user: &str,
         password: &str,
     ) -> Result<crate::models::LoginResponse, JsValue> {
         let body = serde_json::json!({
-            "username": username,
+            "user": user,
             "password": password,
         });
         let body_str = body.to_string();

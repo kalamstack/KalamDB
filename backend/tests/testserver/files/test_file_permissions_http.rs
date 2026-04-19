@@ -4,7 +4,7 @@ use super::test_support::auth_helper::create_user_auth_header_with_id;
 use super::test_support::http_server::start_http_test_server;
 use kalam_client::models::ResponseStatus as LinkResponseStatus;
 use kalamdb_api::http::sql::models::{ResponseStatus, SqlResponse};
-use kalamdb_commons::{Role, UserName};
+use kalamdb_commons::Role;
 use kalamdb_system::FileRef;
 use reqwest::multipart;
 use serde_json::Value as JsonValue;
@@ -137,7 +137,7 @@ async fn test_file_download_permissions_user_table() -> anyhow::Result<()> {
             create_user_auth_header_with_id(&server, "alice", "test123", &Role::User).await?;
         let (bob_auth, _bob_id) =
             create_user_auth_header_with_id(&server, "bob", "test123", &Role::User).await?;
-        let root_auth = server.bearer_auth_header(&UserName::new("root"))?;
+        let root_auth = server.bearer_auth_header("root")?;
 
         let insert_sql = format!(
             "INSERT INTO {}.{} (id, name, doc) VALUES (1, 'Alice', FILE(\"doc\"))",
@@ -341,7 +341,7 @@ async fn test_user_file_access_matrix() -> anyhow::Result<()> {
             create_user_auth_header_with_id(&server, "svc", "test123", &Role::Service).await?;
         let (dba_auth, _dba_id) =
             create_user_auth_header_with_id(&server, "dba", "test123", &Role::Dba).await?;
-        let root_auth = server.bearer_auth_header(&UserName::new("root"))?;
+        let root_auth = server.bearer_auth_header("root")?;
 
         let insert_sql = format!(
             "INSERT INTO {}.{} (id, name, doc) VALUES (1, 'A', FILE(\"doc\"))",

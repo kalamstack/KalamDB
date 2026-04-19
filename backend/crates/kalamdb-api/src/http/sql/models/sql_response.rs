@@ -4,7 +4,6 @@
 
 use kalamdb_commons::models::datatypes::KalamDataType;
 use kalamdb_commons::models::KalamCellValue;
-use kalamdb_commons::models::Username;
 use kalamdb_commons::schemas::SchemaField;
 use serde::{Deserialize, Serialize, Serializer};
 use std::fmt;
@@ -98,6 +97,18 @@ impl ErrorCode {
             ErrorCode::ExtraFile => "EXTRA_FILE",
             ErrorCode::FileNotFound => "FILE_NOT_FOUND",
             ErrorCode::InvalidMimeType => "INVALID_MIME_TYPE",
+        }
+    }
+
+    #[inline]
+    fn public_message(&self) -> Option<&'static str> {
+        match self {
+            ErrorCode::BatchParseError => Some("Failed to parse SQL batch"),
+            ErrorCode::SqlExecutionError => Some("SQL statement failed"),
+            ErrorCode::InvalidSql => Some("SQL statement is invalid or not allowed"),
+            ErrorCode::TableNotFound => Some("Requested table is not available"),
+            ErrorCode::InternalError => Some("SQL request failed"),
+            _ => None,
         }
     }
 }
@@ -230,8 +241,8 @@ pub struct QueryResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 
-    /// Effective username this statement executed as.
-    pub as_user: Username,
+    /// Effective user identifier this statement executed as.
+    pub as_user: String,
 }
 
 /// Error details for failed SQL execution
@@ -273,6 +284,22 @@ impl SqlResponse {
         }
     }
 
+    /// Create an error response and optionally redact sensitive SQL details.
+    pub fn error_for_privilege(
+        code: ErrorCode,
+        message: &str,
+        took: f64,
+        include_sensitive_details: bool,
+    ) -> Self {
+        if !include_sensitive_details {
+            if let Some(public_message) = code.public_message() {
+                return Self::error(code, public_message, took);
+            }
+        }
+
+        Self::error(code, message, took)
+    }
+
     /// Create an error response with additional details
     pub fn error_with_details(code: ErrorCode, message: &str, details: &str, took: f64) -> Self {
         Self {
@@ -286,6 +313,23 @@ impl SqlResponse {
             }),
         }
     }
+
+    /// Create an error response with optional redaction of sensitive SQL details.
+    pub fn error_with_details_for_privilege(
+        code: ErrorCode,
+        message: &str,
+        details: &str,
+        took: f64,
+        include_sensitive_details: bool,
+    ) -> Self {
+        if !include_sensitive_details {
+            if let Some(public_message) = code.public_message() {
+                return Self::error(code, public_message, took);
+            }
+        }
+
+        Self::error_with_details(code, message, details, took)
+    }
 }
 
 impl QueryResult {
@@ -297,7 +341,7 @@ impl QueryResult {
             rows: Some(rows),
             row_count,
             message: None,
-            as_user: Username::from("unknown"),
+            as_user: "unknown".to_string(),
         }
     }
 
@@ -308,7 +352,7 @@ impl QueryResult {
             rows: None,
             row_count,
             message,
-            as_user: Username::from("unknown"),
+            as_user: "unknown".to_string(),
         }
     }
 
@@ -319,7 +363,7 @@ impl QueryResult {
             rows: None,
             row_count: 0,
             message: Some(message),
-            as_user: Username::from("unknown"),
+            as_user: "unknown".to_string(),
         }
     }
 
@@ -355,7 +399,7 @@ impl QueryResult {
             rows: Some(vec![row]),
             row_count: 1,
             message: None,
-            as_user: Username::from("unknown"),
+            as_user: "unknown".to_string(),
         }
     }
 
@@ -365,7 +409,7 @@ impl QueryResult {
     }
 
     /// Set the effective execution username for this result.
-    pub fn with_as_user(mut self, as_user: Username) -> Self {
+    pub fn with_as_user(mut self, as_user: String) -> Self {
         self.as_user = as_user;
         self
     }
@@ -374,7 +418,6 @@ impl QueryResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kalamdb_commons::models::Username;
 
     #[test]
     fn test_success_response_serialization() {
@@ -464,6 +507,38 @@ mod tests {
     }
 
     #[test]
+    fn test_non_admin_sql_errors_are_redacted() {
+        let response = SqlResponse::error_with_details_for_privilege(
+            ErrorCode::SqlExecutionError,
+            "Statement 1 failed: table 'secret.payroll' not found",
+            "SELECT * FROM secret.payroll",
+            5.0,
+            false,
+        );
+
+        let error = response.error.expect("error response should include an error payload");
+        assert_eq!(error.code, ErrorCode::SqlExecutionError);
+        assert_eq!(error.message, "SQL statement failed");
+        assert!(error.details.is_none());
+    }
+
+    #[test]
+    fn test_admin_sql_errors_preserve_full_details() {
+        let response = SqlResponse::error_with_details_for_privilege(
+            ErrorCode::SqlExecutionError,
+            "Statement 1 failed: table 'secret.payroll' not found",
+            "SELECT * FROM secret.payroll",
+            5.0,
+            true,
+        );
+
+        let error = response.error.expect("error response should include an error payload");
+        assert_eq!(error.code, ErrorCode::SqlExecutionError);
+        assert_eq!(error.message, "Statement 1 failed: table 'secret.payroll' not found");
+        assert_eq!(error.details.as_deref(), Some("SELECT * FROM secret.payroll"));
+    }
+
+    #[test]
     fn test_query_result_with_message() {
         let result = QueryResult::with_message("Table created successfully".to_string());
 
@@ -471,7 +546,7 @@ mod tests {
         assert!(result.rows.is_none());
         assert!(result.schema.is_empty());
         assert_eq!(result.message, Some("Table created successfully".to_string()));
-        assert_eq!(result.as_user, Username::from("unknown"));
+        assert_eq!(result.as_user, "unknown".to_string());
     }
 
     #[test]
@@ -482,14 +557,13 @@ mod tests {
         assert!(result.rows.is_none());
         assert!(result.schema.is_empty());
         assert_eq!(result.message, Some("5 rows inserted".to_string()));
-        assert_eq!(result.as_user, Username::from("unknown"));
+        assert_eq!(result.as_user, "unknown".to_string());
     }
 
     #[test]
     fn test_query_result_with_as_user() {
-        let result =
-            QueryResult::with_message("ok".to_string()).with_as_user(Username::from("alice"));
+        let result = QueryResult::with_message("ok".to_string()).with_as_user("alice".to_string());
 
-        assert_eq!(result.as_user, Username::from("alice"));
+        assert_eq!(result.as_user, "alice".to_string());
     }
 }

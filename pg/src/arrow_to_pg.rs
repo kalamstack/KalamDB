@@ -8,8 +8,8 @@ use arrow::array::{
 use arrow::datatypes::{DataType, TimeUnit};
 use datafusion_common::ScalarValue;
 use pgrx::pg_sys;
-use pgrx::IntoDatum;
-use std::ffi::CString;
+use pgrx::{rust_str_to_text_p, IntoDatum};
+use std::ffi::{CStr, CString};
 
 /// Days between Unix epoch (1970-01-01) and PostgreSQL epoch (2000-01-01).
 const UNIX_TO_PG_EPOCH_DAYS: i32 = 10_957;
@@ -125,15 +125,23 @@ unsafe fn datum_from_str_for_target_type(
 }
 
 unsafe fn text_datum_from_str(value: &str) -> Option<pg_sys::Datum> {
-    let cstr = CString::new(value).ok()?;
-    let pg_text = pg_sys::cstring_to_text(cstr.as_ptr());
-    Some(pg_sys::Datum::from(pg_text as usize))
+    #[cfg(feature = "e2e")]
+    crate::conversion_test_stats::record_text_to_pg_fast_path(value.len());
+
+    Some(pg_sys::Datum::from(rust_str_to_text_p(value).into_pg() as usize))
 }
 
 unsafe fn parse_text_via_type_input(
     value: &str,
     target_type_oid: pg_sys::Oid,
 ) -> Option<pg_sys::Datum> {
+    #[cfg(feature = "e2e")]
+    match target_type_oid {
+        pg_sys::JSONOID => crate::conversion_test_stats::record_json_to_pg_input(value.len()),
+        pg_sys::JSONBOID => crate::conversion_test_stats::record_jsonb_to_pg_input(value.len()),
+        _ => {},
+    }
+
     let cstr = CString::new(value).ok()?;
     let mut typinput = pg_sys::Oid::INVALID;
     let mut typioparam = pg_sys::Oid::INVALID;

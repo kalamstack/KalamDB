@@ -144,7 +144,7 @@ extension DartAuthProviderPatterns on DartAuthProvider {
 
   @optionalTypeArgs
   TResult maybeWhen<TResult extends Object?>({
-    TResult Function(String username, String password)? basicAuth,
+    TResult Function(String user, String password)? basicAuth,
     TResult Function(String token)? jwtToken,
     TResult Function()? none,
     required TResult orElse(),
@@ -152,7 +152,7 @@ extension DartAuthProviderPatterns on DartAuthProvider {
     final _that = this;
     switch (_that) {
       case DartAuthProvider_BasicAuth() when basicAuth != null:
-        return basicAuth(_that.username, _that.password);
+        return basicAuth(_that.user, _that.password);
       case DartAuthProvider_JwtToken() when jwtToken != null:
         return jwtToken(_that.token);
       case DartAuthProvider_None() when none != null:
@@ -177,14 +177,14 @@ extension DartAuthProviderPatterns on DartAuthProvider {
 
   @optionalTypeArgs
   TResult when<TResult extends Object?>({
-    required TResult Function(String username, String password) basicAuth,
+    required TResult Function(String user, String password) basicAuth,
     required TResult Function(String token) jwtToken,
     required TResult Function() none,
   }) {
     final _that = this;
     switch (_that) {
       case DartAuthProvider_BasicAuth():
-        return basicAuth(_that.username, _that.password);
+        return basicAuth(_that.user, _that.password);
       case DartAuthProvider_JwtToken():
         return jwtToken(_that.token);
       case DartAuthProvider_None():
@@ -206,14 +206,14 @@ extension DartAuthProviderPatterns on DartAuthProvider {
 
   @optionalTypeArgs
   TResult? whenOrNull<TResult extends Object?>({
-    TResult? Function(String username, String password)? basicAuth,
+    TResult? Function(String user, String password)? basicAuth,
     TResult? Function(String token)? jwtToken,
     TResult? Function()? none,
   }) {
     final _that = this;
     switch (_that) {
       case DartAuthProvider_BasicAuth() when basicAuth != null:
-        return basicAuth(_that.username, _that.password);
+        return basicAuth(_that.user, _that.password);
       case DartAuthProvider_JwtToken() when jwtToken != null:
         return jwtToken(_that.token);
       case DartAuthProvider_None() when none != null:
@@ -227,11 +227,10 @@ extension DartAuthProviderPatterns on DartAuthProvider {
 /// @nodoc
 
 class DartAuthProvider_BasicAuth extends DartAuthProvider {
-  const DartAuthProvider_BasicAuth(
-      {required this.username, required this.password})
+  const DartAuthProvider_BasicAuth({required this.user, required this.password})
       : super._();
 
-  final String username;
+  final String user;
   final String password;
 
   /// Create a copy of DartAuthProvider
@@ -248,18 +247,17 @@ class DartAuthProvider_BasicAuth extends DartAuthProvider {
     return identical(this, other) ||
         (other.runtimeType == runtimeType &&
             other is DartAuthProvider_BasicAuth &&
-            (identical(other.username, username) ||
-                other.username == username) &&
+            (identical(other.user, user) || other.user == user) &&
             (identical(other.password, password) ||
                 other.password == password));
   }
 
   @override
-  int get hashCode => Object.hash(runtimeType, username, password);
+  int get hashCode => Object.hash(runtimeType, user, password);
 
   @override
   String toString() {
-    return 'DartAuthProvider.basicAuth(username: $username, password: $password)';
+    return 'DartAuthProvider.basicAuth(user: $user, password: $password)';
   }
 }
 
@@ -270,7 +268,7 @@ abstract mixin class $DartAuthProvider_BasicAuthCopyWith<$Res>
           $Res Function(DartAuthProvider_BasicAuth) _then) =
       _$DartAuthProvider_BasicAuthCopyWithImpl;
   @useResult
-  $Res call({String username, String password});
+  $Res call({String user, String password});
 }
 
 /// @nodoc
@@ -285,13 +283,13 @@ class _$DartAuthProvider_BasicAuthCopyWithImpl<$Res>
   /// with the given fields replaced by the non-null parameter values.
   @pragma('vm:prefer-inline')
   $Res call({
-    Object? username = null,
+    Object? user = null,
     Object? password = null,
   }) {
     return _then(DartAuthProvider_BasicAuth(
-      username: null == username
-          ? _self.username
-          : username // ignore: cast_nullable_to_non_nullable
+      user: null == user
+          ? _self.user
+          : user // ignore: cast_nullable_to_non_nullable
               as String,
       password: null == password
           ? _self.password

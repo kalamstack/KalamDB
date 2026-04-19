@@ -8,7 +8,7 @@ use datafusion::prelude::SessionContext;
 use kalam_client::models::{ErrorDetail, QueryResponse, ResponseStatus};
 use kalamdb_auth::{CoreUsersRepo, UserRepository};
 use kalamdb_commons::constants::AuthConstants;
-use kalamdb_commons::{AuthType, Role, StorageId, UserId, UserName};
+use kalamdb_commons::{AuthType, Role, StorageId, UserId};
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::sql::executor::SqlExecutor;
 use kalamdb_system::providers::storages::models::StorageMode;
@@ -98,8 +98,7 @@ impl TestServer {
     /// Execute SQL as the root user (HTTP).
     pub async fn execute_sql(&self, sql: &str) -> QueryResponse {
         let root_id = UserId::new(AuthConstants::DEFAULT_ROOT_USER_ID);
-        let root_name = UserName::new(AuthConstants::DEFAULT_SYSTEM_USERNAME);
-        let token = self.http.create_jwt_token_with_id(&root_id, &root_name, &Role::System);
+        let token = self.http.create_jwt_token_with_id(&root_id, &Role::System);
         let auth_header = format!("Bearer {}", token);
 
         match self.http.execute_sql_with_auth(sql, &auth_header).await {
@@ -138,22 +137,7 @@ impl TestServer {
                     took: None,
                     error: Some(ErrorDetail {
                         code: "INVALID_CREDENTIALS".to_string(),
-                        message: "Invalid username or password".to_string(),
-                        details: None,
-                    }),
-                };
-            }
-            user.role
-        } else if let Ok(Some(user)) = users_provider.get_user_by_username(user_id) {
-            // Check if user is soft-deleted
-            if user.deleted_at.is_some() {
-                return QueryResponse {
-                    status: ResponseStatus::Error,
-                    results: vec![],
-                    took: None,
-                    error: Some(ErrorDetail {
-                        code: "INVALID_CREDENTIALS".to_string(),
-                        message: "Invalid username or password".to_string(),
+                        message: "Invalid credentials".to_string(),
                         details: None,
                     }),
                 };
@@ -164,7 +148,6 @@ impl TestServer {
                 bcrypt::hash("test123", bcrypt::DEFAULT_COST).unwrap_or_else(|_| String::new());
             let user = kalamdb_system::User {
                 user_id: user_id_obj.clone(),
-                username: user_id.into(),
                 password_hash,
                 role: Role::User,
                 email: Some(format!("{}@test.com", user_id)),
@@ -184,8 +167,7 @@ impl TestServer {
             Role::User
         };
 
-        let username = UserName::new(user_id);
-        let token = self.http.create_jwt_token_with_id(&user_id_obj, &username, &role);
+        let token = self.http.create_jwt_token_with_id(&user_id_obj, &role);
         let auth_header = format!("Bearer {}", token);
 
         match self.http.execute_sql_with_auth(sql, &auth_header).await {
@@ -226,7 +208,6 @@ impl TestServer {
 
         let user = kalamdb_system::User {
             user_id: user_id.clone(),
-            username: username.into(),
             password_hash,
             role,
             email: Some(format!("{}@test.com", username)),

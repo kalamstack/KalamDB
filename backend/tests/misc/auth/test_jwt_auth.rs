@@ -18,7 +18,7 @@ use actix_web::{test, web, App};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use kalamdb_auth::providers::jwt_auth::{JwtClaims as AuthJwtClaims, KALAMDB_ISSUER};
 use kalamdb_auth::{CoreUsersRepo, UserRepository};
-use kalamdb_commons::{Role, UserId, UserName};
+use kalamdb_commons::{Role, UserId};
 use serde::Serialize;
 use std::sync::Arc;
 
@@ -51,7 +51,6 @@ fn create_test_jwt_token(
         iss: issuer.to_string(),
         exp: ((now as i64) + exp_offset_secs) as usize,
         iat: now,
-        username: Some(UserName::new(username)),
         email: Some(format!("{}@example.com", username)),
         role: Some(Role::User),
         token_type: None,
@@ -60,6 +59,14 @@ fn create_test_jwt_token(
     let header = Header::new(Algorithm::HS256);
     let encoding_key = EncodingKey::from_secret(secret.as_bytes());
     encode(&header, &claims, &encoding_key).expect("Failed to encode JWT")
+}
+
+async fn read_error_code(resp: actix_web::dev::ServiceResponse) -> Option<String> {
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    body.get("error")
+        .and_then(|error| error.get("code"))
+        .and_then(|code| code.as_str())
+        .map(ToString::to_string)
 }
 
 /// T059 - Test successful JWT authentication with valid token
@@ -166,6 +173,7 @@ async fn test_jwt_auth_expired_token() {
 
     // Should be 401 Unauthorized for expired token
     assert_eq!(resp.status(), 401, "Expected 401 Unauthorized for expired JWT token");
+    assert_eq!(read_error_code(resp).await.as_deref(), Some("TOKEN_EXPIRED"));
 
     println!("✓ Expired JWT token correctly rejected with 401");
 }
@@ -215,6 +223,7 @@ async fn test_jwt_auth_invalid_signature() {
 
     // Should be 401 Unauthorized for invalid signature
     assert_eq!(resp.status(), 401, "Expected 401 Unauthorized for invalid JWT signature");
+    assert_eq!(read_error_code(resp).await.as_deref(), Some("INVALID_CREDENTIALS"));
 
     println!("✓ Invalid JWT signature correctly rejected with 401");
 }
@@ -264,6 +273,7 @@ async fn test_jwt_auth_untrusted_issuer() {
 
     // Should be 401 Unauthorized for untrusted issuer
     assert_eq!(resp.status(), 401, "Expected 401 Unauthorized for untrusted JWT issuer");
+    assert_eq!(read_error_code(resp).await.as_deref(), Some("INVALID_CREDENTIALS"));
 
     println!("✓ Untrusted JWT issuer correctly rejected with 401");
 }
@@ -330,6 +340,7 @@ async fn test_jwt_auth_missing_sub_claim() {
     // Per OWASP AA05, all authentication failures (including malformed tokens)
     // should return 401 to avoid leaking token format details to attackers.
     assert_eq!(resp.status(), 401, "Expected 401 Unauthorized for JWT missing 'sub' claim");
+    assert_eq!(read_error_code(resp).await.as_deref(), Some("INVALID_CREDENTIALS"));
 
     println!("✓ JWT with missing 'sub' claim correctly rejected with 401");
 }

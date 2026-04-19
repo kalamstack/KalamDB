@@ -5,13 +5,9 @@
 //!
 //! ## Indexes
 //!
-//! The users table has two secondary indexes (managed automatically):
+//! The users table has one secondary index (managed automatically):
 //!
-//! 1. **UserUsernameIndex** - Unique username lookup (case-insensitive)
-//!    - Key: `{username_lowercase}`
-//!    - Enables: "Get user by username"
-//!
-//! 2. **UserRoleIndex** - Query users by role
+//! 1. **UserRoleIndex** - Query users by role
 //!    - Key: `{role}:{user_id}`
 //!    - Enables: "All users with role 'admin'"
 
@@ -20,7 +16,7 @@ use crate::error::{SystemError, SystemResultExt};
 use crate::providers::base::{system_rows_to_batch, IndexedProviderDefinition};
 use crate::providers::users::models::User;
 use crate::system_row_mapper::{model_to_system_row, system_row_to_model};
-use crate::{StoragePartition, SystemTable};
+use crate::SystemTable;
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::error::Result as DataFusionResult;
@@ -76,30 +72,6 @@ impl UsersTableProvider {
     /// # Returns
     /// Result indicating success or failure
     pub fn create_user(&self, user: User) -> Result<(), SystemError> {
-        // Check if username already exists (lookup by index)
-        // Username index key is lowercase username
-        let username_index_idx = self
-            .store
-            .find_index_by_partition(StoragePartition::SystemUsersUsernameIdx.name())
-            .ok_or_else(|| {
-                SystemError::Other(format!(
-                    "Missing expected index partition: {}",
-                    StoragePartition::SystemUsersUsernameIdx.name()
-                ))
-            })?;
-        let username_key = user.username.as_str().to_lowercase();
-        let existing = self
-            .store
-            .scan_by_index(username_index_idx, Some(username_key.as_bytes()), Some(1))
-            .into_system_error("scan_by_index error")?;
-
-        if !existing.is_empty() {
-            return Err(SystemError::AlreadyExists(format!(
-                "User with username '{}' already exists",
-                user.username.as_str()
-            )));
-        }
-
         // Insert user - indexes are managed automatically
         let row = Self::encode_user_row(&user)?;
         self.store.insert(&user.user_id, &row).into_system_error("insert user error")
@@ -123,32 +95,6 @@ impl UsersTableProvider {
         }
 
         let existing_row = existing.unwrap();
-        let existing_user = Self::decode_user_row(&existing_row)?;
-
-        // If username changed, check for conflicts
-        if existing_user.username != user.username {
-            let username_index_idx = self
-                .store
-                .find_index_by_partition(StoragePartition::SystemUsersUsernameIdx.name())
-                .ok_or_else(|| {
-                    SystemError::Other(format!(
-                        "Missing expected index partition: {}",
-                        StoragePartition::SystemUsersUsernameIdx.name()
-                    ))
-                })?;
-            let username_key = user.username.as_str().to_lowercase();
-            let conflicts = self
-                .store
-                .scan_by_index(username_index_idx, Some(username_key.as_bytes()), Some(1))
-                .into_system_error("scan_by_index error")?;
-
-            if !conflicts.is_empty() && conflicts[0].0 != user.user_id {
-                return Err(SystemError::AlreadyExists(format!(
-                    "User with username '{}' already exists",
-                    user.username.as_str()
-                )));
-            }
-        }
 
         // Use update_with_old for efficiency (we already have old entity)
         let new_row = Self::encode_user_row(&user)?;
@@ -191,40 +137,6 @@ impl UsersTableProvider {
     pub fn get_user_by_id(&self, user_id: &UserId) -> Result<Option<User>, SystemError> {
         let row = self.store.get(user_id)?;
         row.map(|value| Self::decode_user_row(&value)).transpose()
-    }
-
-    /// Get a user by username.
-    ///
-    /// Uses the username index for efficient lookup.
-    ///
-    /// # Arguments
-    /// * `username` - The username to lookup
-    ///
-    /// # Returns
-    /// Option<User> if found, None otherwise
-    pub fn get_user_by_username(&self, username: &str) -> Result<Option<User>, SystemError> {
-        let username_index_idx = self
-            .store
-            .find_index_by_partition(StoragePartition::SystemUsersUsernameIdx.name())
-            .ok_or_else(|| {
-                SystemError::Other(format!(
-                    "Missing expected index partition: {}",
-                    StoragePartition::SystemUsersUsernameIdx.name()
-                ))
-            })?;
-
-        // Username index key is lowercase username
-        let username_key = username.to_lowercase();
-        let results = self
-            .store
-            .scan_by_index(username_index_idx, Some(username_key.as_bytes()), Some(1))
-            .into_system_error("scan_by_index error")?;
-
-        results
-            .into_iter()
-            .next()
-            .map(|(_, row)| Self::decode_user_row(&row))
-            .transpose()
     }
 
     /// Helper to create RecordBatch from users
@@ -289,7 +201,7 @@ crate::impl_indexed_system_table_provider!(
 mod tests {
     use super::*;
     use datafusion::datasource::TableProvider;
-    use kalamdb_commons::{AuthType, Role, StorageId, UserName};
+    use kalamdb_commons::{AuthType, Role, StorageId};
     use kalamdb_store::test_utils::InMemoryBackend;
 
     fn create_test_provider() -> UsersTableProvider {
@@ -297,13 +209,12 @@ mod tests {
         UsersTableProvider::new(backend)
     }
 
-    fn create_test_user(id: &str, username: &str) -> User {
+    fn create_test_user(id: &str) -> User {
         User {
             user_id: UserId::new(id),
-            username: UserName::new(username),
             password_hash: "hashed_password".to_string(),
             role: Role::User,
-            email: Some(format!("{}@example.com", username)),
+            email: Some(format!("{}@example.com", id)),
             auth_type: AuthType::Password,
             auth_data: None,
             storage_mode: crate::providers::storages::models::StorageMode::Table,
@@ -321,7 +232,7 @@ mod tests {
     #[test]
     fn test_create_and_get_user() {
         let provider = create_test_provider();
-        let user = create_test_user("user1", "alice");
+        let user = create_test_user("user1");
 
         // Create user
         provider.create_user(user.clone()).unwrap();
@@ -330,28 +241,13 @@ mod tests {
         let retrieved = provider.get_user_by_id(&UserId::new("user1")).unwrap();
         assert!(retrieved.is_some());
         let retrieved = retrieved.unwrap();
-        assert_eq!(retrieved.username.as_str(), "alice");
-        assert_eq!(retrieved.email, Some("alice@example.com".to_string()));
-    }
-
-    #[test]
-    fn test_get_user_by_username() {
-        let provider = create_test_provider();
-        let user = create_test_user("user1", "alice");
-
-        provider.create_user(user).unwrap();
-
-        // Get by username
-        let retrieved = provider.get_user_by_username("alice").unwrap();
-        assert!(retrieved.is_some());
-        let retrieved = retrieved.unwrap();
-        assert_eq!(retrieved.user_id, UserId::new("user1"));
+        assert_eq!(retrieved.email, Some("user1@example.com".to_string()));
     }
 
     #[test]
     fn test_update_user() {
         let provider = create_test_provider();
-        let user = create_test_user("user1", "alice");
+        let user = create_test_user("user1");
 
         provider.create_user(user).unwrap();
 
@@ -369,32 +265,9 @@ mod tests {
     }
 
     #[test]
-    fn test_update_username() {
-        let provider = create_test_provider();
-        let user = create_test_user("user1", "alice");
-
-        provider.create_user(user).unwrap();
-
-        // Update username
-        let mut updated = provider.get_user_by_id(&UserId::new("user1")).unwrap().unwrap();
-        updated.username = UserName::new("bob");
-
-        provider.update_user(updated).unwrap();
-
-        // Verify old username doesn't work
-        let old_lookup = provider.get_user_by_username("alice").unwrap();
-        assert!(old_lookup.is_none());
-
-        // Verify new username works
-        let new_lookup = provider.get_user_by_username("bob").unwrap();
-        assert!(new_lookup.is_some());
-        assert_eq!(new_lookup.unwrap().user_id, UserId::new("user1"));
-    }
-
-    #[test]
     fn test_delete_user() {
         let provider = create_test_provider();
-        let user = create_test_user("user1", "alice");
+        let user = create_test_user("user1");
 
         provider.create_user(user).unwrap();
         provider.delete_user(&UserId::new("user1")).unwrap();
@@ -410,22 +283,21 @@ mod tests {
 
         // Create multiple users
         for i in 1..=3 {
-            let user = create_test_user(&format!("user{}", i), &format!("user{}", i));
+            let user = create_test_user(&format!("user{}", i));
             provider.create_user(user).unwrap();
         }
 
         // Scan all
         let batch = provider.scan_all_users().unwrap();
         assert_eq!(batch.num_rows(), 3);
-        assert_eq!(batch.num_columns(), 16);
+        assert_eq!(batch.num_columns(), 15);
     }
 
     #[test]
     fn test_table_provider_schema() {
         let provider = create_test_provider();
         let schema = provider.schema();
-        assert_eq!(schema.fields().len(), 16);
+        assert_eq!(schema.fields().len(), 15);
         assert_eq!(schema.field(0).name(), "user_id");
-        assert_eq!(schema.field(1).name(), "username");
     }
 }

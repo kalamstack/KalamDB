@@ -6,20 +6,20 @@ import { Auth, createClient } from '@kalamdb/client';
 import { createConsumerClient, runAgent } from '@kalamdb/consumer';
 
 const serverUrl = process.env.KALAMDB_URL ?? 'http://127.0.0.1:8080';
-const username = process.env.KALAMDB_USERNAME ?? 'admin';
+const user = process.env.KALAMDB_USER ?? 'admin';
 const password = process.env.KALAMDB_PASSWORD ?? 'kalamdb123';
 
 function createAuthedClient() {
   return createClient({
     url: serverUrl,
-    authProvider: async () => Auth.basic(username, password),
+    authProvider: async () => Auth.basic(user, password),
   });
 }
 
 function createWorkerClient() {
   return createConsumerClient({
     url: serverUrl,
-    authProvider: async () => Auth.basic(username, password),
+    authProvider: async () => Auth.basic(user, password),
   });
 }
 
@@ -50,7 +50,7 @@ async function getAccessToken() {
   const response = await fetch(`${serverUrl}/v1/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ user, password }),
   });
 
   if (!response.ok) {
@@ -136,7 +136,7 @@ function parseChatRow(message) {
 async function insertUserMessage(client, tableName, room, messageId, content) {
   const sql = [
     `INSERT INTO ${tableName} (id, room, role, sender_username, content)`,
-    `VALUES ('${messageId}', '${room}', 'user', '${username}', '${content.replace(/'/g, "''")}')`,
+    `VALUES ('${messageId}', '${room}', 'user', '${user}', '${content.replace(/'/g, "''")}')`,
   ].join(' ');
   await client.query(sql);
 }

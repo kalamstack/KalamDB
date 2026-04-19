@@ -127,56 +127,56 @@ fn test_user_operations() {
     println!("TEST 3: User Operations");
     println!("=======================");
 
-    // Generate unique username
-    let username = generate_unique_namespace("smoke_user");
+    // Generate unique user_id
+    let user_id = generate_unique_namespace("smoke_user");
     let password = "S3cur3P@ssw0rd!";
 
     // CREATE USER
-    println!("  Creating user: {}", username);
-    let create_sql = format!("CREATE USER {} WITH PASSWORD '{}' ROLE 'user'", username, password);
+    println!("  Creating user: {}", user_id);
+    let create_sql = format!("CREATE USER {} WITH PASSWORD '{}' ROLE 'user'", user_id, password);
     execute_sql_as_root_via_client(&create_sql).expect("CREATE USER should succeed");
     println!("    ✓ User created");
 
     // SELECT from system.users to verify
     println!("  Verifying user in system.users");
     let select_sql =
-        format!("SELECT username, role FROM system.users WHERE username = '{}'", username);
+        format!("SELECT user_id, role FROM system.users WHERE user_id = '{}'", user_id);
     let result = wait_for_query_contains_with(
         &select_sql,
-        &username,
+        &user_id,
         Duration::from_secs(5),
         execute_sql_as_root_via_client,
     )
     .expect("SELECT from system.users should succeed");
 
     assert!(
-        result.contains(&username) && (result.contains("user") || result.contains("(1 row)")),
+        result.contains(&user_id) && (result.contains("user") || result.contains("(1 row)")),
         "User {} should appear in system.users with role 'user', got: {}",
-        username,
+        user_id,
         result
     );
     println!("    ✓ User found in system.users with correct role");
 
     // DROP USER
-    println!("  Dropping user: {}", username);
-    let drop_sql = format!("DROP USER '{}'", username);
+    println!("  Dropping user: {}", user_id);
+    let drop_sql = format!("DROP USER '{}'", user_id);
     execute_sql_as_root_via_client(&drop_sql).expect("DROP USER should succeed");
     println!("    ✓ User dropped");
 
     // Verify user is removed or soft-deleted
     let verify_sql =
-        format!("SELECT username, deleted_at FROM system.users WHERE username = '{}'", username);
+        format!("SELECT user_id, deleted_at FROM system.users WHERE user_id = '{}'", user_id);
     let result =
         execute_sql_as_root_via_client(&verify_sql).expect("SELECT after DROP should succeed");
 
     // User should either be completely removed or have deleted_at timestamp
-    let is_removed = result.contains("(0 rows)") || !result.contains(&username);
+    let is_removed = result.contains("(0 rows)") || !result.contains(&user_id);
     let is_soft_deleted = result.to_lowercase().contains("deleted");
 
     assert!(
         is_removed || is_soft_deleted,
         "User {} should be removed or marked deleted, got: {}",
-        username,
+        user_id,
         result
     );
     println!("    ✓ User removed or soft-deleted");

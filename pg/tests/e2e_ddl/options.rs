@@ -301,6 +301,98 @@ async fn e2e_ddl_kalam_exec_passthrough_statements() {
 }
 
 #[tokio::test]
+#[ntest::timeout(20000)]
+async fn e2e_ddl_kalam_exec_json_text_operator() {
+    let env = require_ddl_env!();
+    let pg = env.pg_connect().await;
+
+    let ns = unique_name("exec_json_ns");
+    let table = unique_name("exec_json_tbl");
+
+    ensure_schema_exists(&pg, &ns).await;
+    pg.batch_execute(&format!(
+        "CREATE TABLE {ns}.{table} (
+            id BIGINT,
+            doc JSONB
+         ) USING kalamdb WITH (type = 'shared');"
+    ))
+    .await
+    .expect("create Kalam table with json column");
+
+    pg.batch_execute(&format!(
+        "INSERT INTO {ns}.{table} (id, doc) VALUES (
+            1,
+            '{{\"name\":\"alice\",\"profile\":{{\"city\":\"paris\"}}}}'::jsonb
+         );"
+    ))
+    .await
+    .expect("insert json row through postgres");
+
+    let result = pg_kalam_exec(
+        &pg,
+        &format!("SELECT doc->>'name' AS name FROM {ns}.{table} WHERE id = 1"),
+    )
+    .await;
+    let value: serde_json::Value = serde_json::from_str(&result).expect("parse kalam_exec json");
+    let rows = value.as_array().expect("kalam_exec rows array");
+    assert_eq!(rows.len(), 1, "unexpected kalam_exec response: {result}");
+    assert_eq!(rows[0]["name"].as_str(), Some("alice"), "unexpected kalam_exec response: {result}");
+
+    pg.batch_execute(&format!("DROP SCHEMA IF EXISTS {ns} CASCADE;"))
+        .await
+        .ok();
+}
+
+#[tokio::test]
+#[ntest::timeout(20000)]
+async fn e2e_ddl_local_postgres_jsonb_operator_query() {
+    let env = require_ddl_env!();
+    let pg = env.pg_connect().await;
+
+    let ns = unique_name("local_json_ns");
+    let table = unique_name("local_json_tbl");
+
+    ensure_schema_exists(&pg, &ns).await;
+    pg.batch_execute(&format!(
+        "CREATE TABLE {ns}.{table} (
+            id BIGINT,
+            doc JSONB
+         ) USING kalamdb WITH (type = 'shared');"
+    ))
+    .await
+    .expect("create Kalam table with local jsonb column");
+
+    pg.batch_execute(&format!(
+        "INSERT INTO {ns}.{table} (id, doc) VALUES (
+            1,
+            '{{\"name\":\"alice\",\"profile\":{{\"city\":\"paris\"}}}}'::jsonb
+         );"
+    ))
+    .await
+    .expect("insert json row through postgres");
+
+    let row = pg
+        .query_one(
+            &format!(
+                "SELECT doc->>'name' AS name, doc ? 'profile' AS has_profile FROM {ns}.{table} WHERE id = 1"
+            ),
+            &[],
+        )
+        .await
+        .expect("query local Postgres jsonb operators over foreign table");
+
+    let name: String = row.get(0);
+    let has_profile: bool = row.get(1);
+
+    assert_eq!(name, "alice");
+    assert!(has_profile, "expected profile key to exist");
+
+    pg.batch_execute(&format!("DROP SCHEMA IF EXISTS {ns} CASCADE;"))
+        .await
+        .ok();
+}
+
+#[tokio::test]
 #[ntest::timeout(15000)]
 async fn e2e_ddl_create_table_using_kalamdb_disconnect_cleans_session_row() {
     let env = require_ddl_env!();

@@ -106,7 +106,6 @@ cache_ttl_seconds = 600
 [security]
 max_request_body_size = 10485760
 max_ws_message_size = 1048576
-allowed_ws_origins = []
 strict_ws_origin_check = false
 
 [security.cors]

@@ -28,7 +28,8 @@ Older constructor-based examples, manual `connect()` walkthroughs, and raw WASM 
 
 - Use `@kalamdb/client` for `createClient({ url, authProvider, ... })`, SQL, auth flows, realtime subscriptions, live rows, and file helpers
 - Use `@kalamdb/consumer` for topic workers: `consumer()`, `consumeBatch()`, `ack()`, `runAgent()`, and `runConsumer()`
-- `authProvider` is required and can return `Auth.basic(...)`, `Auth.jwt(...)`, or `Auth.none()`
+- `authProvider` is required and can return `Auth.basic(...)` or `Auth.jwt(...)`
+- `Auth.basic(...)` is a login bootstrap only: the SDK exchanges those credentials on `POST /v1/api/auth/login` and uses JWT auth for subsequent protected traffic
 - WebSocket connection management is automatic; with `wsLazyConnect: true` the client connects on the first realtime call
 
 ### Dart / Flutter

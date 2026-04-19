@@ -10,10 +10,12 @@ import type {
   LoginResponse,
   QueryResponse,
   RowData,
-  Username,
+  UserId,
 } from '@kalamdb/client';
 import type {
   AckResponse,
+  ConsumePayload,
+  ConsumeMessage,
   ConsumeContext,
   ConsumerClientOptions,
   ConsumerHandle,
@@ -21,7 +23,13 @@ import type {
   ConsumeRequest,
   ConsumeResponse,
 } from './types.js';
-import { ConsumerWasmTransport } from './wasm_transport.js';
+import {
+  ConsumerWasmTransport,
+  type AckTransportRequest,
+  type ConsumeTransportRequest,
+  type ConsumeWireMessage,
+  type ConsumeWireResponse,
+} from './wasm_transport.js';
 
 type TopicStartPayload = 'Latest' | 'Earliest' | { Offset: number };
 
@@ -57,6 +65,24 @@ type TopicErrorLike = {
 
 function isTopicErrorLike(value: unknown): value is TopicErrorLike {
   return Boolean(value) && typeof value === 'object';
+}
+
+function normalizeConsumeMessage<TPayload extends ConsumePayload>(
+  message: ConsumeWireMessage<TPayload>,
+): ConsumeMessage<TPayload> {
+  return {
+    ...message,
+    value: message.payload,
+  };
+}
+
+function normalizeConsumeResponse<TPayload extends ConsumePayload>(
+  response: ConsumeWireResponse<TPayload>,
+): ConsumeResponse<TPayload> {
+  return {
+    ...response,
+    messages: response.messages.map(normalizeConsumeMessage),
+  };
 }
 
 function normalizeStart(start: ConsumeRequest['start']): TopicStartPayload {
@@ -122,7 +148,7 @@ export class KalamConsumerClient {
     return this.sqlClient;
   }
 
-  getAuthType(): 'basic' | 'jwt' | 'none' {
+  getAuthType(): 'basic' | 'jwt' | null {
     return this.sqlClient.getAuthType();
   }
 
@@ -140,10 +166,10 @@ export class KalamConsumerClient {
 
   async executeAsUser(
     sql: string,
-    username: Username | string,
+    user: UserId | string,
     params?: unknown[],
   ): Promise<QueryResponse> {
-    return this.sqlClient.executeAsUser(sql, username, params);
+    return this.sqlClient.executeAsUser(sql, user, params);
   }
 
   async login(): Promise<LoginResponse> {
@@ -177,15 +203,29 @@ export class KalamConsumerClient {
     void this.disconnect();
   }
 
-  consumer(options: ConsumeRequest): ConsumerHandle {
+  consumer<TPayload extends ConsumePayload = ConsumePayload>(
+    options: ConsumeRequest,
+  ): ConsumerHandle<TPayload> {
     let stopRequested = false;
+    let nextStart = options.start;
 
     return {
-      run: async (handler: ConsumerHandler): Promise<void> => {
+      run: async (handler: ConsumerHandler<TPayload>): Promise<void> => {
         stopRequested = false;
+        nextStart = options.start;
 
         while (!stopRequested) {
-          const response = await this.consumeBatch(options);
+          const response = await this.consumeBatch<TPayload>({
+            ...options,
+            ...(nextStart === undefined ? {} : { start: nextStart }),
+          });
+
+          // Keep the server cursor after empty polls so start='latest'
+          // continues from the observed high-water mark instead of skipping
+          // later inserts by recalculating "latest" on every loop.
+          if (response.messages.length === 0) {
+            nextStart = { offset: response.next_offset };
+          }
 
           for (const message of response.messages) {
             if (stopRequested) {
@@ -193,8 +233,8 @@ export class KalamConsumerClient {
             }
 
             let acked = false;
-            const ctx: ConsumeContext = {
-              username: message.username,
+            const ctx: ConsumeContext<TPayload> = {
+              user: message.user,
               message,
               ack: async () => {
                 if (acked) {
@@ -228,9 +268,10 @@ export class KalamConsumerClient {
     };
   }
 
-  async consumeBatch(options: ConsumeRequest): Promise<ConsumeResponse> {
-    return this.requestTopic(
-      {
+  async consumeBatch<TPayload extends ConsumePayload = ConsumePayload>(
+    options: ConsumeRequest,
+  ): Promise<ConsumeResponse<TPayload>> {
+    const request: ConsumeTransportRequest = {
         topic_id: options.topic,
         group_id: options.group_id,
         start: normalizeStart(options.start),
@@ -239,9 +280,14 @@ export class KalamConsumerClient {
         ...(typeof options.timeout_seconds === 'number'
           ? { timeout_seconds: options.timeout_seconds }
           : {}),
-      },
-      (authHeader, body) => this.topicTransport.consume(authHeader, body),
+      };
+
+    const response = await this.requestTopic<ConsumeWireResponse<TPayload>, ConsumeTransportRequest>(
+      request,
+      (authHeader, body) => this.topicTransport.consume<TPayload>(authHeader, body),
     );
+
+    return normalizeConsumeResponse(response);
   }
 
   async ack(
@@ -250,21 +296,23 @@ export class KalamConsumerClient {
     partitionId: number,
     uptoOffset: number,
   ): Promise<AckResponse> {
-    return this.requestTopic(
-      {
+    const request: AckTransportRequest = {
         topic_id: topic,
         group_id: groupId,
         partition_id: partitionId,
         upto_offset: uptoOffset,
-      },
+      };
+
+    return this.requestTopic<AckResponse, AckTransportRequest>(
+      request,
       (authHeader, body) => this.topicTransport.ack(authHeader, body),
     );
   }
 
-  private async requestTopic<T>(
-    body: unknown,
-    operation: (authHeader: string | undefined, body: unknown) => Promise<T>,
-  ): Promise<T> {
+  private async requestTopic<TResponse, TBody>(
+    body: TBody,
+    operation: (authHeader: string | undefined, body: TBody) => Promise<TResponse>,
+  ): Promise<TResponse> {
     try {
       return await this.performTopicRequest(operation, body, false);
     } catch (error) {
@@ -277,11 +325,11 @@ export class KalamConsumerClient {
     }
   }
 
-  private async performTopicRequest<T>(
-    operation: (authHeader: string | undefined, body: unknown) => Promise<T>,
-    body: unknown,
+  private async performTopicRequest<TResponse, TBody>(
+    operation: (authHeader: string | undefined, body: TBody) => Promise<TResponse>,
+    body: TBody,
     forceRefresh: boolean,
-  ): Promise<T> {
+  ): Promise<TResponse> {
     const auth = await this.resolveTopicAuth(forceRefresh);
     return operation(buildAuthHeader(auth), body);
   }
@@ -336,18 +384,16 @@ export class KalamConsumerClient {
       return auth;
     }
 
-    const response = await this.performDirectBasicLogin(auth.username, auth.password);
+    const response = await this.performDirectBasicLogin(auth.user, auth.password);
     return { type: 'jwt', token: response.access_token };
   }
 
   private authSourceKey(auth: AuthCredentials): string {
     switch (auth.type) {
       case 'basic':
-        return `basic:${auth.username}:${auth.password}`;
+        return `basic:${auth.user}:${auth.password}`;
       case 'jwt':
         return `jwt:${auth.token}`;
-      case 'none':
-        return 'none';
       default: {
         const exhaustive: never = auth;
         return String(exhaustive);
@@ -355,11 +401,11 @@ export class KalamConsumerClient {
     }
   }
 
-  private async performDirectBasicLogin(username: string, password: string): Promise<LoginResponse> {
+  private async performDirectBasicLogin(user: string, password: string): Promise<LoginResponse> {
     const response = await fetch(`${this.url}/v1/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ user, password }),
     });
 
     if (!response.ok) {

@@ -87,7 +87,7 @@ class KalamClient {
   /// * [url] — server URL, e.g. `"https://db.example.com"`.
   /// * [authProvider] — async callback invoked to obtain credentials before
   ///   each connection attempt. Return [Auth.jwt] for JWT-based auth,
-  ///   [Auth.basic] for username/password (the SDK automatically exchanges
+  ///   [Auth.basic] for user/password (the SDK automatically exchanges
   ///   these for a JWT before the WebSocket connection), or [Auth.none] for
   ///   anonymous access. Ideal for refresh-token flows.
   /// * [disableCompression] — set to `true` to disable gzip compression for
@@ -228,7 +228,7 @@ class KalamClient {
       _auth = freshAuth;
       if (freshAuth is BasicAuth) {
         // Exchange basic credentials for JWT.
-        await login(freshAuth.username, freshAuth.password);
+        await login(freshAuth.user, freshAuth.password);
       } else {
         await bridge.dartUpdateAuth(
             client: _handle, auth: _toBridgeAuth(freshAuth));
@@ -369,7 +369,7 @@ class KalamClient {
   // Authentication
   // ---------------------------------------------------------------------------
 
-  /// Optional helper to log in with username and password.
+  /// Optional helper to log in with user and password.
   ///
   /// Most apps do not need to call this manually — when the client was
   /// created with static [Auth.basic] credentials, the SDK automatically
@@ -377,10 +377,10 @@ class KalamClient {
   ///
   /// Returns tokens and user info. The client's in-memory auth state is
   /// updated to [Auth.jwt] automatically.
-  Future<LoginResponse> login(String username, String password) async {
+  Future<LoginResponse> login(String user, String password) async {
     final resp = await bridge.dartLogin(
       client: _handle,
-      username: username,
+      user: user,
       password: password,
     );
     final loginResponse = _fromBridgeLoginResponse(resp);
@@ -647,8 +647,8 @@ class KalamClient {
 
   static gen.DartAuthProvider _toBridgeAuth(Auth auth) {
     return switch (auth) {
-      BasicAuth(:final username, :final password) =>
-        gen.DartAuthProvider.basicAuth(username: username, password: password),
+      BasicAuth(:final user, :final password) =>
+        gen.DartAuthProvider.basicAuth(user: user, password: password),
       JwtAuth(:final token) => gen.DartAuthProvider.jwtToken(token: token),
       NoAuth() => const gen.DartAuthProvider.none(),
     };
@@ -689,15 +689,25 @@ class KalamClient {
       refreshToken: resp.refreshToken,
       expiresAt: resp.expiresAt,
       refreshExpiresAt: resp.refreshExpiresAt,
+      adminUiAccess: resp.adminUiAccess,
       user: LoginUserInfo(
         id: resp.user.id,
-        username: resp.user.username,
-        role: resp.user.role,
+        role: _fromBridgeRole(resp.user.role),
         email: resp.user.email,
         createdAt: resp.user.createdAt,
         updatedAt: resp.user.updatedAt,
       ),
     );
+  }
+
+  static Role _fromBridgeRole(gen.DartRole role) {
+    return switch (role) {
+      gen.DartRole.anonymous => Role.anonymous,
+      gen.DartRole.user => Role.user,
+      gen.DartRole.service => Role.service,
+      gen.DartRole.dba => Role.dba,
+      gen.DartRole.system => Role.system,
+    };
   }
 
   static ChangeEvent _fromBridgeChangeEvent(gen.DartChangeEvent event) {
@@ -894,7 +904,7 @@ class KalamClient {
     );
 
     final exchangeTask = () async {
-      await login(auth.username, auth.password);
+      await login(auth.user, auth.password);
       KalamLogger.info('auth', 'Auto-login successful, switched to JWT auth');
     }();
 

@@ -682,7 +682,7 @@ mod tests {
             job_type: JobType::Flush,
             status: JobStatus::Running,
             leader_status: None,
-            parameters: Some(r#"{"namespace_id":"default","table_name":"events"}"#.to_string()),
+            parameters: Some(serde_json::json!({"namespace_id":"default","table_name":"events"})),
             message: None,
             exception_trace: None,
             idempotency_key: None,

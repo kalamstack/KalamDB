@@ -42,23 +42,17 @@ impl TypedStatementHandler<AlterNamespaceStatement> for AlterNamespaceHandler {
             })?;
 
             // Update namespace options (merge with existing options)
-            let mut current_options: serde_json::Value = if let Some(ref opts) = namespace.options {
-                serde_json::from_str(opts).unwrap_or(serde_json::json!({}))
-            } else {
-                serde_json::json!({})
-            };
+            let mut current_options = namespace.options
+                .clone()
+                .and_then(|v| v.as_object().cloned())
+                .unwrap_or_default();
 
             // Merge new options
-            if let Some(obj) = current_options.as_object_mut() {
-                for (key, value) in &options {
-                    obj.insert(key.clone(), value.clone());
-                }
+            for (key, value) in &options {
+                current_options.insert(key.clone(), value.clone());
             }
 
-            // Serialize back to string
-            namespace.options = Some(serde_json::to_string(&current_options).map_err(|e| {
-                KalamDbError::InvalidOperation(format!("Failed to serialize options: {}", e))
-            })?);
+            namespace.options = Some(serde_json::Value::Object(current_options));
 
             // Save updated namespace
             namespaces_provider.update_namespace(namespace)?;

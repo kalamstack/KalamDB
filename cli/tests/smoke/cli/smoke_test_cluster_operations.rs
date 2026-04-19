@@ -278,7 +278,7 @@ fn smoke_test_cluster_user_operations() {
     }
 
     // Verify all users exist in system.users
-    let query = format!("SELECT username FROM system.users WHERE username LIKE '{}%'", user_prefix);
+    let query = format!("SELECT user_id FROM system.users WHERE user_id LIKE '{}%'", user_prefix);
     let result = execute_sql_as_root_via_client(&query).expect("Failed to query system.users");
 
     for user in &users {

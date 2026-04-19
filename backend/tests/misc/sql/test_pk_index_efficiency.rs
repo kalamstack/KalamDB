@@ -62,16 +62,16 @@ async fn test_user_table_pk_index_update() {
         create_response.error
     );
 
-    // Insert 100 rows
-    for i in 1..=100 {
+    // Insert 100 rows in one batch
+    {
+        let values: Vec<String> =
+            (1..=100).map(|i| format!("({}, 'item_{}', {})", i, i, i * 10)).collect();
         let insert_response = server
             .execute_sql_as_user(
                 &format!(
-                    "INSERT INTO {}.user_items (id, name, value) VALUES ({}, 'item_{}', {})",
+                    "INSERT INTO {}.user_items (id, name, value) VALUES {}",
                     ns,
-                    i,
-                    i,
-                    i * 10
+                    values.join(", ")
                 ),
                 "test_user",
             )
@@ -79,8 +79,7 @@ async fn test_user_table_pk_index_update() {
         assert_eq!(
             insert_response.status,
             ResponseStatus::Success,
-            "INSERT failed for row {}: {:?}",
-            i,
+            "Batch INSERT failed: {:?}",
             insert_response.error
         );
     }
@@ -124,16 +123,18 @@ async fn test_user_table_pk_index_update() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].get("value").unwrap().as_i64().unwrap(), 999);
 
-    // Insert 900 more rows (total 1000)
-    for i in 101..=1000 {
+    // Insert 900 more rows in batches (total 1000)
+    for batch_start in (101..=1000usize).step_by(100) {
+        let batch_end = (batch_start + 99).min(1000);
+        let values: Vec<String> = (batch_start..=batch_end)
+            .map(|i| format!("({}, 'item_{}', {})", i, i, i * 10))
+            .collect();
         let insert_response = server
             .execute_sql_as_user(
                 &format!(
-                    "INSERT INTO {}.user_items (id, name, value) VALUES ({}, 'item_{}', {})",
+                    "INSERT INTO {}.user_items (id, name, value) VALUES {}",
                     ns,
-                    i,
-                    i,
-                    i * 10
+                    values.join(", ")
                 ),
                 "test_user",
             )
@@ -141,8 +142,8 @@ async fn test_user_table_pk_index_update() {
         assert_eq!(
             insert_response.status,
             ResponseStatus::Success,
-            "INSERT failed for row {}: {:?}",
-            i,
+            "Batch INSERT failed (starting at {}): {:?}",
+            batch_start,
             insert_response.error
         );
     }
@@ -231,22 +232,21 @@ async fn test_shared_table_pk_index_update() {
         create_response.error
     );
 
-    // Insert 100 rows
-    for i in 1..=100 {
+    // Insert 100 rows in one batch
+    {
+        let values: Vec<String> =
+            (1..=100).map(|i| format!("({}, 'product_{}', {})", i, i, i * 100)).collect();
         let insert_response = server
             .execute_sql(&format!(
-                "INSERT INTO {}.products (id, name, price) VALUES ({}, 'product_{}', {})",
+                "INSERT INTO {}.products (id, name, price) VALUES {}",
                 ns,
-                i,
-                i,
-                i * 100
+                values.join(", ")
             ))
             .await;
         assert_eq!(
             insert_response.status,
             ResponseStatus::Success,
-            "INSERT failed for row {}: {:?}",
-            i,
+            "Batch INSERT failed: {:?}",
             insert_response.error
         );
     }
@@ -274,22 +274,24 @@ async fn test_shared_table_pk_index_update() {
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].get("price").unwrap().as_i64().unwrap(), 9999);
 
-    // Insert 900 more rows (total 1000)
-    for i in 101..=1000 {
+    // Insert 900 more rows in batches (total 1000)
+    for batch_start in (101..=1000usize).step_by(100) {
+        let batch_end = (batch_start + 99).min(1000);
+        let values: Vec<String> = (batch_start..=batch_end)
+            .map(|i| format!("({}, 'product_{}', {})", i, i, i * 100))
+            .collect();
         let insert_response = server
             .execute_sql(&format!(
-                "INSERT INTO {}.products (id, name, price) VALUES ({}, 'product_{}', {})",
+                "INSERT INTO {}.products (id, name, price) VALUES {}",
                 ns,
-                i,
-                i,
-                i * 100
+                values.join(", ")
             ))
             .await;
         assert_eq!(
             insert_response.status,
             ResponseStatus::Success,
-            "INSERT failed for row {}: {:?}",
-            i,
+            "Batch INSERT failed (starting at {}): {:?}",
+            batch_start,
             insert_response.error
         );
     }
@@ -491,14 +493,24 @@ async fn test_user_table_pk_index_delete() {
         create_response.error
     );
 
-    // Insert 300 rows
-    for i in 1..=300 {
-        server
+    // Insert 300 rows in batches
+    for batch_start in (1..=300usize).step_by(100) {
+        let batch_end = (batch_start + 99).min(300);
+        let values: Vec<String> =
+            (batch_start..=batch_end).map(|i| format!("({}, 'desc_{}')", i, i)).collect();
+        let insert_response = server
             .execute_sql_as_user(
-                &format!("INSERT INTO {}.items (id, description) VALUES ({}, 'desc_{}')", ns, i, i),
+                &format!("INSERT INTO {}.items (id, description) VALUES {}", ns, values.join(", ")),
                 "delete_user",
             )
             .await;
+        assert_eq!(
+            insert_response.status,
+            ResponseStatus::Success,
+            "Batch INSERT failed (starting at {}): {:?}",
+            batch_start,
+            insert_response.error
+        );
     }
 
     // Measure DELETE by PK latency with 300 rows
@@ -523,14 +535,24 @@ async fn test_user_table_pk_index_delete() {
     let rows = select_response.rows_as_maps();
     assert_eq!(rows.len(), 0, "Deleted row should not be returned");
 
-    // Insert 1200 more rows (total ~1500)
-    for i in 301..=1500 {
-        server
+    // Insert 1200 more rows in batches (total ~1500)
+    for batch_start in (301..=1500usize).step_by(100) {
+        let batch_end = (batch_start + 99).min(1500);
+        let values: Vec<String> =
+            (batch_start..=batch_end).map(|i| format!("({}, 'desc_{}')", i, i)).collect();
+        let insert_response = server
             .execute_sql_as_user(
-                &format!("INSERT INTO {}.items (id, description) VALUES ({}, 'desc_{}')", ns, i, i),
+                &format!("INSERT INTO {}.items (id, description) VALUES {}", ns, values.join(", ")),
                 "delete_user",
             )
             .await;
+        assert_eq!(
+            insert_response.status,
+            ResponseStatus::Success,
+            "Batch INSERT failed (starting at {}): {:?}",
+            batch_start,
+            insert_response.error
+        );
     }
 
     // Measure DELETE by PK latency with ~1500 rows

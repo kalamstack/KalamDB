@@ -48,10 +48,8 @@ impl ShowExportHandler {
 
     /// Extract export_id from job parameters JSON
     fn extract_export_id(job: &Job) -> Option<String> {
-        job.parameters.as_ref().and_then(|params_json| {
-            serde_json::from_str::<serde_json::Value>(params_json)
-                .ok()
-                .and_then(|v| v.get("export_id").and_then(|e| e.as_str().map(String::from)))
+        job.parameters.as_ref().and_then(|v| {
+            v.get("export_id").and_then(|e| e.as_str().map(String::from))
         })
     }
 }
@@ -83,7 +81,9 @@ impl TypedStatementHandler<ShowExportStatement> for ShowExportHandler {
             .filter(|job| {
                 job.parameters
                     .as_ref()
-                    .map(|p| p.contains(&format!("\"user_id\":\"{}\"", user_id)))
+                    .and_then(|p| p.get("user_id"))
+                    .and_then(|v| v.as_str())
+                    .map(|uid| uid == user_id)
                     .unwrap_or(false)
             })
             .collect();

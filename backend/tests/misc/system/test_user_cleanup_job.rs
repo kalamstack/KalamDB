@@ -26,7 +26,7 @@ async fn test_user_cleanup_job_scheduled_on_drop() -> Result<()> {
 
     // Verify user exists
     let users = ctx.system_tables().users().list_users()?;
-    let user_exists = users.iter().any(|u| u.username == username && u.deleted_at.is_none());
+    let user_exists = users.iter().any(|u| u.user_id.as_str() == username && u.deleted_at.is_none());
     assert!(user_exists, "User should exist before deletion");
 
     // Drop the user
@@ -42,7 +42,7 @@ async fn test_user_cleanup_job_scheduled_on_drop() -> Result<()> {
 
     // Verify user is soft-deleted
     let users_after = ctx.system_tables().users().list_users()?;
-    let deleted_user = users_after.iter().find(|u| u.username == username);
+    let deleted_user = users_after.iter().find(|u| u.user_id.as_str() == username);
     
     match deleted_user {
         Some(user) => {
@@ -84,7 +84,7 @@ async fn test_user_cleanup_job_removes_data() -> Result<()> {
 
     // Get user ID
     let users = ctx.system_tables().users().list_users()?;
-    let user = users.iter().find(|u| u.username == username).unwrap();
+    let user = users.iter().find(|u| u.user_id.as_str() == username).unwrap();
     let user_id = user.user_id.clone();
 
     // Create a namespace for the user

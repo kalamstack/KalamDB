@@ -62,9 +62,7 @@ pub async fn execute_scan(
     // 2. Filtered path: use DataFrame API for predicate pushdown
     if !filters.is_empty() {
         let schema = provider.schema();
-        let mut df = base_session
-            .read_table(provider)
-            .map_err(OperationError::DataFusion)?;
+        let mut df = base_session.read_table(provider).map_err(OperationError::DataFusion)?;
 
         for (column, value) in filters {
             // Look up the column type for type-correct literal casting

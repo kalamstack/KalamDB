@@ -2,7 +2,65 @@ use super::trusted_proxies::parse_trusted_proxy_entries;
 use super::types::ServerConfig;
 use crate::file_helpers::normalize_dir_path;
 use std::fs;
+use std::net::IpAddr;
 use std::path::Path;
+
+fn is_localhost_host(host: &str) -> bool {
+    let trimmed = host.trim().trim_matches('[').trim_matches(']');
+    trimmed.eq_ignore_ascii_case("localhost")
+        || trimmed.parse::<IpAddr>().map(|ip| ip.is_loopback()).unwrap_or(false)
+}
+
+fn extract_host_component(value: &str) -> &str {
+    let trimmed = value.trim();
+    let without_scheme = trimmed.split_once("://").map(|(_, rest)| rest).unwrap_or(trimmed);
+    let authority = without_scheme.split('/').next().unwrap_or(without_scheme);
+
+    if let Some(rest) = authority.strip_prefix('[') {
+        return rest.split(']').next().unwrap_or(rest);
+    }
+
+    if authority.matches(':').count() == 1 {
+        return authority.rsplit_once(':').map(|(host, _)| host).unwrap_or(authority);
+    }
+
+    authority
+}
+
+fn endpoint_is_localhost(value: &str) -> bool {
+    is_localhost_host(extract_host_component(value))
+}
+
+fn is_explicit_origin_allowlist(origins: &[String]) -> bool {
+    !origins.is_empty()
+        && origins.iter().all(|origin| {
+            let trimmed = origin.trim();
+            !trimmed.is_empty() && trimmed != "*"
+        })
+}
+
+fn has_explicit_browser_origin_policy(config: &ServerConfig) -> bool {
+    is_explicit_origin_allowlist(&config.security.cors.allowed_origins)
+}
+
+fn is_non_local_http_exposure(config: &ServerConfig) -> bool {
+    if !is_localhost_host(&config.server.host) {
+        return true;
+    }
+
+    config
+        .server
+        .configured_public_origin()
+        .is_some_and(|origin| !endpoint_is_localhost(&origin))
+}
+
+fn cluster_uses_non_local_networking(cluster: &super::cluster::ClusterConfig) -> bool {
+    !endpoint_is_localhost(&cluster.rpc_addr)
+        || !endpoint_is_localhost(&cluster.api_addr)
+        || cluster.peers.iter().any(|peer| {
+            !endpoint_is_localhost(&peer.rpc_addr) || !endpoint_is_localhost(&peer.api_addr)
+        })
+}
 
 impl ServerConfig {
     /// Load configuration from a TOML file
@@ -127,13 +185,65 @@ impl ServerConfig {
             anyhow::anyhow!("Invalid security.trusted_proxy_ranges configuration: {}", error)
         })?;
 
+        self.rpc_tls
+            .validate()
+            .map_err(|error| anyhow::anyhow!("Invalid rpc_tls configuration: {}", error))?;
+
+        if let Some(cluster) = &self.cluster {
+            cluster
+                .validate()
+                .map_err(|error| anyhow::anyhow!("Invalid cluster configuration: {}", error))?;
+
+            if !self.rpc_tls.enabled
+                && !cluster.peers.is_empty()
+                && cluster_uses_non_local_networking(cluster)
+            {
+                return Err(anyhow::anyhow!(
+                    "Non-localhost multi-node clusters require rpc_tls.enabled = true"
+                ));
+            }
+        }
+
+        if is_non_local_http_exposure(self) && !has_explicit_browser_origin_policy(self) {
+            return Err(anyhow::anyhow!(
+                "Non-localhost HTTP exposure requires an explicit security.cors.allowed_origins allowlist (empty and '*' are not allowed)"
+            ));
+        }
+
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::cluster::{ClusterConfig, PeerConfig};
     use super::*;
+
+    fn local_cluster_config() -> ClusterConfig {
+        ClusterConfig {
+            cluster_id: "test-cluster".to_string(),
+            node_id: 1,
+            rpc_addr: "127.0.0.1:9188".to_string(),
+            api_addr: "127.0.0.1:8080".to_string(),
+            peers: vec![PeerConfig {
+                node_id: 2,
+                rpc_addr: "127.0.0.2:9188".to_string(),
+                api_addr: "127.0.0.2:8080".to_string(),
+                rpc_server_name: None,
+            }],
+            user_shards: 8,
+            shared_shards: 1,
+            heartbeat_interval_ms: 250,
+            election_timeout_ms: (500, 1000),
+            snapshot_policy: "LogsSinceLast(1000)".to_string(),
+            max_snapshots_to_keep: 3,
+            replication_timeout_ms: 5000,
+            reconnect_interval_ms: 3000,
+            peer_wait_max_retries: None,
+            peer_wait_initial_delay_ms: None,
+            peer_wait_max_delay_ms: None,
+        }
+    }
 
     #[test]
     fn test_default_config_is_valid() {
@@ -196,5 +306,74 @@ mod tests {
         config.server.public_origin = Some("db.example.com".to_string());
 
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_non_localhost_bind_requires_explicit_browser_origins() {
+        let mut config = ServerConfig::default();
+        config.server.host = "0.0.0.0".to_string();
+
+        let err = config
+            .validate()
+            .expect_err("non-localhost bind should require origin allowlist");
+        assert!(err.to_string().contains("explicit"));
+    }
+
+    #[test]
+    fn test_non_localhost_bind_rejects_wildcard_browser_origins() {
+        let mut config = ServerConfig::default();
+        config.server.host = "0.0.0.0".to_string();
+        config.security.cors.allowed_origins = vec!["*".to_string()];
+
+        let err = config.validate().expect_err("wildcard origins should be rejected");
+        assert!(err.to_string().contains("allowlist"));
+    }
+
+    #[test]
+    fn test_non_localhost_bind_allows_explicit_browser_origins() {
+        let mut config = ServerConfig::default();
+        config.server.host = "0.0.0.0".to_string();
+        config.security.cors.allowed_origins = vec![
+            "http://localhost:8080".to_string(),
+            "http://127.0.0.1:8080".to_string(),
+        ];
+
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_external_cluster_requires_rpc_tls() {
+        let mut config = ServerConfig::default();
+        config.cluster = Some(ClusterConfig {
+            rpc_addr: "10.0.0.1:9188".to_string(),
+            api_addr: "http://10.0.0.1:8080".to_string(),
+            peers: vec![PeerConfig {
+                node_id: 2,
+                rpc_addr: "10.0.0.2:9188".to_string(),
+                api_addr: "http://10.0.0.2:8080".to_string(),
+                rpc_server_name: None,
+            }],
+            ..local_cluster_config()
+        });
+
+        let err = config.validate().expect_err("external cluster should require rpc_tls");
+        assert!(err.to_string().contains("rpc_tls.enabled = true"));
+    }
+
+    #[test]
+    fn test_local_cluster_allows_disabled_rpc_tls() {
+        let mut config = ServerConfig::default();
+        config.cluster = Some(local_cluster_config());
+
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_enabled_rpc_tls_requires_material() {
+        let mut config = ServerConfig::default();
+        config.rpc_tls.enabled = true;
+
+        let err = config.validate().expect_err("enabled rpc_tls without certs must be rejected");
+        assert!(err.to_string().contains("ca_cert"));
     }
 }

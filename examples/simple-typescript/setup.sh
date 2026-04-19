@@ -59,7 +59,7 @@ curl -fsS "$KALAMDB_URL/health" >/dev/null || fail "KalamDB is not reachable at 
 log "Logging in as root"
 ACCESS_TOKEN="$(curl -fsS -X POST "$KALAMDB_URL/v1/api/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"username\":\"root\",\"password\":\"$ROOT_PASSWORD\"}" | jq -r '.access_token // empty')"
+    -d "{\"user\":\"root\",\"password\":\"$ROOT_PASSWORD\"}" | jq -r '.access_token // empty')"
 [[ -n "$ACCESS_TOKEN" ]] || fail "Failed to obtain root access token"
 
 execute_root_sql() {
@@ -111,7 +111,7 @@ execute_root_sql_allow_exists "CREATE USER 'demo-user' WITH PASSWORD 'demo123' R
 
 DEMO_TOKEN="$(curl -fsS -X POST "$KALAMDB_URL/v1/api/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"username":"demo-user","password":"demo123"}' | jq -r '.access_token // empty')"
+    -d '{"user":"demo-user","password":"demo123"}' | jq -r '.access_token // empty')"
 [[ -n "$DEMO_TOKEN" ]] || fail "Failed to obtain demo-user token"
 
 execute_demo_sql() {
@@ -137,7 +137,7 @@ fi
 if [[ ! -f "$ENV_FILE" ]]; then
     cat > "$ENV_FILE" <<EOF
 VITE_KALAMDB_URL=$KALAMDB_URL
-VITE_KALAMDB_USERNAME=demo-user
+VITE_KALAMDB_USER=demo-user
 VITE_KALAMDB_PASSWORD=demo123
 EOF
 fi

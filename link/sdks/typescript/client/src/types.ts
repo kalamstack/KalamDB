@@ -61,6 +61,23 @@ export interface HealthCheckResponse {
 
 export type HttpVersion = 'http1' | 'http2' | 'auto';
 
+export type Role = 'anonymous' | 'user' | 'service' | 'dba' | 'system';
+
+/**
+ * Type-safe user ID wrapper.
+ *
+ * Prevents confusion between canonical user IDs and other string identifiers.
+ * Use `.toString()` or template literals to get the raw string value.
+ */
+export type UserId = string & { readonly __brand: unique symbol };
+
+/**
+ * Create a type-safe UserId from a raw string.
+ */
+export function UserId(value: string): UserId {
+  return value as UserId;
+}
+
 export type KalamDataType =
   | 'Boolean'
   | 'Int'
@@ -81,9 +98,8 @@ export type KalamDataType =
   | 'File';
 
 export interface LoginUserInfo {
-  id: string;
-  username: string;
-  role: string;
+  id: UserId;
+  role: Role;
   email?: string;
   created_at: string;
   updated_at: string;
@@ -91,6 +107,7 @@ export interface LoginUserInfo {
 
 export interface LoginResponse {
   user: LoginUserInfo;
+  admin_ui_access: boolean;
   expires_at: string;
   access_token: string;
   refresh_token?: string;
@@ -141,7 +158,7 @@ export interface UploadProgress {
 }
 
 export type ServerMessage =
-  | { type: 'auth_success'; user_id: string; role: string; protocol: ProtocolOptions }
+  | { type: 'auth_success'; user: UserId; role: Role; protocol: ProtocolOptions }
   | { type: 'auth_error'; message: string }
   | {
       type: 'subscription_ack';
@@ -423,21 +440,6 @@ export interface SubscriptionInfo {
   closed: boolean;
 }
 
-/**
- * Type-safe username wrapper.
- *
- * Prevents confusion between usernames and other string identifiers.
- * Use `.toString()` or template literals to get the raw string value.
- */
-export type Username = string & { readonly __brand: unique symbol };
-
-/**
- * Create a type-safe Username from a raw string.
- */
-export function Username(value: string): Username {
-  return value as Username;
-}
-
 /* ================================================================== */
 /*  Client Options                                                    */
 /* ================================================================== */
@@ -459,17 +461,17 @@ export interface ClientOptions {
   /**
    * Authentication provider callback.
    *
-   * Called before each (re-)connection to obtain credentials — supports
-   * JWT, basic, and anonymous auth. Ideal for refresh-token flows where
+    * Called before each (re-)connection to obtain credentials. Ideal for
+    * refresh-token flows where
    * the callback is responsible for refreshing expired tokens.
    *
    * Return `Auth.jwt(token)` for JWT-based auth, `Auth.basic(user, pass)`
-   * for username/password (the SDK automatically exchanges these for a JWT
-   * before opening the WebSocket), or `Auth.none()` for anonymous access.
+    * for user/password (the SDK automatically exchanges these for a JWT
+    * before opening the WebSocket).
    *
    * @example
    * ```typescript
-  * import { Auth, type AuthProvider } from '@kalamdb/client';
+    * import { Auth, type AuthProvider } from '@kalamdb/client';
    *
    * // JWT with auto-refresh
    * const authProvider: AuthProvider = async () => {

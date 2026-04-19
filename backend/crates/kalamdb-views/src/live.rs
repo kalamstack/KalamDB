@@ -119,7 +119,7 @@ impl VirtualView for LiveView {
             queries.append_value(&live_query.query);
 
             if let Some(options_json) = &live_query.options {
-                options.append_value(options_json);
+                options.append_value(serde_json::to_string(options_json).unwrap_or_default());
             } else {
                 options.append_null();
             }
@@ -177,7 +177,7 @@ mod tests {
             table_name: TableName::from("events"),
             user_id,
             query: "SELECT * FROM default.events".to_string(),
-            options: Some(r#"{"batch_size":100}"#.to_string()),
+            options: Some(serde_json::json!({"batch_size":100})),
             status: LiveQueryStatus::Active,
             created_at: 1,
             last_update: 2,

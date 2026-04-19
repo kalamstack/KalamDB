@@ -290,7 +290,7 @@ mod tests {
             namespace_id: namespace_id.clone(),
             name: name.to_string(),
             created_at: 1000,
-            options: Some("{}".to_string()),
+            options: Some(serde_json::json!({})),
             table_count: 0,
         }
     }

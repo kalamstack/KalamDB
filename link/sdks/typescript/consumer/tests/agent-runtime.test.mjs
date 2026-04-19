@@ -13,7 +13,8 @@ function makeMessage(overrides = {}) {
     partition_id: 0,
     topic: 'blog.summarizer',
     group_id: 'blog-summarizer-agent',
-    value: { row: { blog_id: '42', content: 'hello world' } },
+    payload: { blog_id: '42', content: 'hello world', _table: 'blog.posts' },
+    value: { blog_id: '42', content: 'hello world', _table: 'blog.posts' },
     ...overrides,
   };
 }
@@ -44,7 +45,7 @@ function createMockClient(messages, options = {}) {
             }
 
             await handler({
-              username: undefined,
+              user: undefined,
               message,
               ack: async () => {
                 if (options.ackShouldThrow) {
@@ -166,7 +167,8 @@ test('runAgent does not ack when onFailed throws', async () => {
 test('runAgent exposes llm context with system prompt metadata', async () => {
   const message = makeMessage({
     offset: 13,
-    value: { row: { blog_id: '13', content: 'A long blog body' } },
+    payload: { blog_id: '13', content: 'A long blog body', _table: 'blog.posts' },
+    value: { blog_id: '13', content: 'A long blog body', _table: 'blog.posts' },
   });
   const { client, state } = createMockClient([message]);
 
@@ -195,6 +197,34 @@ test('runAgent exposes llm context with system prompt metadata', async () => {
   assert.equal(llmInputs[0].systemPrompt, 'system prompt');
   assert.equal(llmInputs[0].prompt, 'summarize');
   assert.deepEqual(state.ackedOffsets, [13]);
+});
+
+test('runAgent still unwraps legacy payload.row envelopes', async () => {
+  const message = makeMessage({
+    payload: { row: { blog_id: '52', content: 'wrapped payload' } },
+    value: { row: { blog_id: '52', content: 'wrapped payload' } },
+  });
+  const { client, state } = createMockClient([message]);
+
+  let seenRow = null;
+
+  await runAgent({
+    client,
+    name: 'summarizer-agent',
+    topic: message.topic,
+    groupId: message.group_id,
+    retry: {
+      maxAttempts: 1,
+      initialBackoffMs: 0,
+      maxBackoffMs: 0,
+    },
+    onRow: async (_ctx, row) => {
+      seenRow = row;
+    },
+  });
+
+  assert.deepEqual(seenRow, { blog_id: '52', content: 'wrapped payload' });
+  assert.deepEqual(state.ackedOffsets, [7]);
 });
 
 test('runConsumer delegates to runAgent and processes messages', async () => {

@@ -685,10 +685,11 @@ mod tests {
     #[test]
     fn test_parse_message_msgpack_server_message() {
         use crate::models::{ProtocolOptions, SerializationType, ServerMessage};
+        use kalamdb_commons::{Role, UserId};
 
         let msg = ServerMessage::AuthSuccess {
-            user_id: "user-1".to_string(),
-            role: "admin".to_string(),
+            user: UserId::from("user-1"),
+            role: Role::Dba,
             protocol: ProtocolOptions {
                 serialization: SerializationType::MessagePack,
                 compression: crate::models::CompressionType::Gzip,

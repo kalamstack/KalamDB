@@ -167,7 +167,7 @@ export class KalamClient {
     /**
      * Login with current Basic Auth credentials and switch to JWT authentication
      *
-     * Sends a POST request to `/v1/api/auth/login` with the stored username/password
+     * Sends a POST request to `/v1/api/auth/login` with the stored user/password
      * and updates the client to use JWT authentication on success.
      *
      * # Returns
@@ -610,12 +610,12 @@ export interface InitOutput {
     readonly wasmtimestampformatter_new: () => number;
     readonly wasmtimestampformatter_withFormat: (a: number, b: number, c: number) => void;
     readonly timestampNow: () => number;
-    readonly __wasm_bindgen_func_elem_674: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_688: (a: number, b: number, c: number, d: number) => void;
-    readonly __wasm_bindgen_func_elem_3486: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_3486_2: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_3486_3: (a: number, b: number, c: number) => void;
-    readonly __wasm_bindgen_func_elem_3485: (a: number, b: number) => void;
+    readonly __wasm_bindgen_func_elem_716: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_738: (a: number, b: number, c: number, d: number) => void;
+    readonly __wasm_bindgen_func_elem_3555: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_3555_2: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_3555_3: (a: number, b: number, c: number) => void;
+    readonly __wasm_bindgen_func_elem_3554: (a: number, b: number) => void;
     readonly __wbindgen_export: (a: number, b: number) => number;
     readonly __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_export3: (a: number) => void;

@@ -1,8 +1,9 @@
 //! PostgreSQL Datum → KalamDB ScalarValue conversion for INSERT/UPDATE.
 
 use datafusion_common::ScalarValue;
-use pgrx::pg_sys;
-use std::ffi::CStr;
+use pgrx::datum::JsonString;
+use pgrx::{pg_sys, text_to_rust_str_unchecked, FromDatum};
+use std::ffi::{c_void, CStr};
 
 /// Convert a PostgreSQL datum to a DataFusion ScalarValue based on the column's type OID.
 ///
@@ -40,17 +41,10 @@ pub unsafe fn datum_to_scalar(
         },
         pg_sys::TEXTOID | pg_sys::VARCHAROID => {
             let text_ptr = datum.cast_mut_ptr::<pg_sys::varlena>();
-            let cstr = pg_sys::text_to_cstring(text_ptr);
-            let s = CStr::from_ptr(cstr).to_string_lossy().into_owned();
-            pg_sys::pfree(cstr as *mut std::ffi::c_void);
-            ScalarValue::Utf8(Some(s))
+            ScalarValue::Utf8(Some(text_varlena_to_owned_string(text_ptr)))
         },
         pg_sys::JSONBOID | pg_sys::JSONOID => {
-            let text_ptr = datum.cast_mut_ptr::<pg_sys::varlena>();
-            let cstr = pg_sys::text_to_cstring(text_ptr);
-            let s = CStr::from_ptr(cstr).to_string_lossy().into_owned();
-            pg_sys::pfree(cstr as *mut std::ffi::c_void);
-            ScalarValue::Utf8(Some(s))
+            ScalarValue::Utf8(Some(json_datum_to_text(datum, type_oid)))
         },
         _ => {
             // Fallback: attempt text conversion via Postgres output function
@@ -68,4 +62,56 @@ unsafe fn datum_to_text_via_output(datum: pg_sys::Datum, type_oid: pg_sys::Oid) 
     let s = CStr::from_ptr(output_cstr).to_string_lossy().into_owned();
     pg_sys::pfree(output_cstr as *mut std::ffi::c_void);
     s
+}
+
+unsafe fn text_varlena_to_owned_string(varlena: *mut pg_sys::varlena) -> String {
+    let detoasted = pg_sys::pg_detoast_datum_packed(varlena);
+    let text = text_to_rust_str_unchecked(detoasted).to_owned();
+
+    #[cfg(feature = "e2e")]
+    crate::conversion_test_stats::record_text_from_pg_fast_path(text.len());
+
+    if detoasted != varlena {
+        pg_sys::pfree(detoasted as *mut c_void);
+    }
+
+    text
+}
+
+unsafe fn json_datum_to_text(datum: pg_sys::Datum, type_oid: pg_sys::Oid) -> String {
+    match type_oid {
+        pg_sys::JSONOID => {
+            let text = JsonString::from_polymorphic_datum(datum, false, type_oid)
+                .expect("json datum must be valid")
+                .0;
+            #[cfg(feature = "e2e")]
+            crate::conversion_test_stats::record_json_from_pg_fast_path(text.len());
+            text
+        },
+        pg_sys::JSONBOID => jsonb_datum_to_text(datum),
+        _ => datum_to_text_via_output(datum, type_oid),
+    }
+}
+
+unsafe fn jsonb_datum_to_text(datum: pg_sys::Datum) -> String {
+    let original = datum.cast_mut_ptr::<pg_sys::varlena>();
+    let detoasted = pg_sys::pg_detoast_datum_packed(original);
+    let output_cstr = pg_sys::OidOutputFunctionCall(
+        pg_sys::Oid::from(pg_sys::F_JSONB_OUT),
+        pg_sys::Datum::from(detoasted as usize),
+    );
+    let text = CStr::from_ptr(output_cstr)
+        .to_str()
+        .expect("jsonb_out should return utf-8")
+        .to_owned();
+    pg_sys::pfree(output_cstr as *mut c_void);
+
+    #[cfg(feature = "e2e")]
+    crate::conversion_test_stats::record_jsonb_from_pg_fast_path(text.len());
+
+    if detoasted != original {
+        pg_sys::pfree(detoasted as *mut c_void);
+    }
+
+    text
 }

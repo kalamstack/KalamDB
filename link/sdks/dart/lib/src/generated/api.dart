@@ -83,13 +83,13 @@ Future<DartQueryResponse> dartExecuteQuery(
     RustLib.instance.api.crateApiDartExecuteQuery(
         client: client, sql: sql, paramsJson: paramsJson, namespace: namespace);
 
-/// Log in with username and password. Returns tokens and user info.
+/// Log in with user and password. Returns tokens and user info.
 Future<DartLoginResponse> dartLogin(
         {required DartKalamClient client,
-        required String username,
+        required String user,
         required String password}) =>
-    RustLib.instance.api.crateApiDartLogin(
-        client: client, username: username, password: password);
+    RustLib.instance.api
+        .crateApiDartLogin(client: client, user: user, password: password);
 
 /// Refresh an access token using a refresh token.
 Future<DartLoginResponse> dartRefreshToken(

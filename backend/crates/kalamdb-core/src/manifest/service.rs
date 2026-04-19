@@ -7,6 +7,7 @@
 //!
 //! Key type: (TableId, Option<UserId>) for type-safe cache access.
 
+use bytes::Bytes;
 use kalamdb_commons::ids::SeqId;
 use kalamdb_commons::{ManifestId, TableId, UserId};
 use kalamdb_configs::ManifestCacheSettings;
@@ -635,13 +636,20 @@ impl ManifestService {
                     StorageError::Other(format!("Storage '{}' not found in registry", storage_id))
                 })?;
 
-            // Serialize to Value for write_manifest_sync
-            let json_value = serde_json::to_value(&entry.manifest).map_err(|e| {
+            // Serialize manifest directly to bytes (compact JSON).
+            // Avoids the double-serialization of to_value() + to_vec().
+            let manifest_bytes = serde_json::to_vec(&entry.manifest).map_err(|e| {
                 StorageError::SerializationError(format!("Failed to serialize manifest: {}", e))
             })?;
 
             storage_cached
-                .write_manifest_sync(table.table_type, table_id, user_id, &json_value)
+                .put_sync(
+                    table.table_type,
+                    table_id,
+                    user_id,
+                    "manifest.json",
+                    bytes::Bytes::from(manifest_bytes),
+                )
                 .map_err(|e| StorageError::IoError(e.to_string()))?;
 
             debug!("Flushed manifest for {} (ver: {})", table_id, entry.manifest.version);
@@ -745,13 +753,19 @@ impl ManifestService {
 
         self.upsert_cache_entry(table_id, user_id, &manifest, None, SyncState::InSync)?;
 
-        // Write manifest to storage using direct helper (Task 102)
-        let json_value = serde_json::to_value(&manifest).map_err(|e| {
+        // Write manifest to storage — serialize directly to bytes (no intermediate Value)
+        let manifest_bytes = serde_json::to_vec(&manifest).map_err(|e| {
             StorageError::SerializationError(format!("Failed to serialize manifest: {}", e))
         })?;
 
         storage_cached
-            .write_manifest_sync(table.table_type, table_id, user_id, &json_value)
+            .put_sync(
+                table.table_type,
+                table_id,
+                user_id,
+                "manifest.json",
+                Bytes::from(manifest_bytes),
+            )
             .map_err(|e| StorageError::IoError(e.to_string()))?;
 
         Ok(manifest)

@@ -986,7 +986,7 @@ async fn create_default_system_user(
     use kalamdb_system::User;
 
     // Check if root user already exists
-    let existing_user = users_provider.get_user_by_username(AuthConstants::DEFAULT_SYSTEM_USERNAME);
+    let existing_user = users_provider.get_user_by_id(&UserId::root());
 
     match existing_user {
         Ok(Some(_)) => {
@@ -1032,7 +1032,6 @@ async fn create_default_system_user(
 
             let user = User {
                 user_id,
-                username: username.clone().into(),
                 password_hash,
                 role,
                 email: Some(email),

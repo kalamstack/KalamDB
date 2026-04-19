@@ -189,7 +189,7 @@ pub struct CLISession {
     /// Enable spinners/animations
     animations: bool,
 
-    /// Authenticated username
+    /// Authenticated user identifier
     username: String,
 
     /// Session start time
@@ -431,7 +431,7 @@ impl CLISession {
                 let new_creds = Credentials::with_refresh_token(
                     instance.clone(),
                     login_response.access_token.clone(),
-                    login_response.user.username.clone(),
+                    login_response.user.id.to_string(),
                     login_response.expires_at.clone(),
                     creds.server_url.clone().or_else(|| Some(url.clone())),
                     login_response.refresh_token.clone().or_else(|| creds.refresh_token.clone()),
@@ -1029,7 +1029,7 @@ impl CLISession {
                 "  • Check if server is running: curl {}/v1/api/healthcheck",
                 self.server_url
             );
-            eprintln!("  • Verify credentials with: kalam --username <user> --password <pass>");
+            eprintln!("  • Verify credentials with: kalam --user <user> --password <pass>");
             eprintln!("  • Use \\show-credentials to see stored credentials");
             eprintln!();
             // Exit to avoid a second noisy error line from main's Result
@@ -1292,7 +1292,7 @@ impl CLISession {
         );
         println!();
         println!("  {}  {}", "📡".dimmed(), format!("Connected to: {}", self.server_url).cyan());
-        println!("  {}  {}", "👤".dimmed(), format!("User: {}", self.username).cyan());
+        println!("  {}  {}", "👤".dimmed(), format!("User ID: {}", self.username).cyan());
 
         if let Some(ref version) = self.server_version {
             println!("  {}  {}", "🏷️ ".dimmed(), format!("Server version: {}", version).dimmed());
@@ -2620,8 +2620,8 @@ impl CLISession {
                     Ok(Some(creds)) => {
                         println!("{}", "Stored Credentials".bold().cyan());
                         println!("  Instance: {}", creds.instance.green());
-                        if let Some(ref username) = creds.username {
-                            println!("  Username: {}", username.green());
+                        if let Some(ref user) = creds.user {
+                            println!("  User: {}", user.as_str().green());
                         }
                         println!("  JWT Token: {}", "[redacted]".dimmed());
                         if let Some(ref expires) = creds.expires_at {
@@ -2649,7 +2649,7 @@ impl CLISession {
                     },
                     Ok(None) => {
                         println!("{}", "No credentials stored for this instance".yellow());
-                        println!("Use --username and --password to login and store credentials");
+                        println!("Use --user and --password to login and store credentials");
                     },
                     Err(e) => {
                         eprintln!("{} {}", "Error loading credentials:".red(), e);
@@ -2671,7 +2671,7 @@ impl CLISession {
     ///
     /// **Implements T122**: Update credentials command
     /// Performs login to get JWT token and stores it
-    async fn update_credentials(&mut self, username: String, password: String) -> Result<()> {
+    async fn update_credentials(&mut self, user: String, password: String) -> Result<()> {
         use colored::Colorize;
         use kalam_client::credentials::{CredentialStore, Credentials};
 
@@ -2680,14 +2680,14 @@ impl CLISession {
                 // Perform login to get JWT token
                 println!("{}", "Logging in...".dimmed());
 
-                let login_result = self.client.login(&username, &password).await;
+                let login_result = self.client.login(&user, &password).await;
 
                 match login_result {
                     Ok(login_response) => {
                         let creds = Credentials::with_refresh_token(
                             instance.clone(),
                             login_response.access_token,
-                            login_response.user.username.clone(),
+                            login_response.user.id.to_string(),
                             login_response.expires_at.clone(),
                             Some(self.server_url.clone()),
                             login_response.refresh_token.clone(),
@@ -2698,7 +2698,7 @@ impl CLISession {
 
                         println!("{}", "✓ Credentials updated successfully".green().bold());
                         println!("  Instance: {}", instance.cyan());
-                        println!("  Username: {}", login_response.user.username.cyan());
+                        println!("  User: {}", login_response.user.id.to_string().cyan());
                         println!("  Expires: {}", login_response.expires_at.cyan());
                         if let Some(ref refresh_expires) = login_response.refresh_expires_at {
                             println!("  Refresh expires: {}", refresh_expires.cyan());
@@ -3201,13 +3201,13 @@ mod tests {
                             "HTTP/1.1 200 OK",
                             json!({
                                 "user": {
-                                    "id": "user-1",
-                                    "username": "admin",
+                                    "id": "admin",
                                     "role": "dba",
                                     "email": null,
                                     "created_at": "2026-03-17T00:00:00Z",
                                     "updated_at": "2026-03-17T00:00:00Z"
                                 },
+                                "admin_ui_access": true,
                                 "expires_at": "2099-01-01T00:00:00Z",
                                 "access_token": "fresh-token",
                                 "refresh_token": "fresh-refresh-token",
@@ -3322,6 +3322,39 @@ mod tests {
             CLISession::extract_subscribe_options("SELECT * FROM table OPTIONS (last_rows=50);");
         assert_eq!(sql, "SELECT * FROM table");
         assert!(options.is_some());
+    }
+
+    #[tokio::test]
+    #[timeout(5000)]
+    async fn test_build_auth_refresher_refreshes_and_persists_tokens() {
+        let server = TestServer::spawn().await;
+        let (mut store, _temp_dir) = create_temp_store();
+        let creds = Credentials::with_refresh_token(
+            "local".to_string(),
+            "expired-token".to_string(),
+            "admin".to_string(),
+            "2000-01-01T00:00:00Z".to_string(),
+            Some(server.base_url.clone()),
+            Some("refresh-token".to_string()),
+            Some("2099-01-01T00:00:00Z".to_string()),
+        );
+        store.set_credentials(&creds).expect("store initial credentials");
+
+        let refresher = CLISession::build_auth_refresher(
+            &server.base_url,
+            Some("local"),
+            Some(Arc::new(Mutex::new(store))),
+        )
+        .expect("build auth refresher");
+
+        let refreshed_auth = refresher().await.expect("refresh should succeed");
+        assert!(matches!(
+            refreshed_auth,
+            AuthProvider::JwtToken(token) if token == "fresh-token"
+        ));
+
+        let state = server.state.lock().await;
+        assert_eq!(state.refresh_authorization_headers, vec!["Bearer refresh-token".to_string()]);
     }
 
     #[tokio::test]

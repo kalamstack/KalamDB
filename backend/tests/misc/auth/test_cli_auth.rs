@@ -28,7 +28,7 @@ async fn test_init_creates_system_user() {
         .expect("System user should exist");
 
     // Verify user properties
-    assert_eq!(user.username.as_str(), AuthConstants::DEFAULT_SYSTEM_USERNAME);
+    assert_eq!(user.user_id.as_str(), AuthConstants::DEFAULT_ROOT_USER_ID);
     assert_eq!(
         user.auth_type,
         AuthType::Internal,
@@ -43,7 +43,7 @@ async fn test_init_creates_system_user() {
     assert!(user.deleted_at.is_none(), "System user should not be deleted");
 
     println!("✓ System user created successfully on bootstrap");
-    println!("  Username: {}", user.username);
+    println!("  User ID: {}", user.user_id);
     println!("  Auth type: {:?}", user.auth_type);
     println!("  Role: {:?}", user.role);
 }

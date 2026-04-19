@@ -53,9 +53,12 @@ pub fn json_value_to_scalar_for_column(
         KalamDataType::Json | KalamDataType::File => match value {
             Value::String(s) => ScalarValue::Utf8(Some(s.clone())),
             Value::Object(_) | Value::Array(_) => {
-                let bytes = serde_json::to_vec(value)
+                // Store JSON objects/arrays as Utf8 JSON strings so DataFusion
+                // JSON functions (datafusion-functions-json) can operate on them
+                // directly without a binary↔string conversion layer.
+                let json_str = serde_json::to_string(value)
                     .map_err(|e| format!("json field encode failed: {e}"))?;
-                ScalarValue::Binary(Some(bytes))
+                ScalarValue::Utf8(Some(json_str))
             },
             _ => ScalarValue::Utf8(Some(value.to_string())),
         },
@@ -115,12 +118,12 @@ pub fn scalar_to_json_for_column(
             Value::String(extract_string(scalar).unwrap_or_default())
         },
         KalamDataType::Json | KalamDataType::File => match scalar {
-            ScalarValue::Binary(Some(bytes)) | ScalarValue::LargeBinary(Some(bytes)) => {
-                serde_json::from_slice(bytes)
-                    .map_err(|e| format!("json field decode failed: {e}"))?
-            },
             ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)) => {
-                Value::String(s.clone())
+                // Try to parse as structured JSON (objects, arrays, etc.) so
+                // that system models with Vec / struct fields deserialize
+                // correctly.  Plain strings that happen to look like JSON text
+                // (e.g. a string value `"hello"`) fall back to Value::String.
+                serde_json::from_str(s).unwrap_or_else(|_| Value::String(s.clone()))
             },
             ScalarValue::Utf8(None) | ScalarValue::LargeUtf8(None) => Value::Null,
             _ => Value::String(extract_string(scalar).unwrap_or_default()),
@@ -282,12 +285,12 @@ mod tests {
     }
 
     #[test]
-    fn test_json_object_stored_as_binary_and_roundtrips() {
+    fn test_json_object_stored_as_utf8_and_roundtrips() {
         let value = json!({"route": ["a", "b"], "enabled": true});
         let scalar =
             json_value_to_scalar_for_column(&value, &KalamDataType::Json).expect("json to scalar");
 
-        assert!(matches!(scalar, ScalarValue::Binary(Some(_))));
+        assert!(matches!(scalar, ScalarValue::Utf8(Some(_))));
 
         let json_back =
             scalar_to_json_for_column(&scalar, &KalamDataType::Json).expect("scalar to json");

@@ -39,19 +39,15 @@ pub(super) fn validate_origin(
     app_context: &kalamdb_core::app_context::AppContext,
 ) -> Result<(), HttpResponse> {
     let config = app_context.config();
-    let allowed_ws_origins = if config.security.allowed_ws_origins.is_empty() {
-        &config.security.cors.allowed_origins
-    } else {
-        &config.security.allowed_ws_origins
-    };
+    let allowed_origins = &config.security.cors.allowed_origins;
 
-    if allowed_ws_origins.is_empty() || allowed_ws_origins.contains(&"*".to_string()) {
+    if allowed_origins.is_empty() || allowed_origins.contains(&"*".to_string()) {
         return Ok(());
     }
 
     if let Some(origin) = req.headers().get("Origin") {
         if let Ok(origin_str) = origin.to_str() {
-            if allowed_ws_origins.iter().any(|allowed| allowed == origin_str) {
+            if allowed_origins.iter().any(|allowed| allowed == origin_str) {
                 return Ok(());
             }
             log::warn!("WebSocket connection rejected: invalid origin '{}'", origin_str);
@@ -126,8 +122,31 @@ pub(super) fn is_expected_ws_disconnect(error: &ProtocolError) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_protocol_from_query;
+    use super::{parse_protocol_from_query, validate_origin};
+    use actix_web::{http::StatusCode, test::TestRequest};
     use kalamdb_commons::websocket::{CompressionType, SerializationType};
+    use kalamdb_commons::NodeId;
+    use kalamdb_configs::ServerConfig;
+    use kalamdb_core::app_context::AppContext;
+    use kalamdb_store::test_utils::InMemoryBackend;
+    use std::sync::Arc;
+    use uuid::Uuid;
+
+    fn test_app_context_with_origin_policy(
+        cors_allowed_origins: Vec<String>,
+        strict_ws_origin_check: bool,
+    ) -> Arc<AppContext> {
+        let mut config = ServerConfig::default();
+        config.security.cors.allowed_origins = cors_allowed_origins;
+        config.security.strict_ws_origin_check = strict_ws_origin_check;
+
+        AppContext::init_test(
+            Arc::new(InMemoryBackend::new()),
+            NodeId::new(91),
+            format!("/tmp/kalamdb-ws-origin-{}", Uuid::new_v4()),
+            config,
+        )
+    }
 
     #[test]
     fn parse_protocol_defaults_when_empty() {
@@ -176,5 +195,45 @@ mod tests {
         let proto = parse_protocol_from_query("serialization=avro&compression=lz4");
         assert_eq!(proto.serialization, SerializationType::Json);
         assert_eq!(proto.compression, CompressionType::Gzip);
+    }
+
+    #[actix_rt::test]
+    async fn validate_origin_rejects_unlisted_origin() {
+        let app_context = test_app_context_with_origin_policy(
+            vec!["https://admin.example.com".to_string()],
+            false,
+        );
+        let request = TestRequest::default()
+            .insert_header(("Origin", "https://evil.example.com"))
+            .to_http_request();
+
+        let response = validate_origin(&request, app_context.as_ref())
+            .expect_err("unexpectedly allowed an unlisted origin");
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[actix_rt::test]
+    async fn validate_origin_rejects_missing_origin_when_strict() {
+        let app_context = test_app_context_with_origin_policy(
+            vec!["https://admin.example.com".to_string()],
+            true,
+        );
+        let request = TestRequest::default().to_http_request();
+
+        let response = validate_origin(&request, app_context.as_ref())
+            .expect_err("strict origin checking should require Origin header");
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[actix_rt::test]
+    async fn validate_origin_allows_configured_cors_origin() {
+        let app_context =
+            test_app_context_with_origin_policy(vec!["https://app.example.com".to_string()], true);
+        let request = TestRequest::default()
+            .insert_header(("Origin", "https://app.example.com"))
+            .to_http_request();
+
+        validate_origin(&request, app_context.as_ref())
+            .expect("configured CORS origin should also be allowed for WebSocket upgrades");
     }
 }

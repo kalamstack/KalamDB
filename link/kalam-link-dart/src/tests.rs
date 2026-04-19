@@ -15,7 +15,7 @@ mod tests {
     #[test]
     fn auth_basic_converts_to_native() {
         let auth = DartAuthProvider::BasicAuth {
-            username: "alice".into(),
+            user: "alice".into(),
             password: "secret".into(),
         };
         // into_native() should not panic
@@ -202,10 +202,10 @@ mod tests {
             refresh_token: Some("ref456".into()),
             expires_at: "2026-02-25T12:00:00Z".into(),
             refresh_expires_at: Some("2026-03-25T12:00:00Z".into()),
+            admin_ui_access: true,
             user: LoginUserInfo {
                 id: "user-1".into(),
-                username: "alice".into(),
-                role: "dba".into(),
+                role: kalam_client::Role::Dba,
                 email: Some("alice@example.com".into()),
                 created_at: "2026-01-01T00:00:00Z".into(),
                 updated_at: "2026-02-01T00:00:00Z".into(),
@@ -214,8 +214,9 @@ mod tests {
         let dart: DartLoginResponse = l.into();
         assert_eq!(dart.access_token, "tok123");
         assert_eq!(dart.refresh_token.unwrap(), "ref456");
-        assert_eq!(dart.user.username, "alice");
-        assert_eq!(dart.user.role, "dba");
+        assert!(dart.admin_ui_access);
+        assert_eq!(dart.user.id, "user-1");
+        assert!(matches!(dart.user.role, DartRole::Dba));
         assert_eq!(dart.user.email.unwrap(), "alice@example.com");
     }
 

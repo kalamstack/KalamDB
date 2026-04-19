@@ -1,4 +1,4 @@
-use kalamdb_commons::{Role, UserId, UserName};
+use kalamdb_commons::{Role, UserId};
 use serde::{Deserialize, Serialize};
 
 /// Default JWT expiration time in hours.
@@ -28,8 +28,6 @@ pub struct JwtClaims {
     pub iss: String,
     pub exp: usize,
     pub iat: usize,
-    #[serde(alias = "preferred_username")]
-    pub username: Option<UserName>,
     pub email: Option<String>,
     pub role: Option<Role>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -39,26 +37,16 @@ pub struct JwtClaims {
 impl JwtClaims {
     pub fn new(
         user_id: &UserId,
-        username: &UserName,
         role: &Role,
         email: Option<&str>,
         expiry_hours: Option<i64>,
         issuer: &str,
     ) -> Self {
-        Self::with_token_type(
-            user_id,
-            username,
-            role,
-            email,
-            expiry_hours,
-            TokenType::Access,
-            issuer,
-        )
+        Self::with_token_type(user_id, role, email, expiry_hours, TokenType::Access, issuer)
     }
 
     pub fn with_token_type(
         user_id: &UserId,
-        username: &UserName,
         role: &Role,
         email: Option<&str>,
         expiry_hours: Option<i64>,
@@ -74,7 +62,6 @@ impl JwtClaims {
             iss: issuer.to_string(),
             exp: exp.timestamp() as usize,
             iat: now.timestamp() as usize,
-            username: Some(username.clone()),
             email: email.map(|value| value.to_string()),
             role: Some(*role),
             token_type: Some(token_type),

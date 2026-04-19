@@ -14,7 +14,7 @@ ARG RUST_BASE_IMAGE=public.ecr.aws/docker/library/rust:1.92-bookworm
 ARG POSTGRES_BASE_IMAGE=public.ecr.aws/docker/library/postgres:16-bookworm
 ARG PG_MAJOR=16
 ARG PG_EXTENSION_FLAVOR=pg16
-ARG PGRX_VERSION=0.17.0
+ARG PGRX_VERSION=0.18.0
 ARG OCI_IMAGE_DESCRIPTION="PostgreSQL with the pg_kalam extension preinstalled so you can connect PostgreSQL Kalam-backed tables to a remote KalamDB server."
 
 # ---------------------------------------------------------------------------

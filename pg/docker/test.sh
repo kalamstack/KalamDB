@@ -68,7 +68,7 @@ for i in $(seq 1 15); do
         --max-time 5 \
         -X POST "$KALAMDB_API_URL/v1/api/auth/login" \
         -H "Content-Type: application/json" \
-        -d "{\"username\":\"admin\",\"password\":\"$KALAMDB_PASSWORD\"}" \
+        -d "{\"user\":\"admin\",\"password\":\"$KALAMDB_PASSWORD\"}" \
         || true)
     if [ "$HTTP_CODE" != "000" ]; then
         echo "KalamDB server is reachable."
@@ -87,7 +87,7 @@ echo "Bootstrapping KalamDB namespace 'rmtest' ..."
 
 LOGIN_RESP=$(curl -sf "$KALAMDB_API_URL/v1/api/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"username\":\"admin\",\"password\":\"$KALAMDB_PASSWORD\"}" \
+    -d "{\"user\":\"admin\",\"password\":\"$KALAMDB_PASSWORD\"}" \
     2>/dev/null || true)
 
 BEARER_TOKEN=$(printf '%s' "$LOGIN_RESP" | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
@@ -95,11 +95,11 @@ if [ -z "$BEARER_TOKEN" ]; then
     echo "WARNING: Could not login to KalamDB. Trying setup first..."
     curl -sf "$KALAMDB_API_URL/v1/api/auth/setup" \
         -H "Content-Type: application/json" \
-        -d "{\"username\":\"admin\",\"password\":\"$KALAMDB_PASSWORD\",\"root_password\":\"$KALAMDB_PASSWORD\"}" \
+        -d "{\"user\":\"admin\",\"password\":\"$KALAMDB_PASSWORD\",\"root_password\":\"$KALAMDB_PASSWORD\"}" \
         > /dev/null 2>&1 || true
     LOGIN_RESP=$(curl -sf "$KALAMDB_API_URL/v1/api/auth/login" \
         -H "Content-Type: application/json" \
-        -d "{\"username\":\"admin\",\"password\":\"$KALAMDB_PASSWORD\"}" \
+        -d "{\"user\":\"admin\",\"password\":\"$KALAMDB_PASSWORD\"}" \
         2>/dev/null || true)
     BEARER_TOKEN=$(printf '%s' "$LOGIN_RESP" | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
 fi

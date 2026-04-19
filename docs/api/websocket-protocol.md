@@ -18,10 +18,7 @@ This document is aligned with the current server implementation in `kalamdb-api`
 
 ### 1.2 Origin validation
 
-Origin allow-list is resolved as:
-
-1. `security.allowed_ws_origins` (if non-empty), else
-2. `security.cors.allowed_origins`
+Origin allow-list is read from `security.cors.allowed_origins`.
 
 Behavior:
 

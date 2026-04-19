@@ -5,7 +5,7 @@
 use actix_ws::Session;
 use kalamdb_commons::websocket::{BatchControl, SubscriptionRequest, MAX_ROWS_PER_BATCH};
 use kalamdb_commons::WebSocketMessage;
-use kalamdb_core::providers::arrow_json_conversion::row_to_json_map;
+use kalamdb_core::providers::arrow_json_conversion::row_into_json_map;
 use kalamdb_live::{InitialDataOptions, LiveQueryManager, SharedConnectionState};
 use log::{debug, error, warn};
 use std::sync::Arc;
@@ -121,7 +121,7 @@ pub async fn handle_subscribe(
                 // Convert Row objects to HashMap (always using simple JSON format)
                 let mut rows_json = Vec::with_capacity(initial.rows.len());
                 for row in initial.rows {
-                    match row_to_json_map(&row) {
+                    match row_into_json_map(row) {
                         Ok(json) => rows_json.push(json),
                         Err(e) => {
                             error!("Failed to convert row to JSON: {}", e);

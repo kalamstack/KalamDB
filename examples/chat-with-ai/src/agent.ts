@@ -7,7 +7,7 @@ loadEnv({ path: '.env.local', quiet: true });
 loadEnv({ quiet: true });
 
 const KALAMDB_URL = process.env.KALAMDB_URL ?? 'http://127.0.0.1:8080';
-const KALAMDB_USERNAME = process.env.KALAMDB_USERNAME ?? 'admin';
+const KALAMDB_USER = process.env.KALAMDB_USER ?? 'admin';
 const KALAMDB_PASSWORD = process.env.KALAMDB_PASSWORD ?? 'kalamdb123';
 const THINKING_DELAY_MS = 250;
 const STREAM_DELAY_MS = 120;
@@ -35,12 +35,12 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function assertValidUsername(username: string): string {
-  if (!/^[A-Za-z0-9._-]+$/.test(username)) {
-    throw new Error(`Unsupported username for EXECUTE AS USER: ${username}`);
+function assertValidUser(user: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(user)) {
+    throw new Error(`Unsupported user for EXECUTE AS USER: ${user}`);
   }
 
-  return username;
+  return user;
 }
 
 function sqlLiteral(value: string): string {
@@ -61,7 +61,7 @@ async function emitEvent(
     `VALUES (${sqlLiteral(responseId)}, ${sqlLiteral(room)}, ${sqlLiteral(senderUsername)}, ${sqlLiteral(stage)}, ${sqlLiteral(preview)}, ${sqlLiteral(message)})`,
   ].join(' ');
 
-  await client.executeAsUser(statement, assertValidUsername(senderUsername));
+  await client.executeAsUser(statement, assertValidUser(senderUsername));
 }
 
 async function insertAssistantMessage(
@@ -75,7 +75,7 @@ async function insertAssistantMessage(
     `VALUES (${sqlLiteral(room)}, 'assistant', 'KalamDB Copilot', ${sqlLiteral(senderUsername)}, ${sqlLiteral(reply)})`,
   ].join(' ');
 
-  await client.executeAsUser(statement, assertValidUsername(senderUsername));
+  await client.executeAsUser(statement, assertValidUser(senderUsername));
 }
 
 export function buildReply(content: string): string {
@@ -97,10 +97,10 @@ export function buildReply(content: string): string {
 export async function startChatAgent(options: StartAgentOptions = {}): Promise<void> {
   const client = createConsumerClient({
     url: KALAMDB_URL,
-    authProvider: async () => Auth.basic(KALAMDB_USERNAME, KALAMDB_PASSWORD),
+    authProvider: async () => Auth.basic(KALAMDB_USER, KALAMDB_PASSWORD),
   });
 
-  console.log(`chat-demo-agent ready (user=${KALAMDB_USERNAME}, mode=topic-consumer via runAgent)`);
+  console.log(`chat-demo-agent ready (user=${KALAMDB_USER}, mode=topic-consumer via runAgent)`);
   console.log(`  topic=${TOPIC_NAME}  group=${CONSUMER_GROUP}`);
 
   await runAgent<ChatRow>({

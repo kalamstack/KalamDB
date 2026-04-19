@@ -290,12 +290,10 @@ fn prepare_statement_default(
             ScalarValue::TimestampMillisecond(Some(Utc::now().timestamp_millis()), None),
         )),
         FastInsertDefaultTemplate::CurrentUser => {
-            let username = exec_ctx.username().ok_or_else(|| {
-                KalamDbError::InvalidOperation(
-                    "CURRENT_USER() default requires an authenticated username".to_string(),
-                )
-            })?;
-            Ok(PreparedDefaultValue::Constant(ScalarValue::Utf8(Some(username.to_string()))))
+            let user_id = exec_ctx.user_id();
+            Ok(PreparedDefaultValue::Constant(ScalarValue::Utf8(Some(
+                user_id.as_str().to_string(),
+            ))))
         },
         FastInsertDefaultTemplate::SnowflakeId => {
             Ok(PreparedDefaultValue::Volatile(VolatileDefaultFunction::SnowflakeId))

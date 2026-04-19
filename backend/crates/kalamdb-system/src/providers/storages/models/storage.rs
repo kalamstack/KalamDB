@@ -5,6 +5,7 @@ use kalamdb_commons::datatypes::KalamDataType;
 use kalamdb_commons::models::ids::StorageId;
 use kalamdb_macros::table;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// Storage configuration in system_storages table
 #[table(
@@ -73,7 +74,7 @@ pub struct Storage {
         default = "None",
         comment = "Storage credentials JSON (WARNING: stored as plaintext - use environment variables for sensitive credentials)"
     )]
-    pub credentials: Option<String>,
+    pub credentials: Option<Value>,
     /// Storage backend parameters encoded as JSON.
     ///
     /// This is the canonical place for backend-specific configuration (S3/GCS/Azure/local).
@@ -90,7 +91,7 @@ pub struct Storage {
         default = "None",
         comment = "Backend-specific storage configuration JSON"
     )]
-    pub config_json: Option<String>,
+    pub config_json: Option<Value>,
     #[column(
         id = 8,
         ordinal = 8,
@@ -138,10 +139,10 @@ impl Storage {
     pub fn location_config(&self) -> Result<StorageLocationConfig, StorageLocationConfigError> {
         let raw = self
             .config_json
-            .as_deref()
+            .as_ref()
             .ok_or(StorageLocationConfigError::MissingConfigJson)?;
 
-        serde_json::from_str::<StorageLocationConfig>(raw)
+        serde_json::from_value::<StorageLocationConfig>(raw.clone())
             .map_err(|e| StorageLocationConfigError::InvalidJson(e.to_string()))
     }
 }

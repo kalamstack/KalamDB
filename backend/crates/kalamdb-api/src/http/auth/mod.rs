@@ -12,6 +12,7 @@
 
 pub mod models;
 
+mod audit;
 mod login;
 mod logout;
 mod me;
@@ -33,14 +34,14 @@ use models::AuthErrorResponse;
 ///
 /// Uses generic error messages to prevent user enumeration attacks.
 /// Sensitive errors (user not found, wrong password) return the same
-/// "Invalid username or password" message.
+/// "Invalid credentials" message.
 pub(crate) fn map_auth_error_to_response(err: AuthError) -> HttpResponse {
     match err {
         AuthError::InvalidCredentials(_)
         | AuthError::UserNotFound(_)
         | AuthError::UserDeleted
         | AuthError::AuthenticationFailed(_) => HttpResponse::Unauthorized()
-            .json(AuthErrorResponse::new("unauthorized", "Invalid username or password")),
+            .json(AuthErrorResponse::new("unauthorized", "Invalid credentials")),
         AuthError::SetupRequired(message) => {
             // HTTP 428 Precondition Required - server requires initial setup
             HttpResponse::build(actix_web::http::StatusCode::PRECONDITION_REQUIRED)
@@ -54,13 +55,14 @@ pub(crate) fn map_auth_error_to_response(err: AuthError) -> HttpResponse {
         },
         AuthError::MalformedAuthorization(message)
         | AuthError::MissingAuthorization(message)
-        | AuthError::MissingClaim(message)
         | AuthError::WeakPassword(message) => {
             HttpResponse::Unauthorized().json(AuthErrorResponse::new("unauthorized", message))
         },
+        AuthError::MissingClaim(_) => HttpResponse::Unauthorized()
+            .json(AuthErrorResponse::new("unauthorized", "Token is missing required claims")),
         AuthError::TokenExpired | AuthError::InvalidSignature | AuthError::UntrustedIssuer(_) => {
             HttpResponse::Unauthorized()
-                .json(AuthErrorResponse::new("unauthorized", "Invalid username or password"))
+                .json(AuthErrorResponse::new("unauthorized", "Invalid credentials"))
         },
         AuthError::DatabaseError(_) | AuthError::HashingError(_) => {
             HttpResponse::InternalServerError()
@@ -135,4 +137,54 @@ pub(crate) fn extract_refresh_or_bearer_token(req: &HttpRequest) -> Result<Strin
     }
 
     Err(AuthError::MissingAuthorization("No refresh token found".to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::map_auth_error_to_response;
+    use actix_web::{body::to_bytes, http::StatusCode, HttpResponse};
+    use kalamdb_auth::AuthError;
+    use serde_json::Value;
+
+    async fn response_json(response: HttpResponse) -> Value {
+        let body = to_bytes(response.into_body())
+            .await
+            .expect("auth response body should be readable");
+        serde_json::from_slice(&body).expect("auth response body should be valid JSON")
+    }
+
+    #[actix_rt::test]
+    async fn sensitive_auth_failures_are_redacted() {
+        let sensitive_errors = vec![
+            AuthError::InvalidCredentials("wrong password".to_string()),
+            AuthError::UserNotFound("missing-user".to_string()),
+            AuthError::UserDeleted,
+            AuthError::AuthenticationFailed("provider rejected token".to_string()),
+            AuthError::TokenExpired,
+            AuthError::InvalidSignature,
+            AuthError::UntrustedIssuer("evil-issuer".to_string()),
+        ];
+
+        for error in sensitive_errors {
+            let response = map_auth_error_to_response(error);
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+            let body = response_json(response).await;
+            assert_eq!(body["error"], "unauthorized");
+            assert_eq!(body["message"], "Invalid credentials");
+        }
+    }
+
+    #[actix_rt::test]
+    async fn internal_auth_failures_do_not_leak_backend_details() {
+        let response = map_auth_error_to_response(AuthError::DatabaseError(
+            "database connection reset by peer".to_string(),
+        ));
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let body = response_json(response).await;
+        assert_eq!(body["error"], "internal_error");
+        assert_eq!(body["message"], "Authentication failed");
+    }
 }

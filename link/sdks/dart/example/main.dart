@@ -38,7 +38,7 @@ Future<void> main() async {
   // 3. Login to get a JWT Bearer token
   // -------------------------------------------------------------------------
   final login = await anonClient.login(adminUser, adminPass);
-  print('Logged in as ${login.user.username} (${login.user.role})');
+  print('Logged in as ${login.user.id} (${login.user.role.name})');
 
   // -------------------------------------------------------------------------
   // 4. Connect authenticated client with JWT

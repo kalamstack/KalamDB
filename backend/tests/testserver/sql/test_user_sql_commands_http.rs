@@ -1,7 +1,6 @@
 //! SQL-based user management commands over the real HTTP SQL API.
 
 use kalam_client::models::ResponseStatus;
-use kalamdb_commons::UserName;
 
 // TODO: Cannot migrate to get_global_server() pattern yet.
 // This test requires a config override: `enforce_password_complexity = true`.
@@ -16,7 +15,7 @@ async fn test_user_sql_commands_over_http() {
         },
         |server| {
             Box::pin(async move {
-                let admin_auth = server.bearer_auth_header(&UserName::new("root"))?;
+                let admin_auth = server.bearer_auth_header("root")?;
 
                 // CREATE USER with password
                 let sql = "CREATE USER 'alice' WITH PASSWORD 'SecurePass123!' ROLE developer EMAIL 'alice@example.com'";
@@ -28,13 +27,13 @@ async fn test_user_sql_commands_over_http() {
                     result.error
                 );
 
-                let query = "SELECT * FROM system.users WHERE username = 'alice'";
+                let query = "SELECT * FROM system.users WHERE user_id = 'alice'";
                 let result = server.execute_sql_with_auth(query, &admin_auth).await?;
                 assert!(!result.results.is_empty());
                 let rows = result.rows_as_maps();
                 assert_eq!(rows.len(), 1);
                 let row = &rows[0];
-                assert_eq!(row.get("username").unwrap().as_str().unwrap(), "alice");
+                assert_eq!(row.get("user_id").unwrap().as_str().unwrap(), "alice");
                 assert_eq!(row.get("auth_type").unwrap().as_str().unwrap(), "password");
                 // developer -> service (current mapping)
                 assert_eq!(row.get("role").unwrap().as_str().unwrap(), "service");
@@ -48,11 +47,11 @@ async fn test_user_sql_commands_over_http() {
                 let result = server.execute_sql_with_auth(sql, &admin_auth).await?;
                 assert_eq!(result.status, ResponseStatus::Success);
 
-                let query = "SELECT * FROM system.users WHERE username = 'bob'";
+                let query = "SELECT * FROM system.users WHERE user_id = 'bob'";
                 let result = server.execute_sql_with_auth(query, &admin_auth).await?;
                 let rows = result.rows_as_maps();
                 let row = &rows[0];
-                assert_eq!(row.get("username").unwrap().as_str().unwrap(), "bob");
+                assert_eq!(row.get("user_id").unwrap().as_str().unwrap(), "bob");
                 assert_eq!(row.get("auth_type").unwrap().as_str().unwrap(), "oauth");
                 assert_eq!(row.get("role").unwrap().as_str().unwrap(), "user");
 
@@ -63,7 +62,7 @@ async fn test_user_sql_commands_over_http() {
                     .execute_sql_with_auth(create_regular, &admin_auth)
                     .await?;
 
-                let regular_auth = server.bearer_auth_header(&UserName::new("regular_user"))?;
+                let regular_auth = server.bearer_auth_header("regular_user")?;
                 let sql = "CREATE USER 'charlie' WITH PASSWORD 'TestPass123!B' ROLE user";
                 let result = server.execute_sql_with_auth(sql, &regular_auth).await?;
                 assert_eq!(
@@ -76,7 +75,7 @@ async fn test_user_sql_commands_over_http() {
                 let create_sql = "CREATE USER 'dave' WITH PASSWORD 'OldPass123!C' ROLE user";
                 server.execute_sql_with_auth(create_sql, &admin_auth).await?;
 
-                let query = "SELECT password_hash FROM system.users WHERE username = 'dave'";
+                let query = "SELECT password_hash FROM system.users WHERE user_id = 'dave'";
                 let result = server.execute_sql_with_auth(query, &admin_auth).await?;
                 let rows = result.rows_as_maps();
                 let old_hash = rows[0]
@@ -108,7 +107,7 @@ async fn test_user_sql_commands_over_http() {
                 let result = server.execute_sql_with_auth(alter_sql, &admin_auth).await?;
                 assert_eq!(result.status, ResponseStatus::Success);
 
-                let query = "SELECT role FROM system.users WHERE username = 'eve'";
+                let query = "SELECT role FROM system.users WHERE user_id = 'eve'";
                 let result = server.execute_sql_with_auth(query, &admin_auth).await?;
                 let rows = result.rows_as_maps();
                 let role = rows[0].get("role").unwrap().as_str().unwrap();
@@ -122,7 +121,7 @@ async fn test_user_sql_commands_over_http() {
                 let result = server.execute_sql_with_auth(drop_sql, &admin_auth).await?;
                 assert_eq!(result.status, ResponseStatus::Success);
 
-                let query_deleted = "SELECT deleted_at FROM system.users WHERE username = 'frank' AND deleted_at IS NOT NULL";
+                let query_deleted = "SELECT deleted_at FROM system.users WHERE user_id = 'frank' AND deleted_at IS NOT NULL";
                 let result = server.execute_sql_with_auth(query_deleted, &admin_auth).await?;
                 let rows = result.rows_as_maps();
                 assert_eq!(rows.len(), 1);

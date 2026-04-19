@@ -169,7 +169,7 @@ impl MetaApplier for ProviderMetaApplier {
     // =========================================================================
 
     async fn create_user(&self, user: &User) -> Result<String, RaftError> {
-        log::info!("ProviderMetaApplier: Creating user {:?} ({})", user.user_id, user.username);
+        log::info!("ProviderMetaApplier: Creating user {:?}", user.user_id);
 
         self.executor
             .user()

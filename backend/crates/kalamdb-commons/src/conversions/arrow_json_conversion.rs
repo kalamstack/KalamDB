@@ -1059,6 +1059,9 @@ pub fn scalar_value_to_json(value: &ScalarValue) -> Result<KalamCellValue, Commo
             JsonValue::Array(bytes.iter().map(|&b| JsonValue::Number(b.into())).collect())
         },
         ScalarValue::Binary(None) | ScalarValue::LargeBinary(None) => JsonValue::Null,
+        ScalarValue::List(list) => list_scalar_value_to_json(list.as_ref())?,
+        ScalarValue::LargeList(list) => large_list_scalar_value_to_json(list.as_ref())?,
+        ScalarValue::FixedSizeList(list) => fixed_size_list_scalar_value_to_json(list.as_ref())?,
         // Time types - output as raw microseconds/nanoseconds value (integer)
         ScalarValue::Time64Microsecond(Some(t)) => JsonValue::Number((*t).into()),
         ScalarValue::Time64Microsecond(None) => JsonValue::Null,
@@ -1076,6 +1079,44 @@ pub fn scalar_value_to_json(value: &ScalarValue) -> Result<KalamCellValue, Commo
         },
     };
     Ok(KalamCellValue(json))
+}
+
+fn list_scalar_value_to_json(list: &ListArray) -> Result<JsonValue, CommonError> {
+    nested_array_to_json(list, |array| array.value(0))
+}
+
+fn large_list_scalar_value_to_json(list: &LargeListArray) -> Result<JsonValue, CommonError> {
+    nested_array_to_json(list, |array| array.value(0))
+}
+
+fn fixed_size_list_scalar_value_to_json(
+    list: &FixedSizeListArray,
+) -> Result<JsonValue, CommonError> {
+    nested_array_to_json(list, |array| array.value(0))
+}
+
+fn nested_array_to_json<A, F>(array: &A, extract_values: F) -> Result<JsonValue, CommonError>
+where
+    A: Array,
+    F: FnOnce(&A) -> ArrayRef,
+{
+    if array.is_empty() || array.is_null(0) {
+        return Ok(JsonValue::Null);
+    }
+
+    let values = extract_values(array);
+    let mut json_values = Vec::with_capacity(values.len());
+    for index in 0..values.len() {
+        let scalar = ScalarValue::try_from_array(values.as_ref(), index).map_err(|error| {
+            CommonError::invalid_input(format!(
+                "Failed to extract list element scalar: {}",
+                error
+            ))
+        })?;
+        json_values.push(scalar_value_to_json(&scalar)?.0);
+    }
+
+    Ok(JsonValue::Array(json_values))
 }
 
 /// Convert Arrow RecordBatch to JSON rows
@@ -1190,6 +1231,23 @@ pub fn row_to_json_map(
     Ok(json_row)
 }
 
+/// Zero-clone variant of [`row_to_json_map`] that takes ownership of the Row,
+/// reusing the existing String allocations for column names instead of cloning.
+///
+/// Prefer this over `row_to_json_map(&row)` when the Row is no longer needed.
+pub fn row_into_json_map(
+    row: Row,
+) -> Result<std::collections::HashMap<String, KalamCellValue>, CommonError> {
+    let mut json_row = std::collections::HashMap::with_capacity(row.values.len());
+
+    for (col_name, scalar_value) in row.values {
+        let json_value = scalar_value_to_json(&scalar_value)?;
+        json_row.insert(col_name, json_value);
+    }
+
+    Ok(json_row)
+}
+
 /// Coerce a single row of updates to match the schema types.
 ///
 /// Unlike `coerce_rows`, this does NOT fill in default values for missing columns.
@@ -1261,6 +1319,19 @@ mod serialization_tests {
         let null = ScalarValue::Null;
         let json = scalar_value_to_json(&null).unwrap();
         assert_eq!(json, serde_json::json!(null).into());
+    }
+
+    #[test]
+    fn test_list_values_serialize_to_json_arrays() {
+        let mut builder = ListBuilder::new(StringBuilder::new());
+        builder.values().append_value("a");
+        builder.values().append_value("b");
+        builder.append(true);
+
+        let value = ScalarValue::List(Arc::new(builder.finish()));
+        let json = scalar_value_to_json(&value).unwrap();
+
+        assert_eq!(json, serde_json::json!(["a", "b"]).into());
     }
 
     #[test]

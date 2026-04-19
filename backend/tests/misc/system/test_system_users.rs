@@ -15,7 +15,6 @@
 use super::test_support::{auth_helper, TestServer};
 use actix_web::{test, web, App};
 use kalamdb_auth::{CoreUsersRepo, UserRepository};
-use kalamdb_commons::models::UserName;
 use kalamdb_commons::{AuthType, Role, StorageId, UserId};
 use kalamdb_system::providers::storages::models::StorageMode;
 use kalamdb_system::User;
@@ -33,7 +32,6 @@ async fn create_system_user(
 
     let user = User {
         user_id: UserId::new(format!("sys_{}", username)),
-        username: UserName::new(username),
         password_hash,
         role: Role::System,
         email: Some(format!("{}@system.local", username)),

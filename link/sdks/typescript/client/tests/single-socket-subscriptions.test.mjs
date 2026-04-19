@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createClient } from '../dist/src/index.js';
+import { Auth, createClient } from '../dist/src/index.js';
 
 function createFakeWasmClient({ subscribeError, disconnectError } = {}) {
   let connected = false;
@@ -90,7 +90,7 @@ function createFakeWasmClient({ subscribeError, disconnectError } = {}) {
 test('multiple subscriptions on one client share one websocket connection', async () => {
   const client = createClient({
     url: 'http://127.0.0.1:8080',
-    authProvider: async () => ({ type: 'none' }),
+    authProvider: async () => Auth.jwt('fixture-token'),
   });
 
   const fakeWasmClient = createFakeWasmClient();
@@ -116,7 +116,7 @@ test('multiple subscriptions on one client share one websocket connection', asyn
 test('failed subscriptions do not leak local subscription state', async () => {
   const client = createClient({
     url: 'http://127.0.0.1:8080',
-    authProvider: async () => ({ type: 'none' }),
+    authProvider: async () => Auth.jwt('fixture-token'),
   });
 
   const fakeWasmClient = createFakeWasmClient({
@@ -139,7 +139,7 @@ test('failed subscriptions do not leak local subscription state', async () => {
 test('getSubscriptions trusts wasm empty snapshots over stale local metadata', async () => {
   const client = createClient({
     url: 'http://127.0.0.1:8080',
-    authProvider: async () => ({ type: 'none' }),
+    authProvider: async () => Auth.jwt('fixture-token'),
   });
 
   const fakeWasmClient = createFakeWasmClient();
@@ -157,7 +157,7 @@ test('getSubscriptions trusts wasm empty snapshots over stale local metadata', a
 test('disconnect clears local subscription metadata even when wasm disconnect fails', async () => {
   const client = createClient({
     url: 'http://127.0.0.1:8080',
-    authProvider: async () => ({ type: 'none' }),
+    authProvider: async () => Auth.jwt('fixture-token'),
   });
 
   const fakeWasmClient = createFakeWasmClient({
@@ -178,7 +178,7 @@ test('disconnect clears local subscription metadata even when wasm disconnect fa
 test('subscribeWithSql normalizes websocket rows into RowData cells', async () => {
   const client = createClient({
     url: 'http://127.0.0.1:8080',
-    authProvider: async () => ({ type: 'none' }),
+    authProvider: async () => Auth.jwt('fixture-token'),
   });
 
   const fakeWasmClient = createFakeWasmClient();
@@ -207,7 +207,7 @@ test('subscribeWithSql normalizes websocket rows into RowData cells', async () =
 test('live delegates materialized rows to the Rust/WASM layer', async () => {
   const client = createClient({
     url: 'http://127.0.0.1:8080',
-    authProvider: async () => ({ type: 'none' }),
+    authProvider: async () => Auth.jwt('fixture-token'),
   });
 
   const fakeWasmClient = createFakeWasmClient();
@@ -281,7 +281,7 @@ test('live delegates materialized rows to the Rust/WASM layer', async () => {
 test('parallel subscribe storms connect once and keep sibling subscriptions isolated', async () => {
   const client = createClient({
     url: 'http://127.0.0.1:8080',
-    authProvider: async () => ({ type: 'none' }),
+    authProvider: async () => Auth.jwt('fixture-token'),
   });
 
   const fakeWasmClient = createFakeWasmClient();

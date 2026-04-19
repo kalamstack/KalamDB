@@ -21,8 +21,8 @@ const EXECUTE_AS_PREFIX_LEN: usize = EXECUTE_AS_PREFIX.len(); // 15
 /// Result of parsing an `EXECUTE AS USER` envelope.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecuteAsEnvelope {
-    /// The username that follows `EXECUTE AS USER`.
-    pub username: String, //TODO: Use UserName type
+    /// The user identifier that follows `EXECUTE AS USER`.
+    pub username: String,
     /// The inner SQL statement (parentheses stripped).
     pub inner_sql: String,
 }

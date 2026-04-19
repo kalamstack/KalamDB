@@ -4,8 +4,7 @@
 
 pub mod users {
     pub use crate::providers::users::models::{
-        AuthType, Role, User, UserName, DEFAULT_LOCKOUT_DURATION_MINUTES,
-        DEFAULT_MAX_FAILED_ATTEMPTS,
+        AuthType, Role, User, DEFAULT_LOCKOUT_DURATION_MINUTES, DEFAULT_MAX_FAILED_ATTEMPTS,
     };
 }
 

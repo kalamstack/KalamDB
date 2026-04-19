@@ -60,8 +60,8 @@ impl LoginTracker {
             let remaining_minutes = (remaining_seconds + 59) / 60; // Round up
 
             warn!(
-                "Login attempt for locked account: username={}, remaining_minutes={}",
-                user.username, remaining_minutes
+                "Login attempt for locked account: user_id={}, remaining_minutes={}",
+                user.user_id, remaining_minutes
             );
 
             return Err(AuthError::AccountLocked(format!("{} minute(s)", remaining_minutes)));
@@ -87,13 +87,13 @@ impl LoginTracker {
 
         if user.is_locked() {
             warn!(
-                "Account locked after {} failed attempts: username={}, locked_for_minutes={}",
-                user.failed_login_attempts, user.username, self.config.lockout_duration_minutes
+                "Account locked after {} failed attempts: user_id={}, locked_for_minutes={}",
+                user.failed_login_attempts, user.user_id, self.config.lockout_duration_minutes
             );
         } else {
             info!(
-                "Failed login attempt {}/{} for username={}",
-                user.failed_login_attempts, self.config.max_failed_attempts, user.username
+                "Failed login attempt {}/{} for user_id={}",
+                user.failed_login_attempts, self.config.max_failed_attempts, user.user_id
             );
         }
 
@@ -116,13 +116,11 @@ impl LoginTracker {
         let had_failed_attempts = user.failed_login_attempts > 0;
 
         // Only update the database if there were failed attempts to clear
-        // This avoids writing to the database on every successful request
         if had_failed_attempts {
             user.record_successful_login();
-            info!("Successful login, reset failed attempts: username={}", user.username);
+            info!("Successful login, reset failed attempts: user_id={}", user.user_id);
             repo.update_user(user).await
         } else {
-            // No failed attempts - skip database write for performance
             Ok(())
         }
     }
@@ -153,7 +151,6 @@ mod tests {
         let tracker = LoginTracker::new();
         let user = User {
             user_id: UserId::new("u_123"),
-            username: "alice".into(),
             password_hash: "$2b$12$hash".to_string(),
             role: Role::User,
             email: None,
@@ -180,7 +177,6 @@ mod tests {
         let tracker = LoginTracker::new();
         let user = User {
             user_id: UserId::new("u_123"),
-            username: "alice".into(),
             password_hash: "$2b$12$hash".to_string(),
             role: Role::User,
             email: None,
@@ -189,7 +185,7 @@ mod tests {
             storage_mode: kalamdb_system::providers::storages::models::StorageMode::Table,
             storage_id: None,
             failed_login_attempts: 5,
-            locked_until: Some(chrono::Utc::now().timestamp_millis() + 900_000), // 15 min
+            locked_until: Some(chrono::Utc::now().timestamp_millis() + 900_000),
             last_login_at: None,
             created_at: 0,
             updated_at: 0,
@@ -214,7 +210,6 @@ mod tests {
 
         let user = User {
             user_id: UserId::new("u_123"),
-            username: "alice".into(),
             password_hash: "$2b$12$hash".to_string(),
             role: Role::User,
             email: None,

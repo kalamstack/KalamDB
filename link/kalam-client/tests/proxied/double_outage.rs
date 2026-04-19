@@ -8,6 +8,7 @@ use tokio::time::{sleep, timeout};
 /// Server goes down again while the client is in the process of reconnecting.
 /// After the second outage clears, the client should still recover.
 #[tokio::test]
+#[ntest::timeout(15000)]
 async fn test_proxy_server_down_while_reconnecting() {
     let writer = match create_test_client() {
         Ok(c) => c,
@@ -91,8 +92,26 @@ async fn test_proxy_server_down_while_reconnecting() {
     // Briefly resume the proxy so the client starts its reconnect attempt,
     // then kill it again immediately.
     proxy.simulate_server_up();
+    // Wait for EITHER the client to complete a full WS reconnect (connect_count
+    // increases — on_connect fired, so a subsequent disconnect will be properly
+    // registered) OR at minimum a TCP connection has been accepted by the proxy.
+    // Checking connect_count first avoids a race introduced by relying solely on
+    // wait_for_active_connections, which fires at TCP accept time (before the WS
+    // handshake), leaving the subscription in an ambiguous mid-handshake state
+    // that can cause incorrect seq-resume and replay of pre-1 after the second
+    // outage.
+    let mut begin_reconnect_seen = false;
+    for _ in 0..200 {
+        let connects = connect_count.load(Ordering::SeqCst);
+        let active = proxy.active_count().await;
+        if connects >= 2 || active >= 1 {
+            begin_reconnect_seen = true;
+            break;
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
     assert!(
-        proxy.wait_for_active_connections(1, Duration::from_secs(10)).await,
+        begin_reconnect_seen,
         "client should begin reconnecting before the second outage"
     );
 

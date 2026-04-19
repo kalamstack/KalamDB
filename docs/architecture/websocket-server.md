@@ -177,6 +177,8 @@ max_connections = 25000        # Server-wide WS limit
 
 [security]
 max_ws_message_size = 65536    # 64KB message limit
-allowed_ws_origins = []        # Origin whitelist (empty = allow all)
 strict_ws_origin_check = false # Require Origin header
+
+[security.cors]
+allowed_origins = ["https://app.example.com"] # Shared REST + WS origin whitelist
 ```

@@ -21,13 +21,14 @@ mod tests;
 pub use file_ref::FileRef;
 pub use kalam_cell_value::{KalamCellValue, RowData};
 pub use kalam_data_type::KalamDataType;
+pub use kalamdb_commons::UserId;
 pub use schema_field::{FieldFlag, FieldFlags, SchemaField};
 pub use utils::parse_i64;
 
 // ── Auth models ──────────────────────────────────────────────────────────────
 pub use crate::auth::models::{
     LoginRequest, LoginResponse, LoginUserInfo, ServerSetupRequest, ServerSetupResponse,
-    SetupStatusResponse, SetupUserInfo, Username, WsAuthCredentials,
+    SetupStatusResponse, SetupUserInfo, WsAuthCredentials,
 };
 
 // ── Connection models ────────────────────────────────────────────────────────

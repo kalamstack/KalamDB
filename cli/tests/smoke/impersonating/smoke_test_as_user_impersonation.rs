@@ -45,10 +45,10 @@ fn create_user_with_retry(username: &str, password: &str, role: &str) {
     );
 }
 
-/// Helper to get user_id from username by querying system.users
-/// AS USER requires the user_id (UUID), not the username
-fn get_user_id_for_username(username: &str) -> Option<String> {
-    let query = format!("SELECT user_id FROM system.users WHERE username = '{}'", username);
+/// Helper to confirm a user_id exists in system.users.
+/// AS USER requires the user_id, not a legacy username field.
+fn get_user_id(user_id: &str) -> Option<String> {
+    let query = format!("SELECT user_id FROM system.users WHERE user_id = '{}'", user_id);
     let result = execute_sql_as_root_via_client_json(&query).ok()?;
 
     // Parse JSON response
@@ -94,8 +94,7 @@ fn smoke_as_user_blocked_for_regular_user() {
     create_user_with_retry(&target_user, password, "user");
 
     // Get the target user's user_id (UUID)
-    let target_user_id =
-        get_user_id_for_username(&target_user).expect("Failed to get target user_id");
+    let target_user_id = get_user_id(&target_user).expect("Failed to get target user_id");
 
     // Attempt INSERT AS USER as regular user - should FAIL
     let insert_sql = format!(
@@ -160,8 +159,7 @@ fn smoke_as_user_insert_with_service_role() {
     create_user_with_retry(&target_user, password, "user");
 
     // Get user_ids
-    let target_user_id =
-        get_user_id_for_username(&target_user).expect("Failed to get target user_id");
+    let target_user_id = get_user_id(&target_user).expect("Failed to get target user_id");
 
     // INSERT AS USER target_user (executed by service user)
     let insert_sql = format!(
@@ -235,8 +233,7 @@ fn smoke_as_user_update_with_dba_role() {
     create_user_with_retry(&target_user, password, "user");
 
     // Get user_id
-    let target_user_id =
-        get_user_id_for_username(&target_user).expect("Failed to get target user_id");
+    let target_user_id = get_user_id(&target_user).expect("Failed to get target user_id");
 
     // INSERT AS USER first
     let insert_sql = format!(
@@ -381,8 +378,7 @@ fn smoke_as_user_rejected_on_shared_table() {
     create_user_with_retry(&target_user, password, "user");
 
     // Get user_id
-    let target_user_id =
-        get_user_id_for_username(&target_user).expect("Failed to get target user_id");
+    let target_user_id = get_user_id(&target_user).expect("Failed to get target user_id");
 
     // Attempt INSERT AS USER on SHARED table - should FAIL
     let insert_sql = format!(
@@ -446,8 +442,8 @@ fn smoke_as_user_full_workflow() {
     create_user_with_retry(&user_bob, password, "user");
 
     // Get user_ids
-    let alice_user_id = get_user_id_for_username(&user_alice).expect("Failed to get alice user_id");
-    let bob_user_id = get_user_id_for_username(&user_bob).expect("Failed to get bob user_id");
+    let alice_user_id = get_user_id(&user_alice).expect("Failed to get alice user_id");
+    let bob_user_id = get_user_id(&user_bob).expect("Failed to get bob user_id");
 
     // 1. INSERT AS USER alice (service user acting on behalf of alice)
     execute_sql_via_client_as(
@@ -605,8 +601,8 @@ fn smoke_as_user_select_scopes_reads_for_user_tables() {
     create_user_with_retry(&user1, password, "user");
     create_user_with_retry(&user2, password, "user");
 
-    let user1_id = get_user_id_for_username(&user1).expect("Failed to get user1 user_id");
-    let user2_id = get_user_id_for_username(&user2).expect("Failed to get user2 user_id");
+    let user1_id = get_user_id(&user1).expect("Failed to get user1 user_id");
+    let user2_id = get_user_id(&user2).expect("Failed to get user2 user_id");
 
     execute_sql_via_client_as(
         &service_user,
@@ -694,8 +690,8 @@ fn smoke_as_user_stream_table_isolation() {
     create_user_with_retry(&user1, password, "user");
     create_user_with_retry(&user2, password, "user");
 
-    let user1_id = get_user_id_for_username(&user1).expect("Failed to get user1 user_id");
-    let user2_id = get_user_id_for_username(&user2).expect("Failed to get user2 user_id");
+    let user1_id = get_user_id(&user1).expect("Failed to get user1 user_id");
+    let user2_id = get_user_id(&user2).expect("Failed to get user2 user_id");
 
     execute_sql_via_client_as(
         &service_user,

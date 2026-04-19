@@ -9,19 +9,20 @@
 //!
 //! # Security Model
 //!
-//! Credentials stores **JWT tokens only**, never username/password pairs.
+//! Credentials stores **JWT tokens only**, never user/password pairs.
 //! This provides better security because:
 //! - JWT tokens can expire and be revoked
 //! - No plaintext passwords stored on disk
 //! - Tokens can have limited scopes
 
 use crate::error::Result;
+use kalamdb_commons::UserId;
 use serde::{Deserialize, Serialize};
 
 /// Stored credentials for a KalamDB instance.
 ///
 /// Contains a JWT token that can be persisted and reused across sessions.
-/// The token is obtained by authenticating with username/password via the
+/// The token is obtained by authenticating with user/password via the
 /// `/v1/api/auth/login` endpoint.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Credentials {
@@ -32,9 +33,9 @@ pub struct Credentials {
     /// Obtained from the login endpoint, expires after a configured period
     pub jwt_token: String,
 
-    /// Username associated with this token (for display purposes)
+    /// User associated with this token (for display purposes)
     #[serde(default)]
-    pub username: Option<String>,
+    pub user: Option<UserId>,
 
     /// Token expiration time in RFC3339 format (optional, for cache invalidation)
     #[serde(default)]
@@ -59,7 +60,7 @@ impl Credentials {
         Self {
             instance,
             jwt_token,
-            username: None,
+            user: None,
             expires_at: None,
             server_url: None,
             refresh_token: None,
@@ -71,14 +72,14 @@ impl Credentials {
     pub fn with_details(
         instance: String,
         jwt_token: String,
-        username: String,
+        user: impl Into<UserId>,
         expires_at: String,
         server_url: Option<String>,
     ) -> Self {
         Self {
             instance,
             jwt_token,
-            username: Some(username),
+            user: Some(user.into()),
             expires_at: Some(expires_at),
             server_url,
             refresh_token: None,
@@ -90,7 +91,7 @@ impl Credentials {
     pub fn with_refresh_token(
         instance: String,
         jwt_token: String,
-        username: String,
+        user: impl Into<UserId>,
         expires_at: String,
         server_url: Option<String>,
         refresh_token: Option<String>,
@@ -99,7 +100,7 @@ impl Credentials {
         Self {
             instance,
             jwt_token,
-            username: Some(username),
+            user: Some(user.into()),
             expires_at: Some(expires_at),
             server_url,
             refresh_token,
@@ -294,7 +295,7 @@ mod tests {
 
         assert_eq!(creds.instance, "local");
         assert_eq!(creds.jwt_token, "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test");
-        assert_eq!(creds.username, None);
+        assert_eq!(creds.user, None);
         assert_eq!(creds.expires_at, None);
         assert_eq!(creds.server_url, None);
         assert_eq!(creds.get_server_url(), "local");
@@ -311,7 +312,7 @@ mod tests {
         );
 
         assert_eq!(creds.instance, "prod");
-        assert_eq!(creds.username, Some("alice".to_string()));
+        assert_eq!(creds.user, Some(UserId::from("alice")));
         assert_eq!(creds.expires_at, Some("2025-12-31T23:59:59Z".to_string()));
         assert_eq!(creds.server_url, Some("https://db.example.com".to_string()));
         assert_eq!(creds.get_server_url(), "https://db.example.com");
@@ -405,16 +406,13 @@ mod tests {
 
         // Retrieve specific instances
         assert_eq!(
-            store.get_credentials("local").unwrap().unwrap().username,
-            Some("alice".to_string())
+            store.get_credentials("local").unwrap().unwrap().user,
+            Some(UserId::from("alice"))
         );
+        assert_eq!(store.get_credentials("prod").unwrap().unwrap().user, Some(UserId::from("bob")));
         assert_eq!(
-            store.get_credentials("prod").unwrap().unwrap().username,
-            Some("bob".to_string())
-        );
-        assert_eq!(
-            store.get_credentials("dev").unwrap().unwrap().username,
-            Some("carol".to_string())
+            store.get_credentials("dev").unwrap().unwrap().user,
+            Some(UserId::from("carol"))
         );
     }
 

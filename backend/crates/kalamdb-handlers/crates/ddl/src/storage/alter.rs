@@ -82,10 +82,7 @@ impl TypedStatementHandler<AlterStorageStatement> for AlterStorageHandler {
                 ));
             }
 
-            storage.config_json = Some(
-                serde_json::to_string(&value)
-                    .into_invalid_operation("Failed to normalize CONFIG JSON")?,
-            );
+            storage.config_json = Some(value);
         }
 
         let connectivity = StorageHealthService::test_connectivity(&storage)

@@ -171,7 +171,7 @@ async fn ensure_server_setup(
         let setup_response = match client
             .post(format!("{}/v1/api/auth/setup", base_url))
             .json(&json!({
-                "username": "admin",
+                "user": "admin",
                 "password": root_password,
                 "root_password": root_password,
                 "email": null
@@ -215,7 +215,7 @@ async fn fetch_access_token(
         let response = match client
             .post(format!("{}/v1/api/auth/login", base_url))
             .json(&json!({
-                "username": username,
+                "user": username,
                 "password": password
             }))
             .send()

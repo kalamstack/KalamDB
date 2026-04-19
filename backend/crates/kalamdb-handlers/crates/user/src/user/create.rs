@@ -35,11 +35,12 @@ impl TypedStatementHandler<CreateUserStatement> for CreateUserHandler {
         _params: Vec<ScalarValue>,
         context: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
-        // Duplicate check (provider enforces via username index but we do early check for clearer error)
+        // Duplicate check (provider enforces via user_id but we do early check for clearer error)
         let app_ctx = self.app_context.clone();
-        let username = statement.username.clone();
+        let user_id = UserId::new(&statement.username);
+        let check_id = user_id.clone();
         let existing = tokio::task::spawn_blocking(move || {
-            app_ctx.system_tables().users().get_user_by_username(&username)
+            app_ctx.system_tables().users().get_user_by_id(&check_id)
         })
         .await
         .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))??;
@@ -111,8 +112,7 @@ impl TypedStatementHandler<CreateUserStatement> for CreateUserHandler {
 
         let now = chrono::Utc::now().timestamp_millis();
         let user = User {
-            user_id: UserId::generate(),
-            username: statement.username.clone().into(),
+            user_id,
             password_hash,
             role: statement.role,
             email: statement.email.clone(),

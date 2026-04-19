@@ -8,8 +8,8 @@ use kalam_pg_common::{KalamPgError, RemoteServerConfig};
 use kalamdb_pg::{
     BeginTransactionRequest, CloseSessionRequest, CommitTransactionRequest, DeleteRpcRequest,
     ExecuteQueryRpcRequest, ExecuteSqlRpcRequest, InsertRpcRequest, OpenSessionRequest,
-    PgServiceClient, PingRequest, RollbackTransactionRequest, ScanFilterExpression,
-    ScanRpcRequest, UpdateRpcRequest,
+    PgServiceClient, PingRequest, RollbackTransactionRequest, ScanFilterExpression, ScanRpcRequest,
+    UpdateRpcRequest,
 };
 #[cfg(feature = "tls")]
 use tonic::transport::{Certificate, ClientTlsConfig, Identity};

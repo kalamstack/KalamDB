@@ -17,7 +17,8 @@ pub fn handle_credentials(cli: &Cli, credential_store: &mut FileCredentialStore)
             for instance in instances {
                 // Show additional info if available
                 if let Ok(Some(creds)) = credential_store.get_credentials(&instance) {
-                    let user_info = creds.username.as_deref().unwrap_or("unknown");
+                    let user_info =
+                        creds.user.as_ref().map(|user| user.as_str()).unwrap_or("unknown");
                     let expired = if creds.is_expired() { " (expired)" } else { "" };
                     println!("  • {} (user: {}){}", instance, user_info, expired);
                 } else {
@@ -34,8 +35,8 @@ pub fn handle_credentials(cli: &Cli, credential_store: &mut FileCredentialStore)
         })? {
             Some(creds) => {
                 println!("Instance: {}", creds.instance);
-                if let Some(ref user) = creds.username {
-                    println!("Username: {}", user);
+                if let Some(ref user) = creds.user {
+                    println!("User: {}", user);
                 }
                 println!("JWT Token: [redacted]");
                 if let Some(ref expires) = creds.expires_at {
@@ -75,7 +76,7 @@ pub fn handle_credentials(cli: &Cli, credential_store: &mut FileCredentialStore)
     Ok(false)
 }
 
-/// Login with username/password and store the JWT token
+/// Login with user/password and store the JWT token
 /// This is called from the async context in main.rs
 pub async fn login_and_store_credentials(
     cli: &Cli,
@@ -94,15 +95,15 @@ pub async fn login_and_store_credentials(
     });
 
     // Prompt for credentials
-    let username = if let Some(user) = &cli.username {
+    let user = if let Some(user) = &cli.user {
         user.clone()
     } else {
-        print!("Username: ");
+        print!("User: ");
         io::stdout().flush().unwrap();
         let mut input = String::new();
         io::stdin()
             .read_line(&mut input)
-            .map_err(|e| CLIError::FileError(format!("Failed to read username: {}", e)))?;
+            .map_err(|e| CLIError::FileError(format!("Failed to read user: {}", e)))?;
         input.trim().to_string()
     };
 
@@ -121,7 +122,7 @@ pub async fn login_and_store_credentials(
         .map_err(|e| CLIError::ConfigurationError(format!("Failed to create client: {}", e)))?;
 
     let login_response = client
-        .login(&username, &password)
+        .login(&user, &password)
         .await
         .map_err(|e| CLIError::ConfigurationError(format!("Login failed: {}", e)))?;
 
@@ -129,7 +130,7 @@ pub async fn login_and_store_credentials(
     let creds = Credentials::with_refresh_token(
         cli.instance.clone(),
         login_response.access_token,
-        login_response.user.username,
+        login_response.user.id.to_string(),
         login_response.expires_at.clone(),
         Some(server_url),
         login_response.refresh_token.clone(),

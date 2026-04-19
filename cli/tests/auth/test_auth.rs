@@ -42,7 +42,7 @@ fn test_cli_invalid_token() {
     let mut cmd = create_cli_command();
     cmd.arg("-u")
         .arg(server_url())
-        .arg("--username")
+        .arg("--user")
         .arg("test_user")
         .arg("--token")
         .arg("invalid.jwt.token")
@@ -129,7 +129,7 @@ fn test_cli_authenticate_and_check_info() {
     let result = execute_sql_via_cli_as(
         admin_username(),
         admin_password(),
-        "SELECT username FROM system.users WHERE username = 'admin' LIMIT 1",
+        "SELECT user_id FROM system.users WHERE user_id = 'admin' LIMIT 1",
     );
 
     // Should succeed and show the authenticated admin user in query output.
@@ -141,7 +141,7 @@ fn test_cli_authenticate_and_check_info() {
     let output = result.unwrap();
     assert!(
         output.contains(admin_username()),
-        "Info output should show the authenticated username: {}",
+        "Info output should show the authenticated user: {}",
         output
     );
 }

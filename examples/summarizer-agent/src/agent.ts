@@ -7,7 +7,7 @@ loadEnv({ path: '.env.local', quiet: true });
 loadEnv({ quiet: true });
 
 const KALAMDB_URL = process.env.KALAMDB_URL ?? 'http://127.0.0.1:8080';
-const KALAMDB_USERNAME = process.env.KALAMDB_USERNAME ?? 'root';
+const KALAMDB_USER = process.env.KALAMDB_USER ?? 'root';
 const KALAMDB_PASSWORD = process.env.KALAMDB_PASSWORD ?? 'kalamdb123';
 const TOPIC = process.env.KALAMDB_TOPIC ?? 'blog.summarizer';
 const GROUP = process.env.KALAMDB_GROUP ?? 'blog-summarizer-agent';
@@ -28,7 +28,7 @@ export function buildSummary(content: string): string {
 export async function startSummarizerAgent(options: StartAgentOptions = {}): Promise<void> {
   const client = createConsumerClient({
     url: KALAMDB_URL,
-    authProvider: async () => Auth.basic(KALAMDB_USERNAME, KALAMDB_PASSWORD),
+    authProvider: async () => Auth.basic(KALAMDB_USER, KALAMDB_PASSWORD),
   });
 
   const groupId = options.groupId ?? GROUP;

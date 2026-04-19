@@ -12,9 +12,9 @@ part 'models.freezed.dart';
 sealed class DartAuthProvider with _$DartAuthProvider {
   const DartAuthProvider._();
 
-  /// HTTP Basic Auth with username and password.
+  /// HTTP Basic Auth with user and password.
   const factory DartAuthProvider.basicAuth({
-    required String username,
+    required String user,
     required String password,
   }) = DartAuthProvider_BasicAuth;
 
@@ -86,7 +86,7 @@ sealed class DartChangeEvent with _$DartChangeEvent {
 
 /// Error information from a connection or protocol error.
 ///
-/// Mirrors `kalam_link::ConnectionError`.
+/// Mirrors `kalam_client::ConnectionError`.
 class DartConnectionError {
   /// Human-readable error message.
   final String message;
@@ -141,7 +141,7 @@ sealed class DartConnectionEvent with _$DartConnectionEvent {
 
 /// Reason why a WebSocket connection was closed.
 ///
-/// Mirrors `kalam_link::DisconnectReason`.
+/// Mirrors `kalam_client::DisconnectReason`.
 class DartDisconnectReason {
   /// Human-readable description of why the connection closed.
   final String message;
@@ -232,6 +232,7 @@ class DartLoginResponse {
   final String? refreshToken;
   final String expiresAt;
   final String? refreshExpiresAt;
+  final bool adminUiAccess;
   final DartLoginUserInfo user;
 
   const DartLoginResponse({
@@ -239,6 +240,7 @@ class DartLoginResponse {
     this.refreshToken,
     required this.expiresAt,
     this.refreshExpiresAt,
+    required this.adminUiAccess,
     required this.user,
   });
 
@@ -248,6 +250,7 @@ class DartLoginResponse {
       refreshToken.hashCode ^
       expiresAt.hashCode ^
       refreshExpiresAt.hashCode ^
+      adminUiAccess.hashCode ^
       user.hashCode;
 
   @override
@@ -259,20 +262,19 @@ class DartLoginResponse {
           refreshToken == other.refreshToken &&
           expiresAt == other.expiresAt &&
           refreshExpiresAt == other.refreshExpiresAt &&
+          adminUiAccess == other.adminUiAccess &&
           user == other.user;
 }
 
 class DartLoginUserInfo {
   final String id;
-  final String username;
-  final String role;
+  final DartRole role;
   final String? email;
   final String createdAt;
   final String updatedAt;
 
   const DartLoginUserInfo({
     required this.id,
-    required this.username,
     required this.role,
     this.email,
     required this.createdAt,
@@ -282,7 +284,6 @@ class DartLoginUserInfo {
   @override
   int get hashCode =>
       id.hashCode ^
-      username.hashCode ^
       role.hashCode ^
       email.hashCode ^
       createdAt.hashCode ^
@@ -294,7 +295,6 @@ class DartLoginUserInfo {
       other is DartLoginUserInfo &&
           runtimeType == other.runtimeType &&
           id == other.id &&
-          username == other.username &&
           role == other.role &&
           email == other.email &&
           createdAt == other.createdAt &&
@@ -371,6 +371,15 @@ class DartQueryResult {
           namedRowsJson == other.namedRowsJson &&
           rowCount == other.rowCount &&
           message == other.message;
+}
+
+enum DartRole {
+  anonymous,
+  user,
+  service,
+  dba,
+  system,
+  ;
 }
 
 class DartSchemaField {

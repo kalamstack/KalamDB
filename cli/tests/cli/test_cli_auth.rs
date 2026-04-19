@@ -7,7 +7,7 @@
 //! - Secure credential storage with proper file permissions
 //! - Multiple database instance management
 //! - Credential rotation and updates
-//! - JWT token storage (never username/password)
+//! - JWT token storage (never user/password)
 
 use crate::common::*;
 
@@ -59,7 +59,7 @@ fn test_cli_jwt_credentials_stored_securely() {
     // TOML format should contain JWT fields
     assert!(file_contents.contains("[instances.test_instance]"));
     assert!(file_contents.contains("jwt_token = "));
-    assert!(file_contents.contains("username = \"alice\""));
+    assert!(file_contents.contains("user = \"alice\""));
     assert!(file_contents.contains("expires_at = "));
     assert!(file_contents.contains("server_url = "));
 
@@ -102,14 +102,14 @@ fn test_cli_multiple_instances() {
     assert!(instance_list.contains(&"testing".to_string()));
 
     // Verify each instance has correct credentials
-    for (instance, username, server_url) in &instances {
+    for (instance, user, server_url) in &instances {
         let retrieved = store
             .get_credentials(instance)
             .expect("Failed to get credentials")
             .expect("Credentials should exist");
 
         assert_eq!(&retrieved.instance, instance);
-        assert_eq!(retrieved.username.as_deref(), Some(*username));
+        assert_eq!(retrieved.user.as_ref().map(|value| value.as_str()), Some(*user));
         assert_eq!(retrieved.server_url.as_deref(), Some(*server_url));
         assert_eq!(retrieved.jwt_token, format!("jwt_token_for_{}", instance));
     }
@@ -160,7 +160,7 @@ fn test_cli_credential_rotation() {
         .expect("Credentials should exist");
 
     assert_eq!(retrieved.jwt_token, "new_jwt_token_v2_after_rotation");
-    assert_eq!(retrieved.username.as_deref(), Some("admin"));
+    assert_eq!(retrieved.user.as_ref().map(|value| value.as_str()), Some("admin"));
 
     // Verify only one instance exists (not duplicated)
     let instance_list = store.list_instances().expect("Failed to list instances");

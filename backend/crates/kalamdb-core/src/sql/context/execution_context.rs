@@ -108,14 +108,6 @@ impl ExecutionContext {
         self.auth_session.role()
     }
     #[inline]
-    pub fn username(&self) -> Option<&str> {
-        self.auth_session
-            .user_context()
-            .username
-            .as_ref()
-            .map(|username| username.as_str())
-    }
-    #[inline]
     pub fn request_id(&self) -> Option<&str> {
         self.auth_session.request_id()
     }
@@ -174,21 +166,11 @@ impl ExecutionContext {
         // Inject current user_id, role, and read_context into session config extensions
         // TableProviders will read this during scan() for per-user filtering and leader check
         // Use the read_context from this ExecutionContext (defaults to Client)
-        let session_user_context =
-            if let Some(username) = self.auth_session.user_context().username.clone() {
-                SessionUserContext::with_username(
-                    self.auth_session.user_id().clone(),
-                    username,
-                    self.auth_session.role(),
-                    self.auth_session.read_context(),
-                )
-            } else {
-                SessionUserContext::new(
-                    self.auth_session.user_id().clone(),
-                    self.auth_session.role(),
-                    self.auth_session.read_context(),
-                )
-            };
+        let session_user_context = SessionUserContext::new(
+            self.auth_session.user_id().clone(),
+            self.auth_session.role(),
+            self.auth_session.read_context(),
+        );
 
         session_state.config_mut().options_mut().extensions.insert(session_user_context);
 

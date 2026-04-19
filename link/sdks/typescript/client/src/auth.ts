@@ -2,18 +2,17 @@
  * Authentication types and utilities for KalamDB client
  * 
  * Provides a type-safe authentication API with support for:
- * - Basic Auth (username/password)
+ * - Basic Auth (user/password)
  * - JWT Token Auth
- * - Anonymous (no auth - for localhost bypass)
  * - Dynamic provider (async callback for refresh-token flows)
  */
 
 /**
- * Basic authentication credentials (username/password)
+ * Basic authentication credentials (user/password)
  */
 export interface BasicAuthCredentials {
   type: 'basic';
-  username: string;
+  user: string;
   password: string;
 }
 
@@ -26,16 +25,9 @@ export interface JwtAuthCredentials {
 }
 
 /**
- * No authentication (anonymous access)
- */
-export interface NoAuthCredentials {
-  type: 'none';
-}
-
-/**
  * Union type for all authentication credential types
  */
-export type AuthCredentials = BasicAuthCredentials | JwtAuthCredentials | NoAuthCredentials;
+export type AuthCredentials = BasicAuthCredentials | JwtAuthCredentials;
 
 type BufferCtor = {
   from(input: string, encoding?: string): {
@@ -58,17 +50,10 @@ export function isJwtAuth(auth: AuthCredentials): auth is JwtAuthCredentials {
 }
 
 /**
- * Type guard to check if credentials are No Auth
+ * Type guard to check if resolved credentials are available
  */
-export function isNoAuth(auth: AuthCredentials): auth is NoAuthCredentials {
-  return auth.type === 'none';
-}
-
-/**
- * Type guard to check if any authentication is configured
- */
-export function isAuthenticated(auth: AuthCredentials): auth is BasicAuthCredentials | JwtAuthCredentials {
-  return auth.type !== 'none';
+export function isAuthenticated(auth: AuthCredentials | null | undefined): auth is AuthCredentials {
+  return auth != null;
 }
 
 /**
@@ -91,30 +76,32 @@ function base64Encode(str: string): string {
 }
 
 /**
- * Encode username and password for Basic Auth header
+ * Encode user and password for Basic Auth header
  * 
- * @param username - Username
+ * @param user - Canonical user identifier
  * @param password - Password
  * @returns Base64 encoded credentials string
  */
-export function encodeBasicAuth(username: string, password: string): string {
-  return base64Encode(`${username}:${password}`);
+export function encodeBasicAuth(user: string, password: string): string {
+  return base64Encode(`${user}:${password}`);
 }
 
 /**
  * Build the Authorization header value for the given credentials
  * 
  * @param auth - Authentication credentials
- * @returns Authorization header value or undefined for no auth
+ * @returns Authorization header value or undefined when auth is unset
  */
-export function buildAuthHeader(auth: AuthCredentials): string | undefined {
+export function buildAuthHeader(auth: AuthCredentials | null | undefined): string | undefined {
+  if (!auth) {
+    return undefined;
+  }
+
   switch (auth.type) {
     case 'basic':
-      return `Basic ${encodeBasicAuth(auth.username, auth.password)}`;
+      throw new Error('User/password credentials are only valid for /v1/api/auth/login. Exchange them for a JWT before sending authenticated requests.');
     case 'jwt':
       return `Bearer ${auth.token}`;
-    case 'none':
-      return undefined;
     default:
       // Exhaustiveness check
       const _exhaustive: never = auth;
@@ -141,23 +128,18 @@ export function buildAuthHeader(auth: AuthCredentials): string | undefined {
  *   authProvider: async () => Auth.jwt('eyJhbGciOiJIUzI1NiIs...')
  * });
  * 
- * // Anonymous (no auth)
- * const anonClient = createClient({
- *   url: 'http://localhost:8080',
- *   authProvider: async () => Auth.none()
- * });
  * ```
  */
 export const Auth = {
   /**
    * Create Basic Auth credentials
    * 
-   * @param username - Username for authentication
+   * @param user - Canonical user identifier for authentication
    * @param password - Password for authentication
    * @returns BasicAuthCredentials object
    */
-  basic(username: string, password: string): BasicAuthCredentials {
-    return { type: 'basic', username, password };
+  basic(user: string, password: string): BasicAuthCredentials {
+    return { type: 'basic', user, password };
   },
 
   /**
@@ -168,15 +150,6 @@ export const Auth = {
    */
   jwt(token: string): JwtAuthCredentials {
     return { type: 'jwt', token };
-  },
-
-  /**
-   * Create No Auth credentials (anonymous access)
-   * 
-   * @returns NoAuthCredentials object
-   */
-  none(): NoAuthCredentials {
-    return { type: 'none' };
   }
 } as const;
 
@@ -186,9 +159,9 @@ export const Auth = {
  * Called before each (re-)connection attempt to obtain fresh credentials.
  * This is the recommended approach for refresh-token flows.
  *
- * The returned `AuthCredentials` can be any auth type. Returning
- * `{ type: 'basic' }` is supported — the SDK will automatically exchange
- * the credentials for a JWT before establishing the WebSocket connection.
+ * Returning `Auth.basic(...)` is supported — the SDK automatically exchanges
+ * the credentials through `/v1/api/auth/login` before any authenticated
+ * request or WebSocket connection.
  *
  * @example
  * ```typescript

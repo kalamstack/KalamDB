@@ -48,6 +48,8 @@ Authorization: Bearer <JWT_TOKEN>
 
 Basic auth is rejected on these routes.
 
+Direct `user` / `password` credentials are only accepted on `POST /v1/api/auth/login`.
+
 - `POST /v1/api/sql`
 - `GET /v1/files/...`
 - `POST /v1/api/topics/consume`
@@ -295,20 +297,20 @@ Response shape:
 
 ## `POST /v1/api/auth/login`
 
-Authenticates username/password and returns token pair + sets auth cookie.
+Authenticates `user` / `password`, returns an access/refresh token pair, and sets the HttpOnly auth cookie.
 
 Request:
 
 ```json
 {
-  "username": "alice",
+  "user": "alice",
   "password": "Secret123!"
 }
 ```
 
 Constraints:
 
-- username max length: `128`
+- user max length: `128`
 - password max length: `256`
 
 Success response:
@@ -317,12 +319,12 @@ Success response:
 {
   "user": {
     "id": "u_...",
-    "username": "alice",
-    "role": "Dba",
+    "role": "dba",
     "email": null,
     "created_at": "...",
     "updated_at": "..."
   },
+  "admin_ui_access": true,
   "expires_at": "...",
   "access_token": "...",
   "refresh_token": "...",
@@ -330,11 +332,13 @@ Success response:
 }
 ```
 
-Also sets HttpOnly auth cookie for access token.
+Only this endpoint accepts direct user/password credentials. Protected SQL, topic, refresh, `/me`, and WebSocket auth flows use bearer tokens or cookies instead.
 
 ## `POST /v1/api/auth/refresh`
 
 Accepts bearer token header or auth cookie, validates token, issues new access + refresh pair, and resets auth cookie.
+
+Direct user/password auth is rejected on this endpoint.
 
 Returns same shape as login.
 
@@ -350,7 +354,7 @@ Response:
 
 ## `GET /v1/api/auth/me`
 
-Returns current user info (same `user` object shape as login, without token fields).
+Returns current user info plus `admin_ui_access` (same `user` object shape as login, without token fields).
 
 ## `POST /v1/api/auth/setup`
 
@@ -365,7 +369,7 @@ Request:
 
 ```json
 {
-  "username": "admin",
+  "user": "admin",
   "password": "AdminPass123!",
   "root_password": "RootPass123!",
   "email": "admin@example.com"
@@ -426,7 +430,7 @@ Response:
       "payload": "<base64>",
       "key": "optional-key",
       "timestamp_ms": 1730000000000,
-      "username": "alice",
+      "user": "alice",
       "op": "Insert"
     }
   ],

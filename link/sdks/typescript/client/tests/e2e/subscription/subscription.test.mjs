@@ -14,7 +14,7 @@ import {
   sleep,
 } from '../helpers.mjs';
 
-async function waitFor(predicate, timeoutMs = 20_000, intervalMs = 200) {
+async function waitFor(predicate, timeoutMs = 20_000, intervalMs = 50) {
   const started = Date.now();
   while (!predicate()) {
     if (Date.now() - started > timeoutMs) {
@@ -22,6 +22,10 @@ async function waitFor(predicate, timeoutMs = 20_000, intervalMs = 200) {
     }
     await sleep(intervalMs);
   }
+}
+
+function findAckEvent(events) {
+  return events.find((event) => event.type === 'subscription_ack');
 }
 
 function insertedIds(events) {
@@ -96,10 +100,9 @@ describe('Subscription', { timeout: 150_000 }, () => {
       events.push(event);
     });
 
-    // Wait for ack event
-    await sleep(1500);
+    await waitFor(() => !!findAckEvent(events), 5_000);
 
-    const ackEvent = events.find((e) => e.type === 'subscription_ack');
+    const ackEvent = findAckEvent(events);
     assert.ok(ackEvent, 'should receive subscription_ack');
     assert.ok(ackEvent.subscription_id, 'ack should have subscription_id');
 
@@ -115,8 +118,7 @@ describe('Subscription', { timeout: 150_000 }, () => {
       events.push(event);
     });
 
-    // Wait for initial ack
-    await sleep(1500);
+    await waitFor(() => !!findAckEvent(events), 5_000);
 
     // Insert from a second client
     const writer = await connectJwtClient();
@@ -124,8 +126,7 @@ describe('Subscription', { timeout: 150_000 }, () => {
       `INSERT INTO ${tbl} (id, body) VALUES (500, 'hello from writer')`,
     );
 
-    // Wait for change event
-    await sleep(3000);
+    await waitFor(() => insertedIds(events).has(500), 10_000);
 
     const changeEvents = events.filter((e) => e.type === 'change');
     assert.ok(changeEvents.length >= 1, 'should receive at least one change event');
@@ -146,22 +147,24 @@ describe('Subscription', { timeout: 150_000 }, () => {
   // -----------------------------------------------------------------------
   test('subscribeWithSql with WHERE clause works', async () => {
     const events = [];
+    const targetId = 600;
     const unsub = await client.subscribeWithSql(
-      `SELECT * FROM ${tbl} WHERE id = 600`,
+      `SELECT * FROM ${tbl} WHERE id = ${targetId}`,
       (event) => events.push(event),
     );
 
-    await sleep(1500);
+    await waitFor(() => !!findAckEvent(events), 5_000);
 
     const writer = await connectJwtClient();
     await writer.query(
-      `INSERT INTO ${tbl} (id, body) VALUES (600, 'targeted')`,
+      `INSERT INTO ${tbl} (id, body) VALUES (${targetId}, 'targeted')`,
     );
 
-    await sleep(3000);
+    await waitFor(() => insertedIds(events).has(targetId), 10_000);
 
-    const ack = events.find((e) => e.type === 'subscription_ack');
+    const ack = findAckEvent(events);
     assert.ok(ack, 'should get ack for sql subscription');
+    assert.ok(insertedIds(events).has(targetId), 'should receive only the targeted row');
 
     await unsub();
     await shutdownClient(writer);
@@ -171,9 +174,11 @@ describe('Subscription', { timeout: 150_000 }, () => {
   // Subscription tracking
   // -----------------------------------------------------------------------
   test('getSubscriptions / isSubscribedTo track subscriptions', async () => {
-    const unsub = await client.subscribe(tbl, () => {});
-    // Wait for subscription ack to register
-    await sleep(1500);
+    const events = [];
+    const unsub = await client.subscribe(tbl, (event) => {
+      events.push(event);
+    });
+    await waitFor(() => !!findAckEvent(events), 5_000);
 
     assert.ok(client.getSubscriptionCount() >= 1, 'should have at least 1 subscription');
 
@@ -188,12 +193,17 @@ describe('Subscription', { timeout: 150_000 }, () => {
   // unsubscribeAll
   // -----------------------------------------------------------------------
   test('unsubscribeAll clears all subscriptions', async () => {
+    const tableEvents = [];
+    const sqlEvents = [];
+
     // Subscribe twice with different queries to ensure separate subscriptions
-    await client.subscribe(tbl, () => {});
-    await sleep(500);
-    await client.subscribeWithSql(`SELECT * FROM ${tbl} WHERE id > 0`, () => {});
-    // Wait for both subscriptions to register
-    await sleep(1500);
+    await client.subscribe(tbl, (event) => {
+      tableEvents.push(event);
+    });
+    await client.subscribeWithSql(`SELECT * FROM ${tbl} WHERE id > 0`, (event) => {
+      sqlEvents.push(event);
+    });
+    await waitFor(() => !!findAckEvent(tableEvents) && !!findAckEvent(sqlEvents), 5_000);
 
     const count = client.getSubscriptionCount();
     assert.ok(count >= 1, `should have at least 1 subscription, got ${count}`);

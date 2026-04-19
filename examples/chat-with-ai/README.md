@@ -44,12 +44,12 @@ The Playwright test starts the agent, opens two tabs, sends a message, and verif
 
 ## Local credentials
 
-`npm run setup` writes `.env.local` with two local accounts:
+`npm run setup` writes `.env.local` with the local demo account used by both the browser app and the background worker:
 
-- browser app: `chat-demo` / `chatdemo123`
-- background worker: `chat-agent` / `agent123`
+- browser app: `admin` / `kalamdb123`
+- background worker: `admin` / `kalamdb123`
 
-The browser account uses the `service` role because this example writes into a shared table and then subscribes to the same rows. That keeps the sample small and makes the full pipeline observable from two tabs.
+The sample keeps auth bootstrap minimal by reusing that local account for inserts, topic consumption, and `EXECUTE AS USER` writes. That keeps the full live-query path observable from two tabs without extra setup steps.
 
 ```
 chat-with-ai/
@@ -124,9 +124,9 @@ docker-compose up -d keycloak
 
 ---
 
-### Local `admin` account gets `UNTRUSTED_ISSUER`
+### Local `admin` account gets `INVALID_CREDENTIALS`
 
-**Symptom:** Requests with local KalamDB credentials return `{"error":{"code":"UNTRUSTED_ISSUER",...}}`
+**Symptom:** Requests with local KalamDB credentials return `{"error":{"code":"INVALID_CREDENTIALS",...}}`
 
 The server always keeps the internal `"kalamdb"` issuer in the trusted list alongside external issuers. If still seeing this, rebuild:
 

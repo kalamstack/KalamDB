@@ -68,7 +68,6 @@ async fn wait_for_topic_ready(topic: &str, expected_routes: usize) {
                             let route_count =
                                 routes_json.as_array().map(|routes| routes.len()).unwrap_or(0);
                             if route_count >= expected_routes {
-                                tokio::time::sleep(Duration::from_millis(100)).await;
                                 return;
                             }
                         }
@@ -131,10 +130,10 @@ async fn bench_single_pub_single_consumer() -> (usize, f64, f64) {
             match consumer.poll().await {
                 Ok(batch) if batch.is_empty() => {
                     idle += 1;
-                    if consumer_done.load(Ordering::Relaxed) && idle >= 20 {
+                    if consumer_done.load(Ordering::Relaxed) && idle >= 40 {
                         break;
                     }
-                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    tokio::time::sleep(Duration::from_millis(10)).await;
                 },
                 Ok(batch) => {
                     idle = 0;
@@ -145,14 +144,13 @@ async fn bench_single_pub_single_consumer() -> (usize, f64, f64) {
                     let _ = consumer.commit_sync().await;
                 },
                 Err(_) => {
-                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    tokio::time::sleep(Duration::from_millis(10)).await;
                 },
             }
         }
     });
 
     // Single publisher
-    tokio::time::sleep(Duration::from_millis(100)).await;
     let publish_start = Instant::now();
 
     for i in 0..message_count {
@@ -226,10 +224,10 @@ async fn bench_multi_pub_single_consumer() -> (usize, f64, f64) {
             match consumer.poll().await {
                 Ok(batch) if batch.is_empty() => {
                     idle += 1;
-                    if consumer_done.load(Ordering::Relaxed) && idle >= 20 {
+                    if consumer_done.load(Ordering::Relaxed) && idle >= 40 {
                         break;
                     }
-                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    tokio::time::sleep(Duration::from_millis(10)).await;
                 },
                 Ok(batch) => {
                     idle = 0;
@@ -240,14 +238,13 @@ async fn bench_multi_pub_single_consumer() -> (usize, f64, f64) {
                     let _ = consumer.commit_sync().await;
                 },
                 Err(_) => {
-                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    tokio::time::sleep(Duration::from_millis(10)).await;
                 },
             }
         }
     });
 
     // Multiple publishers
-    tokio::time::sleep(Duration::from_millis(100)).await;
     let publish_start = Instant::now();
 
     let mut pub_handles = Vec::new();
@@ -343,10 +340,10 @@ async fn bench_multi_pub_multi_consumer() -> (usize, f64, f64) {
                 match consumer.poll().await {
                     Ok(batch) if batch.is_empty() => {
                         idle += 1;
-                        if consumer_done.load(Ordering::Relaxed) && idle >= 30 {
+                        if consumer_done.load(Ordering::Relaxed) && idle >= 60 {
                             break;
                         }
-                        tokio::time::sleep(Duration::from_millis(80)).await;
+                        tokio::time::sleep(Duration::from_millis(10)).await;
                     },
                     Ok(batch) => {
                         idle = 0;
@@ -358,7 +355,7 @@ async fn bench_multi_pub_multi_consumer() -> (usize, f64, f64) {
                         let _ = consumer.commit_sync().await;
                     },
                     Err(_) => {
-                        tokio::time::sleep(Duration::from_millis(80)).await;
+                        tokio::time::sleep(Duration::from_millis(10)).await;
                     },
                 }
             }
@@ -367,7 +364,6 @@ async fn bench_multi_pub_multi_consumer() -> (usize, f64, f64) {
     }
 
     // Multiple publishers
-    tokio::time::sleep(Duration::from_millis(200)).await;
     let publish_start = Instant::now();
 
     let mut pub_handles = Vec::new();

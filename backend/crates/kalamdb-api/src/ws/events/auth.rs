@@ -5,10 +5,10 @@
 //! explicit Authenticate message).
 //!
 //! Only JWT token authentication is accepted for WebSocket connections.
-//! This keeps username/password auth limited to the login endpoint.
+//! This keeps user/password auth limited to the login endpoint.
 
 use actix_ws::Session;
-use kalamdb_auth::{authenticate, extract_username_for_audit, AuthRequest, UserRepository};
+use kalamdb_auth::{authenticate, extract_user_id_for_audit, AuthRequest, UserRepository};
 use kalamdb_commons::models::{ConnectionInfo, UserId};
 use kalamdb_commons::websocket::{ProtocolOptions, WsAuthCredentials};
 use kalamdb_commons::{Role, WebSocketMessage};
@@ -90,8 +90,8 @@ pub async fn complete_ws_auth(
     connection_state.set_protocol(protocol);
 
     let msg = WebSocketMessage::AuthSuccess {
-        user_id: user_id.clone(),
-        role: format!("{:?}", role),
+        user: user_id.clone(),
+        role,
         protocol,
     };
     let _ = send_json(session, &msg, compression).await;
@@ -119,8 +119,8 @@ pub async fn send_current_auth_success(
     if let (Some(user_id), Some(role)) = (connection_state.user_id(), connection_state.user_role())
     {
         let msg = WebSocketMessage::AuthSuccess {
-            user_id: user_id.clone(),
-            role: format!("{:?}", role),
+            user: user_id.clone(),
+            role,
             protocol: connection_state.protocol(),
         };
         let _ = send_json(session, &msg, compression).await;
@@ -140,27 +140,27 @@ async fn authenticate_with_request(
 ) -> Result<(), String> {
     let connection_id = connection_state.connection_id().clone();
 
-    // Get username for logging (before authentication attempt)
-    let username_for_log = extract_username_for_audit(&auth_request);
+    // Get the requested user for logging before authentication attempt.
+    let user_id_for_log = extract_user_id_for_audit(&auth_request);
     let auth_span = tracing::debug_span!(
         "ws.authenticate",
         connection_id = %connection_id,
-        username = %username_for_log.as_str(),
+        audit_user_id = %user_id_for_log.as_str(),
         user_id = tracing::field::Empty,
         role = tracing::field::Empty
     );
 
     async move {
         debug!(
-            "Authenticating WebSocket: connection_id={}, username={}",
+            "Authenticating WebSocket: connection_id={}, user_id={}",
             connection_id,
-            username_for_log.as_str()
+            user_id_for_log.as_str()
         );
 
         let auth_result = match authenticate(auth_request, connection_info, user_repo).await {
             Ok(result) => result.user,
             Err(_e) => {
-                let _ = send_auth_error(session.clone(), "Invalid username or password").await;
+                let _ = send_auth_error(session.clone(), "Invalid credentials").await;
                 return Err("Authentication failed".to_string());
             },
         };

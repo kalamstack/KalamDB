@@ -8,6 +8,7 @@ use kalamdb_commons::models::TableName;
 use kalamdb_commons::KSerializable;
 use kalamdb_macros::table;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use super::{JobStatus, JobType};
 
@@ -46,7 +47,7 @@ use super::{JobStatus, JobType};
 ///     job_type: JobType::Flush,
 ///     status: JobStatus::Running,
 ///     leader_status: None,
-///     parameters: Some(r#"{"namespace_id":"default","table_name":"events"}"#.to_string()),
+///     parameters: Some(serde_json::json!({"namespace_id":"default","table_name":"events"})),
 ///     message: None,
 ///     exception_trace: None,
 ///     idempotency_key: None,
@@ -184,7 +185,8 @@ pub struct Job {
         default = "None",
         comment = "JSON object containing job parameters"
     )]
-    pub parameters: Option<String>, // JSON object containing namespace_id, table_name, and other params
+    #[serde(default)]
+    pub parameters: Option<Value>,
     #[column(
         id = 6,
         ordinal = 6,
@@ -331,23 +333,19 @@ impl Job {
     /// Extract namespace_id from parameters JSON
     pub fn namespace_id(&self) -> Option<NamespaceId> {
         self.parameters.as_ref().and_then(|p| {
-            serde_json::from_str::<serde_json::Value>(p)
-                .ok()
-                .and_then(|v| v.get("namespace_id")?.as_str().map(NamespaceId::new))
+            p.get("namespace_id")?.as_str().map(NamespaceId::new)
         })
     }
 
     /// Extract table_name from parameters JSON
     pub fn table_name(&self) -> Option<TableName> {
         self.parameters.as_ref().and_then(|p| {
-            serde_json::from_str::<serde_json::Value>(p)
-                .ok()
-                .and_then(|v| v.get("table_name")?.as_str().map(TableName::new))
+            p.get("table_name")?.as_str().map(TableName::new)
         })
     }
 
-    /// Set parameters (JSON object)
-    pub fn with_parameters(mut self, parameters: String) -> Self {
+    /// Set parameters (JSON value)
+    pub fn with_parameters(mut self, parameters: Value) -> Self {
         self.parameters = Some(parameters);
         self
     }
@@ -385,13 +383,8 @@ impl Job {
 
     /// get the parameters as T if possible
     pub fn get_parameters_as<T: for<'de> Deserialize<'de>>(&self) -> Option<T> {
-        /*
-               let cleanup_params: CleanupParams = serde_json::from_str(params)
-           .map_err(|e| KalamDbError::InvalidOperation(format!("Failed to parse parameters: {}", e)))?;
-
-        */
         match &self.parameters {
-            Some(params) => serde_json::from_str(params).ok(),
+            Some(params) => serde_json::from_value(params.clone()).ok(),
             None => None,
         }
     }
@@ -487,7 +480,7 @@ mod tests {
             job_type: JobType::Flush,
             status: JobStatus::Completed,
             leader_status: Some(JobStatus::Completed),
-            parameters: Some(r#"{"namespace_id":"default","table_name":"events"}"#.to_string()),
+            parameters: Some(serde_json::json!({"namespace_id":"default","table_name":"events"})),
             message: Some("Job completed successfully".to_string()),
             exception_trace: None,
             idempotency_key: None,
@@ -517,7 +510,7 @@ mod tests {
             job_type: JobType::Flush,
             status: JobStatus::Running,
             leader_status: None,
-            parameters: Some(r#"{"namespace_id":"default","table_name":"events"}"#.to_string()),
+            parameters: Some(serde_json::json!({"namespace_id":"default","table_name":"events"})),
             message: None,
             exception_trace: None,
             idempotency_key: None,

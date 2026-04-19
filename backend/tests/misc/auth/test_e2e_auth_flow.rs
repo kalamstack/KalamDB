@@ -33,7 +33,7 @@ async fn test_e2e_auth_flow() {
     // Phase 1: User Creation
     println!("📝 Phase 1: Creating test user");
     let user = auth_helper::create_test_user(&server, username, password, Role::Dba).await;
-    assert_eq!(user.username.as_str(), username);
+    assert_eq!(user.user_id.as_str(), username);
     assert_eq!(user.role, Role::Dba);
     println!("✅ User '{}' created successfully", username);
 
@@ -124,8 +124,7 @@ async fn test_e2e_auth_flow() {
     );
     if let Some(err) = response.error {
         assert!(
-            err.message.contains("Invalid username or password")
-                || err.code == "INVALID_CREDENTIALS",
+            err.message.contains("Invalid credentials") || err.code == "INVALID_CREDENTIALS",
             "Expected authentication failure for deleted user, got: {}",
             err.message
         );
@@ -262,11 +261,11 @@ async fn test_password_security_e2e() {
     let user = auth_helper::create_test_user(&server, username, old_password, Role::User).await;
     println!("✅ User created with initial password");
     println!("   User ID: {}", user.user_id.as_str());
-    println!("   Username: {}", user.username.as_str());
+    println!("   User ID: {}", user.user_id.as_str());
 
     // Verify user exists by querying system.users
     let query_sql = format!(
-        "SELECT user_id, username, role FROM system.users WHERE user_id = '{}'",
+        "SELECT user_id, role FROM system.users WHERE user_id = '{}'",
         user.user_id.as_str()
     );
     let response = server.execute_sql_as_user(&query_sql, "system").await;

@@ -255,19 +255,11 @@ impl FlushExecutor {
                 let partition_name = match compact_table_type {
                     TableType::User => {
                         use kalamdb_commons::constants::ColumnFamilyNames;
-                        format!(
-                            "{}{}",
-                            ColumnFamilyNames::USER_TABLE_PREFIX,
-                            compact_table_id
-                        )
+                        format!("{}{}", ColumnFamilyNames::USER_TABLE_PREFIX, compact_table_id)
                     },
                     TableType::Shared => {
                         use kalamdb_commons::constants::ColumnFamilyNames;
-                        format!(
-                            "{}{}",
-                            ColumnFamilyNames::SHARED_TABLE_PREFIX,
-                            compact_table_id
-                        )
+                        format!("{}{}", ColumnFamilyNames::SHARED_TABLE_PREFIX, compact_table_id)
                     },
                     _ => return,
                 };
@@ -279,10 +271,7 @@ impl FlushExecutor {
                 .await
                 {
                     Ok(Ok(())) => {
-                        log::trace!(
-                            "Post-flush compaction completed for {}",
-                            compact_table_id
-                        );
+                        log::trace!("Post-flush compaction completed for {}", compact_table_id);
                     },
                     Ok(Err(e)) => {
                         log::warn!("Post-flush compaction failed (non-critical): {}", e);
@@ -309,13 +298,9 @@ impl FlushExecutor {
                 };
                 let ctx =
                     crate::executors::JobContext::new(cleanup_app_ctx, cleanup_job_id, params);
-                if let Err(e) =
-                    cleanup_empty_shared_scope_if_needed(&ctx, &cleanup_table_id).await
+                if let Err(e) = cleanup_empty_shared_scope_if_needed(&ctx, &cleanup_table_id).await
                 {
-                    log::warn!(
-                        "Post-flush shared scope cleanup failed (non-critical): {}",
-                        e
-                    );
+                    log::warn!("Post-flush shared scope cleanup failed (non-critical): {}", e);
                 }
             });
         }

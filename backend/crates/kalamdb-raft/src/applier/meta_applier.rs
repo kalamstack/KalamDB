@@ -320,7 +320,7 @@ impl MetaApplier for NoOpMetaApplier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kalamdb_commons::models::{AuthType, NamespaceId, TableName, UserName};
+    use kalamdb_commons::models::{AuthType, NamespaceId, TableName};
     use kalamdb_commons::Role;
     use kalamdb_system::JobType;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -524,7 +524,6 @@ mod tests {
         let applier = MockMetaApplier::new();
         let user = User {
             user_id: UserId::from("user_123"),
-            username: UserName::new("testuser"),
             password_hash: "$2b$12$hash".to_string(),
             role: Role::User,
             email: None,
@@ -596,7 +595,7 @@ mod tests {
             storage_type: kalamdb_system::providers::storages::models::StorageType::Filesystem,
             base_directory: "/tmp/local".to_string(),
             credentials: None,
-            config_json: Some(r#"{"type":"local"}"#.to_string()),
+            config_json: Some(serde_json::json!({ "type": "local" })),
             shared_tables_template: "shared".to_string(),
             user_tables_template: "user".to_string(),
             created_at: 0,
@@ -626,7 +625,6 @@ mod tests {
         let user_id = UserId::from("user");
         let user = User {
             user_id: user_id.clone(),
-            username: UserName::new("test"),
             password_hash: "$2b$12$hash".to_string(),
             role: Role::User,
             email: None,
@@ -773,7 +771,6 @@ mod tests {
         let user_id = UserId::from("u1");
         let user = User {
             user_id: user_id.clone(),
-            username: UserName::new("test"),
             password_hash: "$2b$12$hash".to_string(),
             role: Role::User,
             email: None,

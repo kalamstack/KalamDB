@@ -8,6 +8,7 @@ use kalamdb_commons::models::{
 };
 use kalamdb_macros::table;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// Live query subscription row model for `system.live`.
 ///
@@ -54,7 +55,7 @@ use serde::{Deserialize, Serialize};
 ///     table_name: TableName::new("events"),
 ///     user_id,
 ///     query: "SELECT * FROM events WHERE type = 'click'".to_string(),
-///     options: Some(r#"{"include_initial": true}"#.to_string()),
+///     options: Some(serde_json::json!({"include_initial": true})),
 ///     status: LiveQueryStatus::Active,
 ///     created_at: 1730000000000,
 ///     last_update: 1730000300000,
@@ -188,7 +189,8 @@ pub struct LiveQuery {
         default = "None",
         comment = "Query options (JSON)"
     )]
-    pub options: Option<String>,
+    #[serde(default)]
+    pub options: Option<Value>,
     /// Node identifier that holds this subscription's WebSocket connection
     #[column(
         id = 13,
@@ -226,7 +228,7 @@ mod tests {
             table_name: TableName::new("events"),
             user_id: UserId::new("u_123"),
             query: "SELECT * FROM events".to_string(),
-            options: Some(r#"{"include_initial": true}"#.to_string()),
+            options: Some(serde_json::json!({"include_initial": true})),
             status: LiveQueryStatus::Active,
             created_at: 1730000000000,
             last_update: 1730000300000,

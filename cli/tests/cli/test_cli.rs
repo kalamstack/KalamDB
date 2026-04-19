@@ -135,33 +135,28 @@ fn test_cli_color_output() {
     }
 
     // Test with color enabled (default behavior)
-    let mut cmd = create_cli_command();
-    cmd.arg("-u")
-        .arg(server_url())
-        .arg("--username")
-        .arg(default_username())
-        .arg("--password")
-        .arg(root_password())
-        .arg("--command")
-        .arg("SELECT 'color' as test");
+    let mut cmd = create_cli_command_with_root_auth();
+    cmd.arg("--command").arg("SELECT 'color' as test");
 
     let output = cmd.output().unwrap();
-    assert!(output.status.success(), "Color command (default) should succeed");
+    assert!(
+        output.status.success(),
+        "Color command (default) should succeed\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     // Test with color disabled
-    let mut cmd = create_cli_command();
-    cmd.arg("-u")
-        .arg(server_url())
-        .arg("--username")
-        .arg(default_username())
-        .arg("--password")
-        .arg(root_password())
-        .arg("--no-color")
-        .arg("--command")
-        .arg("SELECT 'nocolor' as test");
+    let mut cmd = create_cli_command_with_root_auth();
+    cmd.arg("--no-color").arg("--command").arg("SELECT 'nocolor' as test");
 
     let output = cmd.output().unwrap();
-    assert!(output.status.success(), "No-color command should succeed");
+    assert!(
+        output.status.success(),
+        "No-color command should succeed\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 /// T061: Test session timeout handling
@@ -173,18 +168,16 @@ fn test_cli_session_timeout() {
     }
 
     // Note: --timeout flag not yet implemented, just test that command executes
-    let mut cmd = create_cli_command();
-    cmd.arg("-u")
-        .arg(server_url())
-        .arg("--username")
-        .arg(default_username())
-        .arg("--password")
-        .arg(root_password())
-        .arg("--command")
-        .arg("SELECT 1");
+    let mut cmd = create_cli_command_with_root_auth();
+    cmd.arg("--command").arg("SELECT 1");
 
     let output = cmd.output().unwrap();
-    assert!(output.status.success(), "Should execute command successfully");
+    assert!(
+        output.status.success(),
+        "Should execute command successfully\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 /// T062: Test command history (up/down arrows)
@@ -291,7 +284,7 @@ color = true
         .arg(config_path.to_str().unwrap())
         .arg("-u")
         .arg(server_url())
-        .arg("--username")
+        .arg("--user")
         .arg("root")
         .arg("--password")
         .arg(root_password())
@@ -339,7 +332,7 @@ format = "csv"
         .arg(config_path.to_str().unwrap())
         .arg("-u")
         .arg(server_url()) // Override URL
-        .arg("--username")
+        .arg("--user")
         .arg("root")
         .arg("--password")
         .arg(root_password())

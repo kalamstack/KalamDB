@@ -96,11 +96,11 @@ impl DataFusionSessionFactory {
             settings.memory_limit / (1024 * 1024)
         );
 
-        let base_ctx = SessionContext::new_with_config_rt(config, runtime_env);
+        let mut base_ctx = SessionContext::new_with_config_rt(config, runtime_env);
 
         // Register custom functions ONCE on the base context
         // The resulting SessionState is then reused via cheap clones.
-        Self::register_custom_functions(&base_ctx);
+        Self::register_custom_functions(&mut base_ctx);
 
         Ok(Self {
             state: base_ctx.state(),
@@ -132,7 +132,7 @@ impl DataFusionSessionFactory {
     /// DataFusion built-in functions already available:
     /// - NOW() - Current timestamp
     /// - CURRENT_TIMESTAMP() - Alias for NOW()
-    fn register_custom_functions(ctx: &SessionContext) {
+    fn register_custom_functions(ctx: &mut SessionContext) {
         // Register SNOWFLAKE_ID() function
         let snowflake_fn = SnowflakeIdFunction::new();
         ctx.register_udf(ScalarUDF::from(snowflake_fn));
@@ -153,6 +153,13 @@ impl DataFusionSessionFactory {
 
         // Register CURRENT_ROLE() function (will be overridden with actual role in ExecutionContext)
         ctx.register_udf(ScalarUDF::from(CurrentRoleFunction::new()));
+
+        // Register PostgreSQL-compatible JSON functions and operators (->, ->>, ?).
+        // This replaces the former custom json_extract_scalar UDF and the PG-side
+        // SQL rewrite layer with the community-maintained datafusion-functions-json
+        // crate which handles operator planning natively inside DataFusion.
+        datafusion_functions_json::register_all(ctx)
+            .expect("failed to register JSON functions");
 
         // Register COSINE_DISTANCE(vector, query_vector) for ORDER BY similarity search syntax.
         ctx.register_udf(ScalarUDF::from(CosineDistanceFunction::new()));

@@ -48,7 +48,7 @@ fn test_docs_matrix_has_execution_tests_for_documented_flags_and_commands() {
             tests: &["test_cli_invalid_token"],
         },
         Coverage {
-            item: "--username",
+            item: "--user",
             tests: &["test_cli_color_output"],
         },
         Coverage {
@@ -717,7 +717,7 @@ fn test_cli_consume_flags_work_end_to_end() {
 
     let output = cmd.output().expect("run consume");
 
-    let _ = execute_sql_as_root_via_client(&format!("DROP TOPIC IF EXISTS {}", topic));
+    let _ = execute_sql_as_root_via_client(&format!("DROP TOPIC {}", topic));
     let _ = execute_sql_as_root_via_client(&format!("DROP TABLE IF EXISTS {}", full_table));
     let _ = execute_sql_as_root_via_client(&format!("DROP NAMESPACE IF EXISTS {}", namespace));
 
@@ -808,6 +808,7 @@ fn test_cli_host_and_port_work_against_running_server() {
     }
 
     let server = server_url().to_string();
+    ensure_cli_auth_ready_on_server(default_username(), default_password(), &server);
     let host_port = server
         .strip_prefix("http://")
         .or_else(|| server.strip_prefix("https://"))
@@ -819,7 +820,7 @@ fn test_cli_host_and_port_work_against_running_server() {
         .arg(host)
         .arg("--port")
         .arg(port)
-        .arg("--username")
+        .arg("--user")
         .arg(default_username())
         .arg("--password")
         .arg(default_password())

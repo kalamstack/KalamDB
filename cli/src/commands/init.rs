@@ -539,7 +539,7 @@ fn render_package_json(package_name: &str, sdk_dependency: &str) -> String {
 
 fn render_env_example(config: &AgentScaffoldConfig) -> String {
     format!(
-        "# KalamDB connection\nKALAMDB_URL=http://localhost:8080\nKALAMDB_USERNAME=root\nKALAMDB_PASSWORD=kalamdb123\n\n# Agent routing\nKALAMDB_TOPIC={}\nKALAMDB_GROUP={}\n\n# Table mapping\nKALAMDB_TABLE_ID={}\nKALAMDB_ID_COLUMN={}\nKALAMDB_INPUT_COLUMN={}\nKALAMDB_OUTPUT_COLUMN={}\n\n# LLM settings\nKALAMDB_SYSTEM_PROMPT={}\nOPENAI_API_KEY=\nOPENAI_MODEL=gpt-4o-mini\n",
+        "# KalamDB connection\nKALAMDB_URL=http://localhost:8080\nKALAMDB_USER=root\nKALAMDB_PASSWORD=kalamdb123\n\n# Agent routing\nKALAMDB_TOPIC={}\nKALAMDB_GROUP={}\n\n# Table mapping\nKALAMDB_TABLE_ID={}\nKALAMDB_ID_COLUMN={}\nKALAMDB_INPUT_COLUMN={}\nKALAMDB_OUTPUT_COLUMN={}\n\n# LLM settings\nKALAMDB_SYSTEM_PROMPT={}\nOPENAI_API_KEY=\nOPENAI_MODEL=gpt-4o-mini\n",
         config.topic_id,
         config.group_id,
         config.table_id,
@@ -620,7 +620,7 @@ login_root() {{
   local response
   response="$(curl -fsS -X POST "$KALAMDB_URL/v1/api/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{{\"username\":\"root\",\"password\":\"$ROOT_PASSWORD\"}}")"
+    -d "{{\"user\":\"root\",\"password\":\"$ROOT_PASSWORD\"}}")"
 
   ACCESS_TOKEN="$(echo "$response" | jq -r '.access_token // empty')"
   if [[ -z "$ACCESS_TOKEN" ]]; then
@@ -720,7 +720,7 @@ generate_env_file() {{
   cat > "$ENV_FILE" <<EOF_ENV
 # KalamDB connection
 KALAMDB_URL=$KALAMDB_URL
-KALAMDB_USERNAME=root
+KALAMDB_USER=root
 KALAMDB_PASSWORD=$ROOT_PASSWORD
 
 # Agent routing
@@ -869,7 +869,7 @@ loadEnv({{ path: '.env.local', quiet: true }});
 loadEnv({{ quiet: true }});
 
 const KALAMDB_URL = process.env.KALAMDB_URL ?? 'http://127.0.0.1:8080';
-const KALAMDB_USERNAME = process.env.KALAMDB_USERNAME ?? 'root';
+const KALAMDB_USER = process.env.KALAMDB_USER ?? 'root';
 const KALAMDB_PASSWORD = process.env.KALAMDB_PASSWORD ?? 'kalamdb123';
 const TOPIC = process.env.KALAMDB_TOPIC ?? '{topic_id}';
 const GROUP = process.env.KALAMDB_GROUP ?? '{group_id}';
@@ -916,7 +916,7 @@ assertIdentifier(OUTPUT_COLUMN, 'output column');
 
 const client = createClient({{
   url: normalizeUrlForNode(KALAMDB_URL),
-  auth: Auth.basic(KALAMDB_USERNAME, KALAMDB_PASSWORD),
+  auth: Auth.basic(KALAMDB_USER, KALAMDB_PASSWORD),
 }});
 
 function fallbackSummary(content: string): string {{

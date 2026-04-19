@@ -30,7 +30,8 @@ describe('Auth', { timeout: 30_000 }, () => {
     assert.ok(resp.refresh_token, 'expected refresh_token');
     assert.ok(resp.user, 'expected user info');
     assert.equal(typeof resp.user.id, 'string');
-    assert.equal(typeof resp.user.username, 'string');
+    assert.equal(typeof resp.user.role, 'string');
+    assert.equal(typeof resp.admin_ui_access, 'boolean');
 
     await client.disconnect();
   });
@@ -106,15 +107,14 @@ describe('Auth', { timeout: 30_000 }, () => {
   });
 
   // -----------------------------------------------------------------------
-  // Auth.none (anonymous)
+  // Initial auth state
   // -----------------------------------------------------------------------
-  test('Auth.none client can be created (anonymous mode)', async () => {
+  test('auth type is unresolved before initialize()', async () => {
     const client = createClient({
       url: SERVER_URL,
-      authProvider: async () => Auth.none(),
+      authProvider: async () => Auth.jwt('bootstrap-token'),
     });
-    assert.equal(client.getAuthType(), 'none');
-    // Anonymous queries may be rejected by server policy but client creation succeeds
+    assert.equal(client.getAuthType(), null);
   });
 
   // -----------------------------------------------------------------------
@@ -135,7 +135,7 @@ describe('Auth', { timeout: 30_000 }, () => {
   // Validation
   // -----------------------------------------------------------------------
   test('constructor requires url', () => {
-    assert.throws(() => createClient({ url: '', authProvider: async () => Auth.none() }));
+    assert.throws(() => createClient({ url: '', authProvider: async () => Auth.jwt('bootstrap-token') }));
   });
 
   test('constructor requires authProvider', () => {

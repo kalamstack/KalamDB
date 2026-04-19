@@ -8,7 +8,7 @@
 //! - Validating authentication responses
 
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
-use kalamdb_commons::{AuthType, Role, StorageId, UserId, UserName};
+use kalamdb_commons::{AuthType, Role, StorageId, UserId};
 use kalamdb_core::error::KalamDbError;
 use kalamdb_core::sql::context::ExecutionContext;
 use kalamdb_system::providers::storages::models::StorageMode;
@@ -68,7 +68,7 @@ pub async fn create_test_user(
     let exec_ctx = ExecutionContext::new(system_user_id, Role::System, session);
 
     let users_provider = server.app_context.system_tables().users();
-    if let Ok(Some(mut existing)) = users_provider.get_user_by_username(username) {
+    if let Ok(Some(mut existing)) = users_provider.get_user_by_id(&user_id) {
         existing.password_hash =
             bcrypt::hash(password, bcrypt::DEFAULT_COST).expect("Failed to hash password");
         existing.role = role;
@@ -88,7 +88,7 @@ pub async fn create_test_user(
 
         if let Err(e) = &result {
             if matches!(e, KalamDbError::AlreadyExists(_)) {
-                if let Ok(Some(mut existing)) = users_provider.get_user_by_username(username) {
+                if let Ok(Some(mut existing)) = users_provider.get_user_by_id(&user_id) {
                     existing.password_hash = bcrypt::hash(password, bcrypt::DEFAULT_COST)
                         .expect("Failed to hash password");
                     existing.role = role;
@@ -114,7 +114,6 @@ pub async fn create_test_user(
     // Return user object for test verification
     User {
         user_id,
-        username: username.into(),
         password_hash: String::new(), // Not needed for tests
         role,
         email: Some(format!("{}@example.com", username)),
@@ -154,7 +153,6 @@ pub fn create_bearer_auth_header(username: &str, user_id: &str, role: Role) -> S
     let email = format!("{}@example.com", username);
     let (token, _claims) = kalamdb_auth::providers::jwt_auth::create_and_sign_token(
         &UserId::new(user_id),
-        &UserName::new(username),
         &role,
         Some(email.as_str()),
         Some(1),
@@ -249,7 +247,6 @@ pub async fn create_system_user(server: &super::TestServer, username: &str) -> U
 
     let user = User {
         user_id: UserId::new(format!("sys_{}", username)),
-        username: username.into(),
         password_hash: String::new(), // No password for system users (localhost-only)
         role: Role::System,
         email: None,
@@ -286,7 +283,7 @@ pub async fn create_user_auth_header(
     role: &Role,
 ) -> anyhow::Result<String> {
     let _ = ensure_user_exists(server, username, password, role).await?;
-    server.bearer_auth_header(&UserName::new(username))
+    server.bearer_auth_header(username)
 }
 
 /// Create a user (if needed) and return both the Bearer auth header and user_id.
@@ -297,7 +294,7 @@ pub async fn create_user_auth_header_with_id(
     role: &Role,
 ) -> anyhow::Result<(String, String)> {
     let user_id = ensure_user_exists(server, username, password, role).await?;
-    let auth = server.bearer_auth_header(&UserName::new(username))?;
+    let auth = server.bearer_auth_header(username)?;
     Ok((auth, user_id))
 }
 

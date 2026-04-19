@@ -1,12 +1,13 @@
 //! Server setup request and response models.
 
+use kalamdb_commons::{Role, UserId};
 use serde::{Deserialize, Serialize};
 
 /// Server setup request body
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerSetupRequest {
-    /// Username for the new DBA user
-    pub username: String,
+    /// Canonical user identifier for the new DBA account
+    pub user: UserId,
     /// Password for the new DBA user  
     pub password: String,
     /// Password for the root user
@@ -19,13 +20,13 @@ pub struct ServerSetupRequest {
 impl ServerSetupRequest {
     /// Create a new server setup request
     pub fn new(
-        username: impl Into<String>,
+        user: impl Into<UserId>,
         password: impl Into<String>,
         root_password: impl Into<String>,
         email: Option<String>,
     ) -> Self {
         Self {
-            username: username.into(),
+            user: user.into(),
             password: password.into(),
             root_password: root_password.into(),
             email,
@@ -47,9 +48,8 @@ pub struct ServerSetupResponse {
 /// User info returned in setup response
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetupUserInfo {
-    pub id: String,
-    pub username: String,
-    pub role: String,
+    pub id: UserId,
+    pub role: Role,
     pub email: Option<String>,
     pub created_at: String,
     pub updated_at: String,

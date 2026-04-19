@@ -371,7 +371,7 @@ impl TestEnv {
             .post_json(
                 &format!("{}/v1/api/auth/setup", config.base_url),
                 &serde_json::json!({
-                    "username": config.setup_username,
+                    "user": config.setup_username,
                     "password": config.setup_password,
                     "root_password": config.root_password,
                 }),
@@ -511,7 +511,7 @@ async fn try_login(
         .post_json(
             &format!("{base_url}/v1/api/auth/login"),
             &serde_json::json!({
-                "username": username,
+                "user": username,
                 "password": password,
             }),
             None,

@@ -42,7 +42,7 @@ mod tests {
     use actix_web::{web, App, HttpServer};
     use futures_util::StreamExt;
     use kalamdb_auth::{create_and_sign_token, CoreUsersRepo, UserRepository};
-    use kalamdb_commons::models::{KalamCellValue, UserId, UserName};
+    use kalamdb_commons::models::{KalamCellValue, UserId};
     use kalamdb_commons::websocket::{ChangeType, SharedChangePayload, WireNotification};
     use kalamdb_commons::Role;
     use kalamdb_core::app_context::AppContext;
@@ -69,7 +69,6 @@ mod tests {
         let now = chrono::Utc::now().timestamp_millis();
         User {
             user_id: UserId::new("ws-test-user"),
-            username: UserName::new("ws_test_user"),
             password_hash: "$2b$12$hash".to_string(),
             role: Role::Dba,
             email: Some("ws-test@example.com".to_string()),
@@ -93,15 +92,9 @@ mod tests {
         app_context.system_tables().users().create_user(user.clone()).unwrap();
 
         let secret = app_context.config().auth.jwt_secret.clone();
-        let (token, _) = create_and_sign_token(
-            &user.user_id,
-            &user.username,
-            &user.role,
-            user.email.as_deref(),
-            None,
-            &secret,
-        )
-        .unwrap();
+        let (token, _) =
+            create_and_sign_token(&user.user_id, &user.role, user.email.as_deref(), None, &secret)
+                .unwrap();
 
         let rate_limiter = Arc::new(RateLimiter::new());
         let live_query_manager = app_context.live_query_manager();

@@ -18,7 +18,7 @@ import {
   type Unsubscribe,
   type LoginResponse,
   type LiveRowsOptions,
-} from '../src/index';
+} from '../src/index.js';
 
 // Test: Constructor with Auth.basic
 const client1 = new KalamDBClient({
@@ -32,34 +32,28 @@ const client2 = new KalamDBClient({
   authProvider: async () => Auth.jwt('eyJhbGci...'),
 });
 
-// Test: Constructor with Auth.none
-const client3 = new KalamDBClient({
-  url: 'http://localhost:8080',
-  authProvider: async () => Auth.none(),
-});
-
 // Test: Factory function
-const client4 = createClient({
+const client3 = createClient({
   url: 'http://localhost:8080',
   authProvider: async () => Auth.basic('admin', 'admin'),
 });
 
 // Test: Factory function with wsLazyConnect
-const client5 = createClient({
+const client4 = createClient({
   url: 'http://localhost:8080',
   authProvider: async () => Auth.basic('admin', 'admin'),
   wsLazyConnect: true,
 });
 
 // Test: wsLazyConnect defaults to true — connection is managed internally
-const client6 = createClient({
+const client5 = createClient({
   url: 'http://localhost:8080',
   authProvider: async () => Auth.basic('admin', 'admin'),
   wsLazyConnect: false,
 });
 
 // Test: getAuthType
-const authType: 'basic' | 'jwt' | 'none' = client1.getAuthType();
+const authType: 'basic' | 'jwt' | null = client1.getAuthType();
 
 // Test: Async methods return promises
 async function testMethods() {
@@ -99,7 +93,7 @@ async function testMethods() {
   };
   const unsub2 = await client.subscribeWithSql(
     'SELECT * FROM chat.messages',
-    (event) => {},
+    (_event: ServerMessage) => {},
     opts,
   );
 

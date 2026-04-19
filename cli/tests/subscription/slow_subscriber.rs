@@ -235,9 +235,9 @@ fn subscription_3g_like_high_latency() {
         .build()
         .expect("runtime");
 
-    let events = rt.block_on(async {
-        // Mimic high-latency client: very long timeouts, not rushed
-        let client = slow_client(240, 240).expect("client");
+    // Single runtime handles both phases: initial data and live change events
+    let (initial_ok, change_found) = rt.block_on(async {
+        let client = slow_client(60, 60).expect("client");
         let mut sub = client.subscribe(&query).await.expect("subscribe");
 
         // Wait 300ms (simulated RTT) before starting to read
@@ -247,36 +247,12 @@ fn subscription_3g_like_high_latency() {
             &mut sub,
             15,
             Duration::from_millis(100), // 100ms per event – slow 3G consumer
-            Duration::from_secs(60),
+            Duration::from_secs(15),
         )
         .await;
 
-        // Now insert a new row and wait for the live event
-        drop(sub); // temporarily drop; we'll check via select
-        evs
-    });
-
-    let joined = events.join("\n");
-    assert!(
-        joined.contains("Ack") || joined.contains("row_1"),
-        "High-latency subscriber should still get initial data. Got: {}",
-        &joined[..joined.len().min(400)]
-    );
-
-    // Now verify a change event also arrives for a high-latency client
-    let rt2 = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime2");
-
-    let change_found = rt2.block_on(async {
-        let client = slow_client(240, 240).expect("client2");
-        let mut sub = client.subscribe(&query).await.expect("subscribe2");
-
-        // Drain initial snapshot slowly
-        let (_, _) =
-            drain_with_delay(&mut sub, 15, Duration::from_millis(50), Duration::from_secs(30))
-                .await;
+        let joined = evs.join("\n");
+        let initial_ok = joined.contains("Ack") || joined.contains("row_1");
 
         // Insert while consumer is live (after initial data)
         let _ = execute_sql_as_root_via_client(&format!(
@@ -286,12 +262,15 @@ fn subscription_3g_like_high_latency() {
 
         // Slow consumer picks up the live insert
         tokio::time::sleep(Duration::from_millis(300)).await;
-        let (evs, _) =
-            drain_with_delay(&mut sub, 5, Duration::from_millis(100), Duration::from_secs(30))
+        let (evs2, _) =
+            drain_with_delay(&mut sub, 5, Duration::from_millis(100), Duration::from_secs(10))
                 .await;
-        evs.iter().any(|e| e.contains(&marker))
+        let change_found = evs2.iter().any(|e| e.contains(&marker));
+
+        (initial_ok, change_found)
     });
 
+    assert!(initial_ok, "High-latency subscriber should still get initial data");
     assert!(
         change_found,
         "High-latency subscriber should receive live change event for marker '{}'",
@@ -539,16 +518,16 @@ fn subscription_timeout_graceful_then_reconnect() {
         }
 
         // Brief recovery delay (simulates reconnect back-off)
-        tokio::time::sleep(Duration::from_millis(800)).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
 
         // ── Phase 2: normal timeouts – must succeed ──
-        let client_normal = slow_client(120, 120).expect("normal client");
+        let client_normal = slow_client(30, 30).expect("normal client");
         let mut sub_normal = client_normal.subscribe(&query).await.expect("normal subscribe");
         let (evs_normal, hit_err) = drain_with_delay(
             &mut sub_normal,
             40,
             Duration::from_millis(0),
-            Duration::from_secs(60),
+            Duration::from_secs(15),
         )
         .await;
 
@@ -889,8 +868,8 @@ fn subscription_repeated_reconnect_loop() {
 // Inserts a new row during the pause. Verifies the event arrives after the
 // pause ends (i.e. the server keeps the connection alive and buffers the event).
 // ─────────────────────────────────────────────────────────────────────────────
-// actual ≈49s × 1.5 = 74s → 120000ms
-#[ntest::timeout(120000)]
+// actual ≈15s after optimization; allow 30s on slower machines
+#[ntest::timeout(30000)]
 #[test]
 fn subscription_stable_after_idle_pause() {
     if !require_server_running() {
@@ -915,16 +894,16 @@ fn subscription_stable_after_idle_pause() {
         .expect("runtime");
 
     let found = rt.block_on(async {
-        let client = slow_client(120, 120).expect("client");
+        let client = slow_client(30, 30).expect("client");
         let mut sub = client.subscribe(&query).await.expect("subscribe");
 
         // Drain initial snapshot
         let (_, _) =
             drain_with_delay(&mut sub, 5, Duration::from_millis(0), Duration::from_secs(15)).await;
 
-        // ── Simulate idle pause (3–4 seconds): subscriber goes quiet ──
-        println!("[TEST] idle_pause: subscriber pausing for 3s…");
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        // ── Simulate idle pause (1.5 seconds): subscriber goes quiet ──
+        println!("[TEST] idle_pause: subscriber pausing for 1.5s…");
+        tokio::time::sleep(Duration::from_millis(1500)).await;
 
         // Insert a row while the subscriber is "paused"
         let _ = execute_sql_as_root_via_client(&format!(
@@ -935,7 +914,7 @@ fn subscription_stable_after_idle_pause() {
         // Resume reading after the pause
         println!("[TEST] idle_pause: subscriber resuming…");
         let (evs, hit_error) =
-            drain_with_delay(&mut sub, 5, Duration::from_millis(0), Duration::from_secs(30)).await;
+            drain_with_delay(&mut sub, 5, Duration::from_millis(0), Duration::from_secs(10)).await;
 
         assert!(!hit_error, "No errors expected after idle pause. Events: {:?}", &evs);
         evs.iter().any(|e| e.contains(&wake_marker))

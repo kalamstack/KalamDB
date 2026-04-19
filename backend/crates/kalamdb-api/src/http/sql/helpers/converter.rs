@@ -3,7 +3,6 @@
 use arrow::record_batch::RecordBatch;
 use kalamdb_commons::conversions::{mask_sensitive_rows_for_role, schema_fields_from_arrow_schema};
 use kalamdb_commons::models::Role;
-use kalamdb_commons::models::Username;
 use kalamdb_commons::schemas::SchemaField;
 use kalamdb_core::providers::arrow_json_conversion::record_batch_to_json_arrays;
 
@@ -57,7 +56,7 @@ pub fn row_result_prefix(schema_fields: &[SchemaField]) -> Result<String, serde_
     ))
 }
 
-pub fn success_response_suffix(row_count: usize, as_user: &Username, took: f64) -> String {
+pub fn success_response_suffix(row_count: usize, as_user: &str, took: f64) -> String {
     let rounded = (took * 1000.0).round() / 1000.0;
     format!(
         "],\"row_count\":{},\"as_user\":{}}}],\"took\":{},\"error\":null}}",

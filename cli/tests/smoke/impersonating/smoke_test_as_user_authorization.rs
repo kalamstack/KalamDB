@@ -1,7 +1,7 @@
 use crate::common::*;
 
-fn get_user_id_for_username(username: &str) -> Option<String> {
-    let query = format!("SELECT user_id FROM system.users WHERE username = '{}'", username);
+fn get_user_id(user_id: &str) -> Option<String> {
+    let query = format!("SELECT user_id FROM system.users WHERE user_id = '{}'", user_id);
     let result = execute_sql_as_root_via_client_json(&query).ok()?;
 
     let json: serde_json::Value = serde_json::from_str(&result).ok()?;
@@ -79,11 +79,10 @@ fn smoke_security_regular_user_cannot_impersonate_privileged_users_in_batch() {
     ))
     .expect("Failed to create dba user");
 
-    let service_user_id =
-        get_user_id_for_username(&service_user).expect("Failed to get service user_id");
-    let dba_user_id = get_user_id_for_username(&dba_user).expect("Failed to get dba user_id");
-    let system_user_id = get_user_id_for_username("root")
-        .or_else(|| get_user_id_for_username("system"))
+    let service_user_id = get_user_id(&service_user).expect("Failed to get service user_id");
+    let dba_user_id = get_user_id(&dba_user).expect("Failed to get dba user_id");
+    let system_user_id = get_user_id("root")
+        .or_else(|| get_user_id("system"))
         .expect("Failed to get system user_id");
 
     let attempts = vec![

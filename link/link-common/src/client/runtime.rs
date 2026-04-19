@@ -5,7 +5,7 @@ use crate::{
     auth::{AuthProvider, ResolvedAuth},
     error::{KalamLinkError, Result},
     event_handlers::EventHandlers,
-    models::{QueryResponse, SubscriptionConfig, SubscriptionInfo},
+    models::{LoginResponse, QueryResponse, SubscriptionConfig, SubscriptionInfo},
     query::UploadProgressCallback,
     subscription::{LiveRowsConfig, LiveRowsSubscription, SubscriptionManager},
     timeouts::KalamLinkTimeouts,
@@ -225,6 +225,15 @@ impl KalamLinkClient {
             return Ok(());
         }
 
+        let resolved_auth = match self.fresh_auth().await? {
+            AuthProvider::BasicAuth(user, password) => {
+                let login_response = self.exchange_login_credentials(&user, &password).await?;
+                AuthProvider::jwt_token(login_response.access_token)
+            },
+            auth => auth,
+        };
+        self.update_shared_auth(resolved_auth);
+
         let conn = crate::connection::SharedConnection::connect(
             self.base_url.clone(),
             self.shared_resolved_auth.clone(),
@@ -328,5 +337,29 @@ impl KalamLinkClient {
     /// Resolve fresh credentials from the auth source.
     pub async fn fresh_auth(&self) -> Result<AuthProvider> {
         self.resolved_auth.resolve().await
+    }
+
+    async fn exchange_login_credentials(
+        &self,
+        user: &str,
+        password: &str,
+    ) -> Result<LoginResponse> {
+        let url = format!("{}/v1/api/auth/login", self.base_url);
+        let body = serde_json::json!({
+            "user": user,
+            "password": password,
+        });
+
+        let response = self.http_client.post(&url).json(&body).send().await?;
+        let status = response.status();
+        if !status.is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(KalamLinkError::AuthenticationError(format!(
+                "Login failed during auth exchange ({}): {}",
+                status, error_text
+            )));
+        }
+
+        Ok(response.json::<LoginResponse>().await?)
     }
 }

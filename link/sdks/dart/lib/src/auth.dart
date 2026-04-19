@@ -13,8 +13,8 @@
 sealed class Auth {
   const Auth._();
 
-  /// HTTP Basic Auth with username and password.
-  const factory Auth.basic(String username, String password) = BasicAuth;
+  /// HTTP Basic Auth with user and password.
+  const factory Auth.basic(String user, String password) = BasicAuth;
 
   /// JWT bearer token authentication.
   const factory Auth.jwt(String token) = JwtAuth;
@@ -25,13 +25,13 @@ sealed class Auth {
 
 /// HTTP Basic Auth credentials.
 final class BasicAuth extends Auth {
-  /// The username.
-  final String username;
+  /// The canonical user identifier.
+  final String user;
 
   /// The password.
   final String password;
 
-  const BasicAuth(this.username, this.password) : super._();
+  const BasicAuth(this.user, this.password) : super._();
 }
 
 /// JWT bearer token authentication.

@@ -549,7 +549,8 @@ impl ConnectionsManager {
                     table_name: subscription.table_id.table_name().clone(),
                     user_id: user_id.clone(),
                     query: runtime_metadata.query().to_string(),
-                    options: runtime_metadata.options_json().map(std::borrow::ToOwned::to_owned),
+                    options: runtime_metadata.options_json()
+                        .and_then(|s| serde_json::from_str(s).ok()),
                     status: LiveQueryStatus::Active,
                     created_at: runtime_metadata.created_at_ms(),
                     last_update: runtime_metadata.last_update_ms(),

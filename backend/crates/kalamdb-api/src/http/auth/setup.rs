@@ -10,7 +10,7 @@ use kalamdb_auth::{
     security::password::{hash_password, validate_password},
     UserRepository,
 };
-use kalamdb_commons::models::{StorageId, UserId, UserName};
+use kalamdb_commons::models::{StorageId, UserId};
 use kalamdb_commons::{AuthType, Role};
 use kalamdb_configs::AuthSettings;
 use kalamdb_system::providers::storages::models::StorageMode;
@@ -31,7 +31,6 @@ fn build_setup_response(user: &User, message: String) -> ServerSetupResponse {
     ServerSetupResponse {
         user: UserInfo {
             id: user.user_id.clone(),
-            username: user.username.clone(),
             role: user.role,
             email: user.email.clone(),
             created_at: created_at_str,
@@ -58,8 +57,6 @@ pub async fn server_setup_handler(
     rate_limiter: web::Data<Arc<RateLimiter>>,
     body: web::Json<ServerSetupRequest>,
 ) -> HttpResponse {
-    use kalamdb_commons::constants::AuthConstants;
-
     // Only allow setup from localhost
     let connection_info = extract_client_ip_secure(&req);
 
@@ -79,8 +76,8 @@ pub async fn server_setup_handler(
     }
 
     // Check if root user exists and has empty password
-    let root_username = UserName::new(AuthConstants::DEFAULT_SYSTEM_USERNAME);
-    let root_user = match user_repo.get_user_by_username(&root_username).await {
+    let root_user_id = UserId::root();
+    let root_user = match user_repo.get_user_by_id(&root_user_id).await {
         Ok(user) => user,
         Err(e) => {
             log::error!("Failed to get root user: {}", e);
@@ -107,20 +104,27 @@ pub async fn server_setup_handler(
             .json(AuthErrorResponse::new("weak_password", format!("Root password: {}", e)));
     }
 
-    // Check username is not root
-    if body.username == UserName::root() {
+    let dba_user_id = match UserId::try_new(body.user.clone()) {
+        Ok(user_id) => user_id,
+        Err(_) => {
+            return HttpResponse::BadRequest()
+                .json(AuthErrorResponse::new("invalid_user", "Invalid user value"));
+        },
+    };
+
+    // Check user is not root
+    if dba_user_id == UserId::root() {
         return HttpResponse::BadRequest().json(AuthErrorResponse::new(
-            "invalid_username",
-            "Cannot create a DBA user with username 'root'. Choose a different username.",
+            "invalid_user",
+            "Cannot create a DBA user with user 'root'. Choose a different user.",
         ));
     }
 
-    // Check if DBA username already exists
-    let dba_username = body.username.clone();
-    if user_repo.get_user_by_username(&dba_username).await.is_ok() {
+    // Check if DBA user already exists
+    if user_repo.get_user_by_id(&dba_user_id).await.is_ok() {
         return HttpResponse::Conflict().json(AuthErrorResponse::new(
             "user_exists",
-            format!("User '{}' already exists", body.username.as_str()),
+            format!("User '{}' already exists", dba_user_id.as_str()),
         ));
     }
 
@@ -159,8 +163,7 @@ pub async fn server_setup_handler(
     // Create new DBA user
     let created_at = chrono::Utc::now().timestamp_millis();
     let dba_user = User {
-        user_id: UserId::new(format!("u_{}", uuid::Uuid::new_v4().simple())),
-        username: dba_username.clone(),
+        user_id: dba_user_id.clone(),
         password_hash: dba_password_hash,
         role: Role::Dba,
         email: body.email.clone(),
@@ -180,24 +183,24 @@ pub async fn server_setup_handler(
     if let Err(e) = user_repo.create_user(dba_user.clone()).await {
         match e {
             AuthError::DatabaseError(message) if message.contains("already exists") => {
-                match user_repo.get_user_by_username(&dba_username).await {
+                match user_repo.get_user_by_id(&dba_user_id).await {
                     Ok(existing_user) => {
                         log::info!(
                             "Server setup raced with another caller; reusing existing DBA user '{}'",
-                            dba_username
+                            dba_user_id.as_str()
                         );
                         return HttpResponse::Ok().json(build_setup_response(
                             &existing_user,
                             format!(
                                 "Server setup already completed for DBA user '{}'. Please login to continue.",
-                                existing_user.username
+                                existing_user.user_id.as_str()
                             ),
                         ));
                     },
                     Err(fetch_error) => {
                         log::error!(
                             "Failed to load existing DBA user '{}' after create race: {}",
-                            dba_username,
+                            dba_user_id.as_str(),
                             fetch_error
                         );
                     },
@@ -214,7 +217,7 @@ pub async fn server_setup_handler(
 
     log::info!(
         "Server setup completed: root password set, DBA user '{}' created",
-        body.username
+        dba_user_id.as_str()
     );
 
     // Return user info only - user must login separately to get tokens
@@ -222,7 +225,7 @@ pub async fn server_setup_handler(
         &dba_user,
         format!(
             "Server setup complete. Root password configured and DBA user '{}' created. Please login to continue.",
-            body.username
+            dba_user_id.as_str()
         ),
     ))
 }
@@ -236,8 +239,6 @@ pub async fn setup_status_handler(
     user_repo: web::Data<Arc<dyn UserRepository>>,
     config: web::Data<AuthSettings>,
 ) -> HttpResponse {
-    use kalamdb_commons::constants::AuthConstants;
-
     // Only allow status check from localhost
     let connection_info = extract_client_ip_secure(&req);
     if !connection_info.is_localhost() && !config.allow_remote_setup {
@@ -247,8 +248,8 @@ pub async fn setup_status_handler(
         ));
     }
 
-    let root_username = UserName::new(AuthConstants::DEFAULT_SYSTEM_USERNAME);
-    let root_user = match user_repo.get_user_by_username(&root_username).await {
+    let root_user_id = UserId::root();
+    let root_user = match user_repo.get_user_by_id(&root_user_id).await {
         Ok(user) => user,
         Err(e) => {
             log::error!("Failed to get root user: {}", e);
@@ -262,7 +263,7 @@ pub async fn setup_status_handler(
     HttpResponse::Ok().json(serde_json::json!({
         "needs_setup": needs_setup,
         "message": if needs_setup {
-            "Server requires initial setup. Call POST /v1/api/auth/setup with username, password, root_password, and optional email."
+            "Server requires initial setup. Call POST /v1/api/auth/setup with user, password, root_password, and optional email."
         } else {
             "Server is configured and ready."
         }

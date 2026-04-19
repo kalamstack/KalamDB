@@ -227,7 +227,7 @@ mod tests {
     use arrow::array::Array;
     use datafusion::arrow::array::TimestampMicrosecondArray;
     use datafusion::datasource::TableProvider;
-    use kalamdb_commons::{UserId, UserName};
+    use kalamdb_commons::UserId;
     use kalamdb_store::test_utils::InMemoryBackend;
     use serde_json::json;
 
@@ -242,7 +242,6 @@ mod tests {
             timestamp,
             subject_user_id: Some(UserId::new("user_123")),
             actor_user_id: UserId::new("admin"),
-            actor_username: UserName::new("admin"),
             action: action.to_string(),
             target: "system.users".to_string(),
             details: Some(json!({"test": true}).to_string()),
@@ -283,7 +282,7 @@ mod tests {
         // Scan all
         let batch = provider.scan_all_entries().unwrap();
         assert_eq!(batch.num_rows(), 5);
-        assert_eq!(batch.num_columns(), 9);
+        assert_eq!(batch.num_columns(), 8);
     }
 
     #[test]
@@ -307,7 +306,7 @@ mod tests {
 
         // Verify actions column
         let actions = batch
-            .column(4)
+            .column(3)
             .as_any()
             .downcast_ref::<datafusion::arrow::array::StringArray>()
             .unwrap();
@@ -325,7 +324,7 @@ mod tests {
 
         // Scan with all columns
         let batch = provider.scan_all_entries().unwrap();
-        assert_eq!(batch.num_columns(), 9);
+        assert_eq!(batch.num_columns(), 8);
 
         // Verify schema matches
         assert_eq!(batch.schema(), provider.schema());
@@ -360,7 +359,6 @@ mod tests {
             timestamp: 1730000000000,
             subject_user_id: None,
             actor_user_id: UserId::new("admin"),
-            actor_username: UserName::new("admin"),
             action: "test.action".to_string(),
             target: "test.target".to_string(),
             details: None,    // Optional
@@ -399,7 +397,7 @@ mod tests {
     fn test_scan_all_via_provider_api() {
         let provider = create_test_provider();
 
-        assert_eq!(provider.schema().fields().len(), 9);
+        assert_eq!(provider.schema().fields().len(), 8);
 
         provider
             .append(create_test_entry("audit_001", "test.action", 1730000000000))

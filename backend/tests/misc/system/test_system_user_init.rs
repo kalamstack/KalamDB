@@ -32,9 +32,9 @@ async fn test_system_user_created_on_init() {
     assert_eq!(rows.len(), 1, "System user should exist");
     let row = &rows[0];
 
-    // Verify username
-    let username = row.get("username").and_then(|v| v.as_str()).expect("username missing");
-    assert_eq!(username, AuthConstants::DEFAULT_SYSTEM_USERNAME);
+    // Verify system user id
+    let user_id = row.get("user_id").and_then(|v| v.as_str()).expect("user_id missing");
+    assert_eq!(user_id, AuthConstants::DEFAULT_ROOT_USER_ID);
 
     // Verify role
     let role_str = row.get("role").and_then(|v| v.as_str()).expect("role missing");

@@ -128,7 +128,7 @@ abstract class RustLibApi extends BaseApi {
 
   Future<DartLoginResponse> crateApiDartLogin(
       {required DartKalamClient client,
-      required String username,
+      required String user,
       required String password});
 
   Future<DartConnectionEvent?> crateApiDartNextConnectionEvent(
@@ -554,14 +554,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @override
   Future<DartLoginResponse> crateApiDartLogin(
       {required DartKalamClient client,
-      required String username,
+      required String user,
       required String password}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerDartKalamClient(
             client, serializer);
-        sse_encode_String(username, serializer);
+        sse_encode_String(user, serializer);
         sse_encode_String(password, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
             funcId: 13, port: port_);
@@ -571,14 +571,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeErrorData: sse_decode_AnyhowException,
       ),
       constMeta: kCrateApiDartLoginConstMeta,
-      argValues: [client, username, password],
+      argValues: [client, user, password],
       apiImpl: this,
     ));
   }
 
   TaskConstMeta get kCrateApiDartLoginConstMeta => const TaskConstMeta(
         debugName: "dart_login",
-        argNames: ["client", "username", "password"],
+        argNames: ["client", "user", "password"],
       );
 
   @override
@@ -1000,7 +1000,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     switch (raw[0]) {
       case 0:
         return DartAuthProvider_BasicAuth(
-          username: dco_decode_String(raw[1]),
+          user: dco_decode_String(raw[1]),
           password: dco_decode_String(raw[2]),
         );
       case 1:
@@ -1162,14 +1162,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   DartLoginResponse dco_decode_dart_login_response(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 5)
-      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    if (arr.length != 6)
+      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
     return DartLoginResponse(
       accessToken: dco_decode_String(arr[0]),
       refreshToken: dco_decode_opt_String(arr[1]),
       expiresAt: dco_decode_String(arr[2]),
       refreshExpiresAt: dco_decode_opt_String(arr[3]),
-      user: dco_decode_dart_login_user_info(arr[4]),
+      adminUiAccess: dco_decode_bool(arr[4]),
+      user: dco_decode_dart_login_user_info(arr[5]),
     );
   }
 
@@ -1177,15 +1178,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   DartLoginUserInfo dco_decode_dart_login_user_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
     return DartLoginUserInfo(
       id: dco_decode_String(arr[0]),
-      username: dco_decode_String(arr[1]),
-      role: dco_decode_String(arr[2]),
-      email: dco_decode_opt_String(arr[3]),
-      createdAt: dco_decode_String(arr[4]),
-      updatedAt: dco_decode_String(arr[5]),
+      role: dco_decode_dart_role(arr[1]),
+      email: dco_decode_opt_String(arr[2]),
+      createdAt: dco_decode_String(arr[3]),
+      updatedAt: dco_decode_String(arr[4]),
     );
   }
 
@@ -1216,6 +1216,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       rowCount: dco_decode_i_64(arr[3]),
       message: dco_decode_opt_String(arr[4]),
     );
+  }
+
+  @protected
+  DartRole dco_decode_dart_role(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return DartRole.values[raw as int];
   }
 
   @protected
@@ -1611,10 +1617,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var tag_ = sse_decode_i_32(deserializer);
     switch (tag_) {
       case 0:
-        var var_username = sse_decode_String(deserializer);
+        var var_user = sse_decode_String(deserializer);
         var var_password = sse_decode_String(deserializer);
         return DartAuthProvider_BasicAuth(
-            username: var_username, password: var_password);
+            user: var_user, password: var_password);
       case 1:
         var var_token = sse_decode_String(deserializer);
         return DartAuthProvider_JwtToken(token: var_token);
@@ -1787,12 +1793,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_refreshToken = sse_decode_opt_String(deserializer);
     var var_expiresAt = sse_decode_String(deserializer);
     var var_refreshExpiresAt = sse_decode_opt_String(deserializer);
+    var var_adminUiAccess = sse_decode_bool(deserializer);
     var var_user = sse_decode_dart_login_user_info(deserializer);
     return DartLoginResponse(
         accessToken: var_accessToken,
         refreshToken: var_refreshToken,
         expiresAt: var_expiresAt,
         refreshExpiresAt: var_refreshExpiresAt,
+        adminUiAccess: var_adminUiAccess,
         user: var_user);
   }
 
@@ -1801,14 +1809,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_id = sse_decode_String(deserializer);
-    var var_username = sse_decode_String(deserializer);
-    var var_role = sse_decode_String(deserializer);
+    var var_role = sse_decode_dart_role(deserializer);
     var var_email = sse_decode_opt_String(deserializer);
     var var_createdAt = sse_decode_String(deserializer);
     var var_updatedAt = sse_decode_String(deserializer);
     return DartLoginUserInfo(
         id: var_id,
-        username: var_username,
         role: var_role,
         email: var_email,
         createdAt: var_createdAt,
@@ -1844,6 +1850,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         namedRowsJson: var_namedRowsJson,
         rowCount: var_rowCount,
         message: var_message);
+  }
+
+  @protected
+  DartRole sse_decode_dart_role(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return DartRole.values[inner];
   }
 
   @protected
@@ -2331,11 +2344,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     switch (self) {
       case DartAuthProvider_BasicAuth(
-          username: final username,
+          user: final user,
           password: final password
         ):
         sse_encode_i_32(0, serializer);
-        sse_encode_String(username, serializer);
+        sse_encode_String(user, serializer);
         sse_encode_String(password, serializer);
       case DartAuthProvider_JwtToken(token: final token):
         sse_encode_i_32(1, serializer);
@@ -2500,6 +2513,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.refreshToken, serializer);
     sse_encode_String(self.expiresAt, serializer);
     sse_encode_opt_String(self.refreshExpiresAt, serializer);
+    sse_encode_bool(self.adminUiAccess, serializer);
     sse_encode_dart_login_user_info(self.user, serializer);
   }
 
@@ -2508,8 +2522,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       DartLoginUserInfo self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.id, serializer);
-    sse_encode_String(self.username, serializer);
-    sse_encode_String(self.role, serializer);
+    sse_encode_dart_role(self.role, serializer);
     sse_encode_opt_String(self.email, serializer);
     sse_encode_String(self.createdAt, serializer);
     sse_encode_String(self.updatedAt, serializer);
@@ -2534,6 +2547,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_list_String(self.namedRowsJson, serializer);
     sse_encode_i_64(self.rowCount, serializer);
     sse_encode_opt_String(self.message, serializer);
+  }
+
+  @protected
+  void sse_encode_dart_role(DartRole self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
   }
 
   @protected

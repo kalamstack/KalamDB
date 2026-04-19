@@ -27,34 +27,34 @@ fn smoke_system_tables_and_user_lifecycle() {
     }
 
     // 2) CREATE USER and verify present in system.users
-    let uname = generate_unique_namespace("smoke_user");
+    let user_id = generate_unique_namespace("smoke_user");
     let pass = "S1mpleP@ss!";
-    let create_user = format!("CREATE USER {} WITH PASSWORD '{}' ROLE 'user'", uname, pass);
+    let create_user = format!("CREATE USER {} WITH PASSWORD '{}' ROLE 'user'", user_id, pass);
     execute_sql_as_root_via_client(&create_user).expect("create user should succeed");
 
-    // Use SELECT username to avoid column truncation in pretty-printed tables
+    // Use SELECT user_id to avoid column truncation in pretty-printed tables
     let users_out = execute_sql_as_root_via_client(&format!(
-        "SELECT username FROM system.users WHERE username='{}'",
-        uname
+        "SELECT user_id FROM system.users WHERE user_id='{}'",
+        user_id
     ))
     .expect("select user should succeed");
     assert!(
-        users_out.contains(&uname),
+        users_out.contains(&user_id),
         "expected newly created user to be listed: {}",
         users_out
     );
 
     // 3) DROP USER and verify removed or soft-deleted
-    let drop_user = format!("DROP USER '{}'", uname);
+    let drop_user = format!("DROP USER '{}'", user_id);
     execute_sql_as_root_via_client(&drop_user).expect("drop user should succeed");
 
     let users_out2 = execute_sql_as_root_via_client(&format!(
-        "SELECT * FROM system.users WHERE username='{}'",
-        uname
+        "SELECT * FROM system.users WHERE user_id='{}'",
+        user_id
     ))
     .expect("select user after drop should succeed");
     assert!(
-        !users_out2.contains(&format!("| {} |", uname))
+        !users_out2.contains(&format!("| {} |", user_id))
             || users_out2.to_lowercase().contains("deleted"),
         "user should be removed or marked deleted: {}",
         users_out2

@@ -235,7 +235,7 @@ fn cluster_test_smoke_auth_any_node() {
     execute_on_node(&urls[0], &format!("CREATE NAMESPACE {}", namespace))
         .expect("Failed to create namespace");
 
-    // Create user with proper syntax: CREATE USER username WITH PASSWORD 'pass' ROLE 'role'
+    // Create user with proper syntax: CREATE USER user WITH PASSWORD 'pass' ROLE 'role'
     let test_user = format!("smoke_user_{}", rand::random::<u32>());
     execute_on_node(
         &urls[0],
@@ -251,7 +251,7 @@ fn cluster_test_smoke_auth_any_node() {
 
     // Verify user exists and can be queried from all nodes
     for (node_idx, url) in urls.iter().enumerate() {
-        let query = format!("SELECT username FROM system.users WHERE username = '{}'", test_user);
+        let query = format!("SELECT user_id FROM system.users WHERE user_id = '{}'", test_user);
 
         match execute_on_node(url, &query) {
             Ok(result) if result.contains(&test_user) => {

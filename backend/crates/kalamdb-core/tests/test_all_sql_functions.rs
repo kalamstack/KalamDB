@@ -6,25 +6,21 @@
 //! - Function usage in SELECT, WHERE, INSERT, UPDATE, DELETE statements
 
 use datafusion::prelude::SessionContext;
-use kalamdb_commons::{Role, UserId, UserName};
+use kalamdb_commons::{Role, UserId};
 use kalamdb_core::sql::context::ExecutionContext;
 use kalamdb_core::sql::datafusion_session::DataFusionSessionFactory;
 use kalamdb_session::AuthSession;
 use std::sync::Arc;
 
-/// Helper to create a simple test session with custom functions registered
 fn create_test_session() -> Arc<SessionContext> {
-    // Use DataFusionSessionFactory to get a session with all custom functions registered
     let factory =
         DataFusionSessionFactory::new().expect("Failed to create DataFusionSessionFactory");
     Arc::new(factory.create_session())
 }
 
-/// Helper to create ExecutionContext with username
-fn create_exec_context_with_user(username: &str, user_id: &str, role: Role) -> ExecutionContext {
-    let auth_session = AuthSession::with_username_and_auth_details(
+fn create_exec_context_with_user(user_id: &str, role: Role) -> ExecutionContext {
+    let auth_session = AuthSession::with_auth_details(
         UserId::new(user_id),
-        UserName::new(username),
         role,
         kalamdb_commons::models::ConnectionInfo::new(None),
         kalamdb_session::AuthMethod::Bearer,
@@ -38,21 +34,21 @@ fn create_exec_context_with_user(username: &str, user_id: &str, role: Role) -> E
 
 #[tokio::test]
 async fn test_current_user_basic() {
-    let exec_ctx = create_exec_context_with_user("alice", "u_alice", Role::User);
+    let exec_ctx = create_exec_context_with_user("u_alice", Role::User);
     let session = exec_ctx.create_session_with_user();
 
-    let result = session.sql("SELECT KDB_CURRENT_USER() AS username").await.unwrap();
+    let result = session.sql("SELECT KDB_CURRENT_USER() AS current_user").await.unwrap();
     let batches = result.collect().await.unwrap();
 
     assert_eq!(batches[0].num_rows(), 1);
     let col = batches[0].column(0);
     let arr = col.as_any().downcast_ref::<datafusion::arrow::array::StringArray>().unwrap();
-    assert_eq!(arr.value(0), "alice");
+    assert_eq!(arr.value(0), "u_alice");
 }
 
 #[tokio::test]
 async fn test_current_user_id_dba() {
-    let exec_ctx = create_exec_context_with_user("admin", "u_admin", Role::Dba);
+    let exec_ctx = create_exec_context_with_user("u_admin", Role::Dba);
     let session = exec_ctx.create_session_with_user();
 
     let result = session.sql("SELECT KDB_CURRENT_USER_ID() AS user_id").await.unwrap();
@@ -66,7 +62,7 @@ async fn test_current_user_id_dba() {
 
 #[tokio::test]
 async fn test_current_user_id_system() {
-    let exec_ctx = create_exec_context_with_user("system", "system", Role::System);
+    let exec_ctx = create_exec_context_with_user("system", Role::System);
     let session = exec_ctx.create_session_with_user();
 
     let result = session.sql("SELECT KDB_CURRENT_USER_ID() AS user_id").await.unwrap();
@@ -79,7 +75,7 @@ async fn test_current_user_id_system() {
 
 #[tokio::test]
 async fn test_current_user_id_service_role() {
-    let exec_ctx = create_exec_context_with_user("job_worker", "svc_worker", Role::Service);
+    let exec_ctx = create_exec_context_with_user("svc_worker", Role::Service);
     let session = exec_ctx.create_session_with_user();
 
     let result = session.sql("SELECT KDB_CURRENT_USER_ID() AS user_id").await.unwrap();
@@ -92,7 +88,7 @@ async fn test_current_user_id_service_role() {
 
 #[tokio::test]
 async fn test_current_user_id_unauthorized_user_role() {
-    let exec_ctx = create_exec_context_with_user("regular_user", "u_regular", Role::User);
+    let exec_ctx = create_exec_context_with_user("u_regular", Role::User);
     let session = exec_ctx.create_session_with_user();
 
     let result = session.sql("SELECT KDB_CURRENT_USER_ID() AS user_id").await.unwrap();
@@ -104,7 +100,7 @@ async fn test_current_user_id_unauthorized_user_role() {
 
 #[tokio::test]
 async fn test_current_role_user() {
-    let exec_ctx = create_exec_context_with_user("bob", "u_bob", Role::User);
+    let exec_ctx = create_exec_context_with_user("u_bob", Role::User);
     let session = exec_ctx.create_session_with_user();
 
     let result = session.sql("SELECT KDB_CURRENT_ROLE() AS role").await.unwrap();
@@ -117,7 +113,7 @@ async fn test_current_role_user() {
 
 #[tokio::test]
 async fn test_current_role_dba() {
-    let exec_ctx = create_exec_context_with_user("admin", "u_admin", Role::Dba);
+    let exec_ctx = create_exec_context_with_user("u_admin", Role::Dba);
     let session = exec_ctx.create_session_with_user();
 
     let result = session.sql("SELECT KDB_CURRENT_ROLE() AS role").await.unwrap();
@@ -130,7 +126,7 @@ async fn test_current_role_dba() {
 
 #[tokio::test]
 async fn test_current_role_system() {
-    let exec_ctx = create_exec_context_with_user("system", "system", Role::System);
+    let exec_ctx = create_exec_context_with_user("system", Role::System);
     let session = exec_ctx.create_session_with_user();
 
     let result = session.sql("SELECT KDB_CURRENT_ROLE() AS role").await.unwrap();
@@ -143,11 +139,11 @@ async fn test_current_role_system() {
 
 #[tokio::test]
 async fn test_all_context_functions_together() {
-    let exec_ctx = create_exec_context_with_user("testuser", "u_test", Role::Dba);
+    let exec_ctx = create_exec_context_with_user("u_test", Role::Dba);
     let session = exec_ctx.create_session_with_user();
 
     let result = session
-        .sql("SELECT KDB_CURRENT_USER() AS username, KDB_CURRENT_USER_ID() AS user_id, KDB_CURRENT_ROLE() AS role")
+        .sql("SELECT KDB_CURRENT_USER() AS current_user, KDB_CURRENT_USER_ID() AS user_id, KDB_CURRENT_ROLE() AS role")
         .await
         .unwrap();
     let batches = result.collect().await.unwrap();
@@ -155,10 +151,10 @@ async fn test_all_context_functions_together() {
     assert_eq!(batches[0].num_rows(), 1);
     assert_eq!(batches[0].num_columns(), 3);
 
-    // Verify username (column 0)
+    // Verify current_user (column 0) - now returns user_id
     let col0 = batches[0].column(0);
     let arr0 = col0.as_any().downcast_ref::<datafusion::arrow::array::StringArray>().unwrap();
-    assert_eq!(arr0.value(0), "testuser");
+    assert_eq!(arr0.value(0), "u_test");
 
     // Verify user_id (column 1)
     let col1 = batches[0].column(1);
@@ -177,7 +173,7 @@ async fn test_all_context_functions_together() {
 
 #[tokio::test]
 async fn test_snowflake_id_function() {
-    let exec_ctx = create_exec_context_with_user("alice", "u_alice", Role::User);
+    let exec_ctx = create_exec_context_with_user("u_alice", Role::User);
     let session = exec_ctx.create_session_with_user();
 
     let result = session.sql("SELECT SNOWFLAKE_ID() AS id").await.unwrap();
@@ -194,7 +190,7 @@ async fn test_snowflake_id_function() {
 
 #[tokio::test]
 async fn test_uuid_v7_function() {
-    let exec_ctx = create_exec_context_with_user("bob", "u_bob", Role::User);
+    let exec_ctx = create_exec_context_with_user("u_bob", Role::User);
     let session = exec_ctx.create_session_with_user();
 
     let result = session.sql("SELECT UUID_V7() AS id").await.unwrap();
@@ -211,7 +207,7 @@ async fn test_uuid_v7_function() {
 
 #[tokio::test]
 async fn test_ulid_function() {
-    let exec_ctx = create_exec_context_with_user("charlie", "u_charlie", Role::User);
+    let exec_ctx = create_exec_context_with_user("u_charlie", Role::User);
     let session = exec_ctx.create_session_with_user();
 
     let result = session.sql("SELECT ULID() AS id").await.unwrap();
@@ -232,11 +228,11 @@ async fn test_ulid_function() {
 
 #[tokio::test]
 async fn test_current_user_in_where_clause() {
-    let exec_ctx = create_exec_context_with_user("alice", "u_alice", Role::User);
+    let exec_ctx = create_exec_context_with_user("u_alice", Role::User);
     let session = exec_ctx.create_session_with_user();
 
     // Test WHERE clause with KDB_CURRENT_USER() comparison
-    let result = session.sql("SELECT 1 WHERE KDB_CURRENT_USER() = 'alice'").await.unwrap();
+    let result = session.sql("SELECT 1 WHERE KDB_CURRENT_USER() = 'u_alice'").await.unwrap();
     let batches = result.collect().await.unwrap();
 
     // Should return 1 row (condition is true)
@@ -245,11 +241,11 @@ async fn test_current_user_in_where_clause() {
 
 #[tokio::test]
 async fn test_current_user_where_no_match() {
-    let exec_ctx = create_exec_context_with_user("alice", "u_alice", Role::User);
+    let exec_ctx = create_exec_context_with_user("u_alice", Role::User);
     let session = exec_ctx.create_session_with_user();
 
     // Test WHERE clause with non-matching condition
-    let result = session.sql("SELECT 1 WHERE KDB_CURRENT_USER() = 'bob'").await.unwrap();
+    let result = session.sql("SELECT 1 WHERE KDB_CURRENT_USER() = 'u_bob'").await.unwrap();
     let batches = result.collect().await.unwrap();
 
     // Should return 0 rows (condition is false)
@@ -258,7 +254,7 @@ async fn test_current_user_where_no_match() {
 
 #[tokio::test]
 async fn test_current_role_in_where_clause() {
-    let exec_ctx = create_exec_context_with_user("admin", "u_admin", Role::Dba);
+    let exec_ctx = create_exec_context_with_user("u_admin", Role::Dba);
     let session = exec_ctx.create_session_with_user();
 
     let result = session.sql("SELECT 1 WHERE KDB_CURRENT_ROLE() = 'dba'").await.unwrap();
@@ -270,11 +266,11 @@ async fn test_current_role_in_where_clause() {
 
 #[tokio::test]
 async fn test_multiple_functions_in_where() {
-    let exec_ctx = create_exec_context_with_user("admin", "u_admin", Role::Dba);
+    let exec_ctx = create_exec_context_with_user("u_admin", Role::Dba);
     let session = exec_ctx.create_session_with_user();
 
     let result = session
-        .sql("SELECT 1 WHERE KDB_CURRENT_USER() = 'admin' AND KDB_CURRENT_ROLE() = 'dba'")
+        .sql("SELECT 1 WHERE KDB_CURRENT_USER() = 'u_admin' AND KDB_CURRENT_ROLE() = 'dba'")
         .await
         .unwrap();
     let batches = result.collect().await.unwrap();
@@ -289,7 +285,7 @@ async fn test_multiple_functions_in_where() {
 
 #[tokio::test]
 async fn test_multiple_id_functions_in_select() {
-    let exec_ctx = create_exec_context_with_user("alice", "u_alice", Role::User);
+    let exec_ctx = create_exec_context_with_user("u_alice", Role::User);
     let session = exec_ctx.create_session_with_user();
 
     let result = session
@@ -319,7 +315,7 @@ async fn test_multiple_id_functions_in_select() {
 
 #[tokio::test]
 async fn test_context_and_id_functions_together() {
-    let exec_ctx = create_exec_context_with_user("alice", "u_alice", Role::User);
+    let exec_ctx = create_exec_context_with_user("u_alice", Role::User);
     let session = exec_ctx.create_session_with_user();
 
     let result = session
@@ -344,7 +340,7 @@ async fn test_context_and_id_functions_together() {
 
 #[tokio::test]
 async fn test_context_function_with_coalesce() {
-    let exec_ctx = create_exec_context_with_user("alice", "u_alice", Role::User);
+    let exec_ctx = create_exec_context_with_user("u_alice", Role::User);
     let session = exec_ctx.create_session_with_user();
 
     let result = session
@@ -355,12 +351,12 @@ async fn test_context_function_with_coalesce() {
 
     let col = batches[0].column(0);
     let arr = col.as_any().downcast_ref::<datafusion::arrow::array::StringArray>().unwrap();
-    assert_eq!(arr.value(0), "alice");
+    assert_eq!(arr.value(0), "u_alice");
 }
 
 #[tokio::test]
 async fn test_context_function_with_concat() {
-    let exec_ctx = create_exec_context_with_user("bob", "u_bob", Role::Dba);
+    let exec_ctx = create_exec_context_with_user("u_bob", Role::Dba);
     let session = exec_ctx.create_session_with_user();
 
     let result = session
@@ -371,7 +367,7 @@ async fn test_context_function_with_concat() {
 
     let col = batches[0].column(0);
     let arr = col.as_any().downcast_ref::<datafusion::arrow::array::StringArray>().unwrap();
-    assert_eq!(arr.value(0), "User: bob Role: dba");
+    assert_eq!(arr.value(0), "User: u_bob Role: dba");
 }
 
 // ============================================================================
@@ -380,7 +376,7 @@ async fn test_context_function_with_concat() {
 
 #[tokio::test]
 async fn test_snowflake_id_generates_multiple_unique_ids() {
-    let exec_ctx = create_exec_context_with_user("alice", "u_alice", Role::User);
+    let exec_ctx = create_exec_context_with_user("u_alice", Role::User);
     let session = exec_ctx.create_session_with_user();
 
     // Query that generates multiple IDs
@@ -405,7 +401,7 @@ async fn test_snowflake_id_generates_multiple_unique_ids() {
 
 #[tokio::test]
 async fn test_context_function_in_case_statement() {
-    let exec_ctx = create_exec_context_with_user("alice", "u_alice", Role::User);
+    let exec_ctx = create_exec_context_with_user("u_alice", Role::User);
     let session = exec_ctx.create_session_with_user();
 
     let result = session
@@ -427,7 +423,7 @@ async fn test_context_function_in_case_statement() {
 
 #[tokio::test]
 async fn test_id_function_in_case_statement() {
-    let exec_ctx = create_exec_context_with_user("alice", "u_alice", Role::User);
+    let exec_ctx = create_exec_context_with_user("u_alice", Role::User);
     let session = exec_ctx.create_session_with_user();
 
     let result = session
@@ -452,7 +448,7 @@ async fn test_id_function_in_case_statement() {
 
 #[tokio::test]
 async fn test_current_user_empty_check() {
-    let exec_ctx = create_exec_context_with_user("testuser", "u_test", Role::User);
+    let exec_ctx = create_exec_context_with_user("u_test", Role::User);
     let session = exec_ctx.create_session_with_user();
 
     let result = session
@@ -468,7 +464,7 @@ async fn test_current_user_empty_check() {
 
 #[tokio::test]
 async fn test_uuid_v7_format_validation() {
-    let exec_ctx = create_exec_context_with_user("alice", "u_alice", Role::User);
+    let exec_ctx = create_exec_context_with_user("u_alice", Role::User);
     let session = exec_ctx.create_session_with_user();
 
     let result = session.sql("SELECT UUID_V7() AS uuid_val").await.unwrap();
@@ -484,7 +480,7 @@ async fn test_uuid_v7_format_validation() {
 
 #[tokio::test]
 async fn test_ulid_format_validation() {
-    let exec_ctx = create_exec_context_with_user("bob", "u_bob", Role::User);
+    let exec_ctx = create_exec_context_with_user("u_bob", Role::User);
     let session = exec_ctx.create_session_with_user();
 
     let result = session.sql("SELECT ULID() AS ulid_val").await.unwrap();
@@ -505,7 +501,7 @@ async fn test_ulid_format_validation() {
 
 #[tokio::test]
 async fn test_context_function_in_subquery() {
-    let exec_ctx = create_exec_context_with_user("alice", "u_alice", Role::User);
+    let exec_ctx = create_exec_context_with_user("u_alice", Role::User);
     let session = exec_ctx.create_session_with_user();
 
     let result = session
@@ -519,7 +515,7 @@ async fn test_context_function_in_subquery() {
 
 #[tokio::test]
 async fn test_id_function_in_subquery() {
-    let exec_ctx = create_exec_context_with_user("alice", "u_alice", Role::User);
+    let exec_ctx = create_exec_context_with_user("u_alice", Role::User);
     let session = exec_ctx.create_session_with_user();
 
     let result = session
@@ -538,7 +534,7 @@ async fn test_id_function_in_subquery() {
 
 #[tokio::test]
 async fn test_example_all_context_functions() {
-    let exec_ctx = create_exec_context_with_user("alice", "u_alice", Role::Dba);
+    let exec_ctx = create_exec_context_with_user("u_alice", Role::Dba);
     let session = exec_ctx.create_session_with_user();
 
     // This example demonstrates all three context functions working together
@@ -559,7 +555,7 @@ async fn test_example_all_context_functions() {
 
 #[tokio::test]
 async fn test_example_all_id_functions() {
-    let exec_ctx = create_exec_context_with_user("alice", "u_alice", Role::User);
+    let exec_ctx = create_exec_context_with_user("u_alice", Role::User);
     let session = exec_ctx.create_session_with_user();
 
     // This example demonstrates all three ID generation functions
@@ -580,7 +576,7 @@ async fn test_example_all_id_functions() {
 
 #[tokio::test]
 async fn test_example_mixed_functions() {
-    let exec_ctx = create_exec_context_with_user("alice", "u_alice", Role::Dba);
+    let exec_ctx = create_exec_context_with_user("u_alice", Role::Dba);
     let session = exec_ctx.create_session_with_user();
 
     // Mix context and ID functions

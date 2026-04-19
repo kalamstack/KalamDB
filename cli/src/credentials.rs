@@ -19,13 +19,13 @@
 //! ```toml
 //! [instances.local]
 //! jwt_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-//! username = "alice"
+//! user = "alice"
 //! expires_at = "2025-12-31T23:59:59Z"
 //! server_url = "http://localhost:3000"
 //!
 //! [instances.production]
 //! jwt_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-//! username = "admin"
+//! user = "admin"
 //! expires_at = "2025-12-31T23:59:59Z"
 //! server_url = "https://db.example.com"
 //! ```
@@ -33,6 +33,7 @@
 use crate::history::get_kalam_config_dir;
 use kalam_client::credentials::{CredentialStore, Credentials};
 use kalam_client::Result;
+use kalam_client::UserId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -57,9 +58,9 @@ pub struct FileCredentialStore {
 struct StoredCredential {
     /// JWT access token
     jwt_token: String,
-    /// Username associated with this token (for display)
+    /// User associated with this token (for display)
     #[serde(skip_serializing_if = "Option::is_none")]
-    username: Option<String>,
+    user: Option<UserId>,
     /// Token expiration time in RFC3339 format
     #[serde(skip_serializing_if = "Option::is_none")]
     expires_at: Option<String>,
@@ -247,7 +248,7 @@ impl CredentialStore for FileCredentialStore {
             Ok(Some(Credentials {
                 instance: instance.to_string(),
                 jwt_token: stored.jwt_token.clone(),
-                username: stored.username.clone(),
+                user: stored.user.clone(),
                 expires_at: stored.expires_at.clone(),
                 server_url: stored.server_url.clone(),
                 refresh_token: stored.refresh_token.clone(),
@@ -261,7 +262,7 @@ impl CredentialStore for FileCredentialStore {
     fn set_credentials(&mut self, credentials: &Credentials) -> Result<()> {
         let stored = StoredCredential {
             jwt_token: credentials.jwt_token.clone(),
-            username: credentials.username.clone(),
+            user: credentials.user.clone(),
             expires_at: credentials.expires_at.clone(),
             server_url: credentials.server_url.clone(),
             refresh_token: credentials.refresh_token.clone(),
@@ -316,7 +317,7 @@ mod tests {
 
         // Retrieve credentials
         let retrieved = store.get_credentials("local").unwrap();
-        assert_eq!(retrieved.as_ref().unwrap().username, Some("alice".to_string()));
+        assert_eq!(retrieved.as_ref().unwrap().user, Some(UserId::from("alice")));
         assert_eq!(retrieved.as_ref().unwrap().jwt_token, "eyJhbGciOiJIUzI1NiJ9.test");
         assert!(store.has_credentials("local").unwrap());
 
@@ -350,7 +351,7 @@ mod tests {
         {
             let store = FileCredentialStore::with_path(file_path).unwrap();
             let retrieved = store.get_credentials("prod").unwrap().unwrap();
-            assert_eq!(retrieved.username, Some("bob".to_string()));
+            assert_eq!(retrieved.user, Some(UserId::from("bob")));
             assert_eq!(retrieved.jwt_token, "eyJhbGciOiJIUzI1NiJ9.prod_token");
         }
     }
@@ -385,11 +386,11 @@ mod tests {
 
         // Retrieve specific instances
         let local = store.get_credentials("local").unwrap().unwrap();
-        assert_eq!(local.username, Some("alice".to_string()));
+        assert_eq!(local.user, Some(UserId::from("alice")));
         assert_eq!(local.server_url, None);
 
         let prod = store.get_credentials("prod").unwrap().unwrap();
-        assert_eq!(prod.username, Some("bob".to_string()));
+        assert_eq!(prod.user, Some(UserId::from("bob")));
         assert_eq!(prod.server_url, Some("https://db.example.com".to_string()));
     }
 
@@ -445,7 +446,7 @@ mod tests {
         assert!(contents.contains("[instances.prod]"));
         assert!(contents.contains("jwt_token = \"token_local\""));
         assert!(contents.contains("jwt_token = \"token_prod\""));
-        assert!(contents.contains("username = \"alice\""));
+        assert!(contents.contains("user = \"alice\""));
         assert!(contents.contains("server_url = \"http://localhost:3000\""));
     }
 }

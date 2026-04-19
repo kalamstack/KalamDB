@@ -356,11 +356,6 @@ pub fn default_auth_allow_remote_setup() -> bool {
     false
 }
 
-/// Default: do not auto-create local users from external auth provider identities.
-pub fn default_auth_auto_create_users_from_provider() -> bool {
-    false
-}
-
 // OAuth defaults
 pub fn default_oauth_enabled() -> bool {
     false

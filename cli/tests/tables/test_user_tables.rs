@@ -46,7 +46,7 @@ fn test_cli_basic_query_execution() {
     let mut cmd = create_cli_command();
     cmd.arg("-u")
         .arg(server_url())
-        .arg("--username")
+        .arg("--user")
         .arg(default_username())
         .arg("--password")
         .arg(root_password())
@@ -103,7 +103,7 @@ fn test_cli_table_output_formatting() {
     let mut cmd = create_cli_command();
     cmd.arg("-u")
         .arg(server_url())
-        .arg("--username")
+        .arg("--user")
         .arg(default_username())
         .arg("--password")
         .arg(root_password())
@@ -158,7 +158,7 @@ fn test_cli_json_output_format() {
     let mut cmd = create_cli_command();
     cmd.arg("-u")
         .arg(server_url())
-        .arg("--username")
+        .arg("--user")
         .arg(default_username())
         .arg("--password")
         .arg(root_password())
@@ -213,7 +213,7 @@ fn test_cli_csv_output_format() {
     let mut cmd = create_cli_command();
     cmd.arg("-u")
         .arg(server_url())
-        .arg("--username")
+        .arg("--user")
         .arg(default_username())
         .arg("--password")
         .arg(root_password())
@@ -265,7 +265,7 @@ fn test_cli_multiline_query() {
     let mut cmd = create_cli_command();
     cmd.arg("-u")
         .arg(server_url())
-        .arg("--username")
+        .arg("--user")
         .arg(default_username())
         .arg("--password")
         .arg(root_password())
@@ -295,7 +295,7 @@ fn test_cli_query_with_comments() {
     let mut cmd = create_cli_command();
     cmd.arg("-u")
         .arg(server_url())
-        .arg("--username")
+        .arg("--user")
         .arg(default_username())
         .arg("--password")
         .arg(root_password())
@@ -325,7 +325,7 @@ fn test_cli_empty_query() {
     let mut cmd = create_cli_command();
     cmd.arg("-u")
         .arg(server_url())
-        .arg("--username")
+        .arg("--user")
         .arg(default_username())
         .arg("--password")
         .arg(root_password())
@@ -376,7 +376,7 @@ fn test_cli_result_pagination() {
     let mut cmd = create_cli_command();
     cmd.arg("-u")
         .arg(server_url())
-        .arg("--username")
+        .arg("--user")
         .arg(default_username())
         .arg("--password")
         .arg(root_password())

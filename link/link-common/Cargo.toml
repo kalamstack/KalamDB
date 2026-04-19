@@ -9,6 +9,7 @@ repository.workspace = true
 description = "Shared Rust implementation for KalamDB link crates"
 
 [dependencies]
+kalamdb-commons = { workspace = true, default-features = false, features = ["serde"] }
 tokio = { workspace = true, optional = true }
 reqwest = { workspace = true, default-features = false, features = ["json", "rustls"], optional = true }
 tokio-tungstenite = { workspace = true, optional = true }

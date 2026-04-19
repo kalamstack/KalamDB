@@ -439,7 +439,7 @@ fn fetch_storage_metadata(storage_id: &str) -> StorageMeta {
 
 fn fetch_root_user_id() -> String {
     let output = execute_sql_as_root_via_client_json(
-        "SELECT user_id FROM system.users WHERE username = 'root' LIMIT 1",
+        "SELECT user_id FROM system.users WHERE user_id = 'root' LIMIT 1",
     )
     .expect("root user id query");
     let json: JsonValue = parse_cli_json_output(&output).expect("root user id json");

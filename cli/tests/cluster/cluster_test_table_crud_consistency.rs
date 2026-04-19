@@ -48,7 +48,7 @@ fn assert_rows_on_all_nodes(urls: &[String], sql: &str, expected: &[String]) {
 
 fn assert_rows_on_all_nodes_as_user(
     urls: &[String],
-    username: &str,
+    user: &str,
     password: &str,
     sql: &str,
     expected: &[String],
@@ -61,7 +61,7 @@ fn assert_rows_on_all_nodes_as_user(
         let mut last_mismatch = String::new();
 
         for (idx, url) in urls.iter().enumerate() {
-            match fetch_normalized_rows_as_user(url, username, password, sql) {
+            match fetch_normalized_rows_as_user(url, user, password, sql) {
                 Ok(rows) => {
                     if rows != expected_rows {
                         all_match = false;

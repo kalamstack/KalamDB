@@ -2,13 +2,13 @@
 
 pub mod models {
     pub use kalam_client::models::{
-        AckResponse, ConsumeMessage, ConsumeRequest, ConsumeResponse, RowData, Username,
+        AckResponse, ConsumeMessage, ConsumeRequest, ConsumeResponse, RowData, UserId,
     };
 }
 
 #[cfg(feature = "native-sdk")]
 pub use kalam_client::consumer::ConsumerBuilder;
-pub use kalam_client::models::Username;
+pub use kalam_client::models::UserId;
 #[cfg(feature = "native-sdk")]
 pub use kalam_client::TopicConsumer;
 pub use kalam_client::{

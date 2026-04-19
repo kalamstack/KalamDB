@@ -46,7 +46,7 @@ env:
   WASM_PACK_VERSION: "0.14.0"
   PG_EXTENSION_MAJOR: "16"
   PG_EXTENSION_FLAVOR: "pg16"
-  PGRX_VERSION: "0.17.0"
+  PGRX_VERSION: "0.18.0"
   DEFAULT_PLATFORMS: "linux-x86_64,macos-aarch64,linux-aarch64"
   RUSTC_WRAPPER: ""
   CARGO_BUILD_RUSTC_WRAPPER: ""
@@ -176,7 +176,7 @@ jobs:
           if-no-files-found: error
 
   build_ui:
-    name: Build Admin UI
+    name: Test and Build Admin UI
     runs-on: ubuntu-latest
 
     steps:
@@ -215,12 +215,29 @@ jobs:
           npm install
           npm run build
 
-      - name: Build Admin UI
+      - name: Install Admin UI dependencies
         shell: bash
         run: |
           set -euo pipefail
           cd ui
           npm install
+
+      - name: Run Admin UI tests
+        shell: bash
+        env:
+          CI: "true"
+        run: |
+          set -euo pipefail
+          cd ui
+          npm test -- --run
+
+      - name: Build Admin UI
+        shell: bash
+        env:
+          CI: "true"
+        run: |
+          set -euo pipefail
+          cd ui
           npm run build
 
       - name: Upload UI dist
@@ -1091,8 +1108,8 @@ jobs:
           sed -i 's|default_storage_path = "./data/storage"|default_storage_path = "./test-data/storage"|g' server.toml
           sed -i 's|logs_path = "./logs"|logs_path = "./test-data/logs"|g' server.toml
           sed -i 's|jwt_secret = ".*"|jwt_secret = "smoke-test-secret-key-minimum-32-characters-long-for-ci"|g' server.toml
-          sed -i 's|max_queries_per_sec = 1000|max_queries_per_sec = 10000|g' server.toml
-          sed -i 's|max_messages_per_sec = 500|max_messages_per_sec = 1000|g' server.toml
+          sed -E -i 's|max_queries_per_sec = [0-9]+|max_queries_per_sec = 10000|g' server.toml
+          sed -E -i 's|max_messages_per_sec = [0-9]+|max_messages_per_sec = 1000|g' server.toml
 
       - name: Start server
         shell: bash
@@ -1145,7 +1162,7 @@ jobs:
           set -euo pipefail
           ./kalamcli \
             -u "$KALAMDB_SERVER_URL" \
-            --username root \
+            --user root \
             --password kalamdb123 \
             --json \
             --command "SELECT 1 AS packaged_cli_release_check" \

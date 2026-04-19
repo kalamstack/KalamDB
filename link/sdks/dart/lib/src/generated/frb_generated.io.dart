@@ -163,6 +163,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   DartQueryResult dco_decode_dart_query_result(dynamic raw);
 
   @protected
+  DartRole dco_decode_dart_role(dynamic raw);
+
+  @protected
   DartSchemaField dco_decode_dart_schema_field(dynamic raw);
 
   @protected
@@ -390,6 +393,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   DartQueryResult sse_decode_dart_query_result(SseDeserializer deserializer);
+
+  @protected
+  DartRole sse_decode_dart_role(SseDeserializer deserializer);
 
   @protected
   DartSchemaField sse_decode_dart_schema_field(SseDeserializer deserializer);
@@ -631,6 +637,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_dart_query_result(
       DartQueryResult self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_dart_role(DartRole self, SseSerializer serializer);
 
   @protected
   void sse_encode_dart_schema_field(

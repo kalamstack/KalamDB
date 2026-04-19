@@ -51,10 +51,6 @@ fn test_concurrent_websocket_subscriptions() {
         );
         execute_sql_as_root_via_client(&create_sql).expect("create table");
 
-        // Insert a row so subscriptions have initial data
-        execute_sql_as_root_via_client(&format!("INSERT INTO {} (data) VALUES ('seed_row')", full))
-            .expect("seed insert");
-
         let base_url = leader_or_server_url();
         let subscribed = Arc::new(AtomicUsize::new(0));
         let notified = Arc::new(AtomicUsize::new(0));
@@ -97,7 +93,7 @@ fn test_concurrent_websocket_subscriptions() {
                     };
 
                     let mut sub = match client
-                        .subscribe_with_config(SubscriptionConfig::new(
+                        .subscribe_with_config(SubscriptionConfig::without_initial_data(
                             format!("conc_sub_{}", i),
                             &query,
                         ))
@@ -280,8 +276,10 @@ fn test_rapid_connect_disconnect() {
 
             let subscribe_result = tokio::time::timeout(
                 Duration::from_secs(8),
-                client
-                    .subscribe_with_config(SubscriptionConfig::new(format!("rapid_{}", i), &query)),
+                client.subscribe_with_config(SubscriptionConfig::without_initial_data(
+                    format!("rapid_{}", i),
+                    &query,
+                )),
             )
             .await;
 

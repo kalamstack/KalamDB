@@ -669,6 +669,52 @@ where
         self.backend.batch(operations)
     }
 
+    /// Batch-delete multiple entities, removing both main entries and all
+    /// associated index entries in a single RocksDB batch write.
+    ///
+    /// Each key is fetched once to determine its index entries, then all
+    /// deletions (main + indexes) are collected into one atomic batch.
+    /// Keys that don't exist are silently skipped.
+    ///
+    /// For large key sets this is orders of magnitude faster than calling
+    /// `delete()` in a loop (one RocksDB batch vs N×(get+batch)).
+    pub fn delete_batch(&self, keys: &[K]) -> Result<()> {
+        if keys.is_empty() {
+            return Ok(());
+        }
+
+        let has_indexes = !self.indexes.is_empty();
+        // Estimate: 1 main delete + N index deletes per key
+        let ops_per_key = 1 + self.indexes.len();
+        let mut operations = Vec::with_capacity(keys.len() * ops_per_key);
+
+        for key in keys {
+            // Main entity delete is always needed
+            operations.push(Operation::Delete {
+                partition: self.main_partition.clone(),
+                key: key.storage_key(),
+            });
+
+            // Index cleanup requires fetching the entity to extract index keys
+            if has_indexes {
+                if let Some(entity) = self.get(key)? {
+                    for (index, index_partition) in
+                        self.indexes.iter().zip(self.index_partitions.iter())
+                    {
+                        if let Some(index_key) = index.extract_key(key, &entity) {
+                            operations.push(Operation::Delete {
+                                partition: index_partition.clone(),
+                                key: index_key,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        self.backend.batch(operations)
+    }
+
     // ========================================================================
     // Sync Read/Scan Operations
     // ========================================================================

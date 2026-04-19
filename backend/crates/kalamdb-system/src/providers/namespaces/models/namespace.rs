@@ -4,6 +4,7 @@ use kalamdb_commons::datatypes::KalamDataType;
 use kalamdb_commons::models::ids::NamespaceId;
 use kalamdb_macros::table;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// Namespace entity for system.namespaces table.
 ///
@@ -30,7 +31,7 @@ use serde::{Deserialize, Serialize};
 ///     namespace_id: NamespaceId::default(),
 ///     name: "default".to_string(),
 ///     created_at: 1730000000000,
-///     options: Some("{}".to_string()),
+///     options: Some(serde_json::json!({})),
 ///     table_count: 0,
 /// };
 /// ```
@@ -78,7 +79,8 @@ pub struct Namespace {
         default = "None",
         comment = "Namespace configuration options (JSON)"
     )]
-    pub options: Option<String>, // JSON configuration
+    #[serde(default)]
+    pub options: Option<Value>,
     #[column(
         id = 5,
         ordinal = 5,
@@ -111,7 +113,7 @@ impl Namespace {
             namespace_id: NamespaceId::new(&name_str),
             name: name_str,
             created_at: chrono::Utc::now().timestamp_millis(),
-            options: Some("{}".to_string()),
+            options: Some(serde_json::json!({})),
             table_count: 0,
         }
     }
@@ -147,7 +149,7 @@ mod tests {
             namespace_id: NamespaceId::default(),
             name: "default".to_string(),
             created_at: 1730000000000,
-            options: Some("{}".to_string()),
+            options: Some(serde_json::json!({})),
             table_count: 0,
         };
 

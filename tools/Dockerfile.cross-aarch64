@@ -32,6 +32,12 @@ RUN apt-get update && \
 
 ENV CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc-10
 ENV CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++-10
+# NumKong's Arm dot-product probes fail under the GCC 10 cross toolchain when
+# the translation units are compiled with the armv8-a baseline. Disable the
+# optional SDOT/SVE-SDOT dispatch paths for CI cross-builds until the image is
+# moved to a newer toolchain that can compile those probes consistently.
+ENV NK_TARGET_NEONSDOT=0
+ENV NK_TARGET_SVESDOT=0
 
 # Node.js/npm not needed for cross-compilation (UI is pre-built in CI)
 # wasm-pack not needed for cross-compilation (SDK is pre-built in CI)

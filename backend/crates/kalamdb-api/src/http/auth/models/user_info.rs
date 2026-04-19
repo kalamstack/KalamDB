@@ -1,6 +1,6 @@
 //! User info model
 
-use kalamdb_commons::models::{UserId, UserName};
+use kalamdb_commons::models::UserId;
 use kalamdb_commons::Role;
 use serde::Serialize;
 
@@ -9,8 +9,6 @@ use serde::Serialize;
 pub struct UserInfo {
     /// Unique user identifier
     pub id: UserId,
-    /// Username
-    pub username: UserName,
     /// User role (user, service, dba, system)
     pub role: Role,
     /// Email address (optional)
@@ -19,4 +17,13 @@ pub struct UserInfo {
     pub created_at: String,
     /// Last update timestamp in RFC3339 format
     pub updated_at: String,
+}
+
+/// Current-user response body.
+#[derive(Debug, Serialize)]
+pub struct CurrentUserResponse {
+    /// User information
+    pub user: UserInfo,
+    /// Whether this authenticated account is allowed to enter the Admin UI.
+    pub admin_ui_access: bool,
 }

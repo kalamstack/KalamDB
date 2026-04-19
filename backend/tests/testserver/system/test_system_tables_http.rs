@@ -75,10 +75,7 @@ async fn test_system_tables_queryable_over_http() -> anyhow::Result<()> {
 
     // system.users
     let resp = server
-        .execute_sql(&format!(
-            "SELECT username, role FROM system.users WHERE username = '{}'",
-            user
-        ))
+        .execute_sql(&format!("SELECT user_id, role FROM system.users WHERE user_id = '{}'", user))
         .await?;
     anyhow::ensure!(resp.status == ResponseStatus::Success);
     anyhow::ensure!(!resp.rows_as_maps().is_empty());

@@ -3,8 +3,8 @@
 //! These tests validate:
 //! - Keycloak realm is reachable and issues asymmetric (RS256) tokens
 //! - Real RS256 tokens from Keycloak are verified via JWKS (not the shared HS256 secret)
-//! - Auto-provisioning of users from trusted OIDC providers
-//! - Idempotent lookup of existing provider users on subsequent requests
+//! - Trusted bearer auth resolves a pre-created OAuth user by canonical token subject
+//! - Subsequent requests reuse the same canonical user account
 //! - HS256 tokens claiming an external issuer are rejected
 //!
 //! ## Security model
@@ -23,7 +23,6 @@
 //! 3. Server must be started with:
 //!    ```sh
 //!    KALAMDB_JWT_TRUSTED_ISSUERS="kalamdb,http://localhost:8081/realms/kalamdb" \
-//!    KALAMDB_AUTH_AUTO_CREATE_USERS_FROM_PROVIDER=true \
 //!    cargo run
 //!    ```
 //!
@@ -75,6 +74,10 @@ fn keycloak_issuer() -> String {
 /// Token endpoint for Direct Access Grant (Resource Owner Password Credentials).
 fn keycloak_token_endpoint() -> String {
     format!("{}/realms/{}/protocol/openid-connect/token", keycloak_url(), keycloak_realm())
+}
+
+fn escape_sql_literal(value: &str) -> String {
+    value.replace('\'', "''")
 }
 
 // ---------------------------------------------------------------------------
@@ -154,7 +157,7 @@ async fn get_keycloak_token() -> Result<serde_json::Value, Box<dyn std::error::E
 }
 
 /// Peek at the `sub` claim of a JWT without verifying the signature.
-/// Used in tests to determine the expected auto-provisioned username.
+/// Used in tests to determine the expected canonical user id.
 fn decode_jwt_sub(token: &str) -> Option<String> {
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use base64::Engine as _;
@@ -261,24 +264,24 @@ fn test_keycloak_realm_configured() {
     }
 }
 
-/// End-to-end: Keycloak RS256 token → JWKS verification → auto-provisioning.
+/// End-to-end: Keycloak RS256 token → JWKS verification → direct canonical user lookup.
 ///
 /// This is the correct, cryptographically sound flow:
 /// 1. Get a real RS256 token from Keycloak (signed with Keycloak's RSA private key).
-/// 2. Send it to KalamDB as a Bearer token.
-/// 3. KalamDB reads `iss`, fetches Keycloak's JWKS, verifies the RS256 signature
+/// 2. Pre-create an OAuth user whose `user_id` exactly matches the token `sub`.
+/// 3. Send it to KalamDB as a Bearer token.
+/// 4. KalamDB reads `iss`, fetches Keycloak's JWKS, verifies the RS256 signature
 ///    using Keycloak's *public* key. Only Keycloak can produce a valid signature.
-/// 4. First request: auto-provision user with username `oidc:kcl:{sub}`.
-/// 5. Second request: reuse existing user via the username index (O(1)).
+/// 5. First request: resolve the pre-created OAuth user directly by canonical `sub`.
+/// 6. Second request: reuse the same canonical user via the user_id index.
 ///
 /// Server must be started with:
 /// ```sh
 /// KALAMDB_JWT_TRUSTED_ISSUERS="kalamdb,http://localhost:8081/realms/kalamdb" \
-/// KALAMDB_AUTH_AUTO_CREATE_USERS_FROM_PROVIDER=true \
 /// cargo run
 /// ```
 #[test]
-fn test_provider_auto_provisioning_via_bearer() {
+fn test_preprovisioned_oauth_user_via_bearer() {
     if !should_run_keycloak_tests() {
         return;
     }
@@ -294,14 +297,32 @@ fn test_provider_auto_provisioning_via_bearer() {
         .to_string();
 
     let subject = decode_jwt_sub(&access_token).expect("Could not read sub from Keycloak token");
-    let expected_username = format!("oidc:kcl:{}", subject);
+    let expected_user_id = subject.clone();
 
     eprintln!(
-        "[keycloak] Real RS256 token sub='{}', expected username='{}'",
-        subject, expected_username
+        "[keycloak] Real RS256 token sub='{}', expected user_id='{}'",
+        subject, expected_user_id
     );
 
-    // Step 2: send to KalamDB — verifies RS256 via JWKS, auto-provisions user
+    let escaped_user_id = escape_sql_literal(&expected_user_id);
+    let oauth_payload = serde_json::to_string(&json!({
+        "provider": "keycloak",
+        "subject": subject,
+    }))
+    .expect("Failed to encode Keycloak OAuth payload");
+    let escaped_payload = escape_sql_literal(&oauth_payload);
+
+    let _ = rt.block_on(execute_sql_via_http_as_root(&format!(
+        "DROP USER IF EXISTS '{}'",
+        escaped_user_id
+    )));
+
+    let create_sql =
+        format!("CREATE USER '{}' WITH OAUTH '{}' ROLE 'user'", escaped_user_id, escaped_payload);
+    rt.block_on(execute_sql_via_http_as_root(&create_sql))
+        .expect("Failed to pre-create Keycloak OAuth user");
+
+    // Step 2: send to KalamDB — verifies RS256 via JWKS and resolves the canonical user
     let result1 = rt.block_on(execute_sql_with_bearer(&access_token, "SELECT 1 AS probe"));
 
     match &result1 {
@@ -317,7 +338,6 @@ fn test_provider_auto_provisioning_via_bearer() {
                     "Server not configured for Keycloak OIDC. Skipping.\n\
                      Start server with:\n  \
                      KALAMDB_JWT_TRUSTED_ISSUERS=\"kalamdb,{}\" \\\n  \
-                     KALAMDB_AUTH_AUTO_CREATE_USERS_FROM_PROVIDER=true \\\n  \
                      cargo run",
                     keycloak_issuer()
                 );
@@ -328,29 +348,29 @@ fn test_provider_auto_provisioning_via_bearer() {
                 e
             );
         },
-        Ok(_) => eprintln!("[keycloak] First request OK — user auto-provisioned."),
+        Ok(_) => eprintln!("[keycloak] First request OK — canonical OAuth user resolved by sub."),
     }
 
-    // Step 3: same token again — must reuse existing user via index
+    // Step 3: same token again — must reuse the existing user via index
     let result2 = rt.block_on(execute_sql_with_bearer(&access_token, "SELECT 2 AS probe"));
     assert!(
         result2.is_ok(),
         "Second request with same RS256 token should succeed: {:?}",
         result2.err()
     );
-    eprintln!("[keycloak] Second request OK — existing user found via index.");
+    eprintln!("[keycloak] Second request OK — existing user found via user_id index.");
 
     // Step 4: verify user in system.users
     let check_sql = format!(
-        "SELECT username, auth_type FROM system.users WHERE username = '{}'",
-        expected_username
+        "SELECT user_id, auth_type FROM system.users WHERE user_id = '{}'",
+        expected_user_id
     );
     if let Ok(body) = rt.block_on(execute_sql_via_http_as_root(&check_sql)) {
         let rows = get_rows_as_hashmaps(&body);
         assert!(
             rows.is_some() && !rows.as_ref().unwrap().is_empty(),
             "User '{}' should exist in system.users. Body: {:?}",
-            expected_username,
+            expected_user_id,
             body
         );
         let row = &rows.unwrap()[0];
@@ -359,12 +379,11 @@ fn test_provider_auto_provisioning_via_bearer() {
             Some("OAuth"),
             "auth_type should be OAuth"
         );
-        eprintln!("[keycloak] Verified user '{}' with auth_type=OAuth.", expected_username);
+        eprintln!("[keycloak] Verified user '{}' with auth_type=OAuth.", expected_user_id);
     }
 
     // Cleanup
-    let _ =
-        rt.block_on(execute_sql_via_http_as_root(&format!("DROP USER '{}'", expected_username)));
+    let _ = rt.block_on(execute_sql_via_http_as_root(&format!("DROP USER '{}'", escaped_user_id)));
 }
 
 /// Verify that HS256 tokens claiming an external (Keycloak) issuer are rejected.

@@ -4,8 +4,11 @@
 
 use super::test_support::TestServer;
 use kalam_client::models::ResponseStatus;
-use kalamdb_commons::models::{AuthType, Role, UserId, UserName};
+use kalamdb_commons::models::{AuthType, Role, UserId};
 use kalamdb_system::providers::storages::models::StorageMode;
+use reqwest::StatusCode;
+use serde_json::json;
+use uuid::Uuid;
 
 async fn create_system_user(server: &TestServer, username: &str) -> UserId {
     let user_id = UserId::new(username);
@@ -13,7 +16,6 @@ async fn create_system_user(server: &TestServer, username: &str) -> UserId {
 
     let user = kalamdb_system::User {
         user_id: user_id.clone(),
-        username: UserName::new(username),
         password_hash: "hashed".to_string(),
         role: Role::System,
         email: Some(format!("{}@kalamdb.local", username)),
@@ -44,6 +46,60 @@ fn find_audit_entry<'a>(
         .iter()
         .find(|entry| entry.action == action && entry.target == target)
         .unwrap_or_else(|| panic!("Audit entry {} for target {} not found", action, target))
+}
+
+#[actix_web::test]
+#[ntest::timeout(45000)]
+async fn test_audit_log_for_admin_login_only() {
+    let server = TestServer::new_shared().await;
+    let http_server = crate::test_support::http_server::get_global_server().await;
+    let admin_username = format!("audit_admin_login_{}", Uuid::new_v4().simple());
+    let user_username = format!("audit_regular_login_{}", Uuid::new_v4().simple());
+    let password = "StrongPass123!";
+    let client = reqwest::Client::new();
+    let login_url = format!("{}/v1/api/auth/login", http_server.base_url());
+
+    server.create_user(&admin_username, password, Role::Dba).await;
+    server.create_user(&user_username, password, Role::User).await;
+
+    let login_response = client
+        .post(&login_url)
+        .json(&json!({ "user": admin_username, "password": password }))
+        .send()
+        .await
+        .expect("login request should complete");
+    assert_eq!(login_response.status(), StatusCode::OK);
+
+    let user_login_response = client
+        .post(&login_url)
+        .json(&json!({ "user": user_username, "password": password }))
+        .send()
+        .await
+        .expect("regular user login request should complete");
+    assert_eq!(user_login_response.status(), StatusCode::OK);
+
+    let logs = server
+        .app_context
+        .system_tables()
+        .audit_logs()
+        .scan_all()
+        .expect("Failed to read audit log");
+
+    let admin_login = find_audit_entry(&logs, "LOGIN", &format!("user:{}", admin_username));
+    assert_eq!(admin_login.actor_user_id.as_str(), admin_username);
+    assert!(admin_login.details.is_none());
+
+    assert!(
+        !logs
+            .iter()
+            .any(|entry| entry.action == "LOGIN"
+                && entry.target == format!("user:{}", user_username)),
+        "regular user logins should not be audited"
+    );
+    assert!(
+        !logs.iter().any(|entry| entry.action == "TOKEN_REFRESH"),
+        "refresh should not create audit entries"
+    );
 }
 
 #[actix_web::test]

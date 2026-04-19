@@ -26,11 +26,7 @@ async fn wait_for_postgres_row(
     let deadline = Instant::now() + Duration::from_secs(5);
 
     loop {
-        if let Some(row) = pg
-            .query_opt(select_sql, &[&row_id])
-            .await
-            .expect("query Postgres row")
-        {
+        if let Some(row) = pg.query_opt(select_sql, &[&row_id]).await.expect("query Postgres row") {
             return row;
         }
 
@@ -174,6 +170,50 @@ async fn e2e_ddl_create_file_column_mirrors_as_jsonb() {
 }
 
 #[tokio::test]
+async fn e2e_ddl_create_json_column_preserves_local_json_type() {
+    let env = require_ddl_env!();
+    let pg = env.pg_connect().await;
+
+    let ns = "ddl_test";
+    let table = unique_name("json_tbl");
+    ensure_schema_exists(&pg, ns).await;
+
+    let sql = format!(
+        "CREATE TABLE {ns}.{table} (
+            id TEXT,
+            payload JSON
+        ) USING kalamdb WITH (type = 'shared');"
+    );
+    pg.batch_execute(&sql)
+        .await
+        .expect("CREATE TABLE USING kalamdb with JSON column");
+    env.wait_for_kalamdb_table_exists(ns, &table).await;
+
+    let local_type: String = pg
+        .query_one(
+            "SELECT format_type(a.atttypid, a.atttypmod)
+               FROM pg_attribute a
+               JOIN pg_class c ON a.attrelid = c.oid
+               JOIN pg_namespace n ON c.relnamespace = n.oid
+              WHERE n.nspname = $1
+                AND c.relname = $2
+                AND a.attname = 'payload'
+                AND a.attnum > 0
+                AND NOT a.attisdropped",
+            &[&ns, &table],
+        )
+        .await
+        .expect("resolve mirrored payload column type")
+        .get(0);
+
+    assert_eq!(local_type, "json");
+
+    pg.batch_execute(&format!("DROP FOREIGN TABLE IF EXISTS {ns}.{table};"))
+        .await
+        .ok();
+}
+
+#[tokio::test]
 #[ntest::timeout(1200)]
 async fn e2e_ddl_file_column_roundtrip_via_kalamlink() {
     let env = require_ddl_env!();
@@ -211,12 +251,7 @@ async fn e2e_ddl_file_column_roundtrip_via_kalamlink() {
     let insert_result = client
         .execute_with_files(
             &insert_sql,
-            vec![(
-                "attachment",
-                file_name,
-                file_bytes.clone(),
-                Some(file_mime),
-            )],
+            vec![("attachment", file_name, file_bytes.clone(), Some(file_mime))],
             None,
             None,
         )
@@ -237,10 +272,8 @@ async fn e2e_ddl_file_column_roundtrip_via_kalamlink() {
 
     let deadline = Instant::now() + Duration::from_secs(5);
     let row = loop {
-        if let Some(row) = pg
-            .query_opt(&select_sql, &[&row_id])
-            .await
-            .expect("query Postgres FILE row")
+        if let Some(row) =
+            pg.query_opt(&select_sql, &[&row_id]).await.expect("query Postgres FILE row")
         {
             break row;
         }
@@ -321,12 +354,7 @@ async fn e2e_ddl_multiple_file_columns_roundtrip_via_kalamlink() {
             &insert_sql,
             vec![
                 ("avatar", avatar_name, avatar_bytes.clone(), Some(avatar_mime)),
-                (
-                    "contract",
-                    contract_name,
-                    contract_bytes.clone(),
-                    Some(contract_mime),
-                ),
+                ("contract", contract_name, contract_bytes.clone(), Some(contract_mime)),
             ],
             None,
             None,
@@ -345,12 +373,7 @@ async fn e2e_ddl_multiple_file_columns_roundtrip_via_kalamlink() {
     let contract_text: String = row.get(1);
 
     assert_file_json_text(&avatar_text, avatar_name, avatar_mime, avatar_bytes.len());
-    assert_file_json_text(
-        &contract_text,
-        contract_name,
-        contract_mime,
-        contract_bytes.len(),
-    );
+    assert_file_json_text(&contract_text, contract_name, contract_mime, contract_bytes.len());
 
     pg.batch_execute(&format!("DROP FOREIGN TABLE IF EXISTS {namespace}.{table};"))
         .await

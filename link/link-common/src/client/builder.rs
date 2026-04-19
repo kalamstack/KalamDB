@@ -169,7 +169,7 @@ impl KalamLinkClientBuilder {
                     match auth {
                         AuthProvider::BasicAuth(username, password) => {
                             let body = serde_json::json!({
-                                "username": username,
+                                "user": username,
                                 "password": password,
                             });
                             let response = client.post(&url).json(&body).send().await.map_err(

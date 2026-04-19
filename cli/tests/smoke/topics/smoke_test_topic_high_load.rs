@@ -13,6 +13,7 @@
 use crate::common;
 use kalam_client::consumer::{AutoOffsetReset, ConsumerRecord, TopicOp};
 use kalam_client::KalamLinkTimeouts;
+use kalamdb_configs::config::defaults::default_topic_visibility_timeout_secs;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -1327,15 +1328,12 @@ async fn test_topic_ack_failure_recovery_no_message_loss_with_latency() {
         claimed_by_a.len()
     );
 
-    // Topic visibility timeout defaults to 60s (configurable via [topics]
-    // visibility_timeout_secs in server.toml). Sleep long enough for the
-    // server's timeout to expire so Consumer B can re-deliver the range.
-    // With the default 60s config this sleeps 65s; set a shorter timeout
-    // on the server for faster test runs.
+    // Sleep long enough for the server's topic visibility timeout to expire so
+    // Consumer B can recover the range claimed by Consumer A.
     let visibility_timeout_secs: u64 = std::env::var("KALAMDB_VISIBILITY_TIMEOUT_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(60);
+        .unwrap_or_else(default_topic_visibility_timeout_secs);
     tokio::time::sleep(Duration::from_secs(visibility_timeout_secs + 5)).await;
 
     let client = create_test_client().await;

@@ -11,7 +11,7 @@ pub enum AuthError {
     #[error("Missing authorization header: {0}")]
     MissingAuthorization(String),
 
-    /// Invalid username or password
+    /// Invalid credentials
     #[error("Invalid credentials: {0}")]
     InvalidCredentials(String),
 

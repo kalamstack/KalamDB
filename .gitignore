@@ -122,3 +122,7 @@ ts-sdk-repro/server.toml
 /benchv2/logs
 link/sdks/typescript/client/.npmrc
 /target-pg-bench
+/link/kalam-client/sdks/typescript/client/.wasm-cargo-home-size-current
+/link/kalam-client/sdks/typescript/client/.wasm-cargo-home-size-current2
+/link/kalam-client/sdks/typescript/client/.wasm-target-size-current
+/link/kalam-client/sdks/typescript/client/.wasm-target-size-current2

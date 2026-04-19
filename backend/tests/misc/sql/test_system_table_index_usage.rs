@@ -4,45 +4,43 @@
 //! for efficient lookups rather than full table scans.
 //!
 //! ## Tests Covered
-//! - system.users: username index for `WHERE username = '...'` queries
+//! - system.users: user_id index for `WHERE user_id = '...'` queries
 //! - system.jobs: status index for `WHERE status = '...'` queries
 //! - system.live: active subscription visibility (basic verification)
 //!
 //! ## Strategy
 //! 1. Insert multiple records
-//! 2. Query with indexed filter (e.g., WHERE username = 'user1')
+//! 2. Query with indexed filter (e.g., WHERE user_id = 'user1')
 //! 3. Verify correct results are returned
 //! 4. Measure performance to ensure O(1) lookup behavior
 
 use super::test_support::{consolidated_helpers, TestServer};
 use kalam_client::models::ResponseStatus;
 use kalam_client::parse_i64;
-use kalamdb_commons::models::{ConnectionId, ConnectionInfo, UserName};
+use kalamdb_commons::models::{ConnectionId, ConnectionInfo};
 use kalamdb_commons::websocket::{SubscriptionOptions, SubscriptionRequest};
 use kalamdb_commons::{AuthType, JobId, NodeId, Role, StorageId, UserId};
 use kalamdb_system::providers::storages::models::StorageMode;
 use kalamdb_system::{Job, JobStatus, JobType, User};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-/// Test: system.users uses username index for WHERE username = '...' queries
+/// Test: system.users uses user_id for WHERE user_id = '...' queries
 ///
-/// This test verifies that queries filtering by username use the secondary index
-/// instead of scanning all users.
+/// This test verifies that queries filtering by user_id work correctly.
 ///
 /// Strategy:
 /// 1. Insert 50 users
-/// 2. Query by username
+/// 2. Query by user_id
 /// 3. Verify results are correct
-/// 4. Compare query latency with and without index-friendly filters
+/// 4. Compare query latency
 #[actix_web::test]
 #[ntest::timeout(60000)]
-async fn test_system_users_username_index() {
+async fn test_system_users_user_id_index() {
     let server = TestServer::new_shared().await;
     let run_id = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("System time before UNIX_EPOCH")
         .as_nanos();
-    let user_prefix = format!("username{}", run_id);
     let id_prefix = format!("user{}", run_id);
     let password_hash = bcrypt::hash("password", bcrypt::DEFAULT_COST).unwrap();
 
@@ -51,7 +49,6 @@ async fn test_system_users_username_index() {
         let now = chrono::Utc::now().timestamp_millis();
         let user = User {
             user_id: UserId::new(&format!("{}_{}", id_prefix, i)),
-            username: UserName::new(&format!("{}_{}", user_prefix, i)),
             password_hash: password_hash.clone(),
             role: Role::User,
             email: Some(format!("{}_{}@example.com", id_prefix, i)),
@@ -76,13 +73,13 @@ async fn test_system_users_username_index() {
             .expect("Failed to insert user");
     }
 
-    // Test 1: Query by username (should use username index)
-    let query_by_username = format!(
-        "SELECT COUNT(*) AS user_count FROM system.users WHERE username = '{}_25'",
-        user_prefix
+    // Test 1: Query by user_id
+    let query_by_user_id = format!(
+        "SELECT COUNT(*) AS user_count FROM system.users WHERE user_id = '{}_25'",
+        id_prefix
     );
     let start = Instant::now();
-    let response = server.execute_sql(&query_by_username).await;
+    let response = server.execute_sql(&query_by_user_id).await;
     let latency_indexed = start.elapsed();
 
     assert_eq!(response.status, ResponseStatus::Success, "Query failed: {:?}", response.error);
@@ -90,15 +87,13 @@ async fn test_system_users_username_index() {
     let rows = response.rows_as_maps();
     assert_eq!(rows.len(), 1, "Expected 1 row, got {} - query result: {:?}", rows.len(), rows);
     let count = parse_i64(rows[0].get("user_count").unwrap());
-    assert_eq!(count, 1, "Expected to find exactly 1 user with username='username25'");
+    assert_eq!(count, 1, "Expected to find exactly 1 user with user_id");
 
-    println!("✓ Username index query latency: {:?}", latency_indexed);
+    println!("✓ User ID query latency: {:?}", latency_indexed);
 
-    // Test 2: Query specific username and verify it returns correct user
-    let query_specific = format!(
-        "SELECT user_id, username, email FROM system.users WHERE username = '{}_10'",
-        user_prefix
-    );
+    // Test 2: Query specific user_id and verify it returns correct user
+    let query_specific =
+        format!("SELECT user_id, email FROM system.users WHERE user_id = '{}_10'", id_prefix);
     let response2 = server.execute_sql(&query_specific).await;
 
     assert_eq!(response2.status, ResponseStatus::Success);
@@ -106,28 +101,12 @@ async fn test_system_users_username_index() {
     assert_eq!(rows2.len(), 1);
     assert_eq!(rows2[0].get("user_id").unwrap().as_str().unwrap(), format!("{}_10", id_prefix));
     assert_eq!(
-        rows2[0].get("username").unwrap().as_str().unwrap(),
-        format!("{}_10", user_prefix)
-    );
-    assert_eq!(
         rows2[0].get("email").unwrap().as_str().unwrap(),
         format!("{}_{}@example.com", id_prefix, 10)
     );
 
-    // Test 3: Case-insensitive username lookup (index stores lowercase)
-    let query_case_insensitive = format!(
-        "SELECT user_id FROM system.users WHERE username = '{}'",
-        format!("{}_25", user_prefix).to_uppercase()
-    );
-    let response3 = server.execute_sql(&query_case_insensitive).await;
-
-    // Note: This depends on whether the filter lowercases before index lookup
-    // The index stores lowercase, but the filter needs to normalize
-    assert_eq!(response3.status, ResponseStatus::Success);
-    // For now, just verify it doesn't crash and returns some result
-
-    println!("✓ system.users username index test passed");
-    println!("  - Found user by exact username match");
+    println!("✓ system.users user_id lookup test passed");
+    println!("  - Found user by exact user_id match");
     println!("  - Query latency: {:?}", latency_indexed);
 }
 
@@ -169,7 +148,10 @@ async fn test_system_jobs_status_index() {
             job_type: JobType::Unknown,
             status,
             leader_status: None,
-            parameters: Some(format!(r#"{{"table":"test_{}", "iteration":{}}}"#, i, i)),
+            parameters: Some(serde_json::json!({
+                "table": format!("test_{}", i),
+                "iteration": i,
+            })),
             message: None,
             exception_trace: None,
             idempotency_key: Some(format!("idem_key_{}_{}", job_prefix, i)),
@@ -407,7 +389,6 @@ async fn test_index_performance_scaling() {
         .expect("System time before UNIX_EPOCH")
         .as_nanos();
     let user_prefix = format!("perf_user{}", run_id);
-    let username_prefix = format!("perf_username{}", run_id);
     let password_hash = bcrypt::hash("password", bcrypt::DEFAULT_COST).unwrap();
 
     // Phase 1: Insert 50 users, measure query time
@@ -415,7 +396,6 @@ async fn test_index_performance_scaling() {
         let now = chrono::Utc::now().timestamp_millis();
         let user = User {
             user_id: UserId::new(&format!("{}_{}", user_prefix, i)),
-            username: UserName::new(&format!("{}_{}", username_prefix, i)),
             password_hash: password_hash.clone(),
             role: Role::User,
             email: Some(format!("perf{}@example.com", i)),
@@ -441,17 +421,17 @@ async fn test_index_performance_scaling() {
     }
 
     // Warmup
-    let lookup_username = format!("{}_25", username_prefix);
+    let lookup_user_id = format!("{}_25", user_prefix);
     for _ in 0..3 {
         server
             .execute_sql(&format!(
-                "SELECT user_id FROM system.users WHERE username = '{}'",
-                lookup_username
+                "SELECT user_id FROM system.users WHERE user_id = '{}'",
+                lookup_user_id
             ))
             .await;
     }
 
-    let query = format!("SELECT user_id FROM system.users WHERE username = '{}'", lookup_username);
+    let query = format!("SELECT user_id FROM system.users WHERE user_id = '{}'", lookup_user_id);
     let sample_count = 15usize;
 
     let mut samples_50 = Vec::with_capacity(sample_count);
@@ -471,7 +451,6 @@ async fn test_index_performance_scaling() {
         let now = chrono::Utc::now().timestamp_millis();
         let user = User {
             user_id: UserId::new(&format!("{}_{}", user_prefix, i)),
-            username: UserName::new(&format!("{}_{}", username_prefix, i)),
             password_hash: password_hash.clone(),
             role: Role::User,
             email: Some(format!("perf{}@example.com", i)),

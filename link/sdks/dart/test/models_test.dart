@@ -11,7 +11,7 @@ void main() {
       final auth = Auth.basic('alice', 'secret');
       expect(auth, isA<BasicAuth>());
       final basic = auth as BasicAuth;
-      expect(basic.username, 'alice');
+      expect(basic.user, 'alice');
       expect(basic.password, 'secret');
     });
 
@@ -161,10 +161,10 @@ void main() {
         refreshToken: 'ref',
         expiresAt: '2026-12-31',
         refreshExpiresAt: '2027-01-31',
+        adminUiAccess: true,
         user: LoginUserInfo(
           id: 'u1',
-          username: 'alice',
-          role: 'dba',
+          role: Role.dba,
           email: 'alice@example.com',
           createdAt: '2026-01-01',
           updatedAt: '2026-02-01',
@@ -172,9 +172,10 @@ void main() {
       );
       expect(resp.accessToken, 'tok');
       expect(resp.refreshToken, 'ref');
-      expect(resp.user.username, 'alice');
+      expect(resp.user.id, 'u1');
       expect(resp.user.email, 'alice@example.com');
-      expect(resp.user.role, 'dba');
+      expect(resp.user.role, Role.dba);
+      expect(resp.adminUiAccess, isTrue);
     });
   });
 

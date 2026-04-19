@@ -12,7 +12,7 @@ use tokio::time::Duration;
 
 async fn lookup_user_id(server: &HttpTestServer, username: &str) -> anyhow::Result<String> {
     let resp = server
-        .execute_sql(&format!("SELECT user_id FROM system.users WHERE username='{}'", username))
+        .execute_sql(&format!("SELECT user_id FROM system.users WHERE user_id='{}'", username))
         .await?;
     anyhow::ensure!(
         resp.status == ResponseStatus::Success,

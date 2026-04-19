@@ -3,9 +3,8 @@ use crate::helpers::basic_auth;
 use crate::models::context::AuthenticatedUser;
 use crate::repository::user_repo::UserRepository;
 use crate::security::password;
-use kalamdb_commons::constants::AuthConstants;
-use kalamdb_commons::models::{ConnectionInfo, UserName};
-use kalamdb_commons::{AuthType, Role};
+use kalamdb_commons::models::ConnectionInfo;
+use kalamdb_commons::{AuthType, Role, UserId};
 use log::debug;
 use std::sync::Arc;
 use tracing::Instrument;
@@ -13,39 +12,42 @@ use tracing::Instrument;
 use super::LOGIN_TRACKER;
 
 /// Authenticate using Basic Auth header.
+///
+/// The Basic header carries `user_id:password` (base64-encoded).
 #[allow(dead_code)]
 pub(super) async fn authenticate_basic(
     auth_header: &str,
     connection_info: &ConnectionInfo,
     repo: &Arc<dyn UserRepository>,
 ) -> AuthResult<AuthenticatedUser> {
-    let (username, password) = basic_auth::parse_basic_auth_header(auth_header)?;
-    authenticate_username_password(&username, &password, connection_info, repo).await
+    let (user, password) = basic_auth::parse_basic_auth_header(auth_header)?;
+    authenticate_user_password(&user, &password, connection_info, repo).await
 }
 
-/// Core authentication logic for username/password.
-pub(super) async fn authenticate_username_password(
-    username: &str,
+/// Core authentication logic for user/password.
+pub(super) async fn authenticate_user_password(
+    user_id_str: &str,
     password: &str,
     connection_info: &ConnectionInfo,
     repo: &Arc<dyn UserRepository>,
 ) -> AuthResult<AuthenticatedUser> {
     let span = tracing::info_span!(
-        "auth.username_password",
-        username = username,
+        "auth.user_password",
+        user_id = user_id_str,
         is_localhost = connection_info.is_localhost()
     );
     async move {
-        if username.trim().is_empty() {
-            return Err(AuthError::InvalidCredentials("Invalid username or password".to_string()));
+        if user_id_str.trim().is_empty() {
+            return Err(AuthError::InvalidCredentials("Invalid credentials".to_string()));
         }
 
-        let username_typed = UserName::from(username);
-        let mut user = repo.get_user_by_username(&username_typed).await?;
+        let user_id = UserId::try_new(user_id_str.to_string())
+            .map_err(|_| AuthError::InvalidCredentials("Invalid credentials".to_string()))?;
+        let mut user = repo.get_user_by_id(&user_id).await?;
 
         if user.deleted_at.is_some() {
             debug!("Authentication failed for user attempt");
-            return Err(AuthError::InvalidCredentials("Invalid username or password".to_string()));
+            return Err(AuthError::InvalidCredentials("Invalid credentials".to_string()));
         }
 
         LOGIN_TRACKER.check_lockout(&user)?;
@@ -60,7 +62,7 @@ pub(super) async fn authenticate_username_password(
         let is_localhost = connection_info.is_localhost();
         let is_system_internal = user.role == Role::System && user.auth_type == AuthType::Internal;
 
-        if username == AuthConstants::DEFAULT_SYSTEM_USERNAME
+        if user_id.as_str() == UserId::root().as_str()
             && user.password_hash.is_empty()
             && password.is_empty()
         {
@@ -101,9 +103,7 @@ pub(super) async fn authenticate_username_password(
                 }
             }
         } else if user.password_hash.is_empty() {
-            return Err(AuthError::InvalidCredentials(
-                "Invalid username or password".to_string(),
-            ));
+            return Err(AuthError::InvalidCredentials("Invalid credentials".to_string()));
         } else if !password.is_empty()
             && password::verify_password(password, &user.password_hash)
                 .await
@@ -115,23 +115,20 @@ pub(super) async fn authenticate_username_password(
         }
 
         if !auth_success {
-            tracing::warn!(username = username, "Password authentication failed");
+            tracing::warn!(user_id = user_id_str, "Password authentication failed");
             if let Err(e) = LOGIN_TRACKER.record_failed_login(&mut user, repo).await {
                 log::error!("Failed to record failed login: {}", e);
             }
-            return Err(AuthError::InvalidCredentials(
-                "Invalid username or password".to_string(),
-            ));
+            return Err(AuthError::InvalidCredentials("Invalid credentials".to_string()));
         }
 
         if let Err(e) = LOGIN_TRACKER.record_successful_login(&mut user, repo).await {
             log::error!("Failed to record successful login: {}", e);
         }
-        tracing::debug!(username = %user.username, role = ?user.role, "Password authentication succeeded");
+        tracing::debug!(user_id = %user.user_id, role = ?user.role, "Password authentication succeeded");
 
         Ok(AuthenticatedUser::new(
             user.user_id,
-            user.username.clone(),
             user.role,
             user.email,
             user.created_at,

@@ -55,13 +55,13 @@ pub struct SqlError {
 impl KalamClient {
     /// Create a multi-endpoint client by logging into every configured URL.
     /// All URLs must be reachable and authenticatable, otherwise creation fails.
-    pub async fn login(urls: &[String], username: &str, password: &str) -> Result<Self, String> {
-        Self::login_with_options(urls, username, password, true).await
+    pub async fn login(urls: &[String], user: &str, password: &str) -> Result<Self, String> {
+        Self::login_with_options(urls, user, password, true).await
     }
 
     async fn login_with_options(
         urls: &[String],
-        username: &str,
+        user: &str,
         password: &str,
         ensure_setup: bool,
     ) -> Result<Self, String> {
@@ -80,7 +80,7 @@ impl KalamClient {
         for base_url in urls {
             match Self::build_authenticated_endpoint(
                 &base_url,
-                username,
+                user,
                 password,
                 &timeouts,
                 &ws_local_bind_addresses,
@@ -116,26 +116,26 @@ impl KalamClient {
     /// Convenience helper for a single endpoint.
     pub async fn login_single(
         base_url: &str,
-        username: &str,
+        user: &str,
         password: &str,
     ) -> Result<Self, String> {
         let urls = vec![base_url.to_string()];
-        Self::login_with_options(&urls, username, password, true).await
+        Self::login_with_options(&urls, user, password, true).await
     }
 
     /// Convenience helper for a single endpoint when setup is already complete.
     pub async fn login_single_steady_state(
         base_url: &str,
-        username: &str,
+        user: &str,
         password: &str,
     ) -> Result<Self, String> {
         let urls = vec![base_url.to_string()];
-        Self::login_with_options(&urls, username, password, false).await
+        Self::login_with_options(&urls, user, password, false).await
     }
 
     async fn build_authenticated_endpoint(
         base_url: &str,
-        username: &str,
+        user: &str,
         password: &str,
         timeouts: &KalamLinkTimeouts,
         ws_local_bind_addresses: &[String],
@@ -150,17 +150,17 @@ impl KalamClient {
 
         // Complete setup if needed
         if ensure_setup {
-            Self::complete_setup_if_needed(&unauthed, username, password).await;
+            Self::complete_setup_if_needed(&unauthed, user, password).await;
         }
 
         // Login
-        let login_resp = match unauthed.login(username, password).await {
+        let login_resp = match unauthed.login(user, password).await {
             Ok(r) => r,
             Err(kalam_client::KalamLinkError::SetupRequired(_)) => {
                 // Try setup again + retry login
-                Self::complete_setup_if_needed(&unauthed, username, password).await;
+                Self::complete_setup_if_needed(&unauthed, user, password).await;
                 unauthed
-                    .login(username, password)
+                    .login(user, password)
                     .await
                     .map_err(|e| format!("Login failed after setup: {}", e))?
             },
@@ -194,7 +194,7 @@ impl KalamClient {
     }
 
     /// Complete initial server setup if the server hasn't been set up yet.
-    async fn complete_setup_if_needed(client: &KalamLinkClient, username: &str, password: &str) {
+    async fn complete_setup_if_needed(client: &KalamLinkClient, user: &str, password: &str) {
         let Ok(status) = client.check_setup_status().await else {
             return;
         };
@@ -203,7 +203,7 @@ impl KalamClient {
         }
         eprintln!("  Server needs initial setup, running setup...");
         let req = ServerSetupRequest::new(
-            username.to_string(),
+            user.to_string(),
             password.to_string(),
             password.to_string(),
             None,
@@ -504,7 +504,16 @@ fn derive_loopback_bind_addresses(urls: &[String]) -> Vec<String> {
             }
         }
     }
-    bind_addrs
+
+    // Only force a local bind when there is an actual pool to rotate through.
+    // Pinning every WebSocket to a single loopback address can reduce the usable
+    // socket fanout on macOS even when the benchmark is spreading load across
+    // multiple destination ports.
+    if bind_addrs.len() > 1 {
+        bind_addrs
+    } else {
+        Vec::new()
+    }
 }
 
 fn extract_url_host(url: &str) -> Option<String> {

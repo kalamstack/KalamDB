@@ -143,7 +143,7 @@ SELECT * FROM {};"#,
     let mut cmd = create_cli_command();
     cmd.arg("-u")
         .arg(target_url)
-        .arg("--username")
+        .arg("--user")
         .arg(default_username())
         .arg("--password")
         .arg(root_password())
@@ -161,7 +161,7 @@ SELECT * FROM {};"#,
             retry_cmd
                 .arg("-u")
                 .arg(leader)
-                .arg("--username")
+                .arg("--user")
                 .arg(default_username())
                 .arg("--password")
                 .arg(root_password())

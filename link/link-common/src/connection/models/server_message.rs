@@ -1,3 +1,4 @@
+use kalamdb_commons::{Role, UserId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -14,10 +15,10 @@ use super::ProtocolOptions;
 pub enum ServerMessage {
     /// Authentication successful response (browser clients only)
     AuthSuccess {
-        /// Authenticated user ID
-        user_id: String, //TODO: Use UserId type instead
+        /// Authenticated canonical user identifier
+        user: UserId,
         /// User role
-        role: String, //TODO: Use UserRole type instead
+        role: Role,
         /// Negotiated protocol echoed back from the server.
         protocol: ProtocolOptions,
     },

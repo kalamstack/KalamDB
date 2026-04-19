@@ -12,7 +12,7 @@
 use super::test_support::TestServer;
 use kalamdb_auth::{authenticate, AuthRequest};
 use kalamdb_commons::{
-    models::{ConnectionInfo, UserId, UserName},
+    models::{ConnectionInfo, UserId},
     Role,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -22,7 +22,6 @@ fn bearer_auth_header(username: &str, user_id: &str, role: Role) -> String {
     let email = format!("{}@example.com", username);
     let (token, _claims) = kalamdb_auth::providers::jwt_auth::create_and_sign_token(
         &UserId::new(user_id),
-        &UserName::new(username),
         &role,
         Some(email.as_str()),
         Some(1),
@@ -91,7 +90,6 @@ async fn test_concurrent_auth_no_race_conditions() {
             let secret = kalamdb_configs::defaults::default_auth_jwt_secret();
             let (token, _claims) = kalamdb_auth::providers::jwt_auth::create_and_sign_token(
                 &UserId::new(&username),
-                &UserName::new(&username),
                 &Role::User,
                 Some("concurrent@example.com"),
                 Some(1),
@@ -145,7 +143,7 @@ async fn test_deleted_user_denied() {
     assert!(result.is_err(), "Deleted user authentication should fail");
     let err = result.err().unwrap();
     let err_msg = format!("{:?}", err);
-    // The unified auth returns generic "Invalid username or password" for security
+    // The unified auth returns a generic credential failure for security
     // (doesn't reveal whether user exists or is deleted)
     assert!(
         err_msg.contains("UserDeleted")
@@ -210,7 +208,7 @@ async fn test_maximum_password_length() {
 
     // Try to authenticate via credential flow
     let auth_request = AuthRequest::Credentials {
-        username: "max_pass_user".to_string(),
+        user: "max_pass_user".to_string(),
         password: max_password,
     };
     let result = authenticate(auth_request, &connection_info, &user_repo).await;

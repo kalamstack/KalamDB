@@ -59,8 +59,8 @@ fn test_auth_failure_triggers_prompt() {
 }
 
 #[test]
-fn test_auth_failure_with_cli_username() {
-    // When --username is provided, CLI should NOT prompt for credentials again
+fn test_auth_failure_with_cli_user() {
+    // When --user is provided, CLI should NOT prompt for credentials again
     // It should just fail with the error
 
     let binary = get_cli_binary();
@@ -71,7 +71,7 @@ fn test_auth_failure_with_cli_username() {
 
     let output = Command::new(&binary)
         .args(&[
-            "--username",
+            "--user",
             "nonexistent_user_xyz_12345",
             "--password",
             "wrongpass",
@@ -94,13 +94,13 @@ fn test_auth_failure_with_cli_username() {
     // Should fail with auth error
     assert!(
         !output.status.success(),
-        "Should exit with error when auth fails with explicit username"
+        "Should exit with error when auth fails with explicit user"
     );
 
-    // Should NOT prompt for new credentials when --username is provided
+    // Should NOT prompt for new credentials when --user is provided
     assert!(
         !stderr.contains("Please enter your credentials"),
-        "Should not prompt when --username is provided. Got: {}",
+        "Should not prompt when --user is provided. Got: {}",
         stderr
     );
 }
@@ -112,13 +112,13 @@ fn test_interactive_credential_prompt() {
     println!("\nSteps to test interactive credential prompt:");
     println!("1. Ensure you have invalid stored credentials:");
     println!("   cargo run --release -- --delete-credentials");
-    println!("   cargo run --release -- --username deleteduser --password test --save-credentials");
+    println!("   cargo run --release -- --user deleteduser --password test --save-credentials");
     println!("\n2. Delete that user from the server (or use a non-existent user)");
     println!("\n3. Run CLI without arguments in an interactive terminal:");
     println!("   cargo run --release");
     println!("\n4. Expected behavior:");
     println!("   - Shows: 'Authentication failed with stored credentials.'");
-    println!("   - Prompts: 'Username:'");
+    println!("   - Prompts: 'User:'");
     println!("   - Prompts: 'Password:' (hidden input)");
     println!("   - Asks: 'Save credentials for future use? (y/N)'");
     println!("   - Connects successfully with new credentials");
@@ -130,9 +130,7 @@ fn test_expired_token_flow() {
     println!("\n=== Manual Token Expiry Test ===");
     println!("\nSteps to test expired token handling:");
     println!("1. Login and save credentials:");
-    println!(
-        "   cargo run --release -- --username testuser --password testpass --save-credentials"
-    );
+    println!("   cargo run --release -- --user testuser --password testpass --save-credentials");
     println!("\n2. Wait for the access token to expire (or manually edit the expiry in credentials file)");
     println!("\n3. Run CLI without arguments:");
     println!("   cargo run --release");
@@ -152,14 +150,14 @@ fn test_setup_wizard_direct_access() {
     println!("   cd backend && rm -rf data && cargo run");
     println!("\n2. Store any credentials (they will be invalid for setup-required server):");
     println!("   cargo run --release -- --delete-credentials");
-    println!("   cargo run --release -- --username anyuser --password anypass --save-credentials");
+    println!("   cargo run --release -- --user anyuser --password anypass --save-credentials");
     println!("\n3. Run CLI without arguments:");
     println!("   cargo run --release");
     println!("\n4. Expected behavior:");
     println!("   - Shows: 'Server requires initial setup.'");
     println!("   - Goes DIRECTLY to setup wizard (no login prompt)");
     println!("   - Shows setup box with instructions");
-    println!("   - Prompts for DBA username and password");
+    println!("   - Prompts for DBA user and password");
     println!("   - Prompts for root password");
     println!("   - Completes setup and logs in automatically");
     println!("\n5. Verify NO intermediate login prompt appears!");
@@ -170,7 +168,7 @@ fn test_setup_wizard_direct_access() {
 fn document_auth_retry_behavior() {
     println!("\n=== CLI Authentication Retry Behavior ===\n");
     println!("When credentials fail, the CLI will automatically prompt for new credentials IF:");
-    println!("  ✓ No --username was provided on command line");
+    println!("  ✓ No --user was provided on command line");
     println!("  ✓ No --token was provided on command line");
     println!("  ✓ Terminal is interactive (has TTY)");
     println!("  ✓ Error is authentication-related (401 status)");
@@ -185,7 +183,7 @@ fn document_auth_retry_behavior() {
     println!("2. Stored credentials expired → Prompts for new credentials");
     println!("3. Stored user deleted → Prompts for new credentials");
     println!("4. Wrong password stored → Prompts for new credentials");
-    println!("5. CLI args provided (--username) → Does NOT prompt, returns error");
+    println!("5. CLI args provided (--user) → Does NOT prompt, returns error");
     println!("6. Non-interactive mode → Does NOT prompt, returns error");
     println!("\nError types that trigger re-authentication:");
     println!("  • SetupRequired → Direct to setup wizard");

@@ -87,8 +87,10 @@ cache_ttl_seconds = 600
 max_request_body_size = 10485760
 max_ws_message_size = 1048576
 strict_ws_origin_check = true
-allowed_ws_origins = ["https://app.example.com"]
 trusted_proxy_ranges = ["10.0.1.9", "10.0.0.0/8"]
+
+[security.cors]
+allowed_origins = ["https://app.example.com"]
 ```
 
 KalamDB also rejects localhost-spoofing via proxy headers for connection protection logic (helps prevent rate-limit bypass tricks).

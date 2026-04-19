@@ -1,7 +1,7 @@
 //! Tests for password complexity enforcement.
 
 use super::test_support::TestServer;
-use kalamdb_commons::{models::UserName, AuthType, Role, StorageId, UserId};
+use kalamdb_commons::{AuthType, Role, StorageId, UserId};
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::error::KalamDbError;
 use kalamdb_core::sql::executor::handler_registry::HandlerRegistry;
@@ -31,15 +31,12 @@ async fn create_admin_user(app_context: &Arc<AppContext>) -> UserId {
     let now = chrono::Utc::now().timestamp_millis();
 
     // If user already exists (singleton AppContext across tests), return existing id
-    if let Ok(Some(existing)) =
-        app_context.system_tables().users().get_user_by_username("complexity_admin")
-    {
+    if let Ok(Some(existing)) = app_context.system_tables().users().get_user_by_id(&user_id) {
         return existing.user_id;
     }
 
     let user = User {
         user_id: user_id.clone(),
-        username: UserName::new("complexity_admin"),
         password_hash: "hashed".to_string(),
         role: Role::System,
         email: Some("complexity@kalamdb.local".to_string()),

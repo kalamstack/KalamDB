@@ -271,7 +271,7 @@ fn smoke_cli_system_tables() {
 
     // Test system.users
     let result = execute_sql_as_root_via_client(
-        "SELECT user_id, username, role FROM system.users WHERE username = 'root' LIMIT 1",
+        "SELECT user_id, role FROM system.users WHERE user_id = 'root' LIMIT 1",
     );
     assert!(result.is_ok(), "system.users should be queryable: {:?}", result);
     let output = result.unwrap();
@@ -368,40 +368,40 @@ fn smoke_cli_user_management() {
         return;
     }
 
-    let username = generate_unique_namespace("smoke_cli_user");
+    let user_id = generate_unique_namespace("smoke_cli_user");
     let password = "test_password_123";
 
     // Test CREATE USER
     let result = execute_sql_as_root_via_client(&format!(
         "CREATE USER {} WITH PASSWORD '{}' ROLE 'user'",
-        username, password
+        user_id, password
     ));
     assert!(result.is_ok(), "CREATE USER should succeed: {:?}", result);
 
     // Verify user exists
     let result = execute_sql_as_root_via_client(&format!(
-        "SELECT username, role FROM system.users WHERE username = '{}'",
-        username
+        "SELECT user_id, role FROM system.users WHERE user_id = '{}'",
+        user_id
     ))
     .expect("Failed to query user");
-    assert!(result.contains(&username), "User should exist: {}", result);
+    assert!(result.contains(&user_id), "User should exist: {}", result);
     assert!(result.contains("user"), "User role should be 'user': {}", result);
 
     // Test user can login
-    let result = execute_sql_via_client_as(&username, password, "SELECT 1 as test");
+    let result = execute_sql_via_client_as(&user_id, password, "SELECT 1 as test");
     assert!(result.is_ok(), "User should be able to login: {:?}", result);
 
     // Note: ALTER USER SET ROLE is not currently implemented, skip that test
 
     // Test DROP USER
-    let result = execute_sql_as_root_via_client(&format!("DROP USER IF EXISTS {}", username));
+    let result = execute_sql_as_root_via_client(&format!("DROP USER IF EXISTS {}", user_id));
     assert!(result.is_ok(), "DROP USER should succeed: {:?}", result);
 
     // Note: Users are soft-deleted (deleted_at timestamp set), so they may still appear in system.users
     // Verify user is soft-deleted by checking deleted_at is not null
     let _result = execute_sql_as_root_via_client(&format!(
-        "SELECT deleted_at FROM system.users WHERE username = '{}'",
-        username
+        "SELECT deleted_at FROM system.users WHERE user_id = '{}'",
+        user_id
     ))
     .expect("Failed to query deleted user");
     // The result should show a non-null deleted_at timestamp (or user may be filtered out)

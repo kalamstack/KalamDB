@@ -4,6 +4,7 @@ extern crate kalam_cli;
 use libc::{flock, LOCK_EX, LOCK_UN};
 use rand::{distr::Alphanumeric, RngExt};
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::OpenOptions;
@@ -75,6 +76,7 @@ static ADMIN_PASSWORD: OnceLock<String> = OnceLock::new();
 static TEST_CONTEXT: OnceLock<TestContext> = OnceLock::new();
 static LAST_LEADER_URL: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 static AUTO_TEST_SERVER: OnceLock<Mutex<Option<AutoTestServer>>> = OnceLock::new();
+static AUTO_TEST_SERVER_STATE_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
 static AUTO_TEST_RUNTIME: OnceLock<&'static Runtime> = OnceLock::new();
 /// Token cache: maps "username:password" to access_token
 static TOKEN_CACHE: OnceLock<Mutex<std::collections::HashMap<String, String>>> = OnceLock::new();
@@ -83,6 +85,7 @@ static LOGIN_MUTEX: OnceLock<TokioMutex<()>> = OnceLock::new();
 static TOKEN_FILE_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
 static TEST_CLI_HOME_DIR: OnceLock<PathBuf> = OnceLock::new();
 static TEST_CLI_CREDENTIALS_PATH: OnceLock<PathBuf> = OnceLock::new();
+static AUTO_TEST_SERVER_EXIT_CLEANUP_REGISTERED: OnceLock<()> = OnceLock::new();
 
 struct TestAuthManager {
     ready_urls: Mutex<HashSet<String>>,
@@ -198,7 +201,7 @@ impl TestAuthManager {
         let setup_response = client
             .post(format!("{}/v1/api/auth/setup", base_url))
             .json(&json!({
-                "username": "admin",
+                "user": "admin",
                 "password": "kalamdb123",
                 "root_password": root_password,
                 "email": null
@@ -244,7 +247,7 @@ impl TestAuthManager {
             let response = client
                 .post(format!("{}/v1/api/auth/login", base_url))
                 .json(&json!({
-                    "username": username,
+                    "user": username,
                     "password": password
                 }))
                 .send()
@@ -319,7 +322,7 @@ impl TestAuthManager {
             .post(format!("{}/v1/api/sql", base_url))
             .bearer_auth(&root_token)
             .json(&json!({
-                "sql": "SELECT username FROM system.users WHERE username = 'admin' LIMIT 1"
+                "sql": "SELECT user_id FROM system.users WHERE user_id = 'admin' LIMIT 1"
             }))
             .send()
             .await?;
@@ -553,11 +556,11 @@ impl TestAuthManager {
                 .timeouts(
                     KalamLinkTimeouts::builder()
                         .connection_timeout_secs(5)
-                        .receive_timeout_secs(120)
-                        .send_timeout_secs(30)
+                        .receive_timeout_secs(30)
+                        .send_timeout_secs(10)
                         .subscribe_timeout_secs(10)
                         .auth_timeout_secs(10)
-                        .initial_data_timeout(Duration::from_secs(120))
+                        .initial_data_timeout(Duration::from_secs(30))
                         .build(),
                 )
                 .build()
@@ -571,11 +574,11 @@ impl TestAuthManager {
             .timeouts(
                 KalamLinkTimeouts::builder()
                     .connection_timeout_secs(5)
-                    .receive_timeout_secs(120)
-                    .send_timeout_secs(30)
+                    .receive_timeout_secs(30)
+                    .send_timeout_secs(10)
                     .subscribe_timeout_secs(10)
                     .auth_timeout_secs(10)
-                    .initial_data_timeout(Duration::from_secs(120))
+                    .initial_data_timeout(Duration::from_secs(30))
                     .build(),
             )
             .build()
@@ -654,7 +657,7 @@ fn test_auth_manager() -> &'static TestAuthManager {
 struct AutoTestServer {
     base_url: String,
     storage_dir: PathBuf,
-    _temp_dir: Option<TempDir>,
+    pid: u32,
     child: Option<Child>,
 }
 
@@ -665,6 +668,258 @@ impl Drop for AutoTestServer {
             let _ = child.wait();
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SharedAutoTestServerState {
+    base_url: String,
+    storage_dir: PathBuf,
+    pid: u32,
+}
+
+fn auto_test_server_state_root() -> PathBuf {
+    std::env::temp_dir().join("kalamdb_auto_test_server")
+}
+
+fn auto_test_server_state_lock_path() -> PathBuf {
+    auto_test_server_state_root().join("state.lock")
+}
+
+fn auto_test_server_state_file_path() -> PathBuf {
+    auto_test_server_state_root().join("state.json")
+}
+
+fn auto_test_server_leases_dir() -> PathBuf {
+    auto_test_server_state_root().join("leases")
+}
+
+fn auto_test_server_lease_path(pid: u32) -> PathBuf {
+    auto_test_server_leases_dir().join(pid.to_string())
+}
+
+fn create_auto_test_server_data_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let base_dir = std::env::temp_dir();
+    for _ in 0..16 {
+        let candidate = base_dir.join(format!("kalamdb-test-server-{}", random_string(12)));
+        match std::fs::create_dir(&candidate) {
+            Ok(()) => return Ok(candidate),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(err.into()),
+        }
+    }
+
+    Err("failed to create auto test server data directory".into())
+}
+
+fn with_auto_test_server_state_lock<R>(
+    op: impl FnOnce() -> Result<R, Box<dyn std::error::Error>>,
+) -> Result<R, Box<dyn std::error::Error>> {
+    let _guard = AUTO_TEST_SERVER_STATE_MUTEX
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .map_err(|_| "Failed to lock auto test server mutex")?;
+
+    let root = auto_test_server_state_root();
+    std::fs::create_dir_all(&root)?;
+
+    #[cfg(unix)]
+    {
+        let lock_path = auto_test_server_state_lock_path();
+        let lock_file =
+            OpenOptions::new().create(true).read(true).write(true).open(&lock_path)?;
+
+        unsafe {
+            if flock(lock_file.as_raw_fd(), LOCK_EX) != 0 {
+                return Err("Failed to acquire auto test server lock".into());
+            }
+        }
+
+        let result = op();
+
+        unsafe {
+            let _ = flock(lock_file.as_raw_fd(), LOCK_UN);
+        }
+
+        result
+    }
+
+    #[cfg(not(unix))]
+    {
+        op()
+    }
+}
+
+fn read_auto_test_server_state_locked(
+) -> Result<Option<SharedAutoTestServerState>, Box<dyn std::error::Error>> {
+    let state_path = auto_test_server_state_file_path();
+    if !state_path.exists() {
+        return Ok(None);
+    }
+
+    let state = serde_json::from_str::<SharedAutoTestServerState>(&std::fs::read_to_string(
+        &state_path,
+    )?)?;
+    Ok(Some(state))
+}
+
+fn write_auto_test_server_state_locked(
+    state: &SharedAutoTestServerState,
+) -> Result<(), Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(auto_test_server_state_root())?;
+    std::fs::write(
+        auto_test_server_state_file_path(),
+        serde_json::to_vec(state)?,
+    )?;
+    Ok(())
+}
+
+fn pid_is_alive(pid: u32) -> bool {
+    static PROCESS_SYSTEM: OnceLock<Mutex<System>> = OnceLock::new();
+    let system = PROCESS_SYSTEM
+        .get_or_init(|| Mutex::new(System::new_with_specifics(RefreshKind::nothing())));
+
+    let Ok(mut guard) = system.lock() else {
+        return false;
+    };
+
+    let pid = Pid::from_u32(pid);
+    guard.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        false,
+        ProcessRefreshKind::nothing(),
+    );
+    guard.process(pid).is_some()
+}
+
+fn remove_stale_auto_test_server_leases_locked(
+) -> Result<Vec<u32>, Box<dyn std::error::Error>> {
+    let leases_dir = auto_test_server_leases_dir();
+    std::fs::create_dir_all(&leases_dir)?;
+
+    let mut active_pids = Vec::new();
+    for entry in std::fs::read_dir(&leases_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            let _ = std::fs::remove_file(&path);
+            continue;
+        };
+
+        let Ok(pid) = file_name.parse::<u32>() else {
+            let _ = std::fs::remove_file(&path);
+            continue;
+        };
+
+        if pid_is_alive(pid) {
+            active_pids.push(pid);
+        } else {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+
+    active_pids.sort_unstable();
+    Ok(active_pids)
+}
+
+fn register_auto_test_server_lease_locked(pid: u32) -> Result<(), Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(auto_test_server_leases_dir())?;
+    std::fs::write(auto_test_server_lease_path(pid), pid.to_string())?;
+    Ok(())
+}
+
+fn take_local_auto_test_server(pid: u32) -> Option<AutoTestServer> {
+    let server_mutex = AUTO_TEST_SERVER.get()?;
+    let mut guard = server_mutex.lock().ok()?;
+    if guard
+        .as_ref()
+        .is_some_and(|server| server.pid == pid && server.child.is_some())
+    {
+        guard.take()
+    } else {
+        None
+    }
+}
+
+fn terminate_auto_test_server_process(pid: u32) {
+    #[cfg(unix)]
+    {
+        unsafe {
+            libc::kill(pid as i32, libc::SIGTERM);
+        }
+
+        for _ in 0..30 {
+            if !pid_is_alive(pid) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+
+        unsafe {
+            libc::kill(pid as i32, libc::SIGKILL);
+        }
+
+        for _ in 0..20 {
+            if !pid_is_alive(pid) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .status();
+    }
+}
+
+fn shutdown_auto_test_server_locked(
+    state: &SharedAutoTestServerState,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(server) = take_local_auto_test_server(state.pid) {
+        drop(server);
+    } else if pid_is_alive(state.pid) {
+        terminate_auto_test_server_process(state.pid);
+    }
+
+    let _ = std::fs::remove_file(auto_test_server_state_file_path());
+    let _ = std::fs::remove_dir_all(&state.storage_dir);
+    let _ = std::fs::remove_dir_all(auto_test_server_leases_dir());
+
+    Ok(())
+}
+
+fn release_auto_test_server_lease(pid: u32) -> Result<(), Box<dyn std::error::Error>> {
+    with_auto_test_server_state_lock(|| {
+        let lease_path = auto_test_server_lease_path(pid);
+        if lease_path.exists() {
+            let _ = std::fs::remove_file(&lease_path);
+        }
+
+        let active_leases = remove_stale_auto_test_server_leases_locked()?;
+        if active_leases.is_empty() {
+            if let Some(state) = read_auto_test_server_state_locked()? {
+                shutdown_auto_test_server_locked(&state)?;
+            }
+        }
+
+        Ok(())
+    })
+}
+
+#[cfg(unix)]
+extern "C" fn cleanup_auto_test_server_on_process_exit() {
+    let _ = release_auto_test_server_lease(std::process::id());
+}
+
+fn register_auto_test_server_exit_cleanup() {
+    AUTO_TEST_SERVER_EXIT_CLEANUP_REGISTERED.get_or_init(|| {
+        #[cfg(unix)]
+        unsafe {
+            libc::atexit(cleanup_auto_test_server_on_process_exit);
+        }
+    });
 }
 
 #[derive(Debug, Clone)]
@@ -761,10 +1016,13 @@ fn wait_for_url_reachable(url: &str, timeout: Duration) -> bool {
 
 fn ensure_auto_test_server() -> Option<(String, PathBuf)> {
     let server_mutex = AUTO_TEST_SERVER.get_or_init(|| Mutex::new(None));
-    let mut guard = server_mutex.lock().ok()?;
+    {
+        let mut guard = server_mutex.lock().ok()?;
+        if let Some(existing) = guard.as_ref() {
+            if url_reachable(&existing.base_url) {
+                return Some((existing.base_url.clone(), existing.storage_dir.clone()));
+            }
 
-    if let Some(existing) = guard.as_ref() {
-        if !url_reachable(&existing.base_url) {
             eprintln!(
                 "[TEST] Auto-started server unreachable at {}, restarting",
                 existing.base_url
@@ -773,52 +1031,87 @@ fn ensure_auto_test_server() -> Option<(String, PathBuf)> {
         }
     }
 
-    if guard.is_none() {
-        let start_result: Result<AutoTestServer, String> = if tokio::runtime::Handle::try_current()
-            .is_ok()
-        {
-            let (tx, rx) = std::sync::mpsc::channel();
-            std::thread::spawn(move || {
-                let runtime = AUTO_TEST_RUNTIME.get_or_init(|| {
-                    Box::leak(Box::new(
-                        Runtime::new().expect("Failed to create auto test server runtime"),
-                    ))
-                });
-                let result =
-                    (*runtime).block_on(start_local_test_server()).map_err(|err| err.to_string());
-                let _ = tx.send(result);
-            });
+    let current_pid = std::process::id();
+    let shared_result: Result<(SharedAutoTestServerState, Option<AutoTestServer>), String> =
+        with_auto_test_server_state_lock(|| {
+            let active_leases = remove_stale_auto_test_server_leases_locked()?;
+            let mut shared_state = read_auto_test_server_state_locked()?;
 
-            match rx.recv_timeout(Duration::from_secs(60)) {
-                Ok(result) => result,
-                Err(err) => Err(format!("Timed out starting test server: {}", err)),
-            }
-        } else {
-            let runtime = AUTO_TEST_RUNTIME.get_or_init(|| {
-                Box::leak(Box::new(
-                    Runtime::new().expect("Failed to create auto test server runtime"),
-                ))
-            });
-            (*runtime).block_on(start_local_test_server()).map_err(|err| err.to_string())
-        };
-
-        match start_result {
-            Ok(server) => {
-                *guard = Some(server);
-                if let Some(server) = guard.as_ref() {
-                    let _ = wait_for_url_reachable(&server.base_url, Duration::from_secs(10));
+            if let Some(existing_state) = shared_state.as_ref() {
+                if active_leases.is_empty()
+                    || !url_reachable(&existing_state.base_url)
+                    || !pid_is_alive(existing_state.pid)
+                {
+                    shutdown_auto_test_server_locked(existing_state)?;
+                    shared_state = None;
                 }
-            },
-            Err(err) => {
-                eprintln!("Failed to auto-start test server: {}", err);
-                return None;
-            },
-        }
-    }
+            }
 
-    guard
-        .as_ref()
-        .map(|server| (server.base_url.clone(), server.storage_dir.clone()))
+            let owned_server = if let Some(existing_state) = shared_state.as_ref() {
+                let _ = wait_for_url_reachable(&existing_state.base_url, Duration::from_secs(10));
+                None
+            } else {
+                let start_result: Result<AutoTestServer, String> =
+                    if tokio::runtime::Handle::try_current().is_ok() {
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        std::thread::spawn(move || {
+                            let runtime = AUTO_TEST_RUNTIME.get_or_init(|| {
+                                Box::leak(Box::new(Runtime::new().expect(
+                                    "Failed to create auto test server runtime",
+                                )))
+                            });
+                            let result = (*runtime)
+                                .block_on(start_local_test_server())
+                                .map_err(|err| err.to_string());
+                            let _ = tx.send(result);
+                        });
+
+                        match rx.recv_timeout(Duration::from_secs(60)) {
+                            Ok(result) => result,
+                            Err(err) => Err(format!("Timed out starting test server: {}", err)),
+                        }
+                    } else {
+                        let runtime = AUTO_TEST_RUNTIME.get_or_init(|| {
+                            Box::leak(Box::new(
+                                Runtime::new().expect("Failed to create auto test server runtime"),
+                            ))
+                        });
+                        (*runtime)
+                            .block_on(start_local_test_server())
+                            .map_err(|err| err.to_string())
+                    };
+
+                let server = start_result.map_err(|err| err.to_string())?;
+                let state = SharedAutoTestServerState {
+                    base_url: server.base_url.clone(),
+                    storage_dir: server.storage_dir.clone(),
+                    pid: server.pid,
+                };
+                write_auto_test_server_state_locked(&state)?;
+                shared_state = Some(state);
+                Some(server)
+            };
+
+            register_auto_test_server_lease_locked(current_pid)?;
+
+            Ok((shared_state.expect("shared fresh test server state"), owned_server))
+        })
+        .map_err(|err| err.to_string());
+
+    let (shared_state, owned_server) = match shared_result {
+        Ok(result) => result,
+        Err(err) => {
+            eprintln!("Failed to auto-start test server: {}", err);
+            return None;
+        },
+    };
+
+    register_auto_test_server_exit_cleanup();
+
+    let mut guard = server_mutex.lock().ok()?;
+    *guard = owned_server;
+
+    Some((shared_state.base_url, shared_state.storage_dir))
 }
 
 /// Force a local auto-started test server and return its base URL.
@@ -863,8 +1156,7 @@ fn kalamdb_server_bin() -> Result<PathBuf, Box<dyn std::error::Error>> {
 }
 
 async fn start_local_test_server() -> Result<AutoTestServer, Box<dyn std::error::Error>> {
-    let temp_dir = TempDir::new()?;
-    let data_path = temp_dir.path().to_path_buf();
+    let data_path = create_auto_test_server_data_dir()?;
 
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let port = listener.local_addr()?.port();
@@ -883,6 +1175,7 @@ async fn start_local_test_server() -> Result<AutoTestServer, Box<dyn std::error:
 
     let mut config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     config_path.pop();
+    config_path.push("backend");
     config_path.push("server.toml");
 
     let log_path = data_path.join("server.log");
@@ -895,7 +1188,7 @@ async fn start_local_test_server() -> Result<AutoTestServer, Box<dyn std::error:
         .env("KALAMDB_CLUSTER_RPC_ADDR", format!("127.0.0.1:{}", rpc_port))
         .env("KALAMDB_CLUSTER_API_ADDR", format!("127.0.0.1:{}", api_port))
         .env("KALAMDB_DATA_DIR", data_path.to_string_lossy().into_owned())
-        .env("KALAMDB_RATE_LIMIT_AUTH_REQUESTS_PER_IP_PER_SEC", "200")
+        .env("KALAMDB_RATE_LIMIT_AUTH_REQUESTS_PER_IP_PER_SEC", "200000")
         .env("KALAMDB_LOG_LEVEL", "warn")
         .arg(config_path)
         .stdin(Stdio::null())
@@ -903,9 +1196,12 @@ async fn start_local_test_server() -> Result<AutoTestServer, Box<dyn std::error:
         .stderr(Stdio::from(log_file_err));
 
     let mut child = cmd.spawn()?;
+    let pid = child.id();
 
     if !wait_for_url_reachable(&base_url, Duration::from_secs(30)) {
         let _ = child.kill();
+        let _ = child.wait();
+        let _ = std::fs::remove_dir_all(&data_path);
         let log_tail = std::fs::read_to_string(&log_path).unwrap_or_default();
         let log_tail = log_tail
             .lines()
@@ -924,12 +1220,17 @@ async fn start_local_test_server() -> Result<AutoTestServer, Box<dyn std::error:
     }
 
     // Ensure setup and admin user are ready for the auto-started server
-    test_auth_manager().ensure_ready(&base_url).await?;
+    if let Err(err) = test_auth_manager().ensure_ready(&base_url).await {
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = std::fs::remove_dir_all(&data_path);
+        return Err(err);
+    }
 
     Ok(AutoTestServer {
         base_url: base_url.clone(),
         storage_dir: data_path,
-        _temp_dir: Some(temp_dir),
+        pid,
         child: Some(child),
     })
 }
@@ -2423,7 +2724,7 @@ pub fn execute_sql_via_cli_as_with_timing(
     let output = Command::new(env!("CARGO_BIN_EXE_kalam"))
         .arg("-u")
         .arg(server_url())
-        .arg("--username")
+        .arg("--user")
         .arg(username)
         .arg("--password")
         .arg(password)
@@ -2573,7 +2874,7 @@ fn execute_sql_via_cli_as_with_args_and_urls(
             if let Some(token) = token {
                 child.arg("--token").arg(token);
             } else {
-                child.arg("--username").arg(username).arg("--password").arg(password);
+                child.arg("--user").arg(username).arg("--password").arg(password);
             }
 
             child
@@ -3024,11 +3325,11 @@ fn execute_sql_via_client_internal(
                 {
                     let timeouts = KalamLinkTimeouts::builder()
                         .connection_timeout_secs(5)
-                        .receive_timeout_secs(120)
-                        .send_timeout_secs(30)
-                        .subscribe_timeout_secs(20)
+                        .receive_timeout_secs(30)
+                        .send_timeout_secs(10)
+                        .subscribe_timeout_secs(10)
                         .auth_timeout_secs(10)
-                        .initial_data_timeout(Duration::from_secs(120))
+                        .initial_data_timeout(Duration::from_secs(30))
                         .build();
 
                     let client = if username == default_username() && password == default_password()
@@ -3496,6 +3797,48 @@ pub fn create_cli_command() -> assert_cmd::Command {
     cmd
 }
 
+pub fn ensure_cli_auth_ready_on_server(username: &str, password: &str, server: &str) {
+    if !server_requires_auth_for_url(server).unwrap_or(true) {
+        return;
+    }
+
+    if get_access_token_for_url_sync(server, username, password).is_none() {
+        panic!("Failed to prepare CLI login for user '{}' on {}", username, server);
+    }
+
+    let timeouts = KalamLinkTimeouts::builder()
+        .connection_timeout_secs(10)
+        .receive_timeout_secs(30)
+        .send_timeout_secs(30)
+        .subscribe_timeout_secs(5)
+        .auth_timeout_secs(5)
+        .initial_data_timeout_secs(30)
+        .build();
+
+    let query = "SELECT name FROM system.namespaces LIMIT 1";
+    let mut last_error = None;
+    for _ in 0..3 {
+        match build_client_for_url_with_timeouts(server, username, password, timeouts.clone()) {
+            Ok(client) => match get_shared_runtime()
+                .block_on(async { client.execute_query(query, None, None, None).await })
+            {
+                Ok(_) => return,
+                Err(err) => last_error = Some(err.to_string()),
+            },
+            Err(err) => last_error = Some(err.to_string()),
+        }
+
+        std::thread::sleep(Duration::from_millis(250));
+    }
+
+    if let Some(err) = last_error {
+        panic!(
+            "Failed to prepare CLI query path for user '{}' on {}: {}",
+            username, server, err
+        );
+    }
+}
+
 /// Helper to create a CLI command with explicit authentication and URL.
 pub fn create_cli_command_with_auth(username: &str, password: &str) -> assert_cmd::Command {
     let base_url = if is_cluster_mode() {
@@ -3517,10 +3860,12 @@ pub fn create_cli_command_with_auth_for_server(
         ensure_cli_server_setup().expect("Failed to prepare CLI server setup");
     });
 
+    ensure_cli_auth_ready_on_server(username, password, server);
+
     let mut cmd = create_cli_command();
     cmd.arg("-u")
         .arg(server)
-        .arg("--username")
+        .arg("--user")
         .arg(username)
         .arg("--password")
         .arg(password);
@@ -3944,11 +4289,11 @@ impl SubscriptionListener {
                     default_password(),
                     KalamLinkTimeouts::builder()
                         .connection_timeout_secs(5)
-                        .receive_timeout_secs(120)
-                        .send_timeout_secs(30)
+                        .receive_timeout_secs(30)
+                        .send_timeout_secs(10)
                         .subscribe_timeout_secs(10)
                         .auth_timeout_secs(10)
-                        .initial_data_timeout(Duration::from_secs(120))
+                        .initial_data_timeout(Duration::from_secs(30))
                         .build(),
                 ) {
                     Ok(c) => c,

@@ -4,7 +4,7 @@ use super::cluster::ClusterTestServer;
 use anyhow::{Context, Result};
 use kalam_client::models::{QueryResponse, ResponseStatus};
 use kalam_client::{AuthProvider, KalamLinkClient, KalamLinkTimeouts};
-use kalamdb_commons::{NamespaceId, Role, UserId, UserName};
+use kalamdb_commons::{NamespaceId, Role, UserId};
 use kalamdb_core::app_context::AppContext;
 use once_cell::sync::{Lazy, OnceCell as SyncOnceCell};
 use serde_json::Value as JsonValue;
@@ -44,8 +44,7 @@ pub async fn acquire_test_lock() -> tokio::sync::MutexGuard<'static, ()> {
 
 fn root_jwt_auth_header(jwt_secret: &str) -> String {
     let (token, _claims) = kalamdb_auth::providers::jwt_auth::create_and_sign_token(
-        &UserId::new("1"),
-        &UserName::new("root"),
+        &UserId::root(),
         &Role::System,
         None,
         Some(1),
@@ -199,19 +198,20 @@ impl HttpTestServer {
     /// Build a Bearer auth header value for a user.
     ///
     /// Example: `Authorization: Bearer <jwt>`
-    pub fn bearer_auth_header(&self, username: &UserName) -> Result<String> {
-        if let Some(token) = self.get_cached_user_token(username.as_str()) {
+    pub fn bearer_auth_header(&self, username: &str) -> Result<String> {
+        if let Some(token) = self.get_cached_user_token(username) {
             return Ok(format!("Bearer {}", token));
         }
 
         let users = self.app_context().system_tables().users();
+        let user_id = UserId::new(username);
         let user = users
-            .get_user_by_username(username.as_str())
+            .get_user_by_id(&user_id)
             .context("Failed to load user for bearer auth header")?
             .ok_or_else(|| anyhow::anyhow!("User '{}' not found", username))?;
 
-        let token = self.create_jwt_token_with_id(&user.user_id, &user.username, &user.role);
-        self.cache_user_token(username.as_str(), &token);
+        let token = self.create_jwt_token_with_id(&user.user_id, &user.role);
+        self.cache_user_token(username, &token);
         Ok(format!("Bearer {}", token))
     }
 
@@ -247,15 +247,9 @@ impl HttpTestServer {
     }
 
     /// Creates a JWT token for the specified user with explicit user_id.
-    pub fn create_jwt_token_with_id(
-        &self,
-        user_id: &UserId,
-        username: &UserName,
-        role: &Role,
-    ) -> String {
+    pub fn create_jwt_token_with_id(&self, user_id: &UserId, role: &Role) -> String {
         let (token, _claims) = kalamdb_auth::providers::jwt_auth::create_and_sign_token(
             user_id,
-            username,
             role,
             None,
             Some(1), // 1 hour expiry
@@ -268,23 +262,21 @@ impl HttpTestServer {
 
     /// Creates a JWT token for the specified user.
     /// For test purposes, assumes role is 'system' for root, and 'user' for others.
-    pub fn create_jwt_token(&self, username: &UserName) -> String {
-        let role = if username.as_str() == "root" {
+    pub fn create_jwt_token(&self, username: &str) -> String {
+        let role = if username == "root" {
             Role::System
         } else {
             Role::User
         };
-        // Use username as user_id for non-root users in tests
-        // This allows USER tables to work correctly with partitioning
-        let user_id = if username.as_str() == "root" {
-            UserId::new("1")
+        // Use the real built-in root user id, and otherwise mirror the test user id.
+        let user_id = if username == "root" {
+            UserId::root()
         } else {
-            UserId::new(username.as_str())
+            UserId::new(username)
         };
 
         let (token, _claims) = kalamdb_auth::providers::jwt_auth::create_and_sign_token(
             &user_id,
-            username,
             &role,
             None,
             Some(1), // 1 hour expiry
@@ -339,7 +331,7 @@ impl HttpTestServer {
         password: &str,
         role: &Role,
     ) -> Result<String> {
-        let check_sql = format!("SELECT user_id, COUNT(*) AS user_count FROM system.users WHERE username = '{}' GROUP BY user_id", username);
+        let check_sql = format!("SELECT user_id, COUNT(*) AS user_count FROM system.users WHERE user_id = '{}' GROUP BY user_id", username);
         let resp = self.execute_sql(&check_sql).await?;
 
         // Check if user exists and get their user_id
@@ -361,8 +353,7 @@ impl HttpTestServer {
         self.execute_sql(&create_sql).await?;
 
         // Now fetch the user_id
-        let get_id_sql =
-            format!("SELECT user_id FROM system.users WHERE username = '{}'", username);
+        let get_id_sql = format!("SELECT user_id FROM system.users WHERE user_id = '{}'", username);
         let resp = self.execute_sql(&get_id_sql).await?;
         let user_id = resp
             .rows_as_maps()
@@ -387,7 +378,7 @@ impl HttpTestServer {
         _role: &Role,
     ) -> KalamLinkClient {
         if username == "root" {
-            let token = self.create_jwt_token(&UserName::new("root"));
+            let token = self.create_jwt_token("root");
             return KalamLinkClient::builder()
                 .base_url(self.base_url())
                 .auth(AuthProvider::jwt_token(token))
@@ -407,11 +398,12 @@ impl HttpTestServer {
 
         // Use JWT for all non-root users
         let users = self.app_context().system_tables().users();
+        let uid = UserId::new(username);
         let user = users
-            .get_user_by_username(username)
-            .expect("Failed to load user by username")
+            .get_user_by_id(&uid)
+            .expect("Failed to load user by id")
             .unwrap_or_else(|| panic!("User '{}' not found for link_client_with_id", username));
-        let token = self.create_jwt_token_with_id(&user.user_id, &user.username, &user.role);
+        let token = self.create_jwt_token_with_id(&user.user_id, &user.role);
 
         KalamLinkClient::builder()
             .base_url(self.base_url())

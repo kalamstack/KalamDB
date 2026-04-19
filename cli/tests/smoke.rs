@@ -141,6 +141,8 @@ mod leader_only_reads;
 // Query tests
 #[path = "smoke/query/smoke_test_00_parallel_query_burst.rs"]
 mod smoke_test_00_parallel_query_burst;
+#[path = "smoke/query/smoke_test_json_operators.rs"]
+mod smoke_test_json_operators;
 #[path = "smoke/query/smoke_test_queries_benchmark.rs"]
 mod smoke_test_queries_benchmark;
 

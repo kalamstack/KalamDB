@@ -86,7 +86,7 @@ function createReadmeWasmClient() {
 test('README live resume example passes options and exposes typed checkpoints', async () => {
   const client = createClient({
     url: 'http://127.0.0.1:8080',
-    authProvider: async () => Auth.none(),
+    authProvider: async () => Auth.jwt('readme-token'),
   });
 
   const fakeWasmClient = createReadmeWasmClient();
@@ -145,7 +145,7 @@ test('README live resume example passes options and exposes typed checkpoints', 
 test('README executeAsUser example wraps SQL for tenant-safe writes', async () => {
   const client = createClient({
     url: 'http://127.0.0.1:8080',
-    authProvider: async () => Auth.none(),
+    authProvider: async () => Auth.jwt('readme-token'),
   });
 
   const fakeWasmClient = createReadmeWasmClient();
@@ -186,7 +186,7 @@ test('README queryWithFiles example posts multipart data with auth header', asyn
   try {
     const client = createClient({
       url: 'http://127.0.0.1:8080',
-      authProvider: async () => Auth.none(),
+      authProvider: async () => Auth.jwt('readme-token'),
     });
 
     client.initialized = true;

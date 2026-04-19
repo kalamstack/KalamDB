@@ -144,11 +144,11 @@ fn smoke_security_system_tables_blocked_in_batch() {
         "SELECT 1; SELECT * FROM system.users",
         "SELECT 1; SELECT * FROM system.schemas",
         "SELECT 1; SELECT * FROM (SELECT * FROM system.users) AS u",
-        "SELECT 1; SELECT u.username FROM system.users u JOIN (SELECT user_id FROM system.users) s ON u.user_id = s.user_id",
-        "SELECT 1; SELECT * FROM system.users WHERE username IN (SELECT username FROM system.users)",
+        "SELECT 1; SELECT u.user_id FROM system.users u JOIN (SELECT user_id FROM system.users) s ON u.user_id = s.user_id",
+        "SELECT 1; SELECT * FROM system.users WHERE user_id IN (SELECT user_id FROM system.users)",
         "WITH u AS (SELECT * FROM system.users) SELECT * FROM u",
         "SELECT 1; EXPLAIN SELECT * FROM system.users",
-        "SELECT (SELECT username FROM system.users LIMIT 1) AS usr FROM system.users",
+        "SELECT (SELECT user_id FROM system.users LIMIT 1) AS usr FROM system.users",
         "SELECT (SELECT COUNT(*) FROM system.users) AS cnt",
         "SELECT * FROM system.users WHERE user_id = (SELECT user_id FROM system.users LIMIT 1)",
         // Note: EXISTS in CASE WHEN is not yet implemented in DataFusion, skipping
@@ -368,7 +368,7 @@ fn smoke_security_system_table_write_blocked() {
         format!("CREATE USER {} WITH PASSWORD '{}' ROLE 'user'", user_name, user_pass);
     execute_sql_as_root_via_client(&create_user_sql).expect("Failed to create user");
 
-    let batch_sql = "INSERT INTO system.users (username) VALUES ('hacker'); UPDATE system.users SET username='x' WHERE username='root'; DELETE FROM system.users WHERE username='root';";
+    let batch_sql = "INSERT INTO system.users (user_id) VALUES ('hacker'); UPDATE system.users SET user_id='x' WHERE user_id='root'; DELETE FROM system.users WHERE user_id='root';";
     let result = execute_sql_via_client_as(&user_name, user_pass, batch_sql);
     expect_rejected(result, "system table write batch");
 

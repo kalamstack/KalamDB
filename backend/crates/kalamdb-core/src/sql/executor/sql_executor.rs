@@ -182,17 +182,71 @@ impl SqlExecutor {
     /// Convert a `DataFusionError` into a `KalamDbError`, preserving
     /// `NotLeader` semantics when the error wraps a [`kalamdb_commons::NotLeaderError`].
     fn datafusion_to_execution_error(e: datafusion::error::DataFusionError) -> KalamDbError {
-        if let Some(not_leader) = Self::try_not_leader_error(&e) {
-            return not_leader;
-        }
-        KalamDbError::ExecutionError(e.to_string())
+        Self::classify_datafusion_error(&e)
     }
 
     fn is_table_not_found_error(e: &datafusion::error::DataFusionError) -> bool {
-        let msg = e.to_string().to_lowercase();
+        Self::is_table_not_found_msg(&e.to_string().to_lowercase())
+    }
+
+    fn is_table_not_found_msg(msg: &str) -> bool {
         (msg.contains("table") && msg.contains("not found"))
             || (msg.contains("relation") && msg.contains("does not exist"))
             || msg.contains("unknown table")
+    }
+
+    fn is_permission_msg(msg: &str) -> bool {
+        msg.contains("access denied")
+            || msg.contains("permission denied")
+            || msg.contains("unauthorized")
+            || msg.contains("not authorized")
+            || msg.contains("forbidden")
+            || msg.contains("insufficient privileges")
+    }
+
+    fn is_column_not_found_msg(msg: &str) -> bool {
+        (msg.contains("column") && msg.contains("not found"))
+            || (msg.contains("field") && msg.contains("not found"))
+            || msg.contains("no field named")
+            || msg.contains("schema error: no field named")
+    }
+
+    fn is_constraint_violation_msg(msg: &str) -> bool {
+        msg.contains("primary key")
+            || msg.contains("constraint violation")
+            || msg.contains("already exists")
+            || msg.contains("duplicate")
+            || msg.contains("unique constraint")
+            || msg.contains("unique index")
+    }
+
+    /// Classify a DataFusionError into a KalamDbError with a single `to_string()`
+    /// call, avoiding redundant allocations on the error path.
+    fn classify_datafusion_error(e: &datafusion::error::DataFusionError) -> KalamDbError {
+        if let Some(not_leader) = Self::try_not_leader_error(e) {
+            return not_leader;
+        }
+
+        let error_msg = e.to_string();
+        let lower = error_msg.to_lowercase();
+
+        if Self::is_table_not_found_msg(&lower) {
+            return KalamDbError::TableNotFound(error_msg);
+        }
+
+        if Self::is_permission_msg(&lower) {
+            return KalamDbError::PermissionDenied(error_msg);
+        }
+
+        if Self::is_column_not_found_msg(&lower) {
+            return KalamDbError::InvalidOperation(error_msg);
+        }
+
+        if Self::is_constraint_violation_msg(&lower) {
+            return KalamDbError::AlreadyExists(error_msg);
+        }
+
+        KalamDbError::ExecutionError(error_msg)
     }
 
     fn map_classification_error(
@@ -684,7 +738,7 @@ impl SqlExecutor {
         self.block_system_namespace_dml(metadata.table_id.as_ref(), dml_kind)?;
 
         let execution_sql = kalamdb_sql::rewrite_context_functions_for_datafusion(sql);
-        let execution_sql = execution_sql.as_str();
+        let execution_sql: &str = &execution_sql;
 
         use crate::sql::executor::parameter_binding::{
             replace_placeholders_in_plan, validate_params,
@@ -838,13 +892,7 @@ impl SqlExecutor {
         };
 
         let collect_start = std::time::Instant::now();
-        let batches = df.collect().await.map_err(|e| {
-            // Propagate NOT_LEADER as a typed error so the HTTP layer can forward to leader.
-            if let Some(not_leader_err) = Self::try_not_leader_error(&e) {
-                return not_leader_err;
-            }
-            KalamDbError::Other(format!("Error executing DML statement '{}': {}", sql, e))
-        })?;
+        let batches = df.collect().await.map_err(Self::datafusion_to_execution_error)?;
         tracing::debug!(collect_ms = %format!("{:.3}", collect_start.elapsed().as_micros() as f64 / 1000.0), "sql.dml_collect");
 
         let rows_affected = Self::extract_rows_affected(&batches)?;
@@ -870,7 +918,7 @@ impl SqlExecutor {
         exec_ctx: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
         let execution_sql = kalamdb_sql::rewrite_context_functions_for_datafusion(sql);
-        let execution_sql = execution_sql.as_str();
+        let execution_sql: &str = &execution_sql;
         use crate::sql::executor::default_ordering::apply_default_order_by;
         use crate::sql::executor::parameter_binding::{
             replace_placeholders_in_plan, validate_params,
@@ -1044,15 +1092,7 @@ impl SqlExecutor {
                 if let Some(not_leader_err) = Self::try_not_leader_error(&e) {
                     return Err(not_leader_err);
                 }
-                log::error!(
-                    target: "sql::exec",
-                    "❌ SQL execution failed | sql='{}' | user='{}' | role='{:?}' | error='{}'",
-                    sql,
-                    exec_ctx.user_id().as_str(),
-                    exec_ctx.user_role(),
-                    e
-                );
-                return Err(KalamDbError::Other(format!("Error executing query: {}", e)));
+                return Err(self.log_sql_error(sql, exec_ctx, e));
             },
         };
 
@@ -1080,7 +1120,7 @@ impl SqlExecutor {
         exec_ctx: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
         let execution_sql = kalamdb_sql::rewrite_context_functions_for_datafusion(sql);
-        let execution_sql = execution_sql.as_str();
+        let execution_sql: &str = &execution_sql;
         // Create per-request SessionContext with user_id injected
         let session = self.create_session_with_transaction_context(exec_ctx)?;
 
@@ -1111,14 +1151,7 @@ impl SqlExecutor {
                 if let Some(not_leader_err) = Self::try_not_leader_error(&e) {
                     return Err(not_leader_err);
                 }
-                log::error!(
-                    target: "sql::meta",
-                    "❌ Meta command execution failed | sql='{}' | user='{}' | error='{}'",
-                    sql,
-                    exec_ctx.user_id().as_str(),
-                    e
-                );
-                return Err(KalamDbError::Other(format!("Error executing meta command: {}", e)));
+                return Err(self.log_sql_error(sql, exec_ctx, e));
             },
         };
 
@@ -1145,36 +1178,62 @@ impl SqlExecutor {
         exec_ctx: &ExecutionContext,
         e: datafusion::error::DataFusionError,
     ) -> KalamDbError {
-        // Propagate NOT_LEADER as a typed error so the HTTP handler can forward to leader.
-        if let Some(not_leader_err) = Self::try_not_leader_error(&e) {
-            return not_leader_err;
+        let mapped_error = Self::classify_datafusion_error(&e);
+
+        match &mapped_error {
+            KalamDbError::TableNotFound(_) => {
+                log::warn!(
+                    target: "sql::plan",
+                    "⚠️  Table not found | sql='{}' | user='{}' | role='{:?}' | error='{}'",
+                    sql,
+                    exec_ctx.user_id().as_str(),
+                    exec_ctx.user_role(),
+                    e
+                );
+            },
+            KalamDbError::PermissionDenied(_) => {
+                log::warn!(
+                    target: "sql::plan",
+                    "⚠️  SQL permission denied | sql='{}' | user='{}' | role='{:?}' | error='{}'",
+                    sql,
+                    exec_ctx.user_id().as_str(),
+                    exec_ctx.user_role(),
+                    e
+                );
+            },
+            KalamDbError::InvalidOperation(_) => {
+                log::warn!(
+                    target: "sql::plan",
+                    "⚠️  SQL column validation failed | sql='{}' | user='{}' | role='{:?}' | error='{}'",
+                    sql,
+                    exec_ctx.user_id().as_str(),
+                    exec_ctx.user_role(),
+                    e
+                );
+            },
+            KalamDbError::AlreadyExists(_) => {
+                log::warn!(
+                    target: "sql::plan",
+                    "⚠️  SQL constraint validation failed | sql='{}' | user='{}' | role='{:?}' | error='{}'",
+                    sql,
+                    exec_ctx.user_id().as_str(),
+                    exec_ctx.user_role(),
+                    e
+                );
+            },
+            _ => {
+                log::error!(
+                    target: "sql::plan",
+                    "❌ SQL planning failed | sql='{}' | user='{}' | role='{:?}' | error='{}'",
+                    sql,
+                    exec_ctx.user_id().as_str(),
+                    exec_ctx.user_role(),
+                    e
+                );
+            },
         }
 
-        let error_msg = e.to_string().to_lowercase();
-        let is_table_not_found = error_msg.contains("table") && error_msg.contains("not found")
-            || error_msg.contains("relation") && error_msg.contains("does not exist")
-            || error_msg.contains("unknown table");
-
-        if is_table_not_found {
-            log::warn!(
-                target: "sql::plan",
-                "⚠️  Table not found | sql='{}' | user='{}' | role='{:?}' | error='{}'",
-                sql,
-                exec_ctx.user_id().as_str(),
-                exec_ctx.user_role(),
-                e
-            );
-        } else {
-            log::error!(
-                target: "sql::plan",
-                "❌ SQL planning failed | sql='{}' | user='{}' | role='{:?}' | error='{}'",
-                sql,
-                exec_ctx.user_id().as_str(),
-                exec_ctx.user_role(),
-                e
-            );
-        }
-        KalamDbError::ExecutionError(e.to_string())
+        mapped_error
     }
 
     fn extract_rows_affected(batches: &[RecordBatch]) -> Result<usize, KalamDbError> {

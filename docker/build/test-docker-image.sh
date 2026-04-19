@@ -200,7 +200,7 @@ main() {
     LOGIN_RESPONSE=$(curl -sf -X POST \
         "http://localhost:$TEST_PORT/v1/api/auth/login" \
         -H "Content-Type: application/json" \
-        -d "{\"username\":\"root\",\"password\":\"$ROOT_PASSWORD\"}" 2>&1)
+        -d "{\"user\":\"root\",\"password\":\"$ROOT_PASSWORD\"}" 2>&1)
     
     if [ $? -ne 0 ]; then
         log_error "✗ Login failed"

@@ -289,13 +289,11 @@ impl MetaResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kalamdb_commons::models::UserName;
     use kalamdb_commons::{AuthType, Role};
 
     fn test_user() -> User {
         User {
             user_id: UserId::from("test_user"),
-            username: UserName::from("testuser"),
             password_hash: "hash".to_string(),
             email: None,
             auth_type: AuthType::Password,

@@ -228,7 +228,6 @@ async fn test_system_tables_have_correct_column_ordering() {
     // Expected columns in order (based on UsersTableSchema)
     let expected_columns = vec![
         "user_id",
-        "username",
         "password_hash",
         "role",
         "email",
@@ -236,13 +235,13 @@ async fn test_system_tables_have_correct_column_ordering() {
         "auth_data",
         "storage_mode",
         "storage_id",
+        "failed_login_attempts",
+        "locked_until",
+        "last_login_at",
         "created_at",
         "updated_at",
         "last_seen",
         "deleted_at",
-        "failed_login_attempts",
-        "locked_until",
-        "last_login_at",
     ];
 
     // Verify Arrow schema matches expected column order

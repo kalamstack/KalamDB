@@ -155,7 +155,7 @@ futures-util = { workspace = true }
 regex = { workspace = true }
 ntest = { workspace = true }
 wait-timeout = { workspace = true }
-kalamdb-commons = { workspace = true }
+kalamdb-commons = { workspace = true, features = ["full"] }
 kalamdb-configs = { workspace = true }
 kalamdb-server = { workspace = true }
 object_store = { workspace = true }

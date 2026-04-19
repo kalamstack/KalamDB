@@ -201,14 +201,14 @@ pub fn assert_no_duplicates(resp: &QueryResponse, pk_column: &str) -> Result<()>
 /// Returns Ok(user_id) whether user was created or already existed.
 pub async fn ensure_user_exists(
     server: &HttpTestServer,
-    username: &str,
+    user_id: &str,
     password: &str,
     role: &Role,
 ) -> Result<String> {
     let lookup_sql =
-        format!("SELECT user_id FROM system.users WHERE username = '{}' LIMIT 1", username);
+        format!("SELECT user_id FROM system.users WHERE user_id = '{}' LIMIT 1", user_id);
     let create_sql =
-        format!("CREATE USER '{}' WITH PASSWORD '{}' ROLE '{}'", username, password, role);
+        format!("CREATE USER '{}' WITH PASSWORD '{}' ROLE '{}'", user_id, password, role);
 
     for attempt in 0..10 {
         if let Ok(resp) = server.execute_sql(&lookup_sql).await {
@@ -227,8 +227,8 @@ pub async fn ensure_user_exists(
                             .unwrap_or_default();
 
                         if !user_id_str.is_empty() {
-                            server.cache_user_id(username, &user_id_str);
-                            server.cache_user_password(username, password);
+                            server.cache_user_id(user_id, &user_id_str);
+                            server.cache_user_password(user_id, password);
                             return Ok(user_id_str);
                         }
                     }
@@ -245,17 +245,17 @@ pub async fn ensure_user_exists(
     }
 
     let resp = server.execute_sql(&lookup_sql).await?;
-    let user_id = resp
+    let resolved_user_id = resp
         .rows_as_maps()
         .first()
         .and_then(|r| r.get("user_id"))
         .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("Failed to get user_id for {}", username))?
+        .ok_or_else(|| anyhow::anyhow!("Failed to get user_id for {}", user_id))?
         .to_string();
 
-    server.cache_user_id(username, &user_id);
-    server.cache_user_password(username, password);
-    Ok(user_id)
+    server.cache_user_id(user_id, &resolved_user_id);
+    server.cache_user_password(user_id, password);
+    Ok(resolved_user_id)
 }
 
 /// Create multiple test users at once.

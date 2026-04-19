@@ -75,10 +75,7 @@ impl TypedStatementHandler<CreateStorageStatement> for CreateStorageHandler {
                 ));
             }
 
-            Some(
-                serde_json::to_string(&value)
-                    .into_invalid_operation("Failed to normalize credentials JSON")?,
-            )
+            Some(value)
         } else {
             None
         };
@@ -94,10 +91,7 @@ impl TypedStatementHandler<CreateStorageStatement> for CreateStorageHandler {
                 ));
             }
 
-            Some(
-                serde_json::to_string(&value)
-                    .into_invalid_operation("Failed to normalize CONFIG JSON")?,
-            )
+            Some(value)
         } else {
             None
         };

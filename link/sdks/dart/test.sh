@@ -91,11 +91,11 @@ post_json() {
 }
 
 try_login() {
-  local username="$1"
+  local user="$1"
   local password="$2"
   local body_file="$3"
   local payload
-  payload="$(make_json username "$username" password "$password")"
+  payload="$(make_json user "$user" password "$password")"
   local http_code
   http_code="$(post_json "$KALAMDB_URL/v1/api/auth/login" "$payload" "$body_file")"
   [[ "$http_code" == "200" ]]
@@ -120,7 +120,7 @@ ensure_test_auth_ready() {
     if [[ "$needs_setup" == "true" ]]; then
       echo "🔐 Bootstrapping local auth for Dart SDK tests..."
       local setup_payload setup_code
-      setup_payload="$(make_json username "$KALAMDB_USER" password "$KALAMDB_PASSWORD" root_password "$KALAMDB_ROOT_PASSWORD" email __JSON_NULL__)"
+      setup_payload="$(make_json user "$KALAMDB_USER" password "$KALAMDB_PASSWORD" root_password "$KALAMDB_ROOT_PASSWORD" email __JSON_NULL__)"
       setup_code="$(post_json "$KALAMDB_URL/v1/api/auth/setup" "$setup_payload" "$setup_file")"
       if [[ "$setup_code" != "200" ]]; then
         echo "Auth setup failed with HTTP $setup_code" >&2

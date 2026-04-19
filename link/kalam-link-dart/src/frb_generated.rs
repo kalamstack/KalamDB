@@ -768,7 +768,7 @@ fn wire__crate__api__dart_login_impl(
             let api_client = <RustOpaqueMoi<
                 flutter_rust_bridge::for_generated::RustAutoOpaqueInner<DartKalamClient>,
             >>::sse_decode(&mut deserializer);
-            let api_username = <String>::sse_decode(&mut deserializer);
+            let api_user = <String>::sse_decode(&mut deserializer);
             let api_password = <String>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
@@ -794,7 +794,7 @@ fn wire__crate__api__dart_login_impl(
                         }
                         let api_client_guard = api_client_guard.unwrap();
                         let output_ok =
-                            crate::api::dart_login(&*api_client_guard, api_username, api_password)
+                            crate::api::dart_login(&*api_client_guard, api_user, api_password)
                                 .await?;
                         Ok(output_ok)
                     })()
@@ -1363,10 +1363,10 @@ impl SseDecode for crate::models::DartAuthProvider {
         let mut tag_ = <i32>::sse_decode(deserializer);
         match tag_ {
             0 => {
-                let mut var_username = <String>::sse_decode(deserializer);
+                let mut var_user = <String>::sse_decode(deserializer);
                 let mut var_password = <String>::sse_decode(deserializer);
                 return crate::models::DartAuthProvider::BasicAuth {
-                    username: var_username,
+                    user: var_user,
                     password: var_password,
                 };
             },
@@ -1586,12 +1586,14 @@ impl SseDecode for crate::models::DartLoginResponse {
         let mut var_refreshToken = <Option<String>>::sse_decode(deserializer);
         let mut var_expiresAt = <String>::sse_decode(deserializer);
         let mut var_refreshExpiresAt = <Option<String>>::sse_decode(deserializer);
+        let mut var_adminUiAccess = <bool>::sse_decode(deserializer);
         let mut var_user = <crate::models::DartLoginUserInfo>::sse_decode(deserializer);
         return crate::models::DartLoginResponse {
             access_token: var_accessToken,
             refresh_token: var_refreshToken,
             expires_at: var_expiresAt,
             refresh_expires_at: var_refreshExpiresAt,
+            admin_ui_access: var_adminUiAccess,
             user: var_user,
         };
     }
@@ -1601,14 +1603,12 @@ impl SseDecode for crate::models::DartLoginUserInfo {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_id = <String>::sse_decode(deserializer);
-        let mut var_username = <String>::sse_decode(deserializer);
-        let mut var_role = <String>::sse_decode(deserializer);
+        let mut var_role = <crate::models::DartRole>::sse_decode(deserializer);
         let mut var_email = <Option<String>>::sse_decode(deserializer);
         let mut var_createdAt = <String>::sse_decode(deserializer);
         let mut var_updatedAt = <String>::sse_decode(deserializer);
         return crate::models::DartLoginUserInfo {
             id: var_id,
-            username: var_username,
             role: var_role,
             email: var_email,
             created_at: var_createdAt,
@@ -1647,6 +1647,21 @@ impl SseDecode for crate::models::DartQueryResult {
             named_rows_json: var_namedRowsJson,
             row_count: var_rowCount,
             message: var_message,
+        };
+    }
+}
+
+impl SseDecode for crate::models::DartRole {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::models::DartRole::Anonymous,
+            1 => crate::models::DartRole::User,
+            2 => crate::models::DartRole::Service,
+            3 => crate::models::DartRole::Dba,
+            4 => crate::models::DartRole::System,
+            _ => unreachable!("Invalid variant for DartRole: {}", inner),
         };
     }
 }
@@ -2041,9 +2056,9 @@ impl flutter_rust_bridge::IntoIntoDart<FrbWrapper<DartSubscription>> for DartSub
 impl flutter_rust_bridge::IntoDart for crate::models::DartAuthProvider {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
-            crate::models::DartAuthProvider::BasicAuth { username, password } => [
+            crate::models::DartAuthProvider::BasicAuth { user, password } => [
                 0.into_dart(),
-                username.into_into_dart().into_dart(),
+                user.into_into_dart().into_dart(),
                 password.into_into_dart().into_dart(),
             ]
             .into_dart(),
@@ -2329,6 +2344,7 @@ impl flutter_rust_bridge::IntoDart for crate::models::DartLoginResponse {
             self.refresh_token.into_into_dart().into_dart(),
             self.expires_at.into_into_dart().into_dart(),
             self.refresh_expires_at.into_into_dart().into_dart(),
+            self.admin_ui_access.into_into_dart().into_dart(),
             self.user.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -2350,7 +2366,6 @@ impl flutter_rust_bridge::IntoDart for crate::models::DartLoginUserInfo {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.id.into_into_dart().into_dart(),
-            self.username.into_into_dart().into_dart(),
             self.role.into_into_dart().into_dart(),
             self.email.into_into_dart().into_dart(),
             self.created_at.into_into_dart().into_dart(),
@@ -2414,6 +2429,25 @@ impl flutter_rust_bridge::IntoIntoDart<crate::models::DartQueryResult>
     for crate::models::DartQueryResult
 {
     fn into_into_dart(self) -> crate::models::DartQueryResult {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::models::DartRole {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Anonymous => 0.into_dart(),
+            Self::User => 1.into_dart(),
+            Self::Service => 2.into_dart(),
+            Self::Dba => 3.into_dart(),
+            Self::System => 4.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::models::DartRole {}
+impl flutter_rust_bridge::IntoIntoDart<crate::models::DartRole> for crate::models::DartRole {
+    fn into_into_dart(self) -> crate::models::DartRole {
         self
     }
 }
@@ -2576,9 +2610,9 @@ impl SseEncode for crate::models::DartAuthProvider {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         match self {
-            crate::models::DartAuthProvider::BasicAuth { username, password } => {
+            crate::models::DartAuthProvider::BasicAuth { user, password } => {
                 <i32>::sse_encode(0, serializer);
-                <String>::sse_encode(username, serializer);
+                <String>::sse_encode(user, serializer);
                 <String>::sse_encode(password, serializer);
             },
             crate::models::DartAuthProvider::JwtToken { token } => {
@@ -2771,6 +2805,7 @@ impl SseEncode for crate::models::DartLoginResponse {
         <Option<String>>::sse_encode(self.refresh_token, serializer);
         <String>::sse_encode(self.expires_at, serializer);
         <Option<String>>::sse_encode(self.refresh_expires_at, serializer);
+        <bool>::sse_encode(self.admin_ui_access, serializer);
         <crate::models::DartLoginUserInfo>::sse_encode(self.user, serializer);
     }
 }
@@ -2779,8 +2814,7 @@ impl SseEncode for crate::models::DartLoginUserInfo {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.id, serializer);
-        <String>::sse_encode(self.username, serializer);
-        <String>::sse_encode(self.role, serializer);
+        <crate::models::DartRole>::sse_encode(self.role, serializer);
         <Option<String>>::sse_encode(self.email, serializer);
         <String>::sse_encode(self.created_at, serializer);
         <String>::sse_encode(self.updated_at, serializer);
@@ -2805,6 +2839,25 @@ impl SseEncode for crate::models::DartQueryResult {
         <Vec<String>>::sse_encode(self.named_rows_json, serializer);
         <i64>::sse_encode(self.row_count, serializer);
         <Option<String>>::sse_encode(self.message, serializer);
+    }
+}
+
+impl SseEncode for crate::models::DartRole {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::models::DartRole::Anonymous => 0,
+                crate::models::DartRole::User => 1,
+                crate::models::DartRole::Service => 2,
+                crate::models::DartRole::Dba => 3,
+                crate::models::DartRole::System => 4,
+                _ => {
+                    unimplemented!("");
+                },
+            },
+            serializer,
+        );
     }
 }
 

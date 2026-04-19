@@ -426,7 +426,10 @@ mod tests {
 
         assert!(now_millis > 0);
         assert!(now_secs > 0);
-        assert!(now_millis > now_secs * 1000);
+        // now_millis and now_secs use separate Utc::now() calls, so
+        // now_millis can equal now_secs*1000 on an exact-second boundary
+        // or even be slightly behind if the second ticks between calls.
+        assert!(now_millis >= now_secs * 1000);
     }
 
     // Helper type for tests

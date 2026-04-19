@@ -471,7 +471,7 @@ fn cluster_test_node_rejoin_user_management() {
     let node2_url = &urls[1];
     let user_count = query_count_on_url(
         node2_url,
-        &format!("SELECT count(*) FROM system.users WHERE username = '{}'", test_user),
+        &format!("SELECT count(*) FROM system.users WHERE user_id = '{}'", test_user),
     );
     assert_eq!(user_count, 1, "Node2 should have the new user");
     println!("  ✓ Node2 has user: {}", test_user);
@@ -490,7 +490,7 @@ fn cluster_test_node_rejoin_user_management() {
     println!("\nStep 4: Verifying node3 has the user...");
     let user_count = query_count_on_url(
         stopped_url,
-        &format!("SELECT count(*) FROM system.users WHERE username = '{}'", test_user),
+        &format!("SELECT count(*) FROM system.users WHERE user_id = '{}'", test_user),
     );
     assert_eq!(user_count, 1, "Node3 should have the user after rejoin");
     println!("  ✓ Node3 has user: {}", test_user);

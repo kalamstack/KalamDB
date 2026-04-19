@@ -109,13 +109,13 @@ where
         app_ctx: Arc<AppContext>,
         job: &Job,
     ) -> Result<JobDecision, KalamDbError> {
-        // Deserialize parameters from JSON string
-        let params_json = job
+        // Deserialize parameters from JSON value
+        let params_value = job
             .parameters
             .as_ref()
             .ok_or_else(|| KalamDbError::InvalidOperation("Missing job parameters".to_string()))?;
 
-        let params: T = serde_json::from_str(params_json)
+        let params: T = serde_json::from_value(params_value.clone())
             .into_serde_error("Failed to deserialize job parameters")?;
 
         // Validate parameters
@@ -133,13 +133,13 @@ where
         app_ctx: Arc<AppContext>,
         job: &Job,
     ) -> Result<JobDecision, KalamDbError> {
-        // Deserialize parameters from JSON string
-        let params_json = job
+        // Deserialize parameters from JSON value
+        let params_value = job
             .parameters
             .as_ref()
             .ok_or_else(|| KalamDbError::InvalidOperation("Missing job parameters".to_string()))?;
 
-        let params: T = serde_json::from_str(params_json)
+        let params: T = serde_json::from_value(params_value.clone())
             .into_serde_error("Failed to deserialize job parameters")?;
 
         // Validate parameters
@@ -157,13 +157,13 @@ where
         app_ctx: Arc<AppContext>,
         job: &Job,
     ) -> Result<JobDecision, KalamDbError> {
-        // Deserialize parameters from JSON string
-        let params_json = job
+        // Deserialize parameters from JSON value
+        let params_value = job
             .parameters
             .as_ref()
             .ok_or_else(|| KalamDbError::InvalidOperation("Missing job parameters".to_string()))?;
 
-        let params: T = serde_json::from_str(params_json)
+        let params: T = serde_json::from_value(params_value.clone())
             .into_serde_error("Failed to deserialize job parameters")?;
 
         // Validate parameters
@@ -178,12 +178,12 @@ where
 
     async fn cancel_dyn(&self, app_ctx: Arc<AppContext>, job: &Job) -> Result<(), KalamDbError> {
         // For cancellation, we still need to deserialize params to create context
-        let params_json = job
+        let params_value = job
             .parameters
             .as_ref()
             .ok_or_else(|| KalamDbError::InvalidOperation("Missing job parameters".to_string()))?;
 
-        let params: T = serde_json::from_str(params_json)
+        let params: T = serde_json::from_value(params_value.clone())
             .into_serde_error("Failed to deserialize job parameters")?;
 
         // No validation needed for cancellation
@@ -511,7 +511,7 @@ mod tests {
             job_type,
             status: JobStatus::Running,
             leader_status: None,
-            parameters: Some(params.to_string()),
+            parameters: Some(serde_json::from_str(params).unwrap_or(serde_json::json!({}))),
             message: None,
             exception_trace: None,
             idempotency_key: None,

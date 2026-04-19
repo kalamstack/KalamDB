@@ -6,7 +6,6 @@ use crate::providers::storages::models::StorageMode;
 use crate::providers::users::models::auth_data::AuthData;
 use kalamdb_commons::datatypes::KalamDataType;
 use kalamdb_commons::models::{ids::UserId, AuthType, Role, StorageId};
-use kalamdb_commons::UserName;
 use kalamdb_macros::table;
 use serde::{Deserialize, Serialize};
 
@@ -22,7 +21,6 @@ pub const DEFAULT_LOCKOUT_DURATION_MINUTES: i64 = 15;
 ///
 /// ## Fields
 /// - `user_id`: Unique user identifier (e.g., "u_123456")
-/// - `username`: Unique username for authentication
 /// - `password_hash`: bcrypt hash of password (cost factor 12)
 /// - `role`: User role (User, Service, DBA, System)
 /// - `email`: Optional email address
@@ -46,11 +44,10 @@ pub const DEFAULT_LOCKOUT_DURATION_MINUTES: i64 = 15;
 ///
 /// ```rust
 /// use kalamdb_system::User;
-/// use kalamdb_commons::{UserId, Role, AuthType, StorageMode, StorageId, UserName};
+/// use kalamdb_commons::{UserId, Role, AuthType, StorageMode, StorageId};
 ///
 /// let user = User {
 ///     user_id: UserId::new("u_123456"),
-///     username: UserName::new("alice"),
 ///     password_hash: "$2b$12$...".to_string(),
 ///     role: Role::User,
 ///     email: Some("alice@example.com".to_string()),
@@ -79,7 +76,7 @@ pub struct User {
     // 8-byte aligned fields first (i64, Option<i64>, String/pointer types)
     #[column(
         id = 10,
-        ordinal = 10,
+        ordinal = 12,
         data_type(KalamDataType::Timestamp),
         nullable = false,
         primary_key = false,
@@ -89,7 +86,7 @@ pub struct User {
     pub created_at: i64,
     #[column(
         id = 11,
-        ordinal = 11,
+        ordinal = 13,
         data_type(KalamDataType::Timestamp),
         nullable = false,
         primary_key = false,
@@ -100,7 +97,7 @@ pub struct User {
     /// Unix timestamp in milliseconds when account lockout expires (None = not locked)
     #[column(
         id = 15,
-        ordinal = 15,
+        ordinal = 10,
         data_type(KalamDataType::Timestamp),
         nullable = true,
         primary_key = false,
@@ -111,7 +108,7 @@ pub struct User {
     /// Unix timestamp in milliseconds of last successful login
     #[column(
         id = 16,
-        ordinal = 16,
+        ordinal = 11,
         data_type(KalamDataType::Timestamp),
         nullable = true,
         primary_key = false,
@@ -121,7 +118,7 @@ pub struct User {
     pub last_login_at: Option<i64>,
     #[column(
         id = 12,
-        ordinal = 12,
+        ordinal = 14,
         data_type(KalamDataType::Timestamp),
         nullable = true,
         primary_key = false,
@@ -131,7 +128,7 @@ pub struct User {
     pub last_seen: Option<i64>,
     #[column(
         id = 13,
-        ordinal = 13,
+        ordinal = 15,
         data_type(KalamDataType::Timestamp),
         nullable = true,
         primary_key = false,
@@ -150,18 +147,8 @@ pub struct User {
     )]
     pub user_id: UserId,
     #[column(
-        id = 2,
-        ordinal = 2,
-        data_type(KalamDataType::Text),
-        nullable = false,
-        primary_key = false,
-        default = "None",
-        comment = "Unique username for authentication"
-    )]
-    pub username: UserName,
-    #[column(
         id = 3,
-        ordinal = 3,
+        ordinal = 2,
         data_type(KalamDataType::Text),
         nullable = false,
         primary_key = false,
@@ -171,7 +158,7 @@ pub struct User {
     pub password_hash: String,
     #[column(
         id = 5,
-        ordinal = 5,
+        ordinal = 4,
         data_type(KalamDataType::Text),
         nullable = true,
         primary_key = false,
@@ -181,7 +168,7 @@ pub struct User {
     pub email: Option<String>,
     #[column(
         id = 7,
-        ordinal = 7,
+        ordinal = 6,
         data_type(KalamDataType::Json),
         nullable = true,
         primary_key = false,
@@ -191,7 +178,7 @@ pub struct User {
     pub auth_data: Option<AuthData>,
     #[column(
         id = 9,
-        ordinal = 9,
+        ordinal = 8,
         data_type(KalamDataType::Text),
         nullable = true,
         primary_key = false,
@@ -203,7 +190,7 @@ pub struct User {
     /// Number of consecutive failed login attempts (reset on successful login)
     #[column(
         id = 14,
-        ordinal = 14,
+        ordinal = 9,
         data_type(KalamDataType::Int),
         nullable = false,
         primary_key = false,
@@ -213,7 +200,7 @@ pub struct User {
     pub failed_login_attempts: i32,
     #[column(
         id = 4,
-        ordinal = 4,
+        ordinal = 3,
         data_type(KalamDataType::Text),
         nullable = false,
         primary_key = false,
@@ -223,7 +210,7 @@ pub struct User {
     pub role: Role,
     #[column(
         id = 6,
-        ordinal = 6,
+        ordinal = 5,
         data_type(KalamDataType::Text),
         nullable = false,
         primary_key = false,
@@ -233,7 +220,7 @@ pub struct User {
     pub auth_type: AuthType,
     #[column(
         id = 8,
-        ordinal = 8,
+        ordinal = 7,
         data_type(KalamDataType::Text),
         nullable = false,
         primary_key = false,
@@ -296,7 +283,6 @@ mod tests {
     fn create_test_user() -> User {
         User {
             user_id: UserId::new("u_123"),
-            username: "alice".into(),
             password_hash: "$2b$12$hash".to_string(),
             role: Role::User,
             email: Some("test@example.com".to_string()),

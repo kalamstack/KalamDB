@@ -527,7 +527,7 @@ mod tests {
             columns: vec![],
             limit: None,
             user_id: None,
-        filters: vec![],
+            filters: vec![],
         };
         let err = svc.execute_scan(req).await.unwrap_err();
         assert_eq!(err.code(), tonic::Code::NotFound);
@@ -547,7 +547,7 @@ mod tests {
                 columns: vec![],
                 limit: None,
                 user_id: None,
-            filters: vec![],
+                filters: vec![],
             })
             .await
             .expect("scan should succeed");
@@ -583,7 +583,7 @@ mod tests {
                 columns: vec![],
                 limit: None,
                 user_id: None,
-            filters: vec![],
+                filters: vec![],
             })
             .await
             .expect("scan should succeed");
@@ -621,7 +621,7 @@ mod tests {
                 columns: vec!["name".to_string()],
                 limit: None,
                 user_id: None,
-            filters: vec![],
+                filters: vec![],
             })
             .await
             .expect("scan with projection");
@@ -643,7 +643,7 @@ mod tests {
                 columns: vec!["nonexistent_col".to_string()],
                 limit: None,
                 user_id: None,
-            filters: vec![],
+                filters: vec![],
             })
             .await
             .unwrap_err();

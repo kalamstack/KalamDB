@@ -239,7 +239,7 @@ export function NotificationsDropdown() {
                           {log.target}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {log.actor_username} • {formatTimestamp(log.timestamp)}
+                          {log.actor_user_id} • {formatTimestamp(log.timestamp)}
                         </p>
                       </div>
                     </DropdownMenuItem>
@@ -343,7 +343,7 @@ export function NotificationsDropdown() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-muted-foreground">User</label>
-                  <p className="font-medium">{selectedAuditLog.actor_username}</p>
+                  <p className="font-medium font-mono">{selectedAuditLog.actor_user_id}</p>
                 </div>
                 <div>
                   <label className="text-muted-foreground">Timestamp</label>

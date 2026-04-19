@@ -11,7 +11,7 @@ use kalam_client::KalamCellValue;
 use kalamdb_api::http::sql::models::{ResponseStatus as ApiResponseStatus, SqlResponse};
 use kalamdb_commons::models::{TableId, UserId};
 use kalamdb_commons::schemas::TableType;
-use kalamdb_commons::{Role, UserName};
+use kalamdb_commons::Role;
 use kalamdb_system::FileRef;
 use reqwest::multipart;
 use serde_json::Value as JsonValue;
@@ -106,7 +106,7 @@ async fn test_scenario_14_rag_docs_with_files_and_vector_search() -> anyhow::Res
     }
 
     let user_id = ensure_user_exists(server, &username, "test123", &Role::User).await?;
-    let user_auth = server.bearer_auth_header(&UserName::new(&username))?;
+    let user_auth = server.bearer_auth_header(&username)?;
     let user_client = create_user_and_client(server, &username, &Role::User).await?;
     let app_context = server.app_context();
     let manifest_user = UserId::new(user_id.clone());

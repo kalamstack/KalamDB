@@ -212,8 +212,8 @@ fn create_user_with_retry(username: &str, password: &str, role: &str) {
     );
 }
 
-fn get_user_id_for_username(username: &str) -> Option<String> {
-    let query = format!("SELECT user_id FROM system.users WHERE username = '{}'", username);
+fn get_user_id(user_id: &str) -> Option<String> {
+    let query = format!("SELECT user_id FROM system.users WHERE user_id = '{}'", user_id);
     let result = execute_sql_as_root_via_client_json(&query).ok()?;
 
     let json: serde_json::Value = serde_json::from_str(&result).ok()?;
@@ -263,9 +263,8 @@ fn setup_chat_fixture(suffix: &str) -> ChatFixture {
     create_user_with_retry(&service_user, &password, "service");
     create_user_with_retry(&other_user, &password, "user");
 
-    let regular_user_id =
-        get_user_id_for_username(&regular_user).expect("Failed to get regular user_id");
-    let other_user_id = get_user_id_for_username(&other_user).expect("Failed to get other user_id");
+    let regular_user_id = get_user_id(&regular_user).expect("Failed to get regular user_id");
+    let other_user_id = get_user_id(&other_user).expect("Failed to get other user_id");
 
     ChatFixture {
         namespace,

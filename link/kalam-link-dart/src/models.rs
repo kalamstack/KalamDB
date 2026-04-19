@@ -7,7 +7,7 @@ use kalam_client::models::{
     BatchStatus, ChangeEvent, ErrorDetail, LoginResponse, LoginUserInfo, QueryResponse,
     QueryResult, ResponseStatus, SchemaField,
 };
-use kalam_client::{LiveRowsConfig, LiveRowsEvent};
+use kalam_client::{LiveRowsConfig, LiveRowsEvent, Role};
 
 // ---------------------------------------------------------------------------
 // Connection lifecycle events (mirrors kalam_client::event_handlers)
@@ -70,8 +70,8 @@ pub enum DartConnectionEvent {
 
 /// Authentication method for connecting to KalamDB.
 pub enum DartAuthProvider {
-    /// HTTP Basic Auth with username and password.
-    BasicAuth { username: String, password: String },
+    /// HTTP Basic Auth with user and password.
+    BasicAuth { user: String, password: String },
     /// JWT bearer token.
     JwtToken { token: String },
     /// No authentication (localhost bypass).
@@ -81,8 +81,8 @@ pub enum DartAuthProvider {
 impl DartAuthProvider {
     pub(crate) fn into_native(self) -> kalam_client::AuthProvider {
         match self {
-            Self::BasicAuth { username, password } => {
-                kalam_client::AuthProvider::basic_auth(username, password)
+            Self::BasicAuth { user, password } => {
+                kalam_client::AuthProvider::basic_auth(user, password)
             },
             Self::JwtToken { token } => kalam_client::AuthProvider::jwt_token(token),
             Self::None => kalam_client::AuthProvider::none(),
@@ -205,6 +205,7 @@ pub struct DartLoginResponse {
     pub refresh_token: Option<String>,
     pub expires_at: String,
     pub refresh_expires_at: Option<String>,
+    pub admin_ui_access: bool,
     pub user: DartLoginUserInfo,
 }
 
@@ -215,15 +216,35 @@ impl From<LoginResponse> for DartLoginResponse {
             refresh_token: l.refresh_token,
             expires_at: l.expires_at,
             refresh_expires_at: l.refresh_expires_at,
+            admin_ui_access: l.admin_ui_access,
             user: DartLoginUserInfo::from(l.user),
+        }
+    }
+}
+
+pub enum DartRole {
+    Anonymous,
+    User,
+    Service,
+    Dba,
+    System,
+}
+
+impl From<Role> for DartRole {
+    fn from(role: Role) -> Self {
+        match role {
+            Role::Anonymous => Self::Anonymous,
+            Role::User => Self::User,
+            Role::Service => Self::Service,
+            Role::Dba => Self::Dba,
+            Role::System => Self::System,
         }
     }
 }
 
 pub struct DartLoginUserInfo {
     pub id: String,
-    pub username: String,
-    pub role: String,
+    pub role: DartRole,
     pub email: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -232,9 +253,8 @@ pub struct DartLoginUserInfo {
 impl From<LoginUserInfo> for DartLoginUserInfo {
     fn from(u: LoginUserInfo) -> Self {
         Self {
-            id: u.id,
-            username: u.username,
-            role: u.role,
+            id: u.id.to_string(),
+            role: DartRole::from(u.role),
             email: u.email,
             created_at: u.created_at,
             updated_at: u.updated_at,

@@ -17,7 +17,7 @@ Topic consumer / ACK worker APIs and initial server bootstrap flows are intentio
 - **Typed rows** via `Map<String, KalamCellValue>` accessors like `asString()`, `asInt()`, and `asFile()`
 - **Live subscriptions** to any `SELECT` query over WebSocket
 - **Materialized live rows** with `liveQueryRowsWithSql()` and `liveTableRows()`
-- **Authentication flows** with `Auth.jwt`, `Auth.basic`, `Auth.none`, `login()`, `refreshToken()`, and `refreshAuth()`
+- **Authentication flows** with `Auth.jwt`, `Auth.basic` user/password bootstrap, `Auth.none`, `login()`, `refreshToken()`, and `refreshAuth()`
 - **Connection diagnostics** with `ConnectionHandlers`, keepalive control, and SDK logging hooks
 - **Subscription inspection** with `getSubscriptions()` and `SeqId` resume support
 - **Manual shared-socket control** with `isConnected`, `disconnectWebSocket()`, and `reconnectWebSocket()`
@@ -168,7 +168,7 @@ final client = await KalamClient.connect(
 The callback may return:
 
 - `Auth.jwt(token)` for normal production auth
-- `Auth.basic(username, password)` when you want the SDK to exchange Basic credentials for a JWT before the first query or WebSocket connection
+- `Auth.basic(user, password)` when you want the SDK to exchange user/password credentials for a JWT on `POST /v1/api/auth/login` before the first query or WebSocket connection
 - `Auth.none()` for local anonymous access
 
 Re-resolve credentials on demand:
@@ -182,7 +182,7 @@ Timer.periodic(
 );
 ```
 
-### Basic login and token refresh
+### User/password login and token refresh
 
 ```dart
 final bootstrap = await KalamClient.connect(
@@ -500,7 +500,7 @@ Avoid this pattern. Build the UI first, then resolve auth and connect from a pro
 | `subscribe(sql, {batchSize, lastRows, from, subscriptionId})` | Subscribe to live query changes |
 | `liveQueryRowsWithSql(sql, {batchSize, lastRows, from, subscriptionId, limit, keyColumns, mapRow})` | Subscribe to a reconciled live row set |
 | `liveTableRows(tableName, {batchSize, lastRows, from, subscriptionId, limit, keyColumns, mapRow})` | Subscribe to reconciled rows for `SELECT * FROM table` |
-| `login(username, password)` | Exchange Basic credentials for JWT tokens |
+| `login(user, password)` | Exchange user/password credentials for JWT tokens |
 | `refreshToken(refreshToken)` | Refresh an access token |
 | `refreshAuth(...)` | Re-run `authProvider` and update credentials in place |
 | `isConnected` | Report whether the shared WebSocket is currently open |

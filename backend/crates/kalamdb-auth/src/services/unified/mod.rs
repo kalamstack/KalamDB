@@ -15,18 +15,15 @@ use std::sync::Arc;
 use tracing::Instrument;
 
 use bearer::authenticate_bearer;
-use password::authenticate_username_password;
+use password::authenticate_user_password;
 pub use types::{AuthMethod, AuthRequest, AuthenticationResult};
 
-pub use audit::extract_username_for_audit;
+pub use audit::extract_user_id_for_audit;
 
 /// Cached login tracker instance.
 static LOGIN_TRACKER: Lazy<LoginTracker> = Lazy::new(LoginTracker::new);
 
 /// Initialize auth configuration from server settings.
-///
-/// This initializes JWT validation configuration plus provider-driven
-/// auto-provision behavior used in bearer authentication.
 pub fn init_auth_config(
     auth: &kalamdb_configs::AuthSettings,
     oauth: &kalamdb_configs::OAuthSettings,
@@ -54,12 +51,7 @@ pub fn init_auth_config(
         }
     }
 
-    jwt_config::init_jwt_config(
-        &auth.jwt_secret,
-        &auth.jwt_trusted_issuers,
-        auth.auto_create_users_from_provider,
-        issuer_audiences,
-    );
+    jwt_config::init_jwt_config(&auth.jwt_secret, &auth.jwt_trusted_issuers, issuer_audiences);
 }
 
 /// Authenticate a request using the unified authentication flow.
@@ -87,8 +79,8 @@ pub async fn authenticate(
             AuthRequest::Header(header) => {
                 authenticate_header(&header, connection_info, repo).await
             },
-            AuthRequest::Credentials { username, password } => {
-                authenticate_credentials(&username, &password, connection_info, repo).await
+            AuthRequest::Credentials { user, password } => {
+                authenticate_credentials(&user, &password, connection_info, repo).await
             },
             AuthRequest::Jwt { token } => {
                 let user = authenticate_bearer(&token, connection_info, repo).await?;
@@ -135,12 +127,12 @@ async fn authenticate_header(
 }
 
 async fn authenticate_credentials(
-    username: &str,
+    user_id_str: &str,
     password: &str,
     connection_info: &kalamdb_commons::models::ConnectionInfo,
     repo: &Arc<dyn UserRepository>,
 ) -> AuthResult<AuthenticationResult> {
-    let user = authenticate_username_password(username, password, connection_info, repo).await?;
+    let user = authenticate_user_password(user_id_str, password, connection_info, repo).await?;
     Ok(AuthenticationResult {
         user,
         method: AuthMethod::Direct,
@@ -149,12 +141,13 @@ async fn authenticate_credentials(
 
 fn record_authenticated_span(user: &AuthenticatedUser) {
     tracing::Span::current().record("role", format!("{:?}", user.role).as_str());
-    tracing::Span::current().record("user", user.username.as_str());
+    tracing::Span::current().record("user", user.user_id.as_str());
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kalamdb_commons::UserId;
 
     #[test]
     fn test_auth_method_debug() {
@@ -164,55 +157,22 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_username_from_credentials() {
+    fn test_extract_user_id_from_credentials() {
         let request = AuthRequest::Credentials {
-            username: "testuser".to_string(),
+            user: "testuser".to_string(),
             password: "secret".to_string(),
         };
-        assert_eq!(
-            extract_username_for_audit(&request),
-            kalamdb_commons::UserName::from("testuser")
-        );
+        assert_eq!(extract_user_id_for_audit(&request), UserId::from("testuser"));
     }
 
     #[test]
-    fn test_extract_username_from_basic_header() {
-        let encoded =
-            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, "testuser:password");
-        let request = AuthRequest::Header(format!("Basic {}", encoded));
-        assert_eq!(
-            extract_username_for_audit(&request),
-            kalamdb_commons::UserName::from("testuser")
-        );
-    }
-
-    #[test]
-    fn test_extract_username_from_bearer_header() {
+    fn test_extract_user_id_from_bearer_header() {
         let request = AuthRequest::Header("Bearer some.jwt.token".to_string());
-        assert_eq!(
-            extract_username_for_audit(&request),
-            kalamdb_commons::UserName::from("unknown")
-        );
+        assert_eq!(extract_user_id_for_audit(&request), UserId::anonymous());
     }
 
     #[test]
-    fn test_extract_username_from_jwt_variant() {
-        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-
-        let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"HS256","typ":"JWT"}"#);
-        let payload = URL_SAFE_NO_PAD.encode(r#"{"username":"jwt_user","exp":9999999999}"#);
-        let signature = "fake_signature";
-
-        let token = format!("{}.{}.{}", header, payload, signature);
-        let request = AuthRequest::Jwt { token };
-        assert_eq!(
-            extract_username_for_audit(&request),
-            kalamdb_commons::UserName::from("jwt_user")
-        );
-    }
-
-    #[test]
-    fn test_extract_username_from_jwt_with_sub_claim() {
+    fn test_extract_user_id_from_jwt_with_sub() {
         use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 
         let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"HS256","typ":"JWT"}"#);
@@ -221,37 +181,28 @@ mod tests {
 
         let token = format!("{}.{}.{}", header, payload, signature);
         let request = AuthRequest::Jwt { token };
-        assert_eq!(
-            extract_username_for_audit(&request),
-            kalamdb_commons::UserName::from("user_from_sub")
-        );
+        assert_eq!(extract_user_id_for_audit(&request), UserId::from("user_from_sub"));
     }
 
     #[test]
-    fn test_extract_username_from_invalid_jwt() {
+    fn test_extract_user_id_from_invalid_jwt() {
         let request = AuthRequest::Jwt {
             token: "invalid_token".to_string(),
         };
-        assert_eq!(
-            extract_username_for_audit(&request),
-            kalamdb_commons::UserName::from("unknown")
-        );
+        assert_eq!(extract_user_id_for_audit(&request), UserId::anonymous());
     }
 
     #[test]
-    fn test_extract_username_from_bearer_header_with_jwt() {
+    fn test_extract_user_id_from_bearer_header_with_jwt() {
         use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 
         let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"HS256","typ":"JWT"}"#);
-        let payload = URL_SAFE_NO_PAD.encode(r#"{"username":"bearer_user","exp":9999999999}"#);
+        let payload = URL_SAFE_NO_PAD.encode(r#"{"sub":"bearer_user","exp":9999999999}"#);
         let signature = "fake_signature";
 
         let token = format!("{}.{}.{}", header, payload, signature);
         let request = AuthRequest::Header(format!("Bearer {}", token));
-        assert_eq!(
-            extract_username_for_audit(&request),
-            kalamdb_commons::UserName::from("bearer_user")
-        );
+        assert_eq!(extract_user_id_for_audit(&request), UserId::from("bearer_user"));
     }
 
     #[cfg(feature = "websocket")]

@@ -29,3 +29,4 @@ doctest = false
 
 [dev-dependencies]
 datafusion = { workspace = true }
+kalamdb-core = { path = "../../../kalamdb-core", features = ["test-helpers"] }

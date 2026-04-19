@@ -82,18 +82,14 @@ impl KalamLinkClient {
         Ok(response.json::<ClusterHealthResponse>().await?)
     }
 
-    /// Login with username and password to obtain a JWT token.
+    /// Login with user and password to obtain a JWT token.
     #[cfg(feature = "auth-flows")]
-    pub async fn login(
-        &self,
-        username: &str,
-        password: &str,
-    ) -> Result<crate::models::LoginResponse> {
+    pub async fn login(&self, user: &str, password: &str) -> Result<crate::models::LoginResponse> {
         let url = format!("{}/v1/api/auth/login", self.base_url);
-        log::debug!("[LOGIN] Authenticating user '{}' at url={}", username, url);
+        log::debug!("[LOGIN] Authenticating user '{}' at url={}", user, url);
 
         let login_request = crate::models::LoginRequest {
-            username: username.to_string(),
+            user: kalamdb_commons::UserId::from(user),
             password: password.to_string(),
         };
 
@@ -129,11 +125,7 @@ impl KalamLinkClient {
         }
 
         let login_response = response.json::<crate::models::LoginResponse>().await?;
-        log::debug!(
-            "[LOGIN] Successfully authenticated user '{}' in {:?}",
-            username,
-            start.elapsed()
-        );
+        log::debug!("[LOGIN] Successfully authenticated user '{}' in {:?}", user, start.elapsed());
 
         Ok(login_response)
     }

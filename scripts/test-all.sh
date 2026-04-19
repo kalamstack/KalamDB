@@ -87,7 +87,7 @@ ensure_admin_user() {
     local admin_status
     admin_status=$(curl -sS -o "$admin_login_body" -w '%{http_code}' \
         -H 'Content-Type: application/json' \
-        -d "{\"username\":\"$KALAMDB_ADMIN_USER\",\"password\":\"$KALAMDB_ADMIN_PASSWORD\"}" \
+        -d "{\"user\":\"$KALAMDB_ADMIN_USER\",\"password\":\"$KALAMDB_ADMIN_PASSWORD\"}" \
         "$KALAMDB_SERVER_URL/v1/api/auth/login")
     if [[ "$admin_status" == "200" ]]; then
         echo "    Admin test user '$KALAMDB_ADMIN_USER' already available"
@@ -97,7 +97,7 @@ ensure_admin_user() {
     local root_status
     root_status=$(curl -sS -o "$root_login_body" -w '%{http_code}' \
         -H 'Content-Type: application/json' \
-        -d "{\"username\":\"root\",\"password\":\"$KALAMDB_ROOT_PASSWORD\"}" \
+        -d "{\"user\":\"root\",\"password\":\"$KALAMDB_ROOT_PASSWORD\"}" \
         "$KALAMDB_SERVER_URL/v1/api/auth/login")
     [[ "$root_status" == "200" ]] || die "Unable to authenticate as root to prepare admin test user"
 
@@ -114,7 +114,7 @@ ensure_admin_user() {
         "$KALAMDB_SERVER_URL/v1/api/sql" >/dev/null
 
     local admin_exists=false
-    if grep -q "\"username\":\"$KALAMDB_ADMIN_USER\"" "$user_check_body"; then
+    if grep -q "\"user\":\"$KALAMDB_ADMIN_USER\"" "$user_check_body"; then
         admin_exists=true
     fi
 
@@ -144,7 +144,7 @@ ensure_admin_user() {
 
     admin_status=$(curl -sS -o "$admin_login_body" -w '%{http_code}' \
         -H 'Content-Type: application/json' \
-        -d "{\"username\":\"$KALAMDB_ADMIN_USER\",\"password\":\"$KALAMDB_ADMIN_PASSWORD\"}" \
+        -d "{\"user\":\"$KALAMDB_ADMIN_USER\",\"password\":\"$KALAMDB_ADMIN_PASSWORD\"}" \
         "$KALAMDB_SERVER_URL/v1/api/auth/login")
     [[ "$admin_status" == "200" ]] || die "Admin test user '$KALAMDB_ADMIN_USER' is still not usable after bootstrap"
 

@@ -1,8 +1,9 @@
-use actix_web::{HttpRequest, HttpResponse};
+use actix_web::{http::StatusCode, HttpRequest, HttpResponse};
 use bytes::Bytes;
-use kalamdb_commons::models::{NamespaceId, Username};
+use kalamdb_commons::models::NamespaceId;
 use kalamdb_commons::schemas::TableType;
 use kalamdb_core::app_context::AppContext;
+use kalamdb_core::error::KalamDbError;
 use kalamdb_core::schema_registry::SchemaRegistry;
 use kalamdb_core::sql::context::ExecutionContext;
 use kalamdb_core::sql::executor::request_transaction_state::RequestTransactionState;
@@ -26,6 +27,159 @@ use super::statements::{
     classify_sql, resolve_execute_as_user, resolve_result_username, PreparedApiExecutionStatement,
 };
 
+#[inline]
+fn message_contains_any(message: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| message.contains(needle))
+}
+
+#[inline]
+fn is_permission_error_message(message: &str) -> bool {
+    message_contains_any(
+        message,
+        &[
+            "access denied",
+            "permission denied",
+            "unauthorized",
+            "not authorized",
+            "forbidden",
+            "insufficient privileges",
+        ],
+    )
+}
+
+#[inline]
+fn is_table_discovery_error_message(message: &str) -> bool {
+    (message.contains("table") && message.contains("not found"))
+        || (message.contains("relation") && message.contains("does not exist"))
+        || message.contains("unknown table")
+}
+
+#[inline]
+fn is_safe_validation_error_message(message: &str) -> bool {
+    (message.contains("column") && message.contains("not found"))
+        || (message.contains("field") && message.contains("not found"))
+        || message.contains("no field named")
+        || message.contains("schema error: no field named")
+        || message.contains("primary key")
+        || message.contains("constraint violation")
+        || message.contains("already exists")
+        || message.contains("duplicate")
+        || message.contains("unique constraint")
+        || message.contains("unique index")
+}
+
+#[inline]
+fn classify_sql_error(err: &KalamDbError) -> (StatusCode, ErrorCode, bool) {
+    match err {
+        KalamDbError::PermissionDenied(_) | KalamDbError::Unauthorized(_) => {
+            (StatusCode::FORBIDDEN, ErrorCode::PermissionDenied, true)
+        },
+        KalamDbError::InvalidSql(_) => (StatusCode::BAD_REQUEST, ErrorCode::InvalidSql, true),
+        KalamDbError::AlreadyExists(_)
+        | KalamDbError::InvalidOperation(_)
+        | KalamDbError::InvalidSchemaEvolution(_)
+        | KalamDbError::SystemColumnViolation(_)
+        | KalamDbError::ConstraintViolation(_)
+        | KalamDbError::Conflict(_)
+        | KalamDbError::NamespaceNotFound(_)
+        | KalamDbError::IdempotentConflict(_)
+        | KalamDbError::ParamCountExceeded { .. }
+        | KalamDbError::ParamSizeExceeded { .. }
+        | KalamDbError::ParamCountMismatch { .. }
+        | KalamDbError::ParamsNotSupported { .. }
+        | KalamDbError::ParameterBindingError { .. }
+        | KalamDbError::Timeout { .. }
+        | KalamDbError::NotImplemented { .. } => {
+            (StatusCode::BAD_REQUEST, ErrorCode::SqlExecutionError, true)
+        },
+        KalamDbError::TableNotFound(_) => {
+            (StatusCode::BAD_REQUEST, ErrorCode::SqlExecutionError, false)
+        },
+        KalamDbError::NotFound(message) => {
+            let message_lower = message.to_lowercase();
+            if is_table_discovery_error_message(&message_lower) {
+                (StatusCode::BAD_REQUEST, ErrorCode::SqlExecutionError, false)
+            } else {
+                (StatusCode::BAD_REQUEST, ErrorCode::SqlExecutionError, true)
+            }
+        },
+        KalamDbError::ExecutionError(message) => {
+            let message_lower = message.to_lowercase();
+            if is_permission_error_message(&message_lower) {
+                (StatusCode::FORBIDDEN, ErrorCode::PermissionDenied, true)
+            } else if is_safe_validation_error_message(&message_lower) {
+                (StatusCode::BAD_REQUEST, ErrorCode::SqlExecutionError, true)
+            } else {
+                (StatusCode::BAD_REQUEST, ErrorCode::SqlExecutionError, false)
+            }
+        },
+        _ => (StatusCode::BAD_REQUEST, ErrorCode::SqlExecutionError, false),
+    }
+}
+
+fn build_sql_error_response(
+    status: StatusCode,
+    code: ErrorCode,
+    message: &str,
+    details: Option<&str>,
+    took: f64,
+    is_admin: bool,
+    preserve_message: bool,
+) -> HttpResponse {
+    let payload = if preserve_message {
+        if is_admin {
+            details.map_or_else(
+                || SqlResponse::error(code, message, took),
+                |detail| SqlResponse::error_with_details(code, message, detail, took),
+            )
+        } else {
+            SqlResponse::error(code, message, took)
+        }
+    } else if let Some(detail) = details {
+        SqlResponse::error_with_details_for_privilege(code, message, detail, took, is_admin)
+    } else {
+        SqlResponse::error_for_privilege(code, message, took, is_admin)
+    };
+
+    HttpResponse::build(status).json(payload)
+}
+
+fn build_kalamdb_error_response(err: &KalamDbError, took: f64, is_admin: bool) -> HttpResponse {
+    let (status, code, preserve_message) = classify_sql_error(err);
+    build_sql_error_response(status, code, &err.to_string(), None, took, is_admin, preserve_message)
+}
+
+fn build_statement_error_response(
+    err: &(dyn std::error::Error + 'static),
+    statement_index: usize,
+    sql: &str,
+    took: f64,
+    is_admin: bool,
+) -> HttpResponse {
+    if let Some(kalamdb_err) = err.downcast_ref::<KalamDbError>() {
+        let (status, code, preserve_message) = classify_sql_error(kalamdb_err);
+        return build_sql_error_response(
+            status,
+            code,
+            &format!("Statement {} failed: {}", statement_index, kalamdb_err),
+            Some(sql),
+            took,
+            is_admin,
+            preserve_message,
+        );
+    }
+
+    build_sql_error_response(
+        StatusCode::BAD_REQUEST,
+        ErrorCode::SqlExecutionError,
+        &format!("Statement {} failed: {}", statement_index, err),
+        Some(sql),
+        took,
+        is_admin,
+        false,
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn execute_file_upload_path(
     is_multipart: bool,
@@ -36,25 +190,27 @@ pub(super) async fn execute_file_upload_path(
     sql_executor: &Arc<SqlExecutor>,
     exec_ctx: &ExecutionContext,
     impersonation_service: &SqlImpersonationService,
-    authorized_username: &Username,
+    authorized_username: &str,
     default_namespace: &NamespaceId,
     params: Vec<ScalarValue>,
     schema_registry: &SchemaRegistry,
     start_time: Instant,
 ) -> HttpResponse {
     if !is_multipart {
-        return HttpResponse::BadRequest().json(SqlResponse::error(
+        return HttpResponse::BadRequest().json(SqlResponse::error_for_privilege(
             ErrorCode::InvalidInput,
             "FILE placeholders require multipart/form-data",
             took_ms(start_time),
+            exec_ctx.is_admin(),
         ));
     }
 
     if prepared_statements.len() != 1 {
-        return HttpResponse::BadRequest().json(SqlResponse::error(
+        return HttpResponse::BadRequest().json(SqlResponse::error_for_privilege(
             ErrorCode::InvalidInput,
             "File uploads require a single SQL statement",
             took_ms(start_time),
+            exec_ctx.is_admin(),
         ));
     }
 
@@ -63,11 +219,7 @@ pub(super) async fn execute_file_upload_path(
     {
         Ok(uid) => uid,
         Err(err) => {
-            return HttpResponse::BadRequest().json(SqlResponse::error(
-                ErrorCode::SqlExecutionError,
-                &err,
-                took_ms(start_time),
-            ));
+            return build_kalamdb_error_response(&err, took_ms(start_time), exec_ctx.is_admin());
         },
     };
 
@@ -79,10 +231,11 @@ pub(super) async fn execute_file_upload_path(
     let table_id = match stmt.prepared_statement.table_id.clone() {
         Some(tid) => tid,
         None => {
-            return HttpResponse::BadRequest().json(SqlResponse::error(
+            return HttpResponse::BadRequest().json(SqlResponse::error_for_privilege(
                 ErrorCode::InvalidInput,
                 "Could not determine target table from SQL. Use fully qualified table name (namespace.table).",
                 took_ms(start_time),
+                exec_ctx.is_admin(),
             ));
         },
     };
@@ -90,10 +243,11 @@ pub(super) async fn execute_file_upload_path(
     let table_entry = match schema_registry.get(&table_id) {
         Some(cached) => cached.table_entry(),
         None => {
-            return HttpResponse::BadRequest().json(SqlResponse::error(
+            return HttpResponse::BadRequest().json(SqlResponse::error_for_privilege(
                 ErrorCode::TableNotFound,
                 &format!("Table '{}' not found", table_id),
                 took_ms(start_time),
+                exec_ctx.is_admin(),
             ));
         },
     };
@@ -102,7 +256,7 @@ pub(super) async fn execute_file_upload_path(
     let table_type = table_entry.table_type;
 
     if execute_as_user.is_some() && table_type == TableType::Shared {
-        return HttpResponse::BadRequest().json(SqlResponse::error(
+        return HttpResponse::BadRequest().json(SqlResponse::error_for_privilege(
             ErrorCode::SqlExecutionError,
             &format!(
                 "EXECUTE AS USER is not allowed on SHARED tables (table '{}'). \
@@ -110,6 +264,7 @@ pub(super) async fn execute_file_upload_path(
                 table_id
             ),
             took_ms(start_time),
+            exec_ctx.is_admin(),
         ));
     }
 
@@ -117,10 +272,11 @@ pub(super) async fn execute_file_upload_path(
         TableType::User => execute_as_user.clone().or_else(|| Some(exec_ctx.user_id().clone())),
         TableType::Shared => None,
         TableType::Stream | TableType::System => {
-            return HttpResponse::BadRequest().json(SqlResponse::error(
+            return HttpResponse::BadRequest().json(SqlResponse::error_for_privilege(
                 ErrorCode::InvalidInput,
                 "File uploads are not supported for stream or system tables",
                 took_ms(start_time),
+                exec_ctx.is_admin(),
             ));
         },
     };
@@ -153,10 +309,11 @@ pub(super) async fn execute_file_upload_path(
         {
             Ok(refs) => refs,
             Err(e) => {
-                return HttpResponse::InternalServerError().json(SqlResponse::error(
+                return HttpResponse::InternalServerError().json(SqlResponse::error_for_privilege(
                     e.code,
                     &e.message,
                     took_ms(start_time),
+                    exec_ctx.is_admin(),
                 ));
             },
         }
@@ -167,17 +324,19 @@ pub(super) async fn execute_file_upload_path(
     match kalamdb_sql::parse_single_statement(&modified_sql) {
         Ok(Some(_)) => {},
         Ok(None) => {
-            return HttpResponse::BadRequest().json(SqlResponse::error(
+            return HttpResponse::BadRequest().json(SqlResponse::error_for_privilege(
                 ErrorCode::InvalidSql,
                 "Expected exactly one SQL statement after FILE() substitution",
                 took_ms(start_time),
+                exec_ctx.is_admin(),
             ));
         },
         Err(err) => {
-            return HttpResponse::BadRequest().json(SqlResponse::error(
+            return HttpResponse::BadRequest().json(SqlResponse::error_for_privilege(
                 ErrorCode::InvalidSql,
                 &format!("Failed to parse SQL statement after FILE() substitution: {}", err),
                 took_ms(start_time),
+                exec_ctx.is_admin(),
             ));
         },
     };
@@ -196,7 +355,7 @@ pub(super) async fn execute_file_upload_path(
     );
 
     let effective_username =
-        resolve_result_username(authorized_username, stmt.execute_as_username.as_ref());
+        resolve_result_username(authorized_username, stmt.execute_as_username.as_deref());
 
     match execute_single_statement(
         &modified_metadata,
@@ -226,12 +385,13 @@ pub(super) async fn execute_file_upload_path(
                 app_context,
             )
             .await;
-            HttpResponse::BadRequest().json(SqlResponse::error_with_details(
-                ErrorCode::SqlExecutionError,
-                &format!("Statement 1 failed: {}", err),
+            build_statement_error_response(
+                err.as_ref(),
+                1,
                 &modified_sql,
                 took_ms(start_time),
-            ))
+                exec_ctx.is_admin(),
+            )
         },
     }
 }
@@ -243,7 +403,7 @@ pub(super) async fn execute_batch_path(
     sql_executor: &Arc<SqlExecutor>,
     exec_ctx: &ExecutionContext,
     impersonation_service: &SqlImpersonationService,
-    authorized_username: &Username,
+    authorized_username: &str,
     params: Vec<ScalarValue>,
     http_req: &HttpRequest,
     req_for_forward: &QueryRequest,
@@ -260,11 +420,11 @@ pub(super) async fn execute_batch_path(
         match RequestTransactionState::from_execution_context(exec_ctx) {
             Ok(state) => state,
             Err(err) => {
-                return HttpResponse::BadRequest().json(SqlResponse::error(
-                    ErrorCode::SqlExecutionError,
-                    &err.to_string(),
+                return build_kalamdb_error_response(
+                    &err,
                     took_ms(start_time),
-                ));
+                    exec_ctx.is_admin(),
+                );
             },
         };
     if let Some(state) = request_transaction_state.as_mut() {
@@ -329,13 +489,12 @@ pub(super) async fn execute_batch_path(
                                 if let Some(state) = request_transaction_state.as_mut() {
                                     let _ = state.rollback_if_active(app_context);
                                 }
-                                return HttpResponse::BadRequest().json(
-                                    SqlResponse::error_with_details(
-                                        ErrorCode::SqlExecutionError,
-                                        &format!("Statement {} failed: {}", idx + 1, err),
-                                        &prepared_statements[idx].prepared_statement.sql,
-                                        took_ms(start_time),
-                                    ),
+                                return build_statement_error_response(
+                                    &err,
+                                    idx + 1,
+                                    &prepared_statements[idx].prepared_statement.sql,
+                                    took_ms(start_time),
+                                    exec_ctx.is_admin(),
                                 );
                             },
                         }
@@ -349,11 +508,11 @@ pub(super) async fn execute_batch_path(
             match resolve_execute_as_user(stmt, impersonation_service, exec_ctx).await {
                 Ok(uid) => uid,
                 Err(err) => {
-                    return HttpResponse::BadRequest().json(SqlResponse::error(
-                        ErrorCode::SqlExecutionError,
+                    return build_kalamdb_error_response(
                         &err,
                         took_ms(start_time),
-                    ));
+                        exec_ctx.is_admin(),
+                    );
                 },
             };
 
@@ -361,7 +520,7 @@ pub(super) async fn execute_batch_path(
             && stmt.prepared_statement.table_type == Some(TableType::Shared)
         {
             if let Some(table_id) = stmt.prepared_statement.table_id.as_ref() {
-                return HttpResponse::BadRequest().json(SqlResponse::error(
+                return HttpResponse::BadRequest().json(SqlResponse::error_for_privilege(
                     ErrorCode::SqlExecutionError,
                     &format!(
                         "EXECUTE AS USER is not allowed on SHARED tables (table '{}'). \
@@ -369,13 +528,14 @@ pub(super) async fn execute_batch_path(
                         table_id
                     ),
                     took_ms(start_time),
+                    exec_ctx.is_admin(),
                 ));
             }
         }
 
         let stmt_start = Instant::now();
         let effective_username =
-            resolve_result_username(authorized_username, stmt.execute_as_username.as_ref());
+            resolve_result_username(authorized_username, stmt.execute_as_username.as_deref());
 
         let is_last = idx + 1 == stmt_count;
 
@@ -444,13 +604,14 @@ pub(super) async fn execute_batch_path(
                             took_ms(start_time),
                         ) {
                             Ok(response) => response,
-                            Err(err) => {
-                                HttpResponse::InternalServerError().json(SqlResponse::error(
+                            Err(err) => HttpResponse::InternalServerError().json(
+                                SqlResponse::error_for_privilege(
                                     ErrorCode::InternalError,
                                     &format!("Failed to stream SQL response: {}", err),
                                     took_ms(start_time),
-                                ))
-                            },
+                                    exec_ctx.is_admin(),
+                                ),
+                            ),
                         };
                     }
                 }
@@ -463,11 +624,14 @@ pub(super) async fn execute_batch_path(
                 let result = match execution_result_to_query_result(exec_result, effective_role) {
                     Ok(result) => result.with_as_user(effective_username),
                     Err(err) => {
-                        return HttpResponse::InternalServerError().json(SqlResponse::error(
-                            ErrorCode::InternalError,
-                            &format!("Failed to serialize SQL result: {}", err),
-                            took_ms(start_time),
-                        ));
+                        return HttpResponse::InternalServerError().json(
+                            SqlResponse::error_for_privilege(
+                                ErrorCode::InternalError,
+                                &format!("Failed to serialize SQL result: {}", err),
+                                took_ms(start_time),
+                                exec_ctx.is_admin(),
+                            ),
+                        );
                     },
                 };
 
@@ -520,12 +684,13 @@ pub(super) async fn execute_batch_path(
                     }
                 }
 
-                return HttpResponse::BadRequest().json(SqlResponse::error_with_details(
-                    ErrorCode::SqlExecutionError,
-                    &format!("Statement {} failed: {}", idx + 1, err),
+                return build_statement_error_response(
+                    err.as_ref(),
+                    idx + 1,
                     &stmt.prepared_statement.sql,
                     took_ms(start_time),
-                ));
+                    exec_ctx.is_admin(),
+                );
             },
         }
 
@@ -538,10 +703,11 @@ pub(super) async fn execute_batch_path(
     if let Some(state) = request_transaction_state.as_mut() {
         if state.is_active() {
             let _ = state.rollback_if_active(app_context);
-            return HttpResponse::BadRequest().json(SqlResponse::error(
+            return HttpResponse::BadRequest().json(SqlResponse::error_for_privilege(
                 ErrorCode::SqlExecutionError,
                 "Request completed with an open explicit transaction; rolled back automatically",
                 took_ms(start_time),
+                exec_ctx.is_admin(),
             ));
         }
     }
@@ -553,7 +719,7 @@ pub(super) async fn execute_batch_path(
                     total_inserted,
                     Some(format!("Inserted {} row(s)", total_inserted)),
                 )
-                .with_as_user(authorized_username.clone()),
+                .with_as_user(authorized_username.to_string()),
             );
         }
         if total_updated > 0 {
@@ -562,7 +728,7 @@ pub(super) async fn execute_batch_path(
                     total_updated,
                     Some(format!("Updated {} row(s)", total_updated)),
                 )
-                .with_as_user(authorized_username.clone()),
+                .with_as_user(authorized_username.to_string()),
             );
         }
         if total_deleted > 0 {
@@ -571,7 +737,7 @@ pub(super) async fn execute_batch_path(
                     total_deleted,
                     Some(format!("Deleted {} row(s)", total_deleted)),
                 )
-                .with_as_user(authorized_username.clone()),
+                .with_as_user(authorized_username.to_string()),
             );
         }
     }

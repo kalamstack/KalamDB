@@ -214,7 +214,7 @@ fn cluster_test_system_users_replication() {
         panic!("Namespace {} did not replicate to all nodes", namespace);
     }
 
-    // Create test users with correct syntax (no quotes around username, no NAMESPACE clause)
+    // Create test users with correct syntax (no quotes around user, no NAMESPACE clause)
     let users: Vec<String> = (0..3).map(|i| format!("test_user_{}_{}", namespace, i)).collect();
 
     for user in &users {
@@ -229,7 +229,7 @@ fn cluster_test_system_users_replication() {
     // Verify users exist on all nodes
     for (i, url) in urls.iter().enumerate() {
         for user in &users {
-            let query = format!("SELECT username FROM system.users WHERE username = '{}'", user);
+            let query = format!("SELECT user_id FROM system.users WHERE user_id = '{}'", user);
 
             let mut found = false;
             for _ in 0..10 {

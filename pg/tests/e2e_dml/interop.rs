@@ -36,19 +36,22 @@ fn sql_first_cell_i64(result: &serde_json::Value) -> Option<i64> {
 }
 
 async fn create_kalam_test_user(env: &TestEnv, prefix: &str) -> KalamTestUser {
-    let username = unique_name(prefix);
-    let password = format!("pw_{username}");
+    let user_id = unique_name(prefix);
+    let password = format!("pw_{user_id}");
 
-    env.kalamdb_sql(&format!("CREATE USER '{username}' WITH PASSWORD '{password}' ROLE user"))
+    env.kalamdb_sql(&format!("CREATE USER '{user_id}' WITH PASSWORD '{password}' ROLE user"))
         .await;
 
     let lookup = env
-        .kalamdb_sql(&format!("SELECT user_id FROM system.users WHERE username = '{username}'"))
+        .kalamdb_sql(&format!("SELECT user_id FROM system.users WHERE user_id = '{user_id}'"))
         .await;
     let user_id = sql_first_cell_string(&lookup)
-        .unwrap_or_else(|| panic!("expected user_id for Kalam test user {username}"));
+        .unwrap_or_else(|| panic!("expected user_id for Kalam test user {user_id}"));
 
-    KalamTestUser { username, user_id }
+    KalamTestUser {
+        username: user_id.clone(),
+        user_id,
+    }
 }
 
 async fn wait_for_execute_as_user_count(
@@ -264,9 +267,12 @@ async fn e2e_shared_tables_can_join_each_other_in_postgres() {
         .expect("join shared tables query");
 
     assert_eq!(rows.len(), 3, "expected three joined rows across shared tables");
-    let first: (&str, &str, &str, i32) = (rows[0].get(0), rows[0].get(1), rows[0].get(2), rows[0].get(3));
-    let second: (&str, &str, &str, i32) = (rows[1].get(0), rows[1].get(1), rows[1].get(2), rows[1].get(3));
-    let third: (&str, &str, &str, i32) = (rows[2].get(0), rows[2].get(1), rows[2].get(2), rows[2].get(3));
+    let first: (&str, &str, &str, i32) =
+        (rows[0].get(0), rows[0].get(1), rows[0].get(2), rows[0].get(3));
+    let second: (&str, &str, &str, i32) =
+        (rows[1].get(0), rows[1].get(1), rows[1].get(2), rows[1].get(3));
+    let third: (&str, &str, &str, i32) =
+        (rows[2].get(0), rows[2].get(1), rows[2].get(2), rows[2].get(3));
     assert_eq!(first, ("c1", "Alice", "o1", 15));
     assert_eq!(second, ("c1", "Alice", "o2", 20));
     assert_eq!(third, ("c2", "Bob", "o3", 30));
@@ -367,10 +373,9 @@ async fn e2e_user_tables_can_join_each_other_in_postgres() {
            JOIN e2e.{memberships_table} AS m ON m.profile_id = p.id
           ORDER BY p.id"
     );
-    let rows = retry_transient_user_leader_error("join user tables query", || {
-        pg.query(&join_sql, &[])
-    })
-    .await;
+    let rows =
+        retry_transient_user_leader_error("join user tables query", || pg.query(&join_sql, &[]))
+            .await;
 
     assert_eq!(rows.len(), 2, "expected two joined rows across user tables");
     let first: (&str, &str, &str) = (rows[0].get(0), rows[0].get(1), rows[0].get(2));

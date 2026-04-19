@@ -256,7 +256,7 @@ mod tests {
                 namespace_id: namespace_id.clone(),
                 name: namespace_id.as_str().to_string(),
                 created_at: chrono::Utc::now().timestamp_millis(),
-                options: Some("{}".to_string()),
+                options: Some(serde_json::json!({})),
                 table_count: 0,
             })
             .expect("create namespace");

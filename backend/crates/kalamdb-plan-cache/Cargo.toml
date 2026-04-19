@@ -8,7 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-kalamdb-commons = { workspace = true }
+kalamdb-commons = { workspace = true, features = ["full"] }
 datafusion = { workspace = true }
 moka = { workspace = true }
 

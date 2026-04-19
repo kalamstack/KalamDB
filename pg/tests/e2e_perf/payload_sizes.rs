@@ -32,10 +32,7 @@ struct SelectBreakdownStats {
 
 impl BenchStats {
     fn from_run_totals(run_totals_ms: Vec<f64>) -> Self {
-        assert!(
-            !run_totals_ms.is_empty(),
-            "bench stats require at least one measured run"
-        );
+        assert!(!run_totals_ms.is_empty(), "bench stats require at least one measured run");
 
         let median_total_ms = median_ms(&run_totals_ms);
         let median_avg_ms = median_total_ms / BENCH_ITERATIONS_PER_RUN as f64;
@@ -235,9 +232,8 @@ async fn measure_select_breakdown(
         .await
         .expect("prepare full-row select statement");
     let id_only_sql = format!("SELECT id FROM {qualified_table} WHERE id = '{row_id}'");
-    let full_row_sql = format!(
-        "SELECT id, payload, status, version FROM {qualified_table} WHERE id = '{row_id}'"
-    );
+    let full_row_sql =
+        format!("SELECT id, payload, status, version FROM {qualified_table} WHERE id = '{row_id}'");
 
     let mut pg_id_only_query_ms = Vec::with_capacity(SELECT_BREAKDOWN_SAMPLES);
     let mut pg_full_row_query_ms = Vec::with_capacity(SELECT_BREAKDOWN_SAMPLES);
@@ -379,10 +375,7 @@ async fn benchmark_select(label: &str, payload_bytes: usize) -> BenchStats {
         let select_stmt = select_stmt.clone();
 
         async move {
-            let row = client
-                .query_one(&select_stmt, &[&id])
-                .await
-                .expect("select benchmark row");
+            let row = client.query_one(&select_stmt, &[&id]).await.expect("select benchmark row");
             let selected_id: String = row.get(0);
             let payload: String = row.get(1);
             assert_eq!(selected_id, id, "selected row id mismatch");
@@ -428,7 +421,8 @@ async fn benchmark_update(label: &str, payload_bytes: usize) -> BenchStats {
 
     let stats = run_benchmark_rounds(|run_index, iteration| {
         let id = bench_row_id("update", run_index, iteration);
-        let next_payload = benchmark_payload(payload_bytes, bench_seed(run_index, iteration) + 10_000);
+        let next_payload =
+            benchmark_payload(payload_bytes, bench_seed(run_index, iteration) + 10_000);
         let update_stmt = update_stmt.clone();
 
         async move {
@@ -483,10 +477,7 @@ async fn benchmark_delete(label: &str, payload_bytes: usize) -> BenchStats {
         let delete_stmt = delete_stmt.clone();
 
         async move {
-            let rows = client
-                .execute(&delete_stmt, &[&id])
-                .await
-                .expect("delete benchmark row");
+            let rows = client.execute(&delete_stmt, &[&id]).await.expect("delete benchmark row");
             assert_eq!(rows, 1, "delete should affect exactly one row");
         }
     })

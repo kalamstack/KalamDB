@@ -11,8 +11,10 @@ use kalamdb_auth::{
 };
 use kalamdb_commons::Role;
 use kalamdb_configs::AuthSettings;
+use kalamdb_core::app_context::AppContext;
 use std::sync::Arc;
 
+use super::audit;
 use super::map_auth_error_to_response;
 use super::models::{AuthErrorResponse, LoginRequest, LoginResponse, UserInfo};
 use crate::limiter::RateLimiter;
@@ -25,6 +27,7 @@ use kalamdb_jobs::health_monitor::record_activity_now;
 /// distinguish normal API tokens from accounts allowed to enter the Admin UI.
 pub async fn login_handler(
     req: HttpRequest,
+    app_context: web::Data<Arc<AppContext>>,
     user_repo: web::Data<Arc<dyn UserRepository>>,
     config: web::Data<AuthSettings>,
     rate_limiter: web::Data<Arc<RateLimiter>>,
@@ -45,7 +48,7 @@ pub async fn login_handler(
 
     // Authenticate using unified auth flow (includes localhost/empty password rules)
     let auth_request = AuthRequest::Credentials {
-        username: body.username.clone(),
+        user: body.user.clone(),
         password: body.password.clone(),
     };
 
@@ -61,7 +64,6 @@ pub async fn login_handler(
     // Generate JWT access token
     let (token, _claims) = match create_and_sign_token(
         &user.user_id,
-        &user.username,
         &user.role,
         user.email.as_deref(),
         Some(config.jwt_expiry_hours),
@@ -81,7 +83,6 @@ pub async fn login_handler(
     let refresh_expiry_hours = config.jwt_expiry_hours * 7;
     let (refresh_token, _refresh_claims) = match create_and_sign_refresh_token(
         &user.user_id,
-        &user.username,
         &user.role,
         user.email.as_deref(),
         Some(refresh_expiry_hours),
@@ -119,13 +120,16 @@ pub async fn login_handler(
         .unwrap_or_else(chrono::Utc::now)
         .to_rfc3339();
 
+    if admin_ui_access {
+        audit::record_admin_login(app_context.get_ref(), &user.user_id, &connection_info).await;
+    }
+
     HttpResponse::Ok()
         .cookie(auth_cookie)
         .cookie(refresh_cookie)
         .json(LoginResponse {
             user: UserInfo {
                 id: user.user_id,
-                username: user.username,
                 role: user.role,
                 email: user.email,
                 created_at,

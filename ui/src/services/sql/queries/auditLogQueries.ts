@@ -1,7 +1,7 @@
-export type AuditLogSortKey = "timestamp" | "actor_username" | "action" | "target" | "ip_address";
+export type AuditLogSortKey = "timestamp" | "actor_user_id" | "action" | "target" | "ip_address";
 
 export interface AuditLogFilters {
-  username?: string;
+  user?: string;
   action?: string;
   target?: string;
   startDate?: string;
@@ -18,15 +18,15 @@ function escapeSqlLiteral(value: string): string {
 
 function buildAuditLogsSelect(): string {
   return `
-    SELECT audit_id, timestamp, actor_user_id, actor_username, action, target, details, ip_address
+    SELECT audit_id, timestamp, actor_user_id, action, target, details, ip_address
     FROM system.audit_log
   `;
 }
 
 function buildAuditLogsWhereClause(filters?: AuditLogFilters): string {
   const conditions: string[] = [];
-  if (filters?.username) {
-    conditions.push(`actor_username LIKE '%${escapeSqlLiteral(filters.username)}%'`);
+  if (filters?.user) {
+    conditions.push(`actor_user_id LIKE '%${escapeSqlLiteral(filters.user)}%'`);
   }
   if (filters?.action) {
     conditions.push(`action = '${escapeSqlLiteral(filters.action)}'`);
@@ -49,7 +49,7 @@ export function buildAuditLogsSubscriptionQuery(filters?: AuditLogFilters): stri
 }
 
 const VALID_SORT_COLUMNS = new Set<AuditLogSortKey>([
-  "timestamp", "actor_username", "action", "target", "ip_address",
+  "timestamp", "actor_user_id", "action", "target", "ip_address",
 ]);
 
 export function buildAuditLogsQuery(filters?: AuditLogFilters): string {

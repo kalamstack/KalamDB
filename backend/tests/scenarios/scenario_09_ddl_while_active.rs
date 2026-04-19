@@ -12,7 +12,7 @@ use super::helpers::*;
 use futures_util::StreamExt;
 use kalam_client::models::ChangeEvent;
 use kalam_client::models::ResponseStatus;
-use kalamdb_commons::{Role, UserName};
+use kalamdb_commons::Role;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -320,7 +320,7 @@ async fn test_scenario_09_concurrent_reads_during_ddl() -> anyhow::Result<()> {
     // Spawn concurrent readers
     let ns_clone = ns.clone();
     let server_base = server.base_url().to_string();
-    let token = server.create_jwt_token(&UserName::new(&username));
+    let token = server.create_jwt_token(&username);
 
     let reader_handle = tokio::spawn(async move {
         let client = kalam_client::KalamLinkClient::builder()

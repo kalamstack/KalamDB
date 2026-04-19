@@ -42,9 +42,9 @@ pub struct Cli {
     #[arg(long = "token")]
     pub token: Option<String>,
 
-    /// HTTP Basic Auth username
-    #[arg(long = "username")]
-    pub username: Option<String>,
+    /// HTTP Basic Auth user identifier
+    #[arg(long = "user")]
+    pub user: Option<String>,
 
     /// HTTP Basic Auth password (if flag is present without value, prompts interactively;
     /// avoid passing inline secrets in shared shells)
@@ -129,7 +129,7 @@ pub struct Cli {
     pub delete_credentials: bool,
 
     /// Save credentials (JWT token) after successful login
-    /// When used with --username/--password, stores the JWT token for future sessions
+    /// When used with --user/--password, stores the JWT token for future sessions
     #[arg(long = "save-credentials")]
     pub save_credentials: bool,
 

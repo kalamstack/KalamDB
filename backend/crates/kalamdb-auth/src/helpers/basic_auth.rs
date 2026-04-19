@@ -5,13 +5,13 @@ use base64::prelude::*;
 
 /// Parse HTTP Basic Auth header and extract credentials.
 ///
-/// Expected format: `Authorization: Basic <base64-encoded-username:password>`
+/// Expected format: `Authorization: Basic <base64-encoded-user:password>`
 ///
 /// # Arguments
 /// * `auth_header` - Value of the Authorization header
 ///
 /// # Returns
-/// Tuple of (username, password)
+/// Tuple of (user, password)
 ///
 /// # Errors
 /// - `AuthError::MalformedAuthorization` if header format is invalid
@@ -23,8 +23,8 @@ use base64::prelude::*;
 /// use kalamdb_auth::helpers::basic_auth::parse_basic_auth_header;
 ///
 /// let header = "Basic dXNlcjpwYXNz"; // base64("user:pass")
-/// let (username, password) = parse_basic_auth_header(header).unwrap();
-/// assert_eq!(username, "user");
+/// let (user, password) = parse_basic_auth_header(header).unwrap();
+/// assert_eq!(user, "user");
 /// assert_eq!(password, "pass");
 /// ```
 pub fn parse_basic_auth_header(auth_header: &str) -> AuthResult<(String, String)> {
@@ -44,36 +44,36 @@ pub fn parse_basic_auth_header(auth_header: &str) -> AuthResult<(String, String)
         AuthError::MalformedAuthorization(format!("Invalid UTF-8 in credentials: {}", e))
     })?;
 
-    // Split into username:password
+    // Split into user:password
     extract_credentials(&decoded_str)
 }
 
-/// Extract username and password from decoded credentials string.
+/// Extract user and password from decoded credentials string.
 ///
-/// Expected format: `username:password`
+/// Expected format: `user:password`
 ///
 /// # Arguments
 /// * `credentials` - Decoded credentials string
 ///
 /// # Returns
-/// Tuple of (username, password)
+/// Tuple of (user, password)
 ///
 /// # Errors
 /// - `AuthError::MalformedAuthorization` if format is invalid (no colon found)
 fn extract_credentials(credentials: &str) -> AuthResult<(String, String)> {
     let mut parts = credentials.splitn(2, ':');
 
-    let username = parts.next().ok_or_else(|| {
-        AuthError::MalformedAuthorization("Missing username in credentials".to_string())
+    let user = parts.next().ok_or_else(|| {
+        AuthError::MalformedAuthorization("Missing user in credentials".to_string())
     })?;
 
     let password = parts.next().ok_or_else(|| {
         AuthError::MalformedAuthorization(
-            "Credentials must be in format 'username:password'".to_string(),
+            "Credentials must be in format 'user:password'".to_string(),
         )
     })?;
 
-    Ok((username.to_string(), password.to_string()))
+    Ok((user.to_string(), password.to_string()))
 }
 
 #[cfg(test)]
@@ -84,8 +84,8 @@ mod tests {
     fn test_parse_basic_auth_valid() {
         // "user:pass" in base64 = "dXNlcjpwYXNz"
         let header = "Basic dXNlcjpwYXNz";
-        let (username, password) = parse_basic_auth_header(header).unwrap();
-        assert_eq!(username, "user");
+        let (user, password) = parse_basic_auth_header(header).unwrap();
+        assert_eq!(user, "user");
         assert_eq!(password, "pass");
     }
 
@@ -93,8 +93,8 @@ mod tests {
     fn test_parse_basic_auth_with_colon_in_password() {
         // "admin:p@ss:word" in base64 = "YWRtaW46cEBzczp3b3Jk"
         let header = "Basic YWRtaW46cEBzczp3b3Jk";
-        let (username, password) = parse_basic_auth_header(header).unwrap();
-        assert_eq!(username, "admin");
+        let (user, password) = parse_basic_auth_header(header).unwrap();
+        assert_eq!(user, "admin");
         assert_eq!(password, "p@ss:word");
     }
 
@@ -123,8 +123,8 @@ mod tests {
     #[test]
     fn test_extract_credentials_valid() {
         let creds = "alice:SecurePassword123!";
-        let (username, password) = extract_credentials(creds).unwrap();
-        assert_eq!(username, "alice");
+        let (user, password) = extract_credentials(creds).unwrap();
+        assert_eq!(user, "alice");
         assert_eq!(password, "SecurePassword123!");
     }
 

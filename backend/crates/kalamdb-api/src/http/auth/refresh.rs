@@ -57,16 +57,10 @@ pub async fn refresh_handler(
         ));
     }
 
-    let username_claim = match claims.username {
-        Some(ref u) => u.clone(),
-        None => {
-            return HttpResponse::Unauthorized()
-                .json(AuthErrorResponse::new("unauthorized", "Token missing username claim"));
-        },
-    };
+    let user_id = kalamdb_commons::UserId::new(&claims.sub);
 
-    // Verify user still exists and is active by username
-    let user = match user_repo.get_user_by_username(&username_claim).await {
+    // Verify user still exists and is active by user_id
+    let user = match user_repo.get_user_by_id(&user_id).await {
         Ok(user) if user.deleted_at.is_none() => user,
         _ => {
             return HttpResponse::Unauthorized()
@@ -83,7 +77,7 @@ pub async fn refresh_handler(
                 "Refresh token role mismatch: claimed={:?}, actual={:?} for user={}",
                 claimed_role,
                 user.role,
-                user.username
+                user.user_id.as_str()
             );
             return HttpResponse::Unauthorized().json(AuthErrorResponse::new(
                 "unauthorized",
@@ -95,7 +89,6 @@ pub async fn refresh_handler(
     // Generate new access token
     let (new_token, _new_claims) = match create_and_sign_token(
         &user.user_id,
-        &user.username,
         &user.role,
         user.email.as_deref(),
         Some(config.jwt_expiry_hours),
@@ -115,7 +108,6 @@ pub async fn refresh_handler(
     let refresh_expiry_hours = config.jwt_expiry_hours * 7;
     let (new_refresh_token, _refresh_claims) = match create_and_sign_refresh_token(
         &user.user_id,
-        &user.username,
         &user.role,
         user.email.as_deref(),
         Some(refresh_expiry_hours),
@@ -161,7 +153,6 @@ pub async fn refresh_handler(
         .json(LoginResponse {
             user: UserInfo {
                 id: user.user_id.clone(),
-                username: user.username.clone(),
                 role: user.role,
                 email: user.email,
                 created_at,
@@ -188,7 +179,6 @@ mod tests {
             iss: "kalamdb".to_string(),
             exp: now + 3600,
             iat: now,
-            username: None,
             email: None,
             role: None,
             token_type: Some(TokenType::Refresh),

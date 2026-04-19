@@ -2,6 +2,8 @@
 
 The official TypeScript/JavaScript SDK for KalamDB, built on top of a Rust → WASM core.
 
+Worker and topic-consumer APIs now live in the separate `@kalamdb/consumer` package. This page focuses on the app-facing `@kalamdb/client` surface.
+
 - **Tiny bundle size** with minimal dependencies
 - **Cross-platform**: Works in Node.js and browsers
 - **Type-safe**: Full TypeScript support with complete type definitions
@@ -74,12 +76,10 @@ In another Node project inside this repo, depend on the local package:
 ```typescript
 import { createClient, Auth } from '@kalamdb/client';
 
-// Create and connect
 const client = createClient({
   url: 'http://localhost:8080',
-  auth: Auth.basic('admin', 'admin')
+  authProvider: async () => Auth.basic('admin', 'AdminPass123!'),
 });
-await client.connect();
 
 // Query data
 const result = await client.query('SELECT * FROM app.users LIMIT 10');
@@ -102,30 +102,30 @@ await client.disconnect();
 ### Creating a Client
 
 ```typescript
-import { KalamDBClient, createClient, Auth } from '@kalamdb/client';
+import { createClient, Auth, type AuthProvider } from '@kalamdb/client';
 
-// Option 1: Factory function
+const authProvider: AuthProvider = async () => Auth.basic('admin', 'AdminPass123!');
+
 const client = createClient({
   url: 'http://localhost:8080',
-  auth: Auth.basic('admin', 'admin')
+  authProvider,
 });
-
-// Option 2: Constructor
-const client = new KalamDBClient('http://localhost:8080', 'admin', 'admin');
 ```
+
+`createClient({ url, authProvider })` is the current high-level entrypoint. Older constructor-based examples are no longer accurate for the published SDK.
 
 ### Connection Management
 
 ```typescript
-// Connect to server (establishes WebSocket for subscriptions)
-await client.connect();
+// createClient() clients do not expose a public high-level connect() call.
+// HTTP queries run immediately, and the shared WebSocket opens lazily on the
+// first realtime call unless wsLazyConnect is disabled.
+await client.query('SELECT 1');
 
-// Check connection status
-if (client.isConnected()) {
-  console.log('Connected!');
-}
+const unsubscribe = await client.subscribe('app.messages', handleEvent);
+await unsubscribe();
 
-// Disconnect (closes WebSocket and cleans up subscriptions)
+// Disconnect closes the shared WebSocket and cleans up subscriptions.
 await client.disconnect();
 ```
 
@@ -348,15 +348,12 @@ interface BatchControl {
   <div id="messages"></div>
   
   <script type="module">
-    import { createClient } from '/path/to/dist/index.js';
+    import { Auth, createClient } from '/path/to/dist/index.js';
     
     const client = createClient({
       url: 'http://localhost:8080',
-      username: 'admin',
-      password: 'admin'
+      authProvider: async () => Auth.basic('admin', 'AdminPass123!')
     });
-    
-    await client.connect();
     
     const unsubscribe = await client.subscribe('app.messages', (event) => {
       if (event.type === 'change' && event.rows) {
@@ -386,10 +383,9 @@ import { createClient, Auth } from '@kalamdb/client';
 
 const client = createClient({
   url: 'http://localhost:8080',
-  auth: Auth.basic('admin', 'admin')
+  authProvider: async () => Auth.basic('admin', 'AdminPass123!')
 });
 
-await client.connect();
 // ... use client
 await client.disconnect();
 ```
@@ -402,10 +398,9 @@ import { createClient, Auth, ServerMessage } from '@kalamdb/client';
 async function main() {
   const client = createClient({
     url: 'http://localhost:8080',
-    auth: Auth.basic('admin', 'admin')
+    authProvider: async () => Auth.basic('admin', 'AdminPass123!')
   });
   
-  await client.connect();
   console.log('Connected to KalamDB');
   
   // Create messages table (STREAM for auto-expiring data)
@@ -453,9 +448,9 @@ main().catch(console.error);
 
 ```typescript
 try {
-  await client.connect();
+  await client.query('SELECT 1');
 } catch (error) {
-  console.error('Connection failed:', error);
+  console.error('Initial query failed:', error);
 }
 
 try {
@@ -493,7 +488,7 @@ import {
   BatchControl,
   SubscriptionCallback,
   SubscriptionInfo,
-  SubscribeOptions,
+  SubscriptionOptions,
   Unsubscribe
 } from '@kalamdb/client';
 ```
@@ -520,6 +515,6 @@ The SDK is built on a Rust core compiled to WebAssembly:
 ```
 
 - **Single WebSocket connection** shared by all subscriptions
-- **HTTP Basic Auth** for API requests
+- **`authProvider`-driven auth** with JWT on protected requests; `Auth.basic(user, password)` is only used for the `/v1/api/auth/login` exchange
 - **WebSocket authentication** on connect
 - **Subscription callbacks** stored in HashMap for efficient dispatch

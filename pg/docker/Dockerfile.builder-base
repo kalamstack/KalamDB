@@ -5,7 +5,7 @@
 #   docker build -f pg/docker/Dockerfile.builder-base -t pg-kalam-builder .
 ARG RUST_BASE_IMAGE=public.ecr.aws/docker/library/rust:1.92-bookworm
 ARG PG_MAJOR=16
-ARG PGRX_VERSION=0.17.0
+ARG PGRX_VERSION=0.18.0
 FROM ${RUST_BASE_IMAGE}
 
 ARG PG_MAJOR

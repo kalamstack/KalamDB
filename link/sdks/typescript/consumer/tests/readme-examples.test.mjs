@@ -14,8 +14,8 @@ function createReadmeAgentClient(messages) {
     query: async () => ({ status: 'success', results: [] }),
     queryOne: async () => null,
     queryAll: async () => [],
-    executeAsUser: async (sql, username, params) => {
-      state.executeAsUserCalls.push({ sql, username, params });
+    executeAsUser: async (sql, user, params) => {
+      state.executeAsUserCalls.push({ sql, user, params });
       return { status: 'success', results: [] };
     },
     consumer: (consumeOptions) => {
@@ -24,7 +24,7 @@ function createReadmeAgentClient(messages) {
         run: async (handler) => {
           for (const message of messages) {
             await handler({
-              username: 'alice',
+              user: 'alice',
               message,
               ack: async () => {
                 state.ackedOffsets.push(message.offset);
@@ -46,10 +46,13 @@ test('README runAgent example writes back through executeAsUser inside the user 
     partition_id: 0,
     topic: 'support.inbox_events',
     group_id: 'support-summary-agent',
+    payload: {
+      body: 'Please summarize this support thread',
+      _table: 'support.inbox',
+    },
     value: {
-      row: {
-        body: 'Please summarize this support thread',
-      },
+      body: 'Please summarize this support thread',
+      _table: 'support.inbox',
     },
   };
 
@@ -66,23 +69,23 @@ test('README runAgent example writes back through executeAsUser inside the user 
       maxBackoffMs: 0,
     },
     onRow: async (ctx, row) => {
-      const username = String(ctx.username ?? '').trim();
+      const user = String(ctx.user ?? '').trim();
       const body = String(row.body ?? '').trim();
-      if (!username || !body) {
+      if (!user || !body) {
         return;
       }
 
       const summary = `Support summary: ${body.slice(0, 120)}`;
       await client.executeAsUser(
         'INSERT INTO support.inbox (room, role, body) VALUES ($1, $2, $3)',
-        username,
+        user,
         ['main', 'assistant', summary],
       );
     },
   });
 
   assert.equal(state.executeAsUserCalls.length, 1);
-  assert.equal(state.executeAsUserCalls[0].username, 'alice');
+  assert.equal(state.executeAsUserCalls[0].user, 'alice');
   assert.deepEqual(state.executeAsUserCalls[0].params, [
     'main',
     'assistant',

@@ -12,7 +12,125 @@
 
 use crate::common::*;
 
-use std::time::{Duration, Instant};
+use std::{
+    io::{BufRead, BufReader, Read},
+    process::{Child, Command, Stdio},
+    sync::mpsc::{self, Receiver},
+    time::{Duration, Instant},
+};
+
+fn forward_process_output<R: Read + Send + 'static>(
+    reader: R,
+    stream_name: &'static str,
+    tx: mpsc::Sender<String>,
+) {
+    std::thread::spawn(move || {
+        for line in BufReader::new(reader).lines() {
+            match line {
+                Ok(line) => {
+                    let _ = tx.send(format!("{}: {}", stream_name, line));
+                },
+                Err(err) => {
+                    let _ = tx.send(format!("{} read error: {}", stream_name, err));
+                    break;
+                },
+            }
+        }
+    });
+}
+
+fn spawn_cli_subscription_process(
+    query: &str,
+) -> Result<(Child, Receiver<String>, TempDir), Box<dyn std::error::Error>> {
+    let cli_home = TempDir::new()?;
+    let home_dir = cli_home.path().join("home");
+    let config_dir = home_dir.join(".kalam");
+    let credentials_path = config_dir.join("credentials.toml");
+    std::fs::create_dir_all(&config_dir)?;
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_kalam"));
+    child
+        .arg("-u")
+        .arg(server_url())
+        .arg("--user")
+        .arg(default_username())
+        .arg("--password")
+        .arg(default_password())
+        .arg("--no-spinner")
+        .arg("--no-color")
+        .arg("--subscribe")
+        .arg(query)
+        .env("HOME", &home_dir)
+        .env("USERPROFILE", &home_dir)
+        .env("KALAMDB_CREDENTIALS_PATH", &credentials_path)
+        .env("NO_PROXY", "127.0.0.1,localhost,::1")
+        .env("no_proxy", "127.0.0.1,localhost,::1")
+        .env_remove("HTTP_PROXY")
+        .env_remove("http_proxy")
+        .env_remove("HTTPS_PROXY")
+        .env_remove("https_proxy")
+        .env_remove("ALL_PROXY")
+        .env_remove("all_proxy")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = child.spawn()?;
+    let stdout = child.stdout.take().ok_or("failed to capture CLI stdout")?;
+    let stderr = child.stderr.take().ok_or("failed to capture CLI stderr")?;
+    let (tx, rx) = mpsc::channel();
+    forward_process_output(stdout, "stdout", tx.clone());
+    forward_process_output(stderr, "stderr", tx);
+
+    Ok((child, rx, cli_home))
+}
+
+fn wait_for_process_output(
+    rx: &Receiver<String>,
+    needle: &str,
+    timeout: Duration,
+    collected: &mut Vec<String>,
+) -> Result<String, String> {
+    let start = Instant::now();
+    while start.elapsed() < timeout {
+        match rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(line) => {
+                if !line.trim().is_empty() {
+                    collected.push(line.clone());
+                }
+                if line.contains(needle) {
+                    return Ok(line);
+                }
+            },
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+
+    Err(format!(
+        "Timed out waiting for '{}'. Output so far:\n{}",
+        needle,
+        collected.join("\n")
+    ))
+}
+
+struct ChildProcessGuard {
+    child: Option<Child>,
+}
+
+impl ChildProcessGuard {
+    fn new(child: Child) -> Self {
+        Self { child: Some(child) }
+    }
+}
+
+impl Drop for ChildProcessGuard {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
 
 /// T041: Test basic live query subscription
 #[test]
@@ -73,7 +191,7 @@ fn test_cli_subscription_commands() {
     let mut cmd = create_cli_command();
     cmd.arg("-u")
         .arg(server_url())
-        .arg("--username")
+        .arg("--user")
         .arg(default_username())
         .arg("--password")
         .arg(root_password())
@@ -86,7 +204,7 @@ fn test_cli_subscription_commands() {
     let mut cmd = create_cli_command();
     cmd.arg("-u")
         .arg(server_url())
-        .arg("--username")
+        .arg("--user")
         .arg(default_username())
         .arg("--password")
         .arg(root_password())
@@ -200,7 +318,7 @@ fn test_cli_subscription_with_initial_data() {
     let mut cmd = create_cli_command();
     cmd.arg("-u")
         .arg(server_url())
-        .arg("--username")
+        .arg("--user")
         .arg(default_username())
         .arg("--password")
         .arg(root_password())
@@ -222,6 +340,82 @@ fn test_cli_subscription_with_initial_data() {
 
     // Cleanup
     let _ = execute_sql_as_root_via_cli(&format!("DROP NAMESPACE {} CASCADE", namespace_name));
+}
+
+#[test]
+fn test_cli_binary_projected_subscription_receives_live_changes() {
+    if cfg!(windows) {
+        eprintln!(
+            "⚠️  Skipping on Windows due to intermittent access violations in WebSocket tests."
+        );
+        return;
+    }
+    if !is_server_running() {
+        eprintln!("⚠️  Server not running. Skipping test.");
+        return;
+    }
+
+    let namespace_name = generate_unique_namespace("sub_proj_cli");
+    let table_name = format!("{}.messages", namespace_name);
+    let initial_content = "snap-row";
+    let live_content = "live-row";
+
+    let _ = execute_sql_as_root_via_client(&format!(
+        "DROP NAMESPACE IF EXISTS {} CASCADE",
+        namespace_name
+    ));
+    execute_sql_as_root_via_client(&format!("CREATE NAMESPACE {}", namespace_name))
+        .expect("namespace should be created");
+    execute_sql_as_root_via_client(&format!(
+        "CREATE TABLE {} (id BIGINT PRIMARY KEY, role TEXT NOT NULL, author TEXT NOT NULL, content TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT NOW()) WITH (TYPE='USER', FLUSH_POLICY='rows:10')",
+        table_name
+    ))
+    .expect("table should be created");
+    execute_sql_as_root_via_client(&format!(
+        "INSERT INTO {} (id, role, author, content) VALUES (1, 'assistant', 'KalamDB Copilot', '{}')",
+        table_name, initial_content
+    ))
+    .expect("initial row should be inserted");
+    wait_for_sql_output_contains(
+        &format!("SELECT content FROM {} WHERE id = 1", table_name),
+        &initial_content,
+        Duration::from_secs(5),
+    )
+    .expect("initial row should be queryable before subscribing");
+
+    let query = format!(
+        "SELECT id, role, author, content, created_at FROM {}",
+        table_name
+    );
+    let (child, rx, _cli_home) =
+        spawn_cli_subscription_process(&query).expect("CLI subscription should spawn");
+    let _child = ChildProcessGuard::new(child);
+    let mut output = Vec::new();
+
+    wait_for_process_output(&rx, "SUBSCRIBED", Duration::from_secs(15), &mut output)
+        .expect("CLI should acknowledge the subscription");
+    wait_for_process_output(&rx, &initial_content, Duration::from_secs(15), &mut output)
+        .expect("CLI should print the projected initial row");
+
+    execute_sql_as_root_via_client(&format!(
+        "INSERT INTO {} (id, role, author, content) VALUES (2, 'user', 'admin', '{}')",
+        table_name, live_content
+    ))
+    .expect("live row should be inserted");
+
+    let insert_line =
+        wait_for_process_output(&rx, &live_content, Duration::from_secs(15), &mut output)
+            .expect("CLI should print the projected live row");
+    assert!(
+        insert_line.contains("INSERT"),
+        "Expected an INSERT line for the live row. Output: {}",
+        output.join("\n")
+    );
+
+    let _ = execute_sql_as_root_via_client(&format!(
+        "DROP NAMESPACE IF EXISTS {} CASCADE",
+        namespace_name
+    ));
 }
 
 /// Test comprehensive subscription functionality with CRUD operations
@@ -254,7 +448,7 @@ fn test_cli_subscription_comprehensive_crud() {
     let mut cmd = create_cli_command();
     cmd.arg("-u")
         .arg(server_url())
-        .arg("--username")
+        .arg("--user")
         .arg(default_username())
         .arg("--password")
         .arg(root_password())
@@ -276,7 +470,7 @@ fn test_cli_subscription_comprehensive_crud() {
     let mut cmd = create_cli_command();
     cmd.arg("-u")
         .arg(server_url())
-        .arg("--username")
+        .arg("--user")
         .arg(default_username())
         .arg("--password")
         .arg(root_password())
@@ -349,7 +543,7 @@ fn test_cli_subscription_comprehensive_crud() {
     let mut cmd = create_cli_command();
     cmd.arg("-u")
         .arg(server_url())
-        .arg("--username")
+        .arg("--user")
         .arg(default_username())
         .arg("--password")
         .arg(root_password())

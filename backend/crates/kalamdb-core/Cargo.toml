@@ -36,6 +36,7 @@ arrow = { workspace = true }
 bytes = { workspace = true }
 datafusion = { workspace = true }
 datafusion-common = { workspace = true }
+datafusion-functions-json = { workspace = true }
 
 # SQL parsing (for native DML handlers)
 sqlparser = { workspace = true }

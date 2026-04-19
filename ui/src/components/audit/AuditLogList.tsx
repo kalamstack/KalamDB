@@ -123,7 +123,7 @@ function getActionColor(action: string): string {
   const hasActiveFilters = useMemo(
     () =>
       Boolean(
-        appliedFilters.username ||
+        appliedFilters.user ||
           appliedFilters.action ||
           appliedFilters.target ||
           appliedFilters.startDate ||
@@ -223,11 +223,11 @@ function getActionColor(action: string): string {
           <CardContent className="pt-4">
             <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
               <div className="space-y-1">
-                <label className="text-sm font-medium">Username</label>
+                <label className="text-sm font-medium">User</label>
                 <Input
-                  placeholder="Filter by username"
-                  value={draftFilters.username || ''}
-                  onChange={(e) => setDraftFilters({ ...draftFilters, username: e.target.value || undefined })}
+                  placeholder="Filter by user"
+                  value={draftFilters.user || ''}
+                  onChange={(e) => setDraftFilters({ ...draftFilters, user: e.target.value || undefined })}
                 />
               </div>
               <div className="space-y-1">
@@ -280,7 +280,7 @@ function getActionColor(action: string): string {
               <TableRow>
                 {([
                   ["timestamp", "Timestamp"],
-                  ["actor_username", "User"],
+                  ["actor_user_id", "User"],
                   ["action", "Action"],
                   ["target", "Target"],
                   ["ip_address", "IP Address"],
@@ -308,12 +308,7 @@ function getActionColor(action: string): string {
                     {formatUtcTimestamp(log.timestamp)}
                   </TableCell>
                   <TableCell>
-                    <div>
-                      <div className="font-medium">{log.actor_username}</div>
-                      <div className="text-xs text-muted-foreground font-mono">
-                        {log.actor_user_id.substring(0, 8)}...
-                      </div>
-                    </div>
+                    <div className="font-medium font-mono">{log.actor_user_id}</div>
                   </TableCell>
                   <TableCell>
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${getActionColor(log.action)}`}>
@@ -372,10 +367,6 @@ function getActionColor(action: string): string {
                 </div>
                 <div>
                   <span className="text-muted-foreground">User:</span>
-                  <p>{selectedLog.actor_username}</p>
-                </div>
-                <div>
-                  <span className="text-muted-foreground">User ID:</span>
                   <p className="font-mono text-xs">{selectedLog.actor_user_id}</p>
                 </div>
                 <div className="col-span-2">

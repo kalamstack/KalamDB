@@ -692,7 +692,8 @@ struct ParquetBatchDecoder<'a> {
     /// Cached downcast of the PK column for fast string extraction without
     /// going through ScalarValue intermediate.
     pk_string_array: Option<&'a StringArray>,
-    value_columns: Vec<(usize, String)>,
+    /// Column indices for value columns (excluding system columns _seq, _commit_seq, _deleted).
+    value_column_indices: Vec<usize>,
 }
 
 impl<'a> ParquetBatchDecoder<'a> {
@@ -725,7 +726,7 @@ impl<'a> ParquetBatchDecoder<'a> {
         // Try to cache the PK column as StringArray for fast extraction.
         let pk_string_array =
             pk_idx.and_then(|idx| batch.column(idx).as_any().downcast_ref::<StringArray>());
-        let value_columns = schema
+        let value_column_indices: Vec<usize> = schema
             .fields()
             .iter()
             .enumerate()
@@ -734,7 +735,7 @@ impl<'a> ParquetBatchDecoder<'a> {
                     && field.name() != SystemColumnNames::COMMIT_SEQ
                     && field.name() != SystemColumnNames::DELETED
             })
-            .map(|(idx, field)| (idx, field.name().clone()))
+            .map(|(idx, _)| idx)
             .collect();
 
         Ok(Self {
@@ -744,7 +745,7 @@ impl<'a> ParquetBatchDecoder<'a> {
             deleted_array,
             pk_idx,
             pk_string_array,
-            value_columns,
+            value_column_indices,
         })
     }
 
@@ -793,9 +794,11 @@ impl<'a> ParquetBatchDecoder<'a> {
     fn row_at(&self, row_idx: usize) -> Result<ParquetRowData, KalamDbError> {
         let metadata = self.metadata_at(row_idx);
         let mut values = BTreeMap::new();
+        let schema = self.batch.schema();
 
-        for (col_idx, col_name) in &self.value_columns {
-            let array = self.batch.column(*col_idx);
+        for &col_idx in &self.value_column_indices {
+            let col_name = schema.field(col_idx).name();
+            let array = self.batch.column(col_idx);
             match arrow_value_to_scalar(array.as_ref(), row_idx) {
                 Ok(val) => {
                     values.insert(col_name.clone(), val);

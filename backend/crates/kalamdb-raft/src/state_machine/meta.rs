@@ -244,7 +244,7 @@ impl MetaStateMachine {
             // User Operations
             // =================================================================
             MetaCommand::CreateUser { user } => {
-                log::debug!("MetaStateMachine: CreateUser {:?} ({})", user.user_id, user.username);
+                log::debug!("MetaStateMachine: CreateUser {:?}", user.user_id);
 
                 let message = if let Some(ref a) = applier {
                     a.create_user(&user).await?

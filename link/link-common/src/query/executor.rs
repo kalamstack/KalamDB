@@ -23,7 +23,8 @@ use std::{
 
 /// Async callback that resolves fresh [`AuthProvider`] credentials.
 ///
-/// Called by the executor when a query returns `TOKEN_EXPIRED`.
+/// Called by the executor when a query requires a login exchange or returns
+/// `TOKEN_EXPIRED`.
 /// Implementations should obtain a fresh JWT (e.g. via login or dynamic
 /// auth provider) and return it.
 pub type AuthRefreshCallback =
@@ -107,6 +108,36 @@ impl QueryExecutor {
 
     pub(crate) fn set_auth_refresher(&mut self, refresher: AuthRefreshCallback) {
         self.auth_refresher = Some(refresher);
+    }
+
+    fn validate_request_auth(auth: &AuthProvider) -> Result<()> {
+        if matches!(auth, AuthProvider::BasicAuth(_, _)) {
+            return Err(KalamLinkError::AuthenticationError(
+                "User/password credentials can only be used with /v1/api/auth/login; exchange them for a JWT before executing SQL requests.".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    async fn ensure_request_auth(&self) -> Result<AuthProvider> {
+        let current_auth = self.auth.lock().unwrap().clone();
+        if !matches!(current_auth, AuthProvider::BasicAuth(_, _)) {
+            Self::validate_request_auth(&current_auth)?;
+            return Ok(current_auth);
+        }
+
+        let refresher = self.auth_refresher.as_ref().ok_or_else(|| {
+            KalamLinkError::AuthenticationError(
+                "User/password credentials require a login exchange before executing SQL requests."
+                    .to_string(),
+            )
+        })?;
+
+        let refreshed_auth = refresher().await?;
+        Self::validate_request_auth(&refreshed_auth)?;
+        *self.auth.lock().unwrap() = refreshed_auth.clone();
+        Ok(refreshed_auth)
     }
 
     fn is_retry_safe_sql(sql: &str) -> bool {
@@ -243,7 +274,7 @@ impl QueryExecutor {
                 }
             }
 
-            let auth_snapshot = self.auth.lock().unwrap().clone();
+            let auth_snapshot = self.ensure_request_auth().await?;
             let mut req_builder = self.http_client.post(&self.sql_url).multipart(form);
             req_builder = auth_snapshot.apply_to_request(req_builder)?;
 
@@ -267,7 +298,9 @@ impl QueryExecutor {
                 if let Some(refresher) = &self.auth_refresher {
                     warn!("[LINK_HTTP] TOKEN_EXPIRED on multipart request — refreshing auth for subsequent requests");
                     if let Ok(new_auth) = refresher().await {
-                        *self.auth.lock().unwrap() = new_auth;
+                        if Self::validate_request_auth(&new_auth).is_ok() {
+                            *self.auth.lock().unwrap() = new_auth;
+                        }
                     }
                 }
             }
@@ -301,7 +334,7 @@ impl QueryExecutor {
         let overall_start = Instant::now();
 
         loop {
-            let auth_snapshot = self.auth.lock().unwrap().clone();
+            let auth_snapshot = self.ensure_request_auth().await?;
             let mut req_builder = self.http_client.post(&self.sql_url).json(&request);
             req_builder = auth_snapshot.apply_to_request(req_builder)?;
 
@@ -331,6 +364,7 @@ impl QueryExecutor {
                                 warn!("[LINK_HTTP] TOKEN_EXPIRED — reauthenticating and retrying");
                                 match refresher().await {
                                     Ok(new_auth) => {
+                                        Self::validate_request_auth(&new_auth)?;
                                         *self.auth.lock().unwrap() = new_auth.clone();
                                         // Retry exactly once with fresh credentials.
                                         let mut retry_builder =

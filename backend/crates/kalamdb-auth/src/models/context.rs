@@ -1,7 +1,7 @@
 // Authenticated user context for request handling
 
 use kalamdb_commons::{
-    models::{ConnectionInfo, UserId, UserName},
+    models::{ConnectionInfo, UserId},
     Role,
 };
 
@@ -13,8 +13,6 @@ use kalamdb_commons::{
 pub struct AuthenticatedUser {
     /// User's unique identifier
     pub user_id: UserId,
-    /// Username
-    pub username: UserName,
     /// User's role (User, Service, Dba, System)
     pub role: Role,
     /// Email address (if available)
@@ -28,20 +26,8 @@ pub struct AuthenticatedUser {
 }
 
 impl AuthenticatedUser {
-    /// Create a new authenticated user context.
-    ///
-    /// # Arguments
-    /// * `user_id` - User's unique identifier
-    /// * `username` - Username
-    /// * `role` - User's role
-    /// * `email` - Email address (optional)
-    /// * `connection_info` - Connection information
-    ///
-    /// # Returns
-    /// A new AuthenticatedUser instance
     pub fn new(
         user_id: UserId,
-        username: UserName,
         role: Role,
         email: Option<String>,
         created_at: i64,
@@ -50,7 +36,6 @@ impl AuthenticatedUser {
     ) -> Self {
         Self {
             user_id,
-            username,
             role,
             email,
             created_at,
@@ -59,47 +44,22 @@ impl AuthenticatedUser {
         }
     }
 
-    /// Check if the user has DBA or System role.
-    ///
-    /// # Returns
-    /// True if user is DBA or System, false otherwise
     pub fn is_admin(&self) -> bool {
         matches!(self.role, Role::Dba | Role::System)
     }
 
-    /// Check if the user has System role.
-    ///
-    /// # Returns
-    /// True if user is System, false otherwise
     pub fn is_system(&self) -> bool {
         matches!(self.role, Role::System)
     }
 
-    /// Check if the user is connecting from localhost.
-    ///
-    /// # Returns
-    /// True if connection is from localhost, false otherwise
     pub fn is_localhost(&self) -> bool {
         self.connection_info.is_localhost()
     }
 
-    /// Check if the user can access the given resource.
-    ///
-    /// This is a basic check - more complex authorization logic should be
-    /// implemented by callers based on specific requirements.
-    ///
-    /// # Arguments
-    /// * `resource_user_id` - The user ID that owns the resource (if applicable)
-    ///
-    /// # Returns
-    /// True if access should be allowed, false otherwise
     pub fn can_access_user_resource(&self, resource_user_id: &UserId) -> bool {
-        // System and DBA can access everything
         if self.is_admin() {
             return true;
         }
-
-        // Users can access their own resources
         &self.user_id == resource_user_id
     }
 }
@@ -117,7 +77,6 @@ mod tests {
 
         AuthenticatedUser::new(
             UserId::new("user_123"),
-            UserName::new("testuser"),
             role,
             Some("test@example.com".to_string()),
             0,

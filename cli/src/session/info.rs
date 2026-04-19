@@ -61,7 +61,7 @@ impl CLISession {
         // Connection info
         println!("{}", "Connection:".yellow().bold());
         println!("  Server URL:     {}", self.server_url.green());
-        println!("  Username:       {}", self.username.green());
+        println!("  User ID:        {}", self.username.green());
         println!(
             "  Connected:      {}",
             if self.connected {

@@ -230,7 +230,7 @@ impl CommandParser {
             "\\update-credentials" => {
                 if args.len() < 2 {
                     Err(CLIError::ParseError(
-                        "\\update-credentials requires username and password".into(),
+                        "\\update-credentials requires user and password".into(),
                     ))
                 } else {
                     Ok(Command::UpdateCredentials {

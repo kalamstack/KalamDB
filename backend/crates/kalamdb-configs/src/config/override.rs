@@ -33,7 +33,6 @@ impl ServerConfig {
     /// - KALAMDB_JWT_EXPIRY_HOURS: Override auth.jwt_expiry_hours
     /// - KALAMDB_COOKIE_SECURE: Override auth.cookie_secure
     /// - KALAMDB_ALLOW_REMOTE_SETUP: Override auth.allow_remote_setup
-    /// - KALAMDB_AUTH_AUTO_CREATE_USERS_FROM_PROVIDER: Override auth.auto_create_users_from_provider
     /// - KALAMDB_SECURITY_TRUSTED_PROXY_RANGES: Override security.trusted_proxy_ranges
     /// - KALAMDB_RATE_LIMIT_AUTH_REQUESTS_PER_IP_PER_SEC: Override rate_limit.max_auth_requests_per_ip_per_sec
     /// - KALAMDB_WEBSOCKET_CLIENT_TIMEOUT_SECS: Override websocket.client_timeout_secs
@@ -133,12 +132,6 @@ impl ServerConfig {
         // Allow remote setup (default: false)
         if let Ok(val) = env::var("KALAMDB_ALLOW_REMOTE_SETUP") {
             self.auth.allow_remote_setup =
-                val.to_lowercase() == "true" || val == "1" || val.to_lowercase() == "yes";
-        }
-
-        // Auto-create users from trusted auth provider identity if missing
-        if let Ok(val) = env::var("KALAMDB_AUTH_AUTO_CREATE_USERS_FROM_PROVIDER") {
-            self.auth.auto_create_users_from_provider =
                 val.to_lowercase() == "true" || val == "1" || val.to_lowercase() == "yes";
         }
 

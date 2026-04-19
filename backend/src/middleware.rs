@@ -86,6 +86,59 @@ pub fn build_cors_from_config(config: &ServerConfig) -> Cors {
     cors
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::http::{header, Method};
+    use actix_web::{test, web, App, HttpResponse};
+
+    #[actix_web::test]
+    async fn preflight_login_request_allows_vite_chat_origin() {
+        let mut config = ServerConfig::default();
+        config.security.cors.allowed_origins = vec![
+            "http://localhost:5174".to_string(),
+            "http://127.0.0.1:5174".to_string(),
+        ];
+        config.security.cors.allowed_methods = vec!["POST".to_string(), "OPTIONS".to_string()];
+        config.security.cors.allowed_headers =
+            vec!["Authorization".to_string(), "Content-Type".to_string()];
+        config.security.cors.allow_credentials = true;
+
+        let app = test::init_service(
+            App::new()
+                .wrap(build_cors_from_config(&config))
+                .route("/v1/api/auth/login", web::post().to(HttpResponse::Ok)),
+        )
+        .await;
+
+        let request = test::TestRequest::default()
+            .method(Method::OPTIONS)
+            .uri("/v1/api/auth/login")
+            .insert_header((header::ORIGIN, "http://localhost:5174"))
+            .insert_header((header::ACCESS_CONTROL_REQUEST_METHOD, "POST"))
+            .insert_header((header::ACCESS_CONTROL_REQUEST_HEADERS, "content-type,authorization"))
+            .to_request();
+
+        let response = test::call_service(&app, request).await;
+
+        assert!(response.status().is_success());
+        assert_eq!(
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                .and_then(|value| value.to_str().ok()),
+            Some("http://localhost:5174")
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(header::ACCESS_CONTROL_ALLOW_CREDENTIALS)
+                .and_then(|value| value.to_str().ok()),
+            Some("true")
+        );
+    }
+}
+
 // ============================================================================
 // Connection Protection Middleware
 // ============================================================================

@@ -85,6 +85,48 @@ impl AuthExtractError {
             _ => "AUTHENTICATION_ERROR",
         }
     }
+
+    fn public_error_code(&self) -> &'static str {
+        match &self.inner {
+            AuthError::MissingAuthorization(_) => "MISSING_AUTHORIZATION",
+            AuthError::TokenExpired => "TOKEN_EXPIRED",
+            AuthError::RemoteAccessDenied(_) => "REMOTE_ACCESS_DENIED",
+            AuthError::InsufficientPermissions(_) => "INSUFFICIENT_PERMISSIONS",
+            AuthError::SetupRequired(_) => "SETUP_REQUIRED",
+            AuthError::AccountLocked(_) => "ACCOUNT_LOCKED",
+            AuthError::MalformedAuthorization(_)
+            | AuthError::InvalidCredentials(_)
+            | AuthError::UserNotFound(_)
+            | AuthError::UserDeleted
+            | AuthError::InvalidSignature
+            | AuthError::UntrustedIssuer(_)
+            | AuthError::MissingClaim(_)
+            | AuthError::WeakPassword(_)
+            | AuthError::AuthenticationFailed(_) => "INVALID_CREDENTIALS",
+            AuthError::DatabaseError(_) | AuthError::HashingError(_) => "AUTHENTICATION_ERROR",
+        }
+    }
+
+    fn public_message(&self) -> &'static str {
+        match &self.inner {
+            AuthError::MissingAuthorization(_) => "Authentication required",
+            AuthError::MalformedAuthorization(_)
+            | AuthError::InvalidCredentials(_)
+            | AuthError::UserNotFound(_)
+            | AuthError::TokenExpired
+            | AuthError::InvalidSignature
+            | AuthError::UntrustedIssuer(_)
+            | AuthError::MissingClaim(_)
+            | AuthError::AuthenticationFailed(_) => "Invalid credentials",
+            AuthError::RemoteAccessDenied(_) => "Access denied",
+            AuthError::InsufficientPermissions(_) => "Insufficient permissions",
+            AuthError::DatabaseError(_) | AuthError::HashingError(_) => "Authentication failed",
+            AuthError::SetupRequired(_) => "Server requires initial setup",
+            AuthError::AccountLocked(_) => "Account locked",
+            AuthError::WeakPassword(_) => "Invalid credentials",
+            AuthError::UserDeleted => "Invalid credentials",
+        }
+    }
 }
 
 impl fmt::Display for AuthExtractError {
@@ -118,8 +160,8 @@ impl ResponseError for AuthExtractError {
         let body = serde_json::json!({
             "status": "error",
             "error": {
-                "code": self.error_code(),
-                "message": self.inner.to_string()
+                "code": self.public_error_code(),
+                "message": self.public_message()
             },
             "results": [],
             "took": self.took_ms
@@ -143,6 +185,8 @@ impl From<AuthError> for AuthExtractError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use actix_web::body::to_bytes;
+    use serde_json::Value;
 
     #[test]
     fn test_auth_extract_error_codes() {
@@ -165,6 +209,58 @@ mod tests {
             AuthExtractError::new(AuthError::InsufficientPermissions("test".to_string()), 10.0);
         assert_eq!(err.error_code(), "INSUFFICIENT_PERMISSIONS");
         assert_eq!(err.status_code(), StatusCode::FORBIDDEN);
+    }
+
+    async fn error_body(err: AuthExtractError) -> Value {
+        let response = err.error_response();
+        let body = to_bytes(response.into_body())
+            .await
+            .expect("extractor error body should be readable");
+        serde_json::from_slice(&body).expect("extractor error body should be valid JSON")
+    }
+
+    #[tokio::test]
+    async fn test_sensitive_extractor_errors_are_redacted() {
+        let body = error_body(AuthExtractError::new(
+            AuthError::UntrustedIssuer("evil.com".to_string()),
+            10.0,
+        ))
+        .await;
+        assert_eq!(body["error"]["code"], "INVALID_CREDENTIALS");
+        assert_eq!(body["error"]["message"], "Invalid credentials");
+
+        let body = error_body(AuthExtractError::new(AuthError::TokenExpired, 10.0)).await;
+        assert_eq!(body["error"]["code"], "TOKEN_EXPIRED");
+        assert_eq!(body["error"]["message"], "Invalid credentials");
+
+        let body =
+            error_body(AuthExtractError::new(AuthError::MissingClaim("sub".to_string()), 10.0))
+                .await;
+        assert_eq!(body["error"]["code"], "INVALID_CREDENTIALS");
+        assert_eq!(body["error"]["message"], "Invalid credentials");
+    }
+
+    #[tokio::test]
+    async fn test_extractor_errors_keep_safe_public_messages() {
+        let body = error_body(AuthExtractError::new(
+            AuthError::MissingAuthorization("header missing".to_string()),
+            10.0,
+        ))
+        .await;
+        assert_eq!(body["error"]["code"], "MISSING_AUTHORIZATION");
+        assert_eq!(body["error"]["message"], "Authentication required");
+
+        let body = error_body(AuthExtractError::new(
+            AuthError::InsufficientPermissions("role mismatch".to_string()),
+            10.0,
+        ))
+        .await;
+        assert_eq!(body["error"]["code"], "INSUFFICIENT_PERMISSIONS");
+        assert_eq!(body["error"]["message"], "Insufficient permissions");
+
+        let body = error_body(AuthExtractError::new(AuthError::InvalidSignature, 10.0)).await;
+        assert_eq!(body["error"]["code"], "INVALID_CREDENTIALS");
+        assert_eq!(body["error"]["message"], "Invalid credentials");
     }
 }
 
@@ -288,9 +384,8 @@ impl FromRequest for AuthSessionExtractor {
                     }
 
                     // Construct AuthSession with all extracted information
-                    let mut session = kalamdb_session::AuthSession::with_username_and_auth_details(
+                    let mut session = kalamdb_session::AuthSession::with_auth_details(
                         result.user.user_id,
-                        result.user.username,
                         result.user.role,
                         connection_info,
                         result.method,

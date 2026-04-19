@@ -440,14 +440,13 @@ mod tests {
 
         let mut job = make_job("SE-evict", JobType::StreamEviction, harness.namespace.as_str());
         job.parameters = Some(
-            json!({
+            serde_json::json!({
                 "namespace_id": harness.namespace.as_str(),
                 "table_name": harness.table_name_value.clone(),
                 "table_type": "Stream",
                 "ttl_seconds": 1,
                 "batch_size": 100
-            })
-            .to_string(),
+            }),
         );
 
         let params = StreamEvictionParams {

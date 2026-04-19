@@ -17,15 +17,15 @@ const rootPassword = process.env.KALAMDB_ROOT_PASSWORD ?? 'kalamdb123';
 let agentProcess;
 const testGroup = `chat-demo-test-${Date.now()}`;
 
-async function login(username, password) {
+async function login(user, password) {
   const response = await fetch(`${serverUrl}/v1/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ user, password }),
   });
 
   if (!response.ok) {
-    throw new Error(`Login failed for ${username}: ${response.status}`);
+    throw new Error(`Login failed for ${user}: ${response.status}`);
   }
 
   const body = await response.json();

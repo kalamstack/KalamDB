@@ -120,12 +120,22 @@ class ErrorDetail {
   String toString() => 'KalamDbError($code): $message';
 }
 
+/// Typed user role values returned by the auth APIs.
+enum Role {
+  anonymous,
+  user,
+  service,
+  dba,
+  system,
+}
+
 /// Login response containing tokens and user info.
 class LoginResponse {
   final String accessToken;
   final String? refreshToken;
   final String expiresAt;
   final String? refreshExpiresAt;
+  final bool adminUiAccess;
   final LoginUserInfo user;
 
   const LoginResponse({
@@ -133,6 +143,7 @@ class LoginResponse {
     this.refreshToken,
     required this.expiresAt,
     this.refreshExpiresAt,
+    required this.adminUiAccess,
     required this.user,
   });
 }
@@ -140,15 +151,13 @@ class LoginResponse {
 /// User information returned after login.
 class LoginUserInfo {
   final String id;
-  final String username;
-  final String role;
+  final Role role;
   final String? email;
   final String createdAt;
   final String updatedAt;
 
   const LoginUserInfo({
     required this.id,
-    required this.username,
     required this.role,
     this.email,
     required this.createdAt,

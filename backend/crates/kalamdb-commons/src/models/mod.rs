@@ -44,7 +44,6 @@ mod read_context;
 mod role;
 mod topic_op;
 mod transaction;
-mod user_name;
 
 // Row types only available with full feature (datafusion dependency)
 #[cfg(feature = "rows")]
@@ -65,8 +64,6 @@ pub use role::Role;
 pub use schemas::{TableAccess, TableName};
 pub use topic_op::TopicOp;
 pub use transaction::{OperationKind, TransactionOrigin, TransactionState};
-pub use user_name::UserName;
-pub use user_name::UserName as Username;
 
 #[cfg(feature = "rows")]
 pub use rows::{KTableRow, StreamTableRow, SystemTableRow, UserTableRow};

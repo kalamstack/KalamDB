@@ -10,7 +10,7 @@
 use super::test_support::TestServer;
 use kalamdb_auth::{authenticate, AuthRequest};
 use kalamdb_commons::{
-    models::{ConnectionInfo, UserId, UserName},
+    models::{ConnectionInfo, UserId},
     Role,
 };
 
@@ -19,7 +19,6 @@ fn bearer_auth_header(username: &str, user_id: &str, role: Role) -> String {
     let email = format!("{}@example.com", username);
     let (token, _claims) = kalamdb_auth::providers::jwt_auth::create_and_sign_token(
         &UserId::new(user_id),
-        &UserName::new(username),
         &role,
         Some(email.as_str()),
         Some(1),
@@ -48,7 +47,7 @@ async fn test_authentication_returns_user() {
     assert!(result.is_ok(), "Authentication should succeed");
 
     let auth_result = result.unwrap();
-    assert_eq!(auth_result.user.username, UserName::from(username));
+    assert_eq!(auth_result.user.user_id.as_str(), username);
     assert_eq!(auth_result.user.role, Role::User);
 }
 
@@ -79,5 +78,5 @@ async fn test_multiple_authentications_succeed() {
     // Both should return the same user
     let user1 = result1.unwrap();
     let user2 = result2.unwrap();
-    assert_eq!(user1.user.username, user2.user.username);
+    assert_eq!(user1.user.user_id, user2.user.user_id);
 }

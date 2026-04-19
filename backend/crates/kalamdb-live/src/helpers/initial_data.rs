@@ -16,6 +16,7 @@ use kalamdb_commons::Role;
 use kalamdb_commons::TableType;
 use once_cell::sync::OnceCell;
 use std::collections::BTreeMap;
+use std::fmt::Write;
 use std::sync::Arc;
 
 /// Options for fetching initial data when subscribing to a live query
@@ -210,15 +211,15 @@ impl InitialDataFetcher {
             sql.push_str(&where_clauses.join(" AND "));
         }
 
-        // Add ORDER BY
+        // Add ORDER BY — use write! to avoid intermediate format! allocations
         if options.fetch_last {
-            sql.push_str(&format!(" ORDER BY {} DESC", SystemColumnNames::SEQ));
+            let _ = write!(sql, " ORDER BY {} DESC", SystemColumnNames::SEQ);
         } else {
-            sql.push_str(&format!(" ORDER BY {} ASC", SystemColumnNames::SEQ));
+            let _ = write!(sql, " ORDER BY {} ASC", SystemColumnNames::SEQ);
         }
 
         // Add LIMIT (fetch limit + 1 to check has_more)
-        sql.push_str(&format!(" LIMIT {}", limit + 1));
+        let _ = write!(sql, " LIMIT {}", limit + 1);
 
         let batches = self
             .sql_executor()?
@@ -271,22 +272,21 @@ impl InitialDataFetcher {
         let total_fetched = rows_with_seq.len();
         let has_more = total_fetched > limit;
 
-        let mut batch_rows = if has_more {
-            rows_with_seq.into_iter().take(limit).collect::<Vec<_>>()
-        } else {
-            rows_with_seq
-        };
+        // Truncate in-place instead of collecting into a new Vec
+        if has_more {
+            rows_with_seq.truncate(limit);
+        }
 
         // If we fetched last rows (DESC), we need to reverse them to return in chronological order
         if options.fetch_last {
-            batch_rows.reverse();
+            rows_with_seq.reverse();
         }
 
         // Determine snapshot boundary
-        let last_seq = batch_rows.last().map(|(seq, _)| *seq);
+        let last_seq = rows_with_seq.last().map(|(seq, _)| *seq);
         let snapshot_end_seq = options.until_seq.or(last_seq);
 
-        let rows: Vec<Row> = batch_rows.into_iter().map(|(_, row)| row).collect();
+        let rows: Vec<Row> = rows_with_seq.into_iter().map(|(_, row)| row).collect();
 
         Ok(InitialDataResult {
             rows,

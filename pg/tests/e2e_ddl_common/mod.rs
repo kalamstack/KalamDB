@@ -48,9 +48,9 @@ const TEST_DB: &str = "kalamdb_test";
 
 struct KalamDbAuthConfig {
     base_url: String,
-    login_username: String,
+    login_user: String,
     login_password: String,
-    setup_username: String,
+    setup_user: String,
     setup_password: String,
     root_password: String,
 }
@@ -60,7 +60,7 @@ impl fmt::Display for KalamDbAuthConfig {
         write!(
             f,
             "server={}, login_user={}, setup_user={}",
-            self.base_url, self.login_username, self.setup_username
+            self.base_url, self.login_user, self.setup_user
         )
     }
 }
@@ -74,7 +74,7 @@ fn kalamdb_auth_config() -> KalamDbAuthConfig {
         .ok()
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| DEFAULT_KALAMDB_PASSWORD.to_string());
-    let login_username = env::var("KALAMDB_USER")
+    let login_user = env::var("KALAMDB_USER")
         .ok()
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| DEFAULT_KALAMDB_USER.to_string());
@@ -82,7 +82,7 @@ fn kalamdb_auth_config() -> KalamDbAuthConfig {
         .ok()
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| root_password.clone());
-    let setup_username = env::var("KALAMDB_SETUP_USER")
+    let setup_user = env::var("KALAMDB_SETUP_USER")
         .ok()
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| DEFAULT_SETUP_USER.to_string());
@@ -93,9 +93,9 @@ fn kalamdb_auth_config() -> KalamDbAuthConfig {
 
     KalamDbAuthConfig {
         base_url,
-        login_username,
+        login_user,
         login_password,
-        setup_username,
+        setup_user,
         setup_password,
         root_password,
     }
@@ -483,8 +483,7 @@ impl DdlTestEnv {
         let config = kalamdb_auth_config();
 
         if let Some(token) =
-            try_login(client, &config.base_url, &config.login_username, &config.login_password)
-                .await
+            try_login(client, &config.base_url, &config.login_user, &config.login_password).await
         {
             return Ok(token);
         }
@@ -493,7 +492,7 @@ impl DdlTestEnv {
             .post_json(
                 &format!("{}/v1/api/auth/setup", config.base_url),
                 &serde_json::json!({
-                    "username": config.setup_username,
+                    "user": config.setup_user,
                     "password": config.setup_password,
                     "root_password": config.root_password,
                 }),
@@ -502,15 +501,14 @@ impl DdlTestEnv {
             .await;
 
         if let Some(token) =
-            try_login(client, &config.base_url, &config.login_username, &config.login_password)
-                .await
+            try_login(client, &config.base_url, &config.login_user, &config.login_password).await
         {
             return Ok(token);
         }
 
-        if config.setup_username != config.login_username {
+        if config.setup_user != config.login_user {
             if let Some(token) =
-                try_login(client, &config.base_url, &config.setup_username, &config.setup_password)
+                try_login(client, &config.base_url, &config.setup_user, &config.setup_password)
                     .await
             {
                 return Ok(token);
@@ -526,14 +524,14 @@ impl DdlTestEnv {
 async fn try_login(
     client: &TestHttpClient,
     base_url: &str,
-    username: &str,
+    user: &str,
     password: &str,
 ) -> Option<String> {
     let resp = client
         .post_json(
             &format!("{base_url}/v1/api/auth/login"),
             &serde_json::json!({
-                "username": username,
+                "user": user,
                 "password": password,
             }),
             None,

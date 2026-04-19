@@ -3,6 +3,7 @@
 use kalamdb_auth::security::password::{
     hash_password, validate_password_with_policy, PasswordPolicy,
 };
+use kalamdb_commons::UserId;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_core::error::KalamDbError;
 use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
@@ -33,9 +34,9 @@ impl TypedStatementHandler<AlterUserStatement> for AlterUserHandler {
         context: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
         let app_ctx = self.app_context.clone();
-        let username = statement.username.clone();
+        let user_id = UserId::new(&statement.username);
         let existing = tokio::task::spawn_blocking(move || {
-            app_ctx.system_tables().users().get_user_by_username(&username)
+            app_ctx.system_tables().users().get_user_by_id(&user_id)
         })
         .await
         .map_err(|e| KalamDbError::ExecutionError(format!("Task join error: {}", e)))??

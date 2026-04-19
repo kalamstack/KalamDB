@@ -7,8 +7,8 @@ pub enum AuthRequest {
     /// HTTP Authorization header (Basic or Bearer)
     Header(String),
 
-    /// Direct username/password (login flow)
-    Credentials { username: String, password: String },
+    /// Direct user/password (login flow)
+    Credentials { user: String, password: String },
 
     /// Direct JWT token (WebSocket authenticate message)
     Jwt { token: String },

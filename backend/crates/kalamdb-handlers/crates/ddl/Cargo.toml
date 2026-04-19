@@ -31,3 +31,6 @@ tokio = { workspace = true, features = ["sync", "time", "rt"] }
 
 [lib]
 doctest = false
+
+[dev-dependencies]
+kalamdb-core = { path = "../../../kalamdb-core", features = ["test-helpers"] }

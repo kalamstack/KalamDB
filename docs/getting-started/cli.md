@@ -59,14 +59,14 @@ kalam --url http://localhost:8080
 # Host/port alternative (note: if you use --host without --port, the default port is 3000)
 kalam --host localhost --port 8080
 
-# Basic auth
-kalam --username alice --password Secret123!
+# User/password login
+kalam --user alice --password Secret123!
 
 # JWT
 kalam --token "<JWT_TOKEN>"
 
 # Save credentials (stores JWT token for future sessions)
-kalam --username alice --password Secret123! --save-credentials --instance dev
+kalam --user alice --password Secret123! --save-credentials --instance dev
 ```
 
 ### Run SQL
@@ -85,7 +85,7 @@ kalam -f setup.sql
 - `--host`, `-H` and `--port`, `-p` – alternative to `--url`
 - `--instance` – credential instance name (default: `local`)
 - `--token` – JWT bearer token
-- `--username` / `--password` – Basic auth
+- `--user` / `--password` – user/password login
 - `--save-credentials` – save JWT token after login
 - `--show-credentials` – show stored credentials for instance
 - `--update-credentials` – login and update stored credentials
@@ -172,9 +172,9 @@ kalam --subscribe "SELECT * FROM app.messages WHERE user_id = 'alice';"
 
 ```bash
 # Setup credentials for different environments
-kalam --update-credentials --instance dev --username dev_user
-kalam --update-credentials --instance staging --username staging_user
-kalam --update-credentials --instance prod --username prod_admin
+kalam --update-credentials --instance dev --user dev_user
+kalam --update-credentials --instance staging --user staging_user
+kalam --update-credentials --instance prod --user prod_admin
 
 # Switch between instances
 kalam --instance dev      # Connect to dev

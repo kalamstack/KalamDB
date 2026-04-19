@@ -367,19 +367,19 @@ fn trigger_flush_and_wait(table_name: &str) {
     verify_job_completed(&job_id, Duration::from_secs(180)).expect("flush job should complete");
 }
 
-// Fetch internal user_id for a given username from system.users (first column user_id)
-fn fetch_user_id(username: &str) -> String {
-    let sql = format!("SELECT user_id FROM system.users WHERE username = '{}' LIMIT 1", username);
+// Fetch internal user_id for a given user_id from system.users (first column user_id)
+fn fetch_user_id(user_id: &str) -> String {
+    let sql = format!("SELECT user_id FROM system.users WHERE user_id = '{}' LIMIT 1", user_id);
     let rows = query_rows(&sql);
     if rows.is_empty() {
-        panic!("User '{}' not found in system.users", username);
+        panic!("User '{}' not found in system.users", user_id);
     }
     {
         let value = rows[0].get("user_id").map(extract_typed_value).unwrap_or_else(|| {
-            panic!("Row for user '{}' missing user_id field: {}", username, rows[0])
+            panic!("Row for user '{}' missing user_id field: {}", user_id, rows[0])
         });
         value.as_str().map(|s| s.to_string()).unwrap_or_else(|| {
-            panic!("Row for user '{}' user_id is not a string: {:?}", username, value)
+            panic!("Row for user '{}' user_id is not a string: {:?}", user_id, value)
         })
     }
 }

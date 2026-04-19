@@ -51,7 +51,7 @@ members = [
 exclude = ["benchv2"]
 
 [workspace.package]
-version = "0.4.2-rc2"
+version = "0.4.2-rc.3"
 edition = "2021"
 rust-version = "1.92"
 authors = ["KalamDB Team"]
@@ -86,7 +86,7 @@ url = "2.5.8"
 tokio-tungstenite = { version = "0.29.0", features = ["rustls-tls-webpki-roots"] }
 
 # Security floor pins for vulnerable transitive TLS/QUIC crates.
-aws-lc-rs = { version = "1.16.2", default-features = false }
+aws-lc-rs = { version = "1.16.3", default-features = false }
 quinn-proto = { version = "0.11.14", default-features = false }
 rustls-webpki = { version = "0.103.10", default-features = false }
 
@@ -104,10 +104,11 @@ chrono = { version = "0.4.44", features = ["serde"] }
 arrow = { version = "58.1.0", default-features = false }
 arrow-ipc = { version = "58.1.0", default-features = false }
 arrow-schema = { version = "58.1.0" }
-datafusion = { version = "53.0.0", default-features = false, features = ["sql", "parquet", "recursive_protection", "nested_expressions"] }
-datafusion-datasource = { version = "53.0.0", default-features = false }
-datafusion-common = { version = "53.0.0" }
-datafusion-expr = { version = "53.0.0" }
+datafusion = { version = "53.1.0", default-features = false, features = ["sql", "parquet", "recursive_protection", "nested_expressions"] }
+datafusion-datasource = { version = "53.1.0", default-features = false }
+datafusion-common = { version = "53.1.0" }
+datafusion-expr = { version = "53.1.0" }
+datafusion-functions-json = { version = "0.53.0" }
 sqlparser = { version = "0.61.0" }
 parquet = { version = "58.1.0", default-features = false, features = ["snap", "zstd", "arrow", "async"] }
 
@@ -120,7 +121,7 @@ actix-files = "0.6.10"
 actix-multipart = "0.7"
 
 # UUID generation
-uuid = { version = "1.23.0", features = ["v4", "v7", "serde"] }
+uuid = { version = "1.23.1", features = ["v4", "v7", "serde"] }
 
 # NanoID generation (21-char URL-safe unique IDs)
 nanoid = "0.5.0"
@@ -136,7 +137,7 @@ toml = "1.1.0"
 dotenv = "0.15"
 
 # CLI tools
-clap = { version = "4.6.0", features = ["derive", "color"] }
+clap = { version = "4.6.1", features = ["derive", "color"] }
 rustyline = { version = "18.0.0" }
 
 # System
@@ -169,7 +170,7 @@ bcrypt = "0.19.0"
 rand = "0.10.1"
 rcgen = "0.14.1"
 x509-parser = "0.18.1"
-kalamdb-commons = { path = "backend/crates/kalamdb-commons" }
+kalamdb-commons = { path = "backend/crates/kalamdb-commons", default-features = false }
 kalamdb-plan-cache = { path = "backend/crates/kalamdb-plan-cache" }
 kalamdb-tables = { path = "backend/crates/kalamdb-tables" }
 kalamdb-views = { path = "backend/crates/kalamdb-views" }
@@ -181,7 +182,7 @@ rpassword = "7.3"
 dirs = "6.0"
 term_size = "0.3"
 crossterm = "0.29.0"
-assert_cmd = "2.2.0"
+assert_cmd = "2.2.1"
 predicates = "3.1.4"
 futures-util = { version = "0.3.32", default-features = false }
 base64 = "0.22"
@@ -203,7 +204,7 @@ syn = { version = "2.0.117", features = ["full", "extra-traits"] }
 object_store = { version = "0.13.2" }
  
 # Vector ANN engines
-usearch = "2.24.0"
+usearch = "2.25.1"
 
 parking_lot = "0.12"
 tokio-util = "0.7.18"
@@ -231,8 +232,9 @@ rust-embed = { version = "8.11.0", features = ["compression", "include-exclude"]
 mime_guess = "2.0"
 kalamdb-configs = { path = "backend/crates/kalamdb-configs" }
 kalamdb-server = { path = "backend" }
-pgrx = "=0.17.0"
-pgrx-tests = "=0.17.0"
+pgrx = "=0.18.0"
+pgrx-bench = "=0.18.0"
+pgrx-tests = "=0.18.0"
 tokio-postgres = "0.7.17"
 
 # Tracing / observability

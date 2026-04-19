@@ -7,7 +7,7 @@ use kalamdb_pg::{
     RollbackTransactionRequest, ScanRequest, ScanResult, UpdateRequest,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tonic::Request;
 
 fn service() -> KalamPgService {
@@ -38,6 +38,11 @@ struct RollbackCommittedExecutor;
 
 #[derive(Default)]
 struct SqlExecutor;
+
+#[derive(Default)]
+struct CapturingSqlExecutor {
+    last_query_sql: Mutex<Option<String>>,
+}
 
 #[async_trait]
 impl OperationExecutor for RecordingExecutor {
@@ -345,6 +350,66 @@ impl OperationExecutor for SqlExecutor {
     }
 
     async fn execute_query(&self, _sql: &str) -> Result<(String, Vec<Bytes>), tonic::Status> {
+        Ok(("ok".to_string(), Vec::new()))
+    }
+}
+
+#[async_trait]
+impl OperationExecutor for CapturingSqlExecutor {
+    async fn execute_scan(&self, _request: ScanRequest) -> Result<ScanResult, tonic::Status> {
+        Err(tonic::Status::unimplemented("not needed for this test"))
+    }
+
+    async fn execute_insert(
+        &self,
+        _request: InsertRequest,
+    ) -> Result<MutationResult, tonic::Status> {
+        Err(tonic::Status::unimplemented("not needed for this test"))
+    }
+
+    async fn execute_update(
+        &self,
+        _request: UpdateRequest,
+    ) -> Result<MutationResult, tonic::Status> {
+        Err(tonic::Status::unimplemented("not needed for this test"))
+    }
+
+    async fn execute_delete(
+        &self,
+        _request: DeleteRequest,
+    ) -> Result<MutationResult, tonic::Status> {
+        Err(tonic::Status::unimplemented("not needed for this test"))
+    }
+
+    async fn begin_transaction(&self, _session_id: &str) -> Result<Option<String>, tonic::Status> {
+        Err(tonic::Status::unimplemented("not needed for this test"))
+    }
+
+    async fn commit_transaction(
+        &self,
+        _session_id: &str,
+        _transaction_id: &str,
+    ) -> Result<Option<String>, tonic::Status> {
+        Err(tonic::Status::unimplemented("not needed for this test"))
+    }
+
+    async fn rollback_transaction(
+        &self,
+        _session_id: &str,
+        _transaction_id: &str,
+    ) -> Result<Option<String>, tonic::Status> {
+        Err(tonic::Status::unimplemented("not needed for this test"))
+    }
+
+    async fn execute_sql(&self, _sql: &str) -> Result<String, tonic::Status> {
+        Err(tonic::Status::unimplemented("not needed for this test"))
+    }
+
+    async fn execute_query(&self, sql: &str) -> Result<(String, Vec<Bytes>), tonic::Status> {
+        self.last_query_sql
+            .lock()
+            .expect("capture query sql")
+            .replace(sql.to_string());
         Ok(("ok".to_string(), Vec::new()))
     }
 }
@@ -688,6 +753,35 @@ async fn execute_query_keeps_preexisting_session_open() {
         .get("pg-existing-query")
         .expect("preexisting session should remain open");
     assert_eq!(session.last_method(), Some("ExecuteQuery"));
+}
+
+#[tokio::test]
+async fn execute_query_passes_json_operator_sql_through_without_rewrite() {
+    // With datafusion-functions-json the -> / ->> operators are handled by
+    // DataFusion's planner, so the PG service must forward the raw SQL.
+    let executor = Arc::new(CapturingSqlExecutor::default());
+    let service = KalamPgService::new(false, None).with_operation_executor(executor.clone());
+
+    service
+        .execute_query(plain_request(ExecuteQueryRpcRequest {
+            session_id: "pg-json-query".to_string(),
+            sql: "SELECT doc->>'name' AS name FROM docs".to_string(),
+        }))
+        .await
+        .unwrap();
+
+    let captured = executor
+        .last_query_sql
+        .lock()
+        .expect("captured sql")
+        .clone()
+        .expect("query sql should be captured");
+
+    // SQL is now forwarded as-is; DataFusion handles the operator natively.
+    assert_eq!(
+        captured,
+        "SELECT doc->>'name' AS name FROM docs"
+    );
 }
 
 #[tokio::test]

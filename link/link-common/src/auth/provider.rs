@@ -1,6 +1,6 @@
 //! Authentication provider for KalamDB client.
 //!
-//! Handles JWT tokens, HTTP Basic Auth, and async dynamic auth providers.
+//! Handles JWT tokens, login-only password credentials, and async dynamic auth providers.
 //!
 //! ## Dynamic Auth Provider
 //!
@@ -31,24 +31,24 @@
 //! // .auth_provider(Arc::new(MyTokenStore { ... }))
 //! ```
 
-use crate::error::Result;
-use base64::{engine::general_purpose, Engine as _};
+use crate::error::{KalamLinkError, Result};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
 /// Authentication credentials for KalamDB server.
 ///
-/// Supports JWT tokens and HTTP Basic Auth.
-/// The auth provider automatically attaches the appropriate Authorization header.
+/// Supports JWT tokens and login credentials.
+/// Password credentials are exchanged through `/v1/api/auth/login` before they
+/// can be used for authenticated requests.
 ///
 /// # Examples
 ///
 /// ```rust
 /// use kalam_client::AuthProvider;
 ///
-/// // HTTP Basic Auth (recommended)
-/// let auth = AuthProvider::basic_auth("username".to_string(), "password".to_string());
+/// // Login credentials (exchanged for JWTs automatically)
+/// let auth = AuthProvider::basic_auth("user".to_string(), "password".to_string());
 ///
 /// // JWT token authentication
 /// let auth = AuthProvider::jwt_token("eyJhbGc...".to_string());
@@ -58,7 +58,7 @@ use std::sync::Arc;
 /// ```
 #[derive(Debug, Clone)]
 pub enum AuthProvider {
-    /// HTTP Basic Auth (username, password)
+    /// HTTP Basic Auth (user, password)
     BasicAuth(String, String),
 
     /// JWT token authentication
@@ -69,17 +69,14 @@ pub enum AuthProvider {
 }
 
 impl AuthProvider {
-    /// Create HTTP Basic Auth (recommended for user authentication)
-    ///
-    /// Encodes username:password as base64 for Authorization: Basic header
-    /// following RFC 7617.
-    pub fn basic_auth(username: String, password: String) -> Self {
-        Self::BasicAuth(username, password)
+    /// Create login credentials for `POST /v1/api/auth/login`.
+    pub fn basic_auth(user: String, password: String) -> Self {
+        Self::BasicAuth(user, password)
     }
 
     /// Create system user authentication (convenience for CLI and internal tools)
     ///
-    /// Uses the default system username "root" with provided password.
+    /// Uses the default system user "root" with provided password.
     pub fn system_user_auth(password: String) -> Self {
         Self::BasicAuth("root".to_string(), password)
     }
@@ -94,22 +91,19 @@ impl AuthProvider {
         Self::None
     }
 
-    /// Attach authentication headers to an HTTP request builder
+    /// Attach authentication headers to an HTTP request builder.
     ///
-    /// Applies the appropriate Authorization header based on the auth method:
-    /// - BasicAuth: `Authorization: Basic <base64(username:password)>`
-    /// - JwtToken: `Authorization: Bearer <token>`
-    /// - None: No headers
+    /// Password credentials must be exchanged on `/v1/api/auth/login` before
+    /// they can be used for authenticated requests. This method therefore only
+    /// supports bearer tokens and anonymous requests.
     pub fn apply_to_request(
         &self,
         request: reqwest::RequestBuilder,
     ) -> Result<reqwest::RequestBuilder> {
         match self {
-            Self::BasicAuth(username, password) => {
-                let credentials = format!("{}:{}", username, password);
-                let encoded = general_purpose::STANDARD.encode(credentials.as_bytes());
-                Ok(request.header("Authorization", format!("Basic {}", encoded)))
-            },
+            Self::BasicAuth(_, _) => Err(KalamLinkError::AuthenticationError(
+                "User/password credentials can only be used with /v1/api/auth/login; exchange them for a JWT before sending authenticated requests.".to_string(),
+            )),
             Self::JwtToken(token) => Ok(request.bearer_auth(token)),
             Self::None => Ok(request),
         }
@@ -211,13 +205,13 @@ mod tests {
     }
 
     #[test]
-    fn test_basic_auth_encoding() {
+    fn test_apply_to_request_rejects_basic_auth() {
         let auth = AuthProvider::basic_auth("alice".to_string(), "secret123".to_string());
 
         let client = reqwest::Client::new();
         let request = client.get("http://localhost:8080");
         let result = auth.apply_to_request(request);
-        assert!(result.is_ok());
+        assert!(result.is_err());
     }
 
     #[test]
@@ -225,20 +219,11 @@ mod tests {
         let auth = AuthProvider::system_user_auth("test_password".to_string());
 
         match auth {
-            AuthProvider::BasicAuth(username, password) => {
-                assert_eq!(username, "root");
+            AuthProvider::BasicAuth(user, password) => {
+                assert_eq!(user, "root");
                 assert_eq!(password, "test_password");
             },
             _ => panic!("Expected BasicAuth variant"),
         }
-    }
-
-    #[test]
-    fn test_basic_auth_base64_format() {
-        let username = "alice";
-        let password = "secret123";
-        let credentials = format!("{}:{}", username, password);
-        let encoded = general_purpose::STANDARD.encode(credentials.as_bytes());
-        assert_eq!(encoded, "YWxpY2U6c2VjcmV0MTIz");
     }
 }

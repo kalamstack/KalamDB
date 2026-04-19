@@ -87,4 +87,4 @@ pub use providers::users::models::{
 };
 
 // Re-export from kalamdb-commons for convenience
-pub use kalamdb_commons::models::{AuthType, OAuthProvider, Role, UserName};
+pub use kalamdb_commons::models::{AuthType, OAuthProvider, Role};

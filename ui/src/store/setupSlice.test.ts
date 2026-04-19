@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { api } from '@/lib/api';
 import setupReducer, {
   checkSetupStatus,
   submitSetup,
@@ -24,6 +25,7 @@ vi.mock('@/lib/api', () => ({
 }));
 
 describe('Setup Slice', () => {
+  const mockedPost = vi.mocked(api.post);
   const initialState = {
     needsSetup: null,
     isCheckingStatus: true,
@@ -126,8 +128,7 @@ describe('Setup Slice', () => {
         type: submitSetup.fulfilled.type,
         payload: {
           user: {
-            id: 'u_123',
-            username: 'testuser',
+            id: 'testuser',
             role: 'dba',
             email: 'test@example.com',
             created_at: '2026-01-27T00:00:00Z',
@@ -141,6 +142,43 @@ describe('Setup Slice', () => {
       expect(state.setupComplete).toBe(true);
       expect(state.needsSetup).toBe(false);
       expect(state.createdUsername).toBe('testuser');
+    });
+
+    it('posts the canonical setup payload to the API', async () => {
+      mockedPost.mockResolvedValue({
+        user: {
+          id: 'testuser',
+          role: 'dba',
+          email: 'test@example.com',
+          created_at: '2026-01-27T00:00:00Z',
+          updated_at: '2026-01-27T00:00:00Z',
+        },
+        message: 'Setup complete',
+      });
+
+      const dispatch = vi.fn();
+      const getState = vi.fn();
+      const request = {
+        user: 'testuser',
+        password: 'StrongPass123!',
+        root_password: 'RootPass123!',
+        email: 'test@example.com',
+      };
+
+      const action = await submitSetup(request)(dispatch, getState, undefined);
+
+      expect(mockedPost).toHaveBeenCalledWith('/auth/setup', request);
+      expect(action.type).toBe(submitSetup.fulfilled.type);
+      expect(action.payload).toEqual({
+        user: {
+          id: 'testuser',
+          role: 'dba',
+          email: 'test@example.com',
+          created_at: '2026-01-27T00:00:00Z',
+          updated_at: '2026-01-27T00:00:00Z',
+        },
+        message: 'Setup complete',
+      });
     });
 
     it('should set error on failure', () => {

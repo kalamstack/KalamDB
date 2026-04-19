@@ -142,7 +142,16 @@ async fn scan_with_projection_and_limit() {
     client.open_session("sess-proj", Some("app")).await.expect("open session");
 
     let response = client
-        .scan("app", "messages", "shared", "sess-proj", None, vec!["id".to_string()], Some(1), vec![])
+        .scan(
+            "app",
+            "messages",
+            "shared",
+            "sess-proj",
+            None,
+            vec!["id".to_string()],
+            Some(1),
+            vec![],
+        )
         .await
         .expect("scan with projection");
 

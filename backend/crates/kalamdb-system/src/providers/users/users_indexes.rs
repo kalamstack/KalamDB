@@ -11,67 +11,6 @@ use kalamdb_commons::UserId;
 use kalamdb_store::IndexDefinition;
 use std::sync::Arc;
 
-/// Index for querying users by username (unique).
-///
-/// Key format: `{username_lowercase}`
-///
-/// This index allows efficient lookups by username and enforces uniqueness.
-/// The username is stored in lowercase for case-insensitive lookups.
-pub struct UserUsernameIndex;
-
-impl IndexDefinition<UserId, SystemTableRow> for UserUsernameIndex {
-    fn partition(&self) -> Partition {
-        Partition::new(StoragePartition::SystemUsersUsernameIdx.name())
-    }
-
-    fn indexed_columns(&self) -> Vec<&str> {
-        vec!["username"]
-    }
-
-    fn extract_key(&self, _primary_key: &UserId, row: &SystemTableRow) -> Option<Vec<u8>> {
-        let user: User = system_row_to_model(row, &User::definition()).ok()?;
-        // Store username in lowercase for case-insensitive lookups
-        let username_lower = user.username.as_str().to_lowercase();
-        Some(username_lower.into_bytes())
-    }
-
-    fn filter_to_prefix(&self, filter: &datafusion::logical_expr::Expr) -> Option<Vec<u8>> {
-        use datafusion::logical_expr::Expr;
-        use datafusion::scalar::ScalarValue;
-        use kalamdb_store::extract_string_equality;
-
-        // Handle equality: username = 'value'
-        if let Some((col, val)) = extract_string_equality(filter) {
-            if col == "username" {
-                // Convert to lowercase for case-insensitive matching
-                return Some(val.to_lowercase().into_bytes());
-            }
-        }
-
-        // Handle LIKE operator: username LIKE 'prefix%'
-        if let Expr::Like(like_expr) = filter {
-            if let Expr::Column(col) = like_expr.expr.as_ref() {
-                if col.name == "username" {
-                    if let Expr::Literal(ScalarValue::Utf8(Some(pattern)), _) =
-                        like_expr.pattern.as_ref()
-                    {
-                        // Check if pattern is a simple prefix match (ends with %)
-                        if pattern.ends_with('%')
-                            && !pattern[..pattern.len() - 1].contains('%')
-                            && !pattern[..pattern.len() - 1].contains('_')
-                        {
-                            let prefix = &pattern[..pattern.len() - 1];
-                            return Some(prefix.to_lowercase().into_bytes());
-                        }
-                    }
-                }
-            }
-        }
-
-        None
-    }
-}
-
 /// Index for querying users by role.
 ///
 /// Key format: `{role}:{user_id}`
@@ -110,23 +49,21 @@ impl IndexDefinition<UserId, SystemTableRow> for UserRoleIndex {
 
 /// Create the default set of indexes for the users table.
 pub fn create_users_indexes() -> Vec<Arc<dyn IndexDefinition<UserId, SystemTableRow>>> {
-    vec![Arc::new(UserUsernameIndex), Arc::new(UserRoleIndex)]
+    vec![Arc::new(UserRoleIndex)]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::system_row_mapper::model_to_system_row;
-    use kalamdb_commons::models::UserName;
     use kalamdb_commons::{AuthType, Role, StorageId};
 
-    fn create_test_user(id: &str, username: &str, role: Role) -> User {
+    fn create_test_user(id: &str, role: Role) -> User {
         User {
             user_id: UserId::new(id),
-            username: UserName::new(username),
             password_hash: "hashed_password".to_string(),
             role,
-            email: Some(format!("{}@example.com", username)),
+            email: Some(format!("{}@example.com", id)),
             auth_type: AuthType::Password,
             auth_data: None,
             storage_mode: crate::providers::storages::models::StorageMode::Table,
@@ -142,22 +79,8 @@ mod tests {
     }
 
     #[test]
-    fn test_username_index_key_format() {
-        let user = create_test_user("user1", "Alice", Role::User);
-        let user_id = user.user_id.clone();
-        let row = model_to_system_row(&user, &User::definition()).unwrap();
-
-        let index = UserUsernameIndex;
-        let key = index.extract_key(&user_id, &row).unwrap();
-
-        // Should be lowercase
-        let key_str = String::from_utf8(key).unwrap();
-        assert_eq!(key_str, "alice");
-    }
-
-    #[test]
     fn test_role_index_key_format() {
-        let user = create_test_user("user1", "alice", Role::Dba);
+        let user = create_test_user("user1", Role::Dba);
         let user_id = user.user_id.clone();
         let row = model_to_system_row(&user, &User::definition()).unwrap();
 
@@ -171,8 +94,7 @@ mod tests {
     #[test]
     fn test_create_users_indexes() {
         let indexes = create_users_indexes();
-        assert_eq!(indexes.len(), 2);
-        assert_eq!(indexes[0].partition(), StoragePartition::SystemUsersUsernameIdx.name().into());
-        assert_eq!(indexes[1].partition(), StoragePartition::SystemUsersRoleIdx.name().into());
+        assert_eq!(indexes.len(), 1);
+        assert_eq!(indexes[0].partition(), StoragePartition::SystemUsersRoleIdx.name().into());
     }
 }

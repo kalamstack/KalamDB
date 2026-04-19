@@ -38,5 +38,5 @@ pub use providers::jwt_auth::{
 pub use repository::user_repo::{CachedUsersRepo, CoreUsersRepo, UserRepository};
 pub use services::login_tracker::{LoginTracker, LoginTrackingConfig};
 pub use services::unified::{
-    authenticate, extract_username_for_audit, AuthRequest, AuthenticationResult,
+    authenticate, extract_user_id_for_audit, AuthRequest, AuthenticationResult,
 };

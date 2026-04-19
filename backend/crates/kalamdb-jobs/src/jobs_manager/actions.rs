@@ -85,7 +85,7 @@ impl JobsManager {
             job_type,
             status: JobStatus::Queued,
             leader_status: None,
-            parameters: Some(parameters.to_string()),
+            parameters: Some(parameters),
             message: None,
             exception_trace: None,
             idempotency_key,

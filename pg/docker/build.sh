@@ -21,7 +21,7 @@ PG_MAJOR="${PG_MAJOR:-16}"
 PG_EXTENSION_FLAVOR="${PG_EXTENSION_FLAVOR:-pg${PG_MAJOR}}"
 RUST_BASE_IMAGE="${RUST_BASE_IMAGE:-public.ecr.aws/docker/library/rust:1.92-bookworm}"
 POSTGRES_BASE_IMAGE="${POSTGRES_BASE_IMAGE:-public.ecr.aws/docker/library/postgres:${PG_MAJOR}-bookworm}"
-PGRX_VERSION="${PGRX_VERSION:-0.17.0}"
+PGRX_VERSION="${PGRX_VERSION:-0.18.0}"
 
 DOCKER_ARGS=()
 if [[ "${1:-}" == "--rebuild" ]]; then

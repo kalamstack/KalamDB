@@ -74,7 +74,7 @@ async fn test_regular_user_batch_rejects_admin_statement_without_side_effects(
 
     let user_lookup = server
         .execute_sql(&format!(
-            "SELECT COUNT(*) AS cnt FROM system.users WHERE username = '{}'",
+            "SELECT COUNT(*) AS cnt FROM system.users WHERE user_id = '{}'",
             forbidden_username
         ))
         .await?;

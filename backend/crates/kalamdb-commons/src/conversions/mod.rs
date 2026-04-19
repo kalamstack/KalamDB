@@ -45,6 +45,8 @@ pub mod scalar_bytes;
 #[cfg(feature = "conversions")]
 pub mod scalar_json;
 #[cfg(feature = "conversions")]
+pub mod serde_row;
+#[cfg(feature = "conversions")]
 pub mod scalar_numeric;
 #[cfg(feature = "conversions")]
 pub mod scalar_size;
@@ -60,6 +62,8 @@ pub use arrow_json_conversion::*;
 pub use scalar_bytes::scalar_value_to_bytes;
 #[cfg(feature = "conversions")]
 pub use scalar_json::{json_value_to_scalar_for_column, scalar_to_json_for_column};
+#[cfg(feature = "conversions")]
+pub use serde_row::{row_to_serde_model, serde_model_to_row};
 #[cfg(feature = "conversions")]
 pub use scalar_numeric::{as_f64, scalar_to_f64, scalar_to_i64};
 #[cfg(feature = "conversions")]

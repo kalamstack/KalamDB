@@ -191,13 +191,13 @@ async function runTests() {
       passed++;
     }
 
-    // Should throw with empty username
+    // Should throw with empty user
     try {
       new KalamClient('http://localhost:8080', '', 'secret');
-      console.log('  ✗ Empty username should throw error');
+      console.log('  ✗ Empty user should throw error');
       failed++;
     } catch (error) {
-      console.log('  ✓ Empty username throws error');
+      console.log('  ✓ Empty user throws error');
       passed++;
     }
 

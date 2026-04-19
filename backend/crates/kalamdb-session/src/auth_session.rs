@@ -1,28 +1,4 @@
 //! Authenticated Session Context
-//!
-//! This module provides `AuthSession` - a unified session object that combines
-//! user identity, role, and optional session metadata (request_id, IP address, etc.).
-//!
-//! ## Purpose
-//!
-//! `AuthSession` serves as the bridge between HTTP handlers and the execution layer,
-//! carrying all necessary authentication and audit information through the request lifecycle.
-//!
-//! ## Usage
-//!
-//! ```rust,ignore
-//! // Create from authenticated user
-//! let session = AuthSession::new(user_id, role);
-//!
-//! // Add optional metadata
-//! let session = session
-//!     .with_namespace(namespace_id)
-//!     .with_request_id(request_id)
-//!     .with_ip(client_ip);
-//!
-//! // Use in ExecutionContext
-//! let exec_ctx = ExecutionContext::from_session(session, base_session);
-//! ```
 
 use crate::UserContext;
 use kalamdb_commons::models::{ConnectionInfo, ReadContext, Role, UserId};
@@ -32,53 +8,22 @@ use std::time::SystemTime;
 /// Authentication method used for the session
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AuthMethod {
-    /// HTTP Basic Authentication (username:password base64 encoded)
     Basic,
-    /// JWT Bearer token
     Bearer,
-    /// Direct username/password (for WebSocket)
     Direct,
 }
 
 /// Authenticated session with user identity and optional metadata
-///
-/// This struct consolidates user authentication information (user_id, role)
-/// with optional session metadata (namespace, request_id, IP address) for
-/// audit logging and execution context creation.
-///
-/// # Fields
-/// - `user_context`: Core user identity (user_id, role, read_context)
-/// - `request_id`: Request tracking ID (optional, for audit logging)
-/// - `connection_info`: Connection information (IP address, localhost check)
-/// - `auth_method`: Authentication method used (Bearer, Basic, Direct)
-/// - `timestamp`: Session creation timestamp
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AuthSession {
-    /// Core user identity and read context
     pub user_context: UserContext,
-    /// Request tracking ID (optional) — Arc<str> so clone is O(1).
     pub request_id: Option<Arc<str>>,
-    /// Connection information (IP address, localhost check)
     pub connection_info: ConnectionInfo,
-    /// Authentication method used
     pub auth_method: AuthMethod,
-    /// Session creation timestamp
     pub timestamp: SystemTime,
 }
 
 impl AuthSession {
-    /// Create a new authenticated session for client requests
-    ///
-    /// Creates a session with ReadContext::Client (requires leader for reads).
-    ///
-    /// # Arguments
-    /// * `user_id` - The authenticated user's ID
-    /// * `role` - The user's role (User, Service, Dba, System)
-    ///
-    /// # Example
-    /// ```rust,ignore
-    /// let session = AuthSession::new(UserId::new("alice"), Role::User);
-    /// ```
     pub fn new(user_id: UserId, role: Role) -> Self {
         Self {
             user_context: UserContext::client(user_id, role),
@@ -89,7 +34,6 @@ impl AuthSession {
         }
     }
 
-    /// Create a new authenticated session with connection info and auth method
     pub fn with_auth_details(
         user_id: UserId,
         role: Role,
@@ -105,27 +49,6 @@ impl AuthSession {
         }
     }
 
-    /// Create a new authenticated session with username, connection info, and auth method
-    pub fn with_username_and_auth_details(
-        user_id: UserId,
-        username: kalamdb_commons::UserName,
-        role: Role,
-        connection_info: ConnectionInfo,
-        auth_method: AuthMethod,
-    ) -> Self {
-        Self {
-            user_context: UserContext::client_with_username(user_id, username, role),
-            request_id: None,
-            connection_info,
-            auth_method,
-            timestamp: SystemTime::now(),
-        }
-    }
-
-    /// Create a session with a specific read context
-    ///
-    /// Use ReadContext::Internal for background jobs and notifications
-    /// that can read from followers.
     pub fn with_read_context(user_id: UserId, role: Role, read_context: ReadContext) -> Self {
         Self {
             user_context: UserContext::new(user_id, role, read_context),
@@ -136,12 +59,10 @@ impl AuthSession {
         }
     }
 
-    /// Create a session for internal operations (can read from followers)
     pub fn internal(user_id: UserId, role: Role) -> Self {
         Self::with_read_context(user_id, role, ReadContext::Internal)
     }
 
-    /// Create an anonymous session (not authenticated)
     pub fn anonymous() -> Self {
         Self {
             user_context: UserContext::client(UserId::anonymous(), Role::Anonymous),
@@ -152,7 +73,6 @@ impl AuthSession {
         }
     }
 
-    /// Create a session with all metadata
     pub fn with_audit_info(
         user_id: UserId,
         role: Role,
@@ -171,19 +91,16 @@ impl AuthSession {
 
     // Builder methods
 
-    /// Set the request tracking ID
     pub fn with_request_id(mut self, request_id: String) -> Self {
         self.request_id = Some(Arc::<str>::from(request_id));
         self
     }
 
-    /// Set the client IP address
     pub fn with_ip(mut self, ip_address: String) -> Self {
         self.connection_info.remote_addr = Some(Arc::<str>::from(ip_address));
         self
     }
 
-    /// Update the read context
     pub fn with_read_context_mode(mut self, read_context: ReadContext) -> Self {
         self.user_context.read_context = read_context;
         self

@@ -422,9 +422,7 @@ unsafe fn try_var_value_pair(
     if (*att).attisdropped {
         return None;
     }
-    let col_name = CStr::from_ptr((*att).attname.data.as_ptr())
-        .to_string_lossy()
-        .into_owned();
+    let col_name = CStr::from_ptr((*att).attname.data.as_ptr()).to_string_lossy().into_owned();
 
     // Skip virtual columns — they are handled separately by the FDW
     match col_name.as_str() {
@@ -472,11 +470,7 @@ unsafe fn extract_node_value(
             if prm.isnull {
                 return None;
             }
-            Some(crate::pg_to_kalam::datum_to_scalar(
-                prm.value,
-                (*param).paramtype,
-                false,
-            ))
+            Some(crate::pg_to_kalam::datum_to_scalar(prm.value, (*param).paramtype, false))
         },
         _ => None,
     }

@@ -38,6 +38,7 @@ pub use consumer::{ConsumerBuilder, TopicConsumer};
 pub use credentials::{CredentialStore, Credentials, MemoryCredentialStore};
 pub use error::{KalamLinkError, Result};
 pub use event_handlers::{ConnectionError, DisconnectReason, EventHandlers, MessageDirection};
+pub use kalamdb_commons::{Role, UserId};
 pub use models::{
     parse_i64, ChangeEvent, ClusterHealthResponse, ClusterNodeHealth, ConnectionOptions,
     ErrorDetail, FieldFlag, FieldFlags, FileRef, HealthCheckResponse, HttpVersion, KalamCellValue,
