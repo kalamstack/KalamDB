@@ -47,7 +47,7 @@
   "devDependencies": {
     "@kalamdb/client": "file:../client",
     "@types/node": "^25.5.2",
-    "drizzle-orm": "^0.41.0",
+    "drizzle-orm": "^0.45.2",
     "typescript": "^5.8.0"
   },
   "keywords": [
