@@ -18,7 +18,7 @@
     "paths": {
       "@/*": ["./src/*"],
       "@kalamdb/client": ["../link/sdks/typescript/client/dist/src/index.d.ts"],
-      "@kalamdb/orm": ["../link/sdks/typescript/orm/src/index.ts"]
+      "@kalamdb/orm": ["../link/sdks/typescript/orm/dist/index.d.ts"]
     }
   },
   "include": ["src"],

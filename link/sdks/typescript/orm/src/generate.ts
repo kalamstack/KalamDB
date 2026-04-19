@@ -16,7 +16,7 @@ interface ColumnInfo {
 
 function mapKalamTypeToDrizzle(dataType: string): string {
   const normalized = dataType.toLowerCase();
-  if (normalized.startsWith('timestamp')) return 'bigint';
+  if (normalized.startsWith('timestamp')) return 'timestamp';
   if (normalized === 'int64' || normalized === 'bigint') return 'text';
   if (normalized === 'int32' || normalized === 'int') return 'integer';
   if (normalized === 'float64' || normalized === 'double') return 'doublePrecision';
@@ -89,8 +89,8 @@ function generateTableDefinition(table: TableInfo, columns: ColumnInfo[]): strin
     const drizzleType = mapKalamTypeToDrizzle(col.dataType);
     const fieldName = col.name;
     let def: string;
-    if (drizzleType === 'bigint') {
-      def = `  ${fieldName}: ${drizzleType}('${col.name}', { mode: 'number' })`;
+    if (drizzleType === 'timestamp') {
+      def = `  ${fieldName}: ${drizzleType}('${col.name}', { mode: 'string' })`;
     } else {
       def = `  ${fieldName}: ${drizzleType}('${col.name}')`;
     }
@@ -132,7 +132,11 @@ export async function generateSchema(
     }
   }
 
-  const filtered = tables.filter((t) => {
+  const deduped = Array.from(
+    new Map(tables.map((table) => [table.tableId, table])).values(),
+  );
+
+  const filtered = deduped.filter((t) => {
     if (!options?.includeSystem && (t.namespaceId === 'system' || t.namespaceId === 'dba')) {
       return false;
     }

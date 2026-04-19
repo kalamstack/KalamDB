@@ -41,8 +41,17 @@ const ACTION_COLORS: Record<string, string> = {
 };
 
 // Helper to extract namespace_id and table_name from parameters JSON
-function parseJobParams(parameters: string | null): { namespace_id?: string; table_name?: string } {
-  if (!parameters) return {};
+function parseJobParams(parameters: unknown): { namespace_id?: string; table_name?: string } {
+  if (parameters === null || parameters === undefined) return {};
+
+  if (typeof parameters === 'object') {
+    return parameters as { namespace_id?: string; table_name?: string };
+  }
+
+  if (typeof parameters !== 'string') {
+    return {};
+  }
+
   try {
     return JSON.parse(parameters);
   } catch {

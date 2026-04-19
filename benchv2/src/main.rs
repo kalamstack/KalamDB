@@ -41,10 +41,7 @@ async fn main() {
     config.namespace = format!("{}_{}", config.namespace, run_id);
 
     println!("╔════════════════════════════════════════════════╗");
-    println!(
-        "║   KalamDB Benchmark Suite v{:<18}║",
-        kalamdb_version
-    );
+    println!("║   KalamDB Benchmark Suite v{:<18}║", kalamdb_version);
     println!("╚════════════════════════════════════════════════╝");
     println!();
     println!("  Servers:     {}", config.urls.join(", "));
@@ -59,10 +56,7 @@ async fn main() {
     if !config.bench.is_empty() {
         println!("  Benches:     {}", config.bench.join(", "));
     }
-    println!(
-        "  Machine:     {} ({})",
-        system.machine_model, system.hostname
-    );
+    println!("  Machine:     {} ({})", system.machine_model, system.hostname);
     println!(
         "  CPU:         {} ({} logical / {} physical)",
         system.cpu_model, system.cpu_logical_cores, system.cpu_physical_cores
@@ -164,6 +158,7 @@ async fn main() {
             &config.output_dir,
             &kalamdb_version,
             &system,
+            overall_elapsed,
         ) {
             Ok(path) => println!("  JSON report: {}", path),
             Err(e) => eprintln!("  Failed to write JSON report: {}", e),
@@ -176,23 +171,19 @@ async fn main() {
             &kalamdb_version,
             previous.as_ref(),
             &system,
+            overall_elapsed,
         ) {
             Ok(path) => println!("  HTML report: {}", path),
             Err(e) => eprintln!("  Failed to write HTML report: {}", e),
         }
     } else {
-        println!(
-            "  Skipping report generation because {} benchmark(s) failed.",
-            failed
-        );
+        println!("  Skipping report generation because {} benchmark(s) failed.", failed);
     }
 
     // Clean up the benchmark namespace
-    let _ = run_sql_ok_on_all_urls(
-        &client,
-        &format!("DROP NAMESPACE IF EXISTS {}", config.namespace),
-    )
-    .await;
+    let _ =
+        run_sql_ok_on_all_urls(&client, &format!("DROP NAMESPACE IF EXISTS {}", config.namespace))
+            .await;
 
     println!();
     if failed > 0 {

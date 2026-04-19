@@ -1,6 +1,39 @@
 import type { RemoteCallback } from 'drizzle-orm/pg-proxy';
 import type { KalamDBClient } from '@kalamdb/client';
 
+function toMilliseconds(value: number): number {
+  if (value > 1e15) return Math.floor(value / 1000);
+  if (value > 1e12) return value;
+  if (value > 1e9) return value * 1000;
+  return value;
+}
+
+function normalizeTemporalValue(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (typeof value === 'number') {
+    const date = new Date(toMilliseconds(value));
+    return Number.isNaN(date.getTime()) ? String(value) : date.toISOString();
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+      const num = Number(trimmed);
+      if (!Number.isNaN(num)) {
+        const date = new Date(toMilliseconds(num));
+        if (!Number.isNaN(date.getTime())) return date.toISOString();
+      }
+    }
+  }
+
+  return value;
+}
+
 export function stripDefaults(sql: string, params: unknown[]): { sql: string; params: unknown[] } {
   const match = sql.match(/^(INSERT\s+INTO\s+\S+)\s*\(([^)]+)\)\s*VALUES\s*/i);
   if (!match) return { sql, params };
@@ -96,9 +129,19 @@ export function kalamDriver(client: KalamDBClient): RemoteCallback {
     const response = await client.query(cleanSql, stripped.params);
     if (method === 'execute') return { rows: [] };
     const result = response.results?.[0];
-    const columns = result?.schema?.map((field: { name: string }) => field.name) ?? [];
+    const schema = (result?.schema as Array<{ name: string; data_type?: string; dataType?: string; type?: string }> | undefined) ?? [];
+    const columns = schema.map((field) => field.name);
+    const temporalColumns = new Set(
+      schema
+        .filter((field) => {
+          const rawType = String(field.data_type ?? field.dataType ?? field.type ?? '').toLowerCase();
+          return rawType.includes('timestamp') || rawType.includes('date32') || rawType.includes('date64') || rawType === 'date';
+        })
+        .map((field) => field.name),
+    );
     const rows = (result?.named_rows as Record<string, unknown>[] ?? []).map(
-      (row) => columns.map((col) => row[col]),
+      (row) =>
+        columns.map((col) => (temporalColumns.has(col) ? normalizeTemporalValue(row[col]) : row[col])),
     );
     return { rows };
   };

@@ -32,40 +32,68 @@ pub struct Comparison {
     pub prev_mean_us: f64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComparisonTrend {
+    Faster,
+    Same,
+    Slower,
+}
+
 impl Comparison {
+    pub fn trend(&self) -> ComparisonTrend {
+        let abs_pct = self.mean_pct.abs();
+
+        if abs_pct < 3.0 {
+            ComparisonTrend::Same
+        } else if self.mean_pct < 0.0 {
+            ComparisonTrend::Faster
+        } else {
+            ComparisonTrend::Slower
+        }
+    }
+
     /// Format the comparison as a terminal-printable delta string.
     /// Shows the change in mean latency relative to previous run.
     pub fn display(&self) -> String {
         let abs_pct = self.mean_pct.abs();
 
-        if abs_pct < 3.0 {
-            // Within noise threshold — no meaningful change
-            format!("\x1b[90m~ {:.0}µs prior\x1b[0m", self.prev_mean_us)
-        } else if self.mean_pct < 0.0 {
-            // Faster (lower latency = better)
-            format!(
-                "\x1b[32m↑{:.0}% faster\x1b[0m \x1b[90m(was {:.0}µs)\x1b[0m",
-                abs_pct, self.prev_mean_us
-            )
-        } else {
-            // Slower (higher latency = worse)
-            format!(
-                "\x1b[31m↓{:.0}% slower\x1b[0m \x1b[90m(was {:.0}µs)\x1b[0m",
-                abs_pct, self.prev_mean_us
-            )
+        match self.trend() {
+            ComparisonTrend::Same => {
+                format!("\x1b[90m~ {:.0}µs prior\x1b[0m", self.prev_mean_us)
+            }
+            ComparisonTrend::Faster => {
+                format!(
+                    "\x1b[32m↑{:.0}% faster\x1b[0m \x1b[90m(was {:.0}µs)\x1b[0m",
+                    abs_pct, self.prev_mean_us
+                )
+            }
+            ComparisonTrend::Slower => {
+                format!(
+                    "\x1b[31m↓{:.0}% slower\x1b[0m \x1b[90m(was {:.0}µs)\x1b[0m",
+                    abs_pct, self.prev_mean_us
+                )
+            }
         }
     }
 
     /// HTML version of the comparison delta.
     pub fn html(&self) -> String {
         let abs_pct = self.mean_pct.abs();
+        let tooltip = format!("previous mean: {:.0}µs", self.prev_mean_us);
 
-        if abs_pct < 3.0 {
-            format!("<span class=\"delta delta-same\">~ {:.0}µs prior</span>", self.prev_mean_us)
-        } else if self.mean_pct < 0.0 {
-            format!("<span class=\"delta delta-faster\">↑{:.0}% faster</span>", abs_pct)
-        } else {
-            format!("<span class=\"delta delta-slower\">↓{:.0}% slower</span>", abs_pct)
+        match self.trend() {
+            ComparisonTrend::Same => format!(
+                "<span class=\"delta delta-same\" title=\"{}\">~ {:.0}µs prior</span>",
+                tooltip, self.prev_mean_us
+            ),
+            ComparisonTrend::Faster => format!(
+                "<span class=\"delta delta-faster\" title=\"{}\">↑{:.0}% faster</span>",
+                tooltip, abs_pct
+            ),
+            ComparisonTrend::Slower => format!(
+                "<span class=\"delta delta-slower\" title=\"{}\">↓{:.0}% slower</span>",
+                tooltip, abs_pct
+            ),
         }
     }
 }

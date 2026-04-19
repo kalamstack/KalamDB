@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::Path;
+use std::time::Duration;
 
 use crate::config::Config;
 use crate::metrics::{BenchmarkReport, BenchmarkResult, ReportConfig, ReportSummary, SystemInfo};
@@ -11,6 +12,7 @@ pub fn write_json_report(
     output_dir: &str,
     version: &str,
     system: &SystemInfo,
+    wall_clock_duration: Duration,
 ) -> Result<String, String> {
     fs::create_dir_all(output_dir).map_err(|e| format!("Failed to create output dir: {}", e))?;
 
@@ -21,7 +23,8 @@ pub fn write_json_report(
 
     let passed = results.iter().filter(|r| r.success).count() as u32;
     let failed = results.iter().filter(|r| !r.success).count() as u32;
-    let total_duration_ms: f64 = results.iter().map(|r| r.total_us as f64 / 1000.0).sum();
+    let measured_duration_ms: f64 = results.iter().map(|r| r.total_us as f64 / 1000.0).sum();
+    let total_duration_ms = wall_clock_duration.as_secs_f64() * 1000.0;
 
     let report = BenchmarkReport {
         version: version.to_string(),
@@ -32,6 +35,7 @@ pub fn write_json_report(
             warmup: config.warmup,
             concurrency: config.concurrency,
             namespace: config.namespace.clone(),
+            max_subscribers: Some(config.max_subscribers),
         },
         system: system.clone(),
         results: results.to_vec(),
@@ -40,6 +44,7 @@ pub fn write_json_report(
             passed,
             failed,
             total_duration_ms,
+            measured_duration_ms,
         },
     };
 

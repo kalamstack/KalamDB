@@ -307,13 +307,13 @@ fn resolve_subscription_key(
     subscription_id: &str,
     subscriptions: &HashMap<String, SubscriptionState>,
 ) -> Option<String> {
+    // The server echoes the exact subscription_id the client sent, so an exact
+    // match is always correct. The previous ends_with() fallback was unsafe with
+    // multiple concurrent subscriptions because it could match the wrong entry.
     if subscriptions.contains_key(subscription_id) {
         Some(subscription_id.to_string())
     } else {
-        subscriptions
-            .keys()
-            .find(|client_id| subscription_id.ends_with(client_id.as_str()))
-            .cloned()
+        None
     }
 }
 

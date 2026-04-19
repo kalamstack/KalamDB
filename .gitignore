@@ -126,3 +126,4 @@ link/sdks/typescript/client/.npmrc
 /link/kalam-client/sdks/typescript/client/.wasm-cargo-home-size-current2
 /link/kalam-client/sdks/typescript/client/.wasm-target-size-current
 /link/kalam-client/sdks/typescript/client/.wasm-target-size-current2
+/benchv2/logs

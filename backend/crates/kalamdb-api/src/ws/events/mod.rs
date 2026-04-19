@@ -122,9 +122,21 @@ pub async fn send_message<T: serde::Serialize>(
 /// sent as binary frames.  When `false`, the raw payload is always sent as a
 /// text frame, which is easier to inspect during development.
 async fn send_data(session: &mut Session, data: &[u8], compress: bool) -> Result<(), ()> {
+    // Fast path: no compression — send as Text frame directly without a
+    // UTF-8 round-trip. Callers only reach this path with bytes that they
+    // just produced from `serde_json`/`rmp_serde`, so they are already valid
+    // UTF-8 when `compress == false` and serialization chose the text branch.
     if !compress {
-        let text = String::from_utf8_lossy(data);
-        return session.text(text.into_owned()).await.map_err(|_| ());
+        // `String::from_utf8_lossy(..).into_owned()` previously allocated a
+        // fresh String and scanned every byte even for known-valid JSON. Use
+        // `from_utf8` and fall back to lossy only on the (never-observed)
+        // error path to stay defensive without paying the cost on the hot
+        // path.
+        let owned = match std::str::from_utf8(data) {
+            Ok(s) => s.to_owned(),
+            Err(_) => String::from_utf8_lossy(data).into_owned(),
+        };
+        return session.text(owned).await.map_err(|_| ());
     }
 
     let (payload, compressed) = maybe_compress(data);
@@ -133,10 +145,13 @@ async fn send_data(session: &mut Session, data: &[u8], compress: bool) -> Result
         // Send compressed data as binary frame
         session.binary(payload).await.map_err(|_| ())
     } else {
-        // Send uncompressed data as text frame
-        // Safe to convert since original data was valid JSON string
-        let text = String::from_utf8_lossy(&payload);
-        session.text(text.into_owned()).await.map_err(|_| ())
+        // Send uncompressed data as text frame. `maybe_compress` returned the
+        // original bytes unchanged, so they remain valid UTF-8 JSON.
+        let owned = match std::str::from_utf8(&payload) {
+            Ok(s) => s.to_owned(),
+            Err(_) => String::from_utf8_lossy(&payload).into_owned(),
+        };
+        session.text(owned).await.map_err(|_| ())
     }
 }
 

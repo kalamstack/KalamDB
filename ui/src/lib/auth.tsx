@@ -13,6 +13,7 @@ import {
   refresh as refreshThunk,
   checkAuth,
 } from "../store/authSlice";
+import { ensureSyncedSqlStudioWorkspaceInitialized } from "@/services/sqlStudioWorkspaceSyncService";
 
 interface AuthContextValue {
   user: UserInfo | null;
@@ -78,6 +79,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       refresh();
     }
   }, [expiresAt, user, refresh]);
+
+  // Ensure SQL Studio favorites storage exists for admin users on first UI entry.
+  useEffect(() => {
+    if (!isAuthenticated || !user || (user.role !== "dba" && user.role !== "system")) {
+      return;
+    }
+
+    void ensureSyncedSqlStudioWorkspaceInitialized().catch((error) => {
+      console.warn("Failed to initialize SQL Studio workspace storage", error);
+    });
+  }, [isAuthenticated, user]);
 
   const value: AuthContextValue = {
     user,

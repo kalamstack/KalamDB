@@ -162,13 +162,13 @@ export async function executeSql(sql: string, namespace?: string): Promise<SqlRe
 
 // Auth API helpers
 export interface LoginRequest {
-  username: string;
+  user: string;
   password: string;
 }
 
 export interface UserInfo {
   id: string;
-  username: string;
+  username?: string;
   role: string;
   email: string | null;
   created_at: string;

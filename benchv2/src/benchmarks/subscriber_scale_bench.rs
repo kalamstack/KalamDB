@@ -12,6 +12,7 @@ use tokio::sync::{watch, Mutex, Semaphore};
 use crate::benchmarks::Benchmark;
 use crate::client::KalamClient;
 use crate::config::Config;
+use crate::metrics::BenchmarkDetail;
 
 /// Progressive subscriber scale test.
 ///
@@ -145,7 +146,86 @@ impl Benchmark for SubscriberScaleBench {
         "Scale"
     }
     fn description(&self) -> &str {
-        "Progressive subscriber scale test (up to --max-subscribers, default 100K)"
+        "Progressive live-query subscriber scale and insert fanout verification"
+    }
+
+    fn report_description(&self, config: &Config) -> String {
+        format!(
+            "Progressive live-query subscriber scale and insert fanout verification up to {}",
+            format_num(config.max_subscribers)
+        )
+    }
+
+    fn report_full_description(&self, config: &Config) -> String {
+        let tiers = benchmark_tiers(config.max_subscribers);
+        let targets = resolve_subscriber_ws_targets(config);
+        let subscriptions_per_ws = subscriptions_per_ws_connection();
+        let pooled_ws_connections =
+            pooled_ws_connection_count(config.max_subscribers, targets.len(), subscriptions_per_ws);
+
+        format!(
+            "Progressively ramps cumulative live-query subscribers across tiers {} to verify connection establishment, subscription completion, and INSERT fanout delivery. Delivery probes run at {}. This run is configured with connect_batch={}, wave_size={}, wave_pause={}ms, connect_timeout={}, {} shared WebSocket target{}, {} subscriptions per shared WebSocket connection, and a pooled shared-connection budget of {}.",
+            format_tier_list(&tiers),
+            delivery_probe_tier_list(&tiers, config.max_subscribers),
+            format_count(connect_batch_limit()),
+            format_count(connect_wave_size_limit()),
+            connect_wave_pause_duration().as_millis(),
+            format_duration(connect_timeout_duration()),
+            targets.len(),
+            if targets.len() == 1 { "" } else { "s" },
+            format_count(subscriptions_per_ws),
+            format_count(pooled_ws_connections),
+        )
+    }
+
+    fn report_details(&self, config: &Config) -> Vec<BenchmarkDetail> {
+        let tiers = benchmark_tiers(config.max_subscribers);
+        let targets = resolve_subscriber_ws_targets(config);
+        let subscriptions_per_ws = subscriptions_per_ws_connection();
+        let pooled_ws_connections =
+            pooled_ws_connection_count(config.max_subscribers, targets.len(), subscriptions_per_ws);
+
+        vec![
+            BenchmarkDetail::new("Max", format_num(config.max_subscribers)),
+            BenchmarkDetail::new(
+                "Tiers",
+                format!(
+                    "{} checkpoints to {}",
+                    tiers.len(),
+                    format_num(*tiers.last().unwrap_or(&0))
+                ),
+            ),
+            BenchmarkDetail::new(
+                "Batch/Wave",
+                format!(
+                    "{} / {}",
+                    format_count(connect_batch_limit()),
+                    format_count(connect_wave_size_limit())
+                ),
+            ),
+            BenchmarkDetail::new(
+                "Pause/Timeout",
+                format!(
+                    "{} / {}",
+                    format_duration(connect_wave_pause_duration()),
+                    format_duration(connect_timeout_duration())
+                ),
+            ),
+            BenchmarkDetail::new(
+                "Shared WS",
+                format!(
+                    "{} conns @ {} subs/ws across {} target{}",
+                    format_count(pooled_ws_connections),
+                    format_count(subscriptions_per_ws),
+                    targets.len(),
+                    if targets.len() == 1 { "" } else { "s" }
+                ),
+            ),
+            BenchmarkDetail::new(
+                "Delivery Checks",
+                delivery_probe_summary(&tiers, config.max_subscribers),
+            ),
+        ]
     }
 
     fn single_run(&self) -> bool {
@@ -201,8 +281,7 @@ impl Benchmark for SubscriberScaleBench {
             .await?;
             let ws_targets = Arc::new(ws_targets);
             let subscriptions_per_ws = subscriptions_per_ws_connection();
-            let required_ws_connections =
-                (max_subs as usize).div_ceil(subscriptions_per_ws.max(1));
+            let required_ws_connections = (max_subs as usize).div_ceil(subscriptions_per_ws.max(1));
             let pooled_links = Arc::new(build_shared_link_pool(
                 client,
                 ws_targets.as_ref(),
@@ -226,14 +305,7 @@ impl Benchmark for SubscriberScaleBench {
             }
 
             // Build the list of tiers up to max_subscribers
-            let tiers: Vec<u32> = TIERS.iter().copied().filter(|&t| t <= max_subs).collect();
-            let tiers = if tiers.last().copied() != Some(max_subs) {
-                let mut t = tiers;
-                t.push(max_subs);
-                t
-            } else {
-                tiers
-            };
+            let tiers = benchmark_tiers(max_subs);
 
             println!();
             println!(
@@ -371,10 +443,9 @@ impl Benchmark for SubscriberScaleBench {
                         let mut sub = match setup_result {
                             Ok(sub) => {
                                 conn_counter.fetch_add(1, Ordering::Relaxed);
-                                let subscribe_elapsed_us = subscribe_started
-                                    .elapsed()
-                                    .as_micros()
-                                    .min(u64::MAX as u128) as u64;
+                                let subscribe_elapsed_us =
+                                    subscribe_started.elapsed().as_micros().min(u64::MAX as u128)
+                                        as u64;
                                 subscribe_time_total
                                     .fetch_add(subscribe_elapsed_us, Ordering::Relaxed);
                                 sub
@@ -557,8 +628,7 @@ impl Benchmark for SubscriberScaleBench {
                             format_num(timeout_failed),
                             format_num(auth_failed),
                             format_num(other_failed)
-                        )
-                        ,
+                        ),
                         width = TABLE_INFO_WIDTH,
                     );
                     println!(
@@ -568,8 +638,7 @@ impl Benchmark for SubscriberScaleBench {
                             failure_rate * 100.0,
                             tier_target,
                             FAILURE_THRESHOLD * 100.0
-                        )
-                        ,
+                        ),
                         width = TABLE_INFO_WIDTH,
                     );
                     break;
@@ -582,8 +651,7 @@ impl Benchmark for SubscriberScaleBench {
             println!("  Max sustained subscribers: {}", format_num(max_achieved));
             println!();
 
-            self.record_cleanup_state(stop_tx, all_handles, pooled_links)
-                .await?;
+            self.record_cleanup_state(stop_tx, all_handles, pooled_links).await?;
 
             Ok(())
         })
@@ -668,6 +736,76 @@ fn format_duration(d: Duration) -> String {
     }
 }
 
+fn format_count(value: usize) -> String {
+    if value > u32::MAX as usize {
+        value.to_string()
+    } else {
+        format_num(value as u32)
+    }
+}
+
+fn benchmark_tiers(max_subs: u32) -> Vec<u32> {
+    let tiers: Vec<u32> = TIERS.iter().copied().filter(|&tier| tier <= max_subs).collect();
+    if tiers.last().copied() == Some(max_subs) {
+        tiers
+    } else {
+        let mut tiers_with_max = tiers;
+        tiers_with_max.push(max_subs);
+        tiers_with_max
+    }
+}
+
+fn format_tier_list(tiers: &[u32]) -> String {
+    tiers.iter().map(|tier| format_num(*tier)).collect::<Vec<_>>().join(" -> ")
+}
+
+fn delivery_probe_tiers(tiers: &[u32], max_subs: u32) -> Vec<u32> {
+    tiers
+        .iter()
+        .copied()
+        .filter(|tier| should_verify_delivery(*tier, max_subs))
+        .collect()
+}
+
+fn delivery_probe_tier_list(tiers: &[u32], max_subs: u32) -> String {
+    format_tier_list(&delivery_probe_tiers(tiers, max_subs))
+}
+
+fn delivery_probe_summary(tiers: &[u32], max_subs: u32) -> String {
+    let probes = delivery_probe_tiers(tiers, max_subs);
+    let has_small_tiers = probes.iter().any(|tier| *tier <= 10_000);
+    let small_tier_limit =
+        probes.iter().copied().filter(|tier| *tier <= 10_000).max().unwrap_or(max_subs);
+    let checkpoints = probes
+        .iter()
+        .copied()
+        .filter(|tier| *tier > 10_000)
+        .map(format_num)
+        .collect::<Vec<_>>();
+
+    match (has_small_tiers, checkpoints.is_empty()) {
+        (true, true) => format!("all tiers to {}", format_num(small_tier_limit)),
+        (true, false) => {
+            format!("all tiers to {} + {}", format_num(small_tier_limit), checkpoints.join("/"))
+        },
+        (false, true) => "final tier only".to_string(),
+        (false, false) => checkpoints.join("/"),
+    }
+}
+
+fn pooled_ws_connection_count(
+    max_subs: u32,
+    target_count: usize,
+    subscriptions_per_ws: usize,
+) -> usize {
+    (0..target_count)
+        .map(|target_idx| {
+            let subscribers = subscribers_for_target(max_subs as usize, target_count, target_idx);
+            subscribers.div_ceil(subscriptions_per_ws.max(1))
+        })
+        .sum()
+}
+
 fn average_subscribe_time(total_subscribe_time_us: u64, connected: u32) -> Duration {
     if connected == 0 {
         return Duration::ZERO;
@@ -697,8 +835,7 @@ fn should_verify_delivery(tier_target: u32, max_subs: u32) -> bool {
         return true;
     }
 
-    tier_target == max_subs
-        || matches!(tier_target, 25_000 | 50_000 | 100_000 | 250_000)
+    tier_target == max_subs || matches!(tier_target, 25_000 | 50_000 | 100_000 | 250_000)
 }
 
 async fn wait_for_delivery(
@@ -710,9 +847,7 @@ async fn wait_for_delivery(
     let wait_start = Instant::now();
 
     loop {
-        let delivered = change_counter
-            .load(Ordering::Relaxed)
-            .saturating_sub(change_start);
+        let delivered = change_counter.load(Ordering::Relaxed).saturating_sub(change_start);
         if delivered >= expected_changes {
             return (delivered, wait_start.elapsed());
         }
@@ -793,10 +928,8 @@ fn build_shared_link_pool(
         for _ in 0..required_connections {
             let bind_address = client.ws_local_bind_address_for_index(bind_slot);
             target_pool.push(
-                client.new_isolated_link_for_ws_url_with_bind_address(
-                    Some(target),
-                    bind_address,
-                )?,
+                client
+                    .new_isolated_link_for_ws_url_with_bind_address(Some(target), bind_address)?,
             );
             bind_slot += 1;
         }
@@ -909,10 +1042,7 @@ fn read_sysctl_usize(name: &str) -> Option<usize> {
         return None;
     }
 
-    String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .parse::<usize>()
-        .ok()
+    String::from_utf8_lossy(&output.stdout).trim().parse::<usize>().ok()
 }
 
 fn configured_ws_local_bind_address_count() -> usize {
@@ -974,4 +1104,3 @@ async fn validate_ws_targets(
         Err(message)
     }
 }
-

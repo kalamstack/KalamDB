@@ -26,6 +26,14 @@ const initialState: AuthState = {
   error: null,
 };
 
+function normalizeUserInfo(user: UserInfo): UserInfo {
+  const normalizedUsername = user.username?.trim();
+  return {
+    ...user,
+    username: normalizedUsername && normalizedUsername.length > 0 ? normalizedUsername : user.id,
+  };
+}
+
 function extractAuthErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiRequestError) {
     return error.apiError.message;
@@ -117,7 +125,7 @@ const authSlice = createSlice({
         state.error = null;
       })
       .addCase(login.fulfilled, (state, action) => {
-        state.user = action.payload.user;
+        state.user = normalizeUserInfo(action.payload.user);
         state.accessToken = action.payload.access_token;
         state.expiresAt = action.payload.expires_at;
         state.isAuthenticated = true;
@@ -138,7 +146,7 @@ const authSlice = createSlice({
       })
       // Refresh
       .addCase(refresh.fulfilled, (state, action) => {
-        state.user = action.payload.user;
+        state.user = normalizeUserInfo(action.payload.user);
         state.accessToken = action.payload.access_token;
         state.expiresAt = action.payload.expires_at;
         state.isAuthenticated = true;
@@ -155,7 +163,7 @@ const authSlice = createSlice({
         state.isLoading = true;
       })
       .addCase(checkAuth.fulfilled, (state, action) => {
-        state.user = action.payload.user;
+        state.user = normalizeUserInfo(action.payload.user);
         state.accessToken = action.payload.access_token;
         state.expiresAt = action.payload.expires_at;
         state.isAuthenticated = true;

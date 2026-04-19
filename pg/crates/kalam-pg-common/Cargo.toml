@@ -13,4 +13,4 @@ datafusion = ["dep:datafusion-common"]
 [dependencies]
 thiserror = { workspace = true }
 serde = { workspace = true }
-datafusion-common = { workspace = true, optional = true }
+datafusion-common = { workspace = true, optional = true, default-features = false }

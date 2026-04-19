@@ -12,7 +12,7 @@ const MAX_PASSWORD_LENGTH: usize = 256;
 #[serde(deny_unknown_fields)]
 pub struct LoginRequest {
     /// Canonical user identifier for authentication
-    #[serde(deserialize_with = "validate_user_length")]
+    #[serde(alias = "username", deserialize_with = "validate_user_length")]
     pub user: String,
     /// Password for authentication
     #[serde(deserialize_with = "validate_password_length")]

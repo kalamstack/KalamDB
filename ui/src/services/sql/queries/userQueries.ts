@@ -89,7 +89,7 @@ export function buildUpdateUserStorageSql(
     return null;
   }
 
-  return `UPDATE system.users SET ${setClauses.join(", ")} WHERE username = '${escapeSqlLiteral(username)}'`;
+  return `UPDATE system.users SET ${setClauses.join(", ")} WHERE user_id = '${escapeSqlLiteral(username)}'`;
 }
 
 export function buildDeleteUserSql(username: string): string {

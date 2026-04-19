@@ -1,25 +1,44 @@
 {
   "name": "@kalamdb/orm",
-  "version": "0.1.0",
   "type": "module",
-  "description": "Drizzle ORM driver for KalamDB",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "version": "0.1.0",
+  "description": "Drizzle ORM driver and schema generator for KalamDB",
   "license": "Apache-2.0",
-  "keywords": ["kalamdb", "drizzle", "orm", "database", "driver"],
+  "author": "KalamDB Team",
   "repository": {
     "type": "git",
     "url": "https://github.com/kalamstack/KalamDB"
   },
+  "homepage": "https://github.com/kalamstack/KalamDB#readme",
+  "bugs": {
+    "url": "https://github.com/kalamstack/KalamDB/issues"
+  },
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
   "publishConfig": {
     "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   },
   "bin": {
     "kalamdb-orm": "dist/cli.js"
   },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
   "scripts": {
-    "build": "tsc",
-    "test": "npm run build && node --test tests/file-column.test.mjs tests/strip-defaults.test.mjs"
+    "clean": "node -e \"const fs=require('fs');try{fs.rmSync('dist',{recursive:true,force:true})}catch{}\"",
+    "build": "npm run clean && tsc",
+    "build:orm": "npm run build",
+    "test": "npm run build && node --test tests/driver.test.mjs tests/file-column.test.mjs tests/strip-defaults.test.mjs tests/generate.test.mjs tests/live.test.mjs tests/cli.test.mjs",
+    "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
     "@kalamdb/client": ">=0.4.0",
@@ -27,10 +46,20 @@
   },
   "devDependencies": {
     "@kalamdb/client": "file:../client",
+    "@types/node": "^25.5.2",
     "drizzle-orm": "^0.41.0",
     "typescript": "^5.8.0"
   },
-  "files": [
-    "dist"
-  ]
+  "keywords": [
+    "kalamdb",
+    "drizzle",
+    "orm",
+    "database",
+    "driver",
+    "schema",
+    "generator"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }

@@ -118,6 +118,15 @@ function extractWsMessageType(raw: string): string {
   }
 }
 
+function extractWsSubscriptionId(raw: string): string | null {
+  try {
+    const parsed = JSON.parse(raw);
+    return typeof parsed?.subscription_id === "string" ? parsed.subscription_id : null;
+  } catch {
+    return null;
+  }
+}
+
 function isWsErrorFrame(messageType: string): boolean {
   return messageType === "error" || messageType === "auth_error";
 }
@@ -214,6 +223,7 @@ export default function SqlStudio() {
   const [isRemoteWorkspaceHydrated, setIsRemoteWorkspaceHydrated] = useState(false);
   const liveUnsubscribeRef = useRef<Record<string, Unsubscribe>>({});
   const liveGenRef = useRef<Record<string, number>>({});
+  const liveSubscriptionIdRef = useRef<Record<string, string>>({});
   const consumedPrefillKeyRef = useRef<string | null>(null);
   const activeTabIdRef = useRef<string | null>(null);
   const lastSyncedWorkspaceSnapshotRef = useRef<string | null>(null);
@@ -272,13 +282,15 @@ export default function SqlStudio() {
       return;
     }
 
+    const username = user.username;
+
     let cancelled = false;
     let remoteUnsubscribe: Unsubscribe | null = null;
     let didReceiveInitialSnapshot = false;
 
     void (async () => {
       try {
-        remoteUnsubscribe = await subscribeToSyncedSqlStudioWorkspaceState(user.username, (nextWorkspace) => {
+        remoteUnsubscribe = await subscribeToSyncedSqlStudioWorkspaceState(username, (nextWorkspace) => {
           if (cancelled) {
             return;
           }
@@ -411,6 +423,7 @@ export default function SqlStudio() {
     if (unsubscribe) {
       void unsubscribe();
       delete liveUnsubscribeRef.current[tabId];
+      delete liveSubscriptionIdRef.current[tabId];
     }
   }, []);
 
@@ -571,6 +584,13 @@ export default function SqlStudio() {
 
     setClientReceiveListener((message: string) => {
       if (liveGenRef.current[tab.id] !== gen) return;
+      // Only log frames that belong to this tab's subscription (or have no
+      // subscription_id — e.g. auth, ping). This prevents the log panel from
+      // showing raw frames from other concurrent subscriptions (e.g. the
+      // internal workspace-sync subscription on the same WebSocket connection).
+      const msgSubId = extractWsSubscriptionId(message);
+      const tabSubId = liveSubscriptionIdRef.current[tab.id];
+      if (msgSubId !== null && tabSubId !== undefined && msgSubId !== tabSubId) return;
       const messageType = extractWsMessageType(message);
       const isErrorFrame = isWsErrorFrame(messageType);
       dispatch(appendWorkspaceResultLog({
@@ -640,6 +660,9 @@ export default function SqlStudio() {
 
           case "subscription_ack": {
             hasConnected = true;
+            // Record this tab's subscription ID so the receive listener can
+            // filter out frames from other concurrent subscriptions.
+            liveSubscriptionIdRef.current[tab.id] = msg.subscription_id;
             if (msg.schema.length > 0) {
               dispatch(setWorkspaceLiveSchema({
                 tabId: tab.id,

@@ -15,7 +15,7 @@ default = []
 import-foreign-schema = ["dep:kalam-pg-types", "kalamdb-commons/table-definition"]
 
 [dependencies]
-datafusion-common = { workspace = true }
+datafusion-common = { workspace = true, default-features = false }
 kalam-pg-api = { path = "../kalam-pg-api" }
 kalam-pg-common = { path = "../kalam-pg-common" }
 kalam-pg-types = { path = "../kalam-pg-types", optional = true }

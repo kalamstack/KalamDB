@@ -46,15 +46,36 @@ interface FormData {
   storageId: string;
 }
 
-function formatSystemValue(value: string | number | null | undefined): string {
+function valueToText(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function formatSystemValue(value: unknown): string {
   if (value === null || value === undefined) {
     return "N/A";
+  }
+  if (typeof value === "object") {
+    return valueToText(value);
   }
   return String(value);
 }
 
-function formatTimestampValue(value: string | number | null | undefined): string {
+function formatTimestampValue(value: unknown): string {
   if (!value) {
+    return "N/A";
+  }
+
+  if (typeof value !== "string" && typeof value !== "number") {
     return "N/A";
   }
 
@@ -67,7 +88,7 @@ function FieldHelp({ text }: { text: string }) {
 
 interface SystemFieldProps {
   label: string;
-  value: string | number | null | undefined;
+  value: unknown;
   description: string;
   monospace?: boolean;
   breakAll?: boolean;
@@ -115,7 +136,7 @@ export function UserForm({ open, onOpenChange, user, onSuccess }: UserFormProps)
       role: user?.role ?? "user",
       email: user?.email ?? "",
       authType: user?.auth_type ?? "password",
-      authData: user?.auth_data ?? "",
+      authData: valueToText(user?.auth_data),
       storageMode: user?.storage_mode === "region" ? "region" : "table",
       storageId: user?.storage_id ?? "",
     });

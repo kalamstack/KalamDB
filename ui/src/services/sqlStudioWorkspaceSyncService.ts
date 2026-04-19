@@ -324,3 +324,7 @@ export async function subscribeToSyncedSqlStudioWorkspaceState(
     },
   );
 }
+
+export async function ensureSyncedSqlStudioWorkspaceInitialized(): Promise<void> {
+  await ensureWorkspaceTable();
+}

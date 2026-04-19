@@ -4,7 +4,7 @@ import { like, eq, gte, lte, asc, desc, and, type SQL, type InferSelectModel } f
 
 export type AuditLog = InferSelectModel<typeof system_audit_log>;
 
-export type AuditLogSortKey = "timestamp" | "actor_username" | "action" | "target" | "ip_address";
+export type AuditLogSortKey = "timestamp" | "actor_user_id" | "action" | "target" | "ip_address";
 
 export interface AuditLogFilters {
   username?: string;
@@ -20,7 +20,7 @@ export interface AuditLogFilters {
 
 const sortColumnMap = {
   timestamp: system_audit_log.timestamp,
-  actor_username: system_audit_log.actor_username,
+  actor_user_id: system_audit_log.actor_user_id,
   action: system_audit_log.action,
   target: system_audit_log.target,
   ip_address: system_audit_log.ip_address,
@@ -31,7 +31,7 @@ export async function fetchAuditLogs(filters?: AuditLogFilters) {
   const conditions: SQL[] = [];
 
   if (filters?.username) {
-    conditions.push(like(system_audit_log.actor_username, `%${filters.username}%`));
+    conditions.push(like(system_audit_log.actor_user_id, `%${filters.username}%`));
   }
   if (filters?.action) {
     conditions.push(eq(system_audit_log.action, filters.action));
@@ -40,12 +40,18 @@ export async function fetchAuditLogs(filters?: AuditLogFilters) {
     conditions.push(like(system_audit_log.target, `%${filters.target}%`));
   }
   if (filters?.startDate) {
-    const startMs = new Date(filters.startDate).getTime();
-    if (!isNaN(startMs)) conditions.push(gte(system_audit_log.timestamp, startMs));
+    const startDate = new Date(filters.startDate);
+    if (!Number.isNaN(startDate.getTime())) {
+      const startIso = startDate.toISOString();
+      conditions.push(gte(system_audit_log.timestamp, startIso));
+    }
   }
   if (filters?.endDate) {
-    const endMs = new Date(filters.endDate).getTime();
-    if (!isNaN(endMs)) conditions.push(lte(system_audit_log.timestamp, endMs));
+    const endDate = new Date(filters.endDate);
+    if (!Number.isNaN(endDate.getTime())) {
+      const endIso = endDate.toISOString();
+      conditions.push(lte(system_audit_log.timestamp, endIso));
+    }
   }
 
   const sortCol = sortColumnMap[filters?.sortBy ?? "timestamp"];

@@ -123,7 +123,7 @@ function getActionColor(action: string): string {
   const hasActiveFilters = useMemo(
     () =>
       Boolean(
-        appliedFilters.user ||
+        appliedFilters.username ||
           appliedFilters.action ||
           appliedFilters.target ||
           appliedFilters.startDate ||
@@ -226,8 +226,8 @@ function getActionColor(action: string): string {
                 <label className="text-sm font-medium">User</label>
                 <Input
                   placeholder="Filter by user"
-                  value={draftFilters.user || ''}
-                  onChange={(e) => setDraftFilters({ ...draftFilters, user: e.target.value || undefined })}
+                  value={draftFilters.username || ''}
+                  onChange={(e) => setDraftFilters({ ...draftFilters, username: e.target.value || undefined })}
                 />
               </div>
               <div className="space-y-1">

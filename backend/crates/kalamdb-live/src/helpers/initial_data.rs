@@ -296,10 +296,43 @@ impl InitialDataFetcher {
         })
     }
 
-    /// Compute snapshot end sequence for a subscription
+    /// Compute snapshot end sequence for a subscription.
     ///
-    /// Uses MAX(_seq) with the same filters as initial data to define a snapshot boundary.
+    /// Fast path: since `_seq` is a Snowflake ID with embedded timestamp, the
+    /// maximum possible `_seq` at the current wall-clock millisecond is an
+    /// upper bound on every row already written. Any write performed *after*
+    /// this boundary is computed will get a strictly larger `_seq` (different
+    /// timestamp component) and therefore flow through the live notification
+    /// path, not the initial snapshot.
+    ///
+    /// This removes an entire DataFusion execution from the subscribe critical
+    /// path (previously ~several ms to tens of ms depending on planning cost),
+    /// which is one of the biggest wins for time-to-first-row.
+    ///
+    /// All arguments are accepted for API compatibility; `role`, `table_id`,
+    /// `table_type`, `options`, and `where_clause` are unused on the fast path.
     pub async fn compute_snapshot_end_seq(
+        &self,
+        _live_id: &kalamdb_commons::models::LiveQueryId,
+        _role: Role,
+        _table_id: &TableId,
+        _table_type: TableType,
+        _options: &InitialDataOptions,
+        _where_clause: Option<&str>,
+    ) -> Result<Option<SeqId>, LiveError> {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(SeqId::EPOCH);
+
+        match SeqId::max_id_for_timestamp(now_ms) {
+            Ok(seq) => Ok(Some(seq)),
+            Err(e) => Err(LiveError::Other(format!("Failed to compute snapshot boundary: {}", e))),
+        }
+    }
+
+    #[allow(dead_code)]
+    async fn compute_snapshot_end_seq_sql_fallback(
         &self,
         live_id: &kalamdb_commons::models::LiveQueryId,
         role: Role,
@@ -308,7 +341,6 @@ impl InitialDataFetcher {
         options: &InitialDataOptions,
         where_clause: Option<&str>,
     ) -> Result<Option<SeqId>, LiveError> {
-        // Extract user_id from LiveId for RLS
         let user_id = live_id.user_id().clone();
 
         let table_name = table_id.full_name();

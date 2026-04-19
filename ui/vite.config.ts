@@ -55,7 +55,7 @@ export default defineConfig(({ mode }) => {
         ),
         "@kalamdb/orm": path.resolve(
           __dirname,
-          "../link/sdks/typescript/orm/src/index.ts",
+          "../link/sdks/typescript/orm/dist/index.js",
         ),
       },
     },

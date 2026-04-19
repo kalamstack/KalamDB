@@ -857,9 +857,21 @@ impl WireNotification {
         let mut buf = Vec::with_capacity(est);
 
         buf.extend_from_slice(b"{\"type\":\"change\",\"subscription_id\":\"");
-        // Escape the subscription_id JSON-safely (ids are alphanumeric, but be safe).
-        let escaped = self.subscription_id.replace('\\', "\\\\").replace('"', "\\\"");
-        buf.extend_from_slice(escaped.as_bytes());
+        // Fast path: the overwhelming majority of real subscription IDs are
+        // plain ASCII (UUIDs, cuids, alnum+`-_`), so we can splice the raw
+        // bytes without allocating a second String for escaping. Only fall
+        // back to the allocating path when we actually see a byte that would
+        // need JSON escaping.
+        let sid_bytes = self.subscription_id.as_bytes();
+        let needs_escape = sid_bytes
+            .iter()
+            .any(|&b| b == b'\\' || b == b'"' || b < 0x20 || b >= 0x7f);
+        if needs_escape {
+            let escaped = self.subscription_id.replace('\\', "\\\\").replace('"', "\\\"");
+            buf.extend_from_slice(escaped.as_bytes());
+        } else {
+            buf.extend_from_slice(sid_bytes);
+        }
         buf.extend_from_slice(b"\",\"change_type\":\"");
         buf.extend_from_slice(p.change_type.as_str().as_bytes());
         buf.push(b'"');

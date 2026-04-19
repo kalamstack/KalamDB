@@ -29,14 +29,26 @@ use tokio::sync::mpsc;
 /// Number of sharded notification workers.
 /// Deterministic routing by table_id hash preserves per-table ordering
 /// while achieving parallelism across different tables.
-const NUM_NOTIFY_WORKERS: usize = 4;
+///
+/// Scales with available CPUs (up to a hard cap) so multi-core deployments
+/// can fan out across more tables in parallel. Falls back to 4 on the
+/// (rare) platforms where `available_parallelism` is unavailable.
+fn num_notify_workers() -> usize {
+    // Cap at 16 to bound DashMap contention and worker overhead.
+    // Minimum of 4 preserves previous baseline behavior on small machines.
+    let cpus =
+        std::thread::available_parallelism().map(std::num::NonZeroUsize::get).unwrap_or(4);
+    cpus.clamp(4, 16)
+}
 
-/// Per-worker queue capacity. Total capacity = NUM_NOTIFY_WORKERS × this value.
+/// Per-worker queue capacity. Total capacity = workers × this value.
 const NOTIFY_QUEUE_PER_WORKER: usize = 4_096;
 
-/// Number of subscribers per parallel chunk for shared table streaming notification.
-/// Tuned to amortize tokio::spawn overhead while achieving parallelism at scale.
-const SHARED_NOTIFY_CHUNK_SIZE: usize = 256;
+/// Subscriber count above which we break fan-out into spawned chunks.
+/// For single-table fan-out at high subscriber counts (e.g. 100K on one
+/// table all hashing to one worker), spawning per-chunk lets the tokio
+/// runtime parallelise delivery across its thread pool.
+const SHARED_NOTIFY_CHUNK_SIZE: usize = 512;
 
 struct NotificationTask {
     user_id: Option<UserId>,
@@ -274,10 +286,11 @@ impl NotificationService {
     }
 
     pub fn new(registry: Arc<ConnectionsManager>) -> Arc<Self> {
-        let mut worker_txs = Vec::with_capacity(NUM_NOTIFY_WORKERS);
-        let mut worker_rxs = Vec::with_capacity(NUM_NOTIFY_WORKERS);
+        let worker_count = num_notify_workers();
+        let mut worker_txs = Vec::with_capacity(worker_count);
+        let mut worker_rxs = Vec::with_capacity(worker_count);
 
-        for _ in 0..NUM_NOTIFY_WORKERS {
+        for _ in 0..worker_count {
             let (tx, rx) = mpsc::channel(NOTIFY_QUEUE_PER_WORKER);
             worker_txs.push(tx);
             worker_rxs.push(rx);
@@ -424,35 +437,46 @@ impl NotificationService {
             );
         }
 
-        // Large fan-out: parallel chunked dispatch
-        // Large fan-out: collect handles once, then parallel chunked dispatch
-        let handles: Vec<SubscriptionHandle> =
+        // Large fan-out: spawn a task per chunk so the tokio runtime can
+        // parallelise delivery across its thread pool. When all subscribers
+        // are on the same table they hash to one notification worker —
+        // spawning is the only way to utilise multiple cores for the fan-out.
+        let handles_vec: Vec<SubscriptionHandle> =
             all_handles.iter().map(|entry| entry.value().clone()).collect();
 
-        let mut join_handles = Vec::with_capacity(
-            (handles.len() + SHARED_NOTIFY_CHUNK_SIZE - 1) / SHARED_NOTIFY_CHUNK_SIZE,
-        );
+        let table_id = table_id.clone();
+        let mut tasks = Vec::new();
 
-        for chunk in handles.chunks(SHARED_NOTIFY_CHUNK_SIZE) {
-            let chunk = chunk.to_vec();
-            let nr = Arc::clone(&new_row);
-            let or = old_row.as_ref().map(Arc::clone);
-            let ct = change_type.clone();
-            let pk = Arc::clone(&pk_columns);
+        for chunk in handles_vec.chunks(SHARED_NOTIFY_CHUNK_SIZE) {
+            let chunk_handles: Vec<SubscriptionHandle> = chunk.to_vec();
+            let new_row = Arc::clone(&new_row);
+            let old_row = old_row.as_ref().map(Arc::clone);
+            let change_type = change_type.clone();
+            let pk_columns = Arc::clone(&pk_columns);
+            let table_id = table_id.clone();
 
-            join_handles.push(tokio::spawn(async move {
-                dispatch_chunk(chunk.into_iter(), &nr, or.as_deref(), &ct, &pk, seq_value)
+            tasks.push(tokio::spawn(async move {
+                match dispatch_chunk(
+                    chunk_handles.into_iter(),
+                    &new_row,
+                    old_row.as_deref(),
+                    &change_type,
+                    &pk_columns,
+                    seq_value,
+                ) {
+                    Ok(count) => count,
+                    Err(e) => {
+                        log::error!("Notification dispatch error for table {}: {}", table_id, e);
+                        0
+                    },
+                }
             }));
         }
 
         let mut total = 0usize;
-        for jh in join_handles {
-            match jh.await {
-                Ok(Ok(count)) => total += count,
-                Ok(Err(e)) => {
-                    log::error!("Notification dispatch error for table {}: {}", table_id, e);
-                },
-                Err(e) => log::error!("Notification chunk task panicked: {}", e),
+        for task in tasks {
+            if let Ok(count) = task.await {
+                total += count;
             }
         }
 

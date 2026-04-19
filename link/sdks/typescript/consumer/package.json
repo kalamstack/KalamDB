@@ -1,7 +1,7 @@
 {
   "name": "@kalamdb/consumer",
   "type": "module",
-  "version": "0.4.2-rc.2.1",
+  "version": "0.4.2-rc.3",
   "description": "Topic consumer and agent runtime package for KalamDB",
   "license": "Apache-2.0",
   "author": "KalamDB Team",

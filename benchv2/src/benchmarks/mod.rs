@@ -39,6 +39,7 @@ use std::pin::Pin;
 
 use crate::client::KalamClient;
 use crate::config::Config;
+use crate::metrics::BenchmarkDetail;
 
 /// Trait that every benchmark must implement.
 /// To add a new benchmark: create a file, implement this trait, and register it in `all_benchmarks()`.
@@ -51,6 +52,21 @@ pub trait Benchmark: Send + Sync {
 
     /// Short human-readable description.
     fn description(&self) -> &str;
+
+    /// Report summary shown in generated artifacts.
+    fn report_description(&self, _config: &Config) -> String {
+        self.description().to_string()
+    }
+
+    /// Full report description shown in tooltips.
+    fn report_full_description(&self, config: &Config) -> String {
+        self.report_description(config)
+    }
+
+    /// Benchmark-specific details shown in generated reports.
+    fn report_details(&self, _config: &Config) -> Vec<BenchmarkDetail> {
+        Vec::new()
+    }
 
     /// One-time setup (create tables, seed data, etc). Called once before warmup+iterations.
     fn setup<'a>(

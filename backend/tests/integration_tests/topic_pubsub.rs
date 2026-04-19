@@ -497,21 +497,22 @@ async fn test_cdc_insert_to_consume_workflow() {
     assert!(!result.results.is_empty(), "CONSUME should return batches");
 
     if let Some(first_batch) = result.results.first() {
-        // Check we have the expected 7 columns from topic_message_schema
+        // Check we have the expected 8 columns from topic_message_schema
         assert_eq!(
             first_batch.schema.len(),
-            7,
-            "Should have 7 schema fields (topic, partition, offset, key, payload, timestamp_ms, op)"
+            8,
+            "Should have 8 schema fields (topic_id, partition_id, offset, key, payload, timestamp_ms, user_id, op)"
         );
 
         // Verify column names match schema
-        assert_eq!(first_batch.schema[0].name, "topic");
-        assert_eq!(first_batch.schema[1].name, "partition");
+        assert_eq!(first_batch.schema[0].name, "topic_id");
+        assert_eq!(first_batch.schema[1].name, "partition_id");
         assert_eq!(first_batch.schema[2].name, "offset");
         assert_eq!(first_batch.schema[3].name, "key");
         assert_eq!(first_batch.schema[4].name, "payload");
         assert_eq!(first_batch.schema[5].name, "timestamp_ms");
-        assert_eq!(first_batch.schema[6].name, "op");
+        assert_eq!(first_batch.schema[6].name, "user_id");
+        assert_eq!(first_batch.schema[7].name, "op");
 
         // Row count is eventually consistent in current CDC test environment.
         // Validate schema and successful consume response; payload-count strictness
@@ -544,17 +545,18 @@ async fn test_consume_schema_structure() {
     if !result.results.is_empty() {
         let batch = &result.results[0];
 
-        // Must have exactly 7 schema fields
-        assert_eq!(batch.schema.len(), 7, "Topic message schema must have 7 fields");
+        // Must have exactly 8 schema fields
+        assert_eq!(batch.schema.len(), 8, "Topic message schema must have 8 fields");
 
         // Verify field names and order
         let expected_fields = vec![
-            "topic",
-            "partition",
+            "topic_id",
+            "partition_id",
             "offset",
             "key",
             "payload",
             "timestamp_ms",
+            "user_id",
             "op",
         ];
         for (i, expected_name) in expected_fields.iter().enumerate() {

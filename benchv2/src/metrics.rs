@@ -2,6 +2,25 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+/// Additional benchmark-specific detail rendered in reports.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BenchmarkDetail {
+    /// Short label for the detail value.
+    pub label: String,
+    /// Human-readable value.
+    pub value: String,
+}
+
+impl BenchmarkDetail {
+    /// Create a benchmark detail entry.
+    pub fn new(label: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            value: value.into(),
+        }
+    }
+}
+
 /// Statistics for a single benchmark operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BenchmarkResult {
@@ -11,6 +30,12 @@ pub struct BenchmarkResult {
     pub category: String,
     /// Human-readable description
     pub description: String,
+    /// Full description shown in report tooltips.
+    #[serde(default)]
+    pub full_description: String,
+    /// Benchmark-specific details shown alongside the description.
+    #[serde(default)]
+    pub details: Vec<BenchmarkDetail>,
     /// Number of iterations measured (excluding warmup)
     pub iterations: u32,
     /// Individual iteration durations in microseconds
@@ -86,6 +111,8 @@ impl BenchmarkResult {
             name: name.to_string(),
             category: category.to_string(),
             description: description.to_string(),
+            full_description: description.to_string(),
+            details: Vec::new(),
             iterations: us_values.len() as u32,
             raw_durations_us: us_values,
             total_us,
@@ -108,6 +135,8 @@ impl BenchmarkResult {
             name: name.to_string(),
             category: category.to_string(),
             description: description.to_string(),
+            full_description: description.to_string(),
+            details: Vec::new(),
             iterations: 0,
             raw_durations_us: vec![],
             total_us: 0,
@@ -122,6 +151,21 @@ impl BenchmarkResult {
             success: false,
             error: Some(error),
         }
+    }
+
+    /// Attach richer report context to a benchmark result.
+    #[must_use]
+    pub fn with_report_context(
+        mut self,
+        full_description: impl Into<String>,
+        details: Vec<BenchmarkDetail>,
+    ) -> Self {
+        let full_description = full_description.into();
+        if !full_description.is_empty() {
+            self.full_description = full_description;
+        }
+        self.details = details;
+        self
     }
 }
 
@@ -176,6 +220,8 @@ pub struct ReportConfig {
     pub warmup: u32,
     pub concurrency: u32,
     pub namespace: String,
+    #[serde(default)]
+    pub max_subscribers: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -183,5 +229,32 @@ pub struct ReportSummary {
     pub total_benchmarks: u32,
     pub passed: u32,
     pub failed: u32,
+    /// End-to-end wall-clock duration for the report run.
     pub total_duration_ms: f64,
+    /// Sum of measured benchmark iteration durations.
+    #[serde(default)]
+    pub measured_duration_ms: f64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn benchmark_result_attaches_report_context() {
+        let result = BenchmarkResult::from_durations(
+            "subscriber_scale",
+            "Scale",
+            "short description",
+            vec![Duration::from_micros(3_700_434)],
+        )
+        .with_report_context(
+            "full description",
+            vec![BenchmarkDetail::new("Batch/Wave", "1.0K / 500")],
+        );
+
+        assert_eq!(result.full_description, "full description");
+        assert_eq!(result.details.len(), 1);
+        assert_eq!(result.total_us, 3_700_434);
+    }
 }

@@ -11,14 +11,15 @@
     "generate:schema": "npm run build:orm && node ../link/sdks/typescript/orm/dist/cli.js --url http://localhost:8088 --out src/lib/schema.ts --include-system",
     "clean": "node -e \"const fs=require('fs');const rm=(p)=>{try{fs.rmSync(p,{recursive:true,force:true})}catch{}};rm('node_modules/.vite');rm('dist')\"",
     "clean:all": "node -e \"const fs=require('fs');const rm=(p)=>{try{fs.rmSync(p,{recursive:true,force:true})}catch{}};rm('node_modules/.vite');rm('dist');rm('node_modules/@kalam')\"",
-    "reinstall": "npm run clean:all && npm run build:sdk && npm install && vite",
+    "reinstall": "npm run clean:all && npm run build:sdk && npm run build:orm && npm install && vite",
     "dev": "vite",
-    "dev:fresh": "npm run clean:all && npm run build:sdk && npm install && vite",
-    "prebuild": "npm run build:sdk",
+    "dev:fresh": "npm run clean:all && npm run build:sdk && npm run build:orm && npm install && vite",
+    "prebuild": "npm run build:sdk && npm run build:orm",
     "build": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
-    "test": "vitest"
+    "test": "vitest",
+    "test:flows": "vitest run src/components/auth/LoginForm.test.tsx src/components/auth/ProtectedRoute.test.tsx src/components/auth/SetupGuard.test.tsx src/pages/SetupWizard.test.tsx src/pages/SqlStudio.test.tsx"
   },
   "dependencies": {
     "@kalamdb/client": "file:../link/sdks/typescript/client",
@@ -43,8 +44,8 @@
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.2",
     "lucide-react": "^1.7.0",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
     "react-hook-form": "^7.72.1",
     "react-redux": "^9.2.0",
     "react-resizable-panels": "^4.9.0",
@@ -71,7 +72,7 @@
     "postcss": "^8.5.8",
     "tailwindcss": "^4.2.2",
     "typescript": "^6.0.2",
-    "vite": "^8.0.5",
-    "vitest": "^4.1.2"
+    "vite": "^8.0.8",
+    "vitest": "^4.1.4"
   }
 }

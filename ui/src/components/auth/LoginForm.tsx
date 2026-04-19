@@ -26,7 +26,7 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
     }
 
     try {
-      await login({ username, password });
+      await login({ user: username, password });
       onSuccess?.();
     } catch {
       // Error is already handled by auth context

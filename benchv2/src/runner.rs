@@ -92,10 +92,15 @@ async fn run_single(
     client: &KalamClient,
     config: &Config,
 ) -> BenchmarkResult {
+    let report_description = bench.report_description(config);
+    let full_description = bench.report_full_description(config);
+    let report_details = bench.report_details(config);
+
     // --- Setup ---
     print!("  Setting up...");
     if let Err(e) = bench.setup(client, config).await {
-        return BenchmarkResult::failed(bench.name(), bench.category(), bench.description(), e);
+        return BenchmarkResult::failed(bench.name(), bench.category(), &report_description, e)
+            .with_report_context(full_description.clone(), report_details.clone());
     }
     println!(" done");
 
@@ -115,9 +120,10 @@ async fn run_single(
                 return BenchmarkResult::failed(
                     bench.name(),
                     bench.category(),
-                    bench.description(),
+                    &report_description,
                     format!("Warmup failed: {}", e),
-                );
+                )
+                .with_report_context(full_description.clone(), report_details.clone());
             }
         }
         println!(" done");
@@ -137,9 +143,10 @@ async fn run_single(
             return BenchmarkResult::failed(
                 bench.name(),
                 bench.category(),
-                bench.description(),
+                &report_description,
                 format!("Iteration {} failed: {}", i, e),
-            );
+            )
+            .with_report_context(full_description.clone(), report_details.clone());
         }
         durations.push(start.elapsed());
     }
@@ -150,5 +157,6 @@ async fn run_single(
     let _ = bench.teardown(client, config).await;
     println!(" done");
 
-    BenchmarkResult::from_durations(bench.name(), bench.category(), bench.description(), durations)
+    BenchmarkResult::from_durations(bench.name(), bench.category(), &report_description, durations)
+        .with_report_context(full_description, report_details)
 }

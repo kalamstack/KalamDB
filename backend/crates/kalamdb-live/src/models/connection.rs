@@ -73,7 +73,8 @@ fn intern_subscription_str(value: &str) -> Arc<str> {
 /// Maximum pending notifications per connection before dropping new ones.
 /// Keep this modest: large snapshot catch-up is handled by per-subscription
 /// flow control, while a smaller live buffer reduces worst-case memory per
-/// slow connection.
+/// slow connection. At 100k concurrent idle connections this directly
+/// governs the per-connection memory floor.
 pub const NOTIFICATION_CHANNEL_CAPACITY: usize = 256;
 
 /// Maximum pending control events per connection.

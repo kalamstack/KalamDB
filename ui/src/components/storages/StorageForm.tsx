@@ -92,6 +92,20 @@ interface FormData {
   user_tables_template: string;
 }
 
+function jsonValueToText(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
 function FieldHelp({ text }: { text: string }) {
   return <p className="text-xs text-muted-foreground">{text}</p>;
 }
@@ -130,8 +144,8 @@ export function StorageForm({ open, onOpenChange, storage, onSuccess }: StorageF
       storage_name: storage?.storage_name ?? "",
       description: storage?.description ?? "",
       base_directory: storage?.base_directory ?? "",
-      credentials: storage?.credentials ?? "",
-      config_json: storage?.config_json ?? "",
+      credentials: jsonValueToText(storage?.credentials),
+      config_json: jsonValueToText(storage?.config_json),
       shared_tables_template: storage?.shared_tables_template ?? "{namespace}/{tableName}/",
       user_tables_template: storage?.user_tables_template ?? "{namespace}/{tableName}/{userId}/",
     });
@@ -160,7 +174,7 @@ export function StorageForm({ open, onOpenChange, storage, onSuccess }: StorageF
           input: {
             storage_name: formData.storage_name !== storage.storage_name ? formData.storage_name : undefined,
             description: formData.description !== (storage.description ?? "") ? formData.description : undefined,
-            config_json: formData.config_json !== (storage.config_json ?? "") ? formData.config_json : undefined,
+            config_json: formData.config_json !== jsonValueToText(storage.config_json) ? formData.config_json : undefined,
             shared_tables_template:
               formData.shared_tables_template !== (storage.shared_tables_template ?? "")
                 ? formData.shared_tables_template

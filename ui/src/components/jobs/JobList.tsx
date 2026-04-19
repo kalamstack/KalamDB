@@ -56,12 +56,33 @@ const STATUS_ICONS: Record<string, React.ReactNode> = {
 };
 
 // Helper to extract namespace_id and table_name from parameters JSON
-function parseJobParams(parameters: string | null): { namespace_id?: string; table_name?: string } {
-  if (!parameters) return {};
+function parseJobParams(parameters: unknown): { namespace_id?: string; table_name?: string } {
+  if (parameters === null || parameters === undefined) return {};
+
+  if (typeof parameters === 'object') {
+    return parameters as { namespace_id?: string; table_name?: string };
+  }
+
+  if (typeof parameters !== 'string') {
+    return {};
+  }
+
   try {
     return JSON.parse(parameters);
   } catch {
     return {};
+  }
+}
+
+function stringifyJobParameters(parameters: unknown): string {
+  if (typeof parameters === 'string') {
+    return parameters;
+  }
+
+  try {
+    return JSON.stringify(parameters, null, 2);
+  } catch {
+    return String(parameters);
   }
 }
 
@@ -496,10 +517,10 @@ export function JobList({ initialFilters, compact = false, onJobClick }: JobList
                 </div>
               )}
 
-              {selectedJob.parameters && (
+              {Boolean(selectedJob.parameters) && (
                 <div>
                   <label className="text-sm font-medium text-muted-foreground">Parameters</label>
-                  <CodeBlock value={selectedJob.parameters} jsonPreferred maxHeightClassName="max-h-[260px]" />
+                  <CodeBlock value={stringifyJobParameters(selectedJob.parameters)} jsonPreferred maxHeightClassName="max-h-[260px]" />
                 </div>
               )}
 

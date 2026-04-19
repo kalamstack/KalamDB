@@ -30,7 +30,7 @@ e2e = []
 [dependencies]
 async-trait = { workspace = true }
 arrow = { workspace = true }
-datafusion-common = { workspace = true }
+datafusion-common = { workspace = true, default-features = false }
 kalam-pg-api = { path = "crates/kalam-pg-api" }
 kalam-pg-client = { path = "crates/kalam-pg-client", default-features = false }
 kalam-pg-common = { path = "crates/kalam-pg-common", default-features = false }

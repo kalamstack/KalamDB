@@ -2,6 +2,12 @@
 //!
 //! Provides gzip compression for WebSocket messages to reduce bandwidth.
 //! Compression is enabled by default for all messages over the threshold.
+//!
+//! Performance: pre-sizes the output buffer to a fraction of the input so
+//! the encoder doesn't grow through multiple doublings on large payloads.
+//! actix-ws consumes owned `Vec<u8>`, so a single allocation per message is
+//! unavoidable without a per-connection write pipeline; this keeps it to
+//! exactly one modestly-sized allocation rather than several doublings.
 
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -11,20 +17,28 @@ use std::io::Write;
 /// Messages smaller than this are sent uncompressed
 pub const COMPRESSION_THRESHOLD: usize = 512;
 
-/// Compress data using gzip
+/// Heuristic initial capacity for gzip output. Real-world JSON payloads
+/// compress to 20–40% of original; pre-sizing to 1/3 avoids 2–3
+/// `Vec::grow` reallocations inside the encoder on the hot path.
+#[inline]
+fn gzip_initial_capacity(input_len: usize) -> usize {
+    // Minimum gzip header + footer overhead is ~20 bytes.
+    (input_len / 3).max(64)
+}
+
+/// Compress data using gzip.
 ///
-/// Returns compressed bytes on success, or the original data if compression fails
+/// Returns compressed bytes on success, or the original data if compression fails.
 pub fn compress_gzip(data: &[u8]) -> Vec<u8> {
-    let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+    let buf = Vec::with_capacity(gzip_initial_capacity(data.len()));
+    let mut encoder = GzEncoder::new(buf, Compression::fast());
     if encoder.write_all(data).is_ok() {
         if let Ok(compressed) = encoder.finish() {
-            // Only use compressed if it's actually smaller
             if compressed.len() < data.len() {
                 return compressed;
             }
         }
     }
-    // Fallback to original data
     data.to_vec()
 }
 

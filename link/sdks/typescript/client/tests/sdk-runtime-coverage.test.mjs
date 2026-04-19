@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   Auth,
+  LogLevel,
   SeqId,
   createClient,
 } from '../dist/src/index.js';
@@ -160,6 +161,13 @@ function createRuntimeCoverageWasmClient() {
       }
       callback(JSON.stringify(event));
     },
+    emitSubscriptionRaw(subscriptionId, payload) {
+      const callback = subscriptionCallbacks.get(subscriptionId);
+      if (!callback) {
+        throw new Error(`Missing subscription callback for ${subscriptionId}`);
+      }
+      callback(payload);
+    },
     emitLiveRows(subscriptionId, rows, lastSeqId) {
       const callback = liveCallbacks.get(subscriptionId);
       if (!callback) {
@@ -170,6 +178,18 @@ function createRuntimeCoverageWasmClient() {
         sub.lastSeqId = String(lastSeqId);
       }
       callback(JSON.stringify({ type: 'rows', subscription_id: subscriptionId, rows }));
+    },
+    emitLiveError(subscriptionId, code, message) {
+      const callback = liveCallbacks.get(subscriptionId);
+      if (!callback) {
+        throw new Error(`Missing live callback for ${subscriptionId}`);
+      }
+      callback(JSON.stringify({
+        type: 'error',
+        subscription_id: subscriptionId,
+        ...(code !== undefined ? { code } : {}),
+        ...(message !== undefined ? { message } : {}),
+      }));
     },
     setReconnectAttempts(value) {
       reconnectAttempts = value;
@@ -337,5 +357,145 @@ test('login refresh and reconnect helpers delegate to wasm client', async () => 
     globalThis.fetch = originalFetch;
     WasmKalamClient.withJwt = originalWithJwt;
   }
+});
+
+test('live uses subscribe fallback when getKey is provided and handles updates/deletes/errors', async () => {
+  const client = createClient({
+    url: 'http://127.0.0.1:8080',
+    authProvider: async () => Auth.jwt('coverage-token'),
+  });
+  const fakeWasmClient = createRuntimeCoverageWasmClient();
+  client.initialized = true;
+  client.wasmClient = fakeWasmClient;
+
+  const snapshots = [];
+  const errors = [];
+  const unsub = await client.live('SELECT * FROM demo.items', (rows) => {
+    snapshots.push(rows.map((row) => `${row.id}:${row.title}`));
+  }, {
+    getKey: (row) => row.id,
+    mapRow: (row) => ({
+      id: row.id.asString(),
+      title: row.title.asString(),
+    }),
+    subscriptionOptions: { last_rows: 3 },
+    onError: (event) => errors.push(`${event.code}:${event.message}`),
+  });
+
+  assert.equal(fakeWasmClient.subscribeCalls.length, 1, 'fallback should use subscribeWithSql');
+  assert.equal(fakeWasmClient.liveSubscribeCalls.length, 0, 'fallback must not call liveQueryRowsWithSql');
+  assert.deepEqual(JSON.parse(fakeWasmClient.subscribeCalls[0].optionsJson), {
+    last_rows: 3,
+  });
+
+  fakeWasmClient.emitSubscription('sub-1', {
+    type: 'initial_data_batch',
+    subscription_id: 'sub-1',
+    rows: [
+      { id: '1', title: 'one' },
+      { id: '2', title: 'two' },
+    ],
+    batch_control: { batch_num: 0, has_more: false, status: 'ready', last_seq_id: null },
+  }, 11);
+
+  fakeWasmClient.emitSubscription('sub-1', {
+    type: 'change',
+    change_type: 'update',
+    subscription_id: 'sub-1',
+    rows: [{ id: '2', title: 'two-updated' }],
+    old_values: [{ id: '2', title: 'two' }],
+  }, 12);
+
+  fakeWasmClient.emitSubscription('sub-1', {
+    type: 'change',
+    change_type: 'delete',
+    subscription_id: 'sub-1',
+    rows: [],
+    old_values: [{ id: '1', title: 'one' }],
+  }, 13);
+
+  fakeWasmClient.emitSubscription('sub-1', {
+    type: 'error',
+    subscription_id: 'sub-1',
+    code: 'TEST_ERR',
+    message: 'fallback error path',
+  }, 14);
+
+  assert.deepEqual(snapshots, [
+    ['1:one', '2:two'],
+    ['1:one', '2:two-updated'],
+    ['2:two-updated'],
+  ]);
+  assert.deepEqual(errors, ['TEST_ERR:fallback error path']);
+
+  await unsub();
+});
+
+test('log listener receives messages at configured level and parse errors are logged', async () => {
+  const entries = [];
+  const client = createClient({
+    url: 'http://127.0.0.1:8080',
+    authProvider: async () => Auth.jwt('coverage-token'),
+    logLevel: LogLevel.Debug,
+    logListener: (entry) => entries.push(entry),
+  });
+  const fakeWasmClient = createRuntimeCoverageWasmClient();
+  client.initialized = true;
+  client.wasmClient = fakeWasmClient;
+
+  const unsub = await client.subscribeWithSql('SELECT * FROM demo.logs', () => {});
+  assert.ok(
+    entries.some((entry) => entry.tag === 'subscription' && entry.message.includes('Subscribing to:')),
+    'debug subscription start log should be emitted',
+  );
+  assert.ok(
+    entries.some((entry) => entry.tag === 'subscription' && entry.message.includes('Subscribed: id=')),
+    'subscription success log should be emitted',
+  );
+
+  entries.length = 0;
+  client.setLogLevel(LogLevel.Error);
+  fakeWasmClient.emitSubscriptionRaw('sub-1', '{not-json');
+
+  assert.ok(entries.length >= 1, 'parse failure should produce an error log entry');
+  assert.ok(entries.every((entry) => entry.level === LogLevel.Error));
+  assert.ok(entries.some((entry) => entry.message.includes('Failed to parse callback payload')));
+
+  await unsub();
+});
+
+test('live normalizes keyColumns and reports default onError fields for live-row errors', async () => {
+  const errors = [];
+  const snapshots = [];
+  const client = createClient({
+    url: 'http://127.0.0.1:8080',
+    authProvider: async () => Auth.jwt('coverage-token'),
+  });
+  const fakeWasmClient = createRuntimeCoverageWasmClient();
+  client.initialized = true;
+  client.wasmClient = fakeWasmClient;
+
+  const unsub = await client.live('SELECT * FROM demo.messages', (rows) => {
+    snapshots.push(rows.length);
+  }, {
+    limit: 50,
+    keyColumns: [' room_id ', '', 'room_id', 'message_id'],
+    onError: (event) => errors.push(event),
+  });
+
+  assert.deepEqual(JSON.parse(fakeWasmClient.liveSubscribeCalls[0].optionsJson), {
+    limit: 50,
+    key_columns: ['room_id', 'message_id'],
+  });
+
+  fakeWasmClient.emitLiveError('live-1');
+
+  assert.equal(snapshots.length, 0, 'rows callback should not run for live error events');
+  assert.equal(errors.length, 1, 'onError should receive live error events');
+  assert.equal(errors[0].code, 'unknown');
+  assert.equal(errors[0].message, 'Live query failed');
+  assert.equal(errors[0].subscription_id, 'live-1');
+
+  await unsub();
 });
 

@@ -61,8 +61,8 @@ describe('generateSchema', () => {
     assert.ok(!fullSchema.includes("actorUsername:"));
   });
 
-  it('maps timestamps to bigint with mode number', () => {
-    assert.ok(fullSchema.includes("bigint('created_at', { mode: 'number' })"));
+  it('maps timestamps to timestamp with mode string', () => {
+    assert.ok(fullSchema.includes("timestamp('created_at', { mode: 'string' })"));
   });
 
   it('marks non-nullable columns with notNull()', () => {
@@ -109,12 +109,12 @@ describe('generateSchema', () => {
     assert.ok(!idDef.includes("bigint("), 'BIGINT should not use bigint type');
   });
 
-  it('keeps TIMESTAMP as bigint with mode number', () => {
+  it('keeps TIMESTAMP as drizzle timestamp with mode string', () => {
     const lines = fullSchema.split('\n');
     const tableStart = lines.findIndex((l) => l.includes('test_gen_with_defaults'));
     const tableLines = lines.slice(tableStart, tableStart + 6);
     const createdDef = tableLines.find((l) => l.trim().startsWith('created_at:'));
-    assert.ok(createdDef.includes("bigint('created_at', { mode: 'number' })"), 'timestamp should stay bigint');
+    assert.ok(createdDef.includes("timestamp('created_at', { mode: 'string' })"), 'timestamp should use drizzle timestamp');
   });
 
   it('marks literal default columns', () => {

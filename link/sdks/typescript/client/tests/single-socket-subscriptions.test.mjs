@@ -341,3 +341,116 @@ test('parallel subscribe storms connect once and keep sibling subscriptions isol
   await Promise.all(unsubs.filter((_, index) => index !== 4).map((unsub) => unsub()));
   assert.equal(client.getSubscriptionCount(), 0);
 });
+
+// ---------------------------------------------------------------------------
+// Cross-subscription isolation: change events must only reach the matching
+// subscription callback, even when multiple subscriptions share one connection.
+// This is a regression test for the bug where events keyed by the server's
+// subscription_id were routed via `ends_with()` and could match the wrong
+// client-side subscription, causing cross-subscription event leakage.
+// ---------------------------------------------------------------------------
+test('change events are delivered only to the matching subscription (cross-subscription isolation)', async () => {
+  const client = createClient({
+    url: 'http://127.0.0.1:8080',
+    authProvider: async () => Auth.jwt('fixture-token'),
+  });
+
+  const fakeWasmClient = createFakeWasmClient();
+  client.initialized = true;
+  client.wasmClient = fakeWasmClient;
+
+  const eventsA = [];
+  const eventsB = [];
+
+  const [unsubA, unsubB] = await Promise.all([
+    client.subscribeWithSql('SELECT * FROM ns.table_a', (event) => eventsA.push(event)),
+    client.subscribeWithSql('SELECT * FROM ns.table_b', (event) => eventsB.push(event)),
+  ]);
+
+  // The fake WASM client assigns sub-1 to table_a and sub-2 to table_b.
+  // Emit a change only on sub-1 (table_a).
+  fakeWasmClient.emit('sub-1', {
+    type: 'change',
+    change_type: 'insert',
+    subscription_id: 'sub-1',
+    rows: [{ id: '10', value: 'row-for-a' }],
+    old_values: [],
+  });
+
+  // Only eventsA should receive the event; eventsB must remain empty.
+  assert.equal(eventsA.length, 1, 'subscription A should receive its own change event');
+  assert.equal(eventsB.length, 0, 'subscription B must NOT receive events targeted at subscription A');
+  assert.equal(eventsA[0].rows[0].id.asString(), '10');
+
+  // Now emit a change only on sub-2 (table_b).
+  fakeWasmClient.emit('sub-2', {
+    type: 'change',
+    change_type: 'insert',
+    subscription_id: 'sub-2',
+    rows: [{ id: '20', value: 'row-for-b' }],
+    old_values: [],
+  });
+
+  // eventsA must still have exactly one event; eventsB gets its own event.
+  assert.equal(eventsA.length, 1, 'subscription A must NOT receive events targeted at subscription B');
+  assert.equal(eventsB.length, 1, 'subscription B should receive its own change event');
+  assert.equal(eventsB[0].rows[0].id.asString(), '20');
+
+  await unsubA();
+  await unsubB();
+  assert.equal(client.getSubscriptionCount(), 0);
+});
+
+test('same SQL subscribed twice keeps events isolated by subscription_id', async () => {
+  const client = createClient({
+    url: 'http://127.0.0.1:8080',
+    authProvider: async () => Auth.jwt('fixture-token'),
+  });
+
+  const fakeWasmClient = createFakeWasmClient();
+  client.initialized = true;
+  client.wasmClient = fakeWasmClient;
+
+  const sql = 'SELECT * FROM dba.favorites';
+  const eventsFirst = [];
+  const eventsSecond = [];
+
+  const [unsubFirst, unsubSecond] = await Promise.all([
+    client.subscribeWithSql(sql, (event) => eventsFirst.push(event)),
+    client.subscribeWithSql(sql, (event) => eventsSecond.push(event)),
+  ]);
+
+  assert.equal(fakeWasmClient.connectCalls, 1);
+  assert.equal(fakeWasmClient.subscribeCalls, 2);
+  assert.equal(client.getSubscriptionCount(), 2);
+
+  // Emit only for the first subscription id.
+  fakeWasmClient.emit('sub-1', {
+    type: 'change',
+    change_type: 'update',
+    subscription_id: 'sub-1',
+    rows: [{ id: 'sql-studio-state:admin:workspace', payload: '{"v":1}' }],
+    old_values: [{ id: 'sql-studio-state:admin:workspace', payload: '{"v":0}' }],
+  });
+
+  assert.equal(eventsFirst.length, 1, 'first subscription should receive sub-1 events');
+  assert.equal(eventsSecond.length, 0, 'second subscription must not receive sub-1 events');
+  assert.equal(eventsFirst[0].subscription_id, 'sub-1');
+
+  // Emit only for the second subscription id.
+  fakeWasmClient.emit('sub-2', {
+    type: 'change',
+    change_type: 'update',
+    subscription_id: 'sub-2',
+    rows: [{ id: 'sql-studio-state:admin:workspace', payload: '{"v":2}' }],
+    old_values: [{ id: 'sql-studio-state:admin:workspace', payload: '{"v":1}' }],
+  });
+
+  assert.equal(eventsFirst.length, 1, 'first subscription must not receive sub-2 events');
+  assert.equal(eventsSecond.length, 1, 'second subscription should receive sub-2 events');
+  assert.equal(eventsSecond[0].subscription_id, 'sub-2');
+
+  await unsubFirst();
+  await unsubSecond();
+  assert.equal(client.getSubscriptionCount(), 0);
+});

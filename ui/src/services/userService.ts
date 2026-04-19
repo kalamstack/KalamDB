@@ -13,17 +13,48 @@ import {
   type UpdateUserInput,
 } from "@/services/sql/queries/userQueries";
 
-export type User = InferSelectModel<typeof system_users>;
+type UserModel = InferSelectModel<typeof system_users>;
+export type User = Omit<UserModel, "password_hash"> & { username: string };
+
+type UserWithoutPasswordHash = User;
+
+type UserWithOptionalUsername = Omit<UserWithoutPasswordHash, "username"> & {
+  username?: string | null;
+};
 
 export type { CreateUserInput, UpdateUserInput };
 
+export function mapUsers<T extends UserWithOptionalUsername>(rows: T[]): Array<T & { username: string }> {
+  return rows.map((row) => ({
+    ...row,
+    username: row.username ?? row.user_id,
+  }));
+}
+
 export async function fetchUsers() {
   const db = getDb();
-  return db
-    .select()
+  const rows = await db
+    .select({
+      user_id: system_users.user_id,
+      role: system_users.role,
+      email: system_users.email,
+      auth_type: system_users.auth_type,
+      auth_data: system_users.auth_data,
+      storage_mode: system_users.storage_mode,
+      storage_id: system_users.storage_id,
+      created_at: system_users.created_at,
+      updated_at: system_users.updated_at,
+      last_seen: system_users.last_seen,
+      deleted_at: system_users.deleted_at,
+      failed_login_attempts: system_users.failed_login_attempts,
+      locked_until: system_users.locked_until,
+      last_login_at: system_users.last_login_at,
+    })
     .from(system_users)
     .where(isNull(system_users.deleted_at))
-    .orderBy(asc(system_users.username));
+    .orderBy(asc(system_users.user_id));
+
+  return mapUsers(rows);
 }
 
 export async function createUser(input: CreateUserInput): Promise<void> {

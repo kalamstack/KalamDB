@@ -90,10 +90,12 @@ export function LiveQueryList() {
     setAppliedFilters(filterParams);
   };
 
-  const formatDuration = (createdAt: number) => {
+  const formatDuration = (createdAt: string | null) => {
     if (!createdAt) return '-';
+    const createdAtMs = new Date(createdAt).getTime();
+    if (Number.isNaN(createdAtMs)) return '-';
     const now = Date.now();
-    const diff = now - createdAt;
+    const diff = now - createdAtMs;
     const seconds = Math.floor(diff / 1000);
     const minutes = Math.floor(seconds / 60);
     const hours = Math.floor(minutes / 60);
