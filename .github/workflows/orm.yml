@@ -1,0 +1,69 @@
+name: ORM
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'link/sdks/typescript/orm/**'
+      - '.github/workflows/orm.yml'
+  pull_request:
+    paths:
+      - 'link/sdks/typescript/orm/**'
+      - '.github/workflows/orm.yml'
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    services:
+      kalamdb:
+        image: jamals86/kalamdb:latest
+        ports:
+          - 8088:8080
+        env:
+          KALAMDB_JWT_SECRET: "ci-test-secret-at-least-32-chars-long"
+          KALAMDB_ALLOW_REMOTE_SETUP: "true"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Wait for KalamDB
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8088/v1/api/healthcheck 2>/dev/null || curl -sf -o /dev/null -w "%{http_code}" http://localhost:8088/v1/api/healthcheck 2>/dev/null | grep -q "403"; then
+              echo "KalamDB is ready"
+              break
+            fi
+            echo "Waiting for KalamDB... ($i)"
+            sleep 2
+          done
+
+      - name: Setup KalamDB admin user
+        run: |
+          curl -fsS -X POST http://localhost:8088/v1/api/auth/setup \
+            -H "Content-Type: application/json" \
+            -d '{"username":"admin","password":"testpass123","root_password":"testpass123"}'
+
+      - name: Install dependencies
+        working-directory: link/sdks/typescript/orm
+        run: npm install
+
+      - name: Build
+        working-directory: link/sdks/typescript/orm
+        run: npm run build
+
+      - name: Run unit tests
+        working-directory: link/sdks/typescript/orm
+        run: node --test tests/file-column.test.mjs tests/strip-defaults.test.mjs
+
+      - name: Run integration tests
+        working-directory: link/sdks/typescript/orm
+        env:
+          KALAMDB_TEST_PASSWORD: testpass123
+        run: node --test tests/driver.test.mjs tests/generate.test.mjs tests/cli.test.mjs tests/live.test.mjs

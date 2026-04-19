@@ -40,6 +40,7 @@ import {
   fetchSystemStats,
   fetchDbaStats,
   type DbaStatRow,
+  type Setting,
   type SystemStatsMap,
 } from "@/services/systemTableService";
 import {
@@ -92,7 +93,7 @@ export const apiSlice = createApi({
     "StreamingOffsets",
   ],
   endpoints: (builder) => ({
-    getSettings: builder.query<Record<string, unknown>[], void>({
+    getSettings: builder.query<Setting[], void>({
       async queryFn() {
         try {
           const data = await fetchSystemSettings();

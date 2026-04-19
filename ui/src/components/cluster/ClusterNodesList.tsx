@@ -72,20 +72,21 @@ export function ClusterNodesList({ nodes, isLoading, onRefresh }: ClusterNodesLi
     }
   };
 
-  const formatNumber = (num: number | null) => {
+  const formatNumber = (num: string | number | null) => {
     if (num === null) return '—';
-    return num.toLocaleString();
+    return Number(num).toLocaleString();
   };
 
-  const formatMemory = (memoryMb: number | null) => {
+  const formatMemory = (memoryMb: string | number | null) => {
     if (memoryMb === null) return '—';
-    const precision = memoryMb >= 100 ? 0 : 1;
-    return `${memoryMb.toFixed(precision)} MB`;
+    const val = Number(memoryMb);
+    const precision = val >= 100 ? 0 : 1;
+    return `${val.toFixed(precision)} MB`;
   };
 
-  const formatCpu = (cpuPercent: number | null) => {
+  const formatCpu = (cpuPercent: string | number | null) => {
     if (cpuPercent === null) return '—';
-    return `${cpuPercent.toFixed(1)}%`;
+    return `${Number(cpuPercent).toFixed(1)}%`;
   };
 
   const formatUptime = (uptime: string | null) => uptime ?? '—';
@@ -217,7 +218,7 @@ export function ClusterNodesList({ nodes, isLoading, onRefresh }: ClusterNodesLi
                         {formatNumber(node.snapshot_index)}
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm">
-                        {node.replication_lag !== null && node.replication_lag > 0 ? (
+                        {node.replication_lag !== null && Number(node.replication_lag) > 0 ? (
                           <span className="text-orange-600">{formatNumber(node.replication_lag)}</span>
                         ) : (
                           <span className="text-muted-foreground">{formatNumber(node.replication_lag)}</span>

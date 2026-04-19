@@ -1,28 +1,34 @@
-import { executeSql } from "@/lib/kalam-client";
-import {
-  buildServerLogsQuery,
-  type ServerLogFilters,
-} from "@/services/sql/queries/serverLogQueries";
+import { getDb } from "@/lib/db";
+import { system_server_logs } from "@/lib/schema";
+import { eq, like, desc, and, type SQL, type InferSelectModel } from "drizzle-orm";
 
-export interface ServerLog {
-  timestamp: number | string;
-  level: string;
-  thread: string | null;
-  target: string | null;
-  line: number | null;
-  message: string;
+export type ServerLog = InferSelectModel<typeof system_server_logs>;
+
+export interface ServerLogFilters {
+  level?: string;
+  target?: string;
+  message?: string;
+  limit?: number;
 }
 
-export type { ServerLogFilters };
+export async function fetchServerLogs(filters?: ServerLogFilters) {
+  const db = getDb();
+  const conditions: SQL[] = [];
 
-export async function fetchServerLogs(filters?: ServerLogFilters): Promise<ServerLog[]> {
-  const rows = await executeSql(buildServerLogsQuery(filters));
-  return rows.map((row) => ({
-    timestamp: row.timestamp as number | string,
-    level: String(row.level ?? ""),
-    thread: row.thread as string | null,
-    target: row.target as string | null,
-    line: row.line as number | null,
-    message: String(row.message ?? ""),
-  }));
+  if (filters?.level) {
+    conditions.push(eq(system_server_logs.level, filters.level));
+  }
+  if (filters?.target) {
+    conditions.push(like(system_server_logs.target, `%${filters.target}%`));
+  }
+  if (filters?.message) {
+    conditions.push(like(system_server_logs.message, `%${filters.message}%`));
+  }
+
+  return db
+    .select()
+    .from(system_server_logs)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(desc(system_server_logs.timestamp))
+    .limit(filters?.limit ?? 500);
 }

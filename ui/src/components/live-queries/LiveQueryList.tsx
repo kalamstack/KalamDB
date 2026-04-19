@@ -262,7 +262,7 @@ export function LiveQueryList() {
                         {query.query}
                       </div>
                     </TableCell>
-                    <TableCell className="text-xs">{query.node}</TableCell>
+                    <TableCell className="text-xs">{query.node_id}</TableCell>
                     <TableCell className="text-right">
                       <Button
                         size="sm"
