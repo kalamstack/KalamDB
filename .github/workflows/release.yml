@@ -215,6 +215,14 @@ jobs:
           npm install
           npm run build
 
+      - name: Build ORM (@kalamdb/orm)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd link/sdks/typescript/orm
+          npm install --legacy-peer-deps
+          npm run build
+
       - name: Install Admin UI dependencies
         shell: bash
         run: |
