@@ -105,6 +105,22 @@ fn kalamdb_auth_config() -> KalamDbAuthConfig {
     }
 }
 
+fn sql_literal(value: &str) -> String {
+    value.replace('\'', "''")
+}
+
+pub fn kalamdb_account_login_server_options(host: &str, port: u16) -> String {
+    let config = kalamdb_auth_config();
+
+    format!(
+        "host '{}', port '{}', auth_mode 'account_login', login_user '{}', login_password '{}'",
+        sql_literal(host),
+        port,
+        sql_literal(&config.login_username),
+        sql_literal(&config.login_password)
+    )
+}
+
 pub fn kalamdb_grpc_target() -> (String, u16) {
     let host = env::var("KALAMDB_GRPC_HOST")
         .ok()
@@ -133,6 +149,59 @@ fn kalamdb_pg_grpc_target() -> (String, u16) {
         .and_then(|value| value.parse::<u16>().ok())
         .unwrap_or(default_port);
     (host, port)
+}
+
+async fn server_option_exists(
+    pg: &tokio_postgres::Client,
+    server_name: &str,
+    option_name: &str,
+) -> bool {
+    pg.query_opt(
+        "SELECT 1 \
+         FROM pg_foreign_server AS server \
+         CROSS JOIN LATERAL pg_options_to_table(server.srvoptions) AS option_entry \
+         WHERE server.srvname = $1 AND option_entry.option_name = $2",
+        &[&server_name, &option_name],
+    )
+    .await
+    .expect("query foreign server option")
+    .is_some()
+}
+
+async fn ensure_server_option(
+    pg: &tokio_postgres::Client,
+    server_name: &str,
+    option_name: &str,
+    value: &str,
+) {
+    let action = if server_option_exists(pg, server_name, option_name).await {
+        "SET"
+    } else {
+        "ADD"
+    };
+    let statement = format!(
+        "ALTER SERVER {server_name} OPTIONS ({action} {option_name} '{}');",
+        sql_literal(value)
+    );
+
+    pg.batch_execute(&statement)
+        .await
+        .unwrap_or_else(|error| panic!("configure foreign server option {option_name}: {error}"));
+}
+
+async fn drop_server_option_if_present(
+    pg: &tokio_postgres::Client,
+    server_name: &str,
+    option_name: &str,
+) {
+    if !server_option_exists(pg, server_name, option_name).await {
+        return;
+    }
+
+    let statement = format!("ALTER SERVER {server_name} OPTIONS (DROP {option_name});");
+    pg.batch_execute(&statement)
+        .await
+        .unwrap_or_else(|error| panic!("drop foreign server option {option_name}: {error}"));
 }
 
 fn pg_user_from_env() -> String {
@@ -422,6 +491,8 @@ impl TestEnv {
     async fn ensure_extension_bootstrap(&self) {
         let pg = self.pg_connect().await;
         let (grpc_host, grpc_port) = kalamdb_pg_grpc_target();
+        let auth_config = kalamdb_auth_config();
+        let server_options = kalamdb_account_login_server_options(&grpc_host, grpc_port);
         const BOOTSTRAP_LOCK_ID: i64 = 8_271_604_221;
 
         pg.batch_execute("CREATE EXTENSION IF NOT EXISTS pg_kalam;")
@@ -437,7 +508,7 @@ impl TestEnv {
             pg.batch_execute(&format!(
                 "CREATE SERVER IF NOT EXISTS kalam_server
                      FOREIGN DATA WRAPPER pg_kalam
-                     OPTIONS (host '{grpc_host}', port '{grpc_port}');"
+                     OPTIONS ({server_options});"
             ))
             .await
             .expect("create kalam_server foreign server");
@@ -447,6 +518,23 @@ impl TestEnv {
             ))
             .await
             .expect("repoint kalam_server foreign server");
+
+            drop_server_option_if_present(&pg, "kalam_server", "auth_header").await;
+            ensure_server_option(&pg, "kalam_server", "auth_mode", "account_login").await;
+            ensure_server_option(
+                &pg,
+                "kalam_server",
+                "login_user",
+                &auth_config.login_username,
+            )
+            .await;
+            ensure_server_option(
+                &pg,
+                "kalam_server",
+                "login_password",
+                &auth_config.login_password,
+            )
+            .await;
         }
         .await;
 

@@ -8,7 +8,8 @@ use serde_json::Value;
 use tokio_postgres::{Config, NoTls};
 
 use super::common::{
-    kalamdb_grpc_target, pg_backend_pid, postgres_error_text, unique_name, TestEnv,
+    kalamdb_account_login_server_options, kalamdb_grpc_target, pg_backend_pid,
+    postgres_error_text, unique_name, TestEnv,
 };
 use crate::e2e_common::tcp_proxy::TcpDisconnectProxy;
 
@@ -135,11 +136,14 @@ async fn create_proxy_shared_foreign_table(
     port: u16,
     extra_server_options: Option<&str>,
 ) {
-    let extra_server_options = extra_server_options
+    let mut server_options = kalamdb_account_login_server_options(host, port);
+    if let Some(extra_options) = extra_server_options
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(|value| format!(", {value}"))
-        .unwrap_or_default();
+    {
+        server_options.push_str(", ");
+        server_options.push_str(extra_options);
+    }
 
     client
         .batch_execute("CREATE SCHEMA IF NOT EXISTS e2e;")
@@ -151,7 +155,7 @@ async fn create_proxy_shared_foreign_table(
              DROP SERVER IF EXISTS {server_name} CASCADE; \
              CREATE SERVER {server_name} \
                  FOREIGN DATA WRAPPER pg_kalam \
-                 OPTIONS (host '{host}', port '{port}'{extra_server_options}); \
+                 OPTIONS ({server_options}); \
              CREATE FOREIGN TABLE e2e.{table} ( \
                  id TEXT, \
                  title TEXT, \

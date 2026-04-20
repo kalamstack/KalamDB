@@ -233,9 +233,21 @@ fn test_cli_live_query_with_filter() {
         return;
     }
 
-    let table = setup_test_table("live_query_filter").unwrap();
+    let namespace_name = generate_unique_namespace("test_cli");
+    let table_name = generate_unique_table("live_query_filter");
+    let table = format!("{}.{}", namespace_name, table_name);
 
-    // Test subscription with WHERE clause
+    let _ = execute_sql_as_root_via_cli(&format!(
+        "CREATE NAMESPACE IF NOT EXISTS {}",
+        namespace_name
+    ));
+    execute_sql_as_root_via_cli(&format!(
+        "CREATE TABLE {} (id INT PRIMARY KEY, content VARCHAR NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) WITH (TYPE='USER', FLUSH_POLICY='rows:10')",
+        table
+    ))
+    .unwrap();
+
+    // Use explicit IDs so WHERE id > 10 is deterministic; AUTO_INCREMENT maps to generated IDs.
     let query = format!("SELECT * FROM {} WHERE id > 10", table);
     let mut listener = match SubscriptionListener::start(&query) {
         Ok(l) => l,
@@ -252,7 +264,10 @@ fn test_cli_live_query_with_filter() {
         } else {
             format!("high_{}", i)
         };
-        let insert_sql = format!("INSERT INTO {} (content) VALUES ('{}')", table, marker);
+        let insert_sql = format!(
+            "INSERT INTO {} (id, content) VALUES ({}, '{}')",
+            table, i, marker
+        );
         let insert_result = execute_sql_as_root_via_cli(&insert_sql);
         assert!(
             insert_result.is_ok(),

@@ -15,9 +15,10 @@ num_cpus = { workspace = true }
 
 # Logging
 log = { workspace = true }
+libmimalloc-sys = { workspace = true, optional = true }
 
 [features]
-mimalloc = []
+mimalloc = ["dep:libmimalloc-sys"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = { workspace = true }

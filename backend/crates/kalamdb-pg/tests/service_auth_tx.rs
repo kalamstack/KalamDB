@@ -14,6 +14,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tonic::Request;
 
+const VALID_DBA_BASIC_AUTH: &str = "Basic cGdfYnJpZGdlX3VzZXI6c2VjcmV0LXBhc3M=";
+
 fn init_test_auth_settings() -> AuthSettings {
     let auth = AuthSettings::default();
     init_auth_config(&auth, &OAuthSettings::default());
@@ -63,6 +65,19 @@ impl StaticUserRepo {
             },
         }
     }
+
+    fn with_password_hash(role: Role, password_hash: String) -> Self {
+        let mut repo = Self::new(role);
+        repo.user.password_hash = password_hash;
+        repo
+    }
+}
+
+async fn password_repo(role: Role) -> Arc<dyn UserRepository> {
+    let password_hash = kalamdb_auth::security::password::hash_password("secret-pass", None)
+        .await
+        .expect("hash password for pg auth test");
+    Arc::new(StaticUserRepo::with_password_hash(role, password_hash))
 }
 
 #[async_trait]
@@ -1127,6 +1142,38 @@ async fn ping_accepts_valid_dba_bearer_token() {
         .expect("DBA bearer token should authenticate");
 
     assert!(response.into_inner().ok);
+}
+
+#[tokio::test]
+async fn ping_accepts_valid_dba_basic_auth() {
+    let service = KalamPgService::new(false, None).with_bearer_auth(password_repo(Role::Dba).await);
+
+    let response = service
+        .ping(auth_request(PingRequest {}, VALID_DBA_BASIC_AUTH))
+        .await
+        .expect("DBA basic auth should authenticate");
+
+    assert!(response.into_inner().ok);
+}
+
+#[tokio::test]
+async fn open_session_accepts_valid_dba_basic_auth() {
+    let service = KalamPgService::new(false, None).with_bearer_auth(password_repo(Role::Dba).await);
+
+    let response = service
+        .open_session(auth_request(
+            OpenSessionRequest {
+                session_id: String::new(),
+                current_schema: Some("tenant_x".to_string()),
+            },
+            VALID_DBA_BASIC_AUTH,
+        ))
+        .await
+        .expect("DBA basic auth should open a PG RPC session")
+        .into_inner();
+
+    assert!(!response.session_id.is_empty());
+    assert_eq!(response.current_schema.as_deref(), Some("tenant_x"));
 }
 
 #[tokio::test]

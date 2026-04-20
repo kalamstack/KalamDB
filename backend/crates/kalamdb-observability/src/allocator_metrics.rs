@@ -19,7 +19,13 @@ mod imp {
         })
     }
 
-    pub fn force_allocator_collection(_force: bool) {}
+    pub fn force_allocator_collection(force: bool) {
+        // Ask mimalloc to aggressively collect abandoned pages so runtime metrics
+        // and idle-trim callers observe post-burst steady-state memory sooner.
+        unsafe {
+            libmimalloc_sys::mi_collect(force);
+        }
+    }
 }
 
 #[cfg(not(feature = "mimalloc"))]

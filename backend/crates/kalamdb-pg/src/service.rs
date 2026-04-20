@@ -4,7 +4,7 @@ use std::sync::Arc;
 #[cfg(feature = "server")]
 use async_trait::async_trait;
 #[cfg(feature = "server")]
-use kalamdb_auth::{authenticate, AuthRequest, UserRepository};
+use kalamdb_auth::{authenticate, helpers::basic_auth, AuthRequest, AuthenticationResult, UserRepository};
 #[cfg(feature = "server")]
 use kalamdb_commons::models::ConnectionInfo;
 use tonic::codegen::*;
@@ -977,6 +977,46 @@ impl KalamPgService {
             })
     }
 
+    async fn authenticate_admin_metadata<T>(
+        &self,
+        request: &Request<T>,
+        provided: &str,
+        missing_header_message: &'static str,
+    ) -> Result<Option<AuthenticationResult>, Status> {
+        let Some(repo) = &self.bearer_user_repo else {
+            return Ok(None);
+        };
+
+        if provided.is_empty() {
+            return Err(Status::unauthenticated(missing_header_message));
+        }
+
+        let connection_info = ConnectionInfo::new(request.remote_addr().map(|addr| addr.to_string()));
+        let auth_request = if provided
+            .get(..6)
+            .map(|prefix| prefix.eq_ignore_ascii_case("Basic "))
+            .unwrap_or(false)
+        {
+            let (user, password) = basic_auth::parse_basic_auth_header(provided)
+                .map_err(|error| Status::unauthenticated(format!("authentication failed: {}", error)))?;
+            AuthRequest::Credentials { user, password }
+        } else {
+            AuthRequest::Header(provided.to_string())
+        };
+
+        let auth_result = authenticate(auth_request, &connection_info, repo)
+            .await
+            .map_err(|error| Status::unauthenticated(format!("authentication failed: {}", error)))?;
+
+        if !auth_result.user.is_admin() {
+            return Err(Status::permission_denied(
+                "pg rpc requires a DBA or system account",
+            ));
+        }
+
+        Ok(Some(auth_result))
+    }
+
     /// Full authentication for `open_session` only.
     /// Supports mTLS, static header, and bearer/basic auth via `kalamdb_auth::authenticate`.
     async fn authenticate_open_session<T>(
@@ -1019,32 +1059,14 @@ impl KalamPgService {
             }
         }
 
-        // Bearer or Basic auth via kalamdb_auth::authenticate.
-        if let Some(repo) = &self.bearer_user_repo {
-            if provided.is_empty() {
-                return Err(Status::unauthenticated(
-                    "missing authorization header on open_session",
-                ));
-            }
-
-            let connection_info =
-                ConnectionInfo::new(request.remote_addr().map(|addr| addr.to_string()));
-            let auth_result = authenticate(
-                AuthRequest::Header(provided),
-                &connection_info,
-                repo,
+        if let Some(auth_result) = self
+            .authenticate_admin_metadata(
+                request,
+                &provided,
+                "missing authorization header on open_session",
             )
-            .await
-            .map_err(|error| {
-                Status::unauthenticated(format!("authentication failed: {}", error))
-            })?;
-
-            if !auth_result.user.is_admin() {
-                return Err(Status::permission_denied(
-                    "pg rpc requires a DBA or system account",
-                ));
-            }
-
+            .await?
+        {
             return Ok(BridgeAuth {
                 user_id: auth_result.user.user_id.to_string(),
                 role: auth_result.user.role.to_string(),
@@ -1277,29 +1299,11 @@ impl PgService for KalamPgService {
                 .trim()
                 .to_string();
             if provided != expected.as_str() {
-                // Also allow bearer auth for ping
-                if let Some(repo) = &self.bearer_user_repo {
-                    if !provided.is_empty() {
-                        let connection_info =
-                            ConnectionInfo::new(request.remote_addr().map(|addr| addr.to_string()));
-                        let auth_result = authenticate(
-                            AuthRequest::Header(provided),
-                            &connection_info,
-                            repo,
-                        )
-                        .await
-                        .map_err(|error| {
-                            Status::unauthenticated(format!("authentication failed: {}", error))
-                        })?;
-                        if !auth_result.user.is_admin() {
-                            return Err(Status::permission_denied(
-                                "pg rpc requires a DBA or system account",
-                            ));
-                        }
-                    } else {
-                        return Err(Status::unauthenticated("missing authorization header"));
-                    }
-                } else {
+                if self
+                    .authenticate_admin_metadata(&request, &provided, "missing authorization header")
+                    .await?
+                    .is_none()
+                {
                     return Err(Status::unauthenticated("invalid or missing pg auth token"));
                 }
             }
@@ -1311,26 +1315,9 @@ impl PgService for KalamPgService {
                 .unwrap_or("")
                 .trim()
                 .to_string();
-            if !provided.is_empty() {
-                let connection_info =
-                    ConnectionInfo::new(request.remote_addr().map(|addr| addr.to_string()));
-                let auth_result = authenticate(
-                    AuthRequest::Header(provided),
-                    &connection_info,
-                    repo,
-                )
-                .await
-                .map_err(|error| {
-                    Status::unauthenticated(format!("authentication failed: {}", error))
-                })?;
-                if !auth_result.user.is_admin() {
-                    return Err(Status::permission_denied(
-                        "pg rpc requires a DBA or system account",
-                    ));
-                }
-            } else {
-                return Err(Status::unauthenticated("missing authorization header"));
-            }
+            let _ = repo;
+            self.authenticate_admin_metadata(&request, &provided, "missing authorization header")
+                .await?;
         }
         Ok(Response::new(PingResponse { ok: true }))
     }
