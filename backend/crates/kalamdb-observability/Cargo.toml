@@ -12,13 +12,12 @@ build = "../../build.rs"
 # System monitoring
 sysinfo = { workspace = true }
 num_cpus = { workspace = true }
-libmimalloc-sys = { workspace = true, optional = true }
 
 # Logging
 log = { workspace = true }
 
 [features]
-mimalloc = ["dep:libmimalloc-sys"]
+mimalloc = []
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = { workspace = true }

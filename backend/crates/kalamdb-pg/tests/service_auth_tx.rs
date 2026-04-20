@@ -1,14 +1,24 @@
 use async_trait::async_trait;
 use bytes::Bytes;
+use kalamdb_auth::{create_and_sign_token, services::unified::init_auth_config, AuthError, AuthResult, UserRepository};
+use kalamdb_configs::{AuthSettings, OAuthSettings};
 use kalamdb_pg::{
     BeginTransactionRequest, CloseSessionRequest, CommitTransactionRequest, DeleteRequest,
     ExecuteQueryRpcRequest, ExecuteSqlRpcRequest, InsertRequest, KalamPgService, MutationResult,
     OpenSessionRequest, OperationExecutor, PgService, PgServiceServer, PingRequest,
     RollbackTransactionRequest, ScanRequest, ScanResult, UpdateRequest,
 };
+use kalamdb_system::providers::storages::models::StorageMode;
+use kalamdb_system::{AuthType, Role, User};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tonic::Request;
+
+fn init_test_auth_settings() -> AuthSettings {
+    let auth = AuthSettings::default();
+    init_auth_config(&auth, &OAuthSettings::default());
+    auth
+}
 
 fn service() -> KalamPgService {
     KalamPgService::new(false, None)
@@ -16,6 +26,62 @@ fn service() -> KalamPgService {
 
 fn plain_request<T>(payload: T) -> Request<T> {
     Request::new(payload)
+}
+
+fn auth_request<T>(payload: T, auth_header: &str) -> Request<T> {
+    let mut request = Request::new(payload);
+    request
+        .metadata_mut()
+        .insert("authorization", auth_header.parse().expect("valid authorization metadata"));
+    request
+}
+
+#[derive(Clone)]
+struct StaticUserRepo {
+    user: User,
+}
+
+impl StaticUserRepo {
+    fn new(role: Role) -> Self {
+        Self {
+            user: User {
+                user_id: kalamdb_commons::UserId::new("pg_bridge_user"),
+                password_hash: "$2b$12$unusedhashunusedhashunusedhashunusedhashunusedhashu".to_string(),
+                role,
+                email: Some("pg-bridge@example.com".to_string()),
+                auth_type: AuthType::Password,
+                auth_data: None,
+                storage_mode: StorageMode::Table,
+                storage_id: None,
+                failed_login_attempts: 0,
+                locked_until: None,
+                last_login_at: None,
+                created_at: 0,
+                updated_at: 0,
+                last_seen: None,
+                deleted_at: None,
+            },
+        }
+    }
+}
+
+#[async_trait]
+impl UserRepository for StaticUserRepo {
+    async fn get_user_by_id(&self, user_id: &kalamdb_commons::UserId) -> AuthResult<User> {
+        if &self.user.user_id == user_id {
+            Ok(self.user.clone())
+        } else {
+            Err(AuthError::UserNotFound(format!("User '{}' not found", user_id)))
+        }
+    }
+
+    async fn update_user(&self, _user: &User) -> AuthResult<()> {
+        Ok(())
+    }
+
+    async fn create_user(&self, _user: User) -> AuthResult<()> {
+        Ok(())
+    }
 }
 
 #[derive(Default)]
@@ -427,16 +493,18 @@ async fn ping_succeeds() {
 }
 
 #[tokio::test]
-async fn open_session_rejects_empty_session_id() {
+async fn open_session_ignores_client_session_id() {
     let service = service();
+    // Server generates its own session ID regardless of what the client sends.
     let resp = service
         .open_session(plain_request(OpenSessionRequest {
             session_id: "".to_string(),
             current_schema: None,
         }))
         .await;
-    assert!(resp.is_err());
-    assert_eq!(resp.unwrap_err().code(), tonic::Code::InvalidArgument);
+    assert!(resp.is_ok());
+    let inner = resp.unwrap().into_inner();
+    assert!(!inner.session_id.is_empty(), "server must issue a session ID");
 }
 
 #[tokio::test]
@@ -450,30 +518,34 @@ async fn open_session_returns_session_and_schema() {
         .await;
     assert!(resp.is_ok());
     let inner = resp.unwrap().into_inner();
-    assert_eq!(inner.session_id, "pg-1");
+    assert!(!inner.session_id.is_empty(), "server must issue a session ID");
     assert_eq!(inner.current_schema.as_deref(), Some("tenant_x"));
 }
 
 #[tokio::test]
-async fn open_session_updates_schema_on_existing_session() {
+async fn open_session_generates_distinct_session_ids() {
     let service = service();
-    service
+    let resp1 = service
         .open_session(plain_request(OpenSessionRequest {
-            session_id: "pg-2".to_string(),
+            session_id: String::new(),
             current_schema: Some("ns_a".to_string()),
         }))
         .await
-        .unwrap();
+        .unwrap()
+        .into_inner();
 
-    let resp = service
+    let resp2 = service
         .open_session(plain_request(OpenSessionRequest {
-            session_id: "pg-2".to_string(),
+            session_id: String::new(),
             current_schema: Some("ns_b".to_string()),
         }))
         .await
-        .unwrap();
+        .unwrap()
+        .into_inner();
 
-    assert_eq!(resp.into_inner().current_schema.as_deref(), Some("ns_b"));
+    assert_ne!(resp1.session_id, resp2.session_id, "each open_session must produce a unique ID");
+    assert_eq!(resp1.current_schema.as_deref(), Some("ns_a"));
+    assert_eq!(resp2.current_schema.as_deref(), Some("ns_b"));
 }
 
 // ---------------------------------------------------------------------------
@@ -705,17 +777,19 @@ async fn execute_query_closes_ephemeral_idle_session() {
 async fn execute_sql_keeps_preexisting_session_open() {
     let service = KalamPgService::new(false, None).with_operation_executor(Arc::new(SqlExecutor));
 
-    service
+    let session_id = service
         .open_session(plain_request(OpenSessionRequest {
-            session_id: "pg-existing-sql".to_string(),
+            session_id: String::new(),
             current_schema: None,
         }))
         .await
-        .unwrap();
+        .unwrap()
+        .into_inner()
+        .session_id;
 
     service
         .execute_sql(plain_request(ExecuteSqlRpcRequest {
-            session_id: "pg-existing-sql".to_string(),
+            session_id: session_id.clone(),
             sql: "CREATE TABLE ignored".to_string(),
         }))
         .await
@@ -723,7 +797,7 @@ async fn execute_sql_keeps_preexisting_session_open() {
 
     let session = service
         .session_registry()
-        .get("pg-existing-sql")
+        .get(&session_id)
         .expect("preexisting session should remain open");
     assert_eq!(session.last_method(), Some("ExecuteSql"));
 }
@@ -732,17 +806,19 @@ async fn execute_sql_keeps_preexisting_session_open() {
 async fn execute_query_keeps_preexisting_session_open() {
     let service = KalamPgService::new(false, None).with_operation_executor(Arc::new(SqlExecutor));
 
-    service
+    let session_id = service
         .open_session(plain_request(OpenSessionRequest {
-            session_id: "pg-existing-query".to_string(),
+            session_id: String::new(),
             current_schema: None,
         }))
         .await
-        .unwrap();
+        .unwrap()
+        .into_inner()
+        .session_id;
 
     service
         .execute_query(plain_request(ExecuteQueryRpcRequest {
-            session_id: "pg-existing-query".to_string(),
+            session_id: session_id.clone(),
             sql: "SELECT 1".to_string(),
         }))
         .await
@@ -750,7 +826,7 @@ async fn execute_query_keeps_preexisting_session_open() {
 
     let session = service
         .session_registry()
-        .get("pg-existing-query")
+        .get(&session_id)
         .expect("preexisting session should remain open");
     assert_eq!(session.last_method(), Some("ExecuteQuery"));
 }
@@ -789,17 +865,19 @@ async fn transaction_rpcs_delegate_to_configured_operation_executor() {
     let executor = Arc::new(RecordingExecutor::default());
     let service = KalamPgService::new(false, None).with_operation_executor(executor.clone());
 
-    service
+    let session_id = service
         .open_session(plain_request(OpenSessionRequest {
-            session_id: "pg-321-deadbeef".to_string(),
+            session_id: String::new(),
             current_schema: None,
         }))
         .await
-        .unwrap();
+        .unwrap()
+        .into_inner()
+        .session_id;
 
     let tx_id = service
         .begin_transaction(plain_request(BeginTransactionRequest {
-            session_id: "pg-321-deadbeef".to_string(),
+            session_id: session_id.clone(),
         }))
         .await
         .unwrap()
@@ -811,7 +889,7 @@ async fn transaction_rpcs_delegate_to_configured_operation_executor() {
 
     service
         .commit_transaction(plain_request(CommitTransactionRequest {
-            session_id: "pg-321-deadbeef".to_string(),
+            session_id: session_id.clone(),
             transaction_id: tx_id.clone(),
         }))
         .await
@@ -820,7 +898,7 @@ async fn transaction_rpcs_delegate_to_configured_operation_executor() {
 
     let tx_id = service
         .begin_transaction(plain_request(BeginTransactionRequest {
-            session_id: "pg-321-deadbeef".to_string(),
+            session_id: session_id.clone(),
         }))
         .await
         .unwrap()
@@ -829,7 +907,7 @@ async fn transaction_rpcs_delegate_to_configured_operation_executor() {
 
     service
         .rollback_transaction(plain_request(RollbackTransactionRequest {
-            session_id: "pg-321-deadbeef".to_string(),
+            session_id: session_id.clone(),
             transaction_id: tx_id,
         }))
         .await
@@ -842,17 +920,19 @@ async fn close_session_rolls_back_via_configured_operation_executor() {
     let executor = Arc::new(RecordingExecutor::default());
     let service = KalamPgService::new(false, None).with_operation_executor(executor.clone());
 
-    service
+    let session_id = service
         .open_session(plain_request(OpenSessionRequest {
-            session_id: "pg-close-1".to_string(),
+            session_id: String::new(),
             current_schema: None,
         }))
         .await
-        .unwrap();
+        .unwrap()
+        .into_inner()
+        .session_id;
 
     let tx_id = service
         .begin_transaction(plain_request(BeginTransactionRequest {
-            session_id: "pg-close-1".to_string(),
+            session_id: session_id.clone(),
         }))
         .await
         .unwrap()
@@ -862,7 +942,7 @@ async fn close_session_rolls_back_via_configured_operation_executor() {
 
     service
         .close_session(plain_request(CloseSessionRequest {
-            session_id: "pg-close-1".to_string(),
+            session_id: session_id.clone(),
         }))
         .await
         .unwrap();
@@ -875,24 +955,26 @@ async fn begin_transaction_reclaims_stale_remote_transaction_via_executor() {
     let executor = Arc::new(RecordingExecutor::default());
     let service = KalamPgService::new(false, None).with_operation_executor(executor.clone());
 
-    service
+    let session_id = service
         .open_session(plain_request(OpenSessionRequest {
-            session_id: "pg-stale-1".to_string(),
+            session_id: String::new(),
             current_schema: None,
         }))
         .await
-        .unwrap();
+        .unwrap()
+        .into_inner()
+        .session_id;
 
     service
         .begin_transaction(plain_request(BeginTransactionRequest {
-            session_id: "pg-stale-1".to_string(),
+            session_id: session_id.clone(),
         }))
         .await
         .unwrap();
 
     service
         .begin_transaction(plain_request(BeginTransactionRequest {
-            session_id: "pg-stale-1".to_string(),
+            session_id: session_id.clone(),
         }))
         .await
         .unwrap();
@@ -906,17 +988,19 @@ async fn begin_transaction_reconciles_local_state_when_stale_remote_tx_is_missin
     let executor = Arc::new(BeginRollbackNotFoundExecutor::default());
     let service = KalamPgService::new(false, None).with_operation_executor(executor);
 
-    service
+    let session_id = service
         .open_session(plain_request(OpenSessionRequest {
-            session_id: "pg-stale-reconcile".to_string(),
+            session_id: String::new(),
             current_schema: None,
         }))
         .await
-        .unwrap();
+        .unwrap()
+        .into_inner()
+        .session_id;
 
     let first_tx = service
         .begin_transaction(plain_request(BeginTransactionRequest {
-            session_id: "pg-stale-reconcile".to_string(),
+            session_id: session_id.clone(),
         }))
         .await
         .unwrap()
@@ -925,7 +1009,7 @@ async fn begin_transaction_reconciles_local_state_when_stale_remote_tx_is_missin
 
     let replacement_tx = service
         .begin_transaction(plain_request(BeginTransactionRequest {
-            session_id: "pg-stale-reconcile".to_string(),
+            session_id: session_id.clone(),
         }))
         .await
         .unwrap()
@@ -937,7 +1021,7 @@ async fn begin_transaction_reconciles_local_state_when_stale_remote_tx_is_missin
 
     let session = service
         .session_registry()
-        .get("pg-stale-reconcile")
+        .get(&session_id)
         .expect("session remains open");
     assert_eq!(session.transaction_id(), Some("tx-replacement-2"));
 }
@@ -947,17 +1031,19 @@ async fn commit_transaction_clears_local_state_when_remote_tx_is_already_gone() 
     let executor = Arc::new(CommitNotFoundExecutor);
     let service = KalamPgService::new(false, None).with_operation_executor(executor);
 
-    service
+    let session_id = service
         .open_session(plain_request(OpenSessionRequest {
-            session_id: "pg-commit-reconcile".to_string(),
+            session_id: String::new(),
             current_schema: None,
         }))
         .await
-        .unwrap();
+        .unwrap()
+        .into_inner()
+        .session_id;
 
     let tx_id = service
         .begin_transaction(plain_request(BeginTransactionRequest {
-            session_id: "pg-commit-reconcile".to_string(),
+            session_id: session_id.clone(),
         }))
         .await
         .unwrap()
@@ -966,7 +1052,7 @@ async fn commit_transaction_clears_local_state_when_remote_tx_is_already_gone() 
 
     let err = service
         .commit_transaction(plain_request(CommitTransactionRequest {
-            session_id: "pg-commit-reconcile".to_string(),
+            session_id: session_id.clone(),
             transaction_id: tx_id.clone(),
         }))
         .await
@@ -975,7 +1061,7 @@ async fn commit_transaction_clears_local_state_when_remote_tx_is_already_gone() 
 
     let session = service
         .session_registry()
-        .get("pg-commit-reconcile")
+        .get(&session_id)
         .expect("session remains open");
     assert_eq!(session.transaction_id(), None);
     assert_eq!(session.transaction_state(), None);
@@ -986,17 +1072,19 @@ async fn close_session_succeeds_when_remote_tx_is_already_committed() {
     let executor = Arc::new(RollbackCommittedExecutor);
     let service = KalamPgService::new(false, None).with_operation_executor(executor);
 
-    service
+    let session_id = service
         .open_session(plain_request(OpenSessionRequest {
-            session_id: "pg-close-reconcile".to_string(),
+            session_id: String::new(),
             current_schema: None,
         }))
         .await
-        .unwrap();
+        .unwrap()
+        .into_inner()
+        .session_id;
 
     let tx_id = service
         .begin_transaction(plain_request(BeginTransactionRequest {
-            session_id: "pg-close-reconcile".to_string(),
+            session_id: session_id.clone(),
         }))
         .await
         .unwrap()
@@ -1006,12 +1094,12 @@ async fn close_session_succeeds_when_remote_tx_is_already_committed() {
 
     service
         .close_session(plain_request(CloseSessionRequest {
-            session_id: "pg-close-reconcile".to_string(),
+            session_id: session_id.clone(),
         }))
         .await
         .expect("close_session should be best-effort for terminal remote tx state");
 
-    assert!(service.session_registry().get("pg-close-reconcile").is_none());
+    assert!(service.session_registry().get(&session_id).is_none());
 }
 
 // ---------------------------------------------------------------------------
@@ -1022,4 +1110,52 @@ async fn close_session_succeeds_when_remote_tx_is_already_committed() {
 fn pg_service_server_builds_from_impl() {
     let service = service();
     let _server = PgServiceServer::new(service);
+}
+
+#[tokio::test]
+async fn ping_accepts_valid_dba_bearer_token() {
+    let auth = init_test_auth_settings();
+    let repo: Arc<dyn UserRepository> = Arc::new(StaticUserRepo::new(Role::Dba));
+    let service = KalamPgService::new(false, None).with_bearer_auth(Arc::clone(&repo));
+    let user_id = kalamdb_commons::UserId::new("pg_bridge_user");
+    let (token, _) = create_and_sign_token(&user_id, &Role::Dba, None, None, &auth.jwt_secret)
+        .expect("create bearer token");
+
+    let response = service
+        .ping(auth_request(PingRequest {}, &format!("Bearer {}", token)))
+        .await
+        .expect("DBA bearer token should authenticate");
+
+    assert!(response.into_inner().ok);
+}
+
+#[tokio::test]
+async fn ping_rejects_non_admin_bearer_token() {
+    let auth = init_test_auth_settings();
+    let repo: Arc<dyn UserRepository> = Arc::new(StaticUserRepo::new(Role::User));
+    let service = KalamPgService::new(false, None).with_bearer_auth(Arc::clone(&repo));
+    let user_id = kalamdb_commons::UserId::new("pg_bridge_user");
+    let (token, _) = create_and_sign_token(&user_id, &Role::User, None, None, &auth.jwt_secret)
+        .expect("create bearer token");
+
+    let error = service
+        .ping(auth_request(PingRequest {}, &format!("Bearer {}", token)))
+        .await
+        .expect_err("non-admin bearer token should be rejected");
+
+    assert_eq!(error.code(), tonic::Code::PermissionDenied);
+}
+
+#[tokio::test]
+async fn legacy_static_header_still_authenticates_when_bearer_auth_enabled() {
+    let repo: Arc<dyn UserRepository> = Arc::new(StaticUserRepo::new(Role::Dba));
+    let service = KalamPgService::new(false, Some("Bearer legacy-shared-secret".to_string()))
+        .with_bearer_auth(repo);
+
+    let response = service
+        .ping(auth_request(PingRequest {}, "Bearer legacy-shared-secret"))
+        .await
+        .expect("legacy shared secret should still authenticate");
+
+    assert!(response.into_inner().ok);
 }

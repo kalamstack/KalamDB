@@ -8,8 +8,6 @@ Task numbers are historical and not globally unique. Use the section plus the ta
 
 ## Performance & Optimization
 
-53) [HIGH] IMPORTANT: Add a story about the need for giving ability to subscribe for: * which means all users tables at once, this is done by the ai agent which listen to all the user messages at once, add also ability to listen per storageId, for this we need to add to the user message key a userId:rowId:storageId
-
 126) [MEDIUM] Combine the 2 shared/user tables flushing and querying using a shared hybrid service which is used in both cases to reduce code duplication and maintenance burden
 both of them read from a path and from a store but user table filter the store which is the hot storage based on user id as well
 

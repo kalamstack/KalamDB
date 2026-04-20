@@ -3,6 +3,10 @@ use std::sync::Arc;
 
 #[cfg(feature = "server")]
 use async_trait::async_trait;
+#[cfg(feature = "server")]
+use kalamdb_auth::{authenticate, AuthRequest, UserRepository};
+#[cfg(feature = "server")]
+use kalamdb_commons::models::ConnectionInfo;
 use tonic::codegen::*;
 #[cfg(feature = "server")]
 use tonic::Request;
@@ -12,7 +16,7 @@ use tonic_prost::ProstCodec;
 #[cfg(feature = "server")]
 use crate::operation_executor::{self, OperationExecutor};
 #[cfg(feature = "server")]
-use crate::{LivePgTransaction, RemotePgSession, SessionRegistry};
+use crate::{BridgeAuth, LivePgTransaction, RemotePgSession, SessionRegistry};
 
 const PG_SERVICE_NAME: &str = "kalamdb.pg.PgService";
 
@@ -39,6 +43,9 @@ pub struct OpenSessionResponse {
     pub session_id: String,
     #[prost(string, optional, tag = "2")]
     pub current_schema: Option<String>,
+    /// Lease expiry (epoch ms). Client should re-authenticate before this time.
+    #[prost(int64, tag = "3")]
+    pub lease_expires_at_ms: i64,
 }
 
 #[derive(Clone, PartialEq, prost::Message)]
@@ -867,6 +874,8 @@ pub struct KalamPgService {
     /// Pre-shared token for non-mTLS authentication (e.g. `Bearer <token>`).
     /// When set, the `authorization` gRPC metadata must match this value.
     expected_auth_header: Option<String>,
+    /// Optional bearer-token validation path for DBA/system PG bridge accounts.
+    bearer_user_repo: Option<Arc<dyn UserRepository>>,
     session_registry: Arc<SessionRegistry>,
     operation_executor: Option<Arc<dyn OperationExecutor>>,
 }
@@ -887,6 +896,7 @@ impl Default for KalamPgService {
         Self {
             mtls_enabled: false,
             expected_auth_header: None,
+            bearer_user_repo: None,
             session_registry: Arc::new(SessionRegistry::default()),
             operation_executor: None,
         }
@@ -900,27 +910,40 @@ impl KalamPgService {
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
 
-        if !mtls_enabled && expected_auth_header.is_none() {
-            log::warn!(
-                "PG RPC service is running without mTLS or pg_auth_token; requests are unauthenticated"
-            );
-        }
-
         Self {
             mtls_enabled,
             expected_auth_header,
+            bearer_user_repo: None,
             session_registry: Arc::new(SessionRegistry::default()),
             operation_executor: None,
         }
     }
 
+    fn warn_if_unauthenticated(&self) {
+        if !self.mtls_enabled
+            && self.expected_auth_header.is_none()
+            && self.bearer_user_repo.is_none()
+        {
+            log::warn!(
+                "PG RPC service is running without mTLS, pg_auth_token, or bearer auth; requests are unauthenticated"
+            );
+        }
+    }
+
+    pub fn with_bearer_auth(mut self, repo: Arc<dyn UserRepository>) -> Self {
+        self.bearer_user_repo = Some(repo);
+        self
+    }
+
     pub fn with_operation_executor(mut self, executor: Arc<dyn OperationExecutor>) -> Self {
         self.operation_executor = Some(executor);
+        self.warn_if_unauthenticated();
         self
     }
 
     pub fn set_operation_executor(&mut self, executor: Arc<dyn OperationExecutor>) {
         self.operation_executor = Some(executor);
+        self.warn_if_unauthenticated();
     }
 
     fn operation_executor(&self) -> Result<&dyn OperationExecutor, Status> {
@@ -929,23 +952,118 @@ impl KalamPgService {
             .ok_or_else(|| Status::unavailable("Operation executor not configured"))
     }
 
-    fn authorize<T>(&self, request: &Request<T>) -> Result<(), Status> {
-        if self.mtls_enabled {
-            kalamdb_server_auth::RpcCaller::require_pg_extension(request)?;
+    /// Validate that a session handle is valid for a non-open RPC.
+    /// This is the cheap per-RPC check: session exists, is authenticated, and lease is valid.
+    fn validate_session_handle(&self, session_id: &str) -> Result<(), Status> {
+        if session_id.trim().is_empty() {
+            return Err(Status::invalid_argument("session_id must not be empty"));
+        }
+
+        // If no auth is configured at all, allow unauthenticated sessions.
+        if !self.mtls_enabled
+            && self.expected_auth_header.is_none()
+            && self.bearer_user_repo.is_none()
+        {
             return Ok(());
         }
-        // Non-mTLS: validate pre-shared token if configured.
+
+        self.session_registry
+            .validate_session(session_id)
+            .map(|_| ())
+            .map_err(|reason| match reason {
+                "session lease expired" => Status::unauthenticated("session lease expired – re-authenticate via open_session"),
+                "session not authenticated" => Status::unauthenticated("session not authenticated"),
+                _ => Status::unauthenticated("invalid or expired session"),
+            })
+    }
+
+    /// Full authentication for `open_session` only.
+    /// Supports mTLS, static header, and bearer/basic auth via `kalamdb_auth::authenticate`.
+    async fn authenticate_open_session<T>(
+        &self,
+        request: &Request<T>,
+    ) -> Result<BridgeAuth, Status> {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let lease_ms: i64 = crate::session_registry::DEFAULT_SESSION_LEASE_MS;
+
+        if self.mtls_enabled {
+            kalamdb_server_auth::RpcCaller::require_pg_extension(request)?;
+            return Ok(BridgeAuth {
+                user_id: "mtls-pg-bridge".to_string(),
+                role: "system".to_string(),
+                auth_mode: "mtls".to_string(),
+                lease_expires_at_ms: now_ms + lease_ms,
+            });
+        }
+
+        let provided = request
+            .metadata()
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+
+        // Check static header match first.
         if let Some(expected) = &self.expected_auth_header {
-            let provided = request
-                .metadata()
-                .get("authorization")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("");
-            if provided != expected.as_str() {
-                return Err(Status::unauthenticated("invalid or missing pg auth token"));
+            if provided == expected.as_str() {
+                return Ok(BridgeAuth {
+                    user_id: "static-pg-bridge".to_string(),
+                    role: "system".to_string(),
+                    auth_mode: "static_header".to_string(),
+                    lease_expires_at_ms: now_ms + lease_ms,
+                });
             }
         }
-        Ok(())
+
+        // Bearer or Basic auth via kalamdb_auth::authenticate.
+        if let Some(repo) = &self.bearer_user_repo {
+            if provided.is_empty() {
+                return Err(Status::unauthenticated(
+                    "missing authorization header on open_session",
+                ));
+            }
+
+            let connection_info =
+                ConnectionInfo::new(request.remote_addr().map(|addr| addr.to_string()));
+            let auth_result = authenticate(
+                AuthRequest::Header(provided),
+                &connection_info,
+                repo,
+            )
+            .await
+            .map_err(|error| {
+                Status::unauthenticated(format!("authentication failed: {}", error))
+            })?;
+
+            if !auth_result.user.is_admin() {
+                return Err(Status::permission_denied(
+                    "pg rpc requires a DBA or system account",
+                ));
+            }
+
+            return Ok(BridgeAuth {
+                user_id: auth_result.user.user_id.to_string(),
+                role: auth_result.user.role.to_string(),
+                auth_mode: format!("{:?}", auth_result.method).to_lowercase(),
+                lease_expires_at_ms: now_ms + lease_ms,
+            });
+        }
+
+        // No auth configured — allow unauthenticated open.
+        if self.expected_auth_header.is_some() {
+            return Err(Status::unauthenticated("invalid or missing pg auth token"));
+        }
+
+        Ok(BridgeAuth {
+            user_id: "anonymous".to_string(),
+            role: "system".to_string(),
+            auth_mode: "none".to_string(),
+            lease_expires_at_ms: now_ms + lease_ms,
+        })
     }
 
     pub fn session_registry(&self) -> Arc<SessionRegistry> {
@@ -1146,7 +1264,74 @@ impl KalamPgService {
 #[async_trait]
 impl PgService for KalamPgService {
     async fn ping(&self, request: Request<PingRequest>) -> Result<Response<PingResponse>, Status> {
-        self.authorize(&request)?;
+        // Ping is a lightweight health check — no session validation required.
+        // If auth is configured, require authorization metadata directly (one-off).
+        if self.mtls_enabled {
+            kalamdb_server_auth::RpcCaller::require_pg_extension(&request)?;
+        } else if let Some(expected) = &self.expected_auth_header {
+            let provided = request
+                .metadata()
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if provided != expected.as_str() {
+                // Also allow bearer auth for ping
+                if let Some(repo) = &self.bearer_user_repo {
+                    if !provided.is_empty() {
+                        let connection_info =
+                            ConnectionInfo::new(request.remote_addr().map(|addr| addr.to_string()));
+                        let auth_result = authenticate(
+                            AuthRequest::Header(provided),
+                            &connection_info,
+                            repo,
+                        )
+                        .await
+                        .map_err(|error| {
+                            Status::unauthenticated(format!("authentication failed: {}", error))
+                        })?;
+                        if !auth_result.user.is_admin() {
+                            return Err(Status::permission_denied(
+                                "pg rpc requires a DBA or system account",
+                            ));
+                        }
+                    } else {
+                        return Err(Status::unauthenticated("missing authorization header"));
+                    }
+                } else {
+                    return Err(Status::unauthenticated("invalid or missing pg auth token"));
+                }
+            }
+        } else if let Some(repo) = &self.bearer_user_repo {
+            let provided = request
+                .metadata()
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if !provided.is_empty() {
+                let connection_info =
+                    ConnectionInfo::new(request.remote_addr().map(|addr| addr.to_string()));
+                let auth_result = authenticate(
+                    AuthRequest::Header(provided),
+                    &connection_info,
+                    repo,
+                )
+                .await
+                .map_err(|error| {
+                    Status::unauthenticated(format!("authentication failed: {}", error))
+                })?;
+                if !auth_result.user.is_admin() {
+                    return Err(Status::permission_denied(
+                        "pg rpc requires a DBA or system account",
+                    ));
+                }
+            } else {
+                return Err(Status::unauthenticated("missing authorization header"));
+            }
+        }
         Ok(Response::new(PingResponse { ok: true }))
     }
 
@@ -1154,14 +1339,12 @@ impl PgService for KalamPgService {
         &self,
         request: Request<OpenSessionRequest>,
     ) -> Result<Response<OpenSessionResponse>, Status> {
-        self.authorize(&request)?;
+        // Full authentication happens here — once per session.
+        let bridge_auth = self.authenticate_open_session(&request).await?;
+        let lease_expires_at_ms = bridge_auth.lease_expires_at_ms;
 
         let remote_addr = request.remote_addr().map(|addr| addr.to_string());
         let request = request.into_inner();
-        let session_id = request.session_id.trim();
-        if session_id.is_empty() {
-            return Err(Status::invalid_argument("session_id must not be empty"));
-        }
 
         let current_schema = request
             .current_schema
@@ -1169,16 +1352,16 @@ impl PgService for KalamPgService {
             .map(str::trim)
             .filter(|value| !value.is_empty());
 
-        let session = self.session_registry.open_or_get_with_context(
-            session_id,
+        let session = self.session_registry.open_authenticated(
             current_schema,
             remote_addr.as_deref(),
-            Some("OpenSession"),
+            bridge_auth,
         );
 
         Ok(Response::new(OpenSessionResponse {
             session_id: session.session_id().to_string(),
             current_schema: session.current_schema().map(ToOwned::to_owned),
+            lease_expires_at_ms,
         }))
     }
 
@@ -1186,14 +1369,13 @@ impl PgService for KalamPgService {
         &self,
         request: Request<CloseSessionRequest>,
     ) -> Result<Response<CloseSessionResponse>, Status> {
-        self.authorize(&request)?;
-
         let request = request.into_inner();
         let session_id = request.session_id.trim();
         if session_id.is_empty() {
             return Err(Status::invalid_argument("session_id must not be empty"));
         }
 
+        // Allow close even for expired sessions so cleanup always works.
         if let Some(session) = self.session_registry.get(session_id) {
             if let Some(transaction_id) = session.transaction_id().map(ToOwned::to_owned) {
                 if let Some(executor) = self.operation_executor.as_deref() {
@@ -1230,11 +1412,8 @@ impl PgService for KalamPgService {
         &self,
         request: Request<ScanRpcRequest>,
     ) -> Result<Response<ScanRpcResponse>, Status> {
-        self.authorize(&request)?;
         let session_id = request.get_ref().session_id.trim().to_string();
-        if session_id.is_empty() {
-            return Err(Status::invalid_argument("session_id must not be empty"));
-        }
+        self.validate_session_handle(&session_id)?;
         self.record_session_activity(session_id.as_str(), None, "Scan", &request);
         let inner = request.into_inner();
         log::debug!("PG scan: {}.{} type={}", inner.namespace, inner.table_name, inner.table_type);
@@ -1254,11 +1433,8 @@ impl PgService for KalamPgService {
         &self,
         request: Request<InsertRpcRequest>,
     ) -> Result<Response<InsertRpcResponse>, Status> {
-        self.authorize(&request)?;
         let session_id = request.get_ref().session_id.trim().to_string();
-        if session_id.is_empty() {
-            return Err(Status::invalid_argument("session_id must not be empty"));
-        }
+        self.validate_session_handle(&session_id)?;
         self.record_session_activity(session_id.as_str(), None, "Insert", &request);
         self.session_registry.mark_transaction_writes(session_id.as_str());
         let inner = request.into_inner();
@@ -1285,11 +1461,8 @@ impl PgService for KalamPgService {
         &self,
         request: Request<UpdateRpcRequest>,
     ) -> Result<Response<UpdateRpcResponse>, Status> {
-        self.authorize(&request)?;
         let session_id = request.get_ref().session_id.trim().to_string();
-        if session_id.is_empty() {
-            return Err(Status::invalid_argument("session_id must not be empty"));
-        }
+        self.validate_session_handle(&session_id)?;
         self.record_session_activity(session_id.as_str(), None, "Update", &request);
         self.session_registry.mark_transaction_writes(session_id.as_str());
         let inner = request.into_inner();
@@ -1311,11 +1484,8 @@ impl PgService for KalamPgService {
         &self,
         request: Request<DeleteRpcRequest>,
     ) -> Result<Response<DeleteRpcResponse>, Status> {
-        self.authorize(&request)?;
         let session_id = request.get_ref().session_id.trim().to_string();
-        if session_id.is_empty() {
-            return Err(Status::invalid_argument("session_id must not be empty"));
-        }
+        self.validate_session_handle(&session_id)?;
         self.record_session_activity(session_id.as_str(), None, "Delete", &request);
         self.session_registry.mark_transaction_writes(session_id.as_str());
         let inner = request.into_inner();
@@ -1337,13 +1507,10 @@ impl PgService for KalamPgService {
         &self,
         request: Request<BeginTransactionRequest>,
     ) -> Result<Response<BeginTransactionResponse>, Status> {
-        self.authorize(&request)?;
         let remote_addr = request.remote_addr().map(|addr| addr.to_string());
         let inner = request.into_inner();
         let session_id = inner.session_id.trim();
-        if session_id.is_empty() {
-            return Err(Status::invalid_argument("session_id must not be empty"));
-        }
+        self.validate_session_handle(session_id)?;
 
         // Ensure session exists
         self.session_registry.open_or_get_with_context(
@@ -1407,14 +1574,11 @@ impl PgService for KalamPgService {
         &self,
         request: Request<CommitTransactionRequest>,
     ) -> Result<Response<CommitTransactionResponse>, Status> {
-        self.authorize(&request)?;
         let remote_addr = request.remote_addr().map(|addr| addr.to_string());
         let inner = request.into_inner();
         let session_id = inner.session_id.trim();
         let transaction_id = inner.transaction_id.trim();
-        if session_id.is_empty() {
-            return Err(Status::invalid_argument("session_id must not be empty"));
-        }
+        self.validate_session_handle(session_id)?;
         if transaction_id.is_empty() {
             return Err(Status::invalid_argument("transaction_id must not be empty"));
         }
@@ -1459,14 +1623,11 @@ impl PgService for KalamPgService {
         &self,
         request: Request<RollbackTransactionRequest>,
     ) -> Result<Response<RollbackTransactionResponse>, Status> {
-        self.authorize(&request)?;
         let remote_addr = request.remote_addr().map(|addr| addr.to_string());
         let inner = request.into_inner();
         let session_id = inner.session_id.trim();
         let transaction_id = inner.transaction_id.trim();
-        if session_id.is_empty() {
-            return Err(Status::invalid_argument("session_id must not be empty"));
-        }
+        self.validate_session_handle(session_id)?;
 
         self.session_registry.open_or_get_with_context(
             session_id,
@@ -1508,7 +1669,6 @@ impl PgService for KalamPgService {
         &self,
         request: Request<ExecuteSqlRpcRequest>,
     ) -> Result<Response<ExecuteSqlRpcResponse>, Status> {
-        self.authorize(&request)?;
         let remote_addr = request.remote_addr().map(|addr| addr.to_string());
         let inner = request.into_inner();
         let sql = inner.sql.trim();
@@ -1516,9 +1676,7 @@ impl PgService for KalamPgService {
         if sql.is_empty() {
             return Err(Status::invalid_argument("sql must not be empty"));
         }
-        if session_id.is_empty() {
-            return Err(Status::invalid_argument("session_id must not be empty"));
-        }
+        self.validate_session_handle(session_id)?;
 
         let had_session = self.session_registry.get(session_id).is_some();
         self.session_registry.open_or_get_with_context(
@@ -1543,7 +1701,6 @@ impl PgService for KalamPgService {
         &self,
         request: Request<ExecuteQueryRpcRequest>,
     ) -> Result<Response<ExecuteQueryRpcResponse>, Status> {
-        self.authorize(&request)?;
         let remote_addr = request.remote_addr().map(|addr| addr.to_string());
         let inner = request.into_inner();
         let sql = inner.sql.trim();
@@ -1551,9 +1708,7 @@ impl PgService for KalamPgService {
         if sql.is_empty() {
             return Err(Status::invalid_argument("sql must not be empty"));
         }
-        if session_id.is_empty() {
-            return Err(Status::invalid_argument("session_id must not be empty"));
-        }
+        self.validate_session_handle(session_id)?;
 
         let had_session = self.session_registry.get(session_id).is_some();
         self.session_registry.open_or_get_with_context(

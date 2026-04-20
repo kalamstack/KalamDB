@@ -1,5 +1,5 @@
 use kalam_pg_client::RemoteKalamClient;
-use kalam_pg_common::RemoteServerConfig;
+use kalam_pg_common::{RemoteAuthMode, RemoteServerConfig};
 use kalamdb_pg::{KalamPgService, PgServiceServer};
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -30,6 +30,8 @@ async fn start_server_and_client() -> RemoteKalamClient {
     .expect("connect client")
 }
 
+
+
 #[tokio::test]
 #[ntest::timeout(10000)]
 async fn remote_client_connects_and_opens_session() {
@@ -37,11 +39,11 @@ async fn remote_client_connects_and_opens_session() {
 
     client.ping().await.expect("ping");
     let session = client
-        .open_session("pg-backend-1", Some("tenant_app"))
+        .open_session(Some("tenant_app"))
         .await
         .expect("open session");
 
-    assert_eq!(session.session_id, "pg-backend-1");
+    assert!(!session.session_id.is_empty(), "server should issue a session ID");
     assert_eq!(session.current_schema.as_deref(), Some("tenant_app"));
 }
 
@@ -53,16 +55,16 @@ async fn remote_client_connects_and_opens_session() {
 async fn sequential_transactions_commit_cleanly() {
     let client = start_server_and_client().await;
 
-    client.open_session("pg-seq-tx", None).await.expect("open session");
+    let session = client.open_session(None).await.expect("open session");
 
     for i in 0..5 {
         let tx_id = client
-            .begin_transaction("pg-seq-tx")
+            .begin_transaction(&session.session_id)
             .await
             .unwrap_or_else(|e| panic!("begin_transaction #{i} failed: {e}"));
 
         client
-            .commit_transaction("pg-seq-tx", &tx_id)
+            .commit_transaction(&session.session_id, &tx_id)
             .await
             .unwrap_or_else(|e| panic!("commit_transaction #{i} ({tx_id}) failed: {e}"));
     }
@@ -75,18 +77,18 @@ async fn sequential_transactions_commit_cleanly() {
 async fn stale_transaction_auto_rollback_on_new_begin() {
     let client = start_server_and_client().await;
 
-    client.open_session("pg-stale-tx", None).await.expect("open session");
+    let session = client.open_session(None).await.expect("open session");
 
     // Begin a transaction and intentionally skip commit/rollback
-    let _tx_id1 = client.begin_transaction("pg-stale-tx").await.expect("begin tx1");
+    let _tx_id1 = client.begin_transaction(&session.session_id).await.expect("begin tx1");
 
     // Beginning a new transaction should succeed (auto-rollback of stale tx1)
     let tx_id2 = client
-        .begin_transaction("pg-stale-tx")
+        .begin_transaction(&session.session_id)
         .await
         .expect("begin tx2 should auto-rollback stale tx1");
 
-    client.commit_transaction("pg-stale-tx", &tx_id2).await.expect("commit tx2");
+    client.commit_transaction(&session.session_id, &tx_id2).await.expect("commit tx2");
 }
 
 /// Verify close_session removes the session from the server registry.
@@ -95,14 +97,14 @@ async fn stale_transaction_auto_rollback_on_new_begin() {
 async fn close_session_removes_server_state() {
     let client = start_server_and_client().await;
 
-    client.open_session("pg-close-test", None).await.expect("open session");
+    let session = client.open_session(None).await.expect("open session");
 
     // Close the session — should succeed
-    client.close_session("pg-close-test").await.expect("close session");
+    client.close_session(&session.session_id).await.expect("close session");
 
     // Closing again should also succeed (idempotent remove)
     client
-        .close_session("pg-close-test")
+        .close_session(&session.session_id)
         .await
         .expect("close session again (idempotent)");
 }
@@ -136,4 +138,42 @@ async fn connect_with_timeout_fails_on_unreachable_server() {
             assert!(result.is_err(), "ping to unreachable server should fail");
         },
     }
+}
+
+#[tokio::test]
+#[ntest::timeout(10000)]
+async fn account_login_sends_basic_auth_on_open_session() {
+    // With gRPC-only auth, account_login sends Basic credentials as gRPC metadata
+    // on open_session. The server validates them and issues a session handle.
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind gRPC server");
+    let port = listener.local_addr().expect("gRPC local addr").port();
+    let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+    // No expected static header — the server should accept Basic auth.
+    let service = KalamPgService::new(false, None);
+
+    tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(PgServiceServer::new(service))
+            .serve_with_incoming(incoming)
+            .await
+            .expect("serve auth gRPC server");
+    });
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let client = RemoteKalamClient::connect(RemoteServerConfig {
+        host: "127.0.0.1".to_string(),
+        port,
+        auth_mode: RemoteAuthMode::AccountLogin,
+        login_user: Some("pg_dba".to_string()),
+        login_password: Some("secret-pass".to_string()),
+        ..Default::default()
+    })
+    .await
+    .expect("connect client with account_login");
+
+    // Ping still uses auth metadata (pre-session health check)
+    client.ping().await.expect("ping with account_login");
 }

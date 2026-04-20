@@ -1,4 +1,4 @@
-use kalam_pg_common::{KalamPgError, RemoteServerConfig};
+use kalam_pg_common::{KalamPgError, RemoteAuthMode, RemoteServerConfig};
 use std::collections::BTreeMap;
 
 /// Parsed foreign-server options for the PostgreSQL extension.
@@ -39,6 +39,22 @@ impl ServerOptions {
                 ))
             })?;
 
+        let auth_mode = options
+            .get("auth_mode")
+            .map(String::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| match value {
+                "none" => Ok(RemoteAuthMode::None),
+                "static_header" => Ok(RemoteAuthMode::StaticHeader),
+                "account_login" => Ok(RemoteAuthMode::AccountLogin),
+                _ => Err(KalamPgError::Validation(format!(
+                    "server option 'auth_mode' must be one of: none, static_header, account_login (got '{}')",
+                    value
+                ))),
+            })
+            .transpose()?;
+
         let ca_cert = options
             .get("ca_cert")
             .map(String::as_str)
@@ -59,14 +75,6 @@ impl ServerOptions {
             .map(str::trim)
             .filter(|v| !v.is_empty())
             .map(str::to_string);
-
-        // Validate: if client_cert is provided, client_key must also be provided
-        if client_cert.is_some() != client_key.is_some() {
-            return Err(KalamPgError::Validation(
-                "server options 'client_cert' and 'client_key' must both be provided for mTLS"
-                    .to_string(),
-            ));
-        }
 
         let timeout_ms = options
             .get("timeout")
@@ -91,16 +99,43 @@ impl ServerOptions {
             .filter(|v| !v.is_empty())
             .map(str::to_string);
 
+        let login_user = options
+            .get("login_user")
+            .map(String::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+
+        let login_password = options
+            .get("login_password")
+            .map(String::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+
+        let auth_mode = match auth_mode {
+            Some(mode) => mode,
+            None if auth_header.is_some() => RemoteAuthMode::StaticHeader,
+            None => RemoteAuthMode::None,
+        };
+
+        let remote = RemoteServerConfig {
+            host,
+            port,
+            timeout_ms,
+            auth_mode,
+            auth_header,
+            login_user,
+            login_password,
+            ca_cert,
+            client_cert,
+            client_key,
+        };
+
+        remote.validate()?;
+
         Ok(Self {
-            remote: Some(RemoteServerConfig {
-                host,
-                port,
-                timeout_ms,
-                auth_header,
-                ca_cert,
-                client_cert,
-                client_key,
-            }),
+            remote: Some(remote),
         })
     }
 }

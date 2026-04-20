@@ -43,10 +43,10 @@ async fn shared_rpc_server_hosts_pg_service() {
 
     client.ping().await.expect("ping shared rpc service");
     let session = client
-        .open_session("pg-backend-raft", Some("tenant_a"))
+        .open_session(Some("tenant_a"))
         .await
         .expect("open session over shared rpc server");
 
-    assert_eq!(session.session_id, "pg-backend-raft");
+    assert!(!session.session_id.is_empty(), "server should issue a session id");
     assert_eq!(session.current_schema.as_deref(), Some("tenant_a"));
 }

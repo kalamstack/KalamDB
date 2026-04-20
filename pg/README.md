@@ -166,9 +166,30 @@ CREATE SERVER kalam_server
   OPTIONS (
     host '127.0.0.1',
     port '9188',
+    auth_mode 'account_login',
+    login_user 'pg_dba',
+    login_password '<dba-password>'
+  );
+```
+
+Or keep the legacy shared-header mode explicitly:
+
+```sql
+CREATE SERVER kalam_server
+  FOREIGN DATA WRAPPER pg_kalam
+  OPTIONS (
+    host '127.0.0.1',
+    port '9188',
+    auth_mode 'static_header',
     auth_header 'Bearer <your-kalamdb-token-or-shared-secret>'
   );
 ```
+
+Auth mode notes:
+
+- `auth_mode 'account_login'` sends Basic credentials (login_user/login_password) on the gRPC `open_session` call. The server authenticates once and issues an opaque session handle with a time-limited lease. All subsequent RPCs carry only the session handle — no per-RPC auth overhead. This is the recommended mode for DBA/system bridge accounts.
+- `auth_mode 'static_header'` preserves the legacy `auth_header` transport secret/JWT path.
+- Omitting `auth_mode` still treats `auth_header` as the legacy static-header mode for compatibility.
 
 Verify the extension loaded correctly:
 
@@ -428,6 +449,21 @@ CREATE SERVER kalam_server
   OPTIONS (
     host 'host.docker.internal',
     port '9188',
+    auth_mode 'account_login',
+    login_user 'pg_dba',
+    login_password '<dba-password>'
+  );
+```
+
+Legacy static-header mode remains available:
+
+```sql
+CREATE SERVER kalam_server
+  FOREIGN DATA WRAPPER pg_kalam
+  OPTIONS (
+    host 'host.docker.internal',
+    port '9188',
+    auth_mode 'static_header',
     auth_header 'Bearer <your-kalamdb-token-or-shared-secret>'
   );
 ```

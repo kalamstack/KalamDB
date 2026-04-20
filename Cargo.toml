@@ -154,7 +154,7 @@ serial_test = "3.3.1"
 criterion = { version = "0.8.2", features = ["html_reports"] }
 
 # Raft consensus
-openraft = { version = "0.9.22", features = ["serde"] }
+openraft = { version = "0.9.23", features = ["serde"] }
 rmp = "0.8"
 rmp-serde = "1.3"
 
@@ -219,7 +219,7 @@ wasm-bindgen = { version = "0.2.118" }
 wasm-bindgen-futures = { version = "0.4.68" }
 js-sys = { version = "0.3.95" }
 libc = "0.2.185"
-libmimalloc-sys = { version = "0.1.44", features = ["extended"] }
+libmimalloc-sys = { version = "0.1.46", features = ["extended"] }
 web-sys = { version = "0.3.95" }
 tsify = { version = "0.5.6", default-features = false, features = ["js"] }
 serde-wasm-bindgen = "0.6.5"

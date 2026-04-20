@@ -164,19 +164,19 @@ fn test_cli_live_query_basic() {
         },
     };
 
-    // Give it a moment to connect and receive initial data
-
-    // Try to read with timeout instead of blocking forever
+    // Wait for initial row that was inserted before subscribing.
     let timeout = Duration::from_secs(3);
     let result = listener.wait_for_event("Initial Message", timeout);
 
     listener.stop().unwrap();
     cleanup_test_table(&table).unwrap();
 
-    // Verify subscription mechanism worked (we successfully connected and attempted to receive data)
-    // The result may be Ok (data received) or Err (timeout) - both are valid for this test
-    // since the key thing being tested is that subscription can be started and stopped cleanly
-    assert!(result.is_ok() || result.is_err(), "Subscription lifecycle completed");
+    let line = result.expect("subscription should stream initial snapshot row");
+    assert!(
+        line.contains("Initial Message"),
+        "Expected initial row content in subscription output, got: {}",
+        line
+    );
 }
 
 /// T041b: Test CLI subscription commands
@@ -246,17 +246,45 @@ fn test_cli_live_query_with_filter() {
         },
     };
 
-    // Give it a moment
+    for i in 1..=12 {
+        let marker = if i <= 10 {
+            format!("low_{}", i)
+        } else {
+            format!("high_{}", i)
+        };
+        let insert_sql = format!("INSERT INTO {} (content) VALUES ('{}')", table, marker);
+        let insert_result = execute_sql_as_root_via_cli(&insert_sql);
+        assert!(
+            insert_result.is_ok(),
+            "Insert {} should succeed: {:?}",
+            i,
+            insert_result.err()
+        );
+    }
 
-    // Try to read with timeout - subscription with filter should not block indefinitely
-    // Since there's no data with id > 10, we expect a timeout (which is the correct behavior)
-    let read_result = listener.try_read_line(Duration::from_secs(2));
-
-    // Verify we could read (even if empty/timeout) - proves subscription filter was accepted
-    assert!(read_result.is_ok() || read_result.is_err(), "Subscription filter was processed");
+    let mut lines = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        match listener.try_read_line(Duration::from_millis(150)) {
+            Ok(Some(line)) if !line.trim().is_empty() => lines.push(line),
+            Ok(_) => continue,
+            Err(_) => continue,
+        }
+    }
 
     listener.stop().unwrap();
     cleanup_test_table(&table).unwrap();
+
+    assert!(
+        lines.iter().any(|line| line.contains("high_11") || line.contains("high_12")),
+        "Expected rows with id > 10 to pass filter, got lines:\n{}",
+        lines.join("\n")
+    );
+    assert!(
+        !lines.iter().any(|line| line.contains("low_1") || line.contains("low_2")),
+        "Rows with id <= 10 should be filtered out, got lines:\n{}",
+        lines.join("\n")
+    );
 }
 
 /// T043: Test subscription pause/resume (Ctrl+S/Ctrl+Q)

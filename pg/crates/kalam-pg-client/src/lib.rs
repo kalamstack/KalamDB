@@ -4,7 +4,7 @@ use std::time::Duration;
 use arrow::record_batch::RecordBatch;
 use arrow_ipc::reader::StreamReader;
 use kalam_pg_api::{MutationResponse, ScanResponse};
-use kalam_pg_common::{KalamPgError, RemoteServerConfig};
+use kalam_pg_common::{KalamPgError, RemoteAuthMode, RemoteServerConfig};
 use kalamdb_pg::{
     BeginTransactionRequest, CloseSessionRequest, CommitTransactionRequest, DeleteRpcRequest,
     ExecuteQueryRpcRequest, ExecuteSqlRpcRequest, InsertRpcRequest, OpenSessionRequest,
@@ -17,7 +17,6 @@ use tonic::transport::{Channel, Endpoint};
 use tonic::Request;
 
 /// Load PEM material from either an inline PEM string or a file path.
-#[cfg(feature = "tls")]
 fn load_pem(value: &str) -> Result<Vec<u8>, String> {
     if value.contains("-----BEGIN") {
         Ok(value.as_bytes().to_vec())
@@ -26,10 +25,104 @@ fn load_pem(value: &str) -> Result<Vec<u8>, String> {
     }
 }
 
+/// Build a `Basic base64(user:pass)` authorization metadata value.
+fn build_basic_auth_metadata(
+    user: &str,
+    password: &str,
+) -> Result<tonic::metadata::MetadataValue<tonic::metadata::Ascii>, KalamPgError> {
+    use base64::Engine;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", user, password));
+    format!("Basic {}", encoded)
+        .parse::<tonic::metadata::MetadataValue<_>>()
+        .map_err(|error| {
+            KalamPgError::Validation(format!(
+                "failed to build Basic auth metadata: {}",
+                error
+            ))
+        })
+}
+
+/// Auth metadata to send on `open_session` only.
+#[derive(Debug, Clone)]
+enum OpenSessionAuth {
+    /// No auth metadata.
+    None,
+    /// Pre-shared static header value (e.g. `Bearer <shared-secret>`).
+    StaticHeader(tonic::metadata::MetadataValue<tonic::metadata::Ascii>),
+    /// Basic auth with username/password, sent as `Basic base64(user:pass)`.
+    BasicCredentials(tonic::metadata::MetadataValue<tonic::metadata::Ascii>),
+}
+
+impl OpenSessionAuth {
+    fn from_config(config: &RemoteServerConfig) -> Result<Self, KalamPgError> {
+        match config.effective_auth_mode() {
+            RemoteAuthMode::None => Ok(Self::None),
+            RemoteAuthMode::StaticHeader => {
+                let value = config
+                    .auth_header
+                    .as_deref()
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or_else(|| {
+                        KalamPgError::Validation(
+                            "auth_mode 'static_header' requires a non-empty auth_header"
+                                .to_string(),
+                        )
+                    })?
+                    .parse::<tonic::metadata::MetadataValue<_>>()
+                    .map_err(|error| {
+                        KalamPgError::Validation(format!(
+                            "invalid auth_header metadata value: {}",
+                            error
+                        ))
+                    })?;
+                Ok(Self::StaticHeader(value))
+            },
+            RemoteAuthMode::AccountLogin => {
+                let login_user = config
+                    .login_user
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| {
+                        KalamPgError::Validation(
+                            "auth_mode 'account_login' requires server option 'login_user'"
+                                .to_string(),
+                        )
+                    })?;
+                let login_password = config
+                    .login_password
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .ok_or_else(|| {
+                        KalamPgError::Validation(
+                            "auth_mode 'account_login' requires server option 'login_password'"
+                                .to_string(),
+                        )
+                    })?;
+                let metadata = build_basic_auth_metadata(login_user, login_password)?;
+                Ok(Self::BasicCredentials(metadata))
+            },
+        }
+    }
+
+    fn authorization_metadata(
+        &self,
+    ) -> Option<tonic::metadata::MetadataValue<tonic::metadata::Ascii>> {
+        match self {
+            Self::None => None,
+            Self::StaticHeader(value) => Some(value.clone()),
+            Self::BasicCredentials(value) => Some(value.clone()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteSessionHandle {
     pub session_id: String,
     pub current_schema: Option<String>,
+    /// Lease expiry (epoch ms). Client should re-authenticate before this time.
+    pub lease_expires_at_ms: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -38,17 +131,18 @@ pub struct RemoteKalamClient {
     config: RemoteServerConfig,
     /// "host:port" used in error messages.
     server_addr: String,
-    /// Value to send as the gRPC `authorization` metadata header.
-    auth_header: Option<tonic::metadata::MetadataValue<tonic::metadata::Ascii>>,
+    /// Auth metadata to send on `open_session` only.
+    open_session_auth: OpenSessionAuth,
 }
 
 impl RemoteKalamClient {
     pub async fn connect(config: RemoteServerConfig) -> Result<Self, KalamPgError> {
+        config.validate()?;
+
         let server_addr = format!("{}:{}", config.host, config.port);
         let mut endpoint = Endpoint::from_shared(config.endpoint_uri())
             .map_err(|error| KalamPgError::Execution(error.to_string()))?;
 
-        // Apply connection and request timeout if configured
         if config.timeout_ms > 0 {
             let timeout = Duration::from_millis(config.timeout_ms);
             endpoint = endpoint.connect_timeout(timeout).timeout(timeout);
@@ -75,24 +169,13 @@ impl RemoteKalamClient {
             .connect()
             .await
             .map_err(|error| Self::connect_err(&error, &server_addr))?;
-
-        let auth_header = match config.auth_header.as_deref().filter(|v| !v.is_empty()) {
-            Some(value) => {
-                Some(value.parse::<tonic::metadata::MetadataValue<_>>().map_err(|error| {
-                    KalamPgError::Validation(format!(
-                        "invalid auth_header metadata value: {}",
-                        error
-                    ))
-                })?)
-            },
-            None => None,
-        };
+        let open_session_auth = OpenSessionAuth::from_config(&config)?;
 
         Ok(Self {
             channel,
             config,
             server_addr,
-            auth_header,
+            open_session_auth,
         })
     }
 
@@ -159,7 +242,7 @@ impl RemoteKalamClient {
                 KalamPgError::Execution(format!("not found: {msg}"))
             },
             Code::Unauthenticated => KalamPgError::Execution(
-                "authentication failed – check the auth_header in CREATE SERVER OPTIONS"
+                "authentication failed – check auth_mode, auth_header, or account_login credentials in CREATE SERVER OPTIONS"
                     .to_string(),
             ),
             Code::PermissionDenied => {
@@ -214,35 +297,55 @@ impl RemoteKalamClient {
         Ok(tls)
     }
 
+    /// Create a plain gRPC request (no auth metadata).
+    fn plain_request<T>(payload: T) -> Request<T> {
+        Request::new(payload)
+    }
+
+    /// Create a gRPC request with auth metadata for `open_session`.
+    fn authenticated_request<T>(&self, payload: T) -> Request<T> {
+        let mut req = Request::new(payload);
+        if let Some(val) = self.open_session_auth.authorization_metadata() {
+            req.metadata_mut().insert("authorization", val);
+        }
+        req
+    }
+
     pub async fn ping(&self) -> Result<(), KalamPgError> {
+        // Ping uses auth metadata directly (pre-session health check).
+        let request = self.authenticated_request(PingRequest {});
         let mut client = PgServiceClient::new(self.channel.clone());
-        let request = self.authorized_request(PingRequest {});
-        client.ping(request).await.map_err(|e| Self::grpc_err(e, &self.server_addr))?;
+        client
+            .ping(request)
+            .await
+            .map_err(|status| Self::grpc_err(status, &self.server_addr))?;
         Ok(())
     }
 
+    /// Open an authenticated session. Auth metadata is sent only on this call.
+    /// Returns a server-issued opaque session handle.
     pub async fn open_session(
         &self,
-        session_id: &str,
         current_schema: Option<&str>,
     ) -> Result<RemoteSessionHandle, KalamPgError> {
-        let mut client = PgServiceClient::new(self.channel.clone());
-        let request = self.authorized_request(OpenSessionRequest {
-            session_id: session_id.trim().to_string(),
+        let request = self.authenticated_request(OpenSessionRequest {
+            session_id: String::new(), // Server generates the session ID.
             current_schema: current_schema
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .map(ToOwned::to_owned),
         });
+        let mut client = PgServiceClient::new(self.channel.clone());
         let response = client
             .open_session(request)
             .await
-            .map_err(|e| Self::grpc_err(e, &self.server_addr))?
+            .map_err(|status| Self::grpc_err(status, &self.server_addr))?
             .into_inner();
 
         Ok(RemoteSessionHandle {
             session_id: response.session_id,
             current_schema: response.current_schema,
+            lease_expires_at_ms: response.lease_expires_at_ms,
         })
     }
 
@@ -255,7 +358,7 @@ impl RemoteKalamClient {
                 fresh_client
                     .close_session_attempt(session_id)
                     .await
-                    .map_err(|error| Self::grpc_err(error, &self.server_addr))
+                    .map_err(|status| Self::grpc_err(status, &fresh_client.server_addr))
             },
             Err(status) => Err(Self::grpc_err(status, &self.server_addr)),
         }
@@ -263,10 +366,11 @@ impl RemoteKalamClient {
 
     async fn close_session_attempt(&self, session_id: &str) -> Result<(), tonic::Status> {
         let mut client = PgServiceClient::new(self.channel.clone());
-        let request = self.authorized_request(CloseSessionRequest {
-            session_id: session_id.trim().to_string(),
-        });
-        client.close_session(request).await?;
+        client
+            .close_session(Self::plain_request(CloseSessionRequest {
+                session_id: session_id.trim().to_string(),
+            }))
+            .await?;
         Ok(())
     }
 
@@ -281,7 +385,6 @@ impl RemoteKalamClient {
         limit: Option<u64>,
         filters: Vec<(String, String)>,
     ) -> Result<ScanResponse, KalamPgError> {
-        let mut client = PgServiceClient::new(self.channel.clone());
         let grpc_filters = filters
             .into_iter()
             .map(|(column, value)| ScanFilterExpression {
@@ -290,20 +393,20 @@ impl RemoteKalamClient {
                 value,
             })
             .collect();
-        let request = self.authorized_request(ScanRpcRequest {
-            namespace: namespace.to_string(),
-            table_name: table_name.to_string(),
-            table_type: table_type.to_string(),
-            session_id: session_id.to_string(),
-            user_id: user_id.map(str::to_string),
-            columns,
-            limit,
-            filters: grpc_filters,
-        });
+        let mut client = PgServiceClient::new(self.channel.clone());
         let response = client
-            .scan(request)
+            .scan(Self::plain_request(ScanRpcRequest {
+                namespace: namespace.to_string(),
+                table_name: table_name.to_string(),
+                table_type: table_type.to_string(),
+                session_id: session_id.to_string(),
+                user_id: user_id.map(str::to_string),
+                columns,
+                limit,
+                filters: grpc_filters,
+            }))
             .await
-            .map_err(|e| Self::grpc_err(e, &self.server_addr))?
+            .map_err(|status| Self::grpc_err(status, &self.server_addr))?
             .into_inner();
 
         let batches = Self::decode_ipc_batches(&response.ipc_batches)?;
@@ -320,18 +423,17 @@ impl RemoteKalamClient {
         rows_json: Vec<String>,
     ) -> Result<MutationResponse, KalamPgError> {
         let mut client = PgServiceClient::new(self.channel.clone());
-        let request = self.authorized_request(InsertRpcRequest {
-            namespace: namespace.to_string(),
-            table_name: table_name.to_string(),
-            table_type: table_type.to_string(),
-            session_id: session_id.to_string(),
-            user_id: user_id.map(str::to_string),
-            rows_json,
-        });
         let response = client
-            .insert(request)
+            .insert(Self::plain_request(InsertRpcRequest {
+                namespace: namespace.to_string(),
+                table_name: table_name.to_string(),
+                table_type: table_type.to_string(),
+                session_id: session_id.to_string(),
+                user_id: user_id.map(str::to_string),
+                rows_json,
+            }))
             .await
-            .map_err(|e| Self::grpc_err(e, &self.server_addr))?
+            .map_err(|status| Self::grpc_err(status, &self.server_addr))?
             .into_inner();
 
         Ok(MutationResponse {
@@ -350,19 +452,18 @@ impl RemoteKalamClient {
         updates_json: &str,
     ) -> Result<MutationResponse, KalamPgError> {
         let mut client = PgServiceClient::new(self.channel.clone());
-        let request = self.authorized_request(UpdateRpcRequest {
-            namespace: namespace.to_string(),
-            table_name: table_name.to_string(),
-            table_type: table_type.to_string(),
-            session_id: session_id.to_string(),
-            user_id: user_id.map(str::to_string),
-            pk_value: pk_value.to_string(),
-            updates_json: updates_json.to_string(),
-        });
         let response = client
-            .update(request)
+            .update(Self::plain_request(UpdateRpcRequest {
+                namespace: namespace.to_string(),
+                table_name: table_name.to_string(),
+                table_type: table_type.to_string(),
+                session_id: session_id.to_string(),
+                user_id: user_id.map(str::to_string),
+                pk_value: pk_value.to_string(),
+                updates_json: updates_json.to_string(),
+            }))
             .await
-            .map_err(|e| Self::grpc_err(e, &self.server_addr))?
+            .map_err(|status| Self::grpc_err(status, &self.server_addr))?
             .into_inner();
 
         Ok(MutationResponse {
@@ -380,18 +481,17 @@ impl RemoteKalamClient {
         pk_value: &str,
     ) -> Result<MutationResponse, KalamPgError> {
         let mut client = PgServiceClient::new(self.channel.clone());
-        let request = self.authorized_request(DeleteRpcRequest {
-            namespace: namespace.to_string(),
-            table_name: table_name.to_string(),
-            table_type: table_type.to_string(),
-            session_id: session_id.to_string(),
-            user_id: user_id.map(str::to_string),
-            pk_value: pk_value.to_string(),
-        });
         let response = client
-            .delete(request)
+            .delete(Self::plain_request(DeleteRpcRequest {
+                namespace: namespace.to_string(),
+                table_name: table_name.to_string(),
+                table_type: table_type.to_string(),
+                session_id: session_id.to_string(),
+                user_id: user_id.map(str::to_string),
+                pk_value: pk_value.to_string(),
+            }))
             .await
-            .map_err(|e| Self::grpc_err(e, &self.server_addr))?
+            .map_err(|status| Self::grpc_err(status, &self.server_addr))?
             .into_inner();
 
         Ok(MutationResponse {
@@ -402,13 +502,12 @@ impl RemoteKalamClient {
     /// Begin a new transaction within the given session.
     pub async fn begin_transaction(&self, session_id: &str) -> Result<String, KalamPgError> {
         let mut client = PgServiceClient::new(self.channel.clone());
-        let request = self.authorized_request(BeginTransactionRequest {
-            session_id: session_id.to_string(),
-        });
         let response = client
-            .begin_transaction(request)
+            .begin_transaction(Self::plain_request(BeginTransactionRequest {
+                session_id: session_id.to_string(),
+            }))
             .await
-            .map_err(|e| Self::grpc_err(e, &self.server_addr))?
+            .map_err(|status| Self::grpc_err(status, &self.server_addr))?
             .into_inner();
         Ok(response.transaction_id)
     }
@@ -420,14 +519,13 @@ impl RemoteKalamClient {
         transaction_id: &str,
     ) -> Result<String, KalamPgError> {
         let mut client = PgServiceClient::new(self.channel.clone());
-        let request = self.authorized_request(CommitTransactionRequest {
-            session_id: session_id.to_string(),
-            transaction_id: transaction_id.to_string(),
-        });
         let response = client
-            .commit_transaction(request)
+            .commit_transaction(Self::plain_request(CommitTransactionRequest {
+                session_id: session_id.to_string(),
+                transaction_id: transaction_id.to_string(),
+            }))
             .await
-            .map_err(|e| Self::grpc_err(e, &self.server_addr))?
+            .map_err(|status| Self::grpc_err(status, &self.server_addr))?
             .into_inner();
         Ok(response.transaction_id)
     }
@@ -445,7 +543,7 @@ impl RemoteKalamClient {
                 fresh_client
                     .rollback_transaction_attempt(session_id, transaction_id)
                     .await
-                    .map_err(|error| Self::grpc_err(error, &self.server_addr))
+                    .map_err(|status| Self::grpc_err(status, &fresh_client.server_addr))
             },
             Err(status) => Err(Self::grpc_err(status, &self.server_addr)),
         }
@@ -457,59 +555,48 @@ impl RemoteKalamClient {
         transaction_id: &str,
     ) -> Result<String, tonic::Status> {
         let mut client = PgServiceClient::new(self.channel.clone());
-        let request = self.authorized_request(RollbackTransactionRequest {
-            session_id: session_id.to_string(),
-            transaction_id: transaction_id.to_string(),
-        });
-        let response = client.rollback_transaction(request).await?.into_inner();
+        let response = client
+            .rollback_transaction(Self::plain_request(RollbackTransactionRequest {
+                session_id: session_id.to_string(),
+                transaction_id: transaction_id.to_string(),
+            }))
+            .await?
+            .into_inner();
         Ok(response.transaction_id)
     }
 
     /// Execute a DDL SQL statement on the KalamDB backend.
     pub async fn execute_sql(&self, sql: &str, session_id: &str) -> Result<String, KalamPgError> {
         let mut client = PgServiceClient::new(self.channel.clone());
-        let request = self.authorized_request(ExecuteSqlRpcRequest {
-            sql: sql.to_string(),
-            session_id: session_id.to_string(),
-        });
         let response = client
-            .execute_sql(request)
+            .execute_sql(Self::plain_request(ExecuteSqlRpcRequest {
+                sql: sql.to_string(),
+                session_id: session_id.to_string(),
+            }))
             .await
-            .map_err(|e| Self::grpc_err(e, &self.server_addr))?
+            .map_err(|status| Self::grpc_err(status, &self.server_addr))?
             .into_inner();
         Ok(response.message)
     }
 
     /// Execute an arbitrary SQL statement and return JSON rows.
-    ///
-    /// For SELECT queries the returned `Vec<String>` contains one JSON object per row.
-    /// For DDL/DML an empty vec is returned and the status message is in the `String`.
     pub async fn execute_query(
         &self,
         sql: &str,
         session_id: &str,
     ) -> Result<(String, Vec<String>), KalamPgError> {
         let mut client = PgServiceClient::new(self.channel.clone());
-        let request = self.authorized_request(ExecuteQueryRpcRequest {
-            sql: sql.to_string(),
-            session_id: session_id.to_string(),
-        });
         let response = client
-            .execute_query(request)
+            .execute_query(Self::plain_request(ExecuteQueryRpcRequest {
+                sql: sql.to_string(),
+                session_id: session_id.to_string(),
+            }))
             .await
-            .map_err(|e| Self::grpc_err(e, &self.server_addr))?
+            .map_err(|status| Self::grpc_err(status, &self.server_addr))?
             .into_inner();
         let batches = Self::decode_ipc_batches(&response.ipc_batches)?;
         let json_rows = Self::batches_to_json_rows(&batches);
         Ok((response.message, json_rows))
-    }
-
-    fn authorized_request<T>(&self, payload: T) -> Request<T> {
-        let mut req = Request::new(payload);
-        if let Some(val) = &self.auth_header {
-            req.metadata_mut().insert("authorization", val.clone());
-        }
-        req
     }
 
     /// Decode Arrow IPC bytes received from the gRPC response into RecordBatches.

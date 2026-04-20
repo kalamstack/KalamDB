@@ -8,6 +8,8 @@ use uuid::Uuid;
 
 const STALE_IDLE_SESSION_TTL_MS: i64 = 5_000;
 const STALE_IDLE_SESSION_PRUNE_INTERVAL_MS: i64 = 1_000;
+/// Default session lease duration: 30 minutes.
+pub(crate) const DEFAULT_SESSION_LEASE_MS: i64 = 30 * 60 * 1_000;
 
 fn current_timestamp_ms() -> i64 {
     SystemTime::now()
@@ -24,6 +26,19 @@ fn session_is_stale(last_seen_at_ms: i64, now_ms: i64) -> bool {
     now_ms.saturating_sub(last_seen_at_ms) >= STALE_IDLE_SESSION_TTL_MS
 }
 
+/// Authenticated bridge identity stored at session-open time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeAuth {
+    /// Bridge user id that authenticated during `open_session`.
+    pub user_id: String,
+    /// Role of the bridge user (e.g. "dba", "system").
+    pub role: String,
+    /// Auth mode used: "basic", "bearer", "mtls", or "static_header".
+    pub auth_mode: String,
+    /// Session lease expiry (epoch ms). After this, the session must re-authenticate.
+    pub lease_expires_at_ms: i64,
+}
+
 /// Mutable session state shared across PostgreSQL requests that belong to the same backend.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemotePgSession {
@@ -37,6 +52,8 @@ pub struct RemotePgSession {
     last_seen_at_ms: i64,
     client_addr: Option<String>,
     last_method: Option<String>,
+    /// Authenticated bridge identity set during `open_session`.
+    bridge_auth: Option<BridgeAuth>,
 }
 
 /// Live transaction state resolved from the core transaction coordinator for a pg session.
@@ -93,6 +110,7 @@ impl RemotePgSession {
             last_seen_at_ms: now_ms,
             client_addr: None,
             last_method: None,
+            bridge_auth: None,
         }
     }
 
@@ -130,6 +148,26 @@ impl RemotePgSession {
 
     pub fn last_method(&self) -> Option<&str> {
         self.last_method.as_deref()
+    }
+
+    pub fn bridge_auth(&self) -> Option<&BridgeAuth> {
+        self.bridge_auth.as_ref()
+    }
+
+    pub fn is_authenticated(&self) -> bool {
+        self.bridge_auth.is_some()
+    }
+
+    pub fn is_lease_expired(&self, now_ms: i64) -> bool {
+        self.bridge_auth
+            .as_ref()
+            .map(|auth| now_ms >= auth.lease_expires_at_ms)
+            .unwrap_or(true)
+    }
+
+    pub fn with_bridge_auth(mut self, bridge_auth: BridgeAuth) -> Self {
+        self.bridge_auth = Some(bridge_auth);
+        self
     }
 
     pub fn with_current_schema(mut self, current_schema: Option<&str>) -> Self {
@@ -269,6 +307,42 @@ impl SessionRegistry {
             .entry(session_id.clone())
             .or_insert_with(|| RemotePgSession::new(session_id))
             .clone()
+    }
+
+    /// Open an authenticated session with a server-issued opaque session handle.
+    /// Returns the newly created session with bridge auth set.
+    pub fn open_authenticated(
+        &self,
+        current_schema: Option<&str>,
+        client_addr: Option<&str>,
+        bridge_auth: BridgeAuth,
+    ) -> RemotePgSession {
+        let session_id = Uuid::now_v7().to_string();
+        let now_ms = current_timestamp_ms();
+
+        self.maybe_prune_stale_local_idle_sessions(now_ms);
+
+        let mut session = RemotePgSession::new(&session_id).with_bridge_auth(bridge_auth);
+        session.record_activity(current_schema, client_addr, Some("OpenSession"), now_ms);
+        self.sessions.insert(session_id, session.clone());
+        session
+    }
+
+    /// Validate a session handle for a non-open RPC. Returns the session if valid.
+    /// Fails if the session does not exist, is not authenticated, or lease has expired.
+    pub fn validate_session(&self, session_id: &str) -> Result<RemotePgSession, &'static str> {
+        let session = self.sessions.get(session_id).ok_or("session not found")?;
+        let session = session.value();
+
+        if !session.is_authenticated() {
+            return Err("session not authenticated");
+        }
+
+        if session.is_lease_expired(current_timestamp_ms()) {
+            return Err("session lease expired");
+        }
+
+        Ok(session.clone())
     }
 
     /// Open a session if missing and record activity metadata.
