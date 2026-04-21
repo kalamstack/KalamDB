@@ -285,11 +285,11 @@ impl ManifestAccessPlanner {
             return Ok(batch);
         }
 
-        log::debug!(
-            "[Schema Evolution] Projecting batch from schema v{} to current schema for table {}",
-            old_schema_version,
-            table_id
-        );
+        // log::debug!(
+        //     "[Schema Evolution] Projecting batch from schema v{} to current schema for table {}",
+        //     old_schema_version,
+        //     table_id
+        // );
 
         // Build projection: for each field in current_schema, find it in old_schema or create NULL array
         let mut projected_columns: Vec<Arc<dyn datafusion::arrow::array::Array>> = Vec::new();
@@ -323,11 +323,11 @@ impl ManifestAccessPlanner {
                     new_null_array(current_field.data_type(), batch.num_rows());
                 projected_columns.push(null_array);
 
-                log::trace!(
-                    "[Schema Evolution] Column '{}' not in old schema v{}, filled with NULLs",
-                    current_field.name(),
-                    old_schema_version
-                );
+                // log::trace!(
+                //     "[Schema Evolution] Column '{}' not in old schema v{}, filled with NULLs",
+                //     current_field.name(),
+                //     old_schema_version
+                // );
             }
         }
 
@@ -408,5 +408,74 @@ impl ManifestAccessPlanner {
 
         // Can't compare, conservatively include
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+    use kalamdb_commons::models::rows::StoredScalarValue;
+    use kalamdb_system::{ColumnStats, SegmentMetadata};
+
+    fn numeric_stats(min: i64, max: i64) -> ColumnStats {
+        ColumnStats::new(
+            Some(StoredScalarValue::Int64(Some(min.to_string()))),
+            Some(StoredScalarValue::Int64(Some(max.to_string()))),
+            Some(0),
+        )
+    }
+
+    #[test]
+    fn plan_by_pk_value_skips_out_of_range_and_unreadable_segments() {
+        let table_id = TableId::from_strings("test", "users");
+        let mut manifest = Manifest::new(table_id, None);
+
+        let mut in_range_stats = HashMap::new();
+        in_range_stats.insert(1, numeric_stats(10, 20));
+        manifest.add_segment(SegmentMetadata::with_schema_version(
+            "batch-in-range.parquet".to_string(),
+            "batch-in-range.parquet".to_string(),
+            in_range_stats,
+            SeqId::from(1i64),
+            SeqId::from(10i64),
+            5,
+            128,
+            1,
+        ));
+
+        let mut out_of_range_stats = HashMap::new();
+        out_of_range_stats.insert(1, numeric_stats(30, 40));
+        manifest.add_segment(SegmentMetadata::with_schema_version(
+            "batch-out-of-range.parquet".to_string(),
+            "batch-out-of-range.parquet".to_string(),
+            out_of_range_stats,
+            SeqId::from(11i64),
+            SeqId::from(20i64),
+            5,
+            128,
+            1,
+        ));
+
+        let mut tombstoned_stats = HashMap::new();
+        tombstoned_stats.insert(1, numeric_stats(10, 20));
+        let mut tombstoned = SegmentMetadata::with_schema_version(
+            "batch-tombstoned.parquet".to_string(),
+            "batch-tombstoned.parquet".to_string(),
+            tombstoned_stats,
+            SeqId::from(21i64),
+            SeqId::from(30i64),
+            5,
+            128,
+            1,
+        );
+        tombstoned.mark_tombstone();
+        manifest.add_segment(tombstoned);
+
+        let planner = ManifestAccessPlanner::new();
+        let selected = planner.plan_by_pk_value(&manifest, 1, "15");
+
+        assert_eq!(selected, vec!["batch-in-range.parquet".to_string()]);
     }
 }

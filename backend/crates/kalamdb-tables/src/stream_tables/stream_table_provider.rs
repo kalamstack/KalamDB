@@ -275,12 +275,12 @@ impl BaseTableProvider<StreamTableRowId, StreamTableRow> for StreamTableProvider
             KalamDbError::InvalidOperation(format!("Failed to insert stream event: {}", e))
         })?;
 
-        log::debug!(
-            "[StreamProvider] Inserted event: table={} seq={} user={}",
-            table_id,
-            seq_id.as_i64(),
-            user_id.as_str()
-        );
+        // log::debug!(
+        //     "[StreamProvider] Inserted event: table={} seq={} user={}",
+        //     table_id,
+        //     seq_id.as_i64(),
+        //     user_id.as_str()
+        // );
 
         // Fire live query + topic notification (INSERT)
         let manager = self.core.services.notification_service.clone();
@@ -307,12 +307,12 @@ impl BaseTableProvider<StreamTableRowId, StreamTableRow> for StreamTableProvider
 
             if has_live_subs {
                 let notification = ChangeNotification::insert(table_id.clone(), row);
-                log::debug!(
-                    "[StreamProvider] Notifying change: table={} type=INSERT user={} seq={}",
-                    table_name,
-                    user_id.as_str(),
-                    seq_id.as_i64()
-                );
+                // log::debug!(
+                //     "[StreamProvider] Notifying change: table={} type=INSERT user={} seq={}",
+                //     table_name,
+                //     user_id.as_str(),
+                //     seq_id.as_i64()
+                // );
                 manager.notify_table_change(Some(user_id.clone()), table_id, notification);
             }
         }
@@ -452,14 +452,14 @@ impl BaseTableProvider<StreamTableRowId, StreamTableRow> for StreamTableProvider
                 None,
             )
             .await?;
-        let table_id = self.core.table_id();
-        log::debug!(
-            "[StreamProvider] scan_rows: table={} rows={} user={} ttl={:?}",
-            table_id,
-            kvs.len(),
-            user_id.as_str(),
-            self.ttl_seconds
-        );
+        // let table_id = self.core.table_id();
+        // log::debug!(
+        //     "[StreamProvider] scan_rows: table={} rows={} user={} ttl={:?}",
+        //     table_id,
+        //     kvs.len(),
+        //     user_id.as_str(),
+        //     self.ttl_seconds
+        // );
 
         let schema = self.schema_ref();
         crate::utils::base::rows_to_arrow_batch(&schema, kvs, projection, |row_values, row| {
@@ -490,13 +490,13 @@ impl BaseTableProvider<StreamTableRowId, StreamTableRow> for StreamTableProvider
         let ttl_ms = self.ttl_seconds.map(|s| s * 1000);
         let now_ms = Self::now_millis()?;
 
-        log::debug!(
-            "[StreamProvider] streaming scan: table={} user={} ttl_ms={:?} limit={:?}",
-            table_id,
-            user_id.as_str(),
-            ttl_ms,
-            limit
-        );
+        // log::debug!(
+        //     "[StreamProvider] streaming scan: table={} user={} ttl_ms={:?} limit={:?}",
+        //     table_id,
+        //     user_id.as_str(),
+        //     ttl_ms,
+        //     limit
+        // );
 
         // Use streaming scan with TTL filtering and early termination
         // This is more efficient than the pagination loop for LIMIT queries
@@ -514,12 +514,12 @@ impl BaseTableProvider<StreamTableRowId, StreamTableRow> for StreamTableProvider
                 ))
             })?;
 
-        log::debug!(
-            "[StreamProvider] streaming scan complete: table={} user={} rows={}",
-            table_id,
-            user_id.as_str(),
-            results.len()
-        );
+        // log::debug!(
+        //     "[StreamProvider] streaming scan complete: table={} user={} rows={}",
+        //     table_id,
+        //     user_id.as_str(),
+        //     results.len()
+        // );
 
         // TODO(phase 13.6): Apply filter expression for simple predicates if provided
         Ok(results)

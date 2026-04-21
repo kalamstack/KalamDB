@@ -1156,12 +1156,12 @@ impl SqlExecutor {
 
         let row_count: usize = batches.iter().map(|b| b.num_rows()).sum();
 
-        log::debug!(
-            target: "sql::meta",
-            "✅ Meta command completed | sql='{}' | rows={}",
-            sql,
-            row_count
-        );
+        // log::debug!(
+        //     target: "sql::meta",
+        //     "✅ Meta command completed | sql='{}' | rows={}",
+        //     sql,
+        //     row_count
+        // );
 
         Ok(ExecutionResult::Rows {
             batches,

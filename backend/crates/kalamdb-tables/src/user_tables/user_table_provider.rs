@@ -965,11 +965,13 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
             self.append_hot_row(&row_key, &entity, "Failed to insert user table row")
                 .await?;
 
-            log::debug!(
-                "Inserted user table row for user {} with _seq {}",
-                user_id.as_str(),
-                seq_id
-            );
+            if log::log_enabled!(log::Level::Debug) {
+                log::debug!(
+                    "Inserted user table row for user {} with _seq {}",
+                    user_id.as_str(),
+                    seq_id
+                );
+            }
 
             if let Err(e) = self.stage_vector_upsert(user_id, seq_id, &entity.fields).await {
                 log::warn!(
@@ -1134,12 +1136,14 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
                     )));
                 } else {
                     // Not in hot storage, check cold storage
-                    log::debug!(
-                "[UPDATE] PK {} not found in hot storage, querying cold storage for user={}, pk={}",
-                pk_name,
-                user_id.as_str(),
-                pk_value
-            );
+                    if log::log_enabled!(log::Level::Debug) {
+                        log::debug!(
+                            "[UPDATE] PK {} not found in hot storage, querying cold storage for user={}, pk={}",
+                            pk_name,
+                            user_id.as_str(),
+                            pk_value
+                        );
+                    }
                     base::find_row_by_pk(self, Some(user_id), pk_value).await?.ok_or_else(|| {
                         KalamDbError::NotFound(format!(
                             "Row with {}={} not found (checked both hot and cold storage)",
@@ -1167,11 +1171,13 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
             // Like PostgreSQL / MySQL, a no-op UPDATE should not create a new
             // MVCC version, fire notifications, or count as a row affected.
             if new_fields == latest_row.fields {
-                tracing::debug!(
-                    table_id = %self.core.table_id(),
-                    pk = pk_value,
-                    "table.update_noop: row unchanged, skipping write"
-                );
+                // if log::log_enabled!(log::Level::Debug) {
+                //     log::debug!(
+                //         table_id = %self.core.table_id(),
+                //         pk = pk_value,
+                //         "table.update_noop: row unchanged, skipping write"
+                //     );
+                // }
                 return Ok(None);
             }
 
@@ -1357,12 +1363,15 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
                 fields: Row::new(values),
             };
             let row_key = UserTableRowId::new(user_id.clone(), seq_id);
-            log::debug!(
-                "[UserProvider DELETE_BY_PK] Writing tombstone: user={}, pk={}, _seq={}",
-                user_id.as_str(),
-                pk_value,
-                seq_id.as_i64()
-            );
+
+            if log::log_enabled!(log::Level::Debug) {
+                log::debug!(
+                    "[UserProvider DELETE_BY_PK] Writing tombstone: user={}, pk={}, _seq={}",
+                    user_id.as_str(),
+                    pk_value,
+                    seq_id.as_i64()
+                );
+            }
             self.append_hot_row(&row_key, &entity, "Failed to delete user table row")
                 .await?;
 
@@ -1499,21 +1508,21 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         )
         .await?;
 
-        log::trace!(
-            "[UserProvider] Hot scan: {} rows for user={} (table={})",
-            resolved.hot_rows_scanned,
-            user_id.as_str(),
-            table_id
-        );
+        // log::trace!(
+        //     "[UserProvider] Hot scan: {} rows for user={} (table={})",
+        //     resolved.hot_rows_scanned,
+        //     user_id.as_str(),
+        //     table_id
+        // );
 
-        if log::log_enabled!(log::Level::Trace) {
-            log::trace!(
-                "[UserProvider] Cold scan: {} Parquet rows (table={}; user={})",
-                resolved.cold_rows_scanned,
-                table_id,
-                user_id.as_str()
-            );
-        }
+        // if log::log_enabled!(log::Level::Trace) {
+        //     log::trace!(
+        //         "[UserProvider] Cold scan: {} Parquet rows (table={}; user={})",
+        //         resolved.cold_rows_scanned,
+        //         table_id,
+        //         user_id.as_str()
+        //     );
+        // }
 
         let result: Vec<(UserTableRowId, UserTableRow)> = resolved
             .rows
@@ -1581,8 +1590,10 @@ impl UserTableProvider {
             Ok::<_, KalamDbError>(hot_metadata)
         });
 
-        // Cold storage: scan Parquet files, extract metadata only
-        let cold_future = self.scan_parquet_files_as_batch_async(user_id, None, None);
+        // Cold storage: project only the PK + MVCC metadata needed for counting.
+        let cold_columns = base::compute_metadata_only_cold_columns(&pk_name);
+        let cold_future =
+            self.scan_parquet_files_as_batch_async(user_id, None, Some(cold_columns.as_slice()));
 
         let hot_future = async {
             hot_future.await.map_err(|e| {

@@ -193,26 +193,26 @@ where
         if self.allow_pk_fast_path(scan_context) {
             if let Some(pk_scalar) = typed_pk_literal_from_filter(&schema, filter, pk_name) {
                 if let Some((row_id, row)) = self.scan_hot_pk_row(scan_context, &pk_scalar).await? {
-                    log::debug!(
-                        "[MvccScan] PK fast-path hit for {}={} (table={}; scope={}; subject={})",
-                        pk_name,
-                        pk_scalar,
-                        self.table_id(),
-                        scope_label,
-                        subject_user
-                    );
+                    // log::debug!(
+                    //     "[MvccScan] PK fast-path hit for {}={} (table={}; scope={}; subject={})",
+                    //     pk_name,
+                    //     pk_scalar,
+                    //     self.table_id(),
+                    //     scope_label,
+                    //     subject_user
+                    // );
                     return rows_to_arrow_batch(&schema, vec![(row_id, row)], projection, |_, _| {});
                 }
 
                 if self.hot_pk_tombstoned(scan_context, &pk_scalar).await? {
-                    log::debug!(
-                        "[MvccScan] PK fast-path tombstone for {}={} (table={}; scope={}; subject={})",
-                        pk_name,
-                        pk_scalar,
-                        self.table_id(),
-                        scope_label,
-                        subject_user
-                    );
+                    // log::debug!(
+                    //     "[MvccScan] PK fast-path tombstone for {}={} (table={}; scope={}; subject={})",
+                    //     pk_name,
+                    //     pk_scalar,
+                    //     self.table_id(),
+                    //     scope_label,
+                    //     subject_user
+                    // );
                     return rows_to_arrow_batch(
                         &schema,
                         Vec::<(K, V)>::new(),
@@ -225,25 +225,25 @@ where
                     find_row_by_pk(self, self.scan_cold_scope(scan_context), &pk_scalar.to_string())
                         .await?;
                 if let Some((row_id, row)) = cold_found {
-                    log::debug!(
-                        "[MvccScan] PK fast-path cold hit for {}={} (table={}; scope={}; subject={})",
-                        pk_name,
-                        pk_scalar,
-                        self.table_id(),
-                        scope_label,
-                        subject_user
-                    );
+                    // log::debug!(
+                    //     "[MvccScan] PK fast-path cold hit for {}={} (table={}; scope={}; subject={})",
+                    //     pk_name,
+                    //     pk_scalar,
+                    //     self.table_id(),
+                    //     scope_label,
+                    //     subject_user
+                    // );
                     return rows_to_arrow_batch(&schema, vec![(row_id, row)], projection, |_, _| {});
                 }
 
-                log::debug!(
-                    "[MvccScan] PK fast-path miss for {}={} (table={}; scope={}; subject={})",
-                    pk_name,
-                    pk_scalar,
-                    self.table_id(),
-                    scope_label,
-                    subject_user
-                );
+                // log::debug!(
+                //     "[MvccScan] PK fast-path miss for {}={} (table={}; scope={}; subject={})",
+                //     pk_name,
+                //     pk_scalar,
+                //     self.table_id(),
+                //     scope_label,
+                //     subject_user
+                // );
                 return rows_to_arrow_batch(&schema, Vec::<(K, V)>::new(), projection, |_, _| {});
             }
         }
@@ -274,13 +274,13 @@ where
             )
             .await?;
 
-        log::trace!(
-            "[MvccScan] scan_rows resolved {} row(s) for table={} scope={} subject={}",
-            kvs.len(),
-            self.table_id(),
-            scope_label,
-            subject_user
-        );
+        // log::trace!(
+        //     "[MvccScan] scan_rows resolved {} row(s) for table={} scope={} subject={}",
+        //     kvs.len(),
+        //     self.table_id(),
+        //     scope_label,
+        //     subject_user
+        // );
 
         rows_to_arrow_batch(&schema, kvs, projection, |_, _| {})
     }
@@ -1210,12 +1210,12 @@ pub async fn pk_exists_in_cold(
     let storage_id = match core.services.schema_registry.get_storage_id(table_id) {
         Ok(id) => id,
         Err(_) => {
-            log::trace!(
-                "[pk_exists_in_cold] No storage id for {}.{} {} - PK not in cold",
-                namespace.as_str(),
-                table.as_str(),
-                scope_label
-            );
+            // log::trace!(
+            //     "[pk_exists_in_cold] No storage id for {}.{} {} - PK not in cold",
+            //     namespace.as_str(),
+            //     table.as_str(),
+            //     scope_label
+            // );
             return Ok(false);
         },
     };
@@ -1235,12 +1235,12 @@ pub async fn pk_exists_in_cold(
     let manifest: Option<Manifest> = match &cache_result {
         Ok(Some(entry)) => Some(entry.manifest.clone()),
         Ok(None) => {
-            log::trace!(
-                "[pk_exists_in_cold] No manifest for {}.{} {} - checking all files",
-                namespace.as_str(),
-                table.as_str(),
-                scope_label
-            );
+            // log::trace!(
+            //     "[pk_exists_in_cold] No manifest for {}.{} {} - checking all files",
+            //     namespace.as_str(),
+            //     table.as_str(),
+            //     scope_label
+            // );
             None
         },
         Err(e) => {
@@ -1259,12 +1259,12 @@ pub async fn pk_exists_in_cold(
     // Avoid storage listing on hot-only write paths.
     if let Some(ref m) = manifest {
         if m.segments.is_empty() {
-            log::trace!(
-                "[pk_exists_in_cold] Manifest has no segments for {}.{} {} - PK not in cold",
-                namespace.as_str(),
-                table.as_str(),
-                scope_label
-            );
+            // log::trace!(
+            //     "[pk_exists_in_cold] Manifest has no segments for {}.{} {} - PK not in cold",
+            //     namespace.as_str(),
+            //     table.as_str(),
+            //     scope_label
+            // );
             return Ok(false);
         }
     }
@@ -1274,24 +1274,24 @@ pub async fn pk_exists_in_cold(
     let files_to_scan: Vec<String> = if let Some(ref m) = manifest {
         let pruned_paths = planner.plan_by_pk_value(m, pk_column_id, pk_value);
         if pruned_paths.is_empty() {
-            log::trace!(
-                "[pk_exists_in_cold] Manifest pruning returned no candidate segments for PK {} on {}.{} {} - PK not in cold",
-                pk_value,
-                namespace.as_str(),
-                table.as_str(),
-                scope_label
-            );
+            // log::trace!(
+            //     "[pk_exists_in_cold] Manifest pruning returned no candidate segments for PK {} on {}.{} {} - PK not in cold",
+            //     pk_value,
+            //     namespace.as_str(),
+            //     table.as_str(),
+            //     scope_label
+            // );
             return Ok(false);
         } else {
-            log::trace!(
-                "[pk_exists_in_cold] Manifest pruning: {} of {} segments may contain PK {} for {}.{} {}",
-                pruned_paths.len(),
-                m.segments.len(),
-                pk_value,
-                namespace.as_str(),
-                table.as_str(),
-                scope_label
-            );
+            // log::trace!(
+            //     "[pk_exists_in_cold] Manifest pruning: {} of {} segments may contain PK {} for {}.{} {}",
+            //     pruned_paths.len(),
+            //     m.segments.len(),
+            //     pk_value,
+            //     namespace.as_str(),
+            //     table.as_str(),
+            //     scope_label
+            // );
             pruned_paths
         }
     } else {
@@ -1299,22 +1299,22 @@ pub async fn pk_exists_in_cold(
         let list_result = match storage_cached.list(table_type, table_id, user_id).await {
             Ok(result) => result,
             Err(_) => {
-                log::trace!(
-                    "[pk_exists_in_cold] No storage dir for {}.{} {} - PK not in cold",
-                    namespace.as_str(),
-                    table.as_str(),
-                    scope_label
-                );
+                // log::trace!(
+                //     "[pk_exists_in_cold] No storage dir for {}.{} {} - PK not in cold",
+                //     namespace.as_str(),
+                //     table.as_str(),
+                //     scope_label
+                // );
                 return Ok(false);
             },
         };
         if list_result.is_empty() {
-            log::trace!(
-                "[pk_exists_in_cold] No files in storage for {}.{} {} - PK not in cold",
-                namespace.as_str(),
-                table.as_str(),
-                scope_label
-            );
+            // log::trace!(
+            //     "[pk_exists_in_cold] No files in storage for {}.{} {} - PK not in cold",
+            //     namespace.as_str(),
+            //     table.as_str(),
+            //     scope_label
+            // );
             return Ok(false);
         }
         collect_parquet_files_from_list(&list_result)
@@ -1434,12 +1434,12 @@ pub async fn pk_exists_batch_in_cold(
     let manifest: Option<Manifest> = match &cache_result {
         Ok(Some(entry)) => Some(entry.manifest.clone()),
         Ok(None) => {
-            log::trace!(
-                "[pk_exists_batch_in_cold] No manifest for {}.{} {} - checking all files",
-                namespace.as_str(),
-                table.as_str(),
-                scope_label
-            );
+            // log::trace!(
+            //     "[pk_exists_batch_in_cold] No manifest for {}.{} {} - checking all files",
+            //     namespace.as_str(),
+            //     table.as_str(),
+            //     scope_label
+            // );
             None
         },
         Err(e) => {
@@ -1458,12 +1458,12 @@ pub async fn pk_exists_batch_in_cold(
     // Avoid storage listing on hot-only write paths.
     if let Some(ref m) = manifest {
         if m.segments.is_empty() {
-            log::trace!(
-                "[pk_exists_batch_in_cold] Manifest has no segments for {}.{} {} - PK not in cold",
-                namespace.as_str(),
-                table.as_str(),
-                scope_label
-            );
+            // log::trace!(
+            //     "[pk_exists_batch_in_cold] Manifest has no segments for {}.{} {} - PK not in cold",
+            //     namespace.as_str(),
+            //     table.as_str(),
+            //     scope_label
+            // );
             return Ok(None);
         }
     }
@@ -1873,6 +1873,19 @@ pub fn compute_cold_columns(
     Some(col_set.into_iter().collect())
 }
 
+/// Compute the minimal cold-path columns needed for metadata-only MVCC work.
+///
+/// Used by count-only paths that only need the primary key and MVCC system
+/// columns to choose visible winners without decoding full user payloads.
+pub fn compute_metadata_only_cold_columns(pk_name: &str) -> Vec<String> {
+    vec![
+        pk_name.to_string(),
+        SystemColumnNames::SEQ.to_string(),
+        SystemColumnNames::COMMIT_SEQ.to_string(),
+        SystemColumnNames::DELETED.to_string(),
+    ]
+}
+
 /// Validate that an UPDATE operation doesn't change the PK to an existing value
 ///
 /// This is called when an UPDATE includes the PK column in the SET clause.
@@ -2055,4 +2068,51 @@ pub fn build_count_only_batch(count: usize) -> Result<RecordBatch, KalamDbError>
     RecordBatch::try_new_with_options(empty_schema, vec![], &options).map_err(|e| {
         KalamDbError::InvalidOperation(format!("Failed to build count-only batch: {}", e))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use datafusion::arrow::datatypes::{DataType, Field, Schema};
+
+    #[test]
+    fn compute_metadata_only_cold_columns_returns_pk_and_mvcc_columns() {
+        let columns = compute_metadata_only_cold_columns("id");
+
+        assert_eq!(
+            columns,
+            vec![
+                "id".to_string(),
+                SystemColumnNames::SEQ.to_string(),
+                SystemColumnNames::COMMIT_SEQ.to_string(),
+                SystemColumnNames::DELETED.to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn compute_cold_columns_adds_pk_and_system_columns_to_projection() {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Utf8, false),
+            Field::new("name", DataType::Utf8, true),
+            Field::new("email", DataType::Utf8, true),
+        ]));
+        let projection = vec![1usize];
+        let columns = compute_cold_columns(Some(&projection), &schema, "id")
+            .expect("projection should produce cold columns");
+
+        assert!(columns.iter().any(|column| column == "id"));
+        assert!(columns.iter().any(|column| column == "name"));
+        assert!(columns.iter().any(|column| column == SystemColumnNames::SEQ));
+        assert!(
+            columns
+                .iter()
+                .any(|column| column == SystemColumnNames::COMMIT_SEQ)
+        );
+        assert!(
+            columns
+                .iter()
+                .any(|column| column == SystemColumnNames::DELETED)
+        );
+    }
 }

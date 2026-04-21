@@ -1374,8 +1374,9 @@ impl SharedTableProvider {
             Ok::<_, KalamDbError>(hot_metadata)
         });
 
-        // Cold storage: scan Parquet files (get full batch, but extract only metadata)
-        let cold_future = self.scan_parquet_files_as_batch_async(None, None);
+        // Cold storage: project only the PK + MVCC metadata needed for counting.
+        let cold_columns = base::compute_metadata_only_cold_columns(&pk_name);
+        let cold_future = self.scan_parquet_files_as_batch_async(None, Some(cold_columns.as_slice()));
 
         let hot_future = async {
             hot_future.await.map_err(|e| {
