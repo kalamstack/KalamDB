@@ -10,7 +10,6 @@
 
 use crate::fdw_options::parse_options;
 use kalam_pg_common::{KalamPgError, SEQ_COLUMN, USER_ID_COLUMN};
-use kalam_pg_fdw::ServerOptions;
 use kalamdb_commons::TableType;
 use pgrx::pg_sys;
 use std::collections::BTreeMap;
@@ -1686,18 +1685,7 @@ mod tests {
 ///
 /// Bootstraps the remote connection from the given server name if not already initialized.
 fn execute_remote_sql(sql: &str, server_name: &str) -> Result<String, KalamPgError> {
-    let c_name = std::ffi::CString::new(server_name).unwrap_or_default();
-    let server = unsafe { pg_sys::GetForeignServerByName(c_name.as_ptr(), true) };
-    if server.is_null() {
-        return Err(KalamPgError::Execution(format!("foreign server '{}' not found", server_name)));
-    }
-    let server_options = parse_options(unsafe { (*server).options });
-    let parsed_server = ServerOptions::parse(&server_options)?;
-    let remote_config = parsed_server.remote.ok_or_else(|| {
-        KalamPgError::Validation("foreign server must have host and port options".to_string())
-    })?;
-    let state = crate::remote_state::ensure_remote_extension_state(remote_config)
-        .map_err(|e| KalamPgError::Execution(e.to_string()))?;
+    let state = unsafe { crate::remote_server::remote_state_for_server_name(server_name) }?;
 
     state
         .runtime()

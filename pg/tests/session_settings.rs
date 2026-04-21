@@ -19,21 +19,6 @@ fn exposes_guc_name_and_user_id() {
 }
 
 #[test]
-fn tenant_context_allows_explicit_override() {
-    let settings =
-        SessionSettings::from_guc_values(Some("u_session"), Some("public")).expect("parse guc");
-    let ctx = settings
-        .tenant_context(Some(UserId::new("u_other")))
-        .expect("explicit override should succeed");
-
-    assert_eq!(
-        ctx.effective_user_id(),
-        Some(&UserId::new("u_other")),
-        "explicit user_id should take precedence"
-    );
-}
-
-#[test]
 fn trims_blank_schema_to_missing() {
     let settings =
         SessionSettings::from_guc_values(Some("u_session"), Some("   ")).expect("parse schema");

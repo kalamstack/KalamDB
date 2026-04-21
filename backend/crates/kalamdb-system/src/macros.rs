@@ -189,12 +189,82 @@ macro_rules! finish_array {
     };
 }
 
+/// Implement the repeated metadata scaffold for system table providers.
+///
+/// This macro intentionally only covers low-value boilerplate:
+/// - `Debug`
+/// - cached Arrow schema construction
+/// - provider metadata definitions
+///
+/// Constructors and provider-specific read/write logic stay explicit in each module.
+#[macro_export]
+macro_rules! impl_system_table_provider_metadata {
+    (
+        indexed,
+        provider = $provider:ty,
+        key = $key:ty,
+        table_name = $table_name:expr,
+        primary_key_column = $primary_key_column:expr,
+        parse_key = $parse_key:expr,
+        schema = $schema_expr:expr
+    ) => {
+        impl std::fmt::Debug for $provider {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct(stringify!($provider)).finish()
+            }
+        }
+
+        impl $provider {
+            fn provider_definition() -> IndexedProviderDefinition<$key> {
+                IndexedProviderDefinition {
+                    table_name: $table_name,
+                    primary_key_column: $primary_key_column,
+                    schema: Self::schema,
+                    parse_key: $parse_key,
+                }
+            }
+
+            fn schema() -> SchemaRef {
+                static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
+                SCHEMA.get_or_init(|| $schema_expr).clone()
+            }
+        }
+    };
+
+    (
+        simple,
+        provider = $provider:ty,
+        table_name = $table_name:expr,
+        schema = $schema_expr:expr
+    ) => {
+        impl std::fmt::Debug for $provider {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct(stringify!($provider)).finish()
+            }
+        }
+
+        impl $provider {
+            fn provider_definition() -> SimpleProviderDefinition {
+                SimpleProviderDefinition {
+                    table_name: $table_name,
+                    schema: Self::schema,
+                }
+            }
+
+            fn schema() -> SchemaRef {
+                static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
+                SCHEMA.get_or_init(|| $schema_expr).clone()
+            }
+        }
+    };
+}
+
 /// Implement the common provider boilerplate for `IndexedEntityStore`-backed system tables.
 ///
 /// This macro centralizes the repeated implementations for:
 /// - `SystemTableScan`
 /// - `TableProvider`
-/// - direct `TableProvider` implementations
+/// - shared deferred-scan boilerplate for indexed providers
 ///
 /// It only wires the provider surface; business logic stays in each provider module.
 #[macro_export]
@@ -205,9 +275,7 @@ macro_rules! impl_indexed_system_table_provider {
         value = $value:ty,
         store = $store_field:ident,
         definition = $definition_method:ident,
-        build_batch = $build_batch_method:ident,
-        load_batch = $load_batch_method:ident,
-        pushdown = $pushdown_fn:expr
+        build_batch = $build_batch_method:ident
     ) => {
         impl $crate::providers::base::SystemTableScan<$key, $value> for $provider {
             fn store(&self) -> &kalamdb_store::IndexedEntityStore<$key, $value> {
@@ -263,7 +331,7 @@ macro_rules! impl_indexed_system_table_provider {
             ) -> datafusion::error::Result<
                 Vec<datafusion::logical_expr::TableProviderFilterPushDown>,
             > {
-                ($pushdown_fn)(filters)
+                $crate::providers::base::exact_filter_pushdown(filters)
             }
 
             async fn scan(
@@ -287,26 +355,6 @@ macro_rules! impl_indexed_system_table_provider {
         }
 
     };
-    (
-        provider = $provider:ty,
-        key = $key:ty,
-        value = $value:ty,
-        store = $store_field:ident,
-        definition = $definition_method:ident,
-        build_batch = $build_batch_method:ident,
-        load_batch = $load_batch_method:ident
-    ) => {
-        $crate::impl_indexed_system_table_provider!(
-            provider = $provider,
-            key = $key,
-            value = $value,
-            store = $store_field,
-            definition = $definition_method,
-            build_batch = $build_batch_method,
-            load_batch = $load_batch_method,
-            pushdown = $crate::providers::base::unsupported_filter_pushdown
-        );
-    };
 }
 
 /// Implement the common provider boilerplate for non-indexed/simple system tables.
@@ -318,8 +366,7 @@ macro_rules! impl_simple_system_table_provider {
         value = $value:ty,
         definition = $definition_method:ident,
         scan_all = $scan_all_method:ident,
-        scan_filtered = $scan_filtered_method:ident,
-        pushdown = $pushdown_fn:expr
+        scan_filtered = $scan_filtered_method:ident
     ) => {
         impl $crate::providers::base::SimpleSystemTableScan<$key, $value> for $provider {
             fn table_name(&self) -> &str {
@@ -368,7 +415,7 @@ macro_rules! impl_simple_system_table_provider {
             ) -> datafusion::error::Result<
                 Vec<datafusion::logical_expr::TableProviderFilterPushDown>,
             > {
-                ($pushdown_fn)(filters)
+                $crate::providers::base::exact_filter_pushdown(filters)
             }
 
             async fn scan(
@@ -391,23 +438,5 @@ macro_rules! impl_simple_system_table_provider {
             }
         }
 
-    };
-    (
-        provider = $provider:ty,
-        key = $key:ty,
-        value = $value:ty,
-        definition = $definition_method:ident,
-        scan_all = $scan_all_method:ident,
-        scan_filtered = $scan_filtered_method:ident
-    ) => {
-        $crate::impl_simple_system_table_provider!(
-            provider = $provider,
-            key = $key,
-            value = $value,
-            definition = $definition_method,
-            scan_all = $scan_all_method,
-            scan_filtered = $scan_filtered_method,
-            pushdown = $crate::providers::base::unsupported_filter_pushdown
-        );
     };
 }

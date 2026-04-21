@@ -254,18 +254,3 @@ fn test_cli_health_check() {
         output
     );
 }
-
-/// Helper test to verify server health
-#[test]
-fn test_server_health_check() {
-    if !is_server_running() {
-        eprintln!("⚠️  Server not running at {}.", server_url());
-        eprintln!("   Start server: cargo run --release --bin kalamdb-server");
-        eprintln!("   Then run: cargo test --test test_cli_integration");
-        return;
-    }
-
-    let result = execute_sql_as_root_via_cli("SELECT 1");
-
-    assert!(result.is_ok(), "Server should respond successfully: {:?}", result.err());
-}

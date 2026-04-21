@@ -121,23 +121,6 @@ impl SharedConnection {
         })
     }
 
-    pub async fn subscribe(
-        &self,
-        id: String,
-        sql: String,
-        options: Option<SubscriptionOptions>,
-    ) -> Result<(mpsc::Receiver<Result<ChangeEvent>>, u64, Option<SeqId>)> {
-        let (event_rx, result_rx) = self.subscribe_send(id, sql, options).await?;
-
-        let (generation, resume_from) = result_rx.await.map_err(|_| {
-            KalamLinkError::WebSocketError(
-                "Connection task died before confirming subscribe".to_string(),
-            )
-        })??;
-
-        Ok((event_rx, generation, resume_from))
-    }
-
     /// Send a subscribe command without waiting for the server Ready ack.
     ///
     /// Returns the event receiver and a oneshot that resolves when the server

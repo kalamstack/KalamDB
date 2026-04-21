@@ -1,7 +1,8 @@
-//! Base traits and common patterns for virtual views
+//! Base traits and common patterns for virtual views.
 //!
-//! This module provides the VirtualView trait and ViewTableProvider wrapper
-//! to standardize how views compute their data dynamically using DataFusion patterns.
+//! This module provides the `VirtualView` trait and a shared
+//! `TableProvider` implementation so views can compute data dynamically while
+//! reusing the deferred execution path.
 //!
 //! ## Schema Caching
 //! Views memoize their Arrow schema using a `static OnceLock<SchemaRef>`.
@@ -11,10 +12,18 @@ use crate::error::RegistryError;
 use async_trait::async_trait;
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
+use datafusion::common::DFSchema;
 use datafusion::datasource::{TableProvider, TableType};
 use datafusion::error::{DataFusionError, Result as DataFusionResult};
-use datafusion::logical_expr::Expr;
+use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
+use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_plan::ExecutionPlan;
+use kalamdb_datafusion_sources::exec::{
+    finalize_deferred_batch, DeferredBatchExec, DeferredBatchSource,
+};
+use kalamdb_datafusion_sources::provider::{
+    combined_filter, pushdown_results_for_filters, FilterCapability,
+};
 use kalamdb_system::SystemTable;
 use std::any::Any;
 use std::sync::Arc;
@@ -57,13 +66,61 @@ pub trait VirtualView: Send + Sync + std::fmt::Debug {
     }
 }
 
-/// ViewTableProvider wraps a VirtualView and implements DataFusion's TableProvider
+/// ViewTableProvider implements DataFusion's `TableProvider` for any
+/// `VirtualView`.
 ///
-/// This generic wrapper eliminates code duplication across all view implementations.
-/// Each view only needs to implement the VirtualView trait.
+/// This generic provider eliminates repeated scan/pushdown boilerplate across
+/// views. Each view only needs to implement `VirtualView`.
 #[derive(Debug, Clone)]
 pub struct ViewTableProvider<V: VirtualView> {
     view: Arc<V>,
+}
+
+struct ViewScanSource<V: VirtualView> {
+    view: Arc<V>,
+    physical_filter: Option<Arc<dyn PhysicalExpr>>,
+    projection: Option<Vec<usize>>,
+    limit: Option<usize>,
+    output_schema: SchemaRef,
+}
+
+impl<V: VirtualView> std::fmt::Debug for ViewScanSource<V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ViewScanSource")
+            .field("view_name", &self.view.view_name())
+            .field("projection", &self.projection)
+            .field("limit", &self.limit)
+            .finish()
+    }
+}
+
+#[async_trait]
+impl<V: VirtualView + 'static> DeferredBatchSource for ViewScanSource<V> {
+    fn source_name(&self) -> &'static str {
+        "view_scan"
+    }
+
+    fn schema(&self) -> SchemaRef {
+        Arc::clone(&self.output_schema)
+    }
+
+    async fn produce_batch(&self) -> DataFusionResult<RecordBatch> {
+        let batch = self.view.compute_batch().map_err(|error| {
+            DataFusionError::Execution(format!(
+                "Failed to compute batch for view {}: {}",
+                self.view.view_name(),
+                error
+            ))
+        })?;
+
+        finalize_deferred_batch(
+            batch,
+            self.physical_filter.as_ref(),
+            self.projection.as_deref(),
+            self.limit,
+            self.source_name(),
+        )
+    }
 }
 
 impl<V: VirtualView> ViewTableProvider<V> {
@@ -96,24 +153,37 @@ impl<V: VirtualView + 'static> TableProvider for ViewTableProvider<V> {
         &self,
         state: &dyn datafusion::catalog::Session,
         projection: Option<&Vec<usize>>,
-        _filters: &[Expr],
+        filters: &[Expr],
         limit: Option<usize>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
-        use datafusion::datasource::MemTable;
+        let base_schema = self.view.schema();
+        let output_schema = match projection {
+            Some(indices) => base_schema
+                .project(indices)
+                .map(Arc::new)
+                .map_err(|error| DataFusionError::ArrowError(Box::new(error), None))?,
+            None => Arc::clone(&base_schema),
+        };
+        let physical_filter = if let Some(filter) = combined_filter(filters) {
+            let df_schema = DFSchema::try_from(Arc::clone(&base_schema))?;
+            Some(state.create_physical_expr(filter, &df_schema)?)
+        } else {
+            None
+        };
 
-        let schema = self.view.schema();
-        let batch = self.view.compute_batch().map_err(|e| {
-            DataFusionError::Execution(format!(
-                "Failed to compute batch for view {}: {}",
-                self.view.view_name(),
-                e
-            ))
-        })?;
+        Ok(Arc::new(DeferredBatchExec::new(Arc::new(ViewScanSource {
+            view: Arc::clone(&self.view),
+            physical_filter,
+            projection: projection.cloned(),
+            limit,
+            output_schema,
+        }))))
+    }
 
-        let partitions = vec![vec![batch]];
-        let table = MemTable::try_new(schema, partitions)
-            .map_err(|e| DataFusionError::Execution(format!("Failed to create MemTable: {}", e)))?;
-
-        table.scan(state, projection, &[], limit).await
+    fn supports_filters_pushdown(
+        &self,
+        filters: &[&Expr],
+    ) -> DataFusionResult<Vec<TableProviderFilterPushDown>> {
+        Ok(pushdown_results_for_filters(filters, |_| FilterCapability::Exact))
     }
 }

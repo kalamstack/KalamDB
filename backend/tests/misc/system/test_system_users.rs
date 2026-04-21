@@ -121,7 +121,7 @@ async fn test_system_user_remote_denied_by_default() {
     // Create system user WITHOUT allow_remote flag
     let username = "sysuser_remote_denied";
     let password = "SysPassword123!";
-    let password_hash = bcrypt::hash(password, bcrypt::DEFAULT_COST).unwrap();
+    let password_hash = bcrypt::hash(password, 4).unwrap();
     let user = create_system_user(&server, username, password_hash, false).await;
 
     // Create Bearer auth header
@@ -176,7 +176,7 @@ async fn test_system_user_remote_with_password() {
     // Create system user WITH allow_remote flag AND password
     let username = "sysuser_remote_allowed";
     let password = "RemotePassword123!";
-    let password_hash = bcrypt::hash(password, bcrypt::DEFAULT_COST).unwrap();
+    let password_hash = bcrypt::hash(password, 4).unwrap();
     let user = create_system_user(&server, username, password_hash, true).await; // allow_remote=true
 
     // Create Bearer auth header

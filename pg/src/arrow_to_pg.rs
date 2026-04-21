@@ -9,7 +9,7 @@ use arrow::datatypes::{DataType, TimeUnit};
 use datafusion_common::ScalarValue;
 use pgrx::pg_sys;
 use pgrx::{rust_str_to_text_p, IntoDatum};
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 
 /// Days between Unix epoch (1970-01-01) and PostgreSQL epoch (2000-01-01).
 const UNIX_TO_PG_EPOCH_DAYS: i32 = 10_957;

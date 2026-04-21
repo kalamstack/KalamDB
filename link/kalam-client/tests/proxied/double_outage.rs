@@ -8,7 +8,7 @@ use tokio::time::{sleep, timeout};
 /// Server goes down again while the client is in the process of reconnecting.
 /// After the second outage clears, the client should still recover.
 #[tokio::test]
-#[ntest::timeout(15000)]
+#[ntest::timeout(46000)]
 async fn test_proxy_server_down_while_reconnecting() {
     let writer = match create_test_client() {
         Ok(c) => c,

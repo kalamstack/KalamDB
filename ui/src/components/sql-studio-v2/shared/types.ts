@@ -12,12 +12,21 @@ export interface StudioColumn {
   ordinal: number;
 }
 
+export type StudioTableOptions = Record<string, unknown>;
+export type StudioTableTimestamp = string | number;
+
 export interface StudioTable {
   database: string;
   namespace: string;
   name: string;
   tableType: string;
   columns: StudioColumn[];
+  storageId?: string | null;
+  version?: number | null;
+  options?: StudioTableOptions | null;
+  comment?: string | null;
+  updatedAt?: StudioTableTimestamp | null;
+  createdAt?: StudioTableTimestamp | null;
 }
 
 export interface StudioNamespace {

@@ -3920,6 +3920,7 @@ dependencies = [
  "arrow",
  "arrow-ipc",
  "async-trait",
+ "base64",
  "bytes",
  "kalam-pg-api",
  "kalam-pg-common",
@@ -4155,6 +4156,24 @@ dependencies = [
  "ulid",
  "uuid",
  "zip",
+]
+
+[[package]]
+name = "kalamdb-datafusion-sources"
+version = "0.4.2-rc.3"
+dependencies = [
+ "arrow",
+ "arrow-schema",
+ "async-trait",
+ "datafusion",
+ "datafusion-common",
+ "datafusion-expr",
+ "futures-util",
+ "kalamdb-commons",
+ "parquet",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -4419,10 +4438,13 @@ dependencies = [
  "bytes",
  "dashmap 6.1.0",
  "datafusion-common",
+ "kalamdb-auth",
  "kalamdb-commons",
+ "kalamdb-configs",
  "kalamdb-core",
  "kalamdb-server-auth",
  "kalamdb-sharding",
+ "kalamdb-system",
  "log",
  "ntest",
  "prost",
@@ -4641,6 +4663,7 @@ dependencies = [
  "datafusion",
  "flexbuffers",
  "kalamdb-commons",
+ "kalamdb-datafusion-sources",
  "kalamdb-macros",
  "kalamdb-session-datafusion",
  "kalamdb-store",
@@ -4666,6 +4689,7 @@ dependencies = [
  "datafusion-datasource",
  "futures-util",
  "kalamdb-commons",
+ "kalamdb-datafusion-sources",
  "kalamdb-filestore",
  "kalamdb-macros",
  "kalamdb-session",
@@ -4677,6 +4701,7 @@ dependencies = [
  "kalamdb-transactions",
  "kalamdb-vector",
  "log",
+ "ntest",
  "once_cell",
  "serde",
  "serde_json",
@@ -4693,8 +4718,10 @@ dependencies = [
  "datafusion",
  "futures-util",
  "kalamdb-commons",
+ "kalamdb-datafusion-sources",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -4707,6 +4734,7 @@ dependencies = [
  "dashmap 6.1.0",
  "datafusion",
  "kalamdb-commons",
+ "kalamdb-datafusion-sources",
  "kalamdb-filestore",
  "kalamdb-session-datafusion",
  "kalamdb-store",
@@ -4714,6 +4742,7 @@ dependencies = [
  "once_cell",
  "serde",
  "serde_json",
+ "tokio",
  "usearch",
 ]
 
@@ -4726,6 +4755,7 @@ dependencies = [
  "datafusion",
  "kalamdb-commons",
  "kalamdb-configs",
+ "kalamdb-datafusion-sources",
  "kalamdb-raft",
  "kalamdb-system",
  "parking_lot",
@@ -4858,13 +4888,12 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "libmimalloc-sys"
-version = "0.1.44"
+version = "0.1.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "667f4fec20f29dfc6bc7357c582d91796c169ad7e2fce709468aefeb2c099870"
+checksum = "bc89deee4af0429081d2a518c0431ae068222a5a262a3bc6ff4d8535ec2e02fe"
 dependencies = [
  "cc",
  "cty",
- "libc",
 ]
 
 [[package]]
@@ -5413,9 +5442,9 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
 name = "openraft"
-version = "0.9.22"
+version = "0.9.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc2f40b0e23149ea8673591325bff055939f7a59f4f9a28476f0854282444ab3"
+checksum = "80d35e2f60cdf9bcfc39a020966091017c6dc2a4b43b355a22ca3e76106f4a0a"
 dependencies = [
  "anyerror",
  "byte-unit",
@@ -6831,9 +6860,9 @@ checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.12"
+version = "0.103.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8279bb85272c9f10811ae6a6c547ff594d6a7f3c6c6b02ee9726d1d0dcfcdd06"
+checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
 dependencies = [
  "aws-lc-rs",
  "ring",

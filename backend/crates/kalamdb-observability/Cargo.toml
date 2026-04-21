@@ -12,10 +12,10 @@ build = "../../build.rs"
 # System monitoring
 sysinfo = { workspace = true }
 num_cpus = { workspace = true }
-libmimalloc-sys = { workspace = true, optional = true }
 
 # Logging
 log = { workspace = true }
+libmimalloc-sys = { workspace = true, optional = true }
 
 [features]
 mimalloc = ["dep:libmimalloc-sys"]

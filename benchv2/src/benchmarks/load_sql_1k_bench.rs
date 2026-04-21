@@ -10,6 +10,7 @@ use tokio::sync::{RwLock, Semaphore};
 use crate::benchmarks::Benchmark;
 use crate::client::KalamClient;
 use crate::config::Config;
+use crate::metrics::BenchmarkDetail;
 
 /// Fires 1000 concurrent SQL SELECT queries at once per iteration to measure
 /// RPS degradation and tail latency under extreme concurrency.
@@ -34,6 +35,19 @@ impl Benchmark for Sql1kUsersBench {
     }
     fn description(&self) -> &str {
         "1000 concurrent SQL SELECT queries at once (RPS degradation test)"
+    }
+
+    fn report_details(&self, _config: &Config) -> Vec<BenchmarkDetail> {
+        vec![
+            BenchmarkDetail::new("Baseline", "phase-0 performance"),
+            BenchmarkDetail::new("Query Class", "concurrent read burst"),
+            BenchmarkDetail::new("Dataset", "500 seeded rows"),
+            BenchmarkDetail::new("Burst", "1000 concurrent SQL queries"),
+            BenchmarkDetail::new(
+                "Query Mix",
+                "pk lookup, count, selective order-by limit, narrow projection",
+            ),
+        ]
     }
 
     fn setup<'a>(

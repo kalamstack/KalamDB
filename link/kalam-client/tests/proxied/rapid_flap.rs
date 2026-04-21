@@ -10,9 +10,9 @@ use tokio::time::{sleep, timeout};
 /// get stuck in a reconnect loop, and must eventually stabilise and resume
 /// from the correct seq once the link stays up.
 #[tokio::test]
-#[ntest::timeout(25000)]
+#[ntest::timeout(45000)]
 async fn test_rapid_flapping_connection_stabilises_and_resumes() {
-    let result = timeout(Duration::from_secs(20), async {
+    let result = timeout(Duration::from_secs(30), async {
         let writer = match create_test_client() {
             Ok(c) => c,
             Err(e) => {

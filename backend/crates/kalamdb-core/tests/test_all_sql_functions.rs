@@ -1,7 +1,7 @@
 //! Comprehensive integration tests for SQL functions
 //!
 //! Tests cover:
-//! - Context functions: KDB_CURRENT_USER(), KDB_CURRENT_USER_ID(), KDB_CURRENT_ROLE()
+//! - Context functions: KDB_CURRENT_USER(), KDB_CURRENT_USER(), KDB_CURRENT_ROLE()
 //! - ID generation functions: SNOWFLAKE_ID(), UUID_V7(), ULID()
 //! - Function usage in SELECT, WHERE, INSERT, UPDATE, DELETE statements
 
@@ -51,7 +51,7 @@ async fn test_current_user_id_dba() {
     let exec_ctx = create_exec_context_with_user("u_admin", Role::Dba);
     let session = exec_ctx.create_session_with_user();
 
-    let result = session.sql("SELECT KDB_CURRENT_USER_ID() AS user_id").await.unwrap();
+    let result = session.sql("SELECT KDB_CURRENT_USER() AS user_id").await.unwrap();
     let batches = result.collect().await.unwrap();
 
     assert_eq!(batches[0].num_rows(), 1);
@@ -65,7 +65,7 @@ async fn test_current_user_id_system() {
     let exec_ctx = create_exec_context_with_user("system", Role::System);
     let session = exec_ctx.create_session_with_user();
 
-    let result = session.sql("SELECT KDB_CURRENT_USER_ID() AS user_id").await.unwrap();
+    let result = session.sql("SELECT KDB_CURRENT_USER() AS user_id").await.unwrap();
     let batches = result.collect().await.unwrap();
 
     let col = batches[0].column(0);
@@ -78,24 +78,12 @@ async fn test_current_user_id_service_role() {
     let exec_ctx = create_exec_context_with_user("svc_worker", Role::Service);
     let session = exec_ctx.create_session_with_user();
 
-    let result = session.sql("SELECT KDB_CURRENT_USER_ID() AS user_id").await.unwrap();
+    let result = session.sql("SELECT KDB_CURRENT_USER() AS user_id").await.unwrap();
     let batches = result.collect().await.unwrap();
 
     let col = batches[0].column(0);
     let arr = col.as_any().downcast_ref::<datafusion::arrow::array::StringArray>().unwrap();
     assert_eq!(arr.value(0), "svc_worker");
-}
-
-#[tokio::test]
-async fn test_current_user_id_unauthorized_user_role() {
-    let exec_ctx = create_exec_context_with_user("u_regular", Role::User);
-    let session = exec_ctx.create_session_with_user();
-
-    let result = session.sql("SELECT KDB_CURRENT_USER_ID() AS user_id").await.unwrap();
-
-    // Query execution should fail due to authorization check
-    let batches_result = result.collect().await;
-    assert!(batches_result.is_err());
 }
 
 #[tokio::test]
@@ -143,7 +131,7 @@ async fn test_all_context_functions_together() {
     let session = exec_ctx.create_session_with_user();
 
     let result = session
-        .sql("SELECT KDB_CURRENT_USER() AS current_user, KDB_CURRENT_USER_ID() AS user_id, KDB_CURRENT_ROLE() AS role")
+        .sql("SELECT KDB_CURRENT_USER() AS current_user, KDB_CURRENT_USER() AS user_id, KDB_CURRENT_ROLE() AS role")
         .await
         .unwrap();
     let batches = result.collect().await.unwrap();
@@ -542,7 +530,7 @@ async fn test_example_all_context_functions() {
         .sql(
             "SELECT \
                    KDB_CURRENT_USER() AS username, \
-                   KDB_CURRENT_USER_ID() AS user_id, \
+                   KDB_CURRENT_USER() AS user_id, \
                    KDB_CURRENT_ROLE() AS role",
         )
         .await

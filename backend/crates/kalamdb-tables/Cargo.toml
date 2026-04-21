@@ -23,6 +23,7 @@ kalamdb-session = { path = "../kalamdb-session" }
 kalamdb-session-datafusion = { path = "../kalamdb-session-datafusion" }
 kalamdb-transactions = { path = "../kalamdb-transactions" }
 kalamdb-vector = { path = "../kalamdb-vector" }
+kalamdb-datafusion-sources = { workspace = true }
 
 # Apache Arrow ecosystem
 arrow = { workspace = true }
@@ -50,6 +51,7 @@ tracing = { workspace = true }
 once_cell = { workspace = true }
 
 [dev-dependencies]
+ntest = { workspace = true }
 tempfile = { workspace = true }
 
 [lib]

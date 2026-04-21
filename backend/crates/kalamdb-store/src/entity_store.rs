@@ -731,21 +731,6 @@ where
 
         self.backend().batch(operations)
     }
-
-    /// Scan and get all raw key-value pairs (as bytes) matching a prefix.
-    ///
-    /// This is useful for operations that need raw keys (like deletion) without
-    /// deserializing values. Use sparingly - prefer typed scan methods when possible.
-    fn scan_raw_keys(
-        &self,
-        prefix: Option<&[u8]>,
-        start_key: Option<&[u8]>,
-        limit: Option<usize>,
-    ) -> Result<Vec<Vec<u8>>> {
-        let partition = self.partition();
-        let iter = self.backend().scan(&partition, prefix, start_key, limit)?;
-        Ok(iter.map(|(key_bytes, _)| key_bytes).collect())
-    }
 }
 
 /// Extension trait providing async versions of EntityStore methods.
@@ -802,14 +787,6 @@ where
         run_blocking_result(move || store.delete(&key)).await
     }
 
-    /// Async version of `batch_put()` - stores multiple entities atomically.
-    ///
-    /// Uses `spawn_blocking` internally to prevent blocking the async runtime.
-    async fn batch_put_async(&self, entries: Vec<(K, V)>) -> Result<()> {
-        let store = self.clone();
-        run_blocking_result(move || store.batch_put(&entries)).await
-    }
-
     /// Async version of `scan_all()` - scans all entities in partition.
     ///
     /// Uses `spawn_blocking` internally to prevent blocking the async runtime.
@@ -823,36 +800,6 @@ where
         run_blocking_result(move || {
             let typed_results = store.scan_all_typed(limit, prefix.as_ref(), start_key.as_ref())?;
             Ok(typed_results.into_iter().map(|(k, v)| (k.storage_key(), v)).collect())
-        })
-        .await
-    }
-
-    /// Async version of `scan_prefix()` - scans entities with a key prefix.
-    ///
-    /// Uses `spawn_blocking` internally to prevent blocking the async runtime.
-    async fn scan_prefix_async(&self, prefix: &K) -> Result<Vec<(Vec<u8>, V)>> {
-        let store = self.clone();
-        let prefix = prefix.clone();
-        run_blocking_result(move || {
-            let typed_results = store.scan_prefix_typed(&prefix, None)?;
-            Ok(typed_results.into_iter().map(|(k, v)| (k.storage_key(), v)).collect())
-        })
-        .await
-    }
-
-    /// Async version of `scan_directional()` - scans relative to a starting key.
-    ///
-    /// Uses `spawn_blocking` internally to prevent blocking the async runtime.
-    async fn scan_directional_async(
-        &self,
-        start_key: Option<K>,
-        direction: ScanDirection,
-        limit: usize,
-    ) -> Result<Vec<(K, V)>> {
-        let store = self.clone();
-        run_blocking_result(move || {
-            let iter = store.scan_directional(start_key.as_ref(), direction, limit)?;
-            iter.collect::<Result<Vec<_>>>()
         })
         .await
     }

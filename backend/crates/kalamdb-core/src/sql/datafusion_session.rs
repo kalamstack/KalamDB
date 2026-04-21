@@ -12,8 +12,8 @@
 //! - `batch_size`: Arrow batch size for record processing (default: 8192)
 
 use crate::sql::functions::{
-    CosineDistanceFunction, CurrentRoleFunction, CurrentUserFunction, CurrentUserIdFunction,
-    SnowflakeIdFunction, UlidFunction, UuidV7Function,
+    CosineDistanceFunction, CurrentRoleFunction, CurrentUserFunction, SnowflakeIdFunction,
+    UlidFunction, UuidV7Function,
 };
 use crate::sql::table_functions::VectorSearchTableFunction;
 use datafusion::error::Result as DataFusionResult;
@@ -125,8 +125,7 @@ impl DataFusionSessionFactory {
     /// - SNOWFLAKE_ID() - 64-bit time-ordered distributed IDs
     /// - UUID_V7() - RFC 9562 compliant UUIDs with timestamp
     /// - ULID() - 26-character Crockford Base32 time-sortable IDs
-    /// - CURRENT_USER() - Returns the authenticated username
-    /// - CURRENT_USER_ID() - Returns the authenticated user ID (system/dba/service only)
+    /// - CURRENT_USER() - Returns the authenticated user id
     /// - CURRENT_ROLE() - Returns the authenticated user's role
     ///
     /// DataFusion built-in functions already available:
@@ -145,13 +144,10 @@ impl DataFusionSessionFactory {
         let ulid_fn = UlidFunction::new();
         ctx.register_udf(ScalarUDF::from(ulid_fn));
 
-        // Register CURRENT_USER() function (will be overridden with actual username in ExecutionContext)
+        // Register CURRENT_USER() — resolves user_id from SessionUserContext at execution time
         ctx.register_udf(ScalarUDF::from(CurrentUserFunction::new()));
 
-        // Register CURRENT_USER_ID() function (will be overridden with actual user_id in ExecutionContext)
-        ctx.register_udf(ScalarUDF::from(CurrentUserIdFunction::new()));
-
-        // Register CURRENT_ROLE() function (will be overridden with actual role in ExecutionContext)
+        // Register CURRENT_ROLE() — resolves role from SessionUserContext at execution time
         ctx.register_udf(ScalarUDF::from(CurrentRoleFunction::new()));
 
         // Register PostgreSQL-compatible JSON functions and operators (->, ->>, ?).

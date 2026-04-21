@@ -210,6 +210,12 @@ function ensureTable(
       name: tableName,
       tableType,
       columns: [],
+      storageId: null,
+      version: null,
+      options: null,
+      comment: null,
+      updatedAt: null,
+      createdAt: null,
     };
     tableMap.set(tableKey, table);
     ensureNamespace(namespaces, databaseName, namespaceName).tables.push(table);
@@ -238,6 +244,110 @@ function normalizeNullable(value: unknown): boolean {
   }
 
   return Boolean(value);
+}
+
+function normalizeTextValue(value: unknown): string | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  return null;
+}
+
+function normalizeNumericValue(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
+function normalizeStructuredValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeStructuredValue(entry));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+        key,
+        normalizeStructuredValue(entry),
+      ]),
+    );
+  }
+
+  return value;
+}
+
+function normalizeTableOptions(value: unknown): Record<string, unknown> | null {
+  if (value == null) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    try {
+      return normalizeTableOptions(JSON.parse(trimmed) as unknown);
+    } catch {
+      return { value: trimmed };
+    }
+  }
+
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return { value: normalizeStructuredValue(value) };
+  }
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+      key,
+      normalizeStructuredValue(entry),
+    ]),
+  );
+}
+
+function normalizeTimestampValue(value: unknown): string | number | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString();
+  }
+
+  return null;
+}
+
+function applyTableMetadata(table: StudioTable, row: Record<string, unknown>): void {
+  table.storageId = normalizeTextValue(row.storage_id);
+  table.version = normalizeNumericValue(row.version);
+  table.options = normalizeTableOptions(row.options);
+  table.comment = normalizeTextValue(row.comment);
+  table.updatedAt = normalizeTimestampValue(row.updated_at);
+  table.createdAt = normalizeTimestampValue(row.created_at);
 }
 
 function inferExplorerTableType(namespaceName: string, tableType: unknown): string {
@@ -287,6 +397,12 @@ export async function fetchSqlStudioSchemaTree(): Promise<StudioNamespace[]> {
       t.namespace_id,
       t.table_name,
       t.table_type,
+      t.storage_id,
+      t.version,
+      t.options,
+      t.comment,
+      t.updated_at,
+      t.created_at,
       c.column_name,
       c.data_type,
       c.nullable,
@@ -316,6 +432,8 @@ export async function fetchSqlStudioSchemaTree(): Promise<StudioNamespace[]> {
       tableName,
       inferExplorerTableType(namespaceName, row.table_type),
     );
+
+    applyTableMetadata(table, row);
 
     if (row.column_name) {
       table.columns.push({

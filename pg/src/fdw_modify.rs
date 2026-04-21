@@ -193,8 +193,6 @@ pub unsafe extern "C-unwind" fn end_foreign_modify(
 // ---------------------------------------------------------------------------
 
 unsafe fn begin_foreign_modify_impl(rinfo: *mut pg_sys::ResultRelInfo) -> Result<(), KalamPgError> {
-    use kalam_pg_fdw::ServerOptions;
-
     let relation = (*rinfo).ri_RelationDesc;
     let relid = (*relation).rd_id;
     let ft = pg_sys::GetForeignTable(relid);
@@ -224,18 +222,7 @@ unsafe fn begin_foreign_modify_impl(rinfo: *mut pg_sys::ResultRelInfo) -> Result
         column_names.push(col_name);
     }
 
-    // Get server options (host/port) from the foreign server
-    let server = pg_sys::GetForeignServer((*ft).serverid);
-    let server_options = parse_options((*server).options);
-    let parsed_server = ServerOptions::parse(&server_options)?;
-    let remote_config = parsed_server.remote.ok_or_else(|| {
-        KalamPgError::Validation(
-            "foreign server must have host and port options for remote mode".to_string(),
-        )
-    })?;
-
-    let remote_state = crate::remote_state::ensure_remote_extension_state(remote_config)
-        .map_err(|e| KalamPgError::Execution(e.to_string()))?;
+    let remote_state = crate::remote_server::remote_state_for_server_id((*ft).serverid)?;
     let executor = remote_state.executor()?;
     let runtime = std::sync::Arc::clone(remote_state.runtime());
 

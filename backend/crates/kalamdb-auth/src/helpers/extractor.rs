@@ -365,7 +365,7 @@ impl FromRequest for AuthSessionExtractor {
                 .headers()
                 .get("X-Request-ID")
                 .and_then(|h| h.to_str().ok())
-                .map(|s| s.to_string());
+                .map(Arc::<str>::from);
 
             // Build auth request and authenticate
             let auth_request = AuthRequest::Header(auth_header);

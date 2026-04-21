@@ -15,6 +15,7 @@ use crate::views::system_schema_provider::SystemSchemaProvider;
 use async_trait::async_trait;
 use datafusion::catalog::SchemaProvider;
 use datafusion::prelude::SessionContext;
+use kalamdb_auth::{CoreUsersRepo, UserRepository};
 use kalamdb_commons::constants::SYSTEM_NAMESPACE;
 use kalamdb_commons::models::{NamespaceId, TransactionOrigin, UserId};
 use kalamdb_commons::{constants::ColumnFamilyNames, NodeId};
@@ -523,8 +524,12 @@ impl AppContext {
                 let mtls = app_ctx.config().rpc_tls.enabled
                     && app_ctx.config().rpc_tls.require_client_cert;
                 let pg_auth_token = app_ctx.config().auth.pg_auth_token.clone();
+                let pg_user_repo: Arc<dyn UserRepository> =
+                    Arc::new(CoreUsersRepo::new(app_ctx.system_tables().users()));
                 let pg_service = Arc::new(
-                    KalamPgService::new(mtls, pg_auth_token).with_operation_executor(pg_executor),
+                    KalamPgService::new(mtls, pg_auth_token)
+                        .with_bearer_auth(pg_user_repo)
+                        .with_operation_executor(pg_executor),
                 );
                 let app_ctx_for_sessions = Arc::clone(&app_ctx);
                 let pg_service_for_sessions = Arc::clone(&pg_service);

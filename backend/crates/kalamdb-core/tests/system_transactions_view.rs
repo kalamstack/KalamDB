@@ -5,14 +5,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use datafusion_common::ScalarValue;
+use kalamdb_auth::{create_and_sign_token, services::unified::init_auth_config};
 use kalamdb_commons::conversions::arrow_json_conversion::record_batch_to_json_rows;
 use kalamdb_commons::models::pg_operations::InsertRequest;
 use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::KalamCellValue;
-use kalamdb_commons::models::TransactionId;
+use kalamdb_commons::models::{KalamCellValue, TransactionId, UserId};
 use kalamdb_commons::TableType;
 use kalamdb_configs::ServerConfig;
 use kalamdb_core::operations::service::OperationService;
+use kalamdb_core::app_context::AppContext;
 use kalamdb_core::sql::context::ExecutionResult;
 use kalamdb_core::transactions::ExecutionOwnerKey;
 use kalamdb_pg::{
@@ -20,6 +21,8 @@ use kalamdb_pg::{
     OperationExecutor, PgService, RollbackTransactionRequest, ScanRpcRequest,
 };
 use kalamdb_raft::RaftExecutor;
+use kalamdb_system::providers::storages::models::StorageMode;
+use kalamdb_system::{AuthType, Role, User};
 use support::{
     create_cluster_app_context, create_cluster_app_context_with_config, create_executor,
     create_shared_table, execute_ok, insert_sql, observer_exec_ctx, request_exec_ctx,
@@ -80,14 +83,56 @@ fn shared_insert_request(
     }
 }
 
-async fn open_session(service: &KalamPgService, session_id: &str) {
+async fn open_session(app_ctx: &Arc<AppContext>, service: &KalamPgService, session_label: &str) -> String {
+    init_auth_config(&app_ctx.config().auth, &app_ctx.config().oauth);
+
+    let bridge_user_id = UserId::new(format!("{}_bridge_dba", session_label.replace('-', "_")));
+    let bridge_user = User {
+        user_id: bridge_user_id.clone(),
+        password_hash: "$2b$12$unusedhashunusedhashunusedhashunusedhashunusedhashu".to_string(),
+        role: Role::Dba,
+        email: Some(format!("{}@example.com", bridge_user_id.as_str())),
+        auth_type: AuthType::Password,
+        auth_data: None,
+        storage_mode: StorageMode::Table,
+        storage_id: None,
+        failed_login_attempts: 0,
+        locked_until: None,
+        last_login_at: None,
+        created_at: 0,
+        updated_at: 0,
+        last_seen: None,
+        deleted_at: None,
+    };
+    app_ctx
+        .system_tables()
+        .users()
+        .create_user(bridge_user)
+        .expect("create bridge dba user");
+
+    let (token, _) = create_and_sign_token(
+        &bridge_user_id,
+        &Role::Dba,
+        None,
+        None,
+        &app_ctx.config().auth.jwt_secret,
+    )
+    .expect("create bridge bearer token");
+
+    let mut request = Request::new(OpenSessionRequest {
+        session_id: String::new(),
+        current_schema: None,
+    });
+    request
+        .metadata_mut()
+        .insert("authorization", format!("Bearer {}", token).parse().expect("valid auth metadata"));
+
     service
-        .open_session(Request::new(OpenSessionRequest {
-            session_id: session_id.to_string(),
-            current_schema: None,
-        }))
+        .open_session(request)
         .await
-        .expect("open session succeeds");
+        .expect("open session succeeds")
+        .into_inner()
+        .session_id
 }
 
 async fn begin_transaction(service: &KalamPgService, session_id: &str) -> String {
@@ -121,8 +166,6 @@ async fn system_transactions_shows_active_pg_and_sql_transactions_while_sessions
     let operation_service = OperationService::new(Arc::clone(&app_ctx));
     let observer_ctx = observer_exec_ctx(&app_ctx);
     let request_ctx = request_exec_ctx(&app_ctx, "txn-view-request");
-    let session_id = "pg-4101-abcd1234";
-
     let executor_handle = app_ctx.executor();
     let raft_executor = executor_handle
         .as_any()
@@ -130,8 +173,8 @@ async fn system_transactions_shows_active_pg_and_sql_transactions_while_sessions
         .expect("raft executor available");
     let pg_service = raft_executor.pg_service().expect("pg service is wired");
 
-    open_session(&pg_service, session_id).await;
-    let pg_transaction_id = begin_transaction(&pg_service, session_id).await;
+    let session_id = open_session(&app_ctx, &pg_service, "pg-4101-abcd1234").await;
+    let pg_transaction_id = begin_transaction(&pg_service, &session_id).await;
 
     operation_service
         .execute_insert(InsertRequest {
@@ -195,7 +238,7 @@ async fn system_transactions_shows_active_pg_and_sql_transactions_while_sessions
     assert_eq!(string_field(&session_rows[0], "transaction_id"), pg_transaction_id);
     assert_eq!(string_field(&session_rows[0], "transaction_state"), "active");
 
-    rollback_transaction(&pg_service, session_id, &pg_transaction_id).await;
+    rollback_transaction(&pg_service, &session_id, &pg_transaction_id).await;
     execute_ok(&executor, &request_ctx, "ROLLBACK").await;
 
     let cleared_rows = json_rows(
@@ -211,8 +254,6 @@ async fn stale_idle_pg_sessions_drop_out_of_sessions_view() {
     let (app_ctx, _test_db) = create_cluster_app_context().await;
     let executor = create_executor(Arc::clone(&app_ctx));
     let observer_ctx = observer_exec_ctx(&app_ctx);
-    let session_id = "pg-4202-idlefade";
-
     let executor_handle = app_ctx.executor();
     let raft_executor = executor_handle
         .as_any()
@@ -220,7 +261,7 @@ async fn stale_idle_pg_sessions_drop_out_of_sessions_view() {
         .expect("raft executor available");
     let pg_service = raft_executor.pg_service().expect("pg service is wired");
 
-    open_session(&pg_service, session_id).await;
+    let session_id = open_session(&app_ctx, &pg_service, "pg-4202-idlefade").await;
 
     let active_session_rows = json_rows(
         execute_ok(
@@ -258,8 +299,6 @@ async fn pg_passive_timeout_hides_stale_transaction_fields_from_sessions_view() 
     let (app_ctx, _test_db) = create_cluster_app_context_with_config(config).await;
     let executor = create_executor(Arc::clone(&app_ctx));
     let observer_ctx = observer_exec_ctx(&app_ctx);
-    let session_id = "pg-4300-feedcafe";
-
     let executor_handle = app_ctx.executor();
     let raft_executor = executor_handle
         .as_any()
@@ -267,8 +306,8 @@ async fn pg_passive_timeout_hides_stale_transaction_fields_from_sessions_view() 
         .expect("raft executor available");
     let pg_service = raft_executor.pg_service().expect("pg service is wired");
 
-    open_session(&pg_service, session_id).await;
-    let transaction_id = begin_transaction(&pg_service, session_id).await;
+    let session_id = open_session(&app_ctx, &pg_service, "pg-4300-feedcafe").await;
+    let transaction_id = begin_transaction(&pg_service, &session_id).await;
 
     let active_session_rows = json_rows(
         execute_ok(
@@ -320,9 +359,9 @@ async fn pg_passive_timeout_hides_stale_transaction_fields_from_sessions_view() 
     );
     assert!(timed_out_transaction_rows.is_empty());
 
-    let replacement_transaction_id = begin_transaction(&pg_service, session_id).await;
+    let replacement_transaction_id = begin_transaction(&pg_service, &session_id).await;
     assert_ne!(replacement_transaction_id, transaction_id);
-    rollback_transaction(&pg_service, session_id, &replacement_transaction_id).await;
+    rollback_transaction(&pg_service, &session_id, &replacement_transaction_id).await;
 }
 
 #[tokio::test]
@@ -336,8 +375,6 @@ async fn pg_timeout_after_write_clears_sessions_and_transactions_views() {
         create_shared_table(&app_ctx, &unique_namespace("pg_timeout_write"), "items").await;
     let executor = create_executor(Arc::clone(&app_ctx));
     let observer_ctx = observer_exec_ctx(&app_ctx);
-    let session_id = "pg-4301-deadbeef";
-
     let executor_handle = app_ctx.executor();
     let raft_executor = executor_handle
         .as_any()
@@ -345,11 +382,11 @@ async fn pg_timeout_after_write_clears_sessions_and_transactions_views() {
         .expect("raft executor available");
     let pg_service = raft_executor.pg_service().expect("pg service is wired");
 
-    open_session(&pg_service, session_id).await;
-    let transaction_id = begin_transaction(&pg_service, session_id).await;
+    let session_id = open_session(&app_ctx, &pg_service, "pg-4301-deadbeef").await;
+    let transaction_id = begin_transaction(&pg_service, &session_id).await;
 
     pg_service
-        .insert(Request::new(shared_insert_request(&table_id, session_id, 1, "pending")))
+        .insert(Request::new(shared_insert_request(&table_id, &session_id, 1, "pending")))
         .await
         .expect("initial staged write succeeds");
 
@@ -391,14 +428,14 @@ async fn pg_timeout_after_write_clears_sessions_and_transactions_views() {
     tokio::time::sleep(Duration::from_millis(2200)).await;
 
     let timeout_error = pg_service
-        .insert(Request::new(shared_insert_request(&table_id, session_id, 2, "late")))
+        .insert(Request::new(shared_insert_request(&table_id, &session_id, 2, "late")))
         .await
         .expect_err("follow-up write should fail after timeout");
     assert_eq!(timeout_error.code(), tonic::Code::FailedPrecondition);
     assert!(timeout_error.message().contains("timed out"), "{timeout_error}");
 
-    let owner_key =
-        ExecutionOwnerKey::from_pg_session_id(session_id).expect("pg owner key should parse");
+    let owner_key = ExecutionOwnerKey::from_pg_session_id(session_id.as_str())
+        .expect("pg owner key should parse");
     let parsed_transaction_id =
         TransactionId::try_new(transaction_id.clone()).expect("transaction id should parse");
     assert!(app_ctx.transaction_coordinator().active_for_owner(&owner_key).is_none());
@@ -438,9 +475,9 @@ async fn pg_timeout_after_write_clears_sessions_and_transactions_views() {
     );
     assert!(cleared_transaction_rows.is_empty());
 
-    let replacement_transaction_id = begin_transaction(&pg_service, session_id).await;
+    let replacement_transaction_id = begin_transaction(&pg_service, &session_id).await;
     assert_ne!(replacement_transaction_id, transaction_id);
-    rollback_transaction(&pg_service, session_id, &replacement_transaction_id).await;
+    rollback_transaction(&pg_service, &session_id, &replacement_transaction_id).await;
 }
 
 #[tokio::test]
@@ -454,8 +491,6 @@ async fn pg_timeout_after_read_clears_sessions_and_transactions_views() {
         create_shared_table(&app_ctx, &unique_namespace("pg_timeout_read"), "items").await;
     let executor = create_executor(Arc::clone(&app_ctx));
     let observer_ctx = observer_exec_ctx(&app_ctx);
-    let session_id = "pg-4302-cafef00d";
-
     let executor_handle = app_ctx.executor();
     let raft_executor = executor_handle
         .as_any()
@@ -463,8 +498,8 @@ async fn pg_timeout_after_read_clears_sessions_and_transactions_views() {
         .expect("raft executor available");
     let pg_service = raft_executor.pg_service().expect("pg service is wired");
 
-    open_session(&pg_service, session_id).await;
-    let transaction_id = begin_transaction(&pg_service, session_id).await;
+    let session_id = open_session(&app_ctx, &pg_service, "pg-4302-cafef00d").await;
+    let transaction_id = begin_transaction(&pg_service, &session_id).await;
 
     let active_transaction_rows = json_rows(
         execute_ok(
@@ -502,8 +537,8 @@ async fn pg_timeout_after_read_clears_sessions_and_transactions_views() {
         "{timeout_error}"
     );
 
-    let owner_key =
-        ExecutionOwnerKey::from_pg_session_id(session_id).expect("pg owner key should parse");
+    let owner_key = ExecutionOwnerKey::from_pg_session_id(session_id.as_str())
+        .expect("pg owner key should parse");
     let parsed_transaction_id =
         TransactionId::try_new(transaction_id.clone()).expect("transaction id should parse");
     assert!(app_ctx.transaction_coordinator().active_for_owner(&owner_key).is_none());
@@ -539,7 +574,7 @@ async fn pg_timeout_after_read_clears_sessions_and_transactions_views() {
     );
     assert!(cleared_transaction_rows.is_empty());
 
-    let replacement_transaction_id = begin_transaction(&pg_service, session_id).await;
+    let replacement_transaction_id = begin_transaction(&pg_service, &session_id).await;
     assert_ne!(replacement_transaction_id, transaction_id);
-    rollback_transaction(&pg_service, session_id, &replacement_transaction_id).await;
+    rollback_transaction(&pg_service, &session_id, &replacement_transaction_id).await;
 }

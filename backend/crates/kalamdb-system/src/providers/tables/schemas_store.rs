@@ -215,6 +215,43 @@ impl SchemasStore {
         Ok(result)
     }
 
+    /// Scan all versioned table definitions in a specific namespace.
+    pub fn scan_namespace_with_versions(
+        &self,
+        namespace_id: &NamespaceId,
+    ) -> Result<Vec<(TableId, TableDefinition)>, kalamdb_store::StorageError> {
+        let prefix = TableVersionId::namespace_scan_prefix(namespace_id);
+        let entries: Vec<(TableVersionId, TableDefinition)> =
+            self.scan_with_raw_prefix(&prefix, None, 10_000)?;
+
+        let mut result: Vec<(TableId, TableDefinition)> = entries
+            .into_iter()
+            .filter_map(|(version_key, table_def)| {
+                if version_key.is_versioned() {
+                    Some((version_key.table_id().clone(), table_def))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        result.sort_by(|(left_id, left_def), (right_id, right_def)| {
+            left_id
+                .namespace_id()
+                .as_str()
+                .cmp(right_id.namespace_id().as_str())
+                .then_with(|| {
+                    left_id
+                        .table_name()
+                        .as_str()
+                        .cmp(right_id.table_name().as_str())
+                })
+                .then_with(|| left_def.schema_version.cmp(&right_def.schema_version))
+        });
+
+        Ok(result)
+    }
+
     /// Scan all table entries (both latest and versioned)
     ///
     /// Returns tuples of (TableVersionId, TableDefinition, is_latest)
@@ -469,6 +506,24 @@ mod tests {
         // Scan test namespace
         let test_tables = store.scan_namespace(&NamespaceId::new("test")).unwrap();
         assert_eq!(test_tables.len(), 1);
+    }
+
+    #[test]
+    fn test_scan_namespace_with_versions() {
+        let store = create_test_store();
+        let (table_id, mut table_def) = create_test_table("default", "users", 1);
+
+        store.put_version(&table_id, &table_def).unwrap();
+        table_def.schema_version = 2;
+        store.put_version(&table_id, &table_def).unwrap();
+
+        let versions = store
+            .scan_namespace_with_versions(table_id.namespace_id())
+            .unwrap();
+
+        assert_eq!(versions.len(), 2);
+        assert_eq!(versions[0].1.schema_version, 1);
+        assert_eq!(versions[1].1.schema_version, 2);
     }
 
     #[test]

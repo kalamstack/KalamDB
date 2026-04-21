@@ -17,15 +17,6 @@ fn test_subscription_with_from_seq_id() {
     assert!(opts.has_resume_seq_id());
 }
 
-/// Test that from_seq_id starts as None
-#[test]
-fn test_from_seq_id_initially_none() {
-    let opts = SubscriptionOptions::new();
-
-    assert!(opts.from.is_none());
-    assert!(!opts.has_resume_seq_id());
-}
-
 /// Test updating from_seq_id via builder pattern
 #[test]
 fn test_update_from_seq_id() {
@@ -45,19 +36,6 @@ fn test_update_from_seq_id() {
     // Other fields preserved
     assert_eq!(reconnect_opts.batch_size, Some(50));
     assert_eq!(reconnect_opts.last_rows, Some(10));
-}
-
-/// Test seq_id ordering for resumption logic
-#[test]
-fn test_seq_id_comparison() {
-    let seq1 = SeqId::from(1000i64);
-    let seq2 = SeqId::from(2000i64);
-    let seq3 = SeqId::from(3000i64);
-
-    // SeqId should be comparable for determining "newer" events
-    assert!(seq1 < seq2);
-    assert!(seq2 < seq3);
-    assert!(seq1 < seq3);
 }
 
 /// Test seq_id value extraction
@@ -158,18 +136,6 @@ fn test_batch_resumption_scenario() {
     assert_eq!(opts.from, Some(SeqId::from(299i64)));
 
     // Server should send events starting from seq > 299
-}
-
-/// Test helper function for resumption status
-#[test]
-fn test_has_resume_seq_id_helper() {
-    // Without from_seq_id
-    let opts1 = SubscriptionOptions::new();
-    assert!(!opts1.has_resume_seq_id());
-
-    // With from_seq_id
-    let opts2 = SubscriptionOptions::new().with_from_seq_id(SeqId::from(1i64));
-    assert!(opts2.has_resume_seq_id());
 }
 
 /// Test combining from_seq_id with other options

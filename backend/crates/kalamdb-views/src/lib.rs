@@ -6,6 +6,8 @@
 //!
 //! This crate is extracted from `kalamdb-core` to enable parallel compilation.
 //! The `SystemSchemaProvider` (DataFusion wiring) remains in `kalamdb-core`.
+//! View providers now use the shared deferred execution substrate so batch
+//! computation happens at execute time instead of inside `TableProvider::scan()`.
 
 pub mod cluster;
 pub mod cluster_groups;

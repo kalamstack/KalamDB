@@ -7,7 +7,6 @@ use datafusion::logical_expr::Expr;
 use kalamdb_commons::models::schemas::TableType;
 use kalamdb_commons::models::UserId;
 use kalamdb_commons::TableId;
-use kalamdb_system::Manifest;
 
 /// Async helper for loading Parquet batches via ManifestAccessPlanner.
 ///
@@ -25,19 +24,6 @@ pub(crate) async fn scan_parquet_files_as_batch_async(
         .map(|uid| format!("user={}", uid.as_str()))
         .unwrap_or_else(|| format!("scope={}", table_type.as_str()));
 
-    // 1. Get storage_id from schema registry
-    let storage_id = core
-        .schema_registry()
-        .get_storage_id(table_id)
-        .map_err(|_| KalamDbError::TableNotFound(format!("Table not found: {}", table_id)))?;
-
-    let storage_registry = core.services.storage_registry.as_ref().ok_or_else(|| {
-        KalamDbError::InvalidOperation("Storage registry not configured".to_string())
-    })?;
-    let storage_cached = storage_registry.get_cached(&storage_id)?.ok_or_else(|| {
-        KalamDbError::InvalidOperation(format!("Storage '{}' not found", storage_id.as_str()))
-    })?;
-
     let manifest_service = core.services.manifest_service.clone();
     log::trace!(
         "[PARQUET_SCAN_ASYNC] About to get_or_load manifest: table={} {}",
@@ -45,7 +31,7 @@ pub(crate) async fn scan_parquet_files_as_batch_async(
         scope_label
     );
     let cache_result = manifest_service.get_or_load_async(table_id, user_id).await;
-    let mut manifest_opt: Option<Manifest> = None;
+    let mut manifest_entry = None;
     let mut use_degraded_mode = false;
 
     // Fast path: if manifest loaded successfully and has no segments,
@@ -63,16 +49,15 @@ pub(crate) async fn scan_parquet_files_as_batch_async(
 
     match &cache_result {
         Ok(Some(entry)) => {
-            let manifest = entry.manifest.clone();
             log::trace!(
                 "[PARQUET_SCAN_ASYNC] Got manifest: table={} {} segments={} sync_state={:?}",
                 table_id,
                 scope_label,
-                manifest.segments.len(),
+                entry.manifest.segments.len(),
                 entry.sync_state
             );
             // Validate manifest using service
-            if let Err(e) = manifest_service.validate_manifest(&manifest) {
+            if let Err(e) = manifest_service.validate_manifest(&entry.manifest) {
                 log::warn!(
                     "⚠️  [MANIFEST CORRUPTION] table={} {} error={} | Triggering rebuild",
                     table_id,
@@ -118,7 +103,7 @@ pub(crate) async fn scan_parquet_files_as_batch_async(
                     }
                 });
             } else {
-                manifest_opt = Some(manifest);
+                manifest_entry = Some(entry.clone());
             }
         },
         Ok(None) => {
@@ -140,6 +125,19 @@ pub(crate) async fn scan_parquet_files_as_batch_async(
         },
     }
 
+    // Resolve storage only when the manifest cannot already prove the cold path is empty.
+    let storage_id = core
+        .schema_registry()
+        .get_storage_id(table_id)
+        .map_err(|_| KalamDbError::TableNotFound(format!("Table not found: {}", table_id)))?;
+
+    let storage_registry = core.services.storage_registry.as_ref().ok_or_else(|| {
+        KalamDbError::InvalidOperation("Storage registry not configured".to_string())
+    })?;
+    let storage_cached = storage_registry.get_cached(&storage_id)?.ok_or_else(|| {
+        KalamDbError::InvalidOperation(format!("Storage '{}' not found", storage_id.as_str()))
+    })?;
+
     let planner = ManifestAccessPlanner::new();
     let (min_seq, max_seq) = filter
         .map(crate::utils::row_utils::extract_seq_bounds_from_filter)
@@ -151,7 +149,7 @@ pub(crate) async fn scan_parquet_files_as_batch_async(
 
     let (combined, (total_batches, skipped, scanned)) = planner
         .scan_parquet_files_async(
-            manifest_opt.as_ref(),
+            manifest_entry.as_ref().map(|entry| &entry.manifest),
             storage_cached,
             table_type,
             table_id,

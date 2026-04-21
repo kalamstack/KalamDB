@@ -33,6 +33,7 @@ use kalamdb_store::IndexDefinition;
 /// This index allows efficient lookups by PK value within a user's scope,
 /// returning all MVCC versions of rows with matching PK.
 /// The user_id prefix ensures the same PK value can exist for different users.
+#[derive(Clone)]
 pub struct UserTablePkIndex {
     /// Partition for the index
     partition: Partition,

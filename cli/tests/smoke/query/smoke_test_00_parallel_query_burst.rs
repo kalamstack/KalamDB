@@ -19,6 +19,27 @@ const INSERT_CHUNK_SIZE: usize = 1000;
 const MAX_QUERY_DURATION: Duration = Duration::from_secs(60);
 const MAX_ROWS_IN_TABLE: usize = 2_000;
 
+fn print_phase0_explain_baseline(label: &str, query: &str) {
+    let explain_sql = format!("EXPLAIN {}", query);
+    let explain_output = execute_sql_as_root_via_client(&explain_sql)
+        .unwrap_or_else(|error| panic!("phase-0 EXPLAIN failed for '{}': {}", explain_sql, error));
+    println!("Phase-0 EXPLAIN baseline [{}]:\n{}", label, explain_output);
+
+    let analyze_sql = format!("EXPLAIN ANALYZE {}", query);
+    let analyze_output = execute_sql_as_root_via_client(&analyze_sql).unwrap_or_else(|error| {
+        panic!(
+            "phase-0 EXPLAIN ANALYZE failed for '{}': {}",
+            analyze_sql,
+            error
+        )
+    });
+    println!(
+        "Phase-0 EXPLAIN ANALYZE baseline [{}]:\n{}",
+        label,
+        analyze_output
+    );
+}
+
 #[ntest::timeout(180000)]
 #[test]
 fn smoke_test_00_parallel_query_burst() {
@@ -111,6 +132,11 @@ fn smoke_test_00_parallel_query_burst() {
     let total_count = extract_scalar(&count_output, "total_count") as usize;
     println!("Verified row count: {}", total_count);
 
+    print_phase0_explain_baseline(
+        "parallel_query_burst_select_all",
+        &format!("SELECT * FROM {}", full_table_name),
+    );
+
     println!(
         "Loaded {} rows into {}. Launching {} parallel SELECT * queries...",
         total_count, full_table_name, PARALLEL_QUERIES
@@ -174,6 +200,18 @@ fn smoke_test_00_parallel_query_burst() {
         overall_start.elapsed(),
         max_duration,
         avg_duration
+    );
+    println!(
+        "Phase-0 baseline metric [parallel_burst_max_query_ms]={:.3}",
+        max_duration.as_secs_f64() * 1000.0
+    );
+    println!(
+        "Phase-0 baseline metric [parallel_burst_avg_query_ms]={:.3}",
+        avg_duration.as_secs_f64() * 1000.0
+    );
+    println!(
+        "Phase-0 baseline metric [parallel_burst_total_secs]={:.3}",
+        overall_start.elapsed().as_secs_f64()
     );
 
     assert!(

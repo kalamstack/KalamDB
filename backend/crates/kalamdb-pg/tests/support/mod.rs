@@ -192,14 +192,16 @@ pub async fn await_shared_leader(app_ctx: &Arc<AppContext>) {
     panic!("shared shard leader not ready");
 }
 
-pub async fn open_session(service: &KalamPgService, session_id: &str) {
+pub async fn open_session(service: &KalamPgService, _session_id: &str) -> String {
     service
         .open_session(request(OpenSessionRequest {
-            session_id: session_id.to_string(),
+            session_id: String::new(),
             current_schema: None,
         }))
         .await
-        .expect("open session");
+        .expect("open session")
+        .into_inner()
+        .session_id
 }
 
 pub async fn begin_transaction(service: &KalamPgService, session_id: &str) -> String {

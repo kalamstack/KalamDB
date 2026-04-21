@@ -1,6 +1,4 @@
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use kalam_pg_api::KalamBackendExecutor;
@@ -99,16 +97,6 @@ fn remote_state_registry() -> &'static Mutex<RemoteStateRegistry<RemoteExtension
     REMOTE_STATES.get_or_init(|| Mutex::new(RemoteStateRegistry::default()))
 }
 
-fn session_suffix(config: &RemoteServerConfig) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    config.hash(&mut hasher);
-    hasher.finish()
-}
-
-fn session_id_for_config(config: &RemoteServerConfig) -> String {
-    format!("pg-{}-{:016x}", std::process::id(), session_suffix(config))
-}
-
 fn build_remote_extension_state(
     config: &RemoteServerConfig,
 ) -> Result<RemoteExtensionState, KalamPgError> {
@@ -118,13 +106,13 @@ fn build_remote_extension_state(
         )?);
 
     let client = runtime.block_on(async { RemoteKalamClient::connect(config.clone()).await })?;
-    let session_id = session_id_for_config(config);
-    runtime.block_on(async { client.open_session(&session_id, None).await })?;
+    let session =
+        runtime.block_on(async { client.open_session(None).await })?;
 
     Ok(RemoteExtensionState {
         client,
         runtime,
-        session_id,
+        session_id: session.session_id,
     })
 }
 
@@ -266,12 +254,14 @@ mod tests {
             &self,
             request: Request<OpenSessionRequest>,
         ) -> Result<Response<OpenSessionResponse>, Status> {
-            self.state.open_session_calls.fetch_add(1, Ordering::Relaxed);
+            let count = self.state.open_session_calls.fetch_add(1, Ordering::Relaxed);
+            let server_issued_id = format!("srv-session-{}", count);
+            self.state.record_session_id(server_issued_id.clone());
             let request = request.into_inner();
-            self.state.record_session_id(request.session_id.clone());
             Ok(Response::new(OpenSessionResponse {
-                session_id: request.session_id,
+                session_id: server_issued_id,
                 current_schema: request.current_schema,
+                lease_expires_at_ms: 0,
             }))
         }
 

@@ -20,7 +20,7 @@ const initialState: SqlStudioUiState = {
   expandedNamespaces: {},
   expandedTables: {},
   selectedTableKey: null,
-  isInspectorCollapsed: false,
+  isInspectorCollapsed: true,
   horizontalLayout: [21, 79],
   verticalLayout: [42, 58],
 };

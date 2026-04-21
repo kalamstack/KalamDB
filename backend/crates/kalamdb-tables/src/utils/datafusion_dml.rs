@@ -1,9 +1,9 @@
+use async_trait::async_trait;
 use datafusion::arrow::array::{ArrayRef, UInt64Array};
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::catalog::Session;
 use datafusion::common::DFSchema;
-use datafusion::datasource::memory::MemTable;
 use datafusion::datasource::source::DataSourceExec;
 use datafusion::datasource::TableProvider;
 use datafusion::error::{DataFusionError, Result as DataFusionResult};
@@ -13,6 +13,7 @@ use datafusion::physical_plan::projection::ProjectionExec;
 use datafusion::physical_plan::{collect, ExecutionPlan};
 use datafusion::scalar::ScalarValue;
 use datafusion_datasource::memory::MemorySourceConfig;
+use kalamdb_datafusion_sources::exec::{DeferredBatchExec, DeferredBatchSource};
 use kalamdb_commons::conversions::arrow_json_conversion::{
     arrow_value_to_scalar, json_rows_to_arrow_batch,
 };
@@ -32,10 +33,33 @@ pub struct OverlayScanProjection {
     pub final_projection: Option<Vec<usize>>,
 }
 
+#[derive(Debug)]
+struct RowsAffectedSource {
+    batch: RecordBatch,
+}
+
+#[async_trait]
+impl DeferredBatchSource for RowsAffectedSource {
+    fn source_name(&self) -> &'static str {
+        "dml_rows_affected"
+    }
+
+    fn schema(&self) -> SchemaRef {
+        self.batch.schema()
+    }
+
+    async fn produce_batch(&self) -> DataFusionResult<RecordBatch> {
+        Ok(self.batch.clone())
+    }
+}
+
 /// DataFusion requires DML providers to return an execution plan that yields one row
 /// with a single `count` column (`UInt64`) containing affected rows.
+///
+/// Use the shared deferred execution wrapper instead of building a temporary
+/// `MemTable` just to hand DataFusion one batch.
 pub async fn rows_affected_plan(
-    state: &dyn Session,
+    _state: &dyn Session,
     rows_affected: u64,
 ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
     let schema = Arc::new(Schema::new(vec![Field::new("count", DataType::UInt64, false)]));
@@ -44,8 +68,9 @@ pub async fn rows_affected_plan(
         vec![Arc::new(UInt64Array::from(vec![rows_affected])) as ArrayRef],
     )?;
 
-    let mem = MemTable::try_new(schema, vec![vec![batch]])?;
-    mem.scan(state, None, &[], None).await
+    Ok(Arc::new(DeferredBatchExec::new(Arc::new(
+        RowsAffectedSource { batch },
+    ))))
 }
 
 pub fn prepare_overlay_scan_projection(

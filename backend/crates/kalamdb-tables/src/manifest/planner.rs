@@ -285,11 +285,11 @@ impl ManifestAccessPlanner {
             return Ok(batch);
         }
 
-        log::debug!(
-            "[Schema Evolution] Projecting batch from schema v{} to current schema for table {}",
-            old_schema_version,
-            table_id
-        );
+        // log::debug!(
+        //     "[Schema Evolution] Projecting batch from schema v{} to current schema for table {}",
+        //     old_schema_version,
+        //     table_id
+        // );
 
         // Build projection: for each field in current_schema, find it in old_schema or create NULL array
         let mut projected_columns: Vec<Arc<dyn datafusion::arrow::array::Array>> = Vec::new();
@@ -323,11 +323,11 @@ impl ManifestAccessPlanner {
                     new_null_array(current_field.data_type(), batch.num_rows());
                 projected_columns.push(null_array);
 
-                log::trace!(
-                    "[Schema Evolution] Column '{}' not in old schema v{}, filled with NULLs",
-                    current_field.name(),
-                    old_schema_version
-                );
+                // log::trace!(
+                //     "[Schema Evolution] Column '{}' not in old schema v{}, filled with NULLs",
+                //     current_field.name(),
+                //     old_schema_version
+                // );
             }
         }
 
@@ -408,5 +408,201 @@ impl ManifestAccessPlanner {
 
         // Can't compare, conservatively include
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+    use kalamdb_commons::models::rows::StoredScalarValue;
+    use kalamdb_system::{ColumnStats, SegmentMetadata};
+
+    fn numeric_stats(min: i64, max: i64) -> ColumnStats {
+        ColumnStats::new(
+            Some(StoredScalarValue::Int64(Some(min.to_string()))),
+            Some(StoredScalarValue::Int64(Some(max.to_string()))),
+            Some(0),
+        )
+    }
+
+    #[test]
+    fn plan_by_pk_value_skips_out_of_range_and_unreadable_segments() {
+        let table_id = TableId::from_strings("test", "users");
+        let mut manifest = Manifest::new(table_id, None);
+
+        let mut in_range_stats = HashMap::new();
+        in_range_stats.insert(1, numeric_stats(10, 20));
+        manifest.add_segment(SegmentMetadata::with_schema_version(
+            "batch-in-range.parquet".to_string(),
+            "batch-in-range.parquet".to_string(),
+            in_range_stats,
+            SeqId::from(1i64),
+            SeqId::from(10i64),
+            5,
+            128,
+            1,
+        ));
+
+        let mut out_of_range_stats = HashMap::new();
+        out_of_range_stats.insert(1, numeric_stats(30, 40));
+        manifest.add_segment(SegmentMetadata::with_schema_version(
+            "batch-out-of-range.parquet".to_string(),
+            "batch-out-of-range.parquet".to_string(),
+            out_of_range_stats,
+            SeqId::from(11i64),
+            SeqId::from(20i64),
+            5,
+            128,
+            1,
+        ));
+
+        let mut tombstoned_stats = HashMap::new();
+        tombstoned_stats.insert(1, numeric_stats(10, 20));
+        let mut tombstoned = SegmentMetadata::with_schema_version(
+            "batch-tombstoned.parquet".to_string(),
+            "batch-tombstoned.parquet".to_string(),
+            tombstoned_stats,
+            SeqId::from(21i64),
+            SeqId::from(30i64),
+            5,
+            128,
+            1,
+        );
+        tombstoned.mark_tombstone();
+        manifest.add_segment(tombstoned);
+
+        let planner = ManifestAccessPlanner::new();
+        let selected = planner.plan_by_pk_value(&manifest, 1, "15");
+
+        assert_eq!(selected, vec!["batch-in-range.parquet".to_string()]);
+    }
+
+    #[test]
+    fn plan_by_pk_value_includes_segment_when_value_is_at_boundary() {
+        // Proves boundary values (min or max exactly) are included, not pruned.
+        let table_id = TableId::from_strings("test", "users");
+        let mut manifest = Manifest::new(table_id, None);
+
+        let mut stats = HashMap::new();
+        stats.insert(1, numeric_stats(10, 20));
+        manifest.add_segment(SegmentMetadata::with_schema_version(
+            "batch.parquet".to_string(),
+            "batch.parquet".to_string(),
+            stats,
+            SeqId::from(1i64),
+            SeqId::from(10i64),
+            5,
+            128,
+            1,
+        ));
+
+        let planner = ManifestAccessPlanner::new();
+        assert_eq!(
+            planner.plan_by_pk_value(&manifest, 1, "10"),
+            vec!["batch.parquet".to_string()],
+            "min boundary must be included"
+        );
+        assert_eq!(
+            planner.plan_by_pk_value(&manifest, 1, "20"),
+            vec!["batch.parquet".to_string()],
+            "max boundary must be included"
+        );
+        assert!(
+            planner.plan_by_pk_value(&manifest, 1, "9").is_empty(),
+            "value just below min must be pruned"
+        );
+        assert!(
+            planner.plan_by_pk_value(&manifest, 1, "21").is_empty(),
+            "value just above max must be pruned"
+        );
+    }
+
+    #[test]
+    fn plan_by_seq_range_skips_non_overlapping_segments() {
+        // Proves the non-PK scan path prunes segments whose [min_seq, max_seq]
+        // does not overlap the requested range. This is the primary pruning
+        // signal used by scan_parquet_files_async when no PK filter applies.
+        let table_id = TableId::from_strings("test", "orders");
+        let mut manifest = Manifest::new(table_id, None);
+
+        // Segment A: seq [1..10] — overlaps with query [5..15]
+        manifest.add_segment(SegmentMetadata::with_schema_version(
+            "batch-a.parquet".to_string(),
+            "batch-a.parquet".to_string(),
+            HashMap::new(),
+            SeqId::from(1i64),
+            SeqId::from(10i64),
+            5,
+            128,
+            1,
+        ));
+
+        // Segment B: seq [20..30] — beyond query upper bound, must be skipped
+        manifest.add_segment(SegmentMetadata::with_schema_version(
+            "batch-b.parquet".to_string(),
+            "batch-b.parquet".to_string(),
+            HashMap::new(),
+            SeqId::from(20i64),
+            SeqId::from(30i64),
+            5,
+            128,
+            1,
+        ));
+
+        // Segment C: seq [11..15] — fully inside query, must be included
+        manifest.add_segment(SegmentMetadata::with_schema_version(
+            "batch-c.parquet".to_string(),
+            "batch-c.parquet".to_string(),
+            HashMap::new(),
+            SeqId::from(11i64),
+            SeqId::from(15i64),
+            5,
+            128,
+            1,
+        ));
+
+        // Segment D: seq [0..0] — below query lower bound, must be skipped
+        manifest.add_segment(SegmentMetadata::with_schema_version(
+            "batch-d.parquet".to_string(),
+            "batch-d.parquet".to_string(),
+            HashMap::new(),
+            SeqId::from(0i64),
+            SeqId::from(0i64),
+            5,
+            128,
+            1,
+        ));
+
+        let planner = ManifestAccessPlanner::new();
+        let selections =
+            planner.plan_by_seq_range(&manifest, SeqId::from(5i64), SeqId::from(15i64));
+
+        let paths: Vec<_> = selections.iter().map(|s| s.file_path.clone()).collect();
+        assert_eq!(
+            paths,
+            vec!["batch-a.parquet".to_string(), "batch-c.parquet".to_string()],
+            "only segments whose [min_seq,max_seq] overlaps [5,15] must be selected"
+        );
+    }
+
+    #[test]
+    fn plan_by_seq_range_returns_empty_for_empty_manifest() {
+        // The manifest-first fast path: an empty manifest must return no
+        // selections without any further work.
+        let table_id = TableId::from_strings("test", "empty");
+        let manifest = Manifest::new(table_id, None);
+
+        let planner = ManifestAccessPlanner::new();
+        let selections =
+            planner.plan_by_seq_range(&manifest, SeqId::from(0i64), SeqId::from(1_000_000i64));
+        assert!(selections.is_empty());
+
+        let paths = planner.plan_by_pk_value(&manifest, 1, "42");
+        assert!(paths.is_empty());
+
+        let all = planner.plan_all_files(&manifest);
+        assert!(all.is_empty());
     }
 }

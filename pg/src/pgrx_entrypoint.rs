@@ -151,30 +151,11 @@ pub fn current_kalam_user_id() -> Option<String> {
 /// ```
 #[pg_extern]
 pub fn kalam_exec(sql: &str) -> String {
-    use crate::fdw_options::parse_options;
     use kalam_pg_common::KalamPgError;
-    use kalam_pg_fdw::ServerOptions;
 
     const DEFAULT_SERVER: &str = "kalam_server";
 
-    let c_name = std::ffi::CString::new(DEFAULT_SERVER).unwrap_or_default();
-    let server = unsafe { pgrx::pg_sys::GetForeignServerByName(c_name.as_ptr(), true) };
-    if server.is_null() {
-        pgrx::error!(
-            "kalam_exec: foreign server '{}' not found – create it first with CREATE SERVER",
-            DEFAULT_SERVER
-        );
-    }
-    let server_options = parse_options(unsafe { (*server).options });
-    let parsed = match ServerOptions::parse(&server_options) {
-        Ok(parsed) => parsed,
-        Err(e) => pgrx::error!("kalam_exec: failed to parse server options: {}", e),
-    };
-    let remote_config = match parsed.remote {
-        Some(config) => config,
-        None => pgrx::error!("kalam_exec: foreign server must have host and port options"),
-    };
-    let state = match crate::remote_state::ensure_remote_extension_state(remote_config) {
+    let state = match unsafe { crate::remote_server::remote_state_for_server_name(DEFAULT_SERVER) } {
         Ok(state) => state,
         Err(e) => pgrx::error!("kalam_exec: failed to connect to KalamDB: {}", e),
     };

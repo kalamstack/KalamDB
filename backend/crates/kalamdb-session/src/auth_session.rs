@@ -3,7 +3,6 @@
 use crate::UserContext;
 use kalamdb_commons::models::{ConnectionInfo, ReadContext, Role, UserId};
 use std::sync::Arc;
-use std::time::SystemTime;
 
 /// Authentication method used for the session
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -20,7 +19,6 @@ pub struct AuthSession {
     pub request_id: Option<Arc<str>>,
     pub connection_info: ConnectionInfo,
     pub auth_method: AuthMethod,
-    pub timestamp: SystemTime,
 }
 
 impl AuthSession {
@@ -30,7 +28,6 @@ impl AuthSession {
             request_id: None,
             connection_info: ConnectionInfo::new(None),
             auth_method: AuthMethod::Bearer,
-            timestamp: SystemTime::now(),
         }
     }
 
@@ -45,7 +42,6 @@ impl AuthSession {
             request_id: None,
             connection_info,
             auth_method,
-            timestamp: SystemTime::now(),
         }
     }
 
@@ -55,7 +51,6 @@ impl AuthSession {
             request_id: None,
             connection_info: ConnectionInfo::new(None),
             auth_method: AuthMethod::Bearer,
-            timestamp: SystemTime::now(),
         }
     }
 
@@ -69,7 +64,6 @@ impl AuthSession {
             request_id: None,
             connection_info: ConnectionInfo::new(None),
             auth_method: AuthMethod::Bearer,
-            timestamp: SystemTime::now(),
         }
     }
 
@@ -85,14 +79,13 @@ impl AuthSession {
             request_id: request_id.map(Arc::<str>::from),
             connection_info,
             auth_method: AuthMethod::Bearer,
-            timestamp: SystemTime::now(),
         }
     }
 
     // Builder methods
 
-    pub fn with_request_id(mut self, request_id: String) -> Self {
-        self.request_id = Some(Arc::<str>::from(request_id));
+    pub fn with_request_id(mut self, request_id: impl Into<Arc<str>>) -> Self {
+        self.request_id = Some(request_id.into());
         self
     }
 
@@ -131,11 +124,6 @@ impl AuthSession {
     #[inline]
     pub fn ip_address(&self) -> Option<&str> {
         self.connection_info.remote_addr.as_deref()
-    }
-
-    #[inline]
-    pub fn timestamp(&self) -> SystemTime {
-        self.timestamp
     }
 
     #[inline]

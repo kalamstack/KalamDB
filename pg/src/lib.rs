@@ -4,6 +4,8 @@
 mod remote_executor;
 #[cfg(any(not(test), feature = "pg_test"))]
 mod remote_state;
+#[cfg(any(not(test), feature = "pg_test"))]
+mod remote_server;
 mod session_settings;
 
 #[cfg(any(feature = "pg_test", feature = "e2e"))]

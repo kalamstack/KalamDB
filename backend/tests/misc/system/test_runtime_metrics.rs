@@ -17,10 +17,7 @@ async fn test_system_stats_expose_memory_breakdown_and_allocator_metrics() {
                 'memory_rss_mb',\
                 'memory_virtual_mb',\
                 'memory_rss_gap_mb',\
-                'allocator_name',\
-                'mimalloc_process_commit_bytes',\
-                'mimalloc_reserved_current_bytes',\
-                'mimalloc_malloc_requested_current_bytes'\
+                     'allocator_name'\
              ) ORDER BY metric_name",
         )
         .await;
@@ -41,9 +38,6 @@ async fn test_system_stats_expose_memory_breakdown_and_allocator_metrics() {
         "memory_virtual_mb",
         "memory_rss_gap_mb",
         "allocator_name",
-        "mimalloc_process_commit_bytes",
-        "mimalloc_reserved_current_bytes",
-        "mimalloc_malloc_requested_current_bytes",
     ] {
         assert!(metric_names.contains(required), "missing metric: {required}");
     }

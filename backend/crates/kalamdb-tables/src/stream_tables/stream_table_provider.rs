@@ -20,17 +20,25 @@ use async_trait::async_trait;
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::catalog::Session;
+use datafusion::common::DFSchema;
 use datafusion::datasource::TableProvider;
 use datafusion::error::DataFusionError;
 use datafusion::error::Result as DataFusionResult;
 use datafusion::logical_expr::dml::InsertOp;
 use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
+use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::scalar::ScalarValue;
-use kalamdb_commons::constants::SystemColumnNames;
 use kalamdb_commons::ids::{SeqId, StreamTableRowId};
 use kalamdb_commons::models::UserId;
 use kalamdb_session_datafusion::{check_user_table_write_access, session_error_to_datafusion};
+use kalamdb_datafusion_sources::exec::{
+    finalize_deferred_batch, DeferredBatchExec, DeferredBatchSource,
+};
+use kalamdb_datafusion_sources::provider::{
+    combined_filter, merged_projection_scan_descriptor, pushdown_results_for_filters,
+    remap_projection_indices, FilterCapability, ScanDescriptor, SourceProvider,
+};
 use std::any::Any;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -60,6 +68,98 @@ pub struct StreamTableProvider {
     ttl_seconds: Option<u64>,
 }
 
+struct StreamScanSource {
+    core: Arc<TableProviderCore>,
+    store: Arc<StreamTableStore>,
+    ttl_seconds: Option<u64>,
+    user_id: UserId,
+    descriptor: ScanDescriptor,
+    filter: Option<Expr>,
+    physical_filter: Option<Arc<dyn PhysicalExpr>>,
+    output_projection: Option<Vec<usize>>,
+    output_schema: SchemaRef,
+}
+
+impl std::fmt::Debug for StreamScanSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StreamScanSource")
+            .field("table_id", &self.core.table_id())
+            .field("user_id", &self.user_id)
+            .field("ttl_seconds", &self.ttl_seconds)
+            .field("projected_columns", &self.descriptor.projection.as_ref().map(|p| p.len()))
+            .field("filter_count", &self.descriptor.filters.len())
+            .finish()
+    }
+}
+
+#[async_trait]
+impl DeferredBatchSource for StreamScanSource {
+    fn source_name(&self) -> &'static str {
+        "stream_table_scan"
+    }
+
+    fn schema(&self) -> SchemaRef {
+        Arc::clone(&self.output_schema)
+    }
+
+    async fn produce_batch(&self) -> DataFusionResult<RecordBatch> {
+        let since_seq = self
+            .filter
+            .as_ref()
+            .map(extract_seq_bounds_from_filter)
+            .map(|(since_seq, _until_seq)| since_seq)
+            .unwrap_or(None);
+
+        // LIMIT pushdown remains disabled here because scan-time ordering is not
+        // enough to prove semantic safety when ORDER BY may execute above the scan.
+        let scan_limit = None;
+        let ttl_ms = self.ttl_seconds.map(|seconds| seconds * 1000);
+        let now_ms = StreamTableProvider::now_millis().map_err(|error| {
+            DataFusionError::Execution(format!("stream scan clock failed: {error}"))
+        })?;
+
+        let start_seq = since_seq.map(|seq| SeqId::from_i64(seq.as_i64().saturating_add(1)));
+        let results = self
+            .store
+            .scan_user_streaming_async(
+                &self.user_id,
+                start_seq,
+                scan_limit.unwrap_or(100_000),
+                ttl_ms,
+                now_ms,
+            )
+            .await
+            .map_err(|error| {
+                DataFusionError::Execution(format!(
+                    "failed to scan stream table hot storage: {error}",
+                ))
+            })?;
+
+        let batch = crate::utils::base::rows_to_arrow_batch(
+            &self.core.schema_ref(),
+            results,
+            self.descriptor.projection.as_ref().map(|indices| indices.to_vec()).as_ref(),
+            |row_values, row| {
+                if self.core.schema_ref().field_with_name("user_id").is_ok() {
+                    row_values.values.insert(
+                        "user_id".to_string(),
+                        ScalarValue::Utf8(Some(row.user_id.as_str().to_string())),
+                    );
+                }
+            },
+        )
+        .map_err(|error| DataFusionError::Execution(error.to_string()))?;
+
+        finalize_deferred_batch(
+            batch,
+            self.physical_filter.as_ref(),
+            self.output_projection.as_deref(),
+            None,
+            self.source_name(),
+        )
+    }
+}
+
 impl StreamTableProvider {
     /// Create a new stream table provider
     ///
@@ -84,12 +184,7 @@ impl StreamTableProvider {
     /// This ensures live query notifications include all columns, not just user-defined fields.
     /// Stream tables don't have _deleted column.
     fn build_notification_row(entity: &StreamTableRow) -> Row {
-        let mut values = entity.fields.values.clone();
-        values.insert(
-            SystemColumnNames::SEQ.to_string(),
-            ScalarValue::Int64(Some(entity._seq.as_i64())),
-        );
-        Row::new(values)
+        crate::utils::base::build_stream_notification_row(&entity.fields, entity._seq)
     }
 
     fn now_millis() -> Result<u64, KalamDbError> {
@@ -102,6 +197,21 @@ impl StreamTableProvider {
     /// Expose the underlying store (used by maintenance jobs such as stream eviction)
     pub fn store_arc(&self) -> Arc<StreamTableStore> {
         self.store.clone()
+    }
+}
+
+impl SourceProvider for StreamTableProvider {
+    fn filter_capability(&self, _filter: &Expr) -> FilterCapability {
+        FilterCapability::Exact
+    }
+
+    fn scan_descriptor(
+        &self,
+        projection: Option<&Vec<usize>>,
+        filters: &[Expr],
+        limit: Option<usize>,
+    ) -> ScanDescriptor {
+        merged_projection_scan_descriptor(self.schema_ref(), projection, filters, limit)
     }
 }
 
@@ -125,14 +235,14 @@ impl BaseTableProvider<StreamTableRowId, StreamTableRow> for StreamTableProvider
         Ok(Some((row_key, row)))
     }
 
-    /// Stream tables are append-only and don't support UPDATE/DELETE by PK.
-    /// This always returns None - DML operations other than INSERT are not supported.
+    /// Stream tables are append-only and do not support UPDATE-by-key lookups.
+    /// Hard delete by PK is handled by a scan in `delete_by_pk_value`.
     async fn find_row_key_by_id_field(
         &self,
         _user_id: &UserId,
         _id_value: &str,
     ) -> Result<Option<StreamTableRowId>, KalamDbError> {
-        // Stream tables are append-only - no PK-based lookups for DML
+        // Stream tables do not maintain a mutable PK lookup path for UPDATE.
         Ok(None)
     }
 
@@ -165,12 +275,12 @@ impl BaseTableProvider<StreamTableRowId, StreamTableRow> for StreamTableProvider
             KalamDbError::InvalidOperation(format!("Failed to insert stream event: {}", e))
         })?;
 
-        log::debug!(
-            "[StreamProvider] Inserted event: table={} seq={} user={}",
-            table_id,
-            seq_id.as_i64(),
-            user_id.as_str()
-        );
+        // log::debug!(
+        //     "[StreamProvider] Inserted event: table={} seq={} user={}",
+        //     table_id,
+        //     seq_id.as_i64(),
+        //     user_id.as_str()
+        // );
 
         // Fire live query + topic notification (INSERT)
         let manager = self.core.services.notification_service.clone();
@@ -197,12 +307,12 @@ impl BaseTableProvider<StreamTableRowId, StreamTableRow> for StreamTableProvider
 
             if has_live_subs {
                 let notification = ChangeNotification::insert(table_id.clone(), row);
-                log::debug!(
-                    "[StreamProvider] Notifying change: table={} type=INSERT user={} seq={}",
-                    table_name,
-                    user_id.as_str(),
-                    seq_id.as_i64()
-                );
+                // log::debug!(
+                //     "[StreamProvider] Notifying change: table={} type=INSERT user={} seq={}",
+                //     table_name,
+                //     user_id.as_str(),
+                //     seq_id.as_i64()
+                // );
                 manager.notify_table_change(Some(user_id.clone()), table_id, notification);
             }
         }
@@ -212,36 +322,29 @@ impl BaseTableProvider<StreamTableRowId, StreamTableRow> for StreamTableProvider
 
     async fn update(
         &self,
-        user_id: &UserId,
+        _user_id: &UserId,
         _key: &StreamTableRowId,
-        updates: Row,
+        _updates: Row,
     ) -> Result<Option<StreamTableRowId>, KalamDbError> {
-        // TODO: Implement full UPDATE logic for stream tables
-        // 1. Scan in-memory hot storage (no Parquet)
-        // 2. Find row by key (user-scoped)
-        // 3. Merge updates
-        // 4. Append new version
-
-        // Placeholder: Just append as new version (incomplete implementation)
-        self.insert(user_id, updates).await.map(Some)
+        Err(KalamDbError::InvalidOperation(
+            "UPDATE is not supported for STREAM tables".to_string(),
+        ))
     }
 
     async fn update_by_pk_value(
         &self,
-        user_id: &UserId,
+        _user_id: &UserId,
         _pk_value: &str,
-        updates: Row,
+        _updates: Row,
     ) -> Result<Option<StreamTableRowId>, KalamDbError> {
-        // TODO: Implement full UPDATE logic for stream tables
-        // Stream tables are typically append-only, so UPDATE just inserts a new event
-        self.insert(user_id, updates).await.map(Some)
+        Err(KalamDbError::InvalidOperation(
+            "UPDATE is not supported for STREAM tables".to_string(),
+        ))
     }
 
     async fn delete(&self, user_id: &UserId, key: &StreamTableRowId) -> Result<(), KalamDbError> {
-        // TODO: Implement DELETE logic for stream tables
-        // Stream tables may use hard delete or tombstone depending on requirements
-
-        // Placeholder: Delete from hot storage directly
+        // STREAM tables use hard delete: remove the hot-store row directly and
+        // notify subscribers with a hard-delete event.
         self.store.delete(key).map_err(|e| {
             KalamDbError::InvalidOperation(format!("Failed to delete stream event: {}", e))
         })?;
@@ -349,14 +452,14 @@ impl BaseTableProvider<StreamTableRowId, StreamTableRow> for StreamTableProvider
                 None,
             )
             .await?;
-        let table_id = self.core.table_id();
-        log::debug!(
-            "[StreamProvider] scan_rows: table={} rows={} user={} ttl={:?}",
-            table_id,
-            kvs.len(),
-            user_id.as_str(),
-            self.ttl_seconds
-        );
+        // let table_id = self.core.table_id();
+        // log::debug!(
+        //     "[StreamProvider] scan_rows: table={} rows={} user={} ttl={:?}",
+        //     table_id,
+        //     kvs.len(),
+        //     user_id.as_str(),
+        //     self.ttl_seconds
+        // );
 
         let schema = self.schema_ref();
         crate::utils::base::rows_to_arrow_batch(&schema, kvs, projection, |row_values, row| {
@@ -387,13 +490,13 @@ impl BaseTableProvider<StreamTableRowId, StreamTableRow> for StreamTableProvider
         let ttl_ms = self.ttl_seconds.map(|s| s * 1000);
         let now_ms = Self::now_millis()?;
 
-        log::debug!(
-            "[StreamProvider] streaming scan: table={} user={} ttl_ms={:?} limit={:?}",
-            table_id,
-            user_id.as_str(),
-            ttl_ms,
-            limit
-        );
+        // log::debug!(
+        //     "[StreamProvider] streaming scan: table={} user={} ttl_ms={:?} limit={:?}",
+        //     table_id,
+        //     user_id.as_str(),
+        //     ttl_ms,
+        //     limit
+        // );
 
         // Use streaming scan with TTL filtering and early termination
         // This is more efficient than the pagination loop for LIMIT queries
@@ -411,12 +514,12 @@ impl BaseTableProvider<StreamTableRowId, StreamTableRow> for StreamTableProvider
                 ))
             })?;
 
-        log::debug!(
-            "[StreamProvider] streaming scan complete: table={} user={} rows={}",
-            table_id,
-            user_id.as_str(),
-            results.len()
-        );
+        // log::debug!(
+        //     "[StreamProvider] streaming scan complete: table={} user={} rows={}",
+        //     table_id,
+        //     user_id.as_str(),
+        //     results.len()
+        // );
 
         // TODO(phase 13.6): Apply filter expression for simple predicates if provided
         Ok(results)
@@ -466,14 +569,63 @@ impl TableProvider for StreamTableProvider {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
-        self.base_scan(state, projection, filters, limit).await
+        self.validate_transaction_table_access(state)?;
+        self.ensure_leader_read(state)
+            .await
+            .map_err(|error| DataFusionError::Execution(error.to_string()))?;
+
+        let (user_id, _role) = extract_user_context(state)
+            .map_err(|error| DataFusionError::Execution(error.to_string()))?;
+
+        let descriptor = self.scan_descriptor(projection, filters, limit);
+        let combined_filter = combined_filter(filters);
+        let merged_schema = match descriptor.projection.as_ref() {
+            Some(indices) => descriptor
+                .schema
+                .project(indices)
+                .map(Arc::new)
+                .map_err(|error| DataFusionError::ArrowError(Box::new(error), None))?,
+            None => Arc::clone(&descriptor.schema),
+        };
+
+        let output_projection = if !filters.is_empty() {
+            projection.map(|indices| remap_projection_indices(&descriptor.schema, &merged_schema, indices))
+        } else {
+            None
+        };
+        let output_schema = match projection {
+            Some(indices) => descriptor
+                .schema
+                .project(indices)
+                .map(Arc::new)
+                .map_err(|error| DataFusionError::ArrowError(Box::new(error), None))?,
+            None => Arc::clone(&descriptor.schema),
+        };
+        let physical_filter = if let Some(filter) = combined_filter.clone() {
+            let df_schema = DFSchema::try_from(Arc::clone(&merged_schema))?;
+            Some(state.create_physical_expr(filter, &df_schema)?)
+        } else {
+            None
+        };
+
+        Ok(Arc::new(DeferredBatchExec::new(Arc::new(StreamScanSource {
+            core: Arc::clone(&self.core),
+            store: Arc::clone(&self.store),
+            ttl_seconds: self.ttl_seconds,
+            user_id: user_id.clone(),
+            descriptor,
+            filter: combined_filter,
+            physical_filter,
+            output_projection,
+            output_schema,
+        }))))
     }
 
     fn supports_filters_pushdown(
         &self,
         filters: &[&Expr],
     ) -> DataFusionResult<Vec<TableProviderFilterPushDown>> {
-        self.base_supports_filters_pushdown(filters)
+        Ok(pushdown_results_for_filters(filters, |filter| self.filter_capability(filter)))
     }
 
     async fn insert_into(

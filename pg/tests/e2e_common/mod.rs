@@ -21,6 +21,33 @@ use serde_json::Value;
 use tokio_postgres::error::SqlState;
 use tokio_postgres::{Config, NoTls};
 
+pub fn unique_name(prefix: &str) -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    format!("{prefix}_{ts}_{n}")
+}
+
+pub fn postgres_error_text(error: &tokio_postgres::Error) -> String {
+    if let Some(db_error) = error.as_db_error() {
+        let mut parts = vec![db_error.message().to_string()];
+        if let Some(detail) = db_error.detail() {
+            parts.push(detail.to_string());
+        }
+        if let Some(hint) = db_error.hint() {
+            parts.push(hint.to_string());
+        }
+        parts.join(" | ")
+    } else {
+        error.to_string()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Constants — configurable via env vars, with sensible defaults
 // ---------------------------------------------------------------------------
@@ -105,6 +132,22 @@ fn kalamdb_auth_config() -> KalamDbAuthConfig {
     }
 }
 
+fn sql_literal(value: &str) -> String {
+    value.replace('\'', "''")
+}
+
+pub fn kalamdb_account_login_server_options(host: &str, port: u16) -> String {
+    let config = kalamdb_auth_config();
+
+    format!(
+        "host '{}', port '{}', auth_mode 'account_login', login_user '{}', login_password '{}'",
+        sql_literal(host),
+        port,
+        sql_literal(&config.login_username),
+        sql_literal(&config.login_password)
+    )
+}
+
 pub fn kalamdb_grpc_target() -> (String, u16) {
     let host = env::var("KALAMDB_GRPC_HOST")
         .ok()
@@ -133,6 +176,59 @@ fn kalamdb_pg_grpc_target() -> (String, u16) {
         .and_then(|value| value.parse::<u16>().ok())
         .unwrap_or(default_port);
     (host, port)
+}
+
+async fn server_option_exists(
+    pg: &tokio_postgres::Client,
+    server_name: &str,
+    option_name: &str,
+) -> bool {
+    pg.query_opt(
+        "SELECT 1 \
+         FROM pg_foreign_server AS server \
+         CROSS JOIN LATERAL pg_options_to_table(server.srvoptions) AS option_entry \
+         WHERE server.srvname = $1 AND option_entry.option_name = $2",
+        &[&server_name, &option_name],
+    )
+    .await
+    .expect("query foreign server option")
+    .is_some()
+}
+
+async fn ensure_server_option(
+    pg: &tokio_postgres::Client,
+    server_name: &str,
+    option_name: &str,
+    value: &str,
+) {
+    let action = if server_option_exists(pg, server_name, option_name).await {
+        "SET"
+    } else {
+        "ADD"
+    };
+    let statement = format!(
+        "ALTER SERVER {server_name} OPTIONS ({action} {option_name} '{}');",
+        sql_literal(value)
+    );
+
+    pg.batch_execute(&statement)
+        .await
+        .unwrap_or_else(|error| panic!("configure foreign server option {option_name}: {error}"));
+}
+
+async fn drop_server_option_if_present(
+    pg: &tokio_postgres::Client,
+    server_name: &str,
+    option_name: &str,
+) {
+    if !server_option_exists(pg, server_name, option_name).await {
+        return;
+    }
+
+    let statement = format!("ALTER SERVER {server_name} OPTIONS (DROP {option_name});");
+    pg.batch_execute(&statement)
+        .await
+        .unwrap_or_else(|error| panic!("drop foreign server option {option_name}: {error}"));
 }
 
 fn pg_user_from_env() -> String {
@@ -422,6 +518,8 @@ impl TestEnv {
     async fn ensure_extension_bootstrap(&self) {
         let pg = self.pg_connect().await;
         let (grpc_host, grpc_port) = kalamdb_pg_grpc_target();
+        let auth_config = kalamdb_auth_config();
+        let server_options = kalamdb_account_login_server_options(&grpc_host, grpc_port);
         const BOOTSTRAP_LOCK_ID: i64 = 8_271_604_221;
 
         pg.batch_execute("CREATE EXTENSION IF NOT EXISTS pg_kalam;")
@@ -437,7 +535,7 @@ impl TestEnv {
             pg.batch_execute(&format!(
                 "CREATE SERVER IF NOT EXISTS kalam_server
                      FOREIGN DATA WRAPPER pg_kalam
-                     OPTIONS (host '{grpc_host}', port '{grpc_port}');"
+                     OPTIONS ({server_options});"
             ))
             .await
             .expect("create kalam_server foreign server");
@@ -447,6 +545,23 @@ impl TestEnv {
             ))
             .await
             .expect("repoint kalam_server foreign server");
+
+            drop_server_option_if_present(&pg, "kalam_server", "auth_header").await;
+            ensure_server_option(&pg, "kalam_server", "auth_mode", "account_login").await;
+            ensure_server_option(
+                &pg,
+                "kalam_server",
+                "login_user",
+                &auth_config.login_username,
+            )
+            .await;
+            ensure_server_option(
+                &pg,
+                "kalam_server",
+                "login_password",
+                &auth_config.login_password,
+            )
+            .await;
         }
         .await;
 
@@ -534,22 +649,47 @@ pub async fn create_shared_kalam_table(
     table: &str,
     columns: &str,
 ) {
-    ensure_schema_exists(client, "e2e").await;
-    let drop = format!("DROP FOREIGN TABLE IF EXISTS e2e.{table};");
-    client.batch_execute(&drop).await.expect("drop old table");
-    let sql = format!("CREATE TABLE e2e.{table} ({columns}) USING kalamdb WITH (type = 'shared');");
-    client.batch_execute(&sql).await.expect("create Kalam table");
+    create_shared_kalam_table_in_schema(client, "e2e", table, columns).await;
     TestEnv::global().await.wait_for_kalamdb_table_exists("e2e", table).await;
     wait_for_table_queryable(client, &format!("e2e.{table}")).await;
 }
 
 pub async fn create_user_kalam_table(client: &tokio_postgres::Client, table: &str, columns: &str) {
-    ensure_schema_exists(client, "e2e").await;
-    let drop = format!("DROP FOREIGN TABLE IF EXISTS e2e.{table};");
-    client.batch_execute(&drop).await.expect("drop old table");
-    let sql = format!("CREATE TABLE e2e.{table} ({columns}) USING kalamdb WITH (type = 'user');");
-    client.batch_execute(&sql).await.expect("create Kalam table");
+    create_user_kalam_table_in_schema(client, "e2e", table, columns).await;
     TestEnv::global().await.wait_for_kalamdb_table_exists("e2e", table).await;
+}
+
+pub async fn create_shared_kalam_table_in_schema(
+    client: &tokio_postgres::Client,
+    schema: &str,
+    table: &str,
+    columns: &str,
+) {
+    create_kalam_table_in_schema(client, schema, table, columns, "shared", "create shared Kalam table")
+        .await;
+}
+
+pub async fn create_user_kalam_table_in_schema(
+    client: &tokio_postgres::Client,
+    schema: &str,
+    table: &str,
+    columns: &str,
+) {
+    create_kalam_table_in_schema(client, schema, table, columns, "user", "create user Kalam table")
+        .await;
+}
+
+pub async fn drop_kalam_tables(client: &tokio_postgres::Client, schema: &str, tables: &[String]) {
+    for table in tables {
+        client
+            .batch_execute(&format!("DROP FOREIGN TABLE IF EXISTS {schema}.{table};"))
+            .await
+            .ok();
+    }
+    client
+        .batch_execute(&format!("DROP SCHEMA IF EXISTS {schema} CASCADE;"))
+        .await
+        .ok();
 }
 
 pub async fn set_user_id(client: &tokio_postgres::Client, user_id: &str) {
@@ -893,7 +1033,7 @@ pub async fn pg_backend_pid(client: &tokio_postgres::Client) -> u32 {
     pid as u32
 }
 
-async fn ensure_schema_exists(client: &tokio_postgres::Client, schema: &str) {
+pub async fn ensure_schema_exists(client: &tokio_postgres::Client, schema: &str) {
     let sql = format!("CREATE SCHEMA IF NOT EXISTS {schema};");
     if let Err(error) = client.batch_execute(&sql).await {
         let duplicate = error
@@ -907,4 +1047,25 @@ async fn ensure_schema_exists(client: &tokio_postgres::Client, schema: &str) {
             panic!("create schema {schema}: {error}");
         }
     }
+}
+
+async fn create_kalam_table_in_schema(
+    client: &tokio_postgres::Client,
+    schema: &str,
+    table: &str,
+    columns: &str,
+    table_type: &str,
+    description: &str,
+) {
+    ensure_schema_exists(client, schema).await;
+    client
+        .batch_execute(&format!("DROP FOREIGN TABLE IF EXISTS {schema}.{table};"))
+        .await
+        .ok();
+    client
+        .batch_execute(&format!(
+            "CREATE TABLE {schema}.{table} ({columns}) USING kalamdb WITH (type = '{table_type}');"
+        ))
+        .await
+        .expect(description);
 }

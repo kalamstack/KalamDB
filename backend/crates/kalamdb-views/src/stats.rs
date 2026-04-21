@@ -186,11 +186,6 @@ impl VirtualView for StatsView {
 
 pub type StatsTableProvider = crate::view_base::ViewTableProvider<StatsView>;
 
-/// Helper function to create a stats table provider
-pub fn create_stats_provider() -> StatsTableProvider {
-    StatsTableProvider::new(Arc::new(StatsView::new()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

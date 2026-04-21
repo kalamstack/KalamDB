@@ -42,7 +42,7 @@ async fn test_system_users_user_id_index() {
         .expect("System time before UNIX_EPOCH")
         .as_nanos();
     let id_prefix = format!("user{}", run_id);
-    let password_hash = bcrypt::hash("password", bcrypt::DEFAULT_COST).unwrap();
+    let password_hash = bcrypt::hash("password", 4).unwrap();
 
     // Insert 50 users
     for i in 1..=50 {
@@ -389,7 +389,7 @@ async fn test_index_performance_scaling() {
         .expect("System time before UNIX_EPOCH")
         .as_nanos();
     let user_prefix = format!("perf_user{}", run_id);
-    let password_hash = bcrypt::hash("password", bcrypt::DEFAULT_COST).unwrap();
+    let password_hash = bcrypt::hash("password", 4).unwrap();
 
     // Phase 1: Insert 50 users, measure query time
     for i in 1..=50 {

@@ -62,9 +62,15 @@ TEST_DB="kalamdb_test"
 # KalamDB gRPC (local server)
 KALAMDB_GRPC_HOST="127.0.0.1"
 KALAMDB_GRPC_PORT="9188"
+KALAMDB_LOGIN_USER="${KALAMDB_USER:-root}"
+KALAMDB_LOGIN_PASSWORD="${KALAMDB_PASSWORD:-${KALAMDB_ROOT_PASSWORD:-kalamdb123}}"
 
 info()  { echo "  [INFO] $*"; }
 error() { echo "  [ERROR] $*" >&2; }
+
+sql_escape() {
+    printf '%s' "$1" | sed "s/'/''/g"
+}
 
 check_pg_config() {
     if [[ -z "$PGRX_VERSION_DIR" ]]; then
@@ -165,6 +171,11 @@ ensure_shared_preload_libraries() {
 
 setup_database() {
     local psql_cmd="$PSQL -h $PG_HOST -p $PG_PORT -U $PG_USER"
+    local login_user_escaped
+    local login_password_escaped
+
+    login_user_escaped="$(sql_escape "$KALAMDB_LOGIN_USER")"
+    login_password_escaped="$(sql_escape "$KALAMDB_LOGIN_PASSWORD")"
 
     # Create test database
     if $psql_cmd -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$TEST_DB'" | grep -q 1; then
@@ -184,7 +195,13 @@ setup_database() {
     $psql_cmd -d "$TEST_DB" -c "
         CREATE SERVER IF NOT EXISTS kalam_server
             FOREIGN DATA WRAPPER pg_kalam
-            OPTIONS (host '$KALAMDB_GRPC_HOST', port '$KALAMDB_GRPC_PORT');
+            OPTIONS (
+                host '$KALAMDB_GRPC_HOST',
+                port '$KALAMDB_GRPC_PORT',
+                auth_mode 'account_login',
+                login_user '$login_user_escaped',
+                login_password '$login_password_escaped'
+            );
     "
 
     info "Setup complete!"

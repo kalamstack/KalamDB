@@ -70,7 +70,7 @@ pub async fn create_test_user(
     let users_provider = server.app_context.system_tables().users();
     if let Ok(Some(mut existing)) = users_provider.get_user_by_id(&user_id) {
         existing.password_hash =
-            bcrypt::hash(password, bcrypt::DEFAULT_COST).expect("Failed to hash password");
+            bcrypt::hash(password, 4).expect("Failed to hash password");
         existing.role = role;
         existing.email = Some(format!("{}@example.com", username));
         existing.auth_type = AuthType::Password;
@@ -89,7 +89,7 @@ pub async fn create_test_user(
         if let Err(e) = &result {
             if matches!(e, KalamDbError::AlreadyExists(_)) {
                 if let Ok(Some(mut existing)) = users_provider.get_user_by_id(&user_id) {
-                    existing.password_hash = bcrypt::hash(password, bcrypt::DEFAULT_COST)
+                    existing.password_hash = bcrypt::hash(password, 4)
                         .expect("Failed to hash password");
                     existing.role = role;
                     existing.email = Some(format!("{}@example.com", username));

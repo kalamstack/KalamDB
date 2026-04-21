@@ -304,11 +304,10 @@ where
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "rocksdb"))]
 mod tests {
     use super::*;
-    use crate::rocksdb_impl::RocksDBBackend;
-    use crate::rocksdb_init::RocksDbInit;
+    use crate::{RocksDBBackend, RocksDbInit};
     use serde::{Deserialize, Serialize};
     use tempfile::TempDir;
 

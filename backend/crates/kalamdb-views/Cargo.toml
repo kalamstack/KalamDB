@@ -13,6 +13,7 @@ kalamdb-commons = { path = "../kalamdb-commons", features = ["full"] }
 kalamdb-configs = { path = "../kalamdb-configs" }
 kalamdb-raft = { path = "../kalamdb-raft" }
 kalamdb-system = { path = "../kalamdb-system" }
+kalamdb-datafusion-sources = { workspace = true }
 
 # Apache Arrow ecosystem
 arrow = { workspace = true }

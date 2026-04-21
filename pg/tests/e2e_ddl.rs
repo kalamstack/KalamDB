@@ -13,6 +13,7 @@
 
 #![cfg(feature = "e2e")]
 
+mod e2e_common;
 mod e2e_ddl_common;
 
 #[path = "e2e_ddl/mod.rs"]

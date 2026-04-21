@@ -12,10 +12,14 @@ categories = ["database"]
 
 [dependencies]
 kalamdb-commons = { path = "../kalamdb-commons", features = ["full"] }
+kalamdb-datafusion-sources = { workspace = true }
 datafusion = { workspace = true }
 futures-util = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
 
 [lib]
 name = "kalamdb_transactions"

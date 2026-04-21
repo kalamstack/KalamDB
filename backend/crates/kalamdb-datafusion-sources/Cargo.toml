@@ -1,0 +1,38 @@
+[package]
+name = "kalamdb-datafusion-sources"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared DataFusion source primitives (providers, exec, streams, pruning, stats) for KalamDB"
+keywords = ["kalamdb", "datafusion", "arrow", "parquet"]
+categories = ["database"]
+
+[dependencies]
+# Apache Arrow ecosystem (keep lockstep with workspace; see root Cargo.toml)
+arrow = { workspace = true }
+arrow-schema = { workspace = true }
+datafusion = { workspace = true }
+datafusion-common = { workspace = true }
+datafusion-expr = { workspace = true }
+parquet = { workspace = true }
+
+# Async / stream primitives
+async-trait = { workspace = true }
+futures-util = { workspace = true }
+tokio = { workspace = true }
+
+# Shared KalamDB row and metadata types used by MVCC merge helpers.
+kalamdb-commons = { workspace = true, features = ["conversions", "serialization"] }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Observability
+tracing = { workspace = true }
+
+[lib]
+name = "kalamdb_datafusion_sources"
+path = "src/lib.rs"

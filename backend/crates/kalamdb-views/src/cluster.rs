@@ -23,11 +23,21 @@
 
 use crate::error::RegistryError;
 use crate::view_base::VirtualView;
+use async_trait::async_trait;
 use datafusion::arrow::array::{
     ArrayRef, BooleanArray, Float32Array, Int16Array, Int32Array, Int64Array, StringArray,
 };
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
+use datafusion::common::DFSchema;
+use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
+use datafusion::physical_expr::PhysicalExpr;
+use kalamdb_datafusion_sources::exec::{
+    finalize_deferred_batch, DeferredBatchExec, DeferredBatchSource,
+};
+use kalamdb_datafusion_sources::provider::{
+    combined_filter, pushdown_results_for_filters, FilterCapability,
+};
 use kalamdb_commons::datatypes::KalamDataType;
 use kalamdb_commons::schemas::{
     ColumnDefault, ColumnDefinition, TableDefinition, TableOptions, TableType,
@@ -523,6 +533,55 @@ pub struct ClusterTableProvider {
     view: Arc<ClusterView>,
 }
 
+struct ClusterScanSource {
+    view: Arc<ClusterView>,
+    physical_filter: Option<Arc<dyn PhysicalExpr>>,
+    projection: Option<Vec<usize>>,
+    limit: Option<usize>,
+    output_schema: SchemaRef,
+}
+
+impl std::fmt::Debug for ClusterScanSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClusterScanSource")
+            .field("projection", &self.projection)
+            .field("limit", &self.limit)
+            .finish()
+    }
+}
+
+#[async_trait]
+impl DeferredBatchSource for ClusterScanSource {
+    fn source_name(&self) -> &'static str {
+        "cluster_view_scan"
+    }
+
+    fn schema(&self) -> SchemaRef {
+        Arc::clone(&self.output_schema)
+    }
+
+    async fn produce_batch(&self) -> datafusion::error::Result<RecordBatch> {
+        if let Some(raft_executor) = self.view.executor.as_any().downcast_ref::<RaftExecutor>() {
+            raft_executor.refresh_peer_stats().await;
+        }
+
+        let batch = self.view.compute_batch().map_err(|error| {
+            datafusion::error::DataFusionError::Execution(format!(
+                "Failed to compute cluster batch: {}",
+                error
+            ))
+        })?;
+
+        finalize_deferred_batch(
+            batch,
+            self.physical_filter.as_ref(),
+            self.projection.as_deref(),
+            self.limit,
+            self.source_name(),
+        )
+    }
+}
+
 impl std::fmt::Debug for ClusterTableProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ClusterTableProvider").finish_non_exhaustive()
@@ -547,28 +606,38 @@ impl datafusion::datasource::TableProvider for ClusterTableProvider {
         &self,
         state: &dyn datafusion::catalog::Session,
         projection: Option<&Vec<usize>>,
-        _filters: &[datafusion::logical_expr::Expr],
+        filters: &[Expr],
         limit: Option<usize>,
     ) -> datafusion::error::Result<Arc<dyn datafusion::physical_plan::ExecutionPlan>> {
-        use datafusion::datasource::MemTable;
-        use datafusion::error::DataFusionError;
+        let base_schema = self.view.schema();
+        let output_schema = match projection {
+            Some(indices) => base_schema
+                .project(indices)
+                .map(Arc::new)
+                .map_err(|error| datafusion::error::DataFusionError::ArrowError(Box::new(error), None))?,
+            None => Arc::clone(&base_schema),
+        };
+        let physical_filter = if let Some(filter) = combined_filter(filters) {
+            let df_schema = DFSchema::try_from(Arc::clone(&base_schema))?;
+            Some(state.create_physical_expr(filter, &df_schema)?)
+        } else {
+            None
+        };
 
-        // Refresh peer stats so remote nodes show full data.
-        // Downcast is safe: ClusterTableProvider is only created in cluster mode.
-        if let Some(raft_executor) = self.view.executor.as_any().downcast_ref::<RaftExecutor>() {
-            raft_executor.refresh_peer_stats().await;
-        }
+        Ok(Arc::new(DeferredBatchExec::new(Arc::new(ClusterScanSource {
+            view: Arc::clone(&self.view),
+            physical_filter,
+            projection: projection.cloned(),
+            limit,
+            output_schema,
+        }))))
+    }
 
-        let schema = self.view.schema();
-        let batch = self.view.compute_batch().map_err(|e| {
-            DataFusionError::Execution(format!("Failed to compute cluster batch: {}", e))
-        })?;
-
-        let partitions = vec![vec![batch]];
-        let table = MemTable::try_new(schema, partitions)
-            .map_err(|e| DataFusionError::Execution(format!("Failed to create MemTable: {}", e)))?;
-
-        table.scan(state, projection, &[], limit).await
+    fn supports_filters_pushdown(
+        &self,
+        filters: &[&Expr],
+    ) -> datafusion::error::Result<Vec<TableProviderFilterPushDown>> {
+        Ok(pushdown_results_for_filters(filters, |_| FilterCapability::Exact))
     }
 }
 

@@ -143,6 +143,12 @@ mod leader_only_reads;
 mod smoke_test_00_parallel_query_burst;
 #[path = "smoke/query/smoke_test_json_operators.rs"]
 mod smoke_test_json_operators;
+#[path = "smoke/query/smoke_test_filter_pushdown.rs"]
+mod smoke_test_filter_pushdown;
+#[path = "smoke/query/smoke_test_provider_exec_models.rs"]
+mod smoke_test_provider_exec_models;
+#[path = "smoke/query/smoke_test_stream_explain_planning.rs"]
+mod smoke_test_stream_explain_planning;
 #[path = "smoke/query/smoke_test_queries_benchmark.rs"]
 mod smoke_test_queries_benchmark;
 

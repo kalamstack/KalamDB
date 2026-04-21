@@ -8,7 +8,8 @@ use serde_json::Value;
 use tokio_postgres::{Config, NoTls};
 
 use super::common::{
-    kalamdb_grpc_target, pg_backend_pid, postgres_error_text, unique_name, TestEnv,
+    kalamdb_account_login_server_options, kalamdb_grpc_target, pg_backend_pid,
+    postgres_error_text, unique_name, TestEnv,
 };
 use crate::e2e_common::tcp_proxy::TcpDisconnectProxy;
 
@@ -99,6 +100,10 @@ fn string_cell(row: &[Value], index: usize) -> Option<String> {
     row.get(index).and_then(Value::as_str).map(ToString::to_string)
 }
 
+fn sql_escape_literal(value: &str) -> String {
+    value.replace('\'', "''")
+}
+
 async fn wait_for_pg_backend_exit(backend_pid: u32, timeout: Duration) {
     let env = TestEnv::global().await;
     let observer = env.pg_connect().await;
@@ -135,11 +140,14 @@ async fn create_proxy_shared_foreign_table(
     port: u16,
     extra_server_options: Option<&str>,
 ) {
-    let extra_server_options = extra_server_options
+    let mut server_options = kalamdb_account_login_server_options(host, port);
+    if let Some(extra_options) = extra_server_options
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(|value| format!(", {value}"))
-        .unwrap_or_default();
+    {
+        server_options.push_str(", ");
+        server_options.push_str(extra_options);
+    }
 
     client
         .batch_execute("CREATE SCHEMA IF NOT EXISTS e2e;")
@@ -151,7 +159,7 @@ async fn create_proxy_shared_foreign_table(
              DROP SERVER IF EXISTS {server_name} CASCADE; \
              CREATE SERVER {server_name} \
                  FOREIGN DATA WRAPPER pg_kalam \
-                 OPTIONS (host '{host}', port '{port}'{extra_server_options}); \
+                 OPTIONS ({server_options}); \
              CREATE FOREIGN TABLE e2e.{table} ( \
                  id TEXT, \
                  title TEXT, \
@@ -224,12 +232,13 @@ async fn wait_for_row_count(
     }
 }
 
-async fn fetch_session_rows(env: &TestEnv, backend_pid: u32) -> Vec<Vec<Value>> {
+async fn fetch_session_rows(env: &TestEnv, client_addr: &str) -> Vec<Vec<Value>> {
+    let client_addr = sql_escape_literal(client_addr);
     sql_rows(
         &env.kalamdb_sql(&format!(
             "SELECT session_id, state, transaction_id, transaction_state \
              FROM system.sessions \
-             WHERE backend_pid = {backend_pid} \
+             WHERE client_addr = '{client_addr}' \
              ORDER BY last_seen_at DESC"
         ))
         .await,
@@ -268,32 +277,32 @@ async fn wait_for_transaction_row(
 
 async fn wait_for_session_rows(
     env: &TestEnv,
-    backend_pid: u32,
+    client_addr: &str,
     timeout: Duration,
 ) -> Vec<Vec<Value>> {
     let deadline = Instant::now() + timeout;
 
     loop {
-        let rows = fetch_session_rows(env, backend_pid).await;
+        let rows = fetch_session_rows(env, client_addr).await;
         if !rows.is_empty() {
             return rows;
         }
         if Instant::now() >= deadline {
-            panic!("backend pid {backend_pid} did not appear in system.sessions within timeout");
+            panic!("client_addr {client_addr} did not appear in system.sessions within timeout");
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 
-async fn wait_for_session_cleanup(env: &TestEnv, backend_pid: u32, timeout: Duration) {
+async fn wait_for_session_cleanup(env: &TestEnv, client_addr: &str, timeout: Duration) {
     let deadline = Instant::now() + timeout;
 
     loop {
-        if fetch_session_rows(env, backend_pid).await.is_empty() {
+        if fetch_session_rows(env, client_addr).await.is_empty() {
             return;
         }
         if Instant::now() >= deadline {
-            panic!("backend pid {backend_pid} remained in system.sessions past cleanup timeout");
+            panic!("client_addr {client_addr} remained in system.sessions past cleanup timeout");
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -336,7 +345,6 @@ async fn run_terminal_proxy_cleanup_scenario(action: TerminalAction) {
     create_proxy_shared_foreign_table(&pg, &server_name, &table, &proxy_host, proxy_port, None)
         .await;
 
-    let backend_pid = pg_backend_pid(&pg).await;
     let tx = pg.transaction().await.expect("begin transaction through proxy");
     tx.execute(
         &format!("INSERT INTO {qualified_table} (id, title, value) VALUES ($1, $2, $3)"),
@@ -354,7 +362,12 @@ async fn run_terminal_proxy_cleanup_scenario(action: TerminalAction) {
         "proxy should observe the gRPC connection before transport failure"
     );
 
-    let session_rows = wait_for_session_rows(env, backend_pid, Duration::from_secs(3)).await;
+    let session_client_addr = proxy
+        .wait_for_backend_client_addr(Duration::from_secs(3))
+        .await
+        .expect("proxy should expose the backend-facing client address");
+
+    let session_rows = wait_for_session_rows(env, &session_client_addr, Duration::from_secs(3)).await;
     assert_eq!(session_rows.len(), 1);
     assert_eq!(string_cell(&session_rows[0], 1).as_deref(), Some("idle in transaction"));
     assert_eq!(string_cell(&session_rows[0], 3).as_deref(), Some("active"));
@@ -378,7 +391,7 @@ async fn run_terminal_proxy_cleanup_scenario(action: TerminalAction) {
             assert_transport_or_timeout_error(&message, action.label());
 
             let stuck_session_rows =
-                wait_for_session_rows(env, backend_pid, Duration::from_secs(2)).await;
+                wait_for_session_rows(env, &session_client_addr, Duration::from_secs(2)).await;
             assert_eq!(stuck_session_rows.len(), 1);
             assert_eq!(string_cell(&stuck_session_rows[0], 2), Some(transaction_id.clone()));
             let stuck_transaction_rows = fetch_transaction_rows(env, &transaction_id).await;
@@ -395,7 +408,7 @@ async fn run_terminal_proxy_cleanup_scenario(action: TerminalAction) {
     proxy.simulate_server_up();
     pg.disconnect().await;
 
-    wait_for_session_cleanup(env, backend_pid, Duration::from_secs(5)).await;
+    wait_for_session_cleanup(env, &session_client_addr, Duration::from_secs(5)).await;
     wait_for_transaction_cleanup(env, &transaction_id, Duration::from_secs(5)).await;
 
     let final_rows = env

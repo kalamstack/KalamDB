@@ -11,6 +11,27 @@ use std::time::Instant;
 // This ensures the test completes within timeout even under load.
 const DEFAULT_ROWS_TO_INSERT: usize = 200;
 
+fn print_phase0_explain_baseline(label: &str, query: &str) {
+    let explain_sql = format!("EXPLAIN {}", query);
+    let explain_output = execute_sql_as_root_via_client(&explain_sql)
+        .unwrap_or_else(|error| panic!("phase-0 EXPLAIN failed for '{}': {}", explain_sql, error));
+    println!("Phase-0 EXPLAIN baseline [{}]:\n{}", label, explain_output);
+
+    let analyze_sql = format!("EXPLAIN ANALYZE {}", query);
+    let analyze_output = execute_sql_as_root_via_client(&analyze_sql).unwrap_or_else(|error| {
+        panic!(
+            "phase-0 EXPLAIN ANALYZE failed for '{}': {}",
+            analyze_sql,
+            error
+        )
+    });
+    println!(
+        "Phase-0 EXPLAIN ANALYZE baseline [{}]:\n{}",
+        label,
+        analyze_output
+    );
+}
+
 fn rows_to_insert() -> usize {
     if let Ok(val) = std::env::var("KBENCH_ROWS") {
         if let Ok(parsed) = val.parse::<usize>() {
@@ -132,6 +153,18 @@ fn smoke_queries_benchmark() {
         "Benchmark INSERT: inserted {} rows in {:.3}s → {:.1} rows/sec",
         inserted, insert_elapsed, rows_per_sec
     );
+    println!(
+        "Phase-0 baseline metric [query_insert_rows_per_sec]={:.1}",
+        rows_per_sec
+    );
+
+    print_phase0_explain_baseline(
+        "query_benchmark_paged_select",
+        &format!(
+            "SELECT order_id, customer_id, sku, status, quantity, price, created_at, updated_at, paid, notes FROM {} WHERE order_id > 0 ORDER BY order_id LIMIT {}",
+            full, page_size_from_baseline()
+        ),
+    );
 
     // SELECT pagination (cursor-based): 100 rows per page, using order_id > last_id
     let page_size = 100usize; // unchanged
@@ -161,9 +194,17 @@ fn smoke_queries_benchmark() {
         "Benchmark SELECT: fetched {} pages ({} rows/page) in {:.3}s → {:.1} pages/sec",
         pages, page_size, select_elapsed, pages_per_sec
     );
+    println!(
+        "Phase-0 baseline metric [query_select_pages_per_sec]={:.1}",
+        pages_per_sec
+    );
 
     // Best-effort cleanup to keep the namespace tidy between runs
     let _ = execute_sql_as_root_via_client(&format!("DROP TABLE IF EXISTS {}", full));
     let _ =
         execute_sql_as_root_via_client(&format!("DROP NAMESPACE IF EXISTS {} CASCADE", namespace));
+}
+
+fn page_size_from_baseline() -> usize {
+    100
 }

@@ -7,7 +7,8 @@
 //! - Model types with `#[table]` derive are the source of truth for `TableDefinition`
 //! - `*TableProvider` structs implement DataFusion's `TableProvider` trait
 //! - Providers memoize Arrow schemas with local `OnceLock` caches
-//! - `base` module contains common traits for unified scan logic
+//! - `base` centralizes deferred scan execution so planning stays lightweight
+//!   and provider families share one filter/projection execution model
 
 pub mod audit_logs;
 pub mod base;

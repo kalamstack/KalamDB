@@ -50,7 +50,7 @@ impl TestServer {
         {
             if user.password_hash.is_empty() {
                 user.password_hash =
-                    bcrypt::hash("admin", bcrypt::DEFAULT_COST).unwrap_or_default();
+                    bcrypt::hash("admin", 4).unwrap_or_default();
                 user.updated_at = chrono::Utc::now().timestamp_millis();
                 let _ = app_context.system_tables().users().update_user(user);
             }
@@ -81,7 +81,7 @@ impl TestServer {
         {
             if user.password_hash.is_empty() {
                 user.password_hash =
-                    bcrypt::hash("admin", bcrypt::DEFAULT_COST).unwrap_or_default();
+                    bcrypt::hash("admin", 4).unwrap_or_default();
                 user.updated_at = chrono::Utc::now().timestamp_millis();
                 let _ = app_context.system_tables().users().update_user(user);
             }
@@ -145,7 +145,7 @@ impl TestServer {
             user.role
         } else {
             let password_hash =
-                bcrypt::hash("test123", bcrypt::DEFAULT_COST).unwrap_or_else(|_| String::new());
+                bcrypt::hash("test123", 4).unwrap_or_else(|_| String::new());
             let user = kalamdb_system::User {
                 user_id: user_id_obj.clone(),
                 password_hash,
@@ -189,7 +189,7 @@ impl TestServer {
     pub async fn create_user(&self, username: &str, password: &str, role: Role) -> UserId {
         let user_id = UserId::new(username);
         let password_hash =
-            bcrypt::hash(password, bcrypt::DEFAULT_COST).expect("Failed to hash password");
+            bcrypt::hash(password, 4).expect("Failed to hash password");
         let users_provider = self.app_context.system_tables().users();
 
         if let Ok(Some(mut existing)) = users_provider.get_user_by_id(&user_id) {

@@ -4,6 +4,8 @@
 //!
 //! This module introduces the new utils/ architecture that eliminates ~1200 lines
 //! of duplicate code across User/Shared/Stream table providers.
+//! Shared planning helpers now live in `kalamdb-datafusion-sources`, while this
+//! module retains table-specific MVCC, Parquet, and DML behavior.
 
 pub mod base;
 pub mod core;
@@ -42,11 +44,6 @@ pub use users::UserTableProvider;
 // Re-export unified DML functions
 pub use unified_dml::{
     append_version, append_version_sync, extract_user_pk_value, validate_primary_key,
-};
-
-// Re-export version resolution helpers
-pub use version_resolution::{
-    resolve_latest_version as resolve_latest_version_batch, scan_with_version_resolution_to_kvs,
 };
 
 /// Provider consolidation summary

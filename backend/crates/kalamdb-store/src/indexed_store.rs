@@ -100,7 +100,6 @@ use crate::async_utils::run_blocking_result;
 use crate::entity_store::{EntityIterator, EntityStore};
 use crate::storage_trait::{Operation, Partition, Result, StorageBackend, StorageError};
 use kalamdb_commons::{KSerializable, StorageKey};
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 #[cfg(feature = "datafusion")]
@@ -191,7 +190,6 @@ where
     }
 }
 
-pub type IndexRawIterator<'a> = Box<dyn Iterator<Item = Result<(Vec<u8>, Vec<u8>)>> + Send + 'a>;
 pub type IndexKeyIterator<'a, K> = Box<dyn Iterator<Item = Result<K>> + Send + 'a>;
 pub type IndexRawTypedIterator<'a, K> = Box<dyn Iterator<Item = Result<(Vec<u8>, K)>> + Send + 'a>;
 
@@ -284,11 +282,6 @@ where
         &self.indexes
     }
 
-    /// Returns an index definition by index.
-    pub fn get_index(&self, idx: usize) -> Option<&Arc<dyn IndexDefinition<K, V>>> {
-        self.indexes.get(idx)
-    }
-
     /// Drops all partitions owned by this store: index partitions first (best-effort),
     /// then the main partition (hard error on failure, "not found" is silently OK).
     ///
@@ -325,7 +318,7 @@ where
     ///
     /// Returns `Some((index_idx, prefix))` if an index can satisfy the filter.
     #[cfg(feature = "datafusion")]
-    pub fn find_index_for_filter(&self, filter: &Expr) -> Option<(usize, Vec<u8>)> {
+    fn find_index_for_filter(&self, filter: &Expr) -> Option<(usize, Vec<u8>)> {
         for (idx, index) in self.indexes.iter().enumerate() {
             if let Some(prefix) = index.filter_to_prefix(filter) {
                 return Some((idx, prefix));
@@ -334,28 +327,6 @@ where
         None
     }
 
-    /// Find an index by its partition name.
-    ///
-    /// Useful to avoid hard-coding numeric index positions (0, 1, ...) in providers.
-    pub fn find_index_by_partition(&self, partition: &str) -> Option<usize> {
-        self.indexes
-            .iter()
-            .enumerate()
-            .find(|(_idx, index)| index.partition().name() == partition)
-            .map(|(idx, _)| idx)
-    }
-
-    /// Find the first index that covers a column (based on `indexed_columns()`).
-    ///
-    /// Note: `indexed_columns()` returns an owned Vec, so this is intended for
-    /// provider wiring / occasional lookups (not a tight loop).
-    pub fn find_index_covering_column(&self, column: &str) -> Option<usize> {
-        self.indexes
-            .iter()
-            .enumerate()
-            .find(|(_idx, index)| index.indexed_columns().contains(&column))
-            .map(|(idx, _)| idx)
-    }
 
     /// Finds the "best" index for a set of DataFusion filters.
     ///
@@ -630,8 +601,7 @@ where
     /// # Note
     ///
     /// This method fetches the entity first to determine which index
-    /// entries need to be deleted. If you already have the entity,
-    /// use `delete_with_entity()` for better performance.
+    /// entries need to be deleted.
     pub fn delete(&self, key: &K) -> Result<()> {
         // Fetch entity to determine which index entries to remove
         let entity = match self.get(key)? {
@@ -642,10 +612,8 @@ where
         self.delete_with_entity(key, &entity)
     }
 
-    /// Deletes an entity when you already have it.
-    ///
-    /// More efficient than `delete()` when you've already fetched the entity.
-    pub fn delete_with_entity(&self, key: &K, entity: &V) -> Result<()> {
+    /// Deletes an entity when the caller already has its current value.
+    fn delete_with_entity(&self, key: &K, entity: &V) -> Result<()> {
         let mut operations = Vec::with_capacity(1 + self.indexes.len());
 
         // 1. Delete main entity
@@ -842,32 +810,6 @@ where
         Ok(None)
     }
 
-    /// Scans an index and returns only the primary keys (no entity fetch).
-    ///
-    /// More efficient when you only need the keys.
-    pub fn scan_index_keys(
-        &self,
-        index_idx: usize,
-        prefix: Option<&[u8]>,
-        limit: Option<usize>,
-    ) -> Result<Vec<K>> {
-        let index_partition = self
-            .index_partitions
-            .get(index_idx)
-            .ok_or_else(|| StorageError::Other(format!("Index {} not found", index_idx)))?
-            .clone();
-        let iter = self.backend.scan(&index_partition, prefix, None, limit)?;
-
-        let mut results = Vec::with_capacity(limit.unwrap_or(0));
-        for (_index_key, primary_key_bytes) in iter {
-            let primary_key = K::from_storage_key(&primary_key_bytes)
-                .map_err(StorageError::SerializationError)?;
-            results.push(primary_key);
-        }
-
-        Ok(results)
-    }
-
     /// Checks if any entry exists in an index with the given prefix.
     ///
     /// This is the most efficient check - only scans index, no entity fetch,
@@ -894,131 +836,6 @@ where
         Ok(iter.next().is_some())
     }
 
-    /// Batch check for existence of multiple prefixes in an index.
-    ///
-    /// **Performance**: More efficient than N individual `exists_by_index` calls
-    /// when checking multiple PKs for uniqueness validation. Uses a single scan
-    /// with the common prefix and builds a HashSet of existing values.
-    ///
-    /// # Arguments
-    ///
-    /// * `index_idx` - Index number (0-based, typically 0 for PK index)
-    /// * `common_prefix` - Common prefix for all values (e.g., user_id prefix)
-    /// * `prefixes` - List of full prefixes to check for existence
-    ///
-    /// # Returns
-    ///
-    /// HashSet of prefixes that exist in the index
-    pub fn exists_batch_by_index(
-        &self,
-        index_idx: usize,
-        common_prefix: &[u8],
-        prefixes: &[Vec<u8>],
-    ) -> Result<std::collections::HashSet<Vec<u8>>> {
-        if prefixes.is_empty() {
-            return Ok(HashSet::new());
-        }
-
-        let index_partition = self
-            .index_partitions
-            .get(index_idx)
-            .ok_or_else(|| StorageError::Other(format!("Index {} not found", index_idx)))?
-            .clone();
-
-        // With no common prefix, a shared scan would walk the entire index.
-        // Use point prefix checks instead.
-        if common_prefix.is_empty() {
-            let mut found: HashSet<Vec<u8>> = HashSet::new();
-            let unique_prefixes: HashSet<Vec<u8>> = prefixes.iter().cloned().collect();
-            for prefix in unique_prefixes {
-                let mut iter = self.backend.scan(&index_partition, Some(&prefix), None, Some(1))?;
-                if iter.next().is_some() {
-                    found.insert(prefix);
-                }
-            }
-            return Ok(found);
-        }
-
-        // For scoped prefixes (e.g., all PKs for one user), a single contiguous scan
-        // is typically faster than N individual seeks.
-        let iter = self.backend.scan(&index_partition, Some(common_prefix), None, None)?;
-
-        let mut prefixes_by_len: HashMap<usize, HashSet<&[u8]>> = HashMap::new();
-        for prefix in prefixes {
-            prefixes_by_len.entry(prefix.len()).or_default().insert(prefix.as_slice());
-        }
-        let mut lengths: Vec<usize> = prefixes_by_len.keys().copied().collect();
-        lengths.sort_unstable();
-
-        let mut remaining: usize = prefixes_by_len.values().map(|set| set.len()).sum();
-        if remaining == 0 {
-            return Ok(HashSet::new());
-        }
-
-        let mut found: HashSet<Vec<u8>> = HashSet::with_capacity(remaining);
-        'outer: for (key, _value) in iter {
-            for len in &lengths {
-                if key.len() < *len {
-                    break;
-                }
-
-                let prefix_slice = &key[..*len];
-                if let Some(prefix_set) = prefixes_by_len.get(len) {
-                    if prefix_set.contains(prefix_slice) {
-                        let prefix_owned = prefix_slice.to_vec();
-                        if found.insert(prefix_owned) {
-                            remaining -= 1;
-                            if remaining == 0 {
-                                break 'outer;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(found)
-    }
-
-    /// Scans an index returning raw (index_key, primary_key) pairs.
-    ///
-    /// Useful when you need access to the index key itself.
-    pub fn scan_index_raw(
-        &self,
-        index_idx: usize,
-        prefix: Option<&[u8]>,
-        start_key: Option<&[u8]>,
-        limit: Option<usize>,
-    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
-        let iter = self.scan_index_raw_iter(index_idx, prefix, start_key, limit)?;
-        let mut results = Vec::new();
-        for item in iter {
-            results.push(item?);
-        }
-
-        Ok(results)
-    }
-
-    /// Scans an index returning raw (index_key, primary_key) pairs as an iterator.
-    ///
-    /// Useful for large scans without loading all results into memory.
-    pub fn scan_index_raw_iter(
-        &self,
-        index_idx: usize,
-        prefix: Option<&[u8]>,
-        start_key: Option<&[u8]>,
-        limit: Option<usize>,
-    ) -> Result<IndexRawIterator<'_>> {
-        let index_partition = self
-            .index_partitions
-            .get(index_idx)
-            .ok_or_else(|| StorageError::Other(format!("Index {} not found", index_idx)))?
-            .clone();
-        let iter = self.backend.scan(&index_partition, prefix, start_key, limit)?;
-
-        Ok(Box::new(iter.map(Ok)))
-    }
-
     /// Scans an index returning (index_key, primary_key) pairs with typed primary key.
     pub fn scan_index_raw_typed_iter(
         &self,
@@ -1027,10 +844,14 @@ where
         start_key: Option<&[u8]>,
         limit: Option<usize>,
     ) -> Result<IndexRawTypedIterator<'_, K>> {
-        let iter = self.scan_index_raw_iter(index_idx, prefix, start_key, limit)?;
+        let index_partition = self
+            .index_partitions
+            .get(index_idx)
+            .ok_or_else(|| StorageError::Other(format!("Index {} not found", index_idx)))?
+            .clone();
+        let iter = self.backend.scan(&index_partition, prefix, start_key, limit)?;
 
-        let mapped = iter.map(|res| {
-            let (index_key, primary_key_bytes) = res?;
+        let mapped = iter.map(|(index_key, primary_key_bytes)| {
             let primary_key = K::from_storage_key(&primary_key_bytes)
                 .map_err(StorageError::SerializationError)?;
             Ok((index_key, primary_key))
@@ -1127,14 +948,6 @@ where
         run_blocking_result(move || store.insert_batch(&entries)).await
     }
 
-    /// Async version of `update()`.
-    ///
-    /// Uses `spawn_blocking` to avoid blocking the async runtime.
-    pub async fn update_async(&self, key: K, entity: V) -> Result<()> {
-        let store = self.clone();
-        run_blocking_result(move || store.update(&key, &entity)).await
-    }
-
     /// Async version of `delete()`.
     ///
     /// Uses `spawn_blocking` to avoid blocking the async runtime.
@@ -1166,18 +979,6 @@ where
     ) -> Result<Option<(K, V)>> {
         let store = self.clone();
         run_blocking_result(move || store.get_latest_by_index_prefix(index_idx, &prefix)).await
-    }
-
-    /// Async version of `insert_batch_preencoded()`.
-    ///
-    /// Uses `spawn_blocking` to avoid blocking the async runtime.
-    pub async fn insert_batch_preencoded_async(
-        &self,
-        entries: Vec<(K, V)>,
-        encoded_values: Vec<Vec<u8>>,
-    ) -> Result<()> {
-        let store = self.clone();
-        run_blocking_result(move || store.insert_batch_preencoded(&entries, encoded_values)).await
     }
 
     /// Async version of `get()` from EntityStore.

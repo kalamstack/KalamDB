@@ -1112,7 +1112,6 @@ mod tests {
     use kalamdb_store::test_utils::InMemoryBackend;
     use kalamdb_store::{Operation, Partition, StorageBackend};
     use openraft::EntryPayload;
-    use std::any::Any;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::Arc;
 
@@ -1415,8 +1414,8 @@ mod tests {
             self.inner.compact_partition(partition)
         }
 
-        fn as_any(&self) -> &dyn Any {
-            self
+        fn stats(&self) -> kalamdb_store::StorageStats {
+            self.inner.stats()
         }
     }
 

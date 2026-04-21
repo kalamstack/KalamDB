@@ -11,6 +11,7 @@ use crate::providers::base::{extract_filter_value, SimpleProviderDefinition};
 use crate::providers::manifest::ManifestCacheEntry;
 use crate::system_row_mapper::{model_to_system_row, system_row_to_model};
 use datafusion::arrow::array::RecordBatch;
+use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::logical_expr::Expr;
 use kalamdb_commons::models::rows::SystemTableRow;
 use kalamdb_commons::{ManifestId, StorageKey, TableId};
@@ -18,7 +19,7 @@ use kalamdb_store::entity_store::EntityStore;
 use kalamdb_store::{IndexedEntityStore, StorageBackend, StorageError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ManifestStorageRow {
@@ -44,9 +45,17 @@ pub struct ManifestTableProvider {
     in_memory_checker: RwLock<Option<InMemoryChecker>>,
 }
 
-impl std::fmt::Debug for ManifestTableProvider {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ManifestTableProvider").finish()
+impl Clone for ManifestTableProvider {
+    fn clone(&self) -> Self {
+        let in_memory_checker = match self.in_memory_checker.read() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        };
+
+        Self {
+            store: self.store.clone(),
+            in_memory_checker: RwLock::new(in_memory_checker),
+        }
     }
 }
 
@@ -335,13 +344,6 @@ impl ManifestTableProvider {
         self.scan_to_record_batch()
     }
 
-    fn provider_definition() -> SimpleProviderDefinition {
-        SimpleProviderDefinition {
-            table_name: kalamdb_commons::SystemTable::Manifest.table_name(),
-            schema: manifest_arrow_schema,
-        }
-    }
-
     fn encode_manifest_row(entry: &ManifestCacheEntry) -> Result<SystemTableRow, SystemError> {
         let manifest_id =
             ManifestId::new(entry.manifest.table_id.clone(), entry.manifest.user_id.clone());
@@ -402,6 +404,13 @@ impl ManifestTableProvider {
         StorageError::SerializationError(err.to_string())
     }
 }
+
+crate::impl_system_table_provider_metadata!(
+    simple,
+    provider = ManifestTableProvider,
+    table_name = kalamdb_commons::SystemTable::Manifest.table_name(),
+    schema = manifest_arrow_schema()
+);
 
 crate::impl_simple_system_table_provider!(
     provider = ManifestTableProvider,

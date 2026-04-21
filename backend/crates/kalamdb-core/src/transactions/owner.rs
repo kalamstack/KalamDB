@@ -1,4 +1,5 @@
 use crate::error::KalamDbError;
+use uuid::Uuid;
 
 #[inline]
 fn invalid_pg_session_id(session_id: &str, reason: &str) -> KalamDbError {
@@ -56,6 +57,7 @@ fn parse_u64_hex(value: &[u8], session_id: &str) -> Result<u64, KalamDbError> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExecutionOwnerKey {
     PgSession { backend_pid: u32, config_hash: u64 },
+    PgSessionUuid { session_uuid: u128 },
     SqlRequest { request_nonce: u64 },
     Internal { source_nonce: u64 },
 }
@@ -75,7 +77,16 @@ impl ExecutionOwnerKey {
     pub fn from_pg_session_id(session_id: &str) -> Result<Self, KalamDbError> {
         let bytes = session_id.as_bytes();
         if !bytes.starts_with(b"pg-") {
-            return Err(invalid_pg_session_id(session_id, "expected pg-<pid>-<config_hash>"));
+            return Uuid::parse_str(session_id)
+                .map(|session_uuid| Self::PgSessionUuid {
+                    session_uuid: session_uuid.as_u128(),
+                })
+                .map_err(|_| {
+                    invalid_pg_session_id(
+                        session_id,
+                        "expected pg-<pid>-<config_hash> or a server-issued UUID handle",
+                    )
+                });
         }
 
         let rest = &bytes[3..];
@@ -141,5 +152,17 @@ mod tests {
     fn rejects_non_numeric_backend_pid() {
         let error = ExecutionOwnerKey::from_pg_session_id("pg-abc-deadbeef").unwrap_err();
         assert!(error.to_string().contains("backend pid must be numeric"));
+    }
+
+    #[test]
+    fn parses_uuid_pg_session_handles() {
+        let owner =
+            ExecutionOwnerKey::from_pg_session_id("019dabfa-1538-7c23-8e61-de751d8c1c38").unwrap();
+        assert_eq!(
+            owner,
+            ExecutionOwnerKey::PgSessionUuid {
+                session_uuid: 0x019dabfa15387c238e61de751d8c1c38,
+            }
+        );
     }
 }

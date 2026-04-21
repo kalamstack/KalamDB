@@ -110,10 +110,10 @@ async fn scan_returns_arrow_batches() {
     start_server(59981).await;
     let client = connect(59981).await;
 
-    client.open_session("sess-scan", Some("app")).await.expect("open session");
+    let session = client.open_session(Some("app")).await.expect("open session");
 
     let response = client
-        .scan("app", "messages", "shared", "sess-scan", None, vec![], None, vec![])
+        .scan("app", "messages", "shared", &session.session_id, None, vec![], None, vec![])
         .await
         .expect("scan");
 
@@ -139,14 +139,14 @@ async fn scan_with_projection_and_limit() {
     start_server(59982).await;
     let client = connect(59982).await;
 
-    client.open_session("sess-proj", Some("app")).await.expect("open session");
+    let session = client.open_session(Some("app")).await.expect("open session");
 
     let response = client
         .scan(
             "app",
             "messages",
             "shared",
-            "sess-proj",
+            &session.session_id,
             None,
             vec!["id".to_string()],
             Some(1),
@@ -166,14 +166,14 @@ async fn insert_single_row() {
     start_server(59983).await;
     let client = connect(59983).await;
 
-    client.open_session("sess-ins", Some("app")).await.expect("open session");
+    let session = client.open_session(Some("app")).await.expect("open session");
 
     let response = client
         .insert(
             "app",
             "messages",
             "shared",
-            "sess-ins",
+            &session.session_id,
             None,
             vec![r#"{"id":{"Int64":"10"},"name":{"Utf8":"charlie"}}"#.to_string()],
         )
@@ -189,14 +189,14 @@ async fn insert_multiple_rows() {
     start_server(59984).await;
     let client = connect(59984).await;
 
-    client.open_session("sess-ins-multi", Some("app")).await.expect("open session");
+    let session = client.open_session(Some("app")).await.expect("open session");
 
     let response = client
         .insert(
             "app",
             "messages",
             "shared",
-            "sess-ins-multi",
+            &session.session_id,
             None,
             vec![
                 r#"{"id":{"Int64":"20"},"name":{"Utf8":"dave"}}"#.to_string(),
@@ -216,14 +216,14 @@ async fn insert_with_user_id() {
     start_server(59985).await;
     let client = connect(59985).await;
 
-    client.open_session("sess-ins-uid", Some("app")).await.expect("open session");
+    let session = client.open_session(Some("app")).await.expect("open session");
 
     let response = client
         .insert(
             "app",
             "messages",
             "user",
-            "sess-ins-uid",
+            &session.session_id,
             Some("user-42"),
             vec![r#"{"id":{"Int64":"30"},"name":{"Utf8":"grace"}}"#.to_string()],
         )
@@ -239,14 +239,14 @@ async fn update_single_row() {
     start_server(59986).await;
     let client = connect(59986).await;
 
-    client.open_session("sess-upd", Some("app")).await.expect("open session");
+    let session = client.open_session(Some("app")).await.expect("open session");
 
     let response = client
         .update(
             "app",
             "messages",
             "shared",
-            "sess-upd",
+            &session.session_id,
             None,
             "1",
             r#"{"name":{"Utf8":"alice-updated"}}"#,
@@ -263,14 +263,14 @@ async fn update_with_user_id() {
     start_server(59987).await;
     let client = connect(59987).await;
 
-    client.open_session("sess-upd-uid", Some("app")).await.expect("open session");
+    let session = client.open_session(Some("app")).await.expect("open session");
 
     let response = client
         .update(
             "app",
             "messages",
             "user",
-            "sess-upd-uid",
+            &session.session_id,
             Some("user-42"),
             "1",
             r#"{"name":{"Utf8":"updated-name"}}"#,
@@ -287,10 +287,10 @@ async fn delete_single_row() {
     start_server(59988).await;
     let client = connect(59988).await;
 
-    client.open_session("sess-del", Some("app")).await.expect("open session");
+    let session = client.open_session(Some("app")).await.expect("open session");
 
     let response = client
-        .delete("app", "messages", "shared", "sess-del", None, "1")
+        .delete("app", "messages", "shared", &session.session_id, None, "1")
         .await
         .expect("delete");
 
@@ -303,10 +303,10 @@ async fn delete_with_user_id() {
     start_server(59989).await;
     let client = connect(59989).await;
 
-    client.open_session("sess-del-uid", Some("app")).await.expect("open session");
+    let session = client.open_session(Some("app")).await.expect("open session");
 
     let response = client
-        .delete("app", "messages", "user", "sess-del-uid", Some("user-42"), "1")
+        .delete("app", "messages", "user", &session.session_id, Some("user-42"), "1")
         .await
         .expect("delete with user_id");
 
@@ -319,11 +319,10 @@ async fn transaction_lifecycle_with_dml() {
     start_server(59990).await;
     let client = connect(59990).await;
 
-    let session = client.open_session("sess-tx", Some("app")).await.expect("open session");
-    assert_eq!(session.session_id, "sess-tx");
+    let session = client.open_session(Some("app")).await.expect("open session");
 
     // Begin transaction
-    let tx_id = client.begin_transaction("sess-tx").await.expect("begin tx");
+    let tx_id = client.begin_transaction(&session.session_id).await.expect("begin tx");
     assert!(!tx_id.is_empty());
 
     // Insert within transaction
@@ -332,7 +331,7 @@ async fn transaction_lifecycle_with_dml() {
             "app",
             "messages",
             "shared",
-            "sess-tx",
+            &session.session_id,
             None,
             vec![r#"{"id":{"Int64":"100"},"name":{"Utf8":"tx-row"}}"#.to_string()],
         )
@@ -346,7 +345,7 @@ async fn transaction_lifecycle_with_dml() {
             "app",
             "messages",
             "shared",
-            "sess-tx",
+            &session.session_id,
             None,
             "100",
             r#"{"name":{"Utf8":"tx-row-updated"}}"#,
@@ -356,7 +355,7 @@ async fn transaction_lifecycle_with_dml() {
     assert_eq!(upd_resp.affected_rows, 1);
 
     // Commit transaction
-    client.commit_transaction("sess-tx", &tx_id).await.expect("commit tx");
+    client.commit_transaction(&session.session_id, &tx_id).await.expect("commit tx");
 }
 
 #[tokio::test]
@@ -365,9 +364,9 @@ async fn transaction_rollback() {
     start_server(59991).await;
     let client = connect(59991).await;
 
-    client.open_session("sess-rb", Some("app")).await.expect("open session");
+    let session = client.open_session(Some("app")).await.expect("open session");
 
-    let tx_id = client.begin_transaction("sess-rb").await.expect("begin tx");
+    let tx_id = client.begin_transaction(&session.session_id).await.expect("begin tx");
 
     // Insert then rollback
     client
@@ -375,12 +374,12 @@ async fn transaction_rollback() {
             "app",
             "messages",
             "shared",
-            "sess-rb",
+            &session.session_id,
             None,
             vec![r#"{"id":{"Int64":"200"},"name":{"Utf8":"will-be-rolled-back"}}"#.to_string()],
         )
         .await
         .expect("insert in tx");
 
-    client.rollback_transaction("sess-rb", &tx_id).await.expect("rollback tx");
+    client.rollback_transaction(&session.session_id, &tx_id).await.expect("rollback tx");
 }

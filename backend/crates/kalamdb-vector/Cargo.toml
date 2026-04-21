@@ -15,6 +15,7 @@ kalamdb-filestore = { path = "../kalamdb-filestore" }
 kalamdb-store = { path = "../kalamdb-store" }
 kalamdb-system = { path = "../kalamdb-system" }
 kalamdb-session-datafusion = { path = "../kalamdb-session-datafusion" }
+kalamdb-datafusion-sources = { workspace = true }
 
 # Apache Arrow/DataFusion
 datafusion = { workspace = true }
@@ -34,6 +35,9 @@ once_cell = { workspace = true }
 
 # ANN engines
 usearch = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }
 
 [lib]
 name = "kalamdb_vector"

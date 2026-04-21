@@ -9,12 +9,16 @@ use datafusion::arrow::array::{
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::catalog::{Session, TableFunctionImpl};
-use datafusion::common::{DataFusionError, Result};
-use datafusion::datasource::memory::MemTable;
+use datafusion::common::{DFSchema, DataFusionError, Result};
 use datafusion::datasource::TableProvider;
-use datafusion::logical_expr::{Expr, TableType as DataFusionTableType};
+use datafusion::logical_expr::{Expr, TableProviderFilterPushDown, TableType as DataFusionTableType};
+use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::scalar::ScalarValue;
+use kalamdb_datafusion_sources::exec::{
+    finalize_deferred_batch, DeferredBatchExec, DeferredBatchSource,
+};
+use kalamdb_datafusion_sources::provider::{combined_filter, FilterCapability};
 use kalamdb_commons::ids::SeqId;
 use kalamdb_commons::models::{TableId, UserId};
 use kalamdb_commons::schemas::TableType;
@@ -109,6 +113,212 @@ struct VectorSearchTableProvider {
     output_schema: SchemaRef,
 }
 
+struct VectorSearchScanSource {
+    runtime: Arc<dyn VectorSearchRuntime>,
+    args: VectorSearchArgs,
+    session_user: UserId,
+    physical_filter: Option<Arc<dyn PhysicalExpr>>,
+    projection: Option<Vec<usize>>,
+    limit: Option<usize>,
+    base_schema: SchemaRef,
+    output_schema: SchemaRef,
+}
+
+impl std::fmt::Debug for VectorSearchScanSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VectorSearchScanSource")
+            .field("table_id", &self.args.table_id)
+            .field("column_name", &self.args.column_name)
+            .field("top_k", &self.args.top_k)
+            .field("limit", &self.limit)
+            .finish()
+    }
+}
+
+fn vector_scan_limits(
+    has_provider_side_filter: bool,
+    top_k: usize,
+    pushed_limit: Option<usize>,
+) -> (usize, Option<usize>) {
+    let output_limit = pushed_limit.map(|limit| limit.min(top_k));
+    let search_limit = if has_provider_side_filter {
+        top_k
+    } else {
+        output_limit.unwrap_or(top_k)
+    };
+
+    (search_limit, output_limit)
+}
+
+#[async_trait]
+impl DeferredBatchSource for VectorSearchScanSource {
+    fn source_name(&self) -> &'static str {
+        "vector_search_scan"
+    }
+
+    fn schema(&self) -> SchemaRef {
+        Arc::clone(&self.output_schema)
+    }
+
+    async fn produce_batch(&self) -> Result<RecordBatch> {
+        let (search_limit, output_limit) =
+            vector_scan_limits(self.physical_filter.is_some(), self.args.top_k, self.limit);
+
+        let scope = match self.runtime.resolve_scope(
+            &self.args.table_id,
+            &self.args.column_name,
+            &self.session_user,
+        )? {
+            Some(scope) => scope,
+            None => {
+                let batch = RecordBatch::try_new(
+                    Arc::clone(&self.base_schema),
+                    vec![
+                        Arc::new(StringArray::from(Vec::<String>::new())) as ArrayRef,
+                        Arc::new(Float32Array::from(Vec::<f32>::new())) as ArrayRef,
+                    ],
+                )?;
+                return finalize_deferred_batch(
+                    batch,
+                    self.physical_filter.as_ref(),
+                    self.projection.as_deref(),
+                    output_limit,
+                    self.source_name(),
+                );
+            },
+        };
+
+        let mut base_candidates: Vec<(String, f32)> = Vec::new();
+        let mut base_snapshot_key_to_pk: HashMap<u64, String> = HashMap::new();
+        let mut base_index = None;
+
+        if let Some(snapshot_path) = scope.snapshot_path.as_deref() {
+            if !snapshot_path.is_empty() {
+                match scope.storage_cached.get_sync(
+                    scope.table_type,
+                    &self.args.table_id,
+                    scope.manifest_user.as_ref(),
+                    snapshot_path,
+                ) {
+                    Ok(get_result) => {
+                        let parsed = decode_snapshot(&get_result.data).map_err(|error| {
+                            DataFusionError::Execution(format!(
+                                "Failed to decode vector snapshot '{}': {}",
+                                snapshot_path, error
+                            ))
+                        })?;
+                        if parsed.dimensions as usize != self.args.query_vector.len() {
+                            return Err(DataFusionError::Execution(format!(
+                                "vector_search query vector dimensions mismatch: query has {}, index has {}",
+                                self.args.query_vector.len(),
+                                parsed.dimensions
+                            )));
+                        }
+                        let loaded_index =
+                            load_index(parsed.dimensions, parsed.metric, &parsed.index_blob)
+                                .map_err(|error| {
+                                    DataFusionError::Execution(format!(
+                                        "Failed to load vector snapshot index '{}': {}",
+                                        snapshot_path, error
+                                    ))
+                                })?;
+                        for entry in parsed.entries {
+                            base_snapshot_key_to_pk.insert(entry.key, entry.pk);
+                        }
+                        base_index = Some(loaded_index);
+                    },
+                    Err(FilestoreError::NotFound(_)) => {},
+                    Err(error) => {
+                        return Err(DataFusionError::Execution(format!(
+                            "Failed to read vector snapshot '{}': {}",
+                            snapshot_path, error
+                        )))
+                    },
+                }
+            }
+        }
+
+        let candidate_limit = search_limit
+            .saturating_mul(CANDIDATE_MULTIPLIER)
+            .max(search_limit);
+
+        let hot_search = search_hot_candidates(
+            Arc::clone(&scope.backend),
+            &self.args.table_id,
+            &self.args.column_name,
+            scope.table_type,
+            &self.session_user,
+            scope.last_applied_seq,
+            scope.metric,
+            &self.args.query_vector,
+            candidate_limit,
+        )?;
+
+        let cold_candidate_limit = candidate_limit
+            .saturating_add(hot_search.touched_pks.len())
+            .max(candidate_limit);
+
+        if let Some(index) = &base_index {
+            let raw = search_index(index, &self.args.query_vector, cold_candidate_limit)
+                .map_err(|error| {
+                    DataFusionError::Execution(format!(
+                        "Failed to search base vector index: {}",
+                        error
+                    ))
+                })?;
+            for (key, distance) in raw {
+                let Some(pk) = base_snapshot_key_to_pk.get(&key) else {
+                    continue;
+                };
+                if hot_search.touched_pks.contains(pk) {
+                    continue;
+                }
+                base_candidates.push((pk.clone(), distance));
+            }
+        }
+
+        let mut best_distance_by_pk: HashMap<String, f32> = HashMap::new();
+        for (pk, distance) in base_candidates.into_iter().chain(hot_search.candidates.into_iter()) {
+            match best_distance_by_pk.get_mut(&pk) {
+                Some(existing) => {
+                    if distance < *existing {
+                        *existing = distance;
+                    }
+                },
+                None => {
+                    best_distance_by_pk.insert(pk, distance);
+                },
+            }
+        }
+
+        let mut ranked: Vec<(String, f32)> = best_distance_by_pk.into_iter().collect();
+        ranked.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        ranked.truncate(search_limit);
+
+        let row_ids: Vec<String> = ranked.iter().map(|(pk, _)| pk.clone()).collect();
+        let scores: Vec<f32> = ranked
+            .iter()
+            .map(|(_, distance)| distance_to_score(scope.metric, *distance))
+            .collect();
+
+        let batch = RecordBatch::try_new(
+            Arc::clone(&self.base_schema),
+            vec![
+                Arc::new(StringArray::from(row_ids)) as ArrayRef,
+                Arc::new(Float32Array::from(scores)) as ArrayRef,
+            ],
+        )?;
+
+        finalize_deferred_batch(
+            batch,
+            self.physical_filter.as_ref(),
+            self.projection.as_deref(),
+            output_limit,
+            self.source_name(),
+        )
+    }
+}
+
 impl VectorSearchTableProvider {
     fn new(runtime: Arc<dyn VectorSearchRuntime>, args: VectorSearchArgs) -> Self {
         let output_schema = Arc::new(Schema::new(vec![
@@ -123,15 +333,8 @@ impl VectorSearchTableProvider {
         }
     }
 
-    fn empty_batch(&self) -> Result<RecordBatch> {
-        RecordBatch::try_new(
-            Arc::clone(&self.output_schema),
-            vec![
-                Arc::new(StringArray::from(Vec::<String>::new())) as ArrayRef,
-                Arc::new(Float32Array::from(Vec::<f32>::new())) as ArrayRef,
-            ],
-        )
-        .map_err(DataFusionError::from)
+    fn filter_capability(&self, _filter: &Expr) -> FilterCapability {
+        FilterCapability::Exact
     }
 }
 
@@ -361,140 +564,40 @@ impl TableProvider for VectorSearchTableProvider {
         filters: &[Expr],
         limit: Option<usize>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        let session_user = extract_user_id(state);
-        let scope = match self.runtime.resolve_scope(
-            &self.args.table_id,
-            &self.args.column_name,
-            &session_user,
-        )? {
-            Some(scope) => scope,
-            None => {
-                let batch = self.empty_batch()?;
-                let mem = MemTable::try_new(self.schema(), vec![vec![batch]])?;
-                return mem.scan(state, projection, filters, limit).await;
-            },
+        let base_schema = Arc::clone(&self.output_schema);
+        let output_schema = match projection {
+            Some(indices) => base_schema.project(indices).map(Arc::new)?,
+            None => Arc::clone(&base_schema),
+        };
+        let physical_filter = if let Some(filter) = combined_filter(filters) {
+            let df_schema = DFSchema::try_from(Arc::clone(&base_schema))?;
+            Some(state.create_physical_expr(filter, &df_schema)?)
+        } else {
+            None
         };
 
-        let mut base_candidates: Vec<(String, f32)> = Vec::new();
-        let mut base_snapshot_key_to_pk: HashMap<u64, String> = HashMap::new();
-        let mut base_index = None;
+        Ok(Arc::new(DeferredBatchExec::new(Arc::new(
+            VectorSearchScanSource {
+                runtime: Arc::clone(&self.runtime),
+                args: self.args.clone(),
+                session_user: extract_user_id(state),
+                physical_filter,
+                projection: projection.cloned(),
+                limit,
+                base_schema,
+                output_schema,
+            },
+        ))))
+    }
 
-        if let Some(snapshot_path) = scope.snapshot_path.as_deref() {
-            if !snapshot_path.is_empty() {
-                match scope.storage_cached.get_sync(
-                    scope.table_type,
-                    &self.args.table_id,
-                    scope.manifest_user.as_ref(),
-                    snapshot_path,
-                ) {
-                    Ok(get_result) => {
-                        let parsed = decode_snapshot(&get_result.data).map_err(|e| {
-                            DataFusionError::Execution(format!(
-                                "Failed to decode vector snapshot '{}': {}",
-                                snapshot_path, e
-                            ))
-                        })?;
-                        if parsed.dimensions as usize != self.args.query_vector.len() {
-                            return Err(DataFusionError::Execution(format!(
-                                "vector_search query vector dimensions mismatch: query has {}, index has {}",
-                                self.args.query_vector.len(),
-                                parsed.dimensions
-                            )));
-                        }
-                        let loaded_index =
-                            load_index(parsed.dimensions, parsed.metric, &parsed.index_blob)
-                                .map_err(|e| {
-                                    DataFusionError::Execution(format!(
-                                        "Failed to load vector snapshot index '{}': {}",
-                                        snapshot_path, e
-                                    ))
-                                })?;
-                        for entry in parsed.entries {
-                            base_snapshot_key_to_pk.insert(entry.key, entry.pk);
-                        }
-                        base_index = Some(loaded_index);
-                    },
-                    Err(FilestoreError::NotFound(_)) => {},
-                    Err(e) => {
-                        return Err(DataFusionError::Execution(format!(
-                            "Failed to read vector snapshot '{}': {}",
-                            snapshot_path, e
-                        )))
-                    },
-                }
-            }
-        }
-
-        let requested_limit = limit.unwrap_or(self.args.top_k);
-        let final_limit = requested_limit.min(self.args.top_k);
-        let candidate_limit = final_limit.saturating_mul(CANDIDATE_MULTIPLIER).max(final_limit);
-
-        let hot_search = search_hot_candidates(
-            Arc::clone(&scope.backend),
-            &self.args.table_id,
-            &self.args.column_name,
-            scope.table_type,
-            &session_user,
-            scope.last_applied_seq,
-            scope.metric,
-            &self.args.query_vector,
-            candidate_limit,
-        )?;
-
-        let cold_candidate_limit = candidate_limit
-            .saturating_add(hot_search.touched_pks.len())
-            .max(candidate_limit);
-
-        if let Some(index) = &base_index {
-            let raw = search_index(index, &self.args.query_vector, cold_candidate_limit).map_err(
-                |e| {
-                    DataFusionError::Execution(format!("Failed to search base vector index: {}", e))
-                },
-            )?;
-            for (key, distance) in raw {
-                let Some(pk) = base_snapshot_key_to_pk.get(&key) else {
-                    continue;
-                };
-                if hot_search.touched_pks.contains(pk) {
-                    continue;
-                }
-                base_candidates.push((pk.clone(), distance));
-            }
-        }
-
-        let mut best_distance_by_pk: HashMap<String, f32> = HashMap::new();
-        for (pk, distance) in base_candidates.into_iter().chain(hot_search.candidates.into_iter()) {
-            match best_distance_by_pk.get_mut(&pk) {
-                Some(existing) => {
-                    if distance < *existing {
-                        *existing = distance;
-                    }
-                },
-                None => {
-                    best_distance_by_pk.insert(pk, distance);
-                },
-            }
-        }
-
-        let mut ranked: Vec<(String, f32)> = best_distance_by_pk.into_iter().collect();
-        ranked.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-        ranked.truncate(final_limit);
-
-        let row_ids: Vec<String> = ranked.iter().map(|(pk, _)| pk.clone()).collect();
-        let scores: Vec<f32> = ranked
+    fn supports_filters_pushdown(
+        &self,
+        filters: &[&Expr],
+    ) -> Result<Vec<TableProviderFilterPushDown>> {
+        Ok(filters
             .iter()
-            .map(|(_, distance)| distance_to_score(scope.metric, *distance))
-            .collect();
-
-        let batch = RecordBatch::try_new(
-            self.schema(),
-            vec![
-                Arc::new(StringArray::from(row_ids)) as ArrayRef,
-                Arc::new(Float32Array::from(scores)) as ArrayRef,
-            ],
-        )?;
-        let mem = MemTable::try_new(self.schema(), vec![vec![batch]])?;
-        mem.scan(state, projection, filters, Some(final_limit)).await
+            .map(|filter| TableProviderFilterPushDown::from(self.filter_capability(filter)))
+            .collect())
     }
 }
 
@@ -523,5 +626,14 @@ mod tests {
         assert!((distance_to_score(VectorMetric::Cosine, 0.0) - 1.0).abs() < 1e-6);
         assert!((distance_to_score(VectorMetric::Dot, 0.0) - 1.0).abs() < 1e-6);
         assert!((distance_to_score(VectorMetric::L2, 0.0) - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_vector_scan_limits_skip_limit_pushdown_when_filters_exist() {
+        assert_eq!(vector_scan_limits(false, 5, None), (5, None));
+        assert_eq!(vector_scan_limits(false, 5, Some(2)), (2, Some(2)));
+        assert_eq!(vector_scan_limits(false, 5, Some(9)), (5, Some(5)));
+        assert_eq!(vector_scan_limits(true, 5, None), (5, None));
+        assert_eq!(vector_scan_limits(true, 5, Some(2)), (5, Some(2)));
     }
 }

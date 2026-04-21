@@ -24,9 +24,6 @@ use crate::system_row_mapper::{model_to_system_row, system_row_to_model};
 use crate::JobStatus;
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::error::Result as DataFusionResult;
-use datafusion::logical_expr::Expr;
-use datafusion::logical_expr::TableProviderFilterPushDown;
 use kalamdb_commons::models::rows::SystemTableRow;
 use kalamdb_commons::JobId;
 use kalamdb_commons::SystemTable;
@@ -43,14 +40,9 @@ pub type JobsStore = IndexedEntityStore<JobId, SystemTableRow>;
 ///
 /// All insert/update/delete operations automatically maintain secondary indexes
 /// using RocksDB's atomic WriteBatch - no manual index management needed.
+#[derive(Clone)]
 pub struct JobsTableProvider {
     store: JobsStore,
-}
-
-impl std::fmt::Debug for JobsTableProvider {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("JobsTableProvider").finish()
-    }
 }
 
 impl JobsTableProvider {
@@ -80,12 +72,7 @@ impl JobsTableProvider {
         Ok(format!("Job {} created", job.job_id))
     }
 
-    /// Alias for create_job (for backward compatibility)
-    pub fn insert_job(&self, job: Job) -> Result<String, SystemError> {
-        self.create_job(job)
-    }
-
-    /// Async version of `insert_job()`.
+    /// Async insert path corresponding to `create_job()`.
     ///
     /// Uses `spawn_blocking` internally to avoid blocking the async runtime.
     pub async fn insert_job_async(&self, job: Job) -> Result<(), SystemError> {
@@ -433,18 +420,6 @@ impl JobsTableProvider {
         Ok(())
     }
 
-    /// Cancel a running job (string version for backward compatibility)
-    pub fn cancel_job_str(&self, job_id: &str) -> Result<(), SystemError> {
-        let job_id_typed = JobId::new(job_id);
-        self.cancel_job(&job_id_typed)
-    }
-
-    /// Get a job by string ID (for backward compatibility)
-    pub fn get_job_str(&self, job_id: &str) -> Result<Option<Job>, SystemError> {
-        let job_id_typed = JobId::new(job_id);
-        self.get_job(&job_id_typed)
-    }
-
     /// Delete jobs older than retention period (in days).
     ///
     /// Optimized to use the status index to avoid full table scan.
@@ -616,40 +591,15 @@ fn matches_filter_sync(job: &Job, filter: &JobFilter) -> bool {
     true
 }
 
-impl JobsTableProvider {
-    fn provider_definition() -> IndexedProviderDefinition<JobId> {
-        IndexedProviderDefinition {
-            table_name: SystemTable::Jobs.table_name(),
-            primary_key_column: "job_id",
-            schema: Self::schema,
-            parse_key: |value| Some(JobId::new(value)),
-        }
-    }
-
-    fn filter_pushdown(filters: &[&Expr]) -> DataFusionResult<Vec<TableProviderFilterPushDown>> {
-        // Only push down exact equality filters we can leverage for indexes.
-        Ok(filters
-            .iter()
-            .map(|filter| {
-                if let Some((col, _val)) = kalamdb_store::extract_string_equality(filter) {
-                    if matches!(col, "status" | "job_id" | "idempotency_key") {
-                        return TableProviderFilterPushDown::Inexact;
-                    }
-                }
-                TableProviderFilterPushDown::Unsupported
-            })
-            .collect())
-    }
-
-    fn schema() -> SchemaRef {
-        static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
-        SCHEMA
-            .get_or_init(|| {
-                Job::definition().to_arrow_schema().expect("failed to build jobs schema")
-            })
-            .clone()
-    }
-}
+crate::impl_system_table_provider_metadata!(
+    indexed,
+    provider = JobsTableProvider,
+    key = JobId,
+    table_name = SystemTable::Jobs.table_name(),
+    primary_key_column = "job_id",
+    parse_key = |value| Some(JobId::new(value)),
+    schema = Job::definition().to_arrow_schema().expect("failed to build jobs schema")
+);
 
 crate::impl_indexed_system_table_provider!(
     provider = JobsTableProvider,
@@ -657,9 +607,7 @@ crate::impl_indexed_system_table_provider!(
     value = SystemTableRow,
     store = store,
     definition = provider_definition,
-    build_batch = create_batch,
-    load_batch = scan_all_jobs,
-    pushdown = JobsTableProvider::filter_pushdown
+    build_batch = create_batch
 );
 
 #[cfg(test)]

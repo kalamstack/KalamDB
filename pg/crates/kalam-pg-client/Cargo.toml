@@ -13,6 +13,7 @@ tls = ["tonic/tls-webpki-roots", "tonic/tls-ring", "kalamdb-pg/tls"]
 [dependencies]
 arrow = { workspace = true }
 arrow-ipc = { workspace = true, default-features = false }
+base64 = { workspace = true }
 bytes = { workspace = true }
 kalam-pg-api = { path = "../kalam-pg-api" }
 kalam-pg-common = { path = "../kalam-pg-common" }

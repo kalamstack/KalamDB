@@ -32,6 +32,7 @@ use super::SharedTableRow;
 ///
 /// This index allows efficient lookups by PK value,
 /// returning all MVCC versions of rows with matching PK.
+#[derive(Clone)]
 pub struct SharedTablePkIndex {
     /// Partition for the index
     partition: Partition,

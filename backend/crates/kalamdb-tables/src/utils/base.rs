@@ -3,12 +3,14 @@
 //! This module provides:
 //! - BaseTableProvider<K, V> trait for generic table operations
 //! - TableProviderCore shared structure for common services
+//! - Shared MVCC-oriented scan helpers for user and shared tables
 //!
 //! **Design Rationale**:
-//! - Eliminates ~1200 lines of duplicate code across User/Shared/Stream providers
+//! - Eliminates most of the historic duplicate code across User/Shared/Stream providers
 //! - Generic over storage key (K) and value (V) types
 //! - No separate handlers - DML logic implemented directly in providers
 //! - Shared core reduces memory overhead (Arc<TableProviderCore> vs per-provider fields)
+//! - New planning-only helpers are moving into `kalamdb-datafusion-sources`
 //!
 //! ## Streaming vs MVCC Constraints
 //!
@@ -30,27 +32,37 @@
 //! Cold Storage (Parquet) ┘       (requires ALL rows to find MAX(_seq) per PK)
 //! ```
 //!
-//! **Stream tables ARE streamable** because they:
+//! Stream tables ARE streamable** because they:
 //! - Are append-only (no updates, no version resolution needed)
 //! - Use TTL-based eviction instead of tombstones
 //! - Can return rows as they're scanned with early termination on LIMIT
+//! - They now use the provider-family-specific exec-backed path in
+//!   `stream_table_provider.rs` instead of sharing the MVCC-oriented flow below
 //!
 //! ## Architecture
 //!
 //! ```text
-//! TableProvider::scan()
-//!        │
-//!        ▼
-//! base_scan() ── combines filters, calls scan_rows()
-//!        │
-//!        ▼
-//! scan_rows() ── extracts user context, calls scan_with_version_resolution_to_kvs()
-//!        │
-//!        ▼
-//! scan_with_version_resolution_to_kvs() ── provider-specific implementation:
+//! User/Shared TableProvider::scan()
+//!             │
+//!             ▼
+//! base_scan() ── combines filters, remaps projections, and builds the deferred
+//!                MVCC execution plan used by user/shared providers
+//!             │
+//!             ▼
+//! scan_rows() ── extracts scan context, applies fast paths, and calls
+//!                scan_kvs_with_context()
+//!             │
+//!             ▼
+//! scan_kvs_with_context() ── provider-specific hot/cold scan implementation:
 //!   • User: user-scoped RocksDB prefix + Parquet, MVCC merge
 //!   • Shared: full RocksDB + Parquet, MVCC merge
-//!   • Stream: user-scoped RocksDB only, TTL filter, streamable
+//!             │
+//!             ▼
+//! resolve_latest_scan_from_futures() ── shared concurrent hot/cold fetch +
+//!                                       MVCC winner selection
+//!
+//! Stream tables bypass this path and build deferred execution descriptors in
+//! `stream_table_provider.rs` so the hot-store scan runs at execute time.
 //! ```
 
 use crate::error::KalamDbError;
@@ -63,10 +75,11 @@ use datafusion::arrow::array::{Array, BooleanArray, Float32Array, Int64Array, UI
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::catalog::Session;
-use datafusion::datasource::memory::MemTable;
+use datafusion::common::DFSchema;
 use datafusion::datasource::TableProvider;
 use datafusion::error::{DataFusionError, Result as DataFusionResult};
 use datafusion::logical_expr::{utils::expr_to_columns, Expr, TableProviderFilterPushDown};
+use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_plan::{ExecutionPlan, Statistics};
 use datafusion::scalar::ScalarValue;
 use kalamdb_commons::constants::SystemColumnNames;
@@ -74,15 +87,28 @@ use kalamdb_commons::conversions::arrow_json_conversion::coerce_rows;
 use kalamdb_commons::ids::SeqId;
 use kalamdb_commons::models::rows::Row;
 use kalamdb_commons::models::{NamespaceId, TableName, UserId};
+use kalamdb_commons::serialization::row_codec::RowMetadata;
 use kalamdb_commons::schemas::TableType;
 use kalamdb_commons::NotLeaderError;
 use kalamdb_commons::{StorageKey, TableId};
+use kalamdb_datafusion_sources::exec::{
+    count_resolved_from_metadata, finalize_deferred_batch, resolve_latest_kvs_from_cold_batch,
+    DeferredBatchExec, DeferredBatchSource, ParquetRowData, VersionedRow,
+};
+use kalamdb_datafusion_sources::pruning::mvcc_filter_evaluation;
+use kalamdb_datafusion_sources::provider::{
+    combined_filter, pushdown_results_for_filters, remap_projection_indices, SourceProvider,
+};
 use kalamdb_filestore::registry::ListResult;
 use kalamdb_system::ClusterCoordinator as ClusterCoordinatorTrait;
 use kalamdb_system::Manifest;
 use kalamdb_system::SchemaRegistry as SchemaRegistryTrait;
-use kalamdb_transactions::{extract_transaction_query_context, TransactionAccessError};
+use kalamdb_transactions::{
+    extract_transaction_query_context, TransactionAccessError, TransactionOverlay,
+    TransactionOverlayExec,
+};
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::sync::Arc;
 
 // Re-export types moved to submodules
@@ -92,6 +118,247 @@ pub use crate::utils::row_utils::{
     extract_full_user_context, extract_seq_bounds_from_filter, resolve_user_scope, system_user_id,
 };
 pub use crate::utils::row_utils::{inject_system_columns, rows_to_arrow_batch, ScanRow};
+
+#[async_trait]
+pub trait DeferredMvccScanProvider<K: StorageKey, V>:
+    BaseTableProvider<K, V> + Clone + Send + Sync + 'static
+where
+    K: StorageKey + Clone + Send + Sync + 'static,
+    V: ScanRow + Send + Sync + 'static,
+{
+    type ScanContext: Clone + Send + Sync + 'static;
+
+    fn scan_source_name(&self) -> &'static str;
+
+    fn build_scan_context(&self, state: &dyn Session) -> Result<Self::ScanContext, KalamDbError>;
+
+    fn scan_snapshot_commit_seq(&self, scan_context: &Self::ScanContext) -> Option<u64>;
+
+    fn allow_pk_fast_path(&self, scan_context: &Self::ScanContext) -> bool {
+        self.scan_snapshot_commit_seq(scan_context).is_none()
+    }
+
+    fn allow_count_only_fast_path(&self, _scan_context: &Self::ScanContext) -> bool {
+        true
+    }
+
+    fn scan_scope_label(&self, _scan_context: &Self::ScanContext) -> &'static str {
+        "default"
+    }
+
+    fn scan_cold_scope<'a>(&self, scan_context: &'a Self::ScanContext) -> Option<&'a UserId>;
+
+    async fn scan_hot_pk_row(
+        &self,
+        scan_context: &Self::ScanContext,
+        pk_value: &ScalarValue,
+    ) -> Result<Option<(K, V)>, KalamDbError>;
+
+    async fn hot_pk_tombstoned(
+        &self,
+        scan_context: &Self::ScanContext,
+        pk_value: &ScalarValue,
+    ) -> Result<bool, KalamDbError>;
+
+    async fn count_rows_with_context(
+        &self,
+        scan_context: &Self::ScanContext,
+    ) -> Result<usize, KalamDbError>;
+
+    async fn scan_kvs_with_context(
+        &self,
+        scan_context: &Self::ScanContext,
+        filter: Option<&Expr>,
+        since_seq: Option<SeqId>,
+        limit: Option<usize>,
+        keep_deleted: bool,
+        cold_columns: Option<&[String]>,
+    ) -> Result<Vec<(K, V)>, KalamDbError>;
+
+    async fn scan_rows_with_context(
+        &self,
+        scan_context: &Self::ScanContext,
+        projection: Option<&Vec<usize>>,
+        filter: Option<&Expr>,
+        limit: Option<usize>,
+    ) -> Result<RecordBatch, KalamDbError> {
+        let schema = self.schema_ref();
+        let pk_name = self.primary_key_field_name();
+        let scope_label = self.scan_scope_label(scan_context);
+        let subject_user = self
+            .scan_cold_scope(scan_context)
+            .map(UserId::as_str)
+            .unwrap_or("-");
+
+        if self.allow_pk_fast_path(scan_context) {
+            if let Some(pk_scalar) = typed_pk_literal_from_filter(&schema, filter, pk_name) {
+                if let Some((row_id, row)) = self.scan_hot_pk_row(scan_context, &pk_scalar).await? {
+                    // log::debug!(
+                    //     "[MvccScan] PK fast-path hit for {}={} (table={}; scope={}; subject={})",
+                    //     pk_name,
+                    //     pk_scalar,
+                    //     self.table_id(),
+                    //     scope_label,
+                    //     subject_user
+                    // );
+                    return rows_to_arrow_batch(&schema, vec![(row_id, row)], projection, |_, _| {});
+                }
+
+                if self.hot_pk_tombstoned(scan_context, &pk_scalar).await? {
+                    // log::debug!(
+                    //     "[MvccScan] PK fast-path tombstone for {}={} (table={}; scope={}; subject={})",
+                    //     pk_name,
+                    //     pk_scalar,
+                    //     self.table_id(),
+                    //     scope_label,
+                    //     subject_user
+                    // );
+                    return rows_to_arrow_batch(
+                        &schema,
+                        Vec::<(K, V)>::new(),
+                        projection,
+                        |_, _| {},
+                    );
+                }
+
+                let cold_found =
+                    find_row_by_pk(self, self.scan_cold_scope(scan_context), &pk_scalar.to_string())
+                        .await?;
+                if let Some((row_id, row)) = cold_found {
+                    // log::debug!(
+                    //     "[MvccScan] PK fast-path cold hit for {}={} (table={}; scope={}; subject={})",
+                    //     pk_name,
+                    //     pk_scalar,
+                    //     self.table_id(),
+                    //     scope_label,
+                    //     subject_user
+                    // );
+                    return rows_to_arrow_batch(&schema, vec![(row_id, row)], projection, |_, _| {});
+                }
+
+                // log::debug!(
+                //     "[MvccScan] PK fast-path miss for {}={} (table={}; scope={}; subject={})",
+                //     pk_name,
+                //     pk_scalar,
+                //     self.table_id(),
+                //     scope_label,
+                //     subject_user
+                // );
+                return rows_to_arrow_batch(&schema, Vec::<(K, V)>::new(), projection, |_, _| {});
+            }
+        }
+
+        if self.allow_count_only_fast_path(scan_context)
+            && is_count_only_projection(projection, filter)
+        {
+            let count = self.count_rows_with_context(scan_context).await?;
+            return build_count_only_batch(count);
+        }
+
+        let (since_seq, _until_seq) = if let Some(expr) = filter {
+            extract_seq_bounds_from_filter(expr)
+        } else {
+            (None, None)
+        };
+
+        let keep_deleted = filter.map(filter_uses_deleted_column).unwrap_or(false);
+        let cold_columns = compute_cold_columns(projection, &schema, pk_name);
+        let kvs = self
+            .scan_kvs_with_context(
+                scan_context,
+                filter,
+                since_seq,
+                limit,
+                keep_deleted,
+                cold_columns.as_deref(),
+            )
+            .await?;
+
+        // log::trace!(
+        //     "[MvccScan] scan_rows resolved {} row(s) for table={} scope={} subject={}",
+        //     kvs.len(),
+        //     self.table_id(),
+        //     scope_label,
+        //     subject_user
+        // );
+
+        rows_to_arrow_batch(&schema, kvs, projection, |_, _| {})
+    }
+}
+
+struct DeferredMvccScanSource<P, K, V>
+where
+    P: DeferredMvccScanProvider<K, V>,
+    K: StorageKey + Clone + Send + Sync + 'static,
+    V: ScanRow + Send + Sync + 'static,
+{
+    provider: P,
+    scan_context: P::ScanContext,
+    projection: Option<Vec<usize>>,
+    filter: Option<Expr>,
+    physical_filter: Option<Arc<dyn PhysicalExpr>>,
+    output_projection: Option<Vec<usize>>,
+    output_schema: SchemaRef,
+    _marker: std::marker::PhantomData<(K, V)>,
+}
+
+impl<P, K, V> std::fmt::Debug for DeferredMvccScanSource<P, K, V>
+where
+    P: DeferredMvccScanProvider<K, V>,
+    K: StorageKey + Clone + Send + Sync + 'static,
+    V: ScanRow + Send + Sync + 'static,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeferredMvccScanSource")
+            .field("source", &self.provider.scan_source_name())
+            .field("projection", &self.projection)
+            .field("has_filter", &self.filter.is_some())
+            .finish()
+    }
+}
+
+#[async_trait]
+impl<P, K, V> DeferredBatchSource for DeferredMvccScanSource<P, K, V>
+where
+    P: DeferredMvccScanProvider<K, V>,
+    K: StorageKey + Clone + Send + Sync + 'static,
+    V: ScanRow + Send + Sync + 'static,
+{
+    fn source_name(&self) -> &'static str {
+        self.provider.scan_source_name()
+    }
+
+    fn schema(&self) -> SchemaRef {
+        Arc::clone(&self.output_schema)
+    }
+
+    async fn produce_batch(&self) -> DataFusionResult<RecordBatch> {
+        let batch = self
+            .provider
+            .scan_rows_with_context(
+                &self.scan_context,
+                self.projection.as_ref(),
+                self.filter.as_ref(),
+                None,
+            )
+            .await
+            .map_err(|error| {
+                DataFusionError::Execution(format!(
+                    "{} failed: {}",
+                    self.source_name(),
+                    error
+                ))
+            })?;
+
+        finalize_deferred_batch(
+            batch,
+            self.physical_filter.as_ref(),
+            self.output_projection.as_deref(),
+            None,
+            self.source_name(),
+        )
+    }
+}
 
 /// Unified trait for all table providers with generic storage abstraction
 ///
@@ -108,7 +375,7 @@ pub use crate::utils::row_utils::{inject_system_columns, rows_to_arrow_batch, Sc
 ///                 ↓
 /// Provider.scan_rows(state) → extract_user_context(state)
 ///                           ↓
-/// Provider.scan_with_version_resolution_to_kvs(user_id, filter)
+/// Provider.scan_kvs_with_context(scan_context, filter)
 /// ```
 #[async_trait]
 pub trait BaseTableProvider<K: StorageKey, V>: Send + Sync + TableProvider {
@@ -386,12 +653,13 @@ pub trait BaseTableProvider<K: StorageKey, V>: Send + Sync + TableProvider {
     fn base_supports_filters_pushdown(
         &self,
         filters: &[&Expr],
-    ) -> DataFusionResult<Vec<TableProviderFilterPushDown>> {
-        // We support Inexact pushdown for all filters because:
-        // 1. We use them for partition pruning (Parquet)
-        // 2. We use them for prefix scan / range scan (RocksDB)
-        // But we still need DataFusion to apply the filter afterwards to be safe/exact.
-        Ok(vec![TableProviderFilterPushDown::Inexact; filters.len()])
+    ) -> DataFusionResult<Vec<TableProviderFilterPushDown>>
+    where
+        Self: SourceProvider,
+    {
+        Ok(pushdown_results_for_filters(filters, |filter| {
+            self.filter_capability(filter)
+        }))
     }
 
     /// Default implementation for statistics
@@ -407,83 +675,113 @@ pub trait BaseTableProvider<K: StorageKey, V>: Send + Sync + TableProvider {
         projection: Option<&Vec<usize>>,
         filters: &[Expr],
         limit: Option<usize>,
-    ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
+    ) -> DataFusionResult<Arc<dyn ExecutionPlan>>
+    where
+        Self: SourceProvider + DeferredMvccScanProvider<K, V> + Sized,
+        K: Clone + Send + Sync + 'static,
+        V: ScanRow + Send + Sync + 'static,
+    {
         self.validate_transaction_table_access(state)?;
         self.ensure_leader_read(state).await.map_err(kalam_error_to_datafusion)?;
 
-        let _ = limit;
+        let descriptor = self.scan_descriptor(projection, filters, limit);
+        let pruning = descriptor.pruning_request();
+        let filter_evaluation =
+            mvcc_filter_evaluation(pruning.filters.filters.as_ref(), self.primary_key_field_name());
+        let _ = pruning.limit.limit;
+        let source_filter = combined_filter(filter_evaluation.inexact.filters.as_ref());
+        let exact_filter = combined_filter(filter_evaluation.exact.filters.as_ref());
+        let effective_projection = pruning
+            .projection
+            .columns
+            .as_ref()
+            .map(|indices| indices.as_ref().to_vec());
 
-        // Combine filters (AND) for pruning and pass to scan_rows
-        let combined_filter: Option<Expr> = if filters.is_empty() {
+        let merged_schema = match effective_projection.as_ref() {
+            Some(indices) => descriptor
+                .schema
+                .project(indices)
+                .map(Arc::new)
+                .map_err(|error| DataFusionError::ArrowError(Box::new(error), None))?,
+            None => Arc::clone(&descriptor.schema),
+        };
+        let output_projection = if pruning.filters.filters.is_empty() {
             None
         } else {
-            let first = filters[0].clone();
-            Some(filters[1..].iter().cloned().fold(first, |acc, e| acc.and(e)))
-        };
-
-        // Compute a merged projection that includes both the requested projection columns
-        // AND any columns referenced by filters. This avoids reading all columns for wide
-        // tables when only a subset is needed.
-        let merged_projection: Option<Vec<usize>>;
-        let effective_projection = if filters.is_empty() {
-            merged_projection = None;
             projection
-        } else if let Some(proj) = projection {
-            let schema = self.schema_ref();
-            let mut needed: HashSet<usize> = proj.iter().copied().collect();
-            let mut filter_cols = HashSet::new();
-            for filter in filters {
-                let _ = expr_to_columns(filter, &mut filter_cols);
-            }
-            for col in &filter_cols {
-                if let Some((idx, _)) = schema.column_with_name(&col.name) {
-                    needed.insert(idx);
-                }
-            }
-            let mut indices: Vec<usize> = needed.into_iter().collect();
-            indices.sort_unstable();
-            merged_projection = Some(indices);
-            merged_projection.as_ref()
+                .map(|indices| remap_projection_indices(&descriptor.schema, &merged_schema, indices))
+        };
+        let output_schema = match projection {
+            Some(indices) => descriptor
+                .schema
+                .project(indices)
+                .map(Arc::new)
+                .map_err(|error| DataFusionError::ArrowError(Box::new(error), None))?,
+            None => Arc::clone(&descriptor.schema),
+        };
+        let physical_filter = if let Some(filter) = exact_filter.clone() {
+            let df_schema = DFSchema::try_from(Arc::clone(&merged_schema))?;
+            Some(state.create_physical_expr(filter, &df_schema)?)
         } else {
-            merged_projection = None;
             None
         };
+        let scan_context = self.build_scan_context(state).map_err(kalam_error_to_datafusion)?;
 
-        let batch = self
-            // Provider-level LIMIT pushdown is unsafe here because scan() does not know
-            // whether an ORDER BY will execute above this table scan.
-            .scan_rows(state, effective_projection, combined_filter.as_ref(), None)
-            .await
-            .map_err(|e| DataFusionError::Execution(format!("scan_rows failed: {}", e)))?;
+        Ok(Arc::new(DeferredBatchExec::new(Arc::new(
+            DeferredMvccScanSource::<Self, K, V> {
+                provider: self.clone(),
+                scan_context,
+                projection: effective_projection,
+                filter: source_filter,
+                physical_filter,
+                output_projection,
+                output_schema,
+                _marker: std::marker::PhantomData,
+            },
+        ))))
+    }
 
-        let mem = MemTable::try_new(batch.schema(), vec![vec![batch]])?;
-
-        // When we used a merged projection (proj + filter cols), the batch schema differs
-        // from the original table schema. We need to remap the original projection indices
-        // to the merged batch's column positions for MemTable's final scan.
-        let remapped_projection: Option<Vec<usize>>;
-        let final_projection = if filters.is_empty() {
-            // No filters: batch is already exactly projected → scan all MemTable columns.
-            None
-        } else if let (Some(proj), Some(_)) = (projection, merged_projection.as_ref()) {
-            // Build a mapping from original schema index → merged batch column position.
-            let batch_schema = mem.schema();
-            let original_schema = self.schema_ref();
-            let mut remap = Vec::with_capacity(proj.len());
-            for &orig_idx in proj {
-                let col_name = original_schema.field(orig_idx).name();
-                if let Some((batch_idx, _)) = batch_schema.column_with_name(col_name) {
-                    remap.push(batch_idx);
-                }
-            }
-            remapped_projection = Some(remap);
-            remapped_projection.as_ref()
-        } else {
-            // No projection requested: scan all columns.
-            None
+    async fn base_scan_with_overlay(
+        &self,
+        state: &dyn Session,
+        projection: Option<&Vec<usize>>,
+        filters: &[Expr],
+        limit: Option<usize>,
+        overlay: Option<TransactionOverlay>,
+        overlay_user: Option<UserId>,
+    ) -> DataFusionResult<Arc<dyn ExecutionPlan>>
+    where
+        Self: SourceProvider + DeferredMvccScanProvider<K, V> + Sized,
+        K: Clone + Send + Sync + 'static,
+        V: ScanRow + Send + Sync + 'static,
+    {
+        let Some(overlay) = overlay else {
+            return self.base_scan(state, projection, filters, limit).await;
         };
 
-        mem.scan(state, final_projection, filters, None).await
+        let overlay_projection = crate::utils::datafusion_dml::prepare_overlay_scan_projection(
+            &self.schema_ref(),
+            projection,
+            self.primary_key_field_name(),
+        )?;
+        let base_plan = self
+            .base_scan(
+                state,
+                overlay_projection.effective_projection.as_ref(),
+                filters,
+                limit,
+            )
+            .await?;
+
+        Ok(Arc::new(TransactionOverlayExec::try_new(
+            base_plan,
+            self.table_id().clone(),
+            self.primary_key_field_name().to_string(),
+            overlay,
+            overlay_user,
+            overlay_projection.final_projection,
+            None,
+        )?))
     }
 
     fn validate_transaction_table_access(&self, state: &dyn Session) -> DataFusionResult<()> {
@@ -687,6 +985,30 @@ pub fn extract_pk_equality_literal(filter: &Expr, pk_name: &str) -> Option<Scala
     }
 }
 
+pub fn typed_pk_literal_from_filter(
+    schema: &SchemaRef,
+    filter: Option<&Expr>,
+    pk_name: &str,
+) -> Option<ScalarValue> {
+    let pk_literal = filter.and_then(|expr| extract_pk_equality_literal(expr, pk_name))?;
+    let pk_scalar = if let Ok(field) = schema.field_with_name(pk_name) {
+        kalamdb_commons::conversions::parse_string_as_scalar(
+            &pk_literal.to_string(),
+            field.data_type(),
+        )
+        .ok()
+        .unwrap_or(pk_literal)
+    } else {
+        pk_literal
+    };
+
+    Some(pk_scalar)
+}
+
+pub fn is_count_only_projection(projection: Option<&Vec<usize>>, filter: Option<&Expr>) -> bool {
+    projection.is_some_and(|proj| proj.is_empty()) && filter.is_none()
+}
+
 /// Locate the latest non-deleted row matching the provided primary-key value (async).
 ///
 /// This function scans cold storage (Parquet files) to find a row by its primary key.
@@ -782,6 +1104,71 @@ where
     Ok(None)
 }
 
+pub(crate) struct ResolvedMvccScan<K, V> {
+    pub rows: Vec<(K, V)>,
+    pub hot_rows_scanned: usize,
+    pub cold_rows_scanned: usize,
+}
+
+pub(crate) async fn resolve_latest_scan_from_futures<K, R, HotFuture, ColdFuture, Build>(
+    pk_name: &str,
+    limit: Option<usize>,
+    keep_deleted: bool,
+    snapshot_commit_seq: Option<u64>,
+    hot_future: HotFuture,
+    cold_future: ColdFuture,
+    build_cold_row: Build,
+) -> Result<ResolvedMvccScan<K, R>, KalamDbError>
+where
+    K: Clone,
+    R: VersionedRow,
+    HotFuture: Future<Output = Result<Vec<(K, R)>, KalamDbError>>,
+    ColdFuture: Future<Output = Result<RecordBatch, KalamDbError>>,
+    Build: Fn(ParquetRowData) -> DataFusionResult<(K, R)>,
+{
+    let (hot_result, cold_result) = tokio::join!(hot_future, cold_future);
+    let hot_rows = hot_result?;
+    let hot_rows_scanned = hot_rows.len();
+    let parquet_batch = cold_result?;
+    let cold_rows_scanned = parquet_batch.num_rows();
+
+    let mut rows = resolve_latest_kvs_from_cold_batch(
+        pk_name,
+        hot_rows,
+        &parquet_batch,
+        keep_deleted,
+        snapshot_commit_seq,
+        build_cold_row,
+    )
+    .map_err(|error| KalamDbError::DataFusion(error.to_string()))?;
+
+    apply_limit(&mut rows, limit);
+
+    Ok(ResolvedMvccScan {
+        rows,
+        hot_rows_scanned,
+        cold_rows_scanned,
+    })
+}
+
+pub(crate) async fn count_resolved_rows_from_futures<HotFuture, ColdFuture>(
+    pk_name: &str,
+    snapshot_commit_seq: Option<u64>,
+    hot_future: HotFuture,
+    cold_future: ColdFuture,
+) -> Result<usize, KalamDbError>
+where
+    HotFuture: Future<Output = Result<Vec<RowMetadata>, KalamDbError>>,
+    ColdFuture: Future<Output = Result<RecordBatch, KalamDbError>>,
+{
+    let (hot_result, cold_result) = tokio::join!(hot_future, cold_future);
+    let hot_metadata = hot_result?;
+    let parquet_batch = cold_result?;
+
+    count_resolved_from_metadata(pk_name, hot_metadata, &parquet_batch, snapshot_commit_seq)
+        .map_err(|error| KalamDbError::DataFusion(error.to_string()))
+}
+
 /// Check if a PK value exists in cold storage (Parquet files) using manifest-based pruning (async).
 ///
 /// **Optimized for PK existence checks during INSERT**:
@@ -823,12 +1210,12 @@ pub async fn pk_exists_in_cold(
     let storage_id = match core.services.schema_registry.get_storage_id(table_id) {
         Ok(id) => id,
         Err(_) => {
-            log::trace!(
-                "[pk_exists_in_cold] No storage id for {}.{} {} - PK not in cold",
-                namespace.as_str(),
-                table.as_str(),
-                scope_label
-            );
+            // log::trace!(
+            //     "[pk_exists_in_cold] No storage id for {}.{} {} - PK not in cold",
+            //     namespace.as_str(),
+            //     table.as_str(),
+            //     scope_label
+            // );
             return Ok(false);
         },
     };
@@ -848,12 +1235,12 @@ pub async fn pk_exists_in_cold(
     let manifest: Option<Manifest> = match &cache_result {
         Ok(Some(entry)) => Some(entry.manifest.clone()),
         Ok(None) => {
-            log::trace!(
-                "[pk_exists_in_cold] No manifest for {}.{} {} - checking all files",
-                namespace.as_str(),
-                table.as_str(),
-                scope_label
-            );
+            // log::trace!(
+            //     "[pk_exists_in_cold] No manifest for {}.{} {} - checking all files",
+            //     namespace.as_str(),
+            //     table.as_str(),
+            //     scope_label
+            // );
             None
         },
         Err(e) => {
@@ -872,12 +1259,12 @@ pub async fn pk_exists_in_cold(
     // Avoid storage listing on hot-only write paths.
     if let Some(ref m) = manifest {
         if m.segments.is_empty() {
-            log::trace!(
-                "[pk_exists_in_cold] Manifest has no segments for {}.{} {} - PK not in cold",
-                namespace.as_str(),
-                table.as_str(),
-                scope_label
-            );
+            // log::trace!(
+            //     "[pk_exists_in_cold] Manifest has no segments for {}.{} {} - PK not in cold",
+            //     namespace.as_str(),
+            //     table.as_str(),
+            //     scope_label
+            // );
             return Ok(false);
         }
     }
@@ -887,24 +1274,24 @@ pub async fn pk_exists_in_cold(
     let files_to_scan: Vec<String> = if let Some(ref m) = manifest {
         let pruned_paths = planner.plan_by_pk_value(m, pk_column_id, pk_value);
         if pruned_paths.is_empty() {
-            log::trace!(
-                "[pk_exists_in_cold] Manifest pruning returned no candidate segments for PK {} on {}.{} {} - PK not in cold",
-                pk_value,
-                namespace.as_str(),
-                table.as_str(),
-                scope_label
-            );
+            // log::trace!(
+            //     "[pk_exists_in_cold] Manifest pruning returned no candidate segments for PK {} on {}.{} {} - PK not in cold",
+            //     pk_value,
+            //     namespace.as_str(),
+            //     table.as_str(),
+            //     scope_label
+            // );
             return Ok(false);
         } else {
-            log::trace!(
-                "[pk_exists_in_cold] Manifest pruning: {} of {} segments may contain PK {} for {}.{} {}",
-                pruned_paths.len(),
-                m.segments.len(),
-                pk_value,
-                namespace.as_str(),
-                table.as_str(),
-                scope_label
-            );
+            // log::trace!(
+            //     "[pk_exists_in_cold] Manifest pruning: {} of {} segments may contain PK {} for {}.{} {}",
+            //     pruned_paths.len(),
+            //     m.segments.len(),
+            //     pk_value,
+            //     namespace.as_str(),
+            //     table.as_str(),
+            //     scope_label
+            // );
             pruned_paths
         }
     } else {
@@ -912,22 +1299,22 @@ pub async fn pk_exists_in_cold(
         let list_result = match storage_cached.list(table_type, table_id, user_id).await {
             Ok(result) => result,
             Err(_) => {
-                log::trace!(
-                    "[pk_exists_in_cold] No storage dir for {}.{} {} - PK not in cold",
-                    namespace.as_str(),
-                    table.as_str(),
-                    scope_label
-                );
+                // log::trace!(
+                //     "[pk_exists_in_cold] No storage dir for {}.{} {} - PK not in cold",
+                //     namespace.as_str(),
+                //     table.as_str(),
+                //     scope_label
+                // );
                 return Ok(false);
             },
         };
         if list_result.is_empty() {
-            log::trace!(
-                "[pk_exists_in_cold] No files in storage for {}.{} {} - PK not in cold",
-                namespace.as_str(),
-                table.as_str(),
-                scope_label
-            );
+            // log::trace!(
+            //     "[pk_exists_in_cold] No files in storage for {}.{} {} - PK not in cold",
+            //     namespace.as_str(),
+            //     table.as_str(),
+            //     scope_label
+            // );
             return Ok(false);
         }
         collect_parquet_files_from_list(&list_result)
@@ -1047,12 +1434,12 @@ pub async fn pk_exists_batch_in_cold(
     let manifest: Option<Manifest> = match &cache_result {
         Ok(Some(entry)) => Some(entry.manifest.clone()),
         Ok(None) => {
-            log::trace!(
-                "[pk_exists_batch_in_cold] No manifest for {}.{} {} - checking all files",
-                namespace.as_str(),
-                table.as_str(),
-                scope_label
-            );
+            // log::trace!(
+            //     "[pk_exists_batch_in_cold] No manifest for {}.{} {} - checking all files",
+            //     namespace.as_str(),
+            //     table.as_str(),
+            //     scope_label
+            // );
             None
         },
         Err(e) => {
@@ -1071,12 +1458,12 @@ pub async fn pk_exists_batch_in_cold(
     // Avoid storage listing on hot-only write paths.
     if let Some(ref m) = manifest {
         if m.segments.is_empty() {
-            log::trace!(
-                "[pk_exists_batch_in_cold] Manifest has no segments for {}.{} {} - PK not in cold",
-                namespace.as_str(),
-                table.as_str(),
-                scope_label
-            );
+            // log::trace!(
+            //     "[pk_exists_batch_in_cold] Manifest has no segments for {}.{} {} - PK not in cold",
+            //     namespace.as_str(),
+            //     table.as_str(),
+            //     scope_label
+            // );
             return Ok(None);
         }
     }
@@ -1438,7 +1825,7 @@ where
 /// Log a warning when scanning version resolution without filter or limit.
 ///
 /// This helps identify potential performance issues where full table scans are happening.
-/// Called by `scan_with_version_resolution_to_kvs` implementations.
+/// Called by provider-side MVCC scan implementations.
 ///
 /// # Arguments
 /// * `table_id` - Table identifier for logging
@@ -1484,6 +1871,19 @@ pub fn compute_cold_columns(
     }
     col_set.insert(pk_name.to_string());
     Some(col_set.into_iter().collect())
+}
+
+/// Compute the minimal cold-path columns needed for metadata-only MVCC work.
+///
+/// Used by count-only paths that only need the primary key and MVCC system
+/// columns to choose visible winners without decoding full user payloads.
+pub fn compute_metadata_only_cold_columns(pk_name: &str) -> Vec<String> {
+    vec![
+        pk_name.to_string(),
+        SystemColumnNames::SEQ.to_string(),
+        SystemColumnNames::COMMIT_SEQ.to_string(),
+        SystemColumnNames::DELETED.to_string(),
+    ]
 }
 
 /// Validate that an UPDATE operation doesn't change the PK to an existing value
@@ -1645,6 +2045,13 @@ pub fn build_notification_row(fields: &Row, seq: SeqId, commit_seq: u64, deleted
     Row::new(values)
 }
 
+/// Build a notification row for append-only stream tables.
+pub fn build_stream_notification_row(fields: &Row, seq: SeqId) -> Row {
+    let mut values = fields.values.clone();
+    values.insert(SystemColumnNames::SEQ.to_string(), ScalarValue::Int64(Some(seq.as_i64())));
+    Row::new(values)
+}
+
 /// Build a count-only RecordBatch with no columns but the given row count.
 ///
 /// Used by the COUNT(*) fast-path in both SharedTableProvider and UserTableProvider
@@ -1661,4 +2068,51 @@ pub fn build_count_only_batch(count: usize) -> Result<RecordBatch, KalamDbError>
     RecordBatch::try_new_with_options(empty_schema, vec![], &options).map_err(|e| {
         KalamDbError::InvalidOperation(format!("Failed to build count-only batch: {}", e))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use datafusion::arrow::datatypes::{DataType, Field, Schema};
+
+    #[test]
+    fn compute_metadata_only_cold_columns_returns_pk_and_mvcc_columns() {
+        let columns = compute_metadata_only_cold_columns("id");
+
+        assert_eq!(
+            columns,
+            vec![
+                "id".to_string(),
+                SystemColumnNames::SEQ.to_string(),
+                SystemColumnNames::COMMIT_SEQ.to_string(),
+                SystemColumnNames::DELETED.to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn compute_cold_columns_adds_pk_and_system_columns_to_projection() {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Utf8, false),
+            Field::new("name", DataType::Utf8, true),
+            Field::new("email", DataType::Utf8, true),
+        ]));
+        let projection = vec![1usize];
+        let columns = compute_cold_columns(Some(&projection), &schema, "id")
+            .expect("projection should produce cold columns");
+
+        assert!(columns.iter().any(|column| column == "id"));
+        assert!(columns.iter().any(|column| column == "name"));
+        assert!(columns.iter().any(|column| column == SystemColumnNames::SEQ));
+        assert!(
+            columns
+                .iter()
+                .any(|column| column == SystemColumnNames::COMMIT_SEQ)
+        );
+        assert!(
+            columns
+                .iter()
+                .any(|column| column == SystemColumnNames::DELETED)
+        );
+    }
 }

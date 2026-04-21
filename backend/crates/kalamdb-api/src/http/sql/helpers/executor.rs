@@ -17,16 +17,14 @@ pub async fn execute_single_statement_raw(
     execute_as_user: Option<UserId>,
     params: Vec<ScalarValue>,
 ) -> Result<ExecutionResult, Box<dyn std::error::Error>> {
-    let effective_ctx = if let Some(user_id) = execute_as_user {
-        exec_ctx.with_effective_identity(user_id, Role::User)
+    let exec_result = if let Some(user_id) = execute_as_user {
+        let effective_ctx = exec_ctx.with_effective_identity(user_id, Role::User);
+        sql_executor.execute_with_metadata(metadata, &effective_ctx, params).await
     } else {
-        exec_ctx.clone()
+        sql_executor.execute_with_metadata(metadata, exec_ctx, params).await
     };
 
-    sql_executor
-        .execute_with_metadata(metadata, &effective_ctx, params)
-        .await
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+    exec_result.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
 }
 
 pub fn execution_result_to_query_result(

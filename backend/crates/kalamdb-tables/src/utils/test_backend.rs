@@ -111,7 +111,7 @@ impl StorageBackend for RecordingBackend {
         self.inner.compact_partition(partition)
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
+    fn stats(&self) -> kalamdb_store::storage_trait::StorageStats {
+        self.inner.stats()
     }
 }

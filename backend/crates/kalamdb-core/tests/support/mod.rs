@@ -278,7 +278,7 @@ pub fn row(id: i64, name: &str) -> Row {
     ]))
 }
 
-pub fn request_transaction_state(exec_ctx: &ExecutionContext) -> RequestTransactionState {
+pub fn request_transaction_state(exec_ctx: &ExecutionContext) -> RequestTransactionState<'_> {
     RequestTransactionState::from_execution_context(exec_ctx)
         .expect("request transaction state")
         .expect("request transaction state present")

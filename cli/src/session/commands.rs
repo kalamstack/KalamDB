@@ -256,31 +256,80 @@ impl CLISession {
         let left = [
             ("\\help, \\?", "Show this help"),
             ("\\quit, \\q", "Exit CLI"),
-            ("\\info", "Session info"),
+            ("\\info, \\session", "Session info"),
             ("\\sessions", "PG gRPC sessions"),
+            ("\\stats, \\metrics", "System stats"),
+            ("\\health", "Health check"),
             ("\\format <type>", "table|json|csv"),
             ("\\history, \\h", "Browse history"),
+            ("\\refresh-tables, \\refresh", "Refresh autocomplete"),
         ];
         let right = [
-            ("\\dt", "List tables"),
-            ("\\d <table>", "Describe table"),
-            ("\\stats", "System stats"),
-            ("\\health", "Health check"),
-            ("\\refresh-tables", "Refresh autocomplete"),
-            ("\\subscribe <SQL>", "Start live query"),
+            ("\\dt, \\tables", "List tables"),
+            ("\\d, \\describe <table>", "Describe table"),
+            ("\\flush", "Run STORAGE FLUSH ALL"),
+            ("\\pause", "Pause ingestion"),
+            ("\\continue", "Resume ingestion"),
+            ("\\subscribe, \\watch <SQL>", "Start live query"),
+            ("\\unsubscribe, \\unwatch", "Stop live query"),
             ("\\consume <topic>", "Consume topic messages"),
+            ("\\cluster <subcommand>", "Cluster operations"),
         ];
         for i in 0..left.len().max(right.len()) {
             let l = left
                 .get(i)
-                .map(|(a, b)| format!("{:<18} {:<18}", a.cyan(), b))
-                .unwrap_or_else(|| "".into());
+                .map(|(a, b)| format!("{:<28} {:<18}", a.cyan(), b))
+                .unwrap_or_default();
             let r = right
                 .get(i)
-                .map(|(a, b)| format!("{:<18} {:<18}", a.cyan(), b))
-                .unwrap_or_else(|| "".into());
-            println!("║  {}  {}{}", l, r, " ".repeat(7));
+                .map(|(a, b)| format!("{:<28} {:<18}", a.cyan(), b))
+                .unwrap_or_default();
+            println!("║  {:<47}{:<47} ║", l, r);
         }
+
+        // Cluster Commands
+        println!(
+            "{}",
+            "╠───────────────────────────────────────────────────────────╣"
+                .bright_blue()
+                .bold()
+        );
+        println!("{}", "║  Cluster Commands".bright_blue().bold());
+        println!("║    {:<48} Trigger snapshot", "\\cluster snapshot".cyan());
+        println!(
+            "║    {:<48} Purge logs up to index",
+            "\\cluster purge --upto <index>".cyan()
+        );
+        println!(
+            "║    {:<48} Trigger cluster election",
+            "\\cluster trigger-election".cyan()
+        );
+        println!(
+            "║    {:<48} Transfer cluster leadership",
+            "\\cluster transfer-leader <node_id>".cyan()
+        );
+        println!("║    {:<48} Leader stepdown", "\\cluster stepdown".cyan());
+        println!("║    {:<48} Clear old snapshots", "\\cluster clear".cyan());
+        println!("║    {:<48} List cluster nodes", "\\cluster list".cyan());
+        println!(
+            "║    {:<48} List all raft groups",
+            "\\cluster list groups".cyan()
+        );
+        println!("║    {:<48} Cluster status", "\\cluster status".cyan());
+        println!(
+            "║    {:<48} Join node {}",
+            "\\cluster join <addr>".cyan(),
+            "(not implemented)".yellow()
+        );
+        println!(
+            "║    {:<48} Leave cluster {}",
+            "\\cluster leave".cyan(),
+            "(not implemented)".yellow()
+        );
+        println!(
+            "║    {:<48} Live per-node stats",
+            "\\subscribe SELECT * FROM system.cluster".cyan()
+        );
 
         // Credentials
         println!(
@@ -290,9 +339,18 @@ impl CLISession {
                 .bold()
         );
         println!("{}", "║  Credentials".bright_blue().bold());
-        println!("║    {:<24} Show stored credentials", "\\show-credentials".cyan());
-        println!("║    {:<24} Update credentials", "\\update-credentials <u> <p>".cyan());
-        println!("║    {:<24} Delete stored credentials", "\\delete-credentials".cyan());
+        println!(
+            "║    {:<32} Show stored credentials",
+            "\\show-credentials, \\credentials".cyan()
+        );
+        println!(
+            "║    {:<32} Update credentials",
+            "\\update-credentials <u> <p>".cyan()
+        );
+        println!(
+            "║    {:<32} Delete stored credentials",
+            "\\delete-credentials".cyan()
+        );
 
         // Topic Consumption
         println!(
@@ -326,7 +384,7 @@ impl CLISession {
         println!("{}", "║  Examples".bright_blue().bold());
         println!("║    {}", "SELECT * FROM system.tables LIMIT 5;".green());
         println!("║    {}", "SELECT name FROM system.namespaces;".green());
-        println!("║    {}", "\\d system.jobs".green());
+        println!("║    {}", "\\cluster status".green());
 
         println!(
             "{}",

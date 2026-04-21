@@ -8,7 +8,6 @@ use datafusion::logical_expr::{
     ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
 };
 use kalamdb_commons::arrow_utils::{arrow_utf8, ArrowDataType};
-use kalamdb_commons::UserId;
 use kalamdb_session_datafusion::SessionUserContext;
 use std::any::Any;
 use std::sync::Arc;
@@ -16,26 +15,13 @@ use std::sync::Arc;
 /// KDB_CURRENT_USER() scalar function implementation
 ///
 /// Returns the user_id of the current session user.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct CurrentUserFunction {
-    user_id: Option<UserId>,
-}
+/// `CURRENT_USER_ID()` is rewritten to this function at the dialect layer.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+pub struct CurrentUserFunction;
 
 impl CurrentUserFunction {
     pub fn new() -> Self {
-        Self { user_id: None }
-    }
-
-    pub fn with_user_id(user_id: &UserId) -> Self {
-        Self {
-            user_id: Some(user_id.clone()),
-        }
-    }
-}
-
-impl Default for CurrentUserFunction {
-    fn default() -> Self {
-        Self::new()
+        Self
     }
 }
 
@@ -62,18 +48,17 @@ impl ScalarUDFImpl for CurrentUserFunction {
             return Err(DataFusionError::Plan("KDB_CURRENT_USER() takes no arguments".to_string()));
         }
 
-        let current_user = if let Some(uid) = &self.user_id {
-            uid.as_str().to_string()
-        } else if let Some(session_ctx) = args.config_options.extensions.get::<SessionUserContext>()
-        {
-            session_ctx.user_id.as_str().to_string()
-        } else {
-            return Err(DataFusionError::Execution(
-                "KDB_CURRENT_USER() failed: session user context not found".to_string(),
-            ));
-        };
+        let session_ctx = args
+            .config_options
+            .extensions
+            .get::<SessionUserContext>()
+            .ok_or_else(|| {
+                DataFusionError::Execution(
+                    "KDB_CURRENT_USER() failed: session user context not found".to_string(),
+                )
+            })?;
 
-        let array = StringArray::from(vec![current_user.as_str()]);
+        let array = StringArray::from(vec![session_ctx.user_id.as_str()]);
         Ok(ColumnarValue::Array(Arc::new(array) as ArrayRef))
     }
 }

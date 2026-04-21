@@ -55,10 +55,11 @@ impl PkCheckResult {
 /// Optimized for INSERT/UPDATE operations that need to validate PK uniqueness.
 /// Uses a tiered approach:
 /// 1. Check if PK is auto-increment (skip)
-/// 2. Check hot storage (RocksDB) via provider's PK index
-/// 3. Use manifest cache (L1/L2) to load segment metadata
-/// 4. Apply min/max pruning to skip irrelevant segments
-/// 5. Scan only necessary Parquet files
+/// 2. Use manifest cache (L1/L2) to load segment metadata
+/// 3. Apply min/max pruning to skip irrelevant segments
+/// 4. Scan only necessary Parquet files
+///
+/// The hot-storage PK index is checked by the caller before this checker runs.
 pub struct PkExistenceChecker {
     schema_registry: Arc<dyn SchemaRegistryTrait<Error = KalamDbError>>,
     storage_registry: Arc<StorageRegistry>,
@@ -83,10 +84,9 @@ impl PkExistenceChecker {
     ///
     /// ## Flow:
     /// 1. Check if PK is AUTO_INCREMENT → return AutoIncrement (skip check)
-    /// 2. Check if PK value is provided (not null)
-    /// 3. Load manifest from cache (L1 hot cache → L2 RocksDB → storage)
-    /// 4. Use column_stats min/max to prune segments
-    /// 5. Scan only matching Parquet files
+    /// 2. Load manifest from cache (L1 hot cache → L2 RocksDB → storage)
+    /// 3. Use column_stats min/max to prune segments
+    /// 4. Scan only matching Parquet files
     ///
     /// ## Arguments
     /// * `core` - TableProviderCore with cached PK info
@@ -116,16 +116,10 @@ impl PkExistenceChecker {
         let pk_column = core.primary_key_field_name();
         let pk_column_id = core.primary_key_column_id();
 
-        // Step 3-5: Use the optimized cold storage check
-        let exists_in_cold = self
+        // Step 2-4: Use the optimized cold storage check
+        self
             .check_cold_storage(table_id, table_type, user_id, pk_column, pk_column_id, pk_value)
-            .await?;
-
-        if let Some(segment_path) = exists_in_cold {
-            return Ok(PkCheckResult::FoundInCold { segment_path });
-        }
-
-        Ok(PkCheckResult::NotFound)
+            .await
     }
 
     /// Check cold storage for PK existence using manifest-based pruning (async)
@@ -139,7 +133,7 @@ impl PkExistenceChecker {
         pk_column: &str,
         pk_column_id: u64,
         pk_value: &str,
-    ) -> Result<Option<String>, KalamDbError> {
+    ) -> Result<PkCheckResult, KalamDbError> {
         let namespace = table_id.namespace_id();
         let table = table_id.table_name();
         let scope_label = user_id
@@ -157,7 +151,7 @@ impl PkExistenceChecker {
                     scope_label,
                     e
                 );
-                return Ok(None);
+                return Ok(PkCheckResult::NotFound);
             },
         };
 
@@ -175,7 +169,7 @@ impl PkExistenceChecker {
                     table.as_str(),
                     scope_label
                 );
-                return Ok(None);
+                return Ok(PkCheckResult::NotFound);
             },
         };
 
@@ -190,7 +184,7 @@ impl PkExistenceChecker {
                         table.as_str(),
                         scope_label
                     );
-                    return Ok(None);
+                    return Ok(PkCheckResult::NotFound);
                 },
             };
 
@@ -201,7 +195,7 @@ impl PkExistenceChecker {
                 table.as_str(),
                 scope_label
             );
-            return Ok(None);
+            return Ok(PkCheckResult::NotFound);
         }
 
         // 4. Load manifest from cache (L1 → L2 → storage)
@@ -250,13 +244,13 @@ impl PkExistenceChecker {
             let pruned_paths = planner.plan_by_pk_value(m, pk_column_id, pk_value);
             if pruned_paths.is_empty() {
                 log::trace!(
-                    "[PkExistenceChecker] Manifest pruning returned no candidate segments for PK {} on {}.{} {} - falling back to full parquet scan",
+                    "[PkExistenceChecker] Manifest pruning returned no candidate segments for PK {} on {}.{} {} - PK not in cold",
                     pk_value,
                     namespace.as_str(),
                     table.as_str(),
                     scope_label
                 );
-                all_parquet_files
+                return Ok(PkCheckResult::PrunedByManifest);
             } else {
                 log::trace!(
                     "[PkExistenceChecker] Manifest pruning: {} of {} segments may contain PK {} for {}.{} {}",
@@ -275,7 +269,7 @@ impl PkExistenceChecker {
         };
 
         if files_to_scan.is_empty() {
-            return Ok(None);
+            return Ok(PkCheckResult::NotFound);
         }
 
         // 6. Scan pruned Parquet files for the PK
@@ -300,11 +294,13 @@ impl PkExistenceChecker {
                     table.as_str(),
                     scope_label
                 );
-                return Ok(Some(file_name));
+                return Ok(PkCheckResult::FoundInCold {
+                    segment_path: file_name,
+                });
             }
         }
 
-        Ok(None)
+        Ok(PkCheckResult::NotFound)
     }
 
     /// Extract PK value as string from an Arrow array (now uses shared utility)
@@ -446,11 +442,183 @@ impl PkExistenceChecker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+    use std::fs;
+    use std::path::Path;
+
+    use async_trait::async_trait;
+    use datafusion::arrow::datatypes::SchemaRef;
+    use kalamdb_commons::ids::SeqId;
     use kalamdb_commons::models::datatypes::KalamDataType;
+    use kalamdb_commons::models::rows::StoredScalarValue;
     use kalamdb_commons::models::schemas::{
         ColumnDefault, ColumnDefinition, TableDefinition, TableType,
     };
-    use kalamdb_commons::{NamespaceId, TableName};
+    use kalamdb_commons::{NamespaceId, StorageId, TableId, TableName, UserId};
+    use kalamdb_filestore::StorageRegistry;
+    use kalamdb_store::test_utils::InMemoryBackend;
+    use kalamdb_store::{StorageBackend, StorageError};
+    use kalamdb_system::{
+        ManifestCacheEntry, ManifestService, SegmentMetadata, Storage, StorageType,
+        StoragesTableProvider, SyncState,
+    };
+    use tempfile::TempDir;
+
+    #[derive(Debug, Clone)]
+    struct TestSchemaRegistry {
+        table_id: TableId,
+        table_def: Arc<TableDefinition>,
+        schema: SchemaRef,
+        storage_id: StorageId,
+    }
+
+    impl SchemaRegistryTrait for TestSchemaRegistry {
+        type Error = KalamDbError;
+
+        fn get_arrow_schema(&self, table_id: &TableId) -> Result<SchemaRef, Self::Error> {
+            if &self.table_id == table_id {
+                Ok(Arc::clone(&self.schema))
+            } else {
+                Err(KalamDbError::TableNotFound(table_id.to_string()))
+            }
+        }
+
+        fn get_table_if_exists(
+            &self,
+            table_id: &TableId,
+        ) -> Result<Option<Arc<TableDefinition>>, Self::Error> {
+            if &self.table_id == table_id {
+                Ok(Some(Arc::clone(&self.table_def)))
+            } else {
+                Ok(None)
+            }
+        }
+
+        fn get_arrow_schema_for_version(
+            &self,
+            table_id: &TableId,
+            _schema_version: u32,
+        ) -> Result<SchemaRef, Self::Error> {
+            self.get_arrow_schema(table_id)
+        }
+
+        fn get_storage_id(&self, table_id: &TableId) -> Result<StorageId, Self::Error> {
+            if &self.table_id == table_id {
+                Ok(self.storage_id.clone())
+            } else {
+                Err(KalamDbError::TableNotFound(table_id.to_string()))
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct FixedManifestService {
+        entry: Arc<ManifestCacheEntry>,
+    }
+
+    #[async_trait]
+    impl ManifestService for FixedManifestService {
+        fn get_or_load(
+            &self,
+            _table_id: &TableId,
+            _user_id: Option<&UserId>,
+        ) -> Result<Option<Arc<ManifestCacheEntry>>, StorageError> {
+            Ok(Some(Arc::clone(&self.entry)))
+        }
+
+        async fn get_or_load_async(
+            &self,
+            _table_id: &TableId,
+            _user_id: Option<&UserId>,
+        ) -> Result<Option<Arc<ManifestCacheEntry>>, StorageError> {
+            Ok(Some(Arc::clone(&self.entry)))
+        }
+
+        fn validate_manifest(&self, _manifest: &Manifest) -> Result<(), StorageError> {
+            Ok(())
+        }
+
+        fn mark_as_stale(
+            &self,
+            _table_id: &TableId,
+            _user_id: Option<&UserId>,
+        ) -> Result<(), StorageError> {
+            Ok(())
+        }
+
+        fn rebuild_manifest(
+            &self,
+            _table_id: &TableId,
+            _user_id: Option<&UserId>,
+        ) -> Result<Manifest, StorageError> {
+            panic!("rebuild_manifest is unused in PK pruning tests")
+        }
+
+        fn mark_pending_write(
+            &self,
+            _table_id: &TableId,
+            _user_id: Option<&UserId>,
+        ) -> Result<(), StorageError> {
+            Ok(())
+        }
+
+        fn ensure_manifest_initialized(
+            &self,
+            _table_id: &TableId,
+            _user_id: Option<&UserId>,
+        ) -> Result<Manifest, StorageError> {
+            panic!("ensure_manifest_initialized is unused in PK pruning tests")
+        }
+
+        fn stage_before_flush(
+            &self,
+            _table_id: &TableId,
+            _user_id: Option<&UserId>,
+            _manifest: &Manifest,
+        ) -> Result<(), StorageError> {
+            panic!("stage_before_flush is unused in PK pruning tests")
+        }
+
+        fn get_manifest_user_ids(&self, _table_id: &TableId) -> Result<Vec<UserId>, StorageError> {
+            Ok(Vec::new())
+        }
+    }
+
+    fn build_storage_registry(temp_dir: &TempDir) -> Arc<StorageRegistry> {
+        let backend: Arc<dyn StorageBackend> = Arc::new(InMemoryBackend::new());
+        let storages_provider = Arc::new(StoragesTableProvider::new(backend));
+        let base_directory = temp_dir.path().to_string_lossy().into_owned();
+
+        storages_provider
+            .create_storage(Storage {
+                storage_id: StorageId::local(),
+                storage_name: "Local Storage".to_string(),
+                description: Some("PK pruning test storage".to_string()),
+                storage_type: StorageType::Filesystem,
+                base_directory: base_directory.clone(),
+                credentials: None,
+                config_json: None,
+                shared_tables_template: "shared/{namespace}/{tableName}".to_string(),
+                user_tables_template: "user/{namespace}/{tableName}/{userId}".to_string(),
+                created_at: 1_000,
+                updated_at: 1_000,
+            })
+            .expect("seed local storage");
+
+        Arc::new(StorageRegistry::new(
+            storages_provider,
+            base_directory,
+            Default::default(),
+        ))
+    }
+
+    fn numeric_stats(min: i64, max: i64) -> kalamdb_system::ColumnStats {
+        kalamdb_system::ColumnStats::new(
+            Some(StoredScalarValue::Int64(Some(min.to_string()))),
+            Some(StoredScalarValue::Int64(Some(max.to_string()))),
+            Some(0),
+        )
+    }
 
     #[allow(dead_code)]
     fn create_test_table_def(pk_default: ColumnDefault) -> TableDefinition {
@@ -501,5 +669,75 @@ mod tests {
             segment_path: "batch-0.parquet".to_string()
         }
         .exists());
+    }
+
+    #[tokio::test]
+    #[ntest::timeout(2000)]
+    async fn manifest_prune_returns_without_opening_parquet() {
+        let table_def = Arc::new(create_test_table_def(ColumnDefault::None));
+        let table_id = TableId::new(table_def.namespace_id.clone(), table_def.table_name.clone());
+        let user_id = UserId::from("u_123");
+        let schema = table_def.to_arrow_schema().expect("build arrow schema");
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let storage_registry = build_storage_registry(&temp_dir);
+        let storage_cached = storage_registry
+            .get_cached(&StorageId::local())
+            .expect("lookup storage")
+            .expect("local storage exists");
+
+        let parquet_path = storage_cached.get_file_path(
+            TableType::User,
+            &table_id,
+            Some(&user_id),
+            "batch-0.parquet",
+        );
+        fs::create_dir_all(
+            Path::new(&parquet_path.full_path)
+                .parent()
+                .expect("parquet parent exists"),
+        )
+        .expect("create parquet dir");
+        fs::write(&parquet_path.full_path, b"not a parquet file")
+            .expect("seed invalid parquet file");
+
+        let mut manifest = Manifest::new(table_id.clone(), Some(user_id.clone()));
+        let mut column_stats = HashMap::new();
+        column_stats.insert(1, numeric_stats(1, 10));
+        manifest.add_segment(SegmentMetadata::with_schema_version(
+            "batch-0.parquet".to_string(),
+            "batch-0.parquet".to_string(),
+            column_stats,
+            SeqId::from(1i64),
+            SeqId::from(10i64),
+            1,
+            16,
+            1,
+        ));
+
+        let manifest_service: Arc<dyn ManifestServiceTrait> = Arc::new(FixedManifestService {
+            entry: Arc::new(ManifestCacheEntry::new(
+                manifest,
+                None,
+                chrono::Utc::now().timestamp_millis(),
+                SyncState::InSync,
+            )),
+        });
+
+        let schema_registry: Arc<dyn SchemaRegistryTrait<Error = KalamDbError>> =
+            Arc::new(TestSchemaRegistry {
+                table_id: table_id.clone(),
+                table_def,
+                schema,
+                storage_id: StorageId::local(),
+            });
+
+        let checker = PkExistenceChecker::new(schema_registry, storage_registry, manifest_service);
+
+        let result = checker
+            .check_cold_storage(&table_id, TableType::User, Some(&user_id), "id", 1, "999")
+            .await
+            .expect("manifest-pruned lookup should not open parquet");
+
+        assert_eq!(result, PkCheckResult::PrunedByManifest);
     }
 }

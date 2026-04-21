@@ -1,6 +1,5 @@
-use kalam_pg_fdw::{ServerOptions, TableOptions};
-use kalamdb_commons::models::{NamespaceId, TableName};
-use kalamdb_commons::{TableId, TableType};
+use kalam_pg_common::RemoteAuthMode;
+use kalam_pg_fdw::ServerOptions;
 use std::collections::BTreeMap;
 
 #[test]
@@ -14,6 +13,10 @@ fn parses_remote_server_options() {
 
     assert_eq!(parsed.remote.as_ref().expect("remote config").host, "127.0.0.1");
     assert_eq!(parsed.remote.as_ref().expect("remote config").port, 50051);
+    assert_eq!(
+        parsed.remote.as_ref().expect("remote config").auth_mode,
+        RemoteAuthMode::None
+    );
 }
 
 #[test]
@@ -30,34 +33,6 @@ fn rejects_missing_port() {
 
     let err = ServerOptions::parse(&options).expect_err("missing port should fail");
     assert!(err.to_string().contains("port"));
-}
-
-#[test]
-fn parses_table_options() {
-    let options = BTreeMap::from([
-        ("namespace".to_string(), "app".to_string()),
-        ("table".to_string(), "messages".to_string()),
-        ("table_type".to_string(), "user".to_string()),
-    ]);
-
-    let parsed = TableOptions::parse(&options).expect("parse table options");
-
-    assert_eq!(
-        parsed.table_id,
-        TableId::new(NamespaceId::new("app"), TableName::new("messages"))
-    );
-    assert_eq!(parsed.table_type, TableType::User);
-}
-
-#[test]
-fn table_options_require_namespace() {
-    let options = BTreeMap::from([
-        ("table".to_string(), "messages".to_string()),
-        ("table_type".to_string(), "user".to_string()),
-    ]);
-
-    let err = TableOptions::parse(&options).expect_err("missing namespace should fail");
-    assert!(err.to_string().contains("namespace"));
 }
 
 #[test]
@@ -133,4 +108,62 @@ fn non_tls_uses_http_scheme() {
     let remote = parsed.remote.as_ref().expect("remote config");
     assert!(!remote.tls_enabled());
     assert_eq!(remote.endpoint_uri(), "http://127.0.0.1:50051");
+}
+
+#[test]
+fn legacy_auth_header_defaults_to_static_header_mode() {
+    let options = BTreeMap::from([
+        ("host".to_string(), "127.0.0.1".to_string()),
+        ("port".to_string(), "50051".to_string()),
+        ("auth_header".to_string(), "Bearer legacy-secret".to_string()),
+    ]);
+
+    let parsed = ServerOptions::parse(&options).expect("parse legacy auth_header options");
+    let remote = parsed.remote.as_ref().expect("remote config");
+    assert_eq!(remote.auth_mode, RemoteAuthMode::StaticHeader);
+    assert_eq!(remote.auth_header.as_deref(), Some("Bearer legacy-secret"));
+}
+
+#[test]
+fn parses_account_login_server_options() {
+    let options = BTreeMap::from([
+        ("host".to_string(), "127.0.0.1".to_string()),
+        ("port".to_string(), "50051".to_string()),
+        ("auth_mode".to_string(), "account_login".to_string()),
+        ("login_user".to_string(), "pg_dba".to_string()),
+        ("login_password".to_string(), "super-secret".to_string()),
+    ]);
+
+    let parsed = ServerOptions::parse(&options).expect("parse account_login options");
+    let remote = parsed.remote.as_ref().expect("remote config");
+    assert_eq!(remote.auth_mode, RemoteAuthMode::AccountLogin);
+    assert_eq!(remote.login_user.as_deref(), Some("pg_dba"));
+    assert_eq!(remote.login_password.as_deref(), Some("super-secret"));
+}
+
+#[test]
+fn account_login_requires_login_user() {
+    let options = BTreeMap::from([
+        ("host".to_string(), "127.0.0.1".to_string()),
+        ("port".to_string(), "50051".to_string()),
+        ("auth_mode".to_string(), "account_login".to_string()),
+        ("login_password".to_string(), "super-secret".to_string()),
+    ]);
+
+    let err = ServerOptions::parse(&options).expect_err("account_login without login_user should fail");
+    assert!(err.to_string().contains("login_user"));
+}
+
+#[test]
+fn static_header_rejects_account_login_fields() {
+    let options = BTreeMap::from([
+        ("host".to_string(), "127.0.0.1".to_string()),
+        ("port".to_string(), "50051".to_string()),
+        ("auth_mode".to_string(), "static_header".to_string()),
+        ("auth_header".to_string(), "Bearer legacy-secret".to_string()),
+        ("login_user".to_string(), "pg_dba".to_string()),
+    ]);
+
+    let err = ServerOptions::parse(&options).expect_err("static_header with login fields should fail");
+    assert!(err.to_string().contains("account_login"));
 }

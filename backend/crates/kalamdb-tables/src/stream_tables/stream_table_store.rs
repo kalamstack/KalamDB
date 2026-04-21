@@ -14,7 +14,6 @@ use kalamdb_commons::models::{StreamTableRow, UserId};
 use kalamdb_commons::storage::Partition;
 use kalamdb_commons::TableId;
 use kalamdb_sharding::ShardRouter;
-use kalamdb_store::entity_store::ScanDirection;
 use kalamdb_store::storage_trait::{Result, StorageError};
 use kalamdb_streams::{
     bucket_for_ttl, FileStreamLogStore, MemoryStreamLogStore, StreamLogConfig, StreamLogStore,
@@ -401,38 +400,6 @@ impl StreamTableStore {
         .map_err(|e| StorageError::Other(format!("spawn_blocking join error: {}", e)))?
     }
 
-    /// Scan row keys for a single user, starting at an optional sequence ID (inclusive).
-    pub fn scan_user_keys(
-        &self,
-        user_id: &UserId,
-        start_seq: Option<SeqId>,
-        limit: usize,
-    ) -> Result<Vec<StreamTableRowId>> {
-        let rows = self.scan_user(user_id, start_seq, limit)?;
-        Ok(rows.into_iter().map(|(key, _)| key).collect())
-    }
-
-    /// Scan keys relative to a starting key in a specified direction.
-    ///
-    /// Note: This operation scans logs across users and is intended for maintenance jobs.
-    pub fn scan_keys_directional(
-        &self,
-        _start_key: Option<&StreamTableRowId>,
-        direction: ScanDirection,
-        limit: usize,
-    ) -> Result<Vec<StreamTableRowId>> {
-        if limit == 0 {
-            return Ok(Vec::new());
-        }
-
-        let mut rows = self.scan_all(Some(limit))?;
-        rows.sort_by(|(a, _), (b, _)| match direction {
-            ScanDirection::Newer => a.cmp(b),
-            ScanDirection::Older => b.cmp(a),
-        });
-
-        Ok(rows.into_iter().map(|(k, _)| k).collect())
-    }
 }
 
 /// Helper function to create a new stream table store (in-memory backed).

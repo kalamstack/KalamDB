@@ -5,6 +5,7 @@ use std::time::Duration;
 use crate::benchmarks::Benchmark;
 use crate::client::KalamClient;
 use crate::config::Config;
+use crate::metrics::BenchmarkDetail;
 
 /// Runs concurrent reads and writes against the same table simultaneously.
 /// Tests how write contention affects read latency and vice versa.
@@ -19,6 +20,22 @@ impl Benchmark for MixedReadWriteBench {
     }
     fn description(&self) -> &str {
         "50/50 concurrent reads + writes on same table (contention test)"
+    }
+
+    fn report_details(&self, config: &Config) -> Vec<BenchmarkDetail> {
+        vec![
+            BenchmarkDetail::new("Baseline", "phase-0 performance"),
+            BenchmarkDetail::new("Query Class", "mixed concurrent read/write"),
+            BenchmarkDetail::new("Dataset", "200 seeded rows"),
+            BenchmarkDetail::new(
+                "Mix",
+                format!("{} reads / {} writes", config.concurrency / 2, config.concurrency / 2),
+            ),
+            BenchmarkDetail::new(
+                "Read Shapes",
+                "range filter, count-star, order-by desc limit",
+            ),
+        ]
     }
 
     fn setup<'a>(

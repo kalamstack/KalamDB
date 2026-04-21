@@ -14,6 +14,7 @@ pub struct TcpDisconnectProxy {
     paused: Arc<AtomicBool>,
     impairments: Arc<ProxyImpairments>,
     active_connections: Arc<TokioMutex<HashMap<u64, JoinHandle<()>>>>,
+    backend_client_addrs: Arc<TokioMutex<HashMap<u64, String>>>,
     accept_task: JoinHandle<()>,
 }
 
@@ -32,11 +33,13 @@ impl TcpDisconnectProxy {
         let paused = Arc::new(AtomicBool::new(false));
         let impairments = Arc::new(ProxyImpairments::default());
         let active_connections = Arc::new(TokioMutex::new(HashMap::new()));
+        let backend_client_addrs = Arc::new(TokioMutex::new(HashMap::new()));
         let next_id = Arc::new(AtomicU64::new(1));
 
         let paused_clone = Arc::clone(&paused);
         let impairments_clone = Arc::clone(&impairments);
         let active_clone = Arc::clone(&active_connections);
+        let backend_addrs_clone = Arc::clone(&backend_client_addrs);
         let next_id_clone = Arc::clone(&next_id);
         let accept_task = tokio::spawn(async move {
             while let Ok((mut inbound, _peer)) = listener.accept().await {
@@ -49,8 +52,16 @@ impl TcpDisconnectProxy {
                 let target_addr = target_addr.clone();
                 let impairments_for_task = Arc::clone(&impairments_clone);
                 let active_for_task = Arc::clone(&active_clone);
+                let backend_addrs_for_task = Arc::clone(&backend_addrs_clone);
                 let task = tokio::spawn(async move {
                     if let Ok(mut outbound) = TcpStream::connect(&target_addr).await {
+                        if let Ok(local_addr) = outbound.local_addr() {
+                            backend_addrs_for_task
+                                .lock()
+                                .await
+                                .insert(id, local_addr.to_string());
+                        }
+
                         let (inbound_reader, inbound_writer) = inbound.split();
                         let (outbound_reader, outbound_writer) = outbound.split();
                         let _ = tokio::try_join!(
@@ -63,6 +74,7 @@ impl TcpDisconnectProxy {
                         );
                     }
                     active_for_task.lock().await.remove(&id);
+                    backend_addrs_for_task.lock().await.remove(&id);
                 });
 
                 active_clone.lock().await.insert(id, task);
@@ -74,6 +86,7 @@ impl TcpDisconnectProxy {
             paused,
             impairments,
             active_connections,
+            backend_client_addrs,
             accept_task,
         }
     }
@@ -112,10 +125,15 @@ impl TcpDisconnectProxy {
         for (_id, task) in active.drain() {
             task.abort();
         }
+        self.backend_client_addrs.lock().await.clear();
     }
 
     pub async fn active_count(&self) -> usize {
         self.active_connections.lock().await.len()
+    }
+
+    pub async fn backend_client_addrs(&self) -> Vec<String> {
+        self.backend_client_addrs.lock().await.values().cloned().collect()
     }
 
     pub async fn wait_for_active_connections(
@@ -130,6 +148,19 @@ impl TcpDisconnectProxy {
             }
             if start.elapsed() >= timeout_dur {
                 return false;
+            }
+            sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    pub async fn wait_for_backend_client_addr(&self, timeout_dur: Duration) -> Option<String> {
+        let start = std::time::Instant::now();
+        loop {
+            if let Some(client_addr) = self.backend_client_addrs().await.into_iter().next() {
+                return Some(client_addr);
+            }
+            if start.elapsed() >= timeout_dur {
+                return None;
             }
             sleep(Duration::from_millis(50)).await;
         }

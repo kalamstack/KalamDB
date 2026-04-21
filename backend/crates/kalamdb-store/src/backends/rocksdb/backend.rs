@@ -4,40 +4,31 @@
 //! as the underlying storage engine. It maps the generic partition concept to
 //! RocksDB column families.
 
-use crate::cf_tuning::apply_cf_settings;
-use crate::storage_trait::{Operation, Partition, Result, StorageBackend, StorageError};
+use super::cf_tuning::apply_cf_settings;
+use super::init::create_block_options_with_cache;
+use crate::storage_trait::{
+    Operation, Partition, Result, StorageBackend, StorageError, StorageStats,
+};
 use kalamdb_configs::RocksDbSettings;
 use rocksdb::{BoundColumnFamily, Cache, IteratorMode, Options, PrefixRange, WriteOptions, DB};
 use std::sync::Arc;
 
+const ESTIMATE_NUM_KEYS_PROPERTY: &str = "rocksdb.estimate-num-keys";
+const ESTIMATE_LIVE_DATA_SIZE_PROPERTY: &str = "rocksdb.estimate-live-data-size";
+const ACTIVE_MEMTABLE_ENTRIES_PROPERTY: &str = "rocksdb.num-entries-active-mem-table";
+const IMM_MEMTABLE_ENTRIES_PROPERTY: &str = "rocksdb.num-entries-imm-mem-tables";
+const ACTIVE_MEMTABLE_SIZE_PROPERTY: &str = "rocksdb.cur-size-active-mem-table";
+const LIVE_SST_FILES_SIZE_PROPERTY: &str = "rocksdb.live-sst-files-size";
+const TOTAL_SST_FILES_SIZE_PROPERTY: &str = "rocksdb.total-sst-files-size";
+const ALL_MEMTABLES_SIZE_PROPERTY: &str = "rocksdb.cur-size-all-mem-tables";
+const PENDING_COMPACTION_BYTES_PROPERTY: &str = "rocksdb.estimate-pending-compaction-bytes";
+
 /// RocksDB implementation of the StorageBackend trait.
-///
-/// Maps partitions to RocksDB column families, providing thread-safe access
-/// to the underlying database.
-///
-/// ## Example
-///
-/// ```rust,ignore
-/// use kalamdb_store::{RocksDBBackend, StorageBackend, Partition};
-/// use std::sync::Arc;
-///
-/// let db = Arc::new(DB::open_default("/tmp/test.db").unwrap());
-/// let backend = RocksDBBackend::new(db);
-///
-/// let partition = Partition::new("users");
-/// backend.create_partition(&partition).unwrap();
-/// backend.put(&partition, b"key1", b"value1").unwrap();
-///
-/// let value = backend.get(&partition, b"key1").unwrap();
-/// assert_eq!(value, Some(b"value1".to_vec()));
-/// ```
 pub struct RocksDBBackend {
     db: Arc<DB>,
-    /// Cached write options for fast writes (no sync)
     write_opts: WriteOptions,
     settings: RocksDbSettings,
     block_cache: Cache,
-    /// Tracked column family names for partition enumeration
     known_cf_names: std::sync::RwLock<Vec<String>>,
 }
 
@@ -51,11 +42,6 @@ impl RocksDBBackend {
         let mut write_opts = WriteOptions::default();
         write_opts.set_sync(sync_writes);
         write_opts.disable_wal(disable_wal);
-        // MEMORY OPTIMIZATION: Create a single shared block cache for dynamic CFs.
-        // Previously a second 4MB LRU was created here on top of the one in RocksDbInit::open().
-        // The two caches are independent memory regions. We keep this one small (1MB)
-        // since it only serves CFs created at runtime (user tables, indexes).
-        // The primary cache from RocksDbInit::open() handles all CFs opened at startup.
         let block_cache =
             Cache::new_lru_cache(std::cmp::min(settings.block_cache_size, 1024 * 1024));
         Self {
@@ -68,19 +54,8 @@ impl RocksDBBackend {
     }
 
     /// Creates a new RocksDB backend with the given database handle.
-    /// Uses default write options (no sync for better write performance).
     pub fn new(db: Arc<DB>) -> Self {
         Self::new_internal(db, false, false, RocksDbSettings::default())
-    }
-
-    /// Creates a new RocksDB backend with custom write options.
-    ///
-    /// # Arguments
-    /// * `db` - Database handle
-    /// * `sync_writes` - If true, sync to disk on each write (slower but more durable)
-    /// * `disable_wal` - If true, disable WAL entirely (fastest but data loss on crash)
-    pub fn with_options(db: Arc<DB>, sync_writes: bool, disable_wal: bool) -> Self {
-        Self::new_internal(db, sync_writes, disable_wal, RocksDbSettings::default())
     }
 
     /// Creates a new backend with write options and explicit RocksDB tuning settings.
@@ -93,24 +68,38 @@ impl RocksDBBackend {
         Self::new_internal(db, sync_writes, disable_wal, settings)
     }
 
-    /// Set the known column family names (typically from RocksDbInit::open_with_cf_names).
-    ///
-    /// This enables `list_partitions()` to work correctly and is also used by
-    /// `cleanup_orphaned_partitions()` to identify CFs not belonging to any table.
+    /// Set the known column family names.
     pub fn set_known_cf_names(&self, names: Vec<String>) {
         *self.known_cf_names.write().unwrap() = names;
     }
 
-    /// Returns a reference to the underlying database.
-    pub fn db(&self) -> &Arc<DB> {
-        &self.db
-    }
-
-    /// Gets a column family handle by partition name.
     fn get_cf(&self, partition: &Partition) -> Result<Arc<BoundColumnFamily<'_>>> {
         self.db
             .cf_handle(partition.name())
             .ok_or_else(|| StorageError::PartitionNotFound(partition.name().to_string()))
+    }
+
+    fn tracked_cf_names(&self) -> Vec<String> {
+        match self.known_cf_names.read() {
+            Ok(names) if names.is_empty() => vec!["default".to_string()],
+            Ok(names) => names.clone(),
+            Err(_) => vec!["default".to_string()],
+        }
+    }
+
+    fn tracked_partition_count(&self) -> usize {
+        match self.known_cf_names.read() {
+            Ok(names) => names.iter().filter(|name| name.as_str() != "default").count(),
+            Err(_) => 0,
+        }
+    }
+
+    fn sum_cf_property(&self, property_name: &str) -> u64 {
+        self.tracked_cf_names()
+            .into_iter()
+            .filter_map(|cf_name| self.db.cf_handle(&cf_name))
+            .filter_map(|cf| self.db.property_int_value_cf(&cf, property_name).ok().flatten())
+            .sum()
     }
 }
 
@@ -176,13 +165,9 @@ impl StorageBackend for RocksDBBackend {
         use rocksdb::Direction;
 
         let cf = self.get_cf(partition)?;
-
-        // Take a consistent snapshot for the duration of the iterator
         let snapshot = self.db.snapshot();
-
         let prefix_vec = prefix.map(|p| p.to_vec());
 
-        // Determine start position
         let iter_mode = if let Some(start) = start_key {
             IteratorMode::From(start, Direction::Forward)
         } else if let Some(p) = &prefix_vec {
@@ -191,18 +176,14 @@ impl StorageBackend for RocksDBBackend {
             IteratorMode::Start
         };
 
-        // RocksDB iterator over the snapshot: bind snapshot to ReadOptions
         let mut readopts = rocksdb::ReadOptions::default();
         readopts.set_snapshot(&snapshot);
         if let Some(p) = &prefix_vec {
-            // Bound scans to the prefix range at the engine layer to avoid
-            // walking unrelated keys in PK/index existence checks.
             readopts.set_iterate_range(PrefixRange(p.clone()));
         }
         let inner = self.db.iterator_cf_opt(&cf, readopts, iter_mode);
 
         struct SnapshotScanIter<'a, D: rocksdb::DBAccess> {
-            // Hold the snapshot to keep it alive for 'a
             _snapshot: rocksdb::SnapshotWithThreadMode<'a, D>,
             inner: rocksdb::DBIteratorWithThreadMode<'a, D>,
             prefix: Option<Vec<u8>>,
@@ -211,8 +192,8 @@ impl StorageBackend for RocksDBBackend {
 
         impl<'a, D: rocksdb::DBAccess> Iterator for SnapshotScanIter<'a, D> {
             type Item = (Vec<u8>, Vec<u8>);
+
             fn next(&mut self) -> Option<Self::Item> {
-                // Respect limit
                 if let Some(0) = self.remaining {
                     return None;
                 }
@@ -272,9 +253,6 @@ impl StorageBackend for RocksDBBackend {
             readopts.set_iterate_range(PrefixRange(p.clone()));
         }
 
-        // When a prefix bound is present, IteratorMode::End starts at the high end
-        // of that bounded range. This is required for storekey-encoded composite
-        // prefixes where appending a null byte does not produce a valid upper bound.
         let iter_mode = if let Some(start) = start_key {
             IteratorMode::From(start, Direction::Reverse)
         } else {
@@ -332,25 +310,15 @@ impl StorageBackend for RocksDBBackend {
     }
 
     fn create_partition(&self, partition: &Partition) -> Result<()> {
-        // Check if already exists
         if self.partition_exists(partition) {
             return Ok(());
         }
 
-        // Create new column family
-        // Note: With multi-threaded-cf feature, create_cf takes &self and handles locking internally
         let mut opts = Options::default();
         apply_cf_settings(&mut opts, &self.settings, partition.name());
-        // MEMORY OPTIMIZATION: Do NOT call optimize_for_point_lookup() per-CF.
-        // It switches the memtable to a hash-based representation which has
-        // significantly higher fixed memory overhead per column family.
-        // Block-based table options (bloom filter, cache) are set via the factory below.
-        opts.set_block_based_table_factory(&crate::rocksdb_init::create_block_options_with_cache(
-            &self.block_cache,
-        ));
+        opts.set_block_based_table_factory(&create_block_options_with_cache(&self.block_cache));
         match self.db.create_cf(partition.name(), &opts) {
             Ok(()) => {
-                // Track the new CF name
                 if let Ok(mut names) = self.known_cf_names.write() {
                     let name = partition.name().to_string();
                     if !names.contains(&name) {
@@ -361,7 +329,6 @@ impl StorageBackend for RocksDBBackend {
             },
             Err(e) => {
                 let msg = e.to_string();
-                // Handle benign race: another thread created the CF between exists-check and create
                 if msg.contains("Column family already exists")
                     || msg.contains("column family already exists")
                 {
@@ -387,12 +354,10 @@ impl StorageBackend for RocksDBBackend {
             return Ok(());
         }
 
-        // Note: With multi-threaded-cf feature, drop_cf takes &self and handles locking internally
         self.db
             .drop_cf(partition.name())
             .map_err(|e| StorageError::IoError(e.to_string()))?;
 
-        // Remove from tracked names
         if let Ok(mut names) = self.known_cf_names.write() {
             names.retain(|n| n != partition.name());
         }
@@ -402,12 +367,7 @@ impl StorageBackend for RocksDBBackend {
 
     fn compact_partition(&self, partition: &Partition) -> Result<()> {
         let cf = self.get_cf(partition)?;
-
-        // Compact the entire column family range
-        // This removes tombstones and optimizes storage after flush operations
-        // Note: compact_range_cf is infallible (no Result return)
         self.db.compact_range_cf(&cf, None::<&[u8]>, None::<&[u8]>);
-
         Ok(())
     }
 
@@ -422,14 +382,11 @@ impl StorageBackend for RocksDBBackend {
 
         for cf_name in names.iter() {
             if let Some(cf) = self.db.cf_handle(cf_name) {
-                // Errors are non-fatal: a flush failure on one CF shouldn't
-                // prevent others from flushing.
                 if let Err(e) = self.db.flush_cf_opt(&cf, &flush_opts) {
                     log::warn!("flush_all_memtables: failed to flush CF '{}': {}", cf_name, e);
                 }
             }
         }
-        // Flush the default CF as well
         if let Err(e) = self.db.flush_opt(&flush_opts) {
             log::warn!("flush_all_memtables: failed to flush default CF: {}", e);
         }
@@ -464,7 +421,6 @@ impl StorageBackend for RocksDBBackend {
         let mut engine = BackupEngine::open(&opts, &env).map_err(|e| {
             crate::storage_trait::StorageError::Other(format!("Failed to open BackupEngine: {}", e))
         })?;
-        // flush_before_backup=true ensures memtable data is included
         engine.create_new_backup_flush(&*self.db, true).map_err(|e| {
             crate::storage_trait::StorageError::Other(format!(
                 "RocksDB create_new_backup_flush failed: {}",
@@ -495,9 +451,6 @@ impl StorageBackend for RocksDBBackend {
         })?;
         let restore_opts = RestoreOptions::default();
 
-        // Restore to a staging directory alongside the live DB rather than
-        // overwriting it while it is open. The caller must restart the server
-        // and swap `<db_path>_restore_pending` with `<db_path>` to complete.
         let db_path = self.db.path();
         let staging_path = {
             let mut p = db_path.as_os_str().to_os_string();
@@ -505,7 +458,6 @@ impl StorageBackend for RocksDBBackend {
             std::path::PathBuf::from(p)
         };
 
-        // Remove stale staging directory if present.
         if staging_path.exists() {
             std::fs::remove_dir_all(&staging_path).map_err(|e| {
                 crate::storage_trait::StorageError::Other(format!(
@@ -527,8 +479,50 @@ impl StorageBackend for RocksDBBackend {
         Ok(())
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
+    fn stats(&self) -> StorageStats {
+        StorageStats::from([
+            ("storage_backend".to_string(), "rocksdb".to_string()),
+            (
+                "storage_partition_count".to_string(),
+                self.tracked_partition_count().to_string(),
+            ),
+            (
+                "rocksdb_estimate_num_keys".to_string(),
+                self.sum_cf_property(ESTIMATE_NUM_KEYS_PROPERTY).to_string(),
+            ),
+            (
+                "rocksdb_estimate_live_data_size_bytes".to_string(),
+                self.sum_cf_property(ESTIMATE_LIVE_DATA_SIZE_PROPERTY).to_string(),
+            ),
+            (
+                "rocksdb_active_memtable_entries".to_string(),
+                self.sum_cf_property(ACTIVE_MEMTABLE_ENTRIES_PROPERTY).to_string(),
+            ),
+            (
+                "rocksdb_immutable_memtable_entries".to_string(),
+                self.sum_cf_property(IMM_MEMTABLE_ENTRIES_PROPERTY).to_string(),
+            ),
+            (
+                "rocksdb_active_memtable_size_bytes".to_string(),
+                self.sum_cf_property(ACTIVE_MEMTABLE_SIZE_PROPERTY).to_string(),
+            ),
+            (
+                "rocksdb_live_sst_files_size_bytes".to_string(),
+                self.sum_cf_property(LIVE_SST_FILES_SIZE_PROPERTY).to_string(),
+            ),
+            (
+                "rocksdb_total_sst_files_size_bytes".to_string(),
+                self.sum_cf_property(TOTAL_SST_FILES_SIZE_PROPERTY).to_string(),
+            ),
+            (
+                "rocksdb_memtables_size_bytes".to_string(),
+                self.sum_cf_property(ALL_MEMTABLES_SIZE_PROPERTY).to_string(),
+            ),
+            (
+                "rocksdb_pending_compaction_bytes".to_string(),
+                self.sum_cf_property(PENDING_COMPACTION_BYTES_PROPERTY).to_string(),
+            ),
+        ])
     }
 }
 
@@ -706,15 +700,11 @@ mod tests {
         backend.create_partition(&Partition::new("cf1")).unwrap();
         backend.create_partition(&Partition::new("cf2")).unwrap();
 
-        // Note: Current implementation has limited CF enumeration support
-        // We verify partitions exist using partition_exists instead
         assert!(backend.partition_exists(&Partition::new("cf1")));
         assert!(backend.partition_exists(&Partition::new("cf2")));
 
-        // list_partitions is currently limited due to Arc<DB> API constraints
         let partitions = backend.list_partitions().unwrap();
-        // Just verify it doesn't panic - actual enumeration is limited
-        let _ = partitions.len(); // Suppress unused warning
+        let _ = partitions.len();
     }
 
     #[test]
@@ -728,5 +718,30 @@ mod tests {
 
         backend.drop_partition(&partition).unwrap();
         assert!(!backend.partition_exists(&partition));
+    }
+
+    #[test]
+    fn test_stats_include_storage_and_rocksdb_metrics() {
+        let (db, _temp) = create_test_db();
+        let backend = RocksDBBackend::new(db);
+
+        let partition = Partition::new("stats_cf");
+        backend.create_partition(&partition).unwrap();
+        backend.put(&partition, b"key1", b"value1").unwrap();
+        backend.flush_all_memtables().unwrap();
+
+        let stats = backend.stats();
+
+        assert_eq!(stats.get("storage_backend").map(String::as_str), Some("rocksdb"));
+        assert_eq!(stats.get("storage_partition_count").map(String::as_str), Some("1"));
+        assert!(stats.contains_key("rocksdb_estimate_num_keys"));
+        assert!(stats.contains_key("rocksdb_estimate_live_data_size_bytes"));
+        assert!(stats.contains_key("rocksdb_active_memtable_entries"));
+        assert!(stats.contains_key("rocksdb_immutable_memtable_entries"));
+        assert!(stats.contains_key("rocksdb_active_memtable_size_bytes"));
+        assert!(stats.contains_key("rocksdb_live_sst_files_size_bytes"));
+        assert!(stats.contains_key("rocksdb_total_sst_files_size_bytes"));
+        assert!(stats.contains_key("rocksdb_memtables_size_bytes"));
+        assert!(stats.contains_key("rocksdb_pending_compaction_bytes"));
     }
 }

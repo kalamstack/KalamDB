@@ -1,4 +1,3 @@
-use kalam_pg_api::TenantContext;
 use kalam_pg_common::{KalamPgError, USER_ID_GUC};
 use kalamdb_commons::models::UserId;
 
@@ -10,11 +9,6 @@ pub struct SessionSettings {
 }
 
 impl SessionSettings {
-    /// Parse the `kalam.user_id` GUC value from PostgreSQL session settings.
-    pub fn from_guc_value(value: Option<&str>) -> Result<Self, KalamPgError> {
-        Self::from_guc_values(value, None)
-    }
-
     /// Parse the supported PostgreSQL session values used by the extension.
     pub fn from_guc_values(
         user_id_value: Option<&str>,
@@ -43,16 +37,6 @@ impl SessionSettings {
     /// Return the optional PostgreSQL current schema/default namespace.
     pub fn current_schema(&self) -> Option<&str> {
         self.current_schema.as_deref()
-    }
-
-    /// Build a tenant context by combining the session user and an explicit `_userid`.
-    pub fn tenant_context(
-        &self,
-        explicit_user_id: Option<UserId>,
-    ) -> Result<TenantContext, KalamPgError> {
-        let tenant_context = TenantContext::new(explicit_user_id, self.session_user_id.clone());
-        tenant_context.validate()?;
-        Ok(tenant_context)
     }
 
     /// Return the exact GUC name used by the extension.

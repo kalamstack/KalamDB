@@ -6,10 +6,11 @@
 //! This enables the UI to display user-friendly type names (TEXT, BIGINT, etc.)
 //! instead of Arrow internal types (Utf8, Int64, etc.).
 //!
-//! **DataFusion Pattern**: Implements VirtualView trait for consistent view behavior
+//! **DataFusion Pattern**: Implements `VirtualView` for the shared deferred
+//! execution path
 //! - Static mapping computed once at startup
 //! - No persistent state in RocksDB
-//! - Uses MemTable for efficient DataFusion integration
+//! - Batch construction is deferred until execution time
 //!
 //! **Schema Caching**: Memoized via `OnceLock`
 //! **Schema**: TableDefinition provides consistent metadata for views

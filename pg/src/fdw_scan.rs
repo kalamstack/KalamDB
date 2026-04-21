@@ -196,31 +196,18 @@ pub unsafe extern "C-unwind" fn end_foreign_scan(node: *mut pg_sys::ForeignScanS
 // ---------------------------------------------------------------------------
 
 unsafe fn begin_foreign_scan_impl(node: *mut pg_sys::ForeignScanState) -> Result<(), KalamPgError> {
-    use kalam_pg_fdw::ServerOptions;
-
     let relation = (*node).ss.ss_currentRelation;
     let relid = (*relation).rd_id;
     let ft = pg_sys::GetForeignTable(relid);
     let options = parse_options((*ft).options);
     let table_options = resolve_table_options_for_relation(relation, &options)?;
 
-    // Get server options (host/port) from the foreign server
-    let server = pg_sys::GetForeignServer((*ft).serverid);
-    let server_options = parse_options((*server).options);
-    let parsed_server = ServerOptions::parse(&server_options)?;
-    let remote_config = parsed_server.remote.ok_or_else(|| {
-        KalamPgError::Validation(
-            "foreign server must have host and port options for remote mode".to_string(),
-        )
-    })?;
-
     // Read session user_id from GUC
     let user_id_str = crate::current_kalam_user_id();
     let user_id = user_id_str.map(kalamdb_commons::models::UserId::new);
 
     // Ensure remote connection
-    let remote_state = crate::remote_state::ensure_remote_extension_state(remote_config)
-        .map_err(|e| KalamPgError::Execution(e.to_string()))?;
+    let remote_state = crate::remote_server::remote_state_for_server_id((*ft).serverid)?;
 
     // Flush any pending writes for this table before scanning (read-your-writes)
     crate::write_buffer::flush_table(

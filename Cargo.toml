@@ -16,6 +16,7 @@ members = [
     "backend/crates/kalamdb-session",
     "backend/crates/kalamdb-session-datafusion",
     "backend/crates/kalamdb-transactions",
+    "backend/crates/kalamdb-datafusion-sources",
     "backend/crates/kalamdb-system",
     "backend/crates/kalamdb-tables",
     "backend/crates/kalamdb-dba",
@@ -88,7 +89,7 @@ tokio-tungstenite = { version = "0.29.0", features = ["rustls-tls-webpki-roots"]
 # Security floor pins for vulnerable transitive TLS/QUIC crates.
 aws-lc-rs = { version = "1.16.3", default-features = false }
 quinn-proto = { version = "0.11.14", default-features = false }
-rustls-webpki = { version = "0.103.10", default-features = false }
+rustls-webpki = { version = "0.103.13", default-features = false }
 
 # Time handling
 chrono = { version = "0.4.44", features = ["serde"] }
@@ -154,7 +155,7 @@ serial_test = "3.3.1"
 criterion = { version = "0.8.2", features = ["html_reports"] }
 
 # Raft consensus
-openraft = { version = "0.9.22", features = ["serde"] }
+openraft = { version = "0.9.24", features = ["serde"] }
 rmp = "0.8"
 rmp-serde = "1.3"
 
@@ -174,6 +175,7 @@ kalamdb-commons = { path = "backend/crates/kalamdb-commons", default-features = 
 kalamdb-plan-cache = { path = "backend/crates/kalamdb-plan-cache" }
 kalamdb-tables = { path = "backend/crates/kalamdb-tables" }
 kalamdb-views = { path = "backend/crates/kalamdb-views" }
+kalamdb-datafusion-sources = { path = "backend/crates/kalamdb-datafusion-sources" }
 cookie = "0.18"
 colored = "3.1.1"
 fern = "0.7"
@@ -219,7 +221,7 @@ wasm-bindgen = { version = "0.2.118" }
 wasm-bindgen-futures = { version = "0.4.68" }
 js-sys = { version = "0.3.95" }
 libc = "0.2.185"
-libmimalloc-sys = { version = "0.1.44", features = ["extended"] }
+libmimalloc-sys = { version = "0.1.46", features = ["extended"] }
 web-sys = { version = "0.3.95" }
 tsify = { version = "0.5.6", default-features = false, features = ["js"] }
 serde-wasm-bindgen = "0.6.5"
