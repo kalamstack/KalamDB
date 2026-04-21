@@ -478,4 +478,131 @@ mod tests {
 
         assert_eq!(selected, vec!["batch-in-range.parquet".to_string()]);
     }
+
+    #[test]
+    fn plan_by_pk_value_includes_segment_when_value_is_at_boundary() {
+        // Proves boundary values (min or max exactly) are included, not pruned.
+        let table_id = TableId::from_strings("test", "users");
+        let mut manifest = Manifest::new(table_id, None);
+
+        let mut stats = HashMap::new();
+        stats.insert(1, numeric_stats(10, 20));
+        manifest.add_segment(SegmentMetadata::with_schema_version(
+            "batch.parquet".to_string(),
+            "batch.parquet".to_string(),
+            stats,
+            SeqId::from(1i64),
+            SeqId::from(10i64),
+            5,
+            128,
+            1,
+        ));
+
+        let planner = ManifestAccessPlanner::new();
+        assert_eq!(
+            planner.plan_by_pk_value(&manifest, 1, "10"),
+            vec!["batch.parquet".to_string()],
+            "min boundary must be included"
+        );
+        assert_eq!(
+            planner.plan_by_pk_value(&manifest, 1, "20"),
+            vec!["batch.parquet".to_string()],
+            "max boundary must be included"
+        );
+        assert!(
+            planner.plan_by_pk_value(&manifest, 1, "9").is_empty(),
+            "value just below min must be pruned"
+        );
+        assert!(
+            planner.plan_by_pk_value(&manifest, 1, "21").is_empty(),
+            "value just above max must be pruned"
+        );
+    }
+
+    #[test]
+    fn plan_by_seq_range_skips_non_overlapping_segments() {
+        // Proves the non-PK scan path prunes segments whose [min_seq, max_seq]
+        // does not overlap the requested range. This is the primary pruning
+        // signal used by scan_parquet_files_async when no PK filter applies.
+        let table_id = TableId::from_strings("test", "orders");
+        let mut manifest = Manifest::new(table_id, None);
+
+        // Segment A: seq [1..10] — overlaps with query [5..15]
+        manifest.add_segment(SegmentMetadata::with_schema_version(
+            "batch-a.parquet".to_string(),
+            "batch-a.parquet".to_string(),
+            HashMap::new(),
+            SeqId::from(1i64),
+            SeqId::from(10i64),
+            5,
+            128,
+            1,
+        ));
+
+        // Segment B: seq [20..30] — beyond query upper bound, must be skipped
+        manifest.add_segment(SegmentMetadata::with_schema_version(
+            "batch-b.parquet".to_string(),
+            "batch-b.parquet".to_string(),
+            HashMap::new(),
+            SeqId::from(20i64),
+            SeqId::from(30i64),
+            5,
+            128,
+            1,
+        ));
+
+        // Segment C: seq [11..15] — fully inside query, must be included
+        manifest.add_segment(SegmentMetadata::with_schema_version(
+            "batch-c.parquet".to_string(),
+            "batch-c.parquet".to_string(),
+            HashMap::new(),
+            SeqId::from(11i64),
+            SeqId::from(15i64),
+            5,
+            128,
+            1,
+        ));
+
+        // Segment D: seq [0..0] — below query lower bound, must be skipped
+        manifest.add_segment(SegmentMetadata::with_schema_version(
+            "batch-d.parquet".to_string(),
+            "batch-d.parquet".to_string(),
+            HashMap::new(),
+            SeqId::from(0i64),
+            SeqId::from(0i64),
+            5,
+            128,
+            1,
+        ));
+
+        let planner = ManifestAccessPlanner::new();
+        let selections =
+            planner.plan_by_seq_range(&manifest, SeqId::from(5i64), SeqId::from(15i64));
+
+        let paths: Vec<_> = selections.iter().map(|s| s.file_path.clone()).collect();
+        assert_eq!(
+            paths,
+            vec!["batch-a.parquet".to_string(), "batch-c.parquet".to_string()],
+            "only segments whose [min_seq,max_seq] overlaps [5,15] must be selected"
+        );
+    }
+
+    #[test]
+    fn plan_by_seq_range_returns_empty_for_empty_manifest() {
+        // The manifest-first fast path: an empty manifest must return no
+        // selections without any further work.
+        let table_id = TableId::from_strings("test", "empty");
+        let manifest = Manifest::new(table_id, None);
+
+        let planner = ManifestAccessPlanner::new();
+        let selections =
+            planner.plan_by_seq_range(&manifest, SeqId::from(0i64), SeqId::from(1_000_000i64));
+        assert!(selections.is_empty());
+
+        let paths = planner.plan_by_pk_value(&manifest, 1, "42");
+        assert!(paths.is_empty());
+
+        let all = planner.plan_all_files(&manifest);
+        assert!(all.is_empty());
+    }
 }
