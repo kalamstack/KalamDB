@@ -32,12 +32,12 @@
 //! Cold Storage (Parquet) ┘       (requires ALL rows to find MAX(_seq) per PK)
 //! ```
 //!
-//! **Stream tables ARE streamable** because they:
+//! Stream tables ARE streamable** because they:
 //! - Are append-only (no updates, no version resolution needed)
 //! - Use TTL-based eviction instead of tombstones
 //! - Can return rows as they're scanned with early termination on LIMIT
-//! - They now use the exec-backed path in `stream_table_provider.rs` instead of
-//!   the legacy `base_scan()` flow below
+//! - They now use the provider-family-specific exec-backed path in
+//!   `stream_table_provider.rs` instead of sharing the MVCC-oriented flow below
 //!
 //! ## Architecture
 //!
@@ -45,15 +45,21 @@
 //! User/Shared TableProvider::scan()
 //!             │
 //!             ▼
-//! base_scan() ── combines filters, remaps projections, calls scan_rows()
+//! base_scan() ── combines filters, remaps projections, and builds the deferred
+//!                MVCC execution plan used by user/shared providers
 //!             │
 //!             ▼
-//! scan_rows() ── extracts user context, calls scan_with_version_resolution_to_kvs()
+//! scan_rows() ── extracts scan context, applies fast paths, and calls
+//!                scan_kvs_with_context()
 //!             │
 //!             ▼
-//! scan_with_version_resolution_to_kvs() ── provider-specific implementation:
+//! scan_kvs_with_context() ── provider-specific hot/cold scan implementation:
 //!   • User: user-scoped RocksDB prefix + Parquet, MVCC merge
 //!   • Shared: full RocksDB + Parquet, MVCC merge
+//!             │
+//!             ▼
+//! resolve_latest_scan_from_futures() ── shared concurrent hot/cold fetch +
+//!                                       MVCC winner selection
 //!
 //! Stream tables bypass this path and build deferred execution descriptors in
 //! `stream_table_provider.rs` so the hot-store scan runs at execute time.
@@ -81,11 +87,13 @@ use kalamdb_commons::conversions::arrow_json_conversion::coerce_rows;
 use kalamdb_commons::ids::SeqId;
 use kalamdb_commons::models::rows::Row;
 use kalamdb_commons::models::{NamespaceId, TableName, UserId};
+use kalamdb_commons::serialization::row_codec::RowMetadata;
 use kalamdb_commons::schemas::TableType;
 use kalamdb_commons::NotLeaderError;
 use kalamdb_commons::{StorageKey, TableId};
 use kalamdb_datafusion_sources::exec::{
-    finalize_deferred_batch, DeferredBatchExec, DeferredBatchSource,
+    count_resolved_from_metadata, finalize_deferred_batch, resolve_latest_kvs_from_cold_batch,
+    DeferredBatchExec, DeferredBatchSource, ParquetRowData, VersionedRow,
 };
 use kalamdb_datafusion_sources::pruning::mvcc_filter_evaluation;
 use kalamdb_datafusion_sources::provider::{
@@ -100,6 +108,7 @@ use kalamdb_transactions::{
     TransactionOverlayExec,
 };
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::sync::Arc;
 
 // Re-export types moved to submodules
@@ -115,7 +124,7 @@ pub trait DeferredMvccScanProvider<K: StorageKey, V>:
     BaseTableProvider<K, V> + Clone + Send + Sync + 'static
 where
     K: StorageKey + Clone + Send + Sync + 'static,
-    V: Send + Sync + 'static,
+    V: ScanRow + Send + Sync + 'static,
 {
     type ScanContext: Clone + Send + Sync + 'static;
 
@@ -123,20 +132,165 @@ where
 
     fn build_scan_context(&self, state: &dyn Session) -> Result<Self::ScanContext, KalamDbError>;
 
+    fn scan_snapshot_commit_seq(&self, scan_context: &Self::ScanContext) -> Option<u64>;
+
+    fn allow_pk_fast_path(&self, scan_context: &Self::ScanContext) -> bool {
+        self.scan_snapshot_commit_seq(scan_context).is_none()
+    }
+
+    fn allow_count_only_fast_path(&self, _scan_context: &Self::ScanContext) -> bool {
+        true
+    }
+
+    fn scan_scope_label(&self, _scan_context: &Self::ScanContext) -> &'static str {
+        "default"
+    }
+
+    fn scan_cold_scope<'a>(&self, scan_context: &'a Self::ScanContext) -> Option<&'a UserId>;
+
+    async fn scan_hot_pk_row(
+        &self,
+        scan_context: &Self::ScanContext,
+        pk_value: &ScalarValue,
+    ) -> Result<Option<(K, V)>, KalamDbError>;
+
+    async fn hot_pk_tombstoned(
+        &self,
+        scan_context: &Self::ScanContext,
+        pk_value: &ScalarValue,
+    ) -> Result<bool, KalamDbError>;
+
+    async fn count_rows_with_context(
+        &self,
+        scan_context: &Self::ScanContext,
+    ) -> Result<usize, KalamDbError>;
+
+    async fn scan_kvs_with_context(
+        &self,
+        scan_context: &Self::ScanContext,
+        filter: Option<&Expr>,
+        since_seq: Option<SeqId>,
+        limit: Option<usize>,
+        keep_deleted: bool,
+        cold_columns: Option<&[String]>,
+    ) -> Result<Vec<(K, V)>, KalamDbError>;
+
     async fn scan_rows_with_context(
         &self,
         scan_context: &Self::ScanContext,
         projection: Option<&Vec<usize>>,
         filter: Option<&Expr>,
         limit: Option<usize>,
-    ) -> Result<RecordBatch, KalamDbError>;
+    ) -> Result<RecordBatch, KalamDbError> {
+        let schema = self.schema_ref();
+        let pk_name = self.primary_key_field_name();
+        let scope_label = self.scan_scope_label(scan_context);
+        let subject_user = self
+            .scan_cold_scope(scan_context)
+            .map(UserId::as_str)
+            .unwrap_or("-");
+
+        if self.allow_pk_fast_path(scan_context) {
+            if let Some(pk_scalar) = typed_pk_literal_from_filter(&schema, filter, pk_name) {
+                if let Some((row_id, row)) = self.scan_hot_pk_row(scan_context, &pk_scalar).await? {
+                    log::debug!(
+                        "[MvccScan] PK fast-path hit for {}={} (table={}; scope={}; subject={})",
+                        pk_name,
+                        pk_scalar,
+                        self.table_id(),
+                        scope_label,
+                        subject_user
+                    );
+                    return rows_to_arrow_batch(&schema, vec![(row_id, row)], projection, |_, _| {});
+                }
+
+                if self.hot_pk_tombstoned(scan_context, &pk_scalar).await? {
+                    log::debug!(
+                        "[MvccScan] PK fast-path tombstone for {}={} (table={}; scope={}; subject={})",
+                        pk_name,
+                        pk_scalar,
+                        self.table_id(),
+                        scope_label,
+                        subject_user
+                    );
+                    return rows_to_arrow_batch(
+                        &schema,
+                        Vec::<(K, V)>::new(),
+                        projection,
+                        |_, _| {},
+                    );
+                }
+
+                let cold_found =
+                    find_row_by_pk(self, self.scan_cold_scope(scan_context), &pk_scalar.to_string())
+                        .await?;
+                if let Some((row_id, row)) = cold_found {
+                    log::debug!(
+                        "[MvccScan] PK fast-path cold hit for {}={} (table={}; scope={}; subject={})",
+                        pk_name,
+                        pk_scalar,
+                        self.table_id(),
+                        scope_label,
+                        subject_user
+                    );
+                    return rows_to_arrow_batch(&schema, vec![(row_id, row)], projection, |_, _| {});
+                }
+
+                log::debug!(
+                    "[MvccScan] PK fast-path miss for {}={} (table={}; scope={}; subject={})",
+                    pk_name,
+                    pk_scalar,
+                    self.table_id(),
+                    scope_label,
+                    subject_user
+                );
+                return rows_to_arrow_batch(&schema, Vec::<(K, V)>::new(), projection, |_, _| {});
+            }
+        }
+
+        if self.allow_count_only_fast_path(scan_context)
+            && is_count_only_projection(projection, filter)
+        {
+            let count = self.count_rows_with_context(scan_context).await?;
+            return build_count_only_batch(count);
+        }
+
+        let (since_seq, _until_seq) = if let Some(expr) = filter {
+            extract_seq_bounds_from_filter(expr)
+        } else {
+            (None, None)
+        };
+
+        let keep_deleted = filter.map(filter_uses_deleted_column).unwrap_or(false);
+        let cold_columns = compute_cold_columns(projection, &schema, pk_name);
+        let kvs = self
+            .scan_kvs_with_context(
+                scan_context,
+                filter,
+                since_seq,
+                limit,
+                keep_deleted,
+                cold_columns.as_deref(),
+            )
+            .await?;
+
+        log::trace!(
+            "[MvccScan] scan_rows resolved {} row(s) for table={} scope={} subject={}",
+            kvs.len(),
+            self.table_id(),
+            scope_label,
+            subject_user
+        );
+
+        rows_to_arrow_batch(&schema, kvs, projection, |_, _| {})
+    }
 }
 
 struct DeferredMvccScanSource<P, K, V>
 where
     P: DeferredMvccScanProvider<K, V>,
     K: StorageKey + Clone + Send + Sync + 'static,
-    V: Send + Sync + 'static,
+    V: ScanRow + Send + Sync + 'static,
 {
     provider: P,
     scan_context: P::ScanContext,
@@ -152,7 +306,7 @@ impl<P, K, V> std::fmt::Debug for DeferredMvccScanSource<P, K, V>
 where
     P: DeferredMvccScanProvider<K, V>,
     K: StorageKey + Clone + Send + Sync + 'static,
-    V: Send + Sync + 'static,
+    V: ScanRow + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeferredMvccScanSource")
@@ -168,7 +322,7 @@ impl<P, K, V> DeferredBatchSource for DeferredMvccScanSource<P, K, V>
 where
     P: DeferredMvccScanProvider<K, V>,
     K: StorageKey + Clone + Send + Sync + 'static,
-    V: Send + Sync + 'static,
+    V: ScanRow + Send + Sync + 'static,
 {
     fn source_name(&self) -> &'static str {
         self.provider.scan_source_name()
@@ -221,7 +375,7 @@ where
 ///                 ↓
 /// Provider.scan_rows(state) → extract_user_context(state)
 ///                           ↓
-/// Provider.scan_with_version_resolution_to_kvs(user_id, filter)
+/// Provider.scan_kvs_with_context(scan_context, filter)
 /// ```
 #[async_trait]
 pub trait BaseTableProvider<K: StorageKey, V>: Send + Sync + TableProvider {
@@ -525,7 +679,7 @@ pub trait BaseTableProvider<K: StorageKey, V>: Send + Sync + TableProvider {
     where
         Self: SourceProvider + DeferredMvccScanProvider<K, V> + Sized,
         K: Clone + Send + Sync + 'static,
-        V: Send + Sync + 'static,
+        V: ScanRow + Send + Sync + 'static,
     {
         self.validate_transaction_table_access(state)?;
         self.ensure_leader_read(state).await.map_err(kalam_error_to_datafusion)?;
@@ -599,7 +753,7 @@ pub trait BaseTableProvider<K: StorageKey, V>: Send + Sync + TableProvider {
     where
         Self: SourceProvider + DeferredMvccScanProvider<K, V> + Sized,
         K: Clone + Send + Sync + 'static,
-        V: Send + Sync + 'static,
+        V: ScanRow + Send + Sync + 'static,
     {
         let Some(overlay) = overlay else {
             return self.base_scan(state, projection, filters, limit).await;
@@ -831,6 +985,30 @@ pub fn extract_pk_equality_literal(filter: &Expr, pk_name: &str) -> Option<Scala
     }
 }
 
+pub fn typed_pk_literal_from_filter(
+    schema: &SchemaRef,
+    filter: Option<&Expr>,
+    pk_name: &str,
+) -> Option<ScalarValue> {
+    let pk_literal = filter.and_then(|expr| extract_pk_equality_literal(expr, pk_name))?;
+    let pk_scalar = if let Ok(field) = schema.field_with_name(pk_name) {
+        kalamdb_commons::conversions::parse_string_as_scalar(
+            &pk_literal.to_string(),
+            field.data_type(),
+        )
+        .ok()
+        .unwrap_or(pk_literal)
+    } else {
+        pk_literal
+    };
+
+    Some(pk_scalar)
+}
+
+pub fn is_count_only_projection(projection: Option<&Vec<usize>>, filter: Option<&Expr>) -> bool {
+    projection.is_some_and(|proj| proj.is_empty()) && filter.is_none()
+}
+
 /// Locate the latest non-deleted row matching the provided primary-key value (async).
 ///
 /// This function scans cold storage (Parquet files) to find a row by its primary key.
@@ -924,6 +1102,71 @@ where
     }
 
     Ok(None)
+}
+
+pub(crate) struct ResolvedMvccScan<K, V> {
+    pub rows: Vec<(K, V)>,
+    pub hot_rows_scanned: usize,
+    pub cold_rows_scanned: usize,
+}
+
+pub(crate) async fn resolve_latest_scan_from_futures<K, R, HotFuture, ColdFuture, Build>(
+    pk_name: &str,
+    limit: Option<usize>,
+    keep_deleted: bool,
+    snapshot_commit_seq: Option<u64>,
+    hot_future: HotFuture,
+    cold_future: ColdFuture,
+    build_cold_row: Build,
+) -> Result<ResolvedMvccScan<K, R>, KalamDbError>
+where
+    K: Clone,
+    R: VersionedRow,
+    HotFuture: Future<Output = Result<Vec<(K, R)>, KalamDbError>>,
+    ColdFuture: Future<Output = Result<RecordBatch, KalamDbError>>,
+    Build: Fn(ParquetRowData) -> DataFusionResult<(K, R)>,
+{
+    let (hot_result, cold_result) = tokio::join!(hot_future, cold_future);
+    let hot_rows = hot_result?;
+    let hot_rows_scanned = hot_rows.len();
+    let parquet_batch = cold_result?;
+    let cold_rows_scanned = parquet_batch.num_rows();
+
+    let mut rows = resolve_latest_kvs_from_cold_batch(
+        pk_name,
+        hot_rows,
+        &parquet_batch,
+        keep_deleted,
+        snapshot_commit_seq,
+        build_cold_row,
+    )
+    .map_err(|error| KalamDbError::DataFusion(error.to_string()))?;
+
+    apply_limit(&mut rows, limit);
+
+    Ok(ResolvedMvccScan {
+        rows,
+        hot_rows_scanned,
+        cold_rows_scanned,
+    })
+}
+
+pub(crate) async fn count_resolved_rows_from_futures<HotFuture, ColdFuture>(
+    pk_name: &str,
+    snapshot_commit_seq: Option<u64>,
+    hot_future: HotFuture,
+    cold_future: ColdFuture,
+) -> Result<usize, KalamDbError>
+where
+    HotFuture: Future<Output = Result<Vec<RowMetadata>, KalamDbError>>,
+    ColdFuture: Future<Output = Result<RecordBatch, KalamDbError>>,
+{
+    let (hot_result, cold_result) = tokio::join!(hot_future, cold_future);
+    let hot_metadata = hot_result?;
+    let parquet_batch = cold_result?;
+
+    count_resolved_from_metadata(pk_name, hot_metadata, &parquet_batch, snapshot_commit_seq)
+        .map_err(|error| KalamDbError::DataFusion(error.to_string()))
 }
 
 /// Check if a PK value exists in cold storage (Parquet files) using manifest-based pruning (async).
@@ -1582,7 +1825,7 @@ where
 /// Log a warning when scanning version resolution without filter or limit.
 ///
 /// This helps identify potential performance issues where full table scans are happening.
-/// Called by `scan_with_version_resolution_to_kvs` implementations.
+/// Called by provider-side MVCC scan implementations.
 ///
 /// # Arguments
 /// * `table_id` - Table identifier for logging

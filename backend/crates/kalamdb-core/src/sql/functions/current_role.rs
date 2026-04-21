@@ -18,26 +18,12 @@ use std::sync::Arc;
 ///
 /// Returns the role of the current session user.
 /// This function takes no arguments and returns a String (Utf8).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct CurrentRoleFunction {
-    role: Option<Role>,
-}
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+pub struct CurrentRoleFunction;
 
 impl CurrentRoleFunction {
-    /// Create a new CURRENT_ROLE function with no role bound
     pub fn new() -> Self {
-        Self { role: None }
-    }
-
-    /// Create a CURRENT_ROLE function bound to a specific role
-    pub fn with_role(role: Role) -> Self {
-        Self { role: Some(role) }
-    }
-}
-
-impl Default for CurrentRoleFunction {
-    fn default() -> Self {
-        Self::new()
+        Self
     }
 }
 
@@ -51,7 +37,6 @@ impl ScalarUDFImpl for CurrentRoleFunction {
     }
 
     fn signature(&self) -> &Signature {
-        // Static signature with no arguments
         static SIGNATURE: std::sync::OnceLock<Signature> = std::sync::OnceLock::new();
         SIGNATURE.get_or_init(|| Signature::exact(vec![], Volatility::Stable))
     }
@@ -65,19 +50,17 @@ impl ScalarUDFImpl for CurrentRoleFunction {
             return Err(DataFusionError::Plan("CURRENT_ROLE() takes no arguments".to_string()));
         }
 
-        let role = if let Some(role) = self.role {
-            role
-        } else if let Some(session_ctx) = args.config_options.extensions.get::<SessionUserContext>()
-        {
-            session_ctx.role
-        } else {
-            return Err(DataFusionError::Execution(
-                "CURRENT_ROLE() failed: session user context not found".to_string(),
-            ));
-        };
+        let session_ctx = args
+            .config_options
+            .extensions
+            .get::<SessionUserContext>()
+            .ok_or_else(|| {
+                DataFusionError::Execution(
+                    "CURRENT_ROLE() failed: session user context not found".to_string(),
+                )
+            })?;
 
-        // Convert role to lowercase string (user, service, dba, system, anonymous)
-        let role_str = match role {
+        let role_str = match session_ctx.role {
             Role::User => "user",
             Role::Service => "service",
             Role::Dba => "dba",
@@ -100,32 +83,6 @@ mod tests {
         let func_impl = CurrentRoleFunction::new();
         let func = ScalarUDF::new_from_impl(func_impl);
         assert_eq!(func.name(), "kdb_current_role");
-    }
-
-    #[test]
-    fn test_current_role_with_role() {
-        let role = Role::User;
-        let func_impl = CurrentRoleFunction::with_role(role);
-        let func = ScalarUDF::new_from_impl(func_impl.clone());
-        assert_eq!(func.name(), "kdb_current_role");
-
-        // Verify configured role
-        assert_eq!(func_impl.role, Some(role));
-    }
-
-    #[test]
-    fn test_current_role_all_roles() {
-        // Test each role value
-        for role in [
-            Role::User,
-            Role::Service,
-            Role::Dba,
-            Role::System,
-            Role::Anonymous,
-        ] {
-            let func_impl = CurrentRoleFunction::with_role(role);
-            assert_eq!(func_impl.role, Some(role));
-        }
     }
 
     #[test]

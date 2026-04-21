@@ -29,12 +29,6 @@ pub struct TopicsTableProvider {
     store: TopicsStore,
 }
 
-impl std::fmt::Debug for TopicsTableProvider {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TopicsTableProvider").finish()
-    }
-}
-
 impl TopicsTableProvider {
     /// Create a new topics table provider with automatic index management.
     ///
@@ -96,21 +90,6 @@ impl TopicsTableProvider {
         row.map(|value| Self::decode_topic_row(&value)).transpose()
     }
 
-    /// Get a topic by name (requires full scan for MVP)
-    ///
-    /// TODO: Add name index for efficient lookups
-    pub fn get_topic_by_name(&self, name: &str) -> Result<Option<Topic>, SystemError> {
-        let iter = self.store.scan_iterator(None, None)?;
-        for item in iter {
-            let (_, row) = item?;
-            let topic = Self::decode_topic_row(&row)?;
-            if topic.name == name {
-                return Ok(Some(topic));
-            }
-        }
-        Ok(None)
-    }
-
     /// Update an existing topic entry.
     ///
     /// Indexes are automatically maintained via `IndexedEntityStore`.
@@ -149,12 +128,7 @@ impl TopicsTableProvider {
             .into_system_error("insert_async topic error")
     }
 
-    /// Delete a topic by ID
-    pub fn delete_topic(&self, topic_id: &TopicId) -> Result<(), SystemError> {
-        self.store.delete(topic_id).into_system_error("delete topic error")
-    }
-
-    /// Async version of `delete_topic()`.
+    /// Delete a topic by ID.
     pub async fn delete_topic_async(&self, topic_id: &TopicId) -> Result<(), SystemError> {
         self.store
             .delete_async(topic_id.clone())
@@ -168,24 +142,12 @@ impl TopicsTableProvider {
         rows.into_iter().map(|(_, row)| Self::decode_topic_row(&row)).collect()
     }
 
-    /// Get reference to the underlying store for advanced operations
-    pub fn store(&self) -> &TopicsStore {
-        &self.store
-    }
-
     fn build_batch_from_pairs(
         &self,
         pairs: Vec<(TopicId, SystemTableRow)>,
     ) -> Result<RecordBatch, SystemError> {
         let rows = pairs.into_iter().map(|(_, row)| row).collect();
         system_rows_to_batch(&Self::schema(), rows)
-    }
-    pub fn scan_all_topics_batch(&self) -> Result<RecordBatch, SystemError> {
-        let pairs = self
-            .store
-            .scan_all_typed(None, None, None)
-            .into_system_error("scan_all_typed error")?;
-        self.build_batch_from_pairs(pairs)
     }
 
     fn encode_topic_row(topic: &Topic) -> Result<SystemTableRow, SystemError> {
@@ -195,25 +157,17 @@ impl TopicsTableProvider {
     fn decode_topic_row(row: &SystemTableRow) -> Result<Topic, SystemError> {
         system_row_to_model(row, &Topic::definition())
     }
-
-    fn provider_definition() -> IndexedProviderDefinition<TopicId> {
-        IndexedProviderDefinition {
-            table_name: SystemTable::Topics.table_name(),
-            primary_key_column: "topic_id",
-            schema: Self::schema,
-            parse_key: |value| Some(TopicId::new(value)),
-        }
-    }
-
-    fn schema() -> SchemaRef {
-        static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
-        SCHEMA
-            .get_or_init(|| {
-                Topic::definition().to_arrow_schema().expect("failed to build topics schema")
-            })
-            .clone()
-    }
 }
+
+crate::impl_system_table_provider_metadata!(
+    indexed,
+    provider = TopicsTableProvider,
+    key = TopicId,
+    table_name = SystemTable::Topics.table_name(),
+    primary_key_column = "topic_id",
+    parse_key = |value| Some(TopicId::new(value)),
+    schema = Topic::definition().to_arrow_schema().expect("failed to build topics schema")
+);
 
 crate::impl_indexed_system_table_provider!(
     provider = TopicsTableProvider,

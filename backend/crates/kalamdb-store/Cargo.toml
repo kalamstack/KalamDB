@@ -8,7 +8,8 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-default = []
+default = ["rocksdb"]
+rocksdb = ["dep:rocksdb"]
 datafusion = ["dep:datafusion"]
 
 [dependencies]
@@ -17,7 +18,7 @@ kalamdb-commons = { path = "../kalamdb-commons", features = ["serde", "full"] }
 kalamdb-configs = { path = "../kalamdb-configs" }
 kalamdb-sharding = { path = "../kalamdb-sharding", features = ["serde"] }
 
-rocksdb = { workspace = true }
+rocksdb = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }

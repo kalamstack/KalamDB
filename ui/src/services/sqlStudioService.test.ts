@@ -113,6 +113,69 @@ describe("fetchSqlStudioSchemaTree", () => {
       ordinal: 1,
     });
   });
+
+  it("parses table metadata and options from system.tables", async () => {
+    executeSqlMock.mockImplementation(async (sql: string) => {
+      if (sql.includes("FROM system.namespaces")) {
+        return [{ namespace_id: "default" }];
+      }
+
+      if (sql.includes("FROM system.tables t")) {
+        return [
+          {
+            namespace_id: "default",
+            table_name: "events",
+            table_type: "stream",
+            storage_id: "archive",
+            version: 7,
+            options: JSON.stringify({
+              table_type: "STREAM",
+              ttl_seconds: 3600,
+              compression: "zstd",
+              max_stream_size_bytes: 1024,
+            }),
+            comment: "Operational event stream",
+            updated_at: "2026-04-21T10:00:00Z",
+            created_at: "2026-04-20T09:00:00Z",
+            column_name: "id",
+            data_type: "BigInt",
+            nullable: false,
+            primary_key: true,
+            ordinal: 1,
+          },
+        ];
+      }
+
+      if (sql.includes("FROM information_schema.tables")) {
+        return [];
+      }
+
+      if (sql.includes("FROM information_schema.columns")) {
+        return [];
+      }
+
+      throw new Error(`Unexpected SQL: ${sql}`);
+    });
+
+    const schema = await fetchSqlStudioSchemaTree();
+    const table = schema[0]?.tables[0];
+
+    expect(table).toMatchObject({
+      name: "events",
+      tableType: "stream",
+      storageId: "archive",
+      version: 7,
+      comment: "Operational event stream",
+      updatedAt: "2026-04-21T10:00:00Z",
+      createdAt: "2026-04-20T09:00:00Z",
+    });
+    expect(table?.options).toEqual({
+      table_type: "STREAM",
+      ttl_seconds: 3600,
+      compression: "zstd",
+      max_stream_size_bytes: 1024,
+    });
+  });
 });
 
 describe("executeSqlStudioQuery", () => {

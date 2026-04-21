@@ -97,12 +97,7 @@ pub fn compute_metrics(ctx: &crate::app_context::AppContext) -> Vec<(String, Str
         metrics.push(("total_tables".to_string(), "0".to_string()));
     }
 
-    let storage_partition_count = ctx
-        .storage_backend()
-        .list_partitions()
-        .map(|partitions| partitions.len())
-        .unwrap_or(0);
-    metrics.push(("storage_partition_count".to_string(), storage_partition_count.to_string()));
+    metrics.extend(ctx.storage_backend().stats());
 
     // Jobs count
     if let Ok(jobs) = ctx.system_tables().jobs().list_jobs() {

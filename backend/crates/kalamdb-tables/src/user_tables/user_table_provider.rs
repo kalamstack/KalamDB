@@ -42,6 +42,9 @@ use kalamdb_session::can_read_all_users;
 use kalamdb_session_datafusion::{
     check_user_table_access, check_user_table_write_access, session_error_to_datafusion,
 };
+use kalamdb_datafusion_sources::exec::{
+    resolve_latest_kvs_from_cold_batch, VersionedRow,
+};
 use kalamdb_datafusion_sources::provider::{
     merged_projection_scan_descriptor, mvcc_filter_capability, FilterCapability, ScanDescriptor,
     SourceProvider,
@@ -54,8 +57,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tracing::Instrument;
 
-// Arrow <-> JSON helpers
-use crate::utils::version_resolution::resolve_latest_kvs_from_cold_batch;
 use kalamdb_commons::models::rows::Row;
 
 use kalamdb_commons::websocket::ChangeNotification;
@@ -84,6 +85,35 @@ pub struct UserTableProvider {
 
     /// Cached vector staging stores keyed by embedding column name.
     vector_stores: HashMap<String, Arc<UserVectorHotStore>>,
+}
+
+struct UserMvccRow(UserTableRow);
+
+impl VersionedRow for UserMvccRow {
+    fn seq_id(&self) -> SeqId {
+        self.0._seq
+    }
+
+    fn commit_seq(&self) -> u64 {
+        self.0._commit_seq
+    }
+
+    fn deleted(&self) -> bool {
+        self.0._deleted
+    }
+
+    fn pk_value(&self, pk_name: &str) -> Option<String> {
+        self.0.fields.get(pk_name).and_then(|val| {
+            if val.is_null() {
+                None
+            } else {
+                match val {
+                    ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)) => Some(s.clone()),
+                    _ => Some(val.to_string()),
+                }
+            }
+        })
+    }
 }
 
 impl UserTableProvider {
@@ -594,6 +624,19 @@ impl UserTableProvider {
         .await
     }
 
+    fn construct_mvcc_row_from_parquet_data(
+        &self,
+        user_id: &UserId,
+        row_data: crate::utils::version_resolution::ParquetRowData,
+    ) -> DataFusionResult<(UserTableRowId, UserMvccRow)> {
+        self.construct_row_from_parquet_data(user_id, &row_data)
+            .map_err(|error| DataFusionError::Execution(error.to_string()))?
+            .map(|(row_id, row)| (row_id, UserMvccRow(row)))
+            .ok_or_else(|| {
+                DataFusionError::Execution("missing user row from parquet data".to_string())
+            })
+    }
+
     /// Async version of scan_all_users_with_version_resolution to avoid blocking the async runtime.
     async fn scan_all_users_with_version_resolution_async(
         &self,
@@ -645,26 +688,16 @@ impl UserTableProvider {
             let parquet_batch =
                 self.scan_parquet_files_as_batch_async(&user_id, filter, None).await?;
             let hot_rows = hot_rows_by_user.remove(&user_id).unwrap_or_default();
-            result.extend(resolve_latest_kvs_from_cold_batch(
+            let resolved: Vec<(UserTableRowId, UserMvccRow)> = resolve_latest_kvs_from_cold_batch(
                 &pk_name,
-                hot_rows,
+                hot_rows.into_iter().map(|(row_id, row)| (row_id, UserMvccRow(row))),
                 &parquet_batch,
                 keep_deleted,
                 snapshot_commit_seq,
-                |row_data| {
-                    let seq_id = row_data.seq_id;
-                    Ok((
-                        UserTableRowId::new(user_id.clone(), seq_id),
-                        UserTableRow {
-                            user_id: user_id.clone(),
-                            _seq: seq_id,
-                            _commit_seq: row_data.commit_seq,
-                            _deleted: row_data.deleted,
-                            fields: row_data.fields,
-                        },
-                    ))
-                },
-            )?);
+                |row_data| self.construct_mvcc_row_from_parquet_data(&user_id, row_data),
+            )
+            .map_err(|error| KalamDbError::DataFusion(error.to_string()))?;
+            result.extend(resolved.into_iter().map(|(row_id, row)| (row_id, row.0)));
         }
 
         base::apply_limit(&mut result, limit);
@@ -710,121 +743,76 @@ impl DeferredMvccScanProvider<UserTableRowId, UserTableRow> for UserTableProvide
         })
     }
 
-    async fn scan_rows_with_context(
+    fn scan_snapshot_commit_seq(&self, scan_context: &Self::ScanContext) -> Option<u64> {
+        scan_context.snapshot_commit_seq
+    }
+
+    fn allow_pk_fast_path(&self, scan_context: &Self::ScanContext) -> bool {
+        !scan_context.allow_all_users && scan_context.snapshot_commit_seq.is_none()
+    }
+
+    fn allow_count_only_fast_path(&self, scan_context: &Self::ScanContext) -> bool {
+        !scan_context.allow_all_users
+    }
+
+    fn scan_scope_label(&self, scan_context: &Self::ScanContext) -> &'static str {
+        if scan_context.allow_all_users {
+            "all-users"
+        } else {
+            "subject"
+        }
+    }
+
+    fn scan_cold_scope<'a>(&self, scan_context: &'a Self::ScanContext) -> Option<&'a UserId> {
+        Some(&scan_context.user_id)
+    }
+
+    async fn scan_hot_pk_row(
         &self,
         scan_context: &Self::ScanContext,
-        projection: Option<&Vec<usize>>,
+        pk_value: &ScalarValue,
+    ) -> Result<Option<(UserTableRowId, UserTableRow)>, KalamDbError> {
+        self.find_by_pk(&scan_context.user_id, pk_value).await
+    }
+
+    async fn hot_pk_tombstoned(
+        &self,
+        scan_context: &Self::ScanContext,
+        pk_value: &ScalarValue,
+    ) -> Result<bool, KalamDbError> {
+        self.pk_tombstoned_in_hot(&scan_context.user_id, pk_value).await
+    }
+
+    async fn count_rows_with_context(
+        &self,
+        scan_context: &Self::ScanContext,
+    ) -> Result<usize, KalamDbError> {
+        self.count_resolved_rows_async(
+            &scan_context.user_id,
+            scan_context.snapshot_commit_seq,
+        )
+        .await
+    }
+
+    async fn scan_kvs_with_context(
+        &self,
+        scan_context: &Self::ScanContext,
         filter: Option<&Expr>,
+        since_seq: Option<SeqId>,
         limit: Option<usize>,
-    ) -> Result<RecordBatch, KalamDbError> {
+        keep_deleted: bool,
+        cold_columns: Option<&[String]>,
+    ) -> Result<Vec<(UserTableRowId, UserTableRow)>, KalamDbError> {
         let user_id = &scan_context.user_id;
-        let allow_all_users = scan_context.allow_all_users;
-        let snapshot_commit_seq = scan_context.snapshot_commit_seq;
-        let schema = self.schema_ref();
-        let pk_name = self.primary_key_field_name();
-
-        if !allow_all_users && snapshot_commit_seq.is_none() {
-            if let Some(expr) = filter {
-                if let Some(pk_literal) = base::extract_pk_equality_literal(expr, pk_name) {
-                    let pk_field = schema.field_with_name(pk_name).ok();
-                    let pk_scalar = if let Some(field) = pk_field {
-                        kalamdb_commons::conversions::parse_string_as_scalar(
-                            &pk_literal.to_string(),
-                            field.data_type(),
-                        )
-                        .ok()
-                        .unwrap_or(pk_literal)
-                    } else {
-                        pk_literal
-                    };
-
-                    let found = self.find_by_pk(user_id, &pk_scalar).await?;
-                    if let Some((row_id, row)) = found {
-                        log::debug!(
-                            "[UserProvider] PK fast-path hit for {}={}, user={}",
-                            pk_name,
-                            pk_scalar,
-                            user_id.as_str()
-                        );
-                        return crate::utils::base::rows_to_arrow_batch(
-                            &schema,
-                            vec![(row_id, row)],
-                            projection,
-                            |_, _| {},
-                        );
-                    }
-
-                    if self.pk_tombstoned_in_hot(user_id, &pk_scalar).await? {
-                        log::debug!(
-                            "[UserProvider] PK fast-path tombstone for {}={}, user={}",
-                            pk_name,
-                            pk_scalar,
-                            user_id.as_str()
-                        );
-                        return crate::utils::base::rows_to_arrow_batch(
-                            &schema,
-                            Vec::<(UserTableRowId, UserTableRow)>::new(),
-                            projection,
-                            |_, _| {},
-                        );
-                    }
-
-                    let cold_found =
-                        base::find_row_by_pk(self, Some(user_id), &pk_scalar.to_string()).await?;
-                    if let Some((row_id, row)) = cold_found {
-                        log::debug!(
-                            "[UserProvider] PK fast-path cold hit for {}={}, user={}",
-                            pk_name,
-                            pk_scalar,
-                            user_id.as_str()
-                        );
-                        return crate::utils::base::rows_to_arrow_batch(
-                            &schema,
-                            vec![(row_id, row)],
-                            projection,
-                            |_, _| {},
-                        );
-                    }
-
-                    return crate::utils::base::rows_to_arrow_batch(
-                        &schema,
-                        Vec::<(UserTableRowId, UserTableRow)>::new(),
-                        projection,
-                        |_, _| {},
-                    );
-                }
-            }
-        }
-
-        if !allow_all_users {
-            if let Some(proj) = projection {
-                if proj.is_empty() && filter.is_none() {
-                    let count = self
-                        .count_resolved_rows_async(user_id, snapshot_commit_seq)
-                        .await?;
-                    return base::build_count_only_batch(count);
-                }
-            }
-        }
-
-        let (since_seq, _until_seq) = if let Some(expr) = filter {
-            base::extract_seq_bounds_from_filter(expr)
-        } else {
-            (None, None)
-        };
-
-        let keep_deleted = filter.map(base::filter_uses_deleted_column).unwrap_or(false);
-        let cold_columns = base::compute_cold_columns(projection, &schema, pk_name);
-
-        let kvs = if allow_all_users {
+        if scan_context.allow_all_users {
             self.scan_all_users_with_version_resolution_async(
                 filter,
                 limit,
                 keep_deleted,
-                snapshot_commit_seq,
+                scan_context.snapshot_commit_seq,
                 Some(user_id),
             )
-            .await?
+            .await
         } else {
             self.scan_with_version_resolution_to_kvs_async(
                 user_id,
@@ -832,22 +820,11 @@ impl DeferredMvccScanProvider<UserTableRowId, UserTableRow> for UserTableProvide
                 since_seq,
                 limit,
                 keep_deleted,
-                cold_columns.as_deref(),
-                snapshot_commit_seq,
+                cold_columns,
+                scan_context.snapshot_commit_seq,
             )
-            .await?
-        };
-
-        let table_id = self.core.table_id();
-        log::trace!(
-            "[UserTableProvider] scan_rows resolved {} row(s) for user={} scope={} table={}",
-            kvs.len(),
-            user_id.as_str(),
-            if allow_all_users { "all-users" } else { "subject" },
-            table_id
-        );
-
-        crate::utils::base::rows_to_arrow_batch(&schema, kvs, projection, |_, _| {})
+            .await
+        }
     }
 }
 
@@ -1493,65 +1470,56 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         let scan_limit = base::calculate_scan_limit(limit);
 
         // Run hot storage (RocksDB) and cold storage (Parquet) scans concurrently
-        let hot_future = self.store.scan_with_raw_prefix_async(
-            &user_prefix,
-            start_key_bytes.as_deref(),
-            scan_limit,
-        );
+        let hot_future = async {
+            self.store
+                .scan_with_raw_prefix_async(&user_prefix, start_key_bytes.as_deref(), scan_limit)
+                .await
+                .map_err(|e| {
+                    KalamDbError::InvalidOperation(format!(
+                        "Failed to scan user table hot storage: {}",
+                        e
+                    ))
+                })
+                .map(|rows| {
+                    rows.into_iter()
+                        .map(|(row_id, row)| (row_id, UserMvccRow(row)))
+                        .collect::<Vec<_>>()
+                })
+        };
         let cold_future = self.scan_parquet_files_as_batch_async(user_id, filter, cold_columns);
-
-        let (hot_result, cold_result) = tokio::join!(hot_future, cold_future);
-
-        let hot_rows = hot_result.map_err(|e| {
-            KalamDbError::InvalidOperation(format!("Failed to scan user table hot storage: {}", e))
-        })?;
+        let pk_name = self.primary_key_field_name().to_string();
+        let resolved = base::resolve_latest_scan_from_futures(
+            &pk_name,
+            limit,
+            keep_deleted,
+            snapshot_commit_seq,
+            hot_future,
+            cold_future,
+            |row_data| self.construct_mvcc_row_from_parquet_data(user_id, row_data),
+        )
+        .await?;
 
         log::trace!(
             "[UserProvider] Hot scan: {} rows for user={} (table={})",
-            hot_rows.len(),
+            resolved.hot_rows_scanned,
             user_id.as_str(),
             table_id
         );
 
-        // 2) Scan cold storage (Parquet files)
-        let parquet_batch = cold_result?;
-
-        let pk_name = self.primary_key_field_name().to_string();
-        let cold_rows_scanned = parquet_batch.num_rows();
-
         if log::log_enabled!(log::Level::Trace) {
             log::trace!(
                 "[UserProvider] Cold scan: {} Parquet rows (table={}; user={})",
-                cold_rows_scanned,
+                resolved.cold_rows_scanned,
                 table_id,
                 user_id.as_str()
             );
         }
 
-        // 3) Version resolution: keep MAX(_seq) per primary key; only materialize cold winners
-        let mut result = resolve_latest_kvs_from_cold_batch(
-            &pk_name,
-            hot_rows,
-            &parquet_batch,
-            keep_deleted,
-            snapshot_commit_seq,
-            |row_data| {
-                let seq_id = row_data.seq_id;
-                Ok((
-                    UserTableRowId::new(user_id.clone(), seq_id),
-                    UserTableRow {
-                        user_id: user_id.clone(),
-                        _seq: seq_id,
-                        _commit_seq: row_data.commit_seq,
-                        _deleted: row_data.deleted,
-                        fields: row_data.fields,
-                    },
-                ))
-            },
-        )?;
-
-        // Apply limit after resolution using common helper
-        base::apply_limit(&mut result, limit);
+        let result: Vec<(UserTableRowId, UserTableRow)> = resolved
+            .rows
+            .into_iter()
+            .map(|(row_id, row)| (row_id, row.0))
+            .collect();
 
         if log::log_enabled!(log::Level::Trace) {
             log::trace!(
@@ -1601,12 +1569,9 @@ impl UserTableProvider {
                 })?;
 
             let mut hot_metadata = Vec::new();
-            for (key_bytes, value_bytes) in iter {
-                let key = UserTableRowId::from_storage_key(&key_bytes).map_err(|e| {
-                    KalamDbError::InvalidOperation(format!("Failed to decode row key: {}", e))
-                })?;
+            for (_key_bytes, value_bytes) in iter {
                 match decode_user_table_row_metadata(&value_bytes, &pk_name_clone) {
-                    Ok((_uid, metadata)) => hot_metadata.push((key, metadata)),
+                    Ok((_uid, metadata)) => hot_metadata.push(metadata),
                     Err(e) => {
                         log::warn!("Skipping row with malformed metadata: {}", e);
                         continue;
@@ -1619,20 +1584,19 @@ impl UserTableProvider {
         // Cold storage: scan Parquet files, extract metadata only
         let cold_future = self.scan_parquet_files_as_batch_async(user_id, None, None);
 
-        let (hot_result, cold_result) = tokio::join!(hot_future, cold_future);
+        let hot_future = async {
+            hot_future.await.map_err(|e| {
+                KalamDbError::InvalidOperation(format!("spawn_blocking join error: {}", e))
+            })?
+        };
 
-        let hot_metadata = hot_result.map_err(|e| {
-            KalamDbError::InvalidOperation(format!("spawn_blocking join error: {}", e))
-        })??;
-
-        let parquet_batch = cold_result?;
-        let count = crate::utils::version_resolution::count_resolved_from_metadata(
+        base::count_resolved_rows_from_futures(
             &pk_name,
-            hot_metadata.into_iter().map(|(_, m)| m).collect(),
-            &parquet_batch,
             snapshot_commit_seq,
-        )?;
-        Ok(count)
+            hot_future,
+            cold_future,
+        )
+        .await
     }
 
     async fn insert_deferred_internal(

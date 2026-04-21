@@ -437,15 +437,22 @@ impl ClusterMessageHandler for CoreClusterHandler {
                 ));
             }
 
-            let effective_ctx = match execute_as_user.as_ref() {
-                Some(user_id) => exec_ctx.with_effective_identity(user_id.clone(), Role::User),
-                None => exec_ctx.clone(),
+            let exec_result_result = match execute_as_user.as_ref() {
+                Some(user_id) => {
+                    let effective_ctx =
+                        exec_ctx.with_effective_identity(user_id.clone(), Role::User);
+                    sql_executor
+                        .execute_with_metadata(&prepared_statement, &effective_ctx, stmt_params)
+                        .await
+                },
+                None => {
+                    sql_executor
+                        .execute_with_metadata(&prepared_statement, &exec_ctx, stmt_params)
+                        .await
+                },
             };
 
-            let exec_result = match sql_executor
-                .execute_with_metadata(&prepared_statement, &effective_ctx, stmt_params)
-                .await
-            {
+            let exec_result = match exec_result_result {
                 Ok(v) => v,
                 Err(e) => {
                     return Ok(Self::error_payload(

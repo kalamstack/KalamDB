@@ -3,7 +3,7 @@
 //! Provides a thin helper to open a RocksDB instance with required
 //! system column families present.
 
-use crate::cf_tuning::{apply_cf_settings, apply_db_settings};
+use super::cf_tuning::{apply_cf_settings, apply_db_settings};
 use anyhow::Result;
 use kalamdb_commons::system_tables::StoragePartition;
 use kalamdb_commons::SystemTable;
@@ -39,27 +39,15 @@ impl RocksDbInit {
         db_opts.create_missing_column_families(true);
         apply_db_settings(&mut db_opts, &self.settings);
 
-        // Block cache: SHARED across all column families (memory efficient!)
-        // Adding more CFs does NOT increase cache memory proportionally.
-        // Example: 100 CFs with 4MB cache = still only 4MB total, not 400MB.
-        // This is a key optimization for multi-tenant databases with many tables.
         let cache = Cache::new_lru_cache(self.settings.block_cache_size);
         let block_opts = create_block_options_with_cache(&cache);
         db_opts.set_block_based_table_factory(&block_opts);
-        // NOTE: We intentionally do NOT call optimize_for_point_lookup() at the DB level.
-        // That function switches memtables to a hash-based representation with 2-4x higher
-        // fixed memory overhead per column family and internally creates a second block cache.
-        // The bloom filters and block cache are already configured via set_block_based_table_factory()
-        // which provides the read-path optimizations without the memory penalty.
 
         let (db, _) = self.open_internal(&db_opts, &cache)?;
         Ok(db)
     }
 
     /// Open and return both the DB and the list of column family names.
-    ///
-    /// This avoids re-listing column families from disk after opening, which
-    /// can noticeably add startup time when there are many partitions.
     pub fn open_with_cf_names(&self) -> Result<(Arc<DB>, Vec<String>)> {
         let mut db_opts = Options::default();
         db_opts.create_if_missing(true);
@@ -77,7 +65,6 @@ impl RocksDbInit {
         let path = Path::new(&self.db_path);
         let cf_names = self.collect_column_family_names(db_opts, path);
 
-        // Build CF descriptors with memory-optimized options
         let cf_descriptors: Vec<_> = cf_names
             .iter()
             .map(|name| {
@@ -91,8 +78,6 @@ impl RocksDbInit {
         let db = DB::open_cf_descriptors(&db_opts, path, cf_descriptors)?;
         let db = Arc::new(db);
 
-        // Compact all column families on startup if enabled
-        // This reduces SST file count and prevents "Too many open files" errors
         if self.settings.compact_on_startup {
             log::debug!("Running startup compaction for {} column families...", cf_names.len());
             let start = std::time::Instant::now();
@@ -138,13 +123,11 @@ impl RocksDbInit {
 
         existing
     }
-
 }
 
 pub(crate) fn create_block_options_with_cache(cache: &Cache) -> BlockBasedOptions {
     let mut block_opts = BlockBasedOptions::default();
     block_opts.set_block_cache(cache);
-    // Bloom + cached metadata improve point/prefix lookups used by PK checks.
     block_opts.set_bloom_filter(10.0, false);
     block_opts.set_cache_index_and_filter_blocks(true);
     block_opts.set_pin_l0_filter_and_index_blocks_in_cache(true);

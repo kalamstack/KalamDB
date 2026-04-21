@@ -5,22 +5,16 @@
 //! The real merge execution plan lands in US3. This contract test pins the
 //! ordering rule so the implementation cannot silently drift.
 
-/// Pure ordering used by the upcoming merge exec. Kept inline here until the
-/// shared merge helper lands; at that point this test will switch to importing
-/// the shared function directly.
-fn prefers_version(
-    a: (u64 /* commit_seq */, u64 /* seq_id */),
-    b: (u64, u64),
-) -> std::cmp::Ordering {
-    a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1))
-}
+use kalamdb_datafusion_sources::exec::{
+    select_latest_versions, version_ordering, SelectedVersion, VersionCandidate,
+};
 
 #[test]
 fn commit_seq_wins_over_seq_id() {
     use std::cmp::Ordering::*;
-    assert_eq!(prefers_version((10, 1), (9, 999)), Greater);
-    assert_eq!(prefers_version((5, 100), (5, 101)), Less);
-    assert_eq!(prefers_version((5, 100), (5, 100)), Equal);
+    assert_eq!(version_ordering(10, 1_u64, 9, 999_u64), Greater);
+    assert_eq!(version_ordering(5, 100_u64, 5, 101_u64), Less);
+    assert_eq!(version_ordering(5, 100_u64, 5, 100_u64), Equal);
 }
 
 #[test]
@@ -29,10 +23,37 @@ fn ordering_is_total_and_transitive() {
     for &a in &samples {
         for &b in &samples {
             for &c in &samples {
-                if prefers_version(a, b).is_lt() && prefers_version(b, c).is_lt() {
-                    assert!(prefers_version(a, c).is_lt(), "transitivity broke for {a:?} < {b:?} < {c:?}");
+                if version_ordering(a.0, a.1, b.0, b.1).is_lt()
+                    && version_ordering(b.0, b.1, c.0, c.1).is_lt()
+                {
+                    assert!(
+                        version_ordering(a.0, a.1, c.0, c.1).is_lt(),
+                        "transitivity broke for {a:?} < {b:?} < {c:?}"
+                    );
                 }
             }
         }
+    }
+}
+
+#[test]
+fn latest_version_selection_is_metadata_first_and_filters_deleted_winners() {
+    let winners = select_latest_versions(
+        vec![
+            VersionCandidate::new("a".to_string(), 1, 1_u64, false, "hot-a"),
+            VersionCandidate::new("b".to_string(), 5, 1_u64, false, "hot-b"),
+        ],
+        vec![
+            VersionCandidate::new("a".to_string(), 2, 0_u64, false, "cold-a"),
+            VersionCandidate::new("b".to_string(), 6, 0_u64, true, "cold-b-delete"),
+        ],
+        None,
+        false,
+    );
+
+    assert_eq!(winners.len(), 1);
+    match &winners[0] {
+        SelectedVersion::Cold(payload) => assert_eq!(*payload, "cold-a"),
+        SelectedVersion::Hot(payload) => panic!("expected cold winner, got {payload}"),
     }
 }

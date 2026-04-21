@@ -5,7 +5,6 @@ use kalamdb_session::AuthSession;
 use kalamdb_session_datafusion::SessionUserContext;
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
-use std::time::SystemTime;
 
 /// Unified execution context for SQL queries
 ///
@@ -115,13 +114,8 @@ impl ExecutionContext {
     pub fn ip_address(&self) -> Option<&str> {
         self.auth_session.ip_address()
     }
-    #[inline]
-    pub fn timestamp(&self) -> SystemTime {
-        self.auth_session.timestamp()
-    }
-
     // Builder methods for Phase 3
-    pub fn with_request_id(mut self, request_id: String) -> Self {
+    pub fn with_request_id(mut self, request_id: impl Into<Arc<str>>) -> Self {
         self.auth_session = self.auth_session.with_request_id(request_id);
         self
     }
@@ -158,10 +152,11 @@ impl ExecutionContext {
         self
     }
 
-    fn build_user_session_context(&self) -> SessionContext {
-        // Clone SessionState to keep per-user options/extensions isolated
+    pub(crate) fn build_user_session_state(&self) -> datafusion::execution::context::SessionState {
+        // SessionContext::state() already clones SessionState once; avoid cloning it again.
+        // Keep per-user options/extensions isolated while shared internals stay Arc-backed.
         // (shared internals like RuntimeEnv remain Arc-backed)
-        let mut session_state = self.base_session_context.state().clone();
+        let mut session_state = self.base_session_context.state();
 
         // Inject current user_id, role, and read_context into session config extensions
         // TableProviders will read this during scan() for per-user filtering and leader check
@@ -180,6 +175,12 @@ impl ExecutionContext {
                 ns.as_str().to_string();
         }
 
+        session_state
+    }
+
+    fn build_user_session_context(&self) -> SessionContext {
+        let session_state = self.build_user_session_state();
+
         // Create SessionContext from the per-user state
         let ctx = SessionContext::new_with_state(session_state);
 
@@ -187,7 +188,7 @@ impl ExecutionContext {
     }
 
     fn build_effective_session_context(&self, user_id: UserId, role: Role) -> SessionContext {
-        let mut session_state = self.base_session_context.state().clone();
+        let mut session_state = self.base_session_context.state();
 
         session_state
             .config_mut()

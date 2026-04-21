@@ -135,11 +135,30 @@ pub async fn create_session(
     };
     let server_url = normalize_and_validate_server_url(&server_url)?;
 
+    if cli.verbose {
+        eprintln!(
+            "Resolved server URL for instance '{}': {}",
+            cli.instance, server_url
+        );
+    }
+
+    fn simplify_login_error(err: &KalamLinkError) -> String {
+        match err {
+            KalamLinkError::AuthenticationError(message)
+                if message.contains("Invalid credentials") =>
+            {
+                "invalid credentials".to_string()
+            },
+            _ => err.to_string(),
+        }
+    }
+
     /// Result of a login attempt
     enum LoginResult {
         Success(LoginResponse),
         SetupRequired,
         Failed(String),
+        ConnectivityFailed(String),
     }
 
     // Helper function to exchange user/password for a JWT token
@@ -179,7 +198,15 @@ pub async fn create_session(
                 if verbose {
                     eprintln!("Warning: Login failed: {}", e);
                 }
-                LoginResult::Failed(e.to_string())
+                if matches!(&e, KalamLinkError::NetworkError(_) | KalamLinkError::TimeoutError(_))
+                {
+                    LoginResult::ConnectivityFailed(build_connectivity_diagnostics(
+                        server_url,
+                        &e,
+                    ))
+                } else {
+                    LoginResult::Failed(simplify_login_error(&e))
+                }
             },
         }
     }
@@ -450,8 +477,12 @@ pub async fn create_session(
             LoginResult::SetupRequired => {
                 setup_and_login(server_url, verbose, instance, credential_store, true).await
             },
-            LoginResult::Failed(_) => {
-                Err(CLIError::ConfigurationError("Login failed: invalid credentials".to_string()))
+            LoginResult::Failed(error) => Err(CLIError::ConfigurationError(format!(
+                "Login failed: {}",
+                error
+            ))),
+            LoginResult::ConnectivityFailed(error) => {
+                Err(CLIError::LinkError(KalamLinkError::NetworkError(error)))
             },
         }
     }
@@ -566,10 +597,14 @@ pub async fn create_session(
                 )
                 .await?
             },
-            LoginResult::Failed(_) => {
-                return Err(CLIError::ConfigurationError(
-                    "Login failed: invalid credentials".to_string(),
-                ));
+            LoginResult::Failed(error) => {
+                return Err(CLIError::ConfigurationError(format!(
+                    "Login failed: {}",
+                    error
+                )));
+            },
+            LoginResult::ConnectivityFailed(error) => {
+                return Err(CLIError::LinkError(KalamLinkError::NetworkError(error)));
             },
         }
     } else if let Some(creds) = credential_store
@@ -676,7 +711,9 @@ pub async fn create_session(
                                     },
                                 }
                             },
-                            LoginResult::Failed(_) => (AuthProvider::None, None, false),
+                            LoginResult::Failed(_) | LoginResult::ConnectivityFailed(_) => {
+                                (AuthProvider::None, None, false)
+                            },
                         }
                     } else {
                         eprintln!(
@@ -736,7 +773,9 @@ pub async fn create_session(
                                 },
                             }
                         },
-                        LoginResult::Failed(_) => (AuthProvider::None, None, false),
+                        LoginResult::Failed(_) | LoginResult::ConnectivityFailed(_) => {
+                            (AuthProvider::None, None, false)
+                        },
                     }
                 } else {
                     eprintln!("Please login again with --user and --password --save-credentials");
@@ -823,7 +862,7 @@ pub async fn create_session(
                         },
                     }
                 },
-                LoginResult::Failed(e) => {
+                LoginResult::Failed(e) | LoginResult::ConnectivityFailed(e) => {
                     if cli.verbose {
                         eprintln!("Auto-login failed: {}", e);
                     }

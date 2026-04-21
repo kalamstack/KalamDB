@@ -46,11 +46,6 @@ pub use unified_dml::{
     append_version, append_version_sync, extract_user_pk_value, validate_primary_key,
 };
 
-// Re-export version resolution helpers
-pub use version_resolution::{
-    resolve_latest_version as resolve_latest_version_batch, scan_with_version_resolution_to_kvs,
-};
-
 /// Provider consolidation summary
 ///
 /// **Code Reduction**: ~1200 lines eliminated

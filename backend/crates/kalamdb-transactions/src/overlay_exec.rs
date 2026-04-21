@@ -8,7 +8,8 @@ use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_plan::{
-    DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties, PlanProperties,
+    DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties, Partitioning,
+    PlanProperties,
 };
 use datafusion::scalar::ScalarValue;
 use datafusion::{common::Result as DataFusionResult, error::DataFusionError};
@@ -49,7 +50,9 @@ impl TransactionOverlayExec {
         let output_schema = projected_schema(&input.schema(), final_projection.as_deref())?;
         let cache = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(Arc::clone(&output_schema)),
-            input.output_partitioning().clone(),
+            // Overlay rows apply to the whole relation, so this node must collapse
+            // child partitions and emit a single merged output partition.
+            Partitioning::UnknownPartitioning(1),
             input.pipeline_behavior(),
             input.boundedness(),
         ));
@@ -102,7 +105,7 @@ impl ExecutionPlan for TransactionOverlayExec {
     }
 
     fn maintains_input_order(&self) -> Vec<bool> {
-        vec![true]
+        vec![false]
     }
 
     fn with_new_children(
@@ -126,6 +129,12 @@ impl ExecutionPlan for TransactionOverlayExec {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> DataFusionResult<SendableRecordBatchStream> {
+        if partition != 0 {
+            return Err(DataFusionError::Execution(format!(
+                "TransactionOverlayExec only supports partition 0, got {partition}",
+            )));
+        }
+
         let input = Arc::clone(&self.input);
         let overlay = self.overlay.clone();
         let table_id = self.table_id.clone();
@@ -136,9 +145,9 @@ impl ExecutionPlan for TransactionOverlayExec {
         let fetch = self.fetch;
 
         Ok(one_shot_batch_stream(output_schema, async move {
-            let input_stream = input.execute(partition, context)?;
-            merge_stream_with_overlay(
-                input_stream,
+            merge_partitions_with_overlay(
+                input,
+                context,
                 &table_id,
                 primary_key_column.as_ref(),
                 &overlay,
@@ -151,8 +160,9 @@ impl ExecutionPlan for TransactionOverlayExec {
     }
 }
 
-async fn merge_stream_with_overlay(
-    input_stream: SendableRecordBatchStream,
+async fn merge_partitions_with_overlay(
+    input: Arc<dyn ExecutionPlan>,
+    context: Arc<TaskContext>,
     table_id: &TableId,
     primary_key_column: &str,
     overlay: &TransactionOverlay,
@@ -160,13 +170,16 @@ async fn merge_stream_with_overlay(
     final_projection: Option<&Vec<usize>>,
     fetch: Option<usize>,
 ) -> DataFusionResult<RecordBatch> {
-    let input_schema = input_stream.schema();
+    let input_schema = input.schema();
     let mut rows: Vec<Option<Row>> = Vec::new();
     let mut row_index_by_pk: HashMap<String, usize> = HashMap::new();
 
-    futures_util::pin_mut!(input_stream);
-    while let Some(batch) = input_stream.try_next().await? {
-        merge_batch_into_rows(&mut rows, &mut row_index_by_pk, &batch, primary_key_column)?;
+    for partition in 0..input.output_partitioning().partition_count() {
+        let input_stream = input.execute(partition, Arc::clone(&context))?;
+        futures_util::pin_mut!(input_stream);
+        while let Some(batch) = input_stream.try_next().await? {
+            merge_batch_into_rows(&mut rows, &mut row_index_by_pk, &batch, primary_key_column)?;
+        }
     }
 
     finalize_overlay_rows(
@@ -508,6 +521,142 @@ mod tests {
         assert_eq!(
             second_rows[0].values.get("name"),
             Some(&ScalarValue::Utf8(Some("bob".to_string())))
+        );
+    }
+
+    #[tokio::test]
+    async fn overlay_exec_applies_overlay_once_across_multiple_input_partitions() {
+        use datafusion::execution::context::SessionContext;
+        use datafusion::physical_plan::collect;
+        use kalamdb_datafusion_sources::stream::one_shot_batch_stream;
+
+        #[derive(Debug)]
+        struct EmptyTwoPartitionExec {
+            schema: SchemaRef,
+            properties: Arc<PlanProperties>,
+        }
+
+        impl EmptyTwoPartitionExec {
+            fn new(schema: SchemaRef) -> Self {
+                Self {
+                    schema: Arc::clone(&schema),
+                    properties: Arc::new(PlanProperties::new(
+                        EquivalenceProperties::new(schema),
+                        Partitioning::UnknownPartitioning(2),
+                        datafusion::physical_plan::execution_plan::EmissionType::Incremental,
+                        datafusion::physical_plan::execution_plan::Boundedness::Bounded,
+                    )),
+                }
+            }
+        }
+
+        impl DisplayAs for EmptyTwoPartitionExec {
+            fn fmt_as(
+                &self,
+                _t: DisplayFormatType,
+                f: &mut std::fmt::Formatter,
+            ) -> std::fmt::Result {
+                write!(f, "EmptyTwoPartitionExec")
+            }
+        }
+
+        impl ExecutionPlan for EmptyTwoPartitionExec {
+            fn name(&self) -> &str {
+                Self::static_name()
+            }
+
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+
+            fn properties(&self) -> &Arc<PlanProperties> {
+                &self.properties
+            }
+
+            fn children(&self) -> Vec<&Arc<dyn ExecutionPlan>> {
+                Vec::new()
+            }
+
+            fn with_new_children(
+                self: Arc<Self>,
+                children: Vec<Arc<dyn ExecutionPlan>>,
+            ) -> DataFusionResult<Arc<dyn ExecutionPlan>> {
+                if !children.is_empty() {
+                    return Err(DataFusionError::Execution(
+                        "EmptyTwoPartitionExec does not accept children".to_string(),
+                    ));
+                }
+                Ok(self)
+            }
+
+            fn execute(
+                &self,
+                partition: usize,
+                _context: Arc<TaskContext>,
+            ) -> DataFusionResult<SendableRecordBatchStream> {
+                if partition >= 2 {
+                    return Err(DataFusionError::Execution(format!(
+                        "unexpected partition {partition}",
+                    )));
+                }
+
+                let batch = RecordBatch::new_empty(Arc::clone(&self.schema));
+                Ok(one_shot_batch_stream(Arc::clone(&self.schema), async move {
+                    Ok(batch)
+                }))
+            }
+        }
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("name", DataType::Utf8, true),
+        ]));
+        let transaction_id = TransactionId::new("01960f7b-3d15-7d6d-b26c-7e4db6f25f8d");
+        let table_id = TableId::new(NamespaceId::new("app"), TableName::new("items"));
+        let mut overlay = TransactionOverlay::new(transaction_id.clone());
+        overlay.apply_entry(TransactionOverlayEntry {
+            transaction_id,
+            mutation_order: 0,
+            table_id: table_id.clone(),
+            table_type: TableType::Shared,
+            user_id: None,
+            operation_kind: OperationKind::Insert,
+            primary_key: "1".to_string(),
+            payload: row(&[
+                ("id", ScalarValue::Int64(Some(1))),
+                ("name", ScalarValue::Utf8(Some("alpha".to_string()))),
+            ]),
+            tombstone: false,
+        });
+
+        let exec = Arc::new(
+            TransactionOverlayExec::try_new(
+                Arc::new(EmptyTwoPartitionExec::new(Arc::clone(&schema))),
+                table_id,
+                "id",
+                overlay,
+                None,
+                None,
+                None,
+            )
+            .expect("overlay exec"),
+        );
+
+        assert_eq!(exec.properties().output_partitioning().partition_count(), 1);
+
+        let batches = collect(exec, SessionContext::new().task_ctx())
+            .await
+            .expect("collect overlay rows");
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].num_rows(), 1);
+        assert_eq!(
+            batches[0]
+                .column(1)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .expect("name array")
+                .value(0),
+            "alpha"
         );
     }
 }

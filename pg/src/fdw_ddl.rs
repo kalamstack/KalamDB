@@ -13,7 +13,7 @@ use kalam_pg_common::{KalamPgError, SEQ_COLUMN, USER_ID_COLUMN};
 use kalamdb_commons::TableType;
 use pgrx::pg_sys;
 use std::collections::BTreeMap;
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::str::FromStr;
 
 const DEFAULT_KALAM_SERVER: &str = "kalam_server";

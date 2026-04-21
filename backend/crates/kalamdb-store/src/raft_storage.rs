@@ -300,21 +300,6 @@ impl RaftPartitionStore {
         Ok(last_index)
     }
 
-    /// Returns the first (lowest) log index, or None if log is empty.
-    fn first_log_index(&self) -> Result<Option<u64>> {
-        let prefix = self.make_key("log:");
-
-        let iter = self.backend.scan(&self.partition, Some(&prefix), None, Some(1))?;
-
-        for (key, _) in iter {
-            if let Some(index) = Self::parse_log_index_from_key(&key) {
-                return Ok(Some(index));
-            }
-        }
-
-        Ok(None)
-    }
-
     fn parse_log_index_from_key(key: &[u8]) -> Option<u64> {
         let key_str = std::str::from_utf8(key).ok()?;
         // Key format: "{prefix}:log:{index:020}"
@@ -473,21 +458,6 @@ impl RaftPartitionStore {
             None => Ok(None),
         }
     }
-
-    /// Clears all snapshot data (meta and data reference).
-    fn clear_snapshot(&self) -> Result<()> {
-        let ops = vec![
-            Operation::Delete {
-                partition: self.partition.clone(),
-                key: self.snap_meta_key(),
-            },
-            Operation::Delete {
-                partition: self.partition.clone(),
-                key: self.snap_data_key(),
-            },
-        ];
-        self.backend.batch(ops)
-    }
 }
 
 // ============================================================================
@@ -573,7 +543,6 @@ mod tests {
         let store = create_test_store(GroupId::Meta);
 
         // Empty log
-        assert!(store.first_log_index().unwrap().is_none());
         assert!(store.last_log_index().unwrap().is_none());
 
         // Add some entries
@@ -596,7 +565,9 @@ mod tests {
         ];
         store.append_logs(&entries).unwrap();
 
-        assert_eq!(store.first_log_index().unwrap(), Some(5));
+        let scanned = store.scan_logs(5, 6).unwrap();
+        assert_eq!(scanned.len(), 1);
+        assert_eq!(scanned[0].index, 5);
         assert_eq!(store.last_log_index().unwrap(), Some(7));
     }
 
@@ -627,7 +598,9 @@ mod tests {
             assert!(store.get_log(i).unwrap().is_some());
         }
 
-        assert_eq!(store.first_log_index().unwrap(), Some(5));
+        let scanned = store.scan_logs(5, 6).unwrap();
+        assert_eq!(scanned.len(), 1);
+        assert_eq!(scanned[0].index, 5);
     }
 
     #[test]
@@ -722,11 +695,6 @@ mod tests {
         match read_data {
             RaftSnapshotData::FilePath(path) => assert_eq!(path, "/var/data/snap-001.bin"),
         }
-
-        // Clear snapshot
-        store.clear_snapshot().unwrap();
-        assert!(store.read_snapshot_meta().unwrap().is_none());
-        assert!(store.read_snapshot_data().unwrap().is_none());
     }
 
     #[test]

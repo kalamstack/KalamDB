@@ -2,7 +2,9 @@
 
 **Input**: Design documents from `/specs/029-datafusion-modernization/`
 **Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/provider-execution.md, contracts/cold-path-pruning.md, contracts/validation-rollout.md, quickstart.md
-**Last Updated**: 2026-04-20
+**Last Updated**: 2026-04-21
+
+**Audit Note (2026-04-21)**: Previously open tasks were reviewed against the current branch state. Tasks with verifiable code or validation evidence are marked finished. Tasks without verifiable branch artifacts are marked skipped so nothing remains implicitly open.
 
 **Tests**: The spec explicitly requires explain-shape validation, regression coverage, CLI smoke coverage, and benchmark evidence. This task list includes story-level validation tasks plus final batched end-to-end and performance verification rather than per-edit micro-tests.
 
@@ -14,6 +16,7 @@
 
 - **[P]**: Can run in parallel when earlier stabilizing tasks in the same phase are complete and the tasks touch different files
 - **[Story]**: Which user story this task belongs to (`US1` through `US9`)
+- **[S]**: Explicitly skipped or deferred after audit; no verified implementation or validation artifact landed on this branch for that task
 - Every task includes exact file paths
 
 ## Path Conventions
@@ -44,7 +47,7 @@
 
 - [X] T004 Record phase-0 explain and performance baselines in `benchv2/src/benchmarks/point_lookup_bench.rs`, `benchv2/src/benchmarks/load_sql_1k_bench.rs`, `benchv2/src/benchmarks/load_mixed_rw_bench.rs`, `cli/tests/smoke/query/smoke_test_queries_benchmark.rs`, and `cli/tests/smoke/query/smoke_test_00_parallel_query_burst.rs`
 - [X] T005 [P] Extract common scan descriptors, provider traits, and plan-property builders from `backend/crates/kalamdb-tables/src/utils/base.rs` and `backend/crates/kalamdb-system/src/providers/base.rs` into `backend/crates/kalamdb-datafusion-sources/src/provider.rs` and `backend/crates/kalamdb-datafusion-sources/src/stats.rs`, leaving storage-specific behavior behind crate-local adapters
-- [ ] T006 [P] Extract shared execution-node and record-batch stream utilities from `backend/crates/kalamdb-transactions/src/overlay_exec.rs` and provider helpers into `backend/crates/kalamdb-datafusion-sources/src/exec.rs` and `backend/crates/kalamdb-datafusion-sources/src/stream.rs` using DataFusion `ExecutionPlan` and `SendableRecordBatchStream` primitives instead of custom row buffers
+- [X] T006 [P] Extract shared execution-node and record-batch stream utilities from `backend/crates/kalamdb-transactions/src/overlay_exec.rs` and provider helpers into `backend/crates/kalamdb-datafusion-sources/src/exec.rs` and `backend/crates/kalamdb-datafusion-sources/src/stream.rs` using DataFusion `ExecutionPlan` and `SendableRecordBatchStream` primitives instead of custom row buffers
 - [X] T007 [P] Create unified filter, projection, limit, and pruning descriptors in `backend/crates/kalamdb-datafusion-sources/src/pruning.rs` and wire them into `backend/crates/kalamdb-tables/src/utils/base.rs` and `backend/crates/kalamdb-system/src/providers/base.rs`
 - [X] T008 [P] Wire the shared source crate into `backend/crates/kalamdb-tables/src/utils/mod.rs` and `backend/crates/kalamdb-system/src/providers/mod.rs`, and add only minimal integration entry points in `backend/crates/kalamdb-views/src/lib.rs` and `backend/crates/kalamdb-vector/src/sql/mod.rs`
 - [X] T009 [P] Add shared descriptor, version-merge, plan-properties, and current-API contract tests in `backend/crates/kalamdb-datafusion-sources/tests/descriptor_contract.rs`, `backend/crates/kalamdb-datafusion-sources/tests/version_merge_contract.rs`, `backend/crates/kalamdb-datafusion-sources/tests/plan_properties_contract.rs`, and `backend/crates/kalamdb-datafusion-sources/tests/current_api_surface.rs`
@@ -114,9 +117,9 @@
 - [X] T025 [US3] Replace blanket pushdown reporting with a shared capability matrix for `Exact`, `Inexact`, and `Unsupported` filter shapes in `backend/crates/kalamdb-datafusion-sources/src/provider.rs`, `backend/crates/kalamdb-tables/src/utils/base.rs`, and `backend/crates/kalamdb-system/src/providers/base.rs`
 - [X] T026 [P] [US3] Implement precise pushdown handling for stream, system, view, and vector sources in `backend/crates/kalamdb-tables/src/stream_tables/stream_table_provider.rs`, `backend/crates/kalamdb-system/src/providers/base.rs`, `backend/crates/kalamdb-views/src/view_base.rs`, and `backend/crates/kalamdb-vector/src/sql/vector_search.rs`
 - [X] T027 [US3] Implement shared exact and inexact filter evaluation for MVCC-backed user and shared tables in `backend/crates/kalamdb-tables/src/user_tables/user_table_provider.rs`, `backend/crates/kalamdb-tables/src/shared_tables/shared_table_provider.rs`, and `backend/crates/kalamdb-datafusion-sources/src/pruning.rs`
-- [ ] T062 [US3] Rebuild hot+cold MVCC version resolution as a lazy metadata-first merge execution plan that honors `(commit_seq, seq_id)` ordering, snapshot visibility, and early-stop hints while emitting shared batch slices wherever possible in `backend/crates/kalamdb-datafusion-sources/src/exec.rs`, `backend/crates/kalamdb-datafusion-sources/src/stream.rs`, `backend/crates/kalamdb-tables/src/utils/version_resolution.rs`, `backend/crates/kalamdb-tables/src/user_tables/user_table_provider.rs`, and `backend/crates/kalamdb-tables/src/shared_tables/shared_table_provider.rs`
-- [ ] T063 [US3] Replace callers of `merge_versioned_rows`, `resolve_latest_kvs_from_cold_batch`, and `count_resolved_from_metadata` with the shared merge execution plan and delete the superseded helper paths from `backend/crates/kalamdb-tables/src/utils/version_resolution.rs` and `backend/crates/kalamdb-tables/src/utils/base.rs` once the new contract tests pass
-- [ ] T064 [US3] Preserve and modernize primary-key lookup and count-only fast paths on the streaming merge in `backend/crates/kalamdb-tables/src/utils/pk/existence_checker.rs`, `backend/crates/kalamdb-tables/src/user_tables/user_table_provider.rs`, `backend/crates/kalamdb-tables/src/shared_tables/shared_table_provider.rs`, and `backend/crates/kalamdb-datafusion-sources/src/exec.rs`, with regression coverage in `backend/crates/kalamdb-tables/tests/pk_count_fast_paths.rs`
+- [S] T062 [US3] Rebuild hot+cold MVCC version resolution as a lazy metadata-first merge execution plan that honors `(commit_seq, seq_id)` ordering, snapshot visibility, and early-stop hints while emitting shared batch slices wherever possible in `backend/crates/kalamdb-datafusion-sources/src/exec.rs`, `backend/crates/kalamdb-datafusion-sources/src/stream.rs`, `backend/crates/kalamdb-tables/src/utils/version_resolution.rs`, `backend/crates/kalamdb-tables/src/user_tables/user_table_provider.rs`, and `backend/crates/kalamdb-tables/src/shared_tables/shared_table_provider.rs`
+- [S] T063 [US3] Replace callers of `merge_versioned_rows`, `resolve_latest_kvs_from_cold_batch`, and `count_resolved_from_metadata` with the shared merge execution plan and delete the superseded helper paths from `backend/crates/kalamdb-tables/src/utils/version_resolution.rs` and `backend/crates/kalamdb-tables/src/utils/base.rs` once the new contract tests pass
+- [S] T064 [US3] Preserve and modernize primary-key lookup and count-only fast paths on the streaming merge in `backend/crates/kalamdb-tables/src/utils/pk/existence_checker.rs`, `backend/crates/kalamdb-tables/src/user_tables/user_table_provider.rs`, `backend/crates/kalamdb-tables/src/shared_tables/shared_table_provider.rs`, and `backend/crates/kalamdb-datafusion-sources/src/exec.rs`, with regression coverage in `backend/crates/kalamdb-tables/tests/pk_count_fast_paths.rs`
 
 **Checkpoint**: Pushdown behavior is source-accurate, shared, and free of blanket fallback declarations from the old design.
 
@@ -130,16 +133,16 @@
 
 ### Tests for User Story 4
 
-- [ ] T028 [P] [US4] Add cold-path pruning regression coverage in `backend/crates/kalamdb-tables/tests/historical_pruning.rs` and `backend/crates/kalamdb-filestore/tests/parquet_pruning.rs`
-- [ ] T029 [P] [US4] Add historical explain coverage for partition, file, and row-group reduction in `cli/tests/smoke/flushing/smoke_test_historical_pruning_explain.rs`
+- [S] T028 [P] [US4] Add cold-path pruning regression coverage in `backend/crates/kalamdb-tables/tests/historical_pruning.rs` and `backend/crates/kalamdb-filestore/tests/parquet_pruning.rs`
+- [S] T029 [P] [US4] Add historical explain coverage for partition, file, and row-group reduction in `cli/tests/smoke/flushing/smoke_test_historical_pruning_explain.rs`
 
 ### Implementation for User Story 4
 
-- [ ] T030 [US4] Refactor historical selection descriptors and manifest pruning into shared reusable logic in `backend/crates/kalamdb-datafusion-sources/src/pruning.rs`, `backend/crates/kalamdb-tables/src/manifest/planner.rs`, and `backend/crates/kalamdb-tables/src/utils/parquet.rs` using existing Parquet and object-store metadata APIs instead of custom file-selection machinery
-- [ ] T031 [US4] Add execution-time Parquet row-group and page pruning hooks across table and filestore layers via Parquet/DataFusion reader APIs in `backend/crates/kalamdb-filestore/src/parquet/reader.rs`, `backend/crates/kalamdb-tables/src/utils/parquet.rs`, and `backend/crates/kalamdb-tables/src/manifest/manifest_helpers.rs`
-- [ ] T032 [US4] Delete batch-materializing historical scan leftovers from `backend/crates/kalamdb-tables/src/utils/base.rs` and `backend/crates/kalamdb-tables/src/utils/parquet.rs`
-- [ ] T065 [US4] Add historical schema-evolution regression coverage (columns added, removed, renamed, retyped) for the modernized path in `backend/crates/kalamdb-tables/tests/historical_schema_evolution.rs` and `cli/tests/smoke/flushing/smoke_test_historical_schema_evolution.rs`
-- [ ] T066 [US4] Ensure streaming schema projection aligns older Parquet row groups with the current table schema using Arrow projection utilities and without owned-column copies in `backend/crates/kalamdb-filestore/src/parquet/reader.rs`, `backend/crates/kalamdb-tables/src/utils/parquet.rs`, and `backend/crates/kalamdb-datafusion-sources/src/pruning.rs`
+- [S] T030 [US4] Refactor historical selection descriptors and manifest pruning into shared reusable logic in `backend/crates/kalamdb-datafusion-sources/src/pruning.rs`, `backend/crates/kalamdb-tables/src/manifest/planner.rs`, and `backend/crates/kalamdb-tables/src/utils/parquet.rs` using existing Parquet and object-store metadata APIs instead of custom file-selection machinery
+- [S] T031 [US4] Add execution-time Parquet row-group and page pruning hooks across table and filestore layers via Parquet/DataFusion reader APIs in `backend/crates/kalamdb-filestore/src/parquet/reader.rs`, `backend/crates/kalamdb-tables/src/utils/parquet.rs`, and `backend/crates/kalamdb-tables/src/manifest/manifest_helpers.rs`
+- [S] T032 [US4] Delete batch-materializing historical scan leftovers from `backend/crates/kalamdb-tables/src/utils/base.rs` and `backend/crates/kalamdb-tables/src/utils/parquet.rs`
+- [S] T065 [US4] Add historical schema-evolution regression coverage (columns added, removed, renamed, retyped) for the modernized path in `backend/crates/kalamdb-tables/tests/historical_schema_evolution.rs` and `cli/tests/smoke/flushing/smoke_test_historical_schema_evolution.rs`
+- [S] T066 [US4] Ensure streaming schema projection aligns older Parquet row groups with the current table schema using Arrow projection utilities and without owned-column copies in `backend/crates/kalamdb-filestore/src/parquet/reader.rs`, `backend/crates/kalamdb-tables/src/utils/parquet.rs`, and `backend/crates/kalamdb-datafusion-sources/src/pruning.rs`
 
 **Checkpoint**: Historical pruning is layered, shared, and executed at read time instead of hidden inside the old planning path.
 
@@ -153,14 +156,14 @@
 
 ### Tests for User Story 5
 
-- [ ] T033 [P] [US5] Add limit-pruning correctness coverage in `backend/crates/kalamdb-tables/tests/historical_limit_pruning.rs`
-- [ ] T034 [P] [US5] Add limit-heavy historical benchmark coverage in `benchv2/src/benchmarks/flushed_parquet_query_bench.rs` and `benchv2/src/benchmarks/point_lookup_bench.rs`
+- [S] T033 [P] [US5] Add limit-pruning correctness coverage in `backend/crates/kalamdb-tables/tests/historical_limit_pruning.rs`
+- [S] T034 [P] [US5] Add limit-heavy historical benchmark coverage in `benchv2/src/benchmarks/flushed_parquet_query_bench.rs` and `benchv2/src/benchmarks/point_lookup_bench.rs`
 
 ### Implementation for User Story 5
 
-- [ ] T035 [US5] Add shared early-stop rules, explicit safety gates, and limit descriptors in `backend/crates/kalamdb-datafusion-sources/src/pruning.rs` and `backend/crates/kalamdb-tables/src/manifest/planner.rs`
-- [ ] T036 [US5] Implement safe limit-aware cold-path termination in `backend/crates/kalamdb-tables/src/utils/parquet.rs` and `backend/crates/kalamdb-filestore/src/parquet/reader.rs`
-- [ ] T037 [US5] Remove old limit-oblivious fallback logic from `backend/crates/kalamdb-tables/src/utils/parquet.rs` and `backend/crates/kalamdb-tables/src/manifest/planner.rs`
+- [S] T035 [US5] Add shared early-stop rules, explicit safety gates, and limit descriptors in `backend/crates/kalamdb-datafusion-sources/src/pruning.rs` and `backend/crates/kalamdb-tables/src/manifest/planner.rs`
+- [S] T036 [US5] Implement safe limit-aware cold-path termination in `backend/crates/kalamdb-tables/src/utils/parquet.rs` and `backend/crates/kalamdb-filestore/src/parquet/reader.rs`
+- [S] T037 [US5] Remove old limit-oblivious fallback logic from `backend/crates/kalamdb-tables/src/utils/parquet.rs` and `backend/crates/kalamdb-tables/src/manifest/planner.rs`
 
 **Checkpoint**: Limit-aware pruning works only where it is safe, and the old unconditional limit handling path is gone.
 
@@ -174,16 +177,16 @@
 
 ### Tests for User Story 6
 
-- [ ] T038 [P] [US6] Add plan-property, partition-statistics, and plan-cache metadata coverage in `backend/crates/kalamdb-datafusion-sources/tests/plan_properties_contract.rs`, `backend/crates/kalamdb-tables/tests/partition_statistics.rs`, `backend/crates/kalamdb-system/tests/partition_statistics.rs`, and `backend/crates/kalamdb-core/tests/plan_cache_metadata.rs`
-- [ ] T039 [P] [US6] Add explain regression coverage for redundant sort and repartition avoidance in `cli/tests/smoke/query/smoke_test_plan_metadata.rs`
+- [S] T038 [P] [US6] Add plan-property, partition-statistics, and plan-cache metadata coverage in `backend/crates/kalamdb-datafusion-sources/tests/plan_properties_contract.rs`, `backend/crates/kalamdb-tables/tests/partition_statistics.rs`, `backend/crates/kalamdb-system/tests/partition_statistics.rs`, and `backend/crates/kalamdb-core/tests/plan_cache_metadata.rs`
+- [S] T039 [P] [US6] Add explain regression coverage for redundant sort and repartition avoidance in `cli/tests/smoke/query/smoke_test_plan_metadata.rs`
 
 ### Implementation for User Story 6
 
-- [ ] T040 [US6] Implement shared `PlanProperties` and `partition_statistics` builders in `backend/crates/kalamdb-datafusion-sources/src/stats.rs`, `backend/crates/kalamdb-datafusion-sources/src/exec.rs`, and `backend/crates/kalamdb-transactions/src/overlay_exec.rs`
-- [ ] T041 [US6] Feed stable partitioning, ordering, boundedness, and conservative statistics through table providers in `backend/crates/kalamdb-tables/src/utils/base.rs`, `backend/crates/kalamdb-tables/src/stream_tables/stream_table_provider.rs`, `backend/crates/kalamdb-tables/src/user_tables/user_table_provider.rs`, and `backend/crates/kalamdb-tables/src/shared_tables/shared_table_provider.rs`
-- [ ] T042 [P] [US6] Align session-side partition planning and plan-cache behavior with the new source metadata in `backend/crates/kalamdb-core/src/sql/datafusion_session.rs`, `backend/crates/kalamdb-core/src/sql/context/execution_context.rs`, `backend/crates/kalamdb-core/src/sql/plan_cache.rs`, and `backend/crates/kalamdb-core/tests/plan_cache_metadata.rs`
-- [ ] T067 [US6] Refactor per-user `SessionContext` construction to stay lightweight and Arc-sharing friendly by avoiding avoidable `SessionConfig` option copies, keeping `SessionUserContext` injection minimal on the hot path, and reusing immutable catalog/runtime state in `backend/crates/kalamdb-core/src/sql/context/execution_context.rs`, `backend/crates/kalamdb-core/src/sql/datafusion_session.rs`, and `backend/crates/kalamdb-session-datafusion/src/context.rs`
-- [ ] T068 [P] [US6] Add per-user session footprint and concurrent-user memory regression coverage in `backend/crates/kalamdb-core/tests/session_memory_footprint.rs` and `benchv2/src/benchmarks/concurrent_user_session_bench.rs`
+- [S] T040 [US6] Implement shared `PlanProperties` and `partition_statistics` builders in `backend/crates/kalamdb-datafusion-sources/src/stats.rs`, `backend/crates/kalamdb-datafusion-sources/src/exec.rs`, and `backend/crates/kalamdb-transactions/src/overlay_exec.rs`
+- [S] T041 [US6] Feed stable partitioning, ordering, boundedness, and conservative statistics through table providers in `backend/crates/kalamdb-tables/src/utils/base.rs`, `backend/crates/kalamdb-tables/src/stream_tables/stream_table_provider.rs`, `backend/crates/kalamdb-tables/src/user_tables/user_table_provider.rs`, and `backend/crates/kalamdb-tables/src/shared_tables/shared_table_provider.rs`
+- [S] T042 [P] [US6] Align session-side partition planning and plan-cache behavior with the new source metadata in `backend/crates/kalamdb-core/src/sql/datafusion_session.rs`, `backend/crates/kalamdb-core/src/sql/context/execution_context.rs`, `backend/crates/kalamdb-core/src/sql/plan_cache.rs`, and `backend/crates/kalamdb-core/tests/plan_cache_metadata.rs`
+- [S] T067 [US6] Refactor per-user `SessionContext` construction to stay lightweight and Arc-sharing friendly by avoiding avoidable `SessionConfig` option copies, keeping `SessionUserContext` injection minimal on the hot path, and reusing immutable catalog/runtime state in `backend/crates/kalamdb-core/src/sql/context/execution_context.rs`, `backend/crates/kalamdb-core/src/sql/datafusion_session.rs`, and `backend/crates/kalamdb-session-datafusion/src/context.rs`
+- [S] T068 [P] [US6] Add per-user session footprint and concurrent-user memory regression coverage in `backend/crates/kalamdb-core/tests/session_memory_footprint.rs` and `benchv2/src/benchmarks/concurrent_user_session_bench.rs`
 
 **Checkpoint**: Source metadata is explicit, reused, and visible to the optimizer rather than being hidden behind duplicate wrapper code.
 
@@ -197,12 +200,12 @@
 
 ### Tests for User Story 7
 
-- [ ] T043 [P] [US7] Add projection and nested-field regression coverage in `backend/crates/kalamdb-tables/tests/projection_pruning.rs`, `backend/crates/kalamdb-views/tests/view_projection_pruning.rs`, `backend/crates/kalamdb-vector/tests/vector_projection_pruning.rs`, and `cli/tests/smoke/query/smoke_test_projection_pruning.rs`
+- [S] T043 [P] [US7] Add projection and nested-field regression coverage in `backend/crates/kalamdb-tables/tests/projection_pruning.rs`, `backend/crates/kalamdb-views/tests/view_projection_pruning.rs`, `backend/crates/kalamdb-vector/tests/vector_projection_pruning.rs`, and `cli/tests/smoke/query/smoke_test_projection_pruning.rs`
 
 ### Implementation for User Story 7
 
-- [ ] T044 [US7] Add shared projection and nested-field reduction utilities in `backend/crates/kalamdb-datafusion-sources/src/pruning.rs` and `backend/crates/kalamdb-tables/src/utils/base.rs`
-- [ ] T045 [US7] Apply narrow projection and nested-field reduction to historical, view, and vector reads in `backend/crates/kalamdb-tables/src/utils/parquet.rs`, `backend/crates/kalamdb-filestore/src/parquet/reader.rs`, `backend/crates/kalamdb-views/src/view_base.rs`, and `backend/crates/kalamdb-vector/src/sql/vector_search.rs` by reusing Arrow projection primitives instead of bespoke nested-field copying
+- [S] T044 [US7] Add shared projection and nested-field reduction utilities in `backend/crates/kalamdb-datafusion-sources/src/pruning.rs` and `backend/crates/kalamdb-tables/src/utils/base.rs`
+- [S] T045 [US7] Apply narrow projection and nested-field reduction to historical, view, and vector reads in `backend/crates/kalamdb-tables/src/utils/parquet.rs`, `backend/crates/kalamdb-filestore/src/parquet/reader.rs`, `backend/crates/kalamdb-views/src/view_base.rs`, and `backend/crates/kalamdb-vector/src/sql/vector_search.rs` by reusing Arrow projection primitives instead of bespoke nested-field copying
 
 **Checkpoint**: Projection reduction is centralized and reused rather than reimplemented per source family.
 
@@ -220,9 +223,9 @@
 
 ### Implementation for User Story 8
 
-- [ ] T047 [US8] Replace remaining MemTable-backed planning wrappers and outdated 53.x planning hooks with current `ExecutionPlan` and `PlanProperties` APIs in `backend/crates/kalamdb-tables/src/utils/base.rs`, `backend/crates/kalamdb-system/src/providers/base.rs`, `backend/crates/kalamdb-views/src/view_base.rs`, `backend/crates/kalamdb-vector/src/sql/vector_search.rs`, and `backend/crates/kalamdb-transactions/src/overlay_exec.rs`
-- [ ] T048 [US8] Delete obsolete compatibility shims and dead old-design helpers from `backend/crates/kalamdb-tables/src/utils/base.rs`, `backend/crates/kalamdb-tables/src/utils/mod.rs`, `backend/crates/kalamdb-system/src/providers/base.rs`, `backend/crates/kalamdb-system/src/macros.rs`, `backend/crates/kalamdb-views/src/view_base.rs`, and `backend/crates/kalamdb-vector/src/sql/vector_search.rs`
-- [ ] T049 [US8] Remove unused legacy dependency wiring and compatibility-only comments from `Cargo.toml`, `backend/Cargo.toml`, and touched backend crate `Cargo.toml` files
+- [X] T047 [US8] Replace remaining MemTable-backed planning wrappers and outdated 53.x planning hooks with current `ExecutionPlan` and `PlanProperties` APIs in `backend/crates/kalamdb-tables/src/utils/base.rs`, `backend/crates/kalamdb-system/src/providers/base.rs`, `backend/crates/kalamdb-views/src/view_base.rs`, `backend/crates/kalamdb-vector/src/sql/vector_search.rs`, and `backend/crates/kalamdb-transactions/src/overlay_exec.rs`
+- [X] T048 [US8] Delete obsolete compatibility shims and dead old-design helpers from `backend/crates/kalamdb-tables/src/utils/base.rs`, `backend/crates/kalamdb-tables/src/utils/mod.rs`, `backend/crates/kalamdb-system/src/providers/base.rs`, `backend/crates/kalamdb-system/src/macros.rs`, `backend/crates/kalamdb-views/src/view_base.rs`, and `backend/crates/kalamdb-vector/src/sql/vector_search.rs`
+- [S] T049 [US8] Remove unused legacy dependency wiring and compatibility-only comments from `Cargo.toml`, `backend/Cargo.toml`, and touched backend crate `Cargo.toml` files
 
 **Checkpoint**: The modernized provider stack is on one supported API surface with no backward-compatibility scaffolding left in targeted files.
 
@@ -236,17 +239,17 @@
 
 ### Tests for User Story 9
 
-- [ ] T050 [P] [US9] Add transaction-visibility and authorization regression coverage for modernized scans in `cli/tests/smoke/impersonating/smoke_test_as_user_authorization.rs`, `cli/tests/smoke/tables/smoke_test_user_table_rls.rs`, and `cli/tests/smoke/query/smoke_test_00_parallel_query_burst.rs`
-- [ ] T051 [P] [US9] Add latency, planning, memory, and concurrency benchmark coverage in `benchv2/src/benchmarks/point_lookup_bench.rs`, `benchv2/src/benchmarks/load_sql_1k_bench.rs`, `benchv2/src/benchmarks/load_mixed_rw_bench.rs`, and `benchv2/src/reporter/json_reporter.rs`
-- [ ] T053 [P] [US9] Add transaction overlay correctness and read-your-writes regression coverage in `backend/crates/kalamdb-transactions/tests/overlay_visibility.rs`, `backend/crates/kalamdb-transactions/tests/overlay_read_your_writes.rs`, and `backend/crates/kalamdb-tables/tests/dml_overlay_integration.rs`
-- [ ] T071 [P] [US9] Add zero-copy and allocation-budget regression coverage for scans, version merges, and overlays in `backend/crates/kalamdb-datafusion-sources/tests/zero_copy_allocations.rs`, `backend/crates/kalamdb-transactions/tests/overlay_allocation_budget.rs`, and `backend/crates/kalamdb-tables/tests/scan_allocation_budget.rs`
+- [S] T050 [P] [US9] Add transaction-visibility and authorization regression coverage for modernized scans in `cli/tests/smoke/impersonating/smoke_test_as_user_authorization.rs`, `cli/tests/smoke/tables/smoke_test_user_table_rls.rs`, and `cli/tests/smoke/query/smoke_test_00_parallel_query_burst.rs`
+- [S] T051 [P] [US9] Add latency, planning, memory, and concurrency benchmark coverage in `benchv2/src/benchmarks/point_lookup_bench.rs`, `benchv2/src/benchmarks/load_sql_1k_bench.rs`, `benchv2/src/benchmarks/load_mixed_rw_bench.rs`, and `benchv2/src/reporter/json_reporter.rs`
+- [S] T053 [P] [US9] Add transaction overlay correctness and read-your-writes regression coverage in `backend/crates/kalamdb-transactions/tests/overlay_visibility.rs`, `backend/crates/kalamdb-transactions/tests/overlay_read_your_writes.rs`, and `backend/crates/kalamdb-tables/tests/dml_overlay_integration.rs`
+- [S] T071 [P] [US9] Add zero-copy and allocation-budget regression coverage for scans, version merges, and overlays in `backend/crates/kalamdb-datafusion-sources/tests/zero_copy_allocations.rs`, `backend/crates/kalamdb-transactions/tests/overlay_allocation_budget.rs`, and `backend/crates/kalamdb-tables/tests/scan_allocation_budget.rs`
 
 ### Implementation for User Story 9
 
-- [ ] T052 [US9] Add explain and analyze plan-shape capture, evidence helpers, and assertion utilities in `backend/crates/kalamdb-core/src/sql/executor/sql_executor.rs`, `cli/tests/smoke/query/smoke_test_stream_explain_planning.rs`, and `cli/tests/smoke/query/smoke_test_plan_metadata.rs`
-- [ ] T069 [US9] Modernize DML execution on the shared source substrate so `INSERT`, `UPDATE`, and `DELETE` consume the streaming version-resolution merge instead of owned-row scan fallbacks in `backend/crates/kalamdb-tables/src/utils/datafusion_dml.rs`, `backend/crates/kalamdb-tables/src/user_tables/user_table_provider.rs`, `backend/crates/kalamdb-tables/src/shared_tables/shared_table_provider.rs`, and `backend/crates/kalamdb-transactions/src/overlay_exec.rs`
-- [ ] T070 [US9] Rebuild the transaction overlay execution node to stream shared `RecordBatch` slices from the shared substrate and remove owned-row overlay buffers unless materialization is semantically required in `backend/crates/kalamdb-transactions/src/overlay_exec.rs`, `backend/crates/kalamdb-transactions/src/query_extension.rs`, and `backend/crates/kalamdb-datafusion-sources/src/exec.rs`
-- [ ] T054 [P] [US9] Wire benchmark comparison thresholds and rollout verdict logic into `benchv2/src/comparison.rs`, `benchv2/src/verdict.rs`, and `benchv2/src/metrics.rs`
+- [S] T052 [US9] Add explain and analyze plan-shape capture, evidence helpers, and assertion utilities in `backend/crates/kalamdb-core/src/sql/executor/sql_executor.rs`, `cli/tests/smoke/query/smoke_test_stream_explain_planning.rs`, and `cli/tests/smoke/query/smoke_test_plan_metadata.rs`
+- [S] T069 [US9] Modernize DML execution on the shared source substrate so `INSERT`, `UPDATE`, and `DELETE` consume the streaming version-resolution merge instead of owned-row scan fallbacks in `backend/crates/kalamdb-tables/src/utils/datafusion_dml.rs`, `backend/crates/kalamdb-tables/src/user_tables/user_table_provider.rs`, `backend/crates/kalamdb-tables/src/shared_tables/shared_table_provider.rs`, and `backend/crates/kalamdb-transactions/src/overlay_exec.rs`
+- [S] T070 [US9] Rebuild the transaction overlay execution node to stream shared `RecordBatch` slices from the shared substrate and remove owned-row overlay buffers unless materialization is semantically required in `backend/crates/kalamdb-transactions/src/overlay_exec.rs`, `backend/crates/kalamdb-transactions/src/query_extension.rs`, and `backend/crates/kalamdb-datafusion-sources/src/exec.rs`
+- [S] T054 [P] [US9] Wire benchmark comparison thresholds and rollout verdict logic into `benchv2/src/comparison.rs`, `benchv2/src/verdict.rs`, and `benchv2/src/metrics.rs`
 
 **Checkpoint**: Rollout evidence is explicit, reproducible, and strong enough to justify deleting the last legacy scan paths.
 
@@ -256,14 +259,14 @@
 
 **Purpose**: Finish the cleanup, comments, validation, and removal work so the codebase is left smaller, cleaner, and fully on the new design.
 
-- [ ] T055 [P] Add final module docs and focused inline comments for shared abstractions and remaining complex provider code in `backend/crates/kalamdb-datafusion-sources/src/*.rs`, `backend/crates/kalamdb-tables/src/user_tables/user_table_provider.rs`, `backend/crates/kalamdb-tables/src/shared_tables/shared_table_provider.rs`, and `backend/crates/kalamdb-system/src/providers/base.rs`
-- [ ] T056 [P] Tighten module boundaries, re-exports, and visibility after the story-scoped deletions land in `backend/crates/kalamdb-tables/src/utils/base.rs`, `backend/crates/kalamdb-tables/src/utils/mod.rs`, `backend/crates/kalamdb-system/src/providers/base.rs`, `backend/crates/kalamdb-system/src/macros.rs`, `backend/crates/kalamdb-views/src/view_base.rs`, and `backend/crates/kalamdb-vector/src/sql/vector_search.rs`
-- [ ] T057 [P] Run batched compile validation across modernized crates using `Cargo.toml`, `backend/crates/kalamdb-datafusion-sources/Cargo.toml`, and touched backend crate manifests, then fix errors in touched source files
-- [ ] T058 Run targeted `cargo nextest` validation for modernized crates and fix failures in touched files under `backend/crates/` and `cli/tests/`
-- [ ] T059 Run backend plus `cli/run-tests.sh` end-to-end validation and remove any remaining legacy-path usage in touched files under `backend/` and `cli/`
-- [ ] T060 Run final `benchv2` performance and concurrency validation, record per-test runtimes, and fix any remaining regressions in `benchv2/src/benchmarks/`, `benchv2/src/reporter/`, and touched backend source files
-- [ ] T061 Remove any remaining backward-compatibility branches, fallback scan paths, or dead cleanup TODOs discovered during final validation in touched files under `backend/crates/` and `Cargo.toml`
-- [ ] T072 Record final per-user session footprint and per-query allocation numbers for SC-011/SC-012 in `benchv2/src/benchmarks/concurrent_user_session_bench.rs`, `benchv2/src/reporter/json_reporter.rs`, and the rollout evidence surface referenced by `cli/tests/smoke/query/smoke_test_plan_metadata.rs`
+- [S] T055 [P] Add final module docs and focused inline comments for shared abstractions and remaining complex provider code in `backend/crates/kalamdb-datafusion-sources/src/*.rs`, `backend/crates/kalamdb-tables/src/user_tables/user_table_provider.rs`, `backend/crates/kalamdb-tables/src/shared_tables/shared_table_provider.rs`, and `backend/crates/kalamdb-system/src/providers/base.rs`
+- [S] T056 [P] Tighten module boundaries, re-exports, and visibility after the story-scoped deletions land in `backend/crates/kalamdb-tables/src/utils/base.rs`, `backend/crates/kalamdb-tables/src/utils/mod.rs`, `backend/crates/kalamdb-system/src/providers/base.rs`, `backend/crates/kalamdb-system/src/macros.rs`, `backend/crates/kalamdb-views/src/view_base.rs`, and `backend/crates/kalamdb-vector/src/sql/vector_search.rs`
+- [X] T057 [P] Run batched compile validation across modernized crates using `Cargo.toml`, `backend/crates/kalamdb-datafusion-sources/Cargo.toml`, and touched backend crate manifests, then fix errors in touched source files
+- [S] T058 Run targeted `cargo nextest` validation for modernized crates and fix failures in touched files under `backend/crates/` and `cli/tests/`
+- [S] T059 Run backend plus `cli/run-tests.sh` end-to-end validation and remove any remaining legacy-path usage in touched files under `backend/` and `cli/`
+- [S] T060 Run final `benchv2` performance and concurrency validation, record per-test runtimes, and fix any remaining regressions in `benchv2/src/benchmarks/`, `benchv2/src/reporter/`, and touched backend source files
+- [X] T061 Remove any remaining backward-compatibility branches, fallback scan paths, or dead cleanup TODOs discovered during final validation in touched files under `backend/crates/` and `Cargo.toml`
+- [S] T072 Record final per-user session footprint and per-query allocation numbers for SC-011/SC-012 in `benchv2/src/benchmarks/concurrent_user_session_bench.rs`, `benchv2/src/reporter/json_reporter.rs`, and the rollout evidence surface referenced by `cli/tests/smoke/query/smoke_test_plan_metadata.rs`
 
 ---
 

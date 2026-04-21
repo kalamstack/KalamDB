@@ -45,12 +45,6 @@ pub struct JobsTableProvider {
     store: JobsStore,
 }
 
-impl std::fmt::Debug for JobsTableProvider {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("JobsTableProvider").finish()
-    }
-}
-
 impl JobsTableProvider {
     /// Create a new jobs table provider with automatic index management.
     ///
@@ -78,12 +72,7 @@ impl JobsTableProvider {
         Ok(format!("Job {} created", job.job_id))
     }
 
-    /// Alias for create_job (for backward compatibility)
-    pub fn insert_job(&self, job: Job) -> Result<String, SystemError> {
-        self.create_job(job)
-    }
-
-    /// Async version of `insert_job()`.
+    /// Async insert path corresponding to `create_job()`.
     ///
     /// Uses `spawn_blocking` internally to avoid blocking the async runtime.
     pub async fn insert_job_async(&self, job: Job) -> Result<(), SystemError> {
@@ -431,18 +420,6 @@ impl JobsTableProvider {
         Ok(())
     }
 
-    /// Cancel a running job (string version for backward compatibility)
-    pub fn cancel_job_str(&self, job_id: &str) -> Result<(), SystemError> {
-        let job_id_typed = JobId::new(job_id);
-        self.cancel_job(&job_id_typed)
-    }
-
-    /// Get a job by string ID (for backward compatibility)
-    pub fn get_job_str(&self, job_id: &str) -> Result<Option<Job>, SystemError> {
-        let job_id_typed = JobId::new(job_id);
-        self.get_job(&job_id_typed)
-    }
-
     /// Delete jobs older than retention period (in days).
     ///
     /// Optimized to use the status index to avoid full table scan.
@@ -614,25 +591,15 @@ fn matches_filter_sync(job: &Job, filter: &JobFilter) -> bool {
     true
 }
 
-impl JobsTableProvider {
-    fn provider_definition() -> IndexedProviderDefinition<JobId> {
-        IndexedProviderDefinition {
-            table_name: SystemTable::Jobs.table_name(),
-            primary_key_column: "job_id",
-            schema: Self::schema,
-            parse_key: |value| Some(JobId::new(value)),
-        }
-    }
-
-    fn schema() -> SchemaRef {
-        static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
-        SCHEMA
-            .get_or_init(|| {
-                Job::definition().to_arrow_schema().expect("failed to build jobs schema")
-            })
-            .clone()
-    }
-}
+crate::impl_system_table_provider_metadata!(
+    indexed,
+    provider = JobsTableProvider,
+    key = JobId,
+    table_name = SystemTable::Jobs.table_name(),
+    primary_key_column = "job_id",
+    parse_key = |value| Some(JobId::new(value)),
+    schema = Job::definition().to_arrow_schema().expect("failed to build jobs schema")
+);
 
 crate::impl_indexed_system_table_provider!(
     provider = JobsTableProvider,

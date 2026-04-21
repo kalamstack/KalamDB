@@ -189,6 +189,76 @@ macro_rules! finish_array {
     };
 }
 
+/// Implement the repeated metadata scaffold for system table providers.
+///
+/// This macro intentionally only covers low-value boilerplate:
+/// - `Debug`
+/// - cached Arrow schema construction
+/// - provider metadata definitions
+///
+/// Constructors and provider-specific read/write logic stay explicit in each module.
+#[macro_export]
+macro_rules! impl_system_table_provider_metadata {
+    (
+        indexed,
+        provider = $provider:ty,
+        key = $key:ty,
+        table_name = $table_name:expr,
+        primary_key_column = $primary_key_column:expr,
+        parse_key = $parse_key:expr,
+        schema = $schema_expr:expr
+    ) => {
+        impl std::fmt::Debug for $provider {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct(stringify!($provider)).finish()
+            }
+        }
+
+        impl $provider {
+            fn provider_definition() -> IndexedProviderDefinition<$key> {
+                IndexedProviderDefinition {
+                    table_name: $table_name,
+                    primary_key_column: $primary_key_column,
+                    schema: Self::schema,
+                    parse_key: $parse_key,
+                }
+            }
+
+            fn schema() -> SchemaRef {
+                static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
+                SCHEMA.get_or_init(|| $schema_expr).clone()
+            }
+        }
+    };
+
+    (
+        simple,
+        provider = $provider:ty,
+        table_name = $table_name:expr,
+        schema = $schema_expr:expr
+    ) => {
+        impl std::fmt::Debug for $provider {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.debug_struct(stringify!($provider)).finish()
+            }
+        }
+
+        impl $provider {
+            fn provider_definition() -> SimpleProviderDefinition {
+                SimpleProviderDefinition {
+                    table_name: $table_name,
+                    schema: Self::schema,
+                }
+            }
+
+            fn schema() -> SchemaRef {
+                static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
+                SCHEMA.get_or_init(|| $schema_expr).clone()
+            }
+        }
+    };
+}
+
 /// Implement the common provider boilerplate for `IndexedEntityStore`-backed system tables.
 ///
 /// This macro centralizes the repeated implementations for:

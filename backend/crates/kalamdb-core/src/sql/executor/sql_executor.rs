@@ -279,10 +279,10 @@ impl SqlExecutor {
         )
     }
 
-    fn request_transaction_state(
+    fn request_transaction_state<'a>(
         &self,
-        exec_ctx: &ExecutionContext,
-    ) -> Result<Option<RequestTransactionState>, KalamDbError> {
+        exec_ctx: &'a ExecutionContext,
+    ) -> Result<Option<RequestTransactionState<'a>>, KalamDbError> {
         let mut request_state = RequestTransactionState::from_execution_context(exec_ctx)?;
         if let Some(state) = request_state.as_mut() {
             state.sync_from_coordinator(&self.app_context);
@@ -338,14 +338,13 @@ impl SqlExecutor {
         &self,
         exec_ctx: &ExecutionContext,
     ) -> Result<SessionContext, KalamDbError> {
-        let session = exec_ctx.create_session_with_user();
         let Some(transaction_query_context) =
             self.transaction_query_context_for_request(exec_ctx)?
         else {
-            return Ok(session);
+            return Ok(exec_ctx.create_session_with_user());
         };
 
-        let mut state = session.state().clone();
+        let mut state = exec_ctx.build_user_session_state();
         state
             .config_mut()
             .options_mut()

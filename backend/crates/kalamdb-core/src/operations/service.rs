@@ -47,7 +47,7 @@ impl OperationService {
         transaction_query_context: Option<TransactionQueryContext>,
     ) -> SessionContext {
         let base = self.app_context.base_session_context();
-        let mut state = base.state().clone();
+        let mut state = base.state();
 
         let ctx = match user_id {
             Some(uid) => SessionUserContext::new(uid.clone(), role, ReadContext::Client),

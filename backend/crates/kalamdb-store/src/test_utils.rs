@@ -1,15 +1,14 @@
 //! Test utilities for kalamdb-store.
 //!
-//! Provides helpers for setting up test databases with minimal boilerplate.
+//! Provides generic test helpers plus feature-gated backend-specific helpers.
 
-use anyhow::Result;
-use rocksdb::{Options, DB};
 use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
-use tempfile::TempDir;
+use std::sync::RwLock;
 
-use crate::storage_trait::{Operation, Partition, StorageBackend};
+use crate::storage_trait::{Operation, Partition, StorageBackend, StorageStats};
+
+#[cfg(feature = "rocksdb")]
+pub use crate::backends::rocksdb::test_utils::TestDb;
 
 /// In-memory implementation of StorageBackend for testing.
 ///
@@ -178,139 +177,19 @@ impl StorageBackend for InMemoryBackend {
         // No-op for in-memory backend (no compaction needed)
         Ok(())
     }
-}
 
-/// Test database wrapper that automatically cleans up on drop.
-pub struct TestDb {
-    /// RocksDB instance
-    pub db: Arc<DB>,
-    /// Temporary directory (kept alive for the duration of the test)
-    #[allow(dead_code)]
-    temp_dir: TempDir,
-}
+    fn stats(&self) -> StorageStats {
+        let partition_count = match self.data.read() {
+            Ok(data) => data.len(),
+            Err(_) => 0,
+        };
 
-impl TestDb {
-    /// Create a new test database with the specified column families.
-    ///
-    /// # Arguments
-    ///
-    /// * `cf_names` - List of column family names to create
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// use kalamdb_store::test_utils::TestDb;
-    ///
-    /// let test_db = TestDb::new(&["user_table:app:messages"]).unwrap();
-    /// // Use test_db.db for testing...
-    /// ```
-    pub fn new(cf_names: &[&str]) -> Result<Self> {
-        let temp_dir = TempDir::new()?;
-        let mut opts = Options::default();
-        opts.create_if_missing(true);
-        opts.create_missing_column_families(true);
-
-        let db = DB::open_cf(&opts, temp_dir.path(), cf_names)?;
-
-        Ok(Self {
-            db: Arc::new(db),
-            temp_dir,
-        })
-    }
-
-    /// Create a test database initialized with the standard system partitions.
-    pub fn with_system_tables() -> Result<Self> {
-        let temp_dir = TempDir::new()?;
-        let db_path = temp_dir.path().join("rocksdb");
-        std::fs::create_dir_all(&db_path)?;
-
-        let init = crate::rocksdb_init::RocksDbInit::with_defaults(db_path.to_string_lossy());
-        let db = init.open()?;
-
-        Ok(Self { db, temp_dir })
-    }
-
-    /// Return the test workspace root path backing this database.
-    pub fn path(&self) -> &Path {
-        self.temp_dir.path()
-    }
-
-    /// Create and return a storage directory within the test workspace.
-    pub fn storage_dir(&self) -> Result<PathBuf> {
-        let storage_dir = self.temp_dir.path().join("storage");
-        std::fs::create_dir_all(&storage_dir)?;
-        Ok(storage_dir)
-    }
-
-    /// Create a generic storage backend for this test database.
-    pub fn backend(&self) -> Arc<dyn StorageBackend> {
-        Arc::new(crate::rocksdb_impl::RocksDBBackend::new(Arc::clone(&self.db)))
-    }
-
-    /// Create a test database with common user table column families.
-    ///
-    /// Creates column families for:
-    /// - `user_table:app:messages`
-    /// - `user_table:app:events`
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// use kalamdb_store::test_utils::TestDb;
-    ///
-    /// let test_db = TestDb::with_user_tables().unwrap();
-    /// // Use test_db.db for testing...
-    /// ```
-    pub fn with_user_tables() -> Result<Self> {
-        Self::new(&["user_table:app:messages", "user_table:app:events"])
-    }
-
-    /// Create a test database with a single column family.
-    ///
-    /// # Arguments
-    ///
-    /// * `cf_name` - Column family name to create
-    ///
-    /// # Example
-    ///
-    /// ```no_run
-    /// use kalamdb_store::test_utils::TestDb;
-    ///
-    /// let test_db = TestDb::single_cf("user_table:app:messages").unwrap();
-    /// // Use test_db.db for testing...
-    /// ```
-    pub fn single_cf(cf_name: &str) -> Result<Self> {
-        Self::new(&[cf_name])
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_create_test_db() {
-        let test_db = TestDb::new(&["user_table:app:messages"]).unwrap();
-
-        // Verify DB is accessible
-        let cf = test_db.db.cf_handle("user_table:app:messages");
-        assert!(cf.is_some());
-    }
-
-    #[test]
-    fn test_with_user_tables() {
-        let test_db = TestDb::with_user_tables().unwrap();
-
-        // Verify both CFs exist
-        assert!(test_db.db.cf_handle("user_table:app:messages").is_some());
-        assert!(test_db.db.cf_handle("user_table:app:events").is_some());
-    }
-
-    #[test]
-    fn test_single_cf() {
-        let test_db = TestDb::single_cf("user_table:app:messages").unwrap();
-
-        // Verify CF exists
-        assert!(test_db.db.cf_handle("user_table:app:messages").is_some());
+        StorageStats::from([
+            ("storage_backend".to_string(), "in_memory".to_string()),
+            (
+                "storage_partition_count".to_string(),
+                partition_count.to_string(),
+            ),
+        ])
     }
 }

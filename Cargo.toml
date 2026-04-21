@@ -89,7 +89,7 @@ tokio-tungstenite = { version = "0.29.0", features = ["rustls-tls-webpki-roots"]
 # Security floor pins for vulnerable transitive TLS/QUIC crates.
 aws-lc-rs = { version = "1.16.3", default-features = false }
 quinn-proto = { version = "0.11.14", default-features = false }
-rustls-webpki = { version = "0.103.10", default-features = false }
+rustls-webpki = { version = "0.103.13", default-features = false }
 
 # Time handling
 chrono = { version = "0.4.44", features = ["serde"] }
@@ -155,7 +155,7 @@ serial_test = "3.3.1"
 criterion = { version = "0.8.2", features = ["html_reports"] }
 
 # Raft consensus
-openraft = { version = "0.9.23", features = ["serde"] }
+openraft = { version = "0.9.24", features = ["serde"] }
 rmp = "0.8"
 rmp-serde = "1.3"
 

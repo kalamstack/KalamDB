@@ -18,6 +18,9 @@ futures-util = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
+[dev-dependencies]
+tokio = { workspace = true }
+
 [lib]
 name = "kalamdb_transactions"
 path = "src/lib.rs"

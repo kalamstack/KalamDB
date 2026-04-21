@@ -57,6 +57,7 @@ pub fn normalize_context_keyword_calls_for_sqlparser(sql: &str) -> std::borrow::
 ///
 /// These aliases let user-facing SQL use `CURRENT_USER()`, `CURRENT_USER_ID()`, and
 /// `CURRENT_ROLE()` while execution resolves to the registered `KDB_*` functions.
+/// `CURRENT_USER_ID()` is an alias for `CURRENT_USER()` (both return the user id).
 ///
 /// Returns `Cow::Borrowed` when no rewriting was needed, avoiding allocation.
 pub fn rewrite_context_functions_for_datafusion(sql: &str) -> std::borrow::Cow<'_, str> {
@@ -66,7 +67,7 @@ pub fn rewrite_context_functions_for_datafusion(sql: &str) -> std::borrow::Cow<'
     // The chain of replacements is cheap (no allocation when nothing matches),
     // but we materialise to String once any regex matches to avoid lifetime
     // issues with the intermediate Cow chain.
-    let s1 = CURRENT_USER_ID_CALL_RE.replace_all(sql, "KDB_CURRENT_USER_ID()");
+    let s1 = CURRENT_USER_ID_CALL_RE.replace_all(sql, "KDB_CURRENT_USER()");
     let s2 = CURRENT_USER_CALL_RE.replace_all(&s1, "KDB_CURRENT_USER()");
     let s3 = CURRENT_ROLE_CALL_RE.replace_all(&s2, "KDB_CURRENT_ROLE()");
     let s4 = CURRENT_USER_KEYWORD_RE.replace_all(&s3, "${1}KDB_CURRENT_USER()${3}");
@@ -732,9 +733,10 @@ mod tests {
         let rewritten = rewrite_context_functions_for_datafusion(
             "SELECT CURRENT_USER(), CURRENT_USER_ID(), CURRENT_ROLE()",
         );
+        // CURRENT_USER_ID() is an alias for CURRENT_USER() (both return user id).
         assert_eq!(
             rewritten,
-            "SELECT KDB_CURRENT_USER(), KDB_CURRENT_USER_ID(), KDB_CURRENT_ROLE()"
+            "SELECT KDB_CURRENT_USER(), KDB_CURRENT_USER(), KDB_CURRENT_ROLE()"
         );
     }
 

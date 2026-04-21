@@ -26,12 +26,6 @@ pub struct AuditLogsTableProvider {
     store: IndexedEntityStore<AuditLogId, SystemTableRow>,
 }
 
-impl std::fmt::Debug for AuditLogsTableProvider {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AuditLogsTableProvider").finish()
-    }
-}
-
 impl AuditLogsTableProvider {
     /// Create a new audit logs table provider
     ///
@@ -86,21 +80,6 @@ impl AuditLogsTableProvider {
         row.map(|value| Self::decode_audit_row(&value)).transpose()
     }
 
-    /// Async version of `get_entry()` - offloads to blocking thread pool.
-    ///
-    /// Use this in async contexts to avoid blocking the Tokio runtime.
-    pub async fn get_entry_async(
-        &self,
-        audit_id: &AuditLogId,
-    ) -> Result<Option<AuditLogEntry>, SystemError> {
-        let row = self
-            .store
-            .get_async(audit_id.clone())
-            .await
-            .into_system_error("get_async error")?;
-        row.map(|value| Self::decode_audit_row(&value)).transpose()
-    }
-
     /// Scan all audit log entries and return as RecordBatch
     pub fn scan_all_entries(&self) -> Result<RecordBatch, SystemError> {
         let rows = self
@@ -109,15 +88,6 @@ impl AuditLogsTableProvider {
             .into_iter()
             .map(|(_, row)| row)
             .collect();
-        system_rows_to_batch(&Self::schema(), rows)
-    }
-
-    /// Scan up to `limit` audit log entries and return as RecordBatch
-    pub fn scan_entries_limited(&self, limit: usize) -> Result<RecordBatch, SystemError> {
-        use kalamdb_store::entity_store::{EntityStore, ScanDirection};
-        let iter = self.store.scan_directional(None, ScanDirection::Newer, limit)?;
-        let row_entries: Vec<(AuditLogId, SystemTableRow)> = iter.collect::<Result<Vec<_>, _>>()?;
-        let rows = row_entries.into_iter().map(|(_, row)| row).collect();
         system_rows_to_batch(&Self::schema(), rows)
     }
 
@@ -134,17 +104,6 @@ impl AuditLogsTableProvider {
         Ok(entries)
     }
 
-    /// Async version of `scan_all()` - offloads to blocking thread pool.
-    ///
-    /// Use this in async contexts to avoid blocking the Tokio runtime.
-    pub async fn scan_all_async(&self) -> Result<Vec<AuditLogEntry>, SystemError> {
-        let results: Vec<(Vec<u8>, SystemTableRow)> = self
-            .store
-            .scan_all_async(None, None, None)
-            .await
-            .into_system_error("scan_all_async error")?;
-        results.into_iter().map(|(_, row)| Self::decode_audit_row(&row)).collect()
-    }
     fn scan_to_batch_filtered(
         &self,
         filters: &[Expr],
@@ -178,13 +137,6 @@ impl AuditLogsTableProvider {
         self.scan_all_entries()
     }
 
-    fn provider_definition() -> SimpleProviderDefinition {
-        SimpleProviderDefinition {
-            table_name: Self::table_name(),
-            schema: Self::schema,
-        }
-    }
-
     fn encode_audit_row(entry: &AuditLogEntry) -> Result<SystemTableRow, SystemError> {
         model_to_system_row(entry, &Self::definition())
     }
@@ -197,21 +149,19 @@ impl AuditLogsTableProvider {
         AuditLogEntry::definition()
     }
 
-    fn schema() -> SchemaRef {
-        static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
-        SCHEMA
-            .get_or_init(|| {
-                Self::definition()
-                    .to_arrow_schema()
-                    .expect("Failed to convert audit_log TableDefinition to Arrow schema")
-            })
-            .clone()
-    }
-
     fn table_name() -> &'static str {
         SystemTable::AuditLog.table_name()
     }
 }
+
+crate::impl_system_table_provider_metadata!(
+    simple,
+    provider = AuditLogsTableProvider,
+    table_name = Self::table_name(),
+    schema = Self::definition()
+        .to_arrow_schema()
+        .expect("Failed to convert audit_log TableDefinition to Arrow schema")
+);
 
 crate::impl_simple_system_table_provider!(
     provider = AuditLogsTableProvider,

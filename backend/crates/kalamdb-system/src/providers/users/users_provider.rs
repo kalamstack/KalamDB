@@ -37,12 +37,6 @@ pub struct UsersTableProvider {
     store: UsersStore,
 }
 
-impl std::fmt::Debug for UsersTableProvider {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("UsersTableProvider").finish()
-    }
-}
-
 impl UsersTableProvider {
     /// Create a new users table provider with automatic index management.
     ///
@@ -159,25 +153,17 @@ impl UsersTableProvider {
     fn decode_user_row(row: &SystemTableRow) -> Result<User, SystemError> {
         system_row_to_model(row, &User::definition())
     }
-    fn provider_definition() -> IndexedProviderDefinition<UserId> {
-        IndexedProviderDefinition {
-            table_name: SystemTable::Users.table_name(),
-            primary_key_column: "user_id",
-            schema: Self::schema,
-            parse_key: |value| Some(UserId::new(value)),
-        }
-    }
-
-    fn schema() -> SchemaRef {
-        static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
-        SCHEMA
-            .get_or_init(|| {
-                User::definition().to_arrow_schema().expect("failed to build users schema")
-            })
-            .clone()
-    }
-
 }
+
+crate::impl_system_table_provider_metadata!(
+    indexed,
+    provider = UsersTableProvider,
+    key = UserId,
+    table_name = SystemTable::Users.table_name(),
+    primary_key_column = "user_id",
+    parse_key = |value| Some(UserId::new(value)),
+    schema = User::definition().to_arrow_schema().expect("failed to build users schema")
+);
 
 crate::impl_indexed_system_table_provider!(
     provider = UsersTableProvider,

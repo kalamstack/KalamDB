@@ -3,7 +3,7 @@
 //! This module provides a DataFusion TableProvider implementation for the system.storages table.
 //! Uses the new EntityStore architecture with StorageId keys.
 
-use crate::error::{SystemError, SystemResultExt};
+use crate::error::SystemError;
 use crate::providers::base::{
     extract_filter_value, system_rows_to_batch, SimpleProviderDefinition,
 };
@@ -15,7 +15,7 @@ use datafusion::logical_expr::Expr;
 use kalamdb_commons::models::rows::SystemTableRow;
 use kalamdb_commons::StorageId;
 use kalamdb_commons::SystemTable;
-use kalamdb_store::entity_store::{EntityStore, EntityStoreAsync};
+use kalamdb_store::entity_store::EntityStore;
 use kalamdb_store::{IndexedEntityStore, StorageBackend};
 use std::sync::{Arc, OnceLock};
 
@@ -23,12 +23,6 @@ use std::sync::{Arc, OnceLock};
 #[derive(Clone)]
 pub struct StoragesTableProvider {
     store: IndexedEntityStore<StorageId, SystemTableRow>,
-}
-
-impl std::fmt::Debug for StoragesTableProvider {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StoragesTableProvider").finish()
-    }
 }
 
 impl StoragesTableProvider {
@@ -55,18 +49,6 @@ impl StoragesTableProvider {
         Ok(())
     }
 
-    /// Async version of `create_storage()` - offloads to blocking thread pool.
-    ///
-    /// Use this in async contexts to avoid blocking the Tokio runtime.
-    pub async fn create_storage_async(&self, storage: Storage) -> Result<(), SystemError> {
-        let row = Self::encode_storage_row(&storage)?;
-        self.store
-            .put_async(&storage.storage_id, &row)
-            .await
-            .into_system_error("put_async error")?;
-        Ok(())
-    }
-
     /// Alias for create_storage (for backward compatibility)
     pub fn insert_storage(&self, storage: Storage) -> Result<(), SystemError> {
         self.create_storage(storage)
@@ -81,34 +63,9 @@ impl StoragesTableProvider {
         row.map(|value| Self::decode_storage_row(&value)).transpose()
     }
 
-    /// Async version of `get_storage_by_id()` - offloads to blocking thread pool.
-    ///
-    /// Use this in async contexts to avoid blocking the Tokio runtime.
-    pub async fn get_storage_by_id_async(
-        &self,
-        storage_id: &StorageId,
-    ) -> Result<Option<Storage>, SystemError> {
-        let row = self
-            .store
-            .get_async(storage_id.clone())
-            .await
-            .into_system_error("get_async error")?;
-        row.map(|value| Self::decode_storage_row(&value)).transpose()
-    }
-
     /// Alias for get_storage_by_id (for backward compatibility)
     pub fn get_storage(&self, storage_id: &StorageId) -> Result<Option<Storage>, SystemError> {
         self.get_storage_by_id(storage_id)
-    }
-
-    /// Async version of `get_storage()` - offloads to blocking thread pool.
-    ///
-    /// Use this in async contexts to avoid blocking the Tokio runtime.
-    pub async fn get_storage_async(
-        &self,
-        storage_id: &StorageId,
-    ) -> Result<Option<Storage>, SystemError> {
-        self.get_storage_by_id_async(storage_id).await
     }
 
     /// Update an existing storage entry
@@ -126,40 +83,9 @@ impl StoragesTableProvider {
         Ok(())
     }
 
-    /// Async version of `update_storage()` - offloads to blocking thread pool.
-    ///
-    /// Use this in async contexts to avoid blocking the Tokio runtime.
-    pub async fn update_storage_async(&self, storage: Storage) -> Result<(), SystemError> {
-        // Check if storage exists
-        if self.store.get_async(storage.storage_id.clone()).await?.is_none() {
-            return Err(SystemError::NotFound(format!(
-                "Storage not found: {}",
-                storage.storage_id
-            )));
-        }
-
-        let row = Self::encode_storage_row(&storage)?;
-        self.store
-            .put_async(&storage.storage_id, &row)
-            .await
-            .into_system_error("put_async error")?;
-        Ok(())
-    }
-
     /// Delete a storage entry
     pub fn delete_storage(&self, storage_id: &StorageId) -> Result<(), SystemError> {
         self.store.delete(storage_id)?;
-        Ok(())
-    }
-
-    /// Async version of `delete_storage()` - offloads to blocking thread pool.
-    ///
-    /// Use this in async contexts to avoid blocking the Tokio runtime.
-    pub async fn delete_storage_async(&self, storage_id: &StorageId) -> Result<(), SystemError> {
-        self.store
-            .delete_async(storage_id.clone())
-            .await
-            .into_system_error("delete_async error")?;
         Ok(())
     }
 
@@ -172,18 +98,6 @@ impl StoragesTableProvider {
             storages.push(Self::decode_storage_row(&row)?);
         }
         Ok(storages)
-    }
-
-    /// Async version of `list_storages()` - offloads to blocking thread pool.
-    ///
-    /// Use this in async contexts to avoid blocking the Tokio runtime.
-    pub async fn list_storages_async(&self) -> Result<Vec<Storage>, SystemError> {
-        let results: Vec<(Vec<u8>, SystemTableRow)> = self
-            .store
-            .scan_all_async(None, None, None)
-            .await
-            .into_system_error("scan_all_async error")?;
-        results.into_iter().map(|(_, row)| Self::decode_storage_row(&row)).collect()
     }
 
     /// Scan all storages and return as RecordBatch
@@ -228,13 +142,6 @@ impl StoragesTableProvider {
         self.scan_all_storages()
     }
 
-    fn provider_definition() -> SimpleProviderDefinition {
-        SimpleProviderDefinition {
-            table_name: SystemTable::Storages.table_name(),
-            schema: Self::schema,
-        }
-    }
-
     fn encode_storage_row(storage: &Storage) -> Result<SystemTableRow, SystemError> {
         model_to_system_row(storage, &Storage::definition())
     }
@@ -242,18 +149,16 @@ impl StoragesTableProvider {
     fn decode_storage_row(row: &SystemTableRow) -> Result<Storage, SystemError> {
         system_row_to_model(row, &Storage::definition())
     }
-
-    fn schema() -> SchemaRef {
-        static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
-        SCHEMA
-            .get_or_init(|| {
-                Storage::definition()
-                    .to_arrow_schema()
-                    .expect("failed to build storages schema")
-            })
-            .clone()
-    }
 }
+
+crate::impl_system_table_provider_metadata!(
+    simple,
+    provider = StoragesTableProvider,
+    table_name = SystemTable::Storages.table_name(),
+    schema = Storage::definition()
+        .to_arrow_schema()
+        .expect("failed to build storages schema")
+);
 
 crate::impl_simple_system_table_provider!(
     provider = StoragesTableProvider,

@@ -144,10 +144,6 @@ impl SettingsView {
         }
     }
 
-    /// Set the configuration (called after AppContext init)
-    pub fn set_config(&self, config: ServerConfig) {
-        *self.config.write() = Some(config);
-    }
 }
 
 impl Default for SettingsView {
@@ -705,16 +701,6 @@ impl VirtualView for SettingsView {
 
 // Re-export as SettingsTableProvider for consistency
 pub type SettingsTableProvider = crate::view_base::ViewTableProvider<SettingsView>;
-
-/// Helper function to create a settings table provider
-pub fn create_settings_provider() -> SettingsTableProvider {
-    SettingsTableProvider::new(Arc::new(SettingsView::new()))
-}
-
-/// Helper function to create a settings table provider with config
-pub fn create_settings_provider_with_config(config: ServerConfig) -> SettingsTableProvider {
-    SettingsTableProvider::new(Arc::new(SettingsView::with_config(config)))
-}
 
 #[cfg(test)]
 mod tests {

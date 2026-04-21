@@ -59,9 +59,13 @@
 //! }
 //! ```
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 pub use kalamdb_commons::storage::{KvIterator, Operation, Partition, Result, StorageError};
+
+/// Deterministic key/value stats emitted by a storage backend for `system.stats`.
+pub type StorageStats = BTreeMap<String, String>;
 
 /// Trait for pluggable storage backend implementations.
 ///
@@ -73,6 +77,7 @@ pub use kalamdb_commons::storage::{KvIterator, Operation, Partition, Result, Sto
 /// - `put` operations may be buffered (check backend documentation)
 /// - `batch` operations should be atomic (all-or-nothing)
 /// - `scan` operations should return an iterator for memory efficiency
+/// - `stats` should stay low-cost because it feeds the synchronous `system.stats` callback
 ///
 /// ## Error Handling
 ///
@@ -217,6 +222,13 @@ pub trait StorageBackend: Send + Sync {
             "restore_from is not supported by this storage backend".to_string(),
         ))
     }
+
+    /// Returns low-cost backend stats exposed through `system.stats`.
+    ///
+    /// Implementations should return backend-agnostic keys under `storage_*`
+    /// (for example `storage_backend` and `storage_partition_count`) and any
+    /// engine-specific keys under a stable engine prefix such as `rocksdb_*`.
+    fn stats(&self) -> StorageStats;
 
 }
 

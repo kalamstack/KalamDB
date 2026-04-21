@@ -435,7 +435,7 @@ impl SchemaRegistry {
             .into_kalamdb_error("Failed to persist table definition")?;
 
         if persisted_new_version {
-            log::info!("Registering table {} via SchemaRegistry", table_id);
+            log::info!("Registering table {}", table_id);
         } else {
             log::debug!(
                 "Table {} already has identical persisted schema; refreshing cache/provider only",
@@ -692,7 +692,7 @@ impl SchemaRegistry {
                 Ok(provider as Arc<dyn kalamdb_tables::KalamTableProvider>)
             },
             TableType::System => Err(KalamDbError::InvalidOperation(format!(
-                "Cannot create provider for system table {} via SchemaRegistry",
+                "Cannot create provider for system table {}",
                 table_id
             ))),
         }

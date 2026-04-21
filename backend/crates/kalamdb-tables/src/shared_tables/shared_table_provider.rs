@@ -39,7 +39,6 @@ use kalamdb_commons::models::OperationKind;
 use kalamdb_commons::models::UserId;
 use kalamdb_commons::websocket::ChangeNotification;
 use kalamdb_commons::NotLeaderError;
-use kalamdb_commons::StorageKey;
 use kalamdb_commons::TableType;
 use kalamdb_datafusion_sources::provider::{
     merged_projection_scan_descriptor, mvcc_filter_capability, FilterCapability, ScanDescriptor,
@@ -57,9 +56,6 @@ use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tracing::Instrument;
-
-// Arrow <-> JSON helpers
-use crate::utils::version_resolution::resolve_latest_kvs_from_cold_batch;
 
 /// Shared table provider without RLS
 ///
@@ -329,6 +325,17 @@ impl SharedTableProvider {
             columns,
         )
         .await
+    }
+
+    fn construct_shared_row_from_parquet_data(
+        &self,
+        row_data: crate::utils::version_resolution::ParquetRowData,
+    ) -> DataFusionResult<(SharedTableRowId, SharedTableRow)> {
+        self.construct_row_from_parquet_data(base::system_user_id(), &row_data)
+            .map_err(|error| DataFusionError::Execution(error.to_string()))?
+            .ok_or_else(|| {
+                DataFusionError::Execution("missing shared row from parquet data".to_string())
+            })
     }
 
     /// Find a row by PK value using the PK index for efficient O(1) lookup.
@@ -630,117 +637,61 @@ impl DeferredMvccScanProvider<SharedTableRowId, SharedTableRow> for SharedTableP
         })
     }
 
-    async fn scan_rows_with_context(
+    fn scan_snapshot_commit_seq(&self, scan_context: &Self::ScanContext) -> Option<u64> {
+        scan_context.snapshot_commit_seq
+    }
+
+    fn scan_scope_label(&self, _scan_context: &Self::ScanContext) -> &'static str {
+        "shared"
+    }
+
+    fn scan_cold_scope<'a>(&self, _scan_context: &'a Self::ScanContext) -> Option<&'a UserId> {
+        None
+    }
+
+    async fn scan_hot_pk_row(
+        &self,
+        _scan_context: &Self::ScanContext,
+        pk_value: &ScalarValue,
+    ) -> Result<Option<(SharedTableRowId, SharedTableRow)>, KalamDbError> {
+        self.find_by_pk(pk_value).await
+    }
+
+    async fn hot_pk_tombstoned(
+        &self,
+        _scan_context: &Self::ScanContext,
+        pk_value: &ScalarValue,
+    ) -> Result<bool, KalamDbError> {
+        self.pk_tombstoned_in_hot(pk_value).await
+    }
+
+    async fn count_rows_with_context(
         &self,
         scan_context: &Self::ScanContext,
-        projection: Option<&Vec<usize>>,
+    ) -> Result<usize, KalamDbError> {
+        self.count_resolved_rows_async(scan_context.snapshot_commit_seq)
+            .await
+    }
+
+    async fn scan_kvs_with_context(
+        &self,
+        scan_context: &Self::ScanContext,
         filter: Option<&Expr>,
+        since_seq: Option<kalamdb_commons::ids::SeqId>,
         limit: Option<usize>,
-    ) -> Result<RecordBatch, KalamDbError> {
-        let snapshot_commit_seq = scan_context.snapshot_commit_seq;
-        let schema = self.schema_ref();
-        let pk_name = self.primary_key_field_name();
-
-        if snapshot_commit_seq.is_none() {
-            if let Some(expr) = filter {
-                if let Some(pk_literal) = base::extract_pk_equality_literal(expr, pk_name) {
-                    let pk_field = schema.field_with_name(pk_name).ok();
-                    let pk_scalar = if let Some(field) = pk_field {
-                        kalamdb_commons::conversions::parse_string_as_scalar(
-                            &pk_literal.to_string(),
-                            field.data_type(),
-                        )
-                        .ok()
-                        .unwrap_or(pk_literal)
-                    } else {
-                        pk_literal
-                    };
-
-                    let found = self.find_by_pk(&pk_scalar).await?;
-                    if let Some((row_id, row)) = found {
-                        log::debug!(
-                            "[SharedProvider] PK fast-path hit for {}={}, _seq={}",
-                            pk_name,
-                            pk_scalar,
-                            row_id.as_i64()
-                        );
-                        return crate::utils::base::rows_to_arrow_batch(
-                            &schema,
-                            vec![(row_id, row)],
-                            projection,
-                            |_, _| {},
-                        );
-                    }
-
-                    if self.pk_tombstoned_in_hot(&pk_scalar).await? {
-                        log::debug!(
-                            "[SharedProvider] PK fast-path tombstone for {}={}",
-                            pk_name,
-                            pk_scalar
-                        );
-                        return crate::utils::base::rows_to_arrow_batch(
-                            &schema,
-                            Vec::<(SharedTableRowId, SharedTableRow)>::new(),
-                            projection,
-                            |_, _| {},
-                        );
-                    }
-
-                    let cold_found = base::find_row_by_pk(self, None, &pk_scalar.to_string()).await?;
-                    if let Some((row_id, row)) = cold_found {
-                        log::debug!(
-                            "[SharedProvider] PK fast-path cold hit for {}={}",
-                            pk_name,
-                            pk_scalar
-                        );
-                        return crate::utils::base::rows_to_arrow_batch(
-                            &schema,
-                            vec![(row_id, row)],
-                            projection,
-                            |_, _| {},
-                        );
-                    }
-
-                    log::debug!("[SharedProvider] PK fast-path miss for {}={}", pk_name, pk_scalar);
-                    return crate::utils::base::rows_to_arrow_batch(
-                        &schema,
-                        Vec::<(SharedTableRowId, SharedTableRow)>::new(),
-                        projection,
-                        |_, _| {},
-                    );
-                }
-            }
-        }
-
-        if let Some(proj) = projection {
-            if proj.is_empty() && filter.is_none() {
-                let count = self.count_resolved_rows_async(snapshot_commit_seq).await?;
-                return base::build_count_only_batch(count);
-            }
-        }
-
-        let (since_seq, _until_seq) = if let Some(expr) = filter {
-            base::extract_seq_bounds_from_filter(expr)
-        } else {
-            (None, None)
-        };
-
-        let keep_deleted = filter.map(base::filter_uses_deleted_column).unwrap_or(false);
-        let cold_columns = base::compute_cold_columns(projection, &schema, pk_name);
-
-        let kvs = self
-            .scan_with_version_resolution_to_kvs_async(
-                base::system_user_id(),
-                filter,
-                since_seq,
-                limit,
-                keep_deleted,
-                cold_columns.as_deref(),
-                snapshot_commit_seq,
-            )
-            .await?;
-
-        crate::utils::base::rows_to_arrow_batch(&schema, kvs, projection, |_, _| {})
+        keep_deleted: bool,
+        cold_columns: Option<&[String]>,
+    ) -> Result<Vec<(SharedTableRowId, SharedTableRow)>, KalamDbError> {
+        self.scan_with_version_resolution_to_kvs_async(
+            base::system_user_id(),
+            filter,
+            since_seq,
+            limit,
+            keep_deleted,
+            cold_columns,
+            scan_context.snapshot_commit_seq,
+        )
+        .await
     }
 }
 
@@ -1336,56 +1287,44 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
         let scan_limit = base::calculate_scan_limit(limit);
 
         // Run hot storage (RocksDB) and cold storage (Parquet) scans concurrently
-        let hot_future =
+        let hot_future = async {
             self.store
-                .scan_typed_with_prefix_and_start_async(None, start_key.as_ref(), scan_limit);
+                .scan_typed_with_prefix_and_start_async(None, start_key.as_ref(), scan_limit)
+                .await
+                .map_err(|e| {
+                    KalamDbError::InvalidOperation(format!(
+                        "Failed to scan shared table hot storage: {}",
+                        e
+                    ))
+                })
+        };
         let cold_future = self.scan_parquet_files_as_batch_async(filter, cold_columns);
-
-        let (hot_result, cold_result) = tokio::join!(hot_future, cold_future);
-
-        let hot_rows = hot_result.map_err(|e| {
-            KalamDbError::InvalidOperation(format!(
-                "Failed to scan shared table hot storage: {}",
-                e
-            ))
-        })?;
-        log::trace!("[SharedProvider] RocksDB scan returned {} rows", hot_rows.len());
-
-        let parquet_batch = cold_result?;
-
         let pk_name = self.primary_key_field_name().to_string();
-
-        let cold_rows_scanned = parquet_batch.num_rows();
-        log::trace!("[SharedProvider] Cold scan returned {} Parquet rows", cold_rows_scanned);
-
-        let mut result = resolve_latest_kvs_from_cold_batch(
+        let resolved = base::resolve_latest_scan_from_futures(
             &pk_name,
-            hot_rows,
-            &parquet_batch,
+            limit,
             keep_deleted,
             snapshot_commit_seq,
-            |row_data| {
-                let seq_id = row_data.seq_id;
-                Ok((
-                    seq_id,
-                    SharedTableRow {
-                        _seq: seq_id,
-                        _commit_seq: row_data.commit_seq,
-                        _deleted: row_data.deleted,
-                        fields: row_data.fields,
-                    },
-                ))
-            },
-        )?;
+            hot_future,
+            cold_future,
+            |row_data| self.construct_shared_row_from_parquet_data(row_data),
+        )
+        .await?;
 
-        // Apply limit after resolution using common helper
-        base::apply_limit(&mut result, limit);
+        log::trace!(
+            "[SharedProvider] RocksDB scan returned {} rows",
+            resolved.hot_rows_scanned
+        );
+        log::trace!(
+            "[SharedProvider] Cold scan returned {} Parquet rows",
+            resolved.cold_rows_scanned
+        );
 
         log::trace!(
             "[SharedProvider] Version-resolved rows (post-tombstone filter): {}",
-            result.len()
+            resolved.rows.len()
         );
-        Ok(result)
+        Ok(resolved.rows)
     }
 
     fn extract_row(row: &SharedTableRow) -> &Row {
@@ -1423,13 +1362,9 @@ impl SharedTableProvider {
                 })?;
 
             let mut hot_metadata = Vec::new();
-            for (key_bytes, value_bytes) in iter {
-                let key = kalamdb_commons::ids::SharedTableRowId::from_storage_key(&key_bytes)
-                    .map_err(|e| {
-                        KalamDbError::InvalidOperation(format!("Failed to decode row key: {}", e))
-                    })?;
+            for (_key_bytes, value_bytes) in iter {
                 match decode_shared_table_row_metadata(&value_bytes, &pk_name_clone) {
-                    Ok(metadata) => hot_metadata.push((key, metadata)),
+                    Ok(metadata) => hot_metadata.push(metadata),
                     Err(e) => {
                         log::warn!("Skipping row with malformed metadata: {}", e);
                         continue;
@@ -1442,23 +1377,19 @@ impl SharedTableProvider {
         // Cold storage: scan Parquet files (get full batch, but extract only metadata)
         let cold_future = self.scan_parquet_files_as_batch_async(None, None);
 
-        let (hot_result, cold_result): (_, _) = tokio::join!(hot_future, cold_future);
+        let hot_future = async {
+            hot_future.await.map_err(|e| {
+                KalamDbError::InvalidOperation(format!("spawn_blocking join error: {}", e))
+            })?
+        };
 
-        let hot_metadata: Vec<(
-            kalamdb_commons::ids::SharedTableRowId,
-            kalamdb_commons::serialization::row_codec::RowMetadata,
-        )> = hot_result.map_err(|e| {
-            KalamDbError::InvalidOperation(format!("spawn_blocking join error: {}", e))
-        })??;
-
-        let parquet_batch = cold_result?;
-        let count = crate::utils::version_resolution::count_resolved_from_metadata(
+        base::count_resolved_rows_from_futures(
             &pk_name,
-            hot_metadata.into_iter().map(|(_, m)| m).collect(),
-            &parquet_batch,
             snapshot_commit_seq,
-        )?;
-        Ok(count)
+            hot_future,
+            cold_future,
+        )
+        .await
     }
 
     async fn insert_deferred_internal(

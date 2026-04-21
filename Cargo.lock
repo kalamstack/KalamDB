@@ -4169,6 +4169,7 @@ dependencies = [
  "datafusion-common",
  "datafusion-expr",
  "futures-util",
+ "kalamdb-commons",
  "parquet",
  "thiserror 2.0.18",
  "tokio",
@@ -4720,6 +4721,7 @@ dependencies = [
  "kalamdb-datafusion-sources",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -5440,9 +5442,9 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
 name = "openraft"
-version = "0.9.23"
+version = "0.9.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d939b5d8a4367e775f62fad6f502aed084dff10e7ec35967a5750cc9cfa07b8"
+checksum = "80d35e2f60cdf9bcfc39a020966091017c6dc2a4b43b355a22ca3e76106f4a0a"
 dependencies = [
  "anyerror",
  "byte-unit",
@@ -6858,9 +6860,9 @@ checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.12"
+version = "0.103.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8279bb85272c9f10811ae6a6c547ff594d6a7f3c6c6b02ee9726d1d0dcfcdd06"
+checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
 dependencies = [
  "aws-lc-rs",
  "ring",

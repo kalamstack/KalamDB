@@ -364,6 +364,64 @@ describe("SqlStudio page", () => {
     expect(await screen.findByText("Ada")).toBeTruthy();
   });
 
+  it("starts with the inspector collapsed and renders table metadata when expanded", async () => {
+    mockSchemaTreeQuery.mockReturnValue({
+      data: [
+        {
+          database: "database",
+          name: "default",
+          tables: [
+            {
+              database: "database",
+              namespace: "default",
+              name: "events",
+              tableType: "stream",
+              columns: [
+                { name: "id", dataType: "INT", isNullable: false, isPrimaryKey: true, ordinal: 1 },
+                { name: "payload", dataType: "JSON", isNullable: false, isPrimaryKey: false, ordinal: 2 },
+              ],
+              version: 7,
+              comment: "Operational event feed",
+              createdAt: "2026-04-20T08:30:00Z",
+              updatedAt: "2026-04-21T12:00:00Z",
+              options: {
+                table_type: "STREAM",
+                ttl_seconds: 3600,
+                compression: "snappy",
+                storage_id: "primary",
+                flush_policy: {
+                  max_rows: 1000,
+                },
+              },
+            },
+          ],
+        },
+      ],
+      isFetching: false,
+      refetch: mockRefetchSchemaTree,
+    });
+
+    renderSqlStudio();
+
+    expect(screen.queryByText("Table Information")).toBeNull();
+    expect(screen.queryByText("Commit")).toBeNull();
+    expect(screen.queryByText("Discard")).toBeNull();
+
+    fireEvent.click(screen.getByTitle("Expand details panel"));
+
+    expect(await screen.findByText("Table Information")).toBeTruthy();
+    expect(screen.getByText("default.events")).toBeTruthy();
+    expect(screen.getByText("v7")).toBeTruthy();
+    expect(screen.getByText("Retention")).toBeTruthy();
+    expect(screen.getByText("1 hour")).toBeTruthy();
+    expect(screen.getByText("Table Options")).toBeTruthy();
+    expect(screen.getByText("Storage ID")).toBeTruthy();
+    expect(screen.getByText("primary")).toBeTruthy();
+    expect(screen.queryByText(/pending edit/i)).toBeNull();
+    expect(screen.queryByText("Commit")).toBeNull();
+    expect(screen.queryByText("Discard")).toBeNull();
+  });
+
   it("refreshes the Explorer when the refresh button is clicked", async () => {
     renderSqlStudio();
 

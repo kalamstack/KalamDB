@@ -10,15 +10,15 @@ use crate::sql::context::ExecutionContext;
 use crate::transactions::ExecutionOwnerKey;
 
 #[derive(Debug, Clone)]
-pub struct RequestTransactionState {
+pub struct RequestTransactionState<'a> {
     owner_key: ExecutionOwnerKey,
-    owner_id: Arc<str>,
+    request_id: &'a str,
     active_transaction_id: Option<TransactionId>,
 }
 
-impl RequestTransactionState {
+impl<'a> RequestTransactionState<'a> {
     pub fn from_execution_context(
-        exec_ctx: &ExecutionContext,
+        exec_ctx: &'a ExecutionContext,
     ) -> Result<Option<Self>, KalamDbError> {
         let Some(request_id) = exec_ctx.request_id() else {
             return Ok(None);
@@ -26,7 +26,7 @@ impl RequestTransactionState {
 
         Ok(Some(Self {
             owner_key: Self::owner_key_for_request_id(request_id),
-            owner_id: Arc::<str>::from(format!("sql-req-{}", request_id)),
+            request_id,
             active_transaction_id: None,
         }))
     }
@@ -61,13 +61,15 @@ impl RequestTransactionState {
         if let Some(transaction_id) = self.active_transaction_id.clone() {
             return Err(KalamDbError::Conflict(format!(
                 "request owner '{}' already has an active transaction '{}'",
-                self.owner_id, transaction_id
+                format_args!("sql-req-{}", self.request_id),
+                transaction_id
             )));
         }
 
+        let owner_id = Arc::<str>::from(format!("sql-req-{}", self.request_id));
         let transaction_id = app_context.transaction_coordinator().begin(
             self.owner_key,
-            Arc::clone(&self.owner_id),
+            owner_id,
             TransactionOrigin::SqlBatch,
         )?;
         self.active_transaction_id = Some(transaction_id.clone());

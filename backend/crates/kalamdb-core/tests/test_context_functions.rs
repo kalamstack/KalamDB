@@ -1,4 +1,4 @@
-//! Integration tests for SQL context functions: KDB_CURRENT_USER(), KDB_CURRENT_USER_ID(), KDB_CURRENT_ROLE()
+//! Integration tests for SQL context functions: KDB_CURRENT_USER(), KDB_CURRENT_USER(), KDB_CURRENT_ROLE()
 
 use datafusion::prelude::SessionContext;
 use kalamdb_commons::{Role, UserId};
@@ -61,7 +61,7 @@ async fn test_current_user_id_with_dba_role() {
     let exec_ctx = ExecutionContext::from_session(auth_session, create_test_session());
     let session = exec_ctx.create_session_with_user();
 
-    let result = session.sql("SELECT KDB_CURRENT_USER_ID() AS user_id").await;
+    let result = session.sql("SELECT KDB_CURRENT_USER() AS user_id").await;
     assert!(result.is_ok(), "Query failed: {:?}", result.err());
 
     let df = result.unwrap();
@@ -85,7 +85,7 @@ async fn test_current_user_id_with_system_role() {
     let exec_ctx = ExecutionContext::new(user_id.clone(), role, create_test_session());
     let session = exec_ctx.create_session_with_user();
 
-    let result = session.sql("SELECT KDB_CURRENT_USER_ID() AS user_id").await;
+    let result = session.sql("SELECT KDB_CURRENT_USER() AS user_id").await;
     assert!(result.is_ok(), "Query failed: {:?}", result.err());
 
     let df = result.unwrap();
@@ -106,7 +106,7 @@ async fn test_current_user_id_with_service_role() {
     let exec_ctx = ExecutionContext::new(user_id.clone(), role, create_test_session());
     let session = exec_ctx.create_session_with_user();
 
-    let result = session.sql("SELECT KDB_CURRENT_USER_ID() AS user_id").await;
+    let result = session.sql("SELECT KDB_CURRENT_USER() AS user_id").await;
     assert!(result.is_ok(), "Query failed: {:?}", result.err());
 
     let df = result.unwrap();
@@ -117,29 +117,6 @@ async fn test_current_user_id_with_service_role() {
     let string_array =
         column.as_any().downcast_ref::<datafusion::arrow::array::StringArray>().unwrap();
     assert_eq!(string_array.value(0), "u_service");
-}
-
-#[tokio::test]
-async fn test_current_user_id_with_user_role_fails() {
-    let user_id = UserId::new("u_regular");
-    let role = Role::User;
-
-    let exec_ctx = ExecutionContext::new(user_id, role, create_test_session());
-    let session = exec_ctx.create_session_with_user();
-
-    let result = session.sql("SELECT KDB_CURRENT_USER_ID() AS user_id").await;
-    assert!(result.is_ok(), "Query parsing failed");
-
-    let df = result.unwrap();
-    let batches_result = df.collect().await;
-    assert!(batches_result.is_err(), "Expected error for unauthorized User role");
-
-    let err = batches_result.unwrap_err();
-    assert!(
-        err.to_string().contains("system, dba, or service"),
-        "Error message should mention required roles: {}",
-        err
-    );
 }
 
 #[tokio::test]
@@ -237,7 +214,7 @@ async fn test_all_three_functions_together() {
     let session = exec_ctx.create_session_with_user();
 
     let result = session
-        .sql("SELECT KDB_CURRENT_USER() AS current_user, KDB_CURRENT_USER_ID() AS user_id, KDB_CURRENT_ROLE() AS role")
+        .sql("SELECT KDB_CURRENT_USER() AS current_user, KDB_CURRENT_USER() AS user_id, KDB_CURRENT_ROLE() AS role")
         .await;
     assert!(result.is_ok(), "Query failed: {:?}", result.err());
 
@@ -290,7 +267,7 @@ async fn test_context_function_execution_uses_rewritten_aliases() {
 
     let result = session
         .sql(
-            "SELECT KDB_CURRENT_USER() AS current_user, KDB_CURRENT_USER_ID() AS user_id, KDB_CURRENT_ROLE() AS role",
+            "SELECT KDB_CURRENT_USER() AS current_user, KDB_CURRENT_USER() AS user_id, KDB_CURRENT_ROLE() AS role",
         )
         .await;
     assert!(result.is_ok(), "Query failed: {:?}", result.err());

@@ -44,7 +44,6 @@ pub mod error;
 pub mod error_extensions;
 pub mod manifest;
 pub mod shared_tables;
-pub mod store_ext;
 pub mod stream_tables;
 pub mod topics;
 pub mod user_tables;
@@ -76,9 +75,6 @@ pub use user_tables::pk_index::{create_user_table_pk_index, UserTablePkIndex};
 pub use user_tables::user_table_store::{
     new_indexed_user_table_store, new_user_table_store, UserTableIndexedStore, UserTableStore,
 };
-
-// Re-export extension traits
-pub use store_ext::{SharedTableStoreExt, StreamTableStoreExt, UserTableStoreExt};
 
 // Re-export providers for core integration
 pub use utils::{

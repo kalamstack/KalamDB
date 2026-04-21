@@ -15,7 +15,7 @@ use datafusion::logical_expr::Expr;
 use kalamdb_commons::models::rows::SystemTableRow;
 use kalamdb_commons::NamespaceId;
 use kalamdb_commons::SystemTable;
-use kalamdb_store::entity_store::{EntityStore, EntityStoreAsync};
+use kalamdb_store::entity_store::EntityStore;
 use kalamdb_store::{IndexedEntityStore, StorageBackend};
 use std::sync::{Arc, OnceLock};
 
@@ -23,12 +23,6 @@ use std::sync::{Arc, OnceLock};
 #[derive(Clone)]
 pub struct NamespacesTableProvider {
     store: IndexedEntityStore<NamespaceId, SystemTableRow>,
-}
-
-impl std::fmt::Debug for NamespacesTableProvider {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NamespacesTableProvider").finish()
-    }
 }
 
 impl NamespacesTableProvider {
@@ -54,23 +48,6 @@ impl NamespacesTableProvider {
     pub fn create_namespace(&self, namespace: Namespace) -> Result<(), SystemError> {
         let row = Self::encode_namespace_row(&namespace)?;
         self.store.put(&namespace.namespace_id, &row)?;
-        Ok(())
-    }
-
-    /// Alias for create_namespace (for backward compatibility)
-    pub fn insert_namespace(&self, namespace: Namespace) -> Result<(), SystemError> {
-        self.create_namespace(namespace)
-    }
-
-    /// Async version of `create_namespace()` - offloads to blocking thread pool.
-    ///
-    /// Use this in async contexts to avoid blocking the Tokio runtime.
-    pub async fn create_namespace_async(&self, namespace: Namespace) -> Result<(), SystemError> {
-        let row = Self::encode_namespace_row(&namespace)?;
-        self.store
-            .put_async(&namespace.namespace_id, &row)
-            .await
-            .into_system_error("put_async error")?;
         Ok(())
     }
 
@@ -121,43 +98,9 @@ impl NamespacesTableProvider {
         Ok(())
     }
 
-    /// Async version of `update_namespace()` - offloads to blocking thread pool.
-    ///
-    /// Use this in async contexts to avoid blocking the Tokio runtime.
-    pub async fn update_namespace_async(&self, namespace: Namespace) -> Result<(), SystemError> {
-        // Check if namespace exists
-        if self.store.get_async(namespace.namespace_id.clone()).await?.is_none() {
-            return Err(SystemError::NotFound(format!(
-                "Namespace not found: {}",
-                namespace.namespace_id
-            )));
-        }
-
-        let row = Self::encode_namespace_row(&namespace)?;
-        self.store
-            .put_async(&namespace.namespace_id, &row)
-            .await
-            .into_system_error("put_async error")?;
-        Ok(())
-    }
-
     /// Delete a namespace entry
     pub fn delete_namespace(&self, namespace_id: &NamespaceId) -> Result<(), SystemError> {
         self.store.delete(namespace_id)?;
-        Ok(())
-    }
-
-    /// Async version of `delete_namespace()` - offloads to blocking thread pool.
-    ///
-    /// Use this in async contexts to avoid blocking the Tokio runtime.
-    pub async fn delete_namespace_async(
-        &self,
-        namespace_id: &NamespaceId,
-    ) -> Result<(), SystemError> {
-        self.store
-            .delete_async(namespace_id.clone())
-            .await
-            .into_system_error("delete_async error")?;
         Ok(())
     }
 
@@ -172,33 +115,9 @@ impl NamespacesTableProvider {
         Ok(namespaces)
     }
 
-    /// Async version of `list_namespaces()` - offloads to blocking thread pool.
-    ///
-    /// Use this in async contexts to avoid blocking the Tokio runtime.
-    pub async fn list_namespaces_async(&self) -> Result<Vec<Namespace>, SystemError> {
-        let results: Vec<(Vec<u8>, SystemTableRow)> = self
-            .store
-            .scan_all_async(None, None, None)
-            .await
-            .into_system_error("scan_all_async error")?;
-        results.into_iter().map(|(_, row)| Self::decode_namespace_row(&row)).collect()
-    }
-
     /// Alias for list_namespaces (backward compatibility)
     pub fn scan_all(&self) -> Result<Vec<Namespace>, SystemError> {
         self.list_namespaces()
-    }
-
-    /// Async version of `scan_all()` - offloads to blocking thread pool.
-    ///
-    /// Use this in async contexts to avoid blocking the Tokio runtime.
-    pub async fn scan_all_async(&self) -> Result<Vec<Namespace>, SystemError> {
-        let results: Vec<(Vec<u8>, SystemTableRow)> = self
-            .store
-            .scan_all_async(None, None, None)
-            .await
-            .into_system_error("scan_all_async error")?;
-        results.into_iter().map(|(_, row)| Self::decode_namespace_row(&row)).collect()
     }
 
     /// Scan all namespaces and return as RecordBatch
@@ -239,13 +158,6 @@ impl NamespacesTableProvider {
         system_rows_to_batch(&Self::schema(), entries)
     }
 
-    fn provider_definition() -> SimpleProviderDefinition {
-        SimpleProviderDefinition {
-            table_name: SystemTable::Namespaces.table_name(),
-            schema: Self::schema,
-        }
-    }
-
     fn encode_namespace_row(namespace: &Namespace) -> Result<SystemTableRow, SystemError> {
         model_to_system_row(namespace, &Namespace::definition())
     }
@@ -253,18 +165,16 @@ impl NamespacesTableProvider {
     fn decode_namespace_row(row: &SystemTableRow) -> Result<Namespace, SystemError> {
         system_row_to_model(row, &Namespace::definition())
     }
-
-    fn schema() -> SchemaRef {
-        static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
-        SCHEMA
-            .get_or_init(|| {
-                Namespace::definition()
-                    .to_arrow_schema()
-                    .expect("failed to build namespaces schema")
-            })
-            .clone()
-    }
 }
+
+crate::impl_system_table_provider_metadata!(
+    simple,
+    provider = NamespacesTableProvider,
+    table_name = SystemTable::Namespaces.table_name(),
+    schema = Namespace::definition()
+        .to_arrow_schema()
+        .expect("failed to build namespaces schema")
+);
 
 crate::impl_simple_system_table_provider!(
     provider = NamespacesTableProvider,

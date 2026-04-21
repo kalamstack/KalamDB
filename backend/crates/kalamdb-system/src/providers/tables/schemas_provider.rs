@@ -6,24 +6,19 @@
 use super::{new_schemas_store, schemas_arrow_schema, SchemasStore};
 use crate::error::{SystemError, SystemResultExt};
 use crate::providers::base::{extract_filter_value, SimpleProviderDefinition};
+use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::array::RecordBatch;
 use datafusion::logical_expr::Expr;
 use kalamdb_commons::models::TableId;
 use kalamdb_commons::schemas::{TableDefinition, TableOptions};
 use kalamdb_store::StorageBackend;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 /// System.tables table provider using consolidated store with versioning
 #[derive(Clone)]
 pub struct SchemasTableProvider {
     store: SchemasStore,
-}
-
-impl std::fmt::Debug for SchemasTableProvider {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SchemasTableProvider").finish()
-    }
 }
 
 impl SchemasTableProvider {
@@ -49,21 +44,6 @@ impl SchemasTableProvider {
         Ok(self.store.put_version(table_id, table_def)?)
     }
 
-    /// Async version of `create_table()`
-    pub async fn create_table_async(
-        &self,
-        table_id: &TableId,
-        table_def: &TableDefinition,
-    ) -> Result<(), SystemError> {
-        let table_id = table_id.clone();
-        let table_def = table_def.clone();
-        let store = self.store.clone();
-        tokio::task::spawn_blocking(move || store.put_version(&table_id, &table_def))
-            .await
-            .into_system_error("spawn_blocking error")?
-            .map_err(SystemError::from)
-    }
-
     /// Update a table (stores new version and updates latest pointer)
     pub fn update_table(
         &self,
@@ -78,41 +58,9 @@ impl SchemasTableProvider {
         Ok(self.store.put_version(table_id, table_def)?)
     }
 
-    /// Async version of `update_table()`
-    pub async fn update_table_async(
-        &self,
-        table_id: &TableId,
-        table_def: &TableDefinition,
-    ) -> Result<(), SystemError> {
-        let table_id = table_id.clone();
-        let table_def = table_def.clone();
-        let store = self.store.clone();
-        tokio::task::spawn_blocking(move || {
-            // Check if table exists
-            if store.get_latest(&table_id)?.is_none() {
-                return Err(SystemError::NotFound(format!("Table not found: {}", table_id)));
-            }
-            store.put_version(&table_id, &table_def)?;
-            Ok(())
-        })
-        .await
-        .into_system_error("spawn_blocking error")?
-    }
-
     /// Delete a table entry (removes all versions)
     pub fn delete_table(&self, table_id: &TableId) -> Result<(), SystemError> {
         self.store.delete_all_versions(table_id)?;
-        Ok(())
-    }
-
-    /// Async version of `delete_table()`
-    pub async fn delete_table_async(&self, table_id: &TableId) -> Result<(), SystemError> {
-        let table_id = table_id.clone();
-        let store = self.store.clone();
-        tokio::task::spawn_blocking(move || store.delete_all_versions(&table_id))
-            .await
-            .into_system_error("spawn_blocking error")?
-            .map_err(SystemError::from)?;
         Ok(())
     }
 
@@ -188,17 +136,6 @@ impl SchemasTableProvider {
     ) -> Result<Vec<TableDefinition>, SystemError> {
         let tables = self.store.scan_namespace(namespace_id)?;
         Ok(tables.into_iter().map(|(_, def)| def).collect())
-    }
-
-    /// Async version of `list_tables()`
-    pub async fn list_tables_async(&self) -> Result<Vec<TableDefinition>, SystemError> {
-        let store = self.store.clone();
-        tokio::task::spawn_blocking(move || {
-            let tables = store.scan_all_latest()?;
-            Ok(tables.into_iter().map(|(_, def)| def).collect())
-        })
-        .await
-        .into_system_error("spawn_blocking error")?
     }
 
     /// Alias for list_tables (backward compatibility)
@@ -393,14 +330,14 @@ impl SchemasTableProvider {
         // Fall back to full scan (for LIMIT-only queries, DataFusion will truncate)
         self.scan_all_tables()
     }
-
-    fn provider_definition() -> SimpleProviderDefinition {
-        SimpleProviderDefinition {
-            table_name: kalamdb_commons::SystemTable::Schemas.table_name(),
-            schema: schemas_arrow_schema,
-        }
-    }
 }
+
+crate::impl_system_table_provider_metadata!(
+    simple,
+    provider = SchemasTableProvider,
+    table_name = kalamdb_commons::SystemTable::Schemas.table_name(),
+    schema = schemas_arrow_schema()
+);
 
 crate::impl_simple_system_table_provider!(
     provider = SchemasTableProvider,

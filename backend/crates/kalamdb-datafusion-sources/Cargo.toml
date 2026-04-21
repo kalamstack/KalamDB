@@ -24,6 +24,9 @@ async-trait = { workspace = true }
 futures-util = { workspace = true }
 tokio = { workspace = true }
 
+# Shared KalamDB row and metadata types used by MVCC merge helpers.
+kalamdb-commons = { workspace = true, features = ["conversions", "serialization"] }
+
 # Error handling
 thiserror = { workspace = true }
 

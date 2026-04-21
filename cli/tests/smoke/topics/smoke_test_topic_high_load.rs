@@ -60,6 +60,56 @@ fn is_retryable_consumer_poll_error(message: &str) -> bool {
     normalized.contains("error decoding") || normalized.contains("network")
 }
 
+fn using_fresh_test_server() -> bool {
+    if let Ok(value) = std::env::var("KALAMDB_SERVER_TYPE") {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "fresh" => return true,
+            "running" | "cluster" => return false,
+            _ => {},
+        }
+    }
+
+    if let Ok(value) = std::env::var("KALAMDB_AUTO_START_TEST_SERVER") {
+        match value.trim() {
+            "1" => return true,
+            "0" => return false,
+            _ => {},
+        }
+    }
+
+    if std::env::var_os("KALAMDB_STORAGE_DIR").is_some() {
+        return true;
+    }
+
+    std::env::var_os("KALAMDB_SERVER_URL").is_none()
+        && std::env::var_os("KALAMDB_CLUSTER_URLS").is_none()
+}
+
+fn configured_topic_visibility_timeout_secs() -> u64 {
+    if let Some(value) = std::env::var("KALAMDB_VISIBILITY_TIMEOUT_SECS")
+        .ok()
+        .and_then(|raw| raw.parse().ok())
+    {
+        return value;
+    }
+
+    if !using_fresh_test_server() {
+        return default_topic_visibility_timeout_secs();
+    }
+
+    let mut config_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    config_path.pop();
+    config_path.push("backend");
+    config_path.push("server.toml");
+
+    std::fs::read_to_string(config_path)
+        .ok()
+        .and_then(|raw| toml::from_str::<toml::Value>(&raw).ok())
+        .and_then(|config| config.get("topics")?.get("visibility_timeout_secs")?.as_integer())
+        .and_then(|value| (value >= 0).then_some(value as u64))
+        .unwrap_or_else(default_topic_visibility_timeout_secs)
+}
+
 async fn wait_for_topic_ready(topic: &str, expected_routes: usize) {
     let sql = format!("SELECT routes FROM system.topics WHERE topic_id = '{}'", topic);
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
@@ -1329,11 +1379,10 @@ async fn test_topic_ack_failure_recovery_no_message_loss_with_latency() {
     );
 
     // Sleep long enough for the server's topic visibility timeout to expire so
-    // Consumer B can recover the range claimed by Consumer A.
-    let visibility_timeout_secs: u64 = std::env::var("KALAMDB_VISIBILITY_TIMEOUT_SECS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or_else(default_topic_visibility_timeout_secs);
+    // Consumer B can recover the range claimed by Consumer A. Fresh-mode CLI
+    // tests start the backend with backend/server.toml, which overrides the
+    // library default here.
+    let visibility_timeout_secs = configured_topic_visibility_timeout_secs();
     tokio::time::sleep(Duration::from_secs(visibility_timeout_secs + 5)).await;
 
     let client = create_test_client().await;
