@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use kalamdb_commons::models::pg_operations::InsertRequest;
-use kalamdb_commons::models::TransactionId;
 use kalamdb_commons::TableType;
 use kalamdb_configs::ServerConfig;
 use kalamdb_core::operations::service::OperationService;
@@ -15,10 +14,6 @@ use support::{
     create_shared_table, execute_ok, insert_sql, observer_exec_ctx, request_exec_ctx,
     request_transaction_state, row, select_names, unique_namespace,
 };
-
-fn parse_transaction_id(transaction_id: &str) -> TransactionId {
-    TransactionId::try_new(transaction_id.to_string()).expect("valid transaction id")
-}
 
 #[tokio::test]
 #[ntest::timeout(6000)]
@@ -53,7 +48,7 @@ async fn repeated_commit_vs_rollback_clears_coordinator_state() {
         let coordinator = app_ctx.transaction_coordinator();
         let commit_coordinator = Arc::clone(&coordinator);
         let rollback_coordinator = Arc::clone(&coordinator);
-        let parsed_transaction_id = parse_transaction_id(&transaction_id);
+        let parsed_transaction_id = transaction_id.clone();
         let commit_tx = parsed_transaction_id.clone();
         let rollback_tx = parsed_transaction_id.clone();
 
@@ -133,7 +128,7 @@ async fn repeated_timeout_cleanup_drops_staged_state() {
             .expect_err("follow-up write should fail after timeout");
         assert!(timeout_error.message().contains("timed out"), "{timeout_error}");
 
-        let parsed_transaction_id = parse_transaction_id(&transaction_id);
+        let parsed_transaction_id = transaction_id.clone();
         assert!(app_ctx.transaction_coordinator().active_metrics().is_empty());
         assert!(
             app_ctx.transaction_coordinator().get_overlay(&parsed_transaction_id).is_none(),

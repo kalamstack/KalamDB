@@ -43,7 +43,7 @@ async fn shared_rpc_server_hosts_pg_service() {
 
     client.ping().await.expect("ping shared rpc service");
     let session = client
-        .open_session(Some("tenant_a"))
+        .open_session(None, Some("tenant_a"))
         .await
         .expect("open session over shared rpc server");
 

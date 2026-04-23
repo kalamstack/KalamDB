@@ -40,6 +40,9 @@ services:
       KALAMDB_CLUSTER_PEERS: "${KALAMDB_CLUSTER_PEERS_NODE1:-2@kalamdb-node2:9090@http://kalamdb-node2:8080;3@kalamdb-node3:9090@http://kalamdb-node3:8080}"
       KALAMDB_ROOT_PASSWORD: "${KALAMDB_ROOT_PASSWORD:-kalamdb123}"
       KALAMDB_JWT_SECRET: "${KALAMDB_JWT_SECRET:-kalamdb-docker-dev-secret-please-change-32chars}"
+      # TESTING ONLY: allow any browser origin so the sample Admin UI works out of the box.
+      # Replace "*" with exact UI origins before using this outside local/demo environments.
+      KALAMDB_SECURITY_CORS_ALLOWED_ORIGINS: "${KALAMDB_SECURITY_CORS_ALLOWED_ORIGINS:-*}"
     networks:
       - kalamdb-cluster
     restart: unless-stopped
@@ -75,6 +78,9 @@ services:
       KALAMDB_CLUSTER_PEERS: "${KALAMDB_CLUSTER_PEERS_NODE2:-1@kalamdb-node1:9090@http://kalamdb-node1:8080;3@kalamdb-node3:9090@http://kalamdb-node3:8080}"
       KALAMDB_ROOT_PASSWORD: "${KALAMDB_ROOT_PASSWORD:-kalamdb123}"
       KALAMDB_JWT_SECRET: "${KALAMDB_JWT_SECRET:-kalamdb-docker-dev-secret-please-change-32chars}"
+      # TESTING ONLY: allow any browser origin so the sample Admin UI works out of the box.
+      # Replace "*" with exact UI origins before using this outside local/demo environments.
+      KALAMDB_SECURITY_CORS_ALLOWED_ORIGINS: "${KALAMDB_SECURITY_CORS_ALLOWED_ORIGINS:-*}"
     networks:
       - kalamdb-cluster
     depends_on:
@@ -113,6 +119,9 @@ services:
       KALAMDB_CLUSTER_PEERS: "${KALAMDB_CLUSTER_PEERS_NODE3:-1@kalamdb-node1:9090@http://kalamdb-node1:8080;2@kalamdb-node2:9090@http://kalamdb-node2:8080}"
       KALAMDB_ROOT_PASSWORD: "${KALAMDB_ROOT_PASSWORD:-kalamdb123}"
       KALAMDB_JWT_SECRET: "${KALAMDB_JWT_SECRET:-kalamdb-docker-dev-secret-please-change-32chars}"
+      # TESTING ONLY: allow any browser origin so the sample Admin UI works out of the box.
+      # Replace "*" with exact UI origins before using this outside local/demo environments.
+      KALAMDB_SECURITY_CORS_ALLOWED_ORIGINS: "${KALAMDB_SECURITY_CORS_ALLOWED_ORIGINS:-*}"
     networks:
       - kalamdb-cluster
     depends_on:

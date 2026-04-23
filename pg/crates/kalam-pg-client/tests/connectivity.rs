@@ -39,7 +39,7 @@ async fn remote_client_connects_and_opens_session() {
 
     client.ping().await.expect("ping");
     let session = client
-        .open_session(Some("tenant_app"))
+        .open_session(None, Some("tenant_app"))
         .await
         .expect("open session");
 
@@ -55,7 +55,7 @@ async fn remote_client_connects_and_opens_session() {
 async fn sequential_transactions_commit_cleanly() {
     let client = start_server_and_client().await;
 
-    let session = client.open_session(None).await.expect("open session");
+    let session = client.open_session(None, None).await.expect("open session");
 
     for i in 0..5 {
         let tx_id = client
@@ -77,7 +77,7 @@ async fn sequential_transactions_commit_cleanly() {
 async fn stale_transaction_auto_rollback_on_new_begin() {
     let client = start_server_and_client().await;
 
-    let session = client.open_session(None).await.expect("open session");
+    let session = client.open_session(None, None).await.expect("open session");
 
     // Begin a transaction and intentionally skip commit/rollback
     let _tx_id1 = client.begin_transaction(&session.session_id).await.expect("begin tx1");
@@ -97,7 +97,7 @@ async fn stale_transaction_auto_rollback_on_new_begin() {
 async fn close_session_removes_server_state() {
     let client = start_server_and_client().await;
 
-    let session = client.open_session(None).await.expect("open session");
+    let session = client.open_session(None, None).await.expect("open session");
 
     // Close the session — should succeed
     client.close_session(&session.session_id).await.expect("close session");

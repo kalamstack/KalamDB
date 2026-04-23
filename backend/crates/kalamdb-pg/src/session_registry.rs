@@ -1,7 +1,7 @@
 use dashmap::DashMap;
-use kalamdb_commons::models::TransactionState;
+use kalamdb_commons::models::{TransactionId, TransactionState};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -44,7 +44,7 @@ pub struct BridgeAuth {
 pub struct RemotePgSession {
     session_id: String,
     current_schema: Option<String>,
-    transaction_id: Option<String>,
+    transaction_id: Option<TransactionId>,
     transaction_state: Option<TransactionState>,
     /// Whether the current transaction has performed writes.
     transaction_has_writes: bool,
@@ -60,7 +60,7 @@ pub struct RemotePgSession {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LivePgTransaction {
     session_id: String,
-    transaction_id: String,
+    transaction_id: TransactionId,
     transaction_state: TransactionState,
     transaction_has_writes: bool,
 }
@@ -68,13 +68,13 @@ pub struct LivePgTransaction {
 impl LivePgTransaction {
     pub fn new(
         session_id: impl Into<String>,
-        transaction_id: impl Into<String>,
+        transaction_id: TransactionId,
         transaction_state: TransactionState,
         transaction_has_writes: bool,
     ) -> Self {
         Self {
             session_id: session_id.into(),
-            transaction_id: transaction_id.into(),
+            transaction_id,
             transaction_state,
             transaction_has_writes,
         }
@@ -84,8 +84,8 @@ impl LivePgTransaction {
         self.session_id.as_str()
     }
 
-    pub fn transaction_id(&self) -> &str {
-        self.transaction_id.as_str()
+    pub fn transaction_id(&self) -> &TransactionId {
+        &self.transaction_id
     }
 
     pub fn transaction_state(&self) -> TransactionState {
@@ -123,7 +123,11 @@ impl RemotePgSession {
     }
 
     pub fn transaction_id(&self) -> Option<&str> {
-        self.transaction_id.as_deref()
+        self.transaction_id.as_ref().map(TransactionId::as_str)
+    }
+
+    pub fn transaction_id_value(&self) -> Option<&TransactionId> {
+        self.transaction_id.as_ref()
     }
 
     pub fn transaction_state(&self) -> Option<TransactionState> {
@@ -175,18 +179,31 @@ impl RemotePgSession {
         self
     }
 
-    pub fn with_transaction_id(mut self, transaction_id: Option<&str>) -> Self {
-        self.transaction_id = normalize_optional(transaction_id);
+    pub fn with_transaction_id(mut self, transaction_id: Option<&TransactionId>) -> Self {
+        self.transaction_id = transaction_id.cloned();
         self
     }
 
     fn with_live_transaction(mut self, live_transaction: Option<&LivePgTransaction>) -> Self {
-        self.transaction_id =
-            live_transaction.map(|transaction| transaction.transaction_id().to_owned());
+        self.transaction_id = live_transaction.map(|transaction| transaction.transaction_id().clone());
         self.transaction_state = live_transaction.map(LivePgTransaction::transaction_state);
         self.transaction_has_writes =
             live_transaction.map(LivePgTransaction::transaction_has_writes).unwrap_or(false);
         self
+    }
+
+    /// Clear all transaction bookkeeping and bump `last_seen_at_ms`.
+    ///
+    /// Returns the transaction id that was cleared, or `fallback.cloned()`
+    /// if no transaction was tracked. Used by commit/rollback paths that
+    /// need to return an id to the caller even when the registry had lost
+    /// track (idempotent retries).
+    fn clear_transaction(&mut self, fallback: Option<&TransactionId>) -> Option<TransactionId> {
+        let tx_id = self.transaction_id.take().or_else(|| fallback.cloned());
+        self.transaction_state = None;
+        self.transaction_has_writes = false;
+        self.last_seen_at_ms = current_timestamp_ms();
+        tx_id
     }
 
     fn record_activity(
@@ -226,8 +243,6 @@ fn compare_sessions_for_observability(
 #[derive(Debug)]
 pub struct SessionRegistry {
     sessions: Arc<DashMap<String, RemotePgSession>>,
-    /// Monotonic counter for generating unique transaction IDs.
-    tx_counter: AtomicU64,
     /// Last time an opportunistic stale-session sweep ran.
     last_pruned_at_ms: AtomicI64,
 }
@@ -236,7 +251,6 @@ impl Default for SessionRegistry {
     fn default() -> Self {
         Self {
             sessions: Arc::new(DashMap::new()),
-            tx_counter: AtomicU64::new(0),
             last_pruned_at_ms: AtomicI64::new(0),
         }
     }
@@ -309,15 +323,16 @@ impl SessionRegistry {
             .clone()
     }
 
-    /// Open an authenticated session with a server-issued opaque session handle.
+    /// Open an authenticated session, preserving a caller-supplied session handle when present.
     /// Returns the newly created session with bridge auth set.
     pub fn open_authenticated(
         &self,
+        session_id: Option<&str>,
         current_schema: Option<&str>,
         client_addr: Option<&str>,
         bridge_auth: BridgeAuth,
     ) -> RemotePgSession {
-        let session_id = Uuid::now_v7().to_string();
+        let session_id = normalize_optional(session_id).unwrap_or_else(|| Uuid::now_v7().to_string());
         let now_ms = current_timestamp_ms();
 
         self.maybe_prune_stale_local_idle_sessions(now_ms);
@@ -371,7 +386,7 @@ impl SessionRegistry {
         &self,
         session_id: &str,
         current_schema: Option<&str>,
-        transaction_id: Option<&str>,
+        transaction_id: Option<&TransactionId>,
     ) -> Option<RemotePgSession> {
         let mut session = self.sessions.get_mut(session_id)?;
         let updated = session
@@ -383,20 +398,39 @@ impl SessionRegistry {
         Some(updated)
     }
 
+    /// Pin an externally managed transaction to a session for cleanup/pruning without
+    /// making the registry a second transaction state machine.
+    pub fn pin_transaction(
+        &self,
+        session_id: &str,
+        transaction_id: &TransactionId,
+    ) -> Result<TransactionId, String> {
+        let mut session = self
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(|| format!("session '{}' not found", session_id))?;
+
+        session.transaction_id = Some(transaction_id.clone());
+        session.transaction_state = None;
+        session.transaction_has_writes = false;
+        session.last_seen_at_ms = current_timestamp_ms();
+        Ok(transaction_id.clone())
+    }
+
     /// Begin a new transaction for the given session. Returns the transaction ID.
     ///
     /// If a transaction is already active on this session, returns an error.
-    pub fn begin_transaction(&self, session_id: &str) -> Result<String, String> {
-        let transaction_id = Uuid::now_v7().to_string();
-        self.begin_transaction_with_id(session_id, transaction_id.as_str())
+    pub fn begin_transaction(&self, session_id: &str) -> Result<TransactionId, String> {
+        let transaction_id = TransactionId::new(Uuid::now_v7().to_string());
+        self.begin_transaction_with_id(session_id, &transaction_id)
     }
 
     /// Begin a new transaction for the given session using an externally supplied ID.
     pub fn begin_transaction_with_id(
         &self,
         session_id: &str,
-        transaction_id: &str,
-    ) -> Result<String, String> {
+        transaction_id: &TransactionId,
+    ) -> Result<TransactionId, String> {
         let mut session = self
             .sessions
             .get_mut(session_id)
@@ -409,23 +443,22 @@ impl SessionRegistry {
             log::warn!(
                 "PG session '{}': auto-rolling back stale transaction '{}' before starting new one",
                 session_id,
-                session.transaction_id.as_deref().unwrap_or("?")
+                session
+                    .transaction_id
+                    .as_ref()
+                    .map(TransactionId::as_str)
+                    .unwrap_or("?")
             );
             session.transaction_id = None;
             session.transaction_state = None;
             session.transaction_has_writes = false;
         }
 
-        let tx_id = if transaction_id.trim().is_empty() {
-            format!("{}-{}", Uuid::now_v7(), self.tx_counter.fetch_add(1, Ordering::Relaxed))
-        } else {
-            transaction_id.trim().to_string()
-        };
-        session.transaction_id = Some(tx_id.clone());
+        session.transaction_id = Some(transaction_id.clone());
         session.transaction_state = Some(TransactionState::OpenRead);
         session.transaction_has_writes = false;
         session.last_seen_at_ms = current_timestamp_ms();
-        Ok(tx_id)
+        Ok(transaction_id.clone())
     }
 
     /// Commit the active transaction on the given session.
@@ -434,8 +467,8 @@ impl SessionRegistry {
     pub fn commit_transaction(
         &self,
         session_id: &str,
-        transaction_id: &str,
-    ) -> Result<String, String> {
+        transaction_id: &TransactionId,
+    ) -> Result<TransactionId, String> {
         let mut session = self
             .sessions
             .get_mut(session_id)
@@ -466,20 +499,22 @@ impl SessionRegistry {
             },
         }
 
-        let current_tx = session.transaction_id.as_deref().unwrap_or("");
-        if current_tx != transaction_id {
+        if session.transaction_id.as_ref() != Some(transaction_id) {
+            let current_tx = session
+                .transaction_id
+                .as_ref()
+                .map(TransactionId::as_str)
+                .unwrap_or("");
             return Err(format!(
                 "transaction ID mismatch: expected '{}', got '{}'",
                 current_tx, transaction_id
             ));
         }
 
-        session.transaction_state = Some(TransactionState::Committed);
-        // Clear transaction state after commit
-        let tx_id = session.transaction_id.take().unwrap_or_default();
-        session.transaction_state = None;
-        session.transaction_has_writes = false;
-        session.last_seen_at_ms = current_timestamp_ms();
+        // State machine already validated above: transaction_id is Some.
+        let tx_id = session
+            .clear_transaction(Some(transaction_id))
+            .expect("transaction_id present in Open state");
         Ok(tx_id)
     }
 
@@ -490,21 +525,27 @@ impl SessionRegistry {
     pub fn rollback_transaction(
         &self,
         session_id: &str,
-        transaction_id: &str,
-    ) -> Result<String, String> {
+        transaction_id: &TransactionId,
+    ) -> Result<TransactionId, String> {
         let mut session = self
             .sessions
             .get_mut(session_id)
             .ok_or_else(|| format!("session '{}' not found", session_id))?;
 
         match session.transaction_state {
+            // Active transaction — fall through to validation + clear below.
             Some(TransactionState::OpenRead | TransactionState::OpenWrite) => {},
-            Some(TransactionState::RolledBack) => {
-                // Idempotent rollback
-                let tx_id = session.transaction_id.take().unwrap_or_default();
-                session.transaction_state = None;
-                session.transaction_has_writes = false;
-                session.last_seen_at_ms = current_timestamp_ms();
+            // All other states are idempotent no-ops: just return whatever id we have.
+            Some(
+                TransactionState::RolledBack
+                | TransactionState::RollingBack
+                | TransactionState::TimedOut
+                | TransactionState::Aborted,
+            )
+            | None => {
+                let tx_id = session
+                    .clear_transaction(Some(transaction_id))
+                    .unwrap_or_else(|| transaction_id.clone());
                 return Ok(tx_id);
             },
             Some(TransactionState::Committed) => {
@@ -513,39 +554,23 @@ impl SessionRegistry {
             Some(TransactionState::Committing) => {
                 return Err("cannot rollback transaction while it is committing".to_string());
             },
-            Some(TransactionState::RollingBack) => {
-                let tx_id = session.transaction_id.take().unwrap_or_default();
-                session.transaction_state = None;
-                session.transaction_has_writes = false;
-                session.last_seen_at_ms = current_timestamp_ms();
-                return Ok(tx_id);
-            },
-            Some(TransactionState::TimedOut | TransactionState::Aborted) => {
-                let tx_id = session.transaction_id.take().unwrap_or_default();
-                session.transaction_state = None;
-                session.transaction_has_writes = false;
-                session.last_seen_at_ms = current_timestamp_ms();
-                return Ok(tx_id);
-            },
-            None => {
-                // No active transaction — idempotent no-op
-                return Ok(String::new());
-            },
         }
 
-        let current_tx = session.transaction_id.as_deref().unwrap_or("");
-        if current_tx != transaction_id {
+        if session.transaction_id.as_ref() != Some(transaction_id) {
+            let current_tx = session
+                .transaction_id
+                .as_ref()
+                .map(TransactionId::as_str)
+                .unwrap_or("");
             return Err(format!(
                 "transaction ID mismatch: expected '{}', got '{}'",
                 current_tx, transaction_id
             ));
         }
 
-        session.transaction_state = Some(TransactionState::RolledBack);
-        let tx_id = session.transaction_id.take().unwrap_or_default();
-        session.transaction_state = None;
-        session.transaction_has_writes = false;
-        session.last_seen_at_ms = current_timestamp_ms();
+        let tx_id = session
+            .clear_transaction(Some(transaction_id))
+            .expect("transaction_id present in Open state");
         Ok(tx_id)
     }
 
@@ -606,12 +631,12 @@ impl SessionRegistry {
     pub fn clear_transaction_state_if_matches(
         &self,
         session_id: &str,
-        expected_transaction_id: Option<&str>,
+        expected_transaction_id: Option<&TransactionId>,
     ) -> Option<RemotePgSession> {
         let mut session = self.sessions.get_mut(session_id)?;
 
         if let Some(expected_transaction_id) = expected_transaction_id {
-            if session.transaction_id.as_deref() != Some(expected_transaction_id) {
+            if session.transaction_id.as_ref() != Some(expected_transaction_id) {
                 return Some(session.clone());
             }
         }
@@ -675,6 +700,27 @@ mod tests {
     }
 
     #[test]
+    fn open_authenticated_preserves_supplied_session_id() {
+        let registry = SessionRegistry::default();
+        let session = registry.open_authenticated(
+            Some("pg-4242-deadbeef"),
+            Some("tenant_a"),
+            Some("127.0.0.1:54321"),
+            BridgeAuth {
+                user_id: "bridge-user".to_string(),
+                role: "dba".to_string(),
+                auth_mode: "basic".to_string(),
+                lease_expires_at_ms: current_timestamp_ms() + DEFAULT_SESSION_LEASE_MS,
+            },
+        );
+
+        assert_eq!(session.session_id(), "pg-4242-deadbeef");
+        assert_eq!(session.current_schema(), Some("tenant_a"));
+        assert_eq!(session.client_addr(), Some("127.0.0.1:54321"));
+        assert!(session.is_authenticated());
+    }
+
+    #[test]
     fn snapshot_returns_all_sessions() {
         let registry = SessionRegistry::default();
         registry.open_or_get_with_context("pg-1", None, None, Some("OpenSession"));
@@ -692,7 +738,7 @@ mod tests {
         registry.open_or_get("pg-1");
 
         let tx_id = registry.begin_transaction("pg-1").unwrap();
-        assert!(Uuid::parse_str(&tx_id).is_ok());
+        assert!(Uuid::parse_str(tx_id.as_str()).is_ok());
 
         let committed = registry.commit_transaction("pg-1", &tx_id).unwrap();
         assert_eq!(committed, tx_id);
@@ -751,7 +797,8 @@ mod tests {
         registry.open_or_get("pg-1");
 
         let _tx_id = registry.begin_transaction("pg-1").unwrap();
-        let result = registry.commit_transaction("pg-1", "wrong-tx-id");
+        let wrong_tx_id = TransactionId::new("01960f7b-3d16-7d6d-b26c-7e4db6f25f8d");
+        let result = registry.commit_transaction("pg-1", &wrong_tx_id);
         assert!(result.is_err());
     }
 
@@ -768,8 +815,10 @@ mod tests {
         registry.open_or_get("pg-1");
 
         // Rollback with no active transaction should be idempotent
-        let result = registry.rollback_transaction("pg-1", "any-tx-id");
+        let tx_id = TransactionId::new("01960f7b-3d17-7d6d-b26c-7e4db6f25f8d");
+        let result = registry.rollback_transaction("pg-1", &tx_id);
         assert!(result.is_ok());
+        assert_eq!(result.unwrap(), tx_id);
     }
 
     #[test]
@@ -804,17 +853,19 @@ mod tests {
     fn snapshot_with_live_transactions_prefers_live_transaction_state() {
         let registry = SessionRegistry::default();
         registry.open_or_get("pg-1");
-        registry.begin_transaction_with_id("pg-1", "stale-tx").unwrap();
+        let stale_tx_id = TransactionId::new("01960f7b-3d18-7d6d-b26c-7e4db6f25f8d");
+        let live_tx_id = TransactionId::new("01960f7b-3d19-7d6d-b26c-7e4db6f25f8d");
+        registry.begin_transaction_with_id("pg-1", &stale_tx_id).unwrap();
 
         let snapshot = registry.snapshot_with_live_transactions(vec![LivePgTransaction::new(
             "pg-1",
-            "live-tx",
+            live_tx_id,
             TransactionState::OpenWrite,
             true,
         )]);
         let session = snapshot.into_iter().find(|session| session.session_id() == "pg-1").unwrap();
 
-        assert_eq!(session.transaction_id(), Some("live-tx"));
+        assert_eq!(session.transaction_id(), Some("01960f7b-3d19-7d6d-b26c-7e4db6f25f8d"));
         assert_eq!(session.transaction_state(), Some(TransactionState::OpenWrite));
         assert!(session.transaction_has_writes());
     }
@@ -866,7 +917,7 @@ mod tests {
 
         let snapshot = registry.snapshot_with_live_transactions(vec![LivePgTransaction::new(
             "pg-live",
-            Uuid::now_v7().to_string(),
+            TransactionId::new(Uuid::now_v7().to_string()),
             TransactionState::OpenRead,
             false,
         )]);

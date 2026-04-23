@@ -31,6 +31,26 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant as TokioInstant;
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, protocol::Message};
 
+fn all_resumes_ready(subs: &HashMap<String, SubEntry>) -> bool {
+    subs.values().all(|entry| !entry.reconnect_resubscribe_pending)
+}
+
+fn mark_connected(connected: &Arc<AtomicBool>, event_handlers: &EventHandlers) {
+    if !connected.swap(true, Ordering::SeqCst) {
+        event_handlers.emit_connect();
+    }
+}
+
+fn mark_disconnected(
+    connected: &Arc<AtomicBool>,
+    event_handlers: &EventHandlers,
+    reason: DisconnectReason,
+) {
+    if connected.swap(false, Ordering::SeqCst) {
+        event_handlers.emit_disconnect(reason);
+    }
+}
+
 async fn establish_ws(
     base_url: &str,
     resolved_auth: &RwLock<ResolvedAuth>,
@@ -240,12 +260,11 @@ async fn handle_startup_timeouts(
         let _ = ws.close(None).await;
     }
 
-    let was_connected = connected.swap(false, Ordering::SeqCst);
-    if was_connected {
-        event_handlers.emit_disconnect(DisconnectReason::new(
-            "Subscription resume timed out; forcing reconnect",
-        ));
-    }
+    mark_disconnected(
+        connected,
+        event_handlers,
+        DisconnectReason::new("Subscription resume timed out; forcing reconnect"),
+    );
 
     true
 }
@@ -288,8 +307,7 @@ pub(super) async fn connection_task(
         Ok((stream, _auth, serialization)) => {
             ws_stream = Some(stream);
             negotiated_ser = serialization;
-            connected.store(true, Ordering::SeqCst);
-            event_handlers.emit_connect();
+            mark_connected(&connected, &event_handlers);
             ping_deadline = TokioInstant::now() + keepalive_duration;
             if let Some(tx) = ready_tx {
                 let _ = tx.send(Ok(()));
@@ -349,11 +367,14 @@ pub(super) async fn connection_task(
                         "[kalam-sdk] Pong timeout ({:?}) - server unresponsive",
                         pong_timeout_duration,
                     );
-                    event_handlers.emit_disconnect(DisconnectReason::new(format!(
-                        "Pong timeout ({:?}) — server unresponsive",
-                        pong_timeout_duration,
-                    )));
-                    connected.store(false, Ordering::SeqCst);
+                    mark_disconnected(
+                        &connected,
+                        &event_handlers,
+                        DisconnectReason::new(format!(
+                            "Pong timeout ({:?}) — server unresponsive",
+                            pong_timeout_duration,
+                        )),
+                    );
                     awaiting_pong = false;
                     ws_stream = None;
                     continue;
@@ -433,11 +454,11 @@ pub(super) async fn connection_task(
                 _ = &mut ping_sleep, if has_keepalive && !awaiting_pong => {
                     if let Err(error) = ws.send(Message::Ping(Bytes::new())).await {
                         log::warn!("Keepalive ping failed: {}", error);
-                        event_handlers.emit_disconnect(DisconnectReason::new(format!(
-                            "Keepalive ping failed: {}",
-                            error,
-                        )));
-                        connected.store(false, Ordering::SeqCst);
+                        mark_disconnected(
+                            &connected,
+                            &event_handlers,
+                            DisconnectReason::new(format!("Keepalive ping failed: {}", error)),
+                        );
                         awaiting_pong = false;
                         ws_stream = None;
                         continue;
@@ -475,6 +496,9 @@ pub(super) async fn connection_task(
                                         negotiated_ser,
                                     )
                                     .await;
+                                    if all_resumes_ready(&subs) {
+                                        mark_connected(&connected, &event_handlers);
+                                    }
                                 },
                                 Ok(None) => {},
                                 Err(error) => log::warn!("Failed to parse WS message: {}", error),
@@ -508,6 +532,9 @@ pub(super) async fn connection_task(
                                                 negotiated_ser,
                                             )
                                             .await;
+                                            if all_resumes_ready(&subs) {
+                                                mark_connected(&connected, &event_handlers);
+                                            }
                                         },
                                         Ok(None) => {},
                                         Err(error) => log::warn!("Failed to parse msgpack message: {}", error),
@@ -549,8 +576,7 @@ pub(super) async fn connection_task(
                             } else {
                                 DisconnectReason::new("Server closed connection")
                             };
-                            event_handlers.emit_disconnect(reason);
-                            connected.store(false, Ordering::SeqCst);
+                            mark_disconnected(&connected, &event_handlers, reason);
                             negotiated_ser = SerializationType::Json;
                             ws_stream = None;
                             continue;
@@ -565,18 +591,21 @@ pub(super) async fn connection_task(
                         Some(Err(error)) => {
                             let message = error.to_string();
                             event_handlers.emit_error(ConnectionError::new(&message, true));
-                            event_handlers.emit_disconnect(DisconnectReason::new(format!(
-                                "WebSocket error: {}",
-                                message,
-                            )));
-                            connected.store(false, Ordering::SeqCst);
+                            mark_disconnected(
+                                &connected,
+                                &event_handlers,
+                                DisconnectReason::new(format!("WebSocket error: {}", message)),
+                            );
                             negotiated_ser = SerializationType::Json;
                             ws_stream = None;
                             continue;
                         },
                         None => {
-                            event_handlers.emit_disconnect(DisconnectReason::new("WebSocket stream ended"));
-                            connected.store(false, Ordering::SeqCst);
+                            mark_disconnected(
+                                &connected,
+                                &event_handlers,
+                                DisconnectReason::new("WebSocket stream ended"),
+                            );
                             negotiated_ser = SerializationType::Json;
                             ws_stream = None;
                             continue;
@@ -763,8 +792,7 @@ pub(super) async fn connection_task(
                     log::info!("Reconnection successful");
                     negotiated_ser = serialization;
                     reconnect_attempts.store(0, Ordering::SeqCst);
-                    connected.store(true, Ordering::SeqCst);
-                    event_handlers.emit_connect();
+                    connected.store(false, Ordering::SeqCst);
                     resubscribe_all(
                         &mut stream,
                         &mut subs,
@@ -773,6 +801,9 @@ pub(super) async fn connection_task(
                         negotiated_ser,
                     )
                     .await;
+                    if all_resumes_ready(&subs) {
+                        mark_connected(&connected, &event_handlers);
+                    }
                     ws_stream = Some(stream);
                     ping_deadline = TokioInstant::now() + keepalive_duration;
                     awaiting_pong = false;

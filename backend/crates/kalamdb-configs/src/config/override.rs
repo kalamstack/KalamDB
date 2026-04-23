@@ -2,6 +2,14 @@ use super::cluster::{ClusterConfig, PeerConfig};
 use super::types::ServerConfig;
 use std::env;
 
+fn parse_csv_env_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(|entry| entry.trim().to_string())
+        .filter(|entry| !entry.is_empty())
+        .collect()
+}
+
 impl ServerConfig {
     /// Apply environment variable overrides for sensitive configuration
     ///
@@ -33,6 +41,7 @@ impl ServerConfig {
     /// - KALAMDB_JWT_EXPIRY_HOURS: Override auth.jwt_expiry_hours
     /// - KALAMDB_COOKIE_SECURE: Override auth.cookie_secure
     /// - KALAMDB_ALLOW_REMOTE_SETUP: Override auth.allow_remote_setup
+    /// - KALAMDB_SECURITY_CORS_ALLOWED_ORIGINS: Override security.cors.allowed_origins
     /// - KALAMDB_SECURITY_TRUSTED_PROXY_RANGES: Override security.trusted_proxy_ranges
     /// - KALAMDB_RATE_LIMIT_AUTH_REQUESTS_PER_IP_PER_SEC: Override rate_limit.max_auth_requests_per_ip_per_sec
     /// - KALAMDB_WEBSOCKET_CLIENT_TIMEOUT_SECS: Override websocket.client_timeout_secs
@@ -140,15 +149,16 @@ impl ServerConfig {
             self.auth.pg_auth_token = Some(val);
         }
 
+        // Allowed browser origins used by both HTTP CORS and WebSocket origin checks.
+        if let Ok(val) = env::var("KALAMDB_SECURITY_CORS_ALLOWED_ORIGINS") {
+            self.security.cors.allowed_origins = parse_csv_env_list(&val);
+        }
+
         // Trusted proxy ranges used for X-Forwarded-For / X-Real-IP trust.
         if let Ok(val) = env::var("KALAMDB_SECURITY_TRUSTED_PROXY_RANGES")
             .or_else(|_| env::var("KALAMDB_TRUSTED_PROXY_RANGES"))
         {
-            self.security.trusted_proxy_ranges = val
-                .split(',')
-                .map(|entry| entry.trim().to_string())
-                .filter(|entry| !entry.is_empty())
-                .collect();
+            self.security.trusted_proxy_ranges = parse_csv_env_list(&val);
         }
 
         // Auth rate limit per IP
@@ -363,6 +373,41 @@ mod tests {
         assert_eq!(config.logging.level, "debug");
 
         env::remove_var("KALAMDB_LOG_LEVEL");
+    }
+
+    #[test]
+    fn test_env_override_cors_allowed_origins() {
+        let _guard = acquire_env_lock();
+        env::set_var(
+            "KALAMDB_SECURITY_CORS_ALLOWED_ORIGINS",
+            "http://localhost:5173, https://admin.example.com",
+        );
+
+        let mut config = ServerConfig::default();
+        config.apply_env_overrides().unwrap();
+
+        assert_eq!(
+            config.security.cors.allowed_origins,
+            vec![
+                "http://localhost:5173".to_string(),
+                "https://admin.example.com".to_string()
+            ]
+        );
+
+        env::remove_var("KALAMDB_SECURITY_CORS_ALLOWED_ORIGINS");
+    }
+
+    #[test]
+    fn test_env_override_cors_allowed_origins_wildcard() {
+        let _guard = acquire_env_lock();
+        env::set_var("KALAMDB_SECURITY_CORS_ALLOWED_ORIGINS", "*");
+
+        let mut config = ServerConfig::default();
+        config.apply_env_overrides().unwrap();
+
+        assert_eq!(config.security.cors.allowed_origins, vec!["*".to_string()]);
+
+        env::remove_var("KALAMDB_SECURITY_CORS_ALLOWED_ORIGINS");
     }
 
     #[test]

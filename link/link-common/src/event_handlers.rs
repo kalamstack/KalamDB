@@ -2,7 +2,7 @@
 //!
 //! Provides callback-based hooks for monitoring WebSocket connection events:
 //!
-//! - [`on_connect`](EventHandlers::on_connect): Fired when WebSocket connection is established
+//! - [`on_connect`](EventHandlers::on_connect): Fired when the shared connection becomes ready
 //! - [`on_disconnect`](EventHandlers::on_disconnect): Fired when WebSocket connection closes
 //! - [`on_error`](EventHandlers::on_error): Fired on connection or protocol errors
 //! - [`on_receive`](EventHandlers::on_receive): Optional debug hook for all incoming messages
@@ -141,7 +141,11 @@ pub type OnSendCallback = Arc<dyn Fn(&str) + Send + Sync>;
 /// with the same semantics.
 #[derive(Clone, Default)]
 pub struct EventHandlers {
-    /// Called when the WebSocket connection is successfully established.
+    /// Called when the shared connection is ready for use.
+    ///
+    /// On the initial connect, this fires as soon as the WebSocket handshake
+    /// and authentication succeed. On reconnect with active subscriptions, it
+    /// fires after those subscriptions have finished recovering.
     pub(crate) on_connect: Option<OnConnectCallback>,
 
     /// Called when the WebSocket connection is closed (intentionally or not).
@@ -175,7 +179,7 @@ impl EventHandlers {
         Self::default()
     }
 
-    /// Register a callback invoked when the WebSocket connection is established.
+    /// Register a callback invoked when the shared connection becomes ready.
     ///
     /// # Example
     /// ```rust

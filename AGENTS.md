@@ -38,6 +38,7 @@ use kalamdb_commons::models::UserId;
 16. **SDK Changes Must Update Docs**: Any change under `link/sdks/**` or SDK bridge crates (for example `link/kalam-link-dart/**`) must also update the corresponding SDK docs in the `KalamSite` repo (typically `../KalamSite/content/sdk/**`) and include appropriate test coverage.
 17. **Performance-First Execution**: Prefer approaches that reduce runtime, allocations, binary size, and compile time; avoid adding abstractions or dependencies that materially slow hot paths or build/test feedback loops without a clear benefit.
 18. **Performance Test Timing**: Whenever you run performance tests, benchmarks, or perf-focused e2e cases, record and report how long each relevant test took in seconds.
+19. **Architecture Changes Must Update Architecture Docs**: When a change affects architecture, transaction flow, storage boundaries, execution paths, or cross-system integration, first check `docs/architecture/` and `docs/architecture/decisions/`, then update the relevant document or add a new one so those folders stay aligned with the codebase.
 
 > **⚠️ IMPORTANT**: Smoke tests require a running KalamDB server! Start the server first with `cargo run` in the `backend` directory before running smoke tests. The tests will fail if no server is running.
 
@@ -87,7 +88,7 @@ use kalamdb_commons::models::UserId;
 - `pg/`: PostgreSQL extension workspace for `pg_kalam`; see `pg/pg_kalam.control`, `pg/src/`, `pg/crates/`, and `pg/tests/`.
 - `benchv2/`: Benchmark harness, scenarios, templates, and results for performance work.
 - `ui/`: Frontend/admin UI.
-- `docs/`: Architecture, API, security, and operational documentation.
+- `docs/`: Architecture, API, security, and operational documentation. For architecture-affecting work, always check and update `docs/architecture/` and `docs/architecture/decisions/`.
 - `specs/`: Historical and active design specs by feature/phase.
 - `docker/`: Container builds and local deployment layouts.
 

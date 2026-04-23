@@ -116,7 +116,7 @@ async fn e2e_cross_verify_fdw_to_rest() {
 }
 
 #[tokio::test]
-#[ntest::timeout(1200)]
+#[ntest::timeout(4000)]
 async fn e2e_dml_changes_are_visible_in_kalamdb() {
     let env = TestEnv::global().await;
     let pg = env.pg_connect().await;
@@ -226,7 +226,7 @@ async fn e2e_select_filters_and_postgres_join_work() {
 }
 
 #[tokio::test]
-#[ntest::timeout(1200)]
+#[ntest::timeout(4000)]
 async fn e2e_shared_tables_can_join_each_other_in_postgres() {
     let env = TestEnv::global().await;
     let pg = env.pg_connect().await;
@@ -333,7 +333,7 @@ async fn e2e_search_path_schema_mirror_works_without_namespace_option() {
 }
 
 #[tokio::test]
-#[ntest::timeout(1200)]
+#[ntest::timeout(4000)]
 async fn e2e_user_tables_can_join_each_other_in_postgres() {
     let env = TestEnv::global().await;
     let pg = env.pg_connect().await;

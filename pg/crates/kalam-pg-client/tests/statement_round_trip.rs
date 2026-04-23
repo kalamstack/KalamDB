@@ -110,7 +110,7 @@ async fn scan_returns_arrow_batches() {
     start_server(59981).await;
     let client = connect(59981).await;
 
-    let session = client.open_session(Some("app")).await.expect("open session");
+    let session = client.open_session(None, Some("app")).await.expect("open session");
 
     let response = client
         .scan("app", "messages", "shared", &session.session_id, None, vec![], None, vec![])
@@ -139,7 +139,7 @@ async fn scan_with_projection_and_limit() {
     start_server(59982).await;
     let client = connect(59982).await;
 
-    let session = client.open_session(Some("app")).await.expect("open session");
+    let session = client.open_session(None, Some("app")).await.expect("open session");
 
     let response = client
         .scan(
@@ -166,7 +166,7 @@ async fn insert_single_row() {
     start_server(59983).await;
     let client = connect(59983).await;
 
-    let session = client.open_session(Some("app")).await.expect("open session");
+    let session = client.open_session(None, Some("app")).await.expect("open session");
 
     let response = client
         .insert(
@@ -189,7 +189,7 @@ async fn insert_multiple_rows() {
     start_server(59984).await;
     let client = connect(59984).await;
 
-    let session = client.open_session(Some("app")).await.expect("open session");
+    let session = client.open_session(None, Some("app")).await.expect("open session");
 
     let response = client
         .insert(
@@ -216,7 +216,7 @@ async fn insert_with_user_id() {
     start_server(59985).await;
     let client = connect(59985).await;
 
-    let session = client.open_session(Some("app")).await.expect("open session");
+    let session = client.open_session(None, Some("app")).await.expect("open session");
 
     let response = client
         .insert(
@@ -239,7 +239,7 @@ async fn update_single_row() {
     start_server(59986).await;
     let client = connect(59986).await;
 
-    let session = client.open_session(Some("app")).await.expect("open session");
+    let session = client.open_session(None, Some("app")).await.expect("open session");
 
     let response = client
         .update(
@@ -263,7 +263,7 @@ async fn update_with_user_id() {
     start_server(59987).await;
     let client = connect(59987).await;
 
-    let session = client.open_session(Some("app")).await.expect("open session");
+    let session = client.open_session(None, Some("app")).await.expect("open session");
 
     let response = client
         .update(
@@ -287,7 +287,7 @@ async fn delete_single_row() {
     start_server(59988).await;
     let client = connect(59988).await;
 
-    let session = client.open_session(Some("app")).await.expect("open session");
+    let session = client.open_session(None, Some("app")).await.expect("open session");
 
     let response = client
         .delete("app", "messages", "shared", &session.session_id, None, "1")
@@ -303,7 +303,7 @@ async fn delete_with_user_id() {
     start_server(59989).await;
     let client = connect(59989).await;
 
-    let session = client.open_session(Some("app")).await.expect("open session");
+    let session = client.open_session(None, Some("app")).await.expect("open session");
 
     let response = client
         .delete("app", "messages", "user", &session.session_id, Some("user-42"), "1")
@@ -319,7 +319,7 @@ async fn transaction_lifecycle_with_dml() {
     start_server(59990).await;
     let client = connect(59990).await;
 
-    let session = client.open_session(Some("app")).await.expect("open session");
+    let session = client.open_session(None, Some("app")).await.expect("open session");
 
     // Begin transaction
     let tx_id = client.begin_transaction(&session.session_id).await.expect("begin tx");
@@ -364,7 +364,7 @@ async fn transaction_rollback() {
     start_server(59991).await;
     let client = connect(59991).await;
 
-    let session = client.open_session(Some("app")).await.expect("open session");
+    let session = client.open_session(None, Some("app")).await.expect("open session");
 
     let tx_id = client.begin_transaction(&session.session_id).await.expect("begin tx");
 
