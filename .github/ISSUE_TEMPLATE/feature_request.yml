@@ -1,0 +1,57 @@
+name: Feature request
+description: Propose a focused improvement to KalamDB.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What user, developer, or operator problem are you trying to solve?
+      placeholder: Describe the gap or friction.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - backend
+        - cli
+        - ui
+        - pg extension
+        - typescript sdk
+        - dart sdk
+        - docker
+        - docs
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Keep this concrete and scoped.
+      placeholder: Describe the API, UX, workflow, or behavior you want.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional, but useful when tradeoffs matter.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Specs, prior art, mockups, benchmarks, or related issues.
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched for existing issues and feature requests first.
+          required: true
+        - label: This request is scoped to one clear problem or improvement.
+          required: true
