@@ -1,6 +1,6 @@
-# Chat With AI, Without the Extra Product Surface
+# Chat With AI, Without the CRUD Layer
 
-This example keeps only the parts that matter for the SDK:
+This example shows the core KalamDB product story in code:
 
 - browser writes into a shared table
 - a topic mirrors those inserts
@@ -8,7 +8,7 @@ This example keeps only the parts that matter for the SDK:
 - the agent writes a reply row back into the same table
 - every open browser tab updates through one live SQL subscription
 
-There is no Keycloak setup, no multi-theme UI system, and no service framework around the worker.
+There is no custom REST or GraphQL CRUD layer between the app, the worker, and the database. There is also no extra service framework around the worker.
 
 ## Quick start
 
@@ -28,6 +28,19 @@ When you send a message, KalamDB does all of this:
 3. wakes the background worker
 4. inserts the assistant reply
 5. pushes both rows into every subscribed browser
+
+This is the base pattern for agent-native product flows: one backend for SQL reads and writes, one live subscription path for the UI, and no separate sync layer in between.
+
+## Extend It to Human Approval
+
+If you want the stronger human-in-the-loop story, extend this sample by changing the write path instead of adding a separate API layer:
+
+1. write proposed replies into `chat_demo.agent_drafts` instead of final `chat_demo.messages`
+2. subscribe the browser to pending drafts with a second live SQL query
+3. let the user approve or reject with a normal SQL `UPDATE`
+4. on approval, write the final assistant message through the same backend, optionally with `EXECUTE AS USER`
+
+That turns the sample into the approval workflow the README now describes, while keeping the same one-tool agent model.
 
 ## Test it
 

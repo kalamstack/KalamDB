@@ -1,6 +1,6 @@
 # KalamDB Docker Guide
 
-KalamDB is a SQL-first realtime state database for AI agents, chat products, and multi-tenant SaaS. This directory contains the Docker image definitions and compose setups used to run KalamDB as a single node or a 3-node cluster.
+KalamDB is a SQL-first realtime backend for agent-native apps. Agents and frontends share one HTTP SQL API for reads and writes plus WebSocket live subscriptions, with USER tables and auth keeping access policy-scoped. This directory contains the Docker image definitions and compose setups used to run KalamDB as a single node or a 3-node cluster.
 
 The Docker image ships with both binaries:
 
