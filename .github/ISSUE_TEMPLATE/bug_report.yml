@@ -1,0 +1,79 @@
+name: Bug report
+description: Report a reproducible defect in KalamDB.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug report.
+
+        For unpatched security issues, do not open a public issue. Use the security reporting guidance in SECURITY.md instead.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What broke?
+      placeholder: A short description of the problem.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - backend
+        - cli
+        - ui
+        - pg extension
+        - typescript sdk
+        - dart sdk
+        - docker
+        - docs
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include exact commands, SQL, or API requests when possible.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include commit SHA, branch, OS, deployment mode, and relevant config details.
+      placeholder: main @ <sha>, macOS 15, local backend, custom server.toml
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Logs, screenshots, or anything else that helps triage.
+      render: shell
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched for existing issues covering this problem.
+          required: true
+        - label: I can reproduce this on a current branch or release.
+          required: true
+        - label: This is not a private security vulnerability report.
+          required: true
