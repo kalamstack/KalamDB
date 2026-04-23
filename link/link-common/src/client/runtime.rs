@@ -267,7 +267,11 @@ impl KalamLinkClient {
         Ok(())
     }
 
-    /// Whether a shared connection is currently established and connected.
+    /// Whether the shared connection is currently ready.
+    ///
+    /// During reconnect with active subscriptions, this stays false until the
+    /// subscription set has recovered, not merely until the socket handshake
+    /// succeeds.
     pub async fn is_connected(&self) -> bool {
         let guard = self.connection.lock().await;
         guard.as_ref().is_some_and(|conn| conn.is_connected())

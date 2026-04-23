@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use kalam_pg_api::KalamBackendExecutor;
@@ -97,6 +99,23 @@ fn remote_state_registry() -> &'static Mutex<RemoteStateRegistry<RemoteExtension
     REMOTE_STATES.get_or_init(|| Mutex::new(RemoteStateRegistry::default()))
 }
 
+fn pg_backend_session_id(config: &RemoteServerConfig, backend_pid: u32) -> String {
+    let mut hasher = DefaultHasher::new();
+    config.hash(&mut hasher);
+    let config_hash = hasher.finish();
+    format!("pg-{}-{:x}", backend_pid, config_hash)
+}
+
+#[cfg(not(test))]
+fn current_backend_pid() -> u32 {
+    unsafe { pg_sys::MyProcPid as u32 }
+}
+
+#[cfg(test)]
+fn current_backend_pid() -> u32 {
+    std::process::id()
+}
+
 fn build_remote_extension_state(
     config: &RemoteServerConfig,
 ) -> Result<RemoteExtensionState, KalamPgError> {
@@ -106,8 +125,8 @@ fn build_remote_extension_state(
         )?);
 
     let client = runtime.block_on(async { RemoteKalamClient::connect(config.clone()).await })?;
-    let session =
-        runtime.block_on(async { client.open_session(None).await })?;
+    let session_id = pg_backend_session_id(config, current_backend_pid());
+    let session = runtime.block_on(async { client.open_session(Some(session_id.as_str()), None).await })?;
 
     Ok(RemoteExtensionState {
         client,
@@ -256,10 +275,15 @@ mod tests {
         ) -> Result<Response<OpenSessionResponse>, Status> {
             let count = self.state.open_session_calls.fetch_add(1, Ordering::Relaxed);
             let server_issued_id = format!("srv-session-{}", count);
-            self.state.record_session_id(server_issued_id.clone());
             let request = request.into_inner();
+            let session_id = if request.session_id.trim().is_empty() {
+                server_issued_id
+            } else {
+                request.session_id.clone()
+            };
+            self.state.record_session_id(session_id.clone());
             Ok(Response::new(OpenSessionResponse {
-                session_id: server_issued_id,
+                session_id,
                 current_schema: request.current_schema,
                 lease_expires_at_ms: 0,
             }))
@@ -424,6 +448,7 @@ mod tests {
 
         assert!(Arc::ptr_eq(&first, &second));
         assert_eq!(first.session_id(), second.session_id());
+        assert!(first.session_id().starts_with("pg-"));
         assert_eq!(service.open_session_calls.load(Ordering::Relaxed), 1);
         assert!(
             recorded_session_ids.iter().all(|session_id| session_id == first.session_id()),

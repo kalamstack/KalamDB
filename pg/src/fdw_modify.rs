@@ -274,6 +274,18 @@ unsafe fn exec_foreign_insert_impl(
     let explicit_user_id = explicit_userid.map(UserId::new);
     let effective = explicit_user_id.or(session_user_id);
 
+    if crate::fdw_xact::is_explicit_transaction_block_active() {
+        let request = InsertRequest::new(
+            state.table_options.table_id.clone(),
+            state.table_options.table_type,
+            TenantContext::new(None, effective),
+            vec![row],
+        );
+
+        state.runtime.block_on(async { state.executor.insert(request).await })?;
+        return Ok(());
+    }
+
     crate::write_buffer::buffer_insert(
         &state.session_id,
         &state.table_options.table_id,
@@ -301,6 +313,19 @@ unsafe fn exec_foreign_batch_insert_impl(
         let (row, explicit_userid) = slot_to_row(slot, &state.column_names)?;
         let explicit_user_id = explicit_userid.map(UserId::new);
         let effective = explicit_user_id.or(session_user_id);
+
+        if crate::fdw_xact::is_explicit_transaction_block_active() {
+            let request = InsertRequest::new(
+                state.table_options.table_id.clone(),
+                state.table_options.table_type,
+                TenantContext::new(None, effective),
+                vec![row],
+            );
+
+            state.runtime.block_on(async { state.executor.insert(request).await })?;
+            return Ok(());
+        }
+
         crate::write_buffer::buffer_insert(
             &state.session_id,
             &state.table_options.table_id,

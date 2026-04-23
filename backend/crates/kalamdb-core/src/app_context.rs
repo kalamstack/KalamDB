@@ -544,7 +544,7 @@ impl AppContext {
                                 .map(|metric| {
                                     LivePgTransaction::new(
                                         metric.owner_id.to_string(),
-                                        metric.transaction_id.to_string(),
+                                        metric.transaction_id.clone(),
                                         metric.state,
                                         metric.write_count > 0,
                                     )

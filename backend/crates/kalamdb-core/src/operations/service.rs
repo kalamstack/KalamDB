@@ -10,7 +10,7 @@ use kalamdb_commons::models::{
     OperationKind, ReadContext, Role, TransactionId, TransactionOrigin, UserId,
 };
 use kalamdb_commons::{NamespaceId, TableType};
-use kalamdb_pg::OperationExecutor;
+use kalamdb_pg::{LivePgTransaction, OperationExecutor};
 use kalamdb_session_datafusion::SessionUserContext;
 use kalamdb_transactions::{
     build_insert_staged_mutations, TransactionQueryContext, TransactionQueryExtension,
@@ -95,31 +95,40 @@ impl OperationService {
         Ok(self.app_context.transaction_coordinator().active_for_owner(&owner_key))
     }
 
+    /// Resolve the active transaction id + handle for a PG session in one shot.
+    /// Returns `None` if the session has no active transaction. Returns
+    /// `FailedPrecondition` if the id is present but the handle is missing.
+    fn active_transaction_handle_for_session(
+        &self,
+        session_id: Option<&str>,
+    ) -> Result<Option<(TransactionId, crate::transactions::TransactionHandle)>, Status> {
+        let Some(transaction_id) = self.active_transaction_for_session(session_id)? else {
+            return Ok(None);
+        };
+        let handle = self
+            .app_context
+            .transaction_coordinator()
+            .get_handle(&transaction_id)
+            .ok_or_else(|| {
+                Status::failed_precondition(format!(
+                    "active transaction '{}' has no handle",
+                    transaction_id
+                ))
+            })?;
+        Ok(Some((transaction_id, handle)))
+    }
+
     fn transaction_query_context_for_session(
         &self,
         session_id: Option<&str>,
     ) -> Result<Option<TransactionQueryContext>, Status> {
         // Autocommit reads return from this helper without constructing an overlay view
         // or mutation sink unless an active transaction handle is actually present.
-        let Some(session_id) =
-            session_id.map(str::trim).filter(|session_id| !session_id.is_empty())
+        let Some((transaction_id, handle)) =
+            self.active_transaction_handle_for_session(session_id)?
         else {
             return Ok(None);
         };
-
-        let owner_key = ExecutionOwnerKey::from_pg_session_id(session_id)
-            .map_err(|e| Status::invalid_argument(e.to_string()))?;
-        let coordinator = self.app_context.transaction_coordinator();
-        let Some(transaction_id) = coordinator.active_for_owner(&owner_key) else {
-            return Ok(None);
-        };
-
-        let handle = coordinator.get_handle(&transaction_id).ok_or_else(|| {
-            Status::failed_precondition(format!(
-                "active transaction '{}' has no handle",
-                transaction_id
-            ))
-        })?;
 
         if !handle.state.is_open() {
             return Err(Status::failed_precondition(format!(
@@ -128,6 +137,7 @@ impl OperationService {
             )));
         }
 
+        let coordinator = self.app_context.transaction_coordinator();
         Ok(Some(TransactionQueryContext::new(
             transaction_id.clone(),
             handle.snapshot_commit_seq,
@@ -215,7 +225,22 @@ impl OperationService {
 
 #[async_trait]
 impl OperationExecutor for OperationService {
-    async fn begin_transaction(&self, session_id: &str) -> Result<Option<String>, Status> {
+    async fn active_transaction(&self, session_id: &str) -> Result<Option<LivePgTransaction>, Status> {
+        let Some((transaction_id, handle)) =
+            self.active_transaction_handle_for_session(Some(session_id))?
+        else {
+            return Ok(None);
+        };
+
+        Ok(Some(LivePgTransaction::new(
+            session_id.to_string(),
+            transaction_id,
+            handle.state,
+            handle.has_write_set,
+        )))
+    }
+
+    async fn begin_transaction(&self, session_id: &str) -> Result<Option<TransactionId>, Status> {
         let owner_key = ExecutionOwnerKey::from_pg_session_id(session_id)
             .map_err(|e| Status::invalid_argument(e.to_string()))?;
         let transaction_id = self
@@ -223,37 +248,33 @@ impl OperationExecutor for OperationService {
             .transaction_coordinator()
             .begin(owner_key, session_id.to_string().into(), TransactionOrigin::PgRpc)
             .map_err(|e| Status::failed_precondition(e.to_string()))?;
-        Ok(Some(transaction_id.to_string()))
+        Ok(Some(transaction_id))
     }
 
     async fn commit_transaction(
         &self,
         _session_id: &str,
-        transaction_id: &str,
-    ) -> Result<Option<String>, Status> {
-        let transaction_id = TransactionId::try_new(transaction_id.to_string())
-            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+        transaction_id: &TransactionId,
+    ) -> Result<Option<TransactionId>, Status> {
         let result = self
             .app_context
             .transaction_coordinator()
-            .commit(&transaction_id)
+            .commit(transaction_id)
             .await
             .map_err(|e| Status::failed_precondition(e.to_string()))?;
-        Ok(Some(result.transaction_id.to_string()))
+        Ok(Some(result.transaction_id))
     }
 
     async fn rollback_transaction(
         &self,
         _session_id: &str,
-        transaction_id: &str,
-    ) -> Result<Option<String>, Status> {
-        let transaction_id = TransactionId::try_new(transaction_id.to_string())
-            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+        transaction_id: &TransactionId,
+    ) -> Result<Option<TransactionId>, Status> {
         self.app_context
             .transaction_coordinator()
-            .rollback(&transaction_id)
+            .rollback(transaction_id)
             .map_err(|e| Status::failed_precondition(e.to_string()))?;
-        Ok(Some(transaction_id.to_string()))
+        Ok(Some(transaction_id.clone()))
     }
 
     async fn execute_scan(&self, request: ScanRequest) -> Result<ScanResult, Status> {

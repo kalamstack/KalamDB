@@ -89,6 +89,8 @@ impl TcpDisconnectProxy {
         let accept_task = tokio::spawn(async move {
             while let Ok((mut inbound, _peer)) = listener.accept().await {
                 if paused_clone.load(Ordering::SeqCst) {
+                    let _ = inbound.set_linger(Some(Duration::ZERO));
+                    let _ = inbound.shutdown().await;
                     drop(inbound);
                     continue;
                 }

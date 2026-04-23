@@ -1,11 +1,12 @@
 use async_trait::async_trait;
 use bytes::Bytes;
 use kalamdb_auth::{create_and_sign_token, services::unified::init_auth_config, AuthError, AuthResult, UserRepository};
+use kalamdb_commons::models::TransactionId;
 use kalamdb_configs::{AuthSettings, OAuthSettings};
 use kalamdb_pg::{
     BeginTransactionRequest, CloseSessionRequest, CommitTransactionRequest, DeleteRequest,
     ExecuteQueryRpcRequest, ExecuteSqlRpcRequest, InsertRequest, KalamPgService, MutationResult,
-    OpenSessionRequest, OperationExecutor, PgService, PgServiceServer, PingRequest,
+    LivePgTransaction, OpenSessionRequest, OperationExecutor, PgService, PgServiceServer, PingRequest,
     RollbackTransactionRequest, ScanRequest, ScanResult, UpdateRequest,
 };
 use kalamdb_system::providers::storages::models::StorageMode;
@@ -15,6 +16,12 @@ use std::sync::{Arc, Mutex};
 use tonic::Request;
 
 const VALID_DBA_BASIC_AUTH: &str = "Basic cGdfYnJpZGdlX3VzZXI6c2VjcmV0LXBhc3M=";
+const TX_ID_RECORDING: &str = "01960f7b-3d15-7d6d-b26c-7e4db6f25f8d";
+const TX_ID_STALE: &str = "01960f7b-3d16-7d6d-b26c-7e4db6f25f8d";
+const TX_ID_REPLACEMENT: &str = "01960f7b-3d17-7d6d-b26c-7e4db6f25f8d";
+const TX_ID_COMMIT_MISSING: &str = "01960f7b-3d18-7d6d-b26c-7e4db6f25f8d";
+const TX_ID_CLOSE_COMMITTED: &str = "01960f7b-3d19-7d6d-b26c-7e4db6f25f8d";
+const TX_ID_WRONG: &str = "01960f7b-3d1a-7d6d-b26c-7e4db6f25f8d";
 
 fn init_test_auth_settings() -> AuthSettings {
     let auth = AuthSettings::default();
@@ -104,18 +111,24 @@ struct RecordingExecutor {
     begin_calls: AtomicUsize,
     commit_calls: AtomicUsize,
     rollback_calls: AtomicUsize,
+    active_tx: Mutex<Option<TransactionId>>,
 }
 
 #[derive(Default)]
 struct BeginRollbackNotFoundExecutor {
     begin_calls: AtomicUsize,
+    active_tx: Mutex<Option<TransactionId>>,
 }
 
 #[derive(Default)]
-struct CommitNotFoundExecutor;
+struct CommitNotFoundExecutor {
+    active_tx: Mutex<Option<TransactionId>>,
+}
 
 #[derive(Default)]
-struct RollbackCommittedExecutor;
+struct RollbackCommittedExecutor {
+    active_tx: Mutex<Option<TransactionId>>,
+}
 
 #[derive(Default)]
 struct SqlExecutor;
@@ -152,27 +165,57 @@ impl OperationExecutor for RecordingExecutor {
         Err(tonic::Status::unimplemented("not needed for this test"))
     }
 
-    async fn begin_transaction(&self, _session_id: &str) -> Result<Option<String>, tonic::Status> {
+    async fn active_transaction(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<LivePgTransaction>, tonic::Status> {
+        Ok(self
+            .active_tx
+            .lock()
+            .expect("recording executor active tx")
+            .clone()
+            .map(|transaction_id| {
+                LivePgTransaction::new(session_id.to_string(), transaction_id, kalamdb_pg::TransactionState::OpenRead, false)
+            }))
+    }
+
+    async fn begin_transaction(
+        &self,
+        _session_id: &str,
+    ) -> Result<Option<TransactionId>, tonic::Status> {
         self.begin_calls.fetch_add(1, Ordering::Relaxed);
-        Ok(Some("01960f7b-3d15-7d6d-b26c-7e4db6f25f8d".to_string()))
+        let transaction_id = TransactionId::new(TX_ID_RECORDING);
+        self.active_tx
+            .lock()
+            .expect("recording executor begin active tx")
+            .replace(transaction_id.clone());
+        Ok(Some(transaction_id))
     }
 
     async fn commit_transaction(
         &self,
         _session_id: &str,
-        transaction_id: &str,
-    ) -> Result<Option<String>, tonic::Status> {
+        transaction_id: &TransactionId,
+    ) -> Result<Option<TransactionId>, tonic::Status> {
         self.commit_calls.fetch_add(1, Ordering::Relaxed);
-        Ok(Some(transaction_id.to_string()))
+        self.active_tx
+            .lock()
+            .expect("recording executor commit active tx")
+            .take();
+        Ok(Some(transaction_id.clone()))
     }
 
     async fn rollback_transaction(
         &self,
         _session_id: &str,
-        transaction_id: &str,
-    ) -> Result<Option<String>, tonic::Status> {
+        transaction_id: &TransactionId,
+    ) -> Result<Option<TransactionId>, tonic::Status> {
         self.rollback_calls.fetch_add(1, Ordering::Relaxed);
-        Ok(Some(transaction_id.to_string()))
+        self.active_tx
+            .lock()
+            .expect("recording executor rollback active tx")
+            .take();
+        Ok(Some(transaction_id.clone()))
     }
 
     async fn execute_sql(&self, _sql: &str) -> Result<String, tonic::Status> {
@@ -214,29 +257,54 @@ impl OperationExecutor for BeginRollbackNotFoundExecutor {
         Err(tonic::Status::unimplemented("not needed for this test"))
     }
 
-    async fn begin_transaction(&self, _session_id: &str) -> Result<Option<String>, tonic::Status> {
+    async fn active_transaction(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<LivePgTransaction>, tonic::Status> {
+        Ok(self
+            .active_tx
+            .lock()
+            .expect("stale executor active tx")
+            .clone()
+            .map(|transaction_id| {
+                LivePgTransaction::new(session_id.to_string(), transaction_id, kalamdb_pg::TransactionState::OpenRead, false)
+            }))
+    }
+
+    async fn begin_transaction(
+        &self,
+        _session_id: &str,
+    ) -> Result<Option<TransactionId>, tonic::Status> {
         let begin_call = self.begin_calls.fetch_add(1, Ordering::Relaxed);
         let transaction_id = if begin_call == 0 {
-            "tx-stale-1"
+            TransactionId::new(TX_ID_STALE)
         } else {
-            "tx-replacement-2"
+            TransactionId::new(TX_ID_REPLACEMENT)
         };
-        Ok(Some(transaction_id.to_string()))
+        self.active_tx
+            .lock()
+            .expect("stale executor begin active tx")
+            .replace(transaction_id.clone());
+        Ok(Some(transaction_id))
     }
 
     async fn commit_transaction(
         &self,
         _session_id: &str,
-        _transaction_id: &str,
-    ) -> Result<Option<String>, tonic::Status> {
+        _transaction_id: &TransactionId,
+    ) -> Result<Option<TransactionId>, tonic::Status> {
         Err(tonic::Status::unimplemented("not needed for this test"))
     }
 
     async fn rollback_transaction(
         &self,
         _session_id: &str,
-        transaction_id: &str,
-    ) -> Result<Option<String>, tonic::Status> {
+        transaction_id: &TransactionId,
+    ) -> Result<Option<TransactionId>, tonic::Status> {
+        self.active_tx
+            .lock()
+            .expect("stale executor rollback active tx")
+            .take();
         Err(tonic::Status::failed_precondition(format!(
             "transaction '{}' not found",
             transaction_id
@@ -282,15 +350,41 @@ impl OperationExecutor for CommitNotFoundExecutor {
         Err(tonic::Status::unimplemented("not needed for this test"))
     }
 
-    async fn begin_transaction(&self, _session_id: &str) -> Result<Option<String>, tonic::Status> {
-        Ok(Some("tx-commit-missing".to_string()))
+    async fn active_transaction(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<LivePgTransaction>, tonic::Status> {
+        Ok(self
+            .active_tx
+            .lock()
+            .expect("commit-missing executor active tx")
+            .clone()
+            .map(|transaction_id| {
+                LivePgTransaction::new(session_id.to_string(), transaction_id, kalamdb_pg::TransactionState::OpenRead, false)
+            }))
+    }
+
+    async fn begin_transaction(
+        &self,
+        _session_id: &str,
+    ) -> Result<Option<TransactionId>, tonic::Status> {
+        let transaction_id = TransactionId::new(TX_ID_COMMIT_MISSING);
+        self.active_tx
+            .lock()
+            .expect("commit-missing executor begin active tx")
+            .replace(transaction_id.clone());
+        Ok(Some(transaction_id))
     }
 
     async fn commit_transaction(
         &self,
         _session_id: &str,
-        transaction_id: &str,
-    ) -> Result<Option<String>, tonic::Status> {
+        transaction_id: &TransactionId,
+    ) -> Result<Option<TransactionId>, tonic::Status> {
+        self.active_tx
+            .lock()
+            .expect("commit-missing executor commit active tx")
+            .take();
         Err(tonic::Status::failed_precondition(format!(
             "transaction '{}' not found during commit",
             transaction_id
@@ -300,8 +394,8 @@ impl OperationExecutor for CommitNotFoundExecutor {
     async fn rollback_transaction(
         &self,
         _session_id: &str,
-        _transaction_id: &str,
-    ) -> Result<Option<String>, tonic::Status> {
+        _transaction_id: &TransactionId,
+    ) -> Result<Option<TransactionId>, tonic::Status> {
         Err(tonic::Status::unimplemented("not needed for this test"))
     }
 
@@ -344,23 +438,49 @@ impl OperationExecutor for RollbackCommittedExecutor {
         Err(tonic::Status::unimplemented("not needed for this test"))
     }
 
-    async fn begin_transaction(&self, _session_id: &str) -> Result<Option<String>, tonic::Status> {
-        Ok(Some("tx-close-committed".to_string()))
+    async fn active_transaction(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<LivePgTransaction>, tonic::Status> {
+        Ok(self
+            .active_tx
+            .lock()
+            .expect("rollback-committed executor active tx")
+            .clone()
+            .map(|transaction_id| {
+                LivePgTransaction::new(session_id.to_string(), transaction_id, kalamdb_pg::TransactionState::OpenRead, false)
+            }))
+    }
+
+    async fn begin_transaction(
+        &self,
+        _session_id: &str,
+    ) -> Result<Option<TransactionId>, tonic::Status> {
+        let transaction_id = TransactionId::new(TX_ID_CLOSE_COMMITTED);
+        self.active_tx
+            .lock()
+            .expect("rollback-committed executor begin active tx")
+            .replace(transaction_id.clone());
+        Ok(Some(transaction_id))
     }
 
     async fn commit_transaction(
         &self,
         _session_id: &str,
-        _transaction_id: &str,
-    ) -> Result<Option<String>, tonic::Status> {
+        _transaction_id: &TransactionId,
+    ) -> Result<Option<TransactionId>, tonic::Status> {
         Err(tonic::Status::unimplemented("not needed for this test"))
     }
 
     async fn rollback_transaction(
         &self,
         _session_id: &str,
-        transaction_id: &str,
-    ) -> Result<Option<String>, tonic::Status> {
+        transaction_id: &TransactionId,
+    ) -> Result<Option<TransactionId>, tonic::Status> {
+        self.active_tx
+            .lock()
+            .expect("rollback-committed executor rollback active tx")
+            .take();
         Err(tonic::Status::failed_precondition(format!(
             "cannot rollback transaction '{}' while it is committed",
             transaction_id
@@ -406,23 +526,26 @@ impl OperationExecutor for SqlExecutor {
         Err(tonic::Status::unimplemented("not needed for this test"))
     }
 
-    async fn begin_transaction(&self, _session_id: &str) -> Result<Option<String>, tonic::Status> {
+    async fn begin_transaction(
+        &self,
+        _session_id: &str,
+    ) -> Result<Option<TransactionId>, tonic::Status> {
         Err(tonic::Status::unimplemented("not needed for this test"))
     }
 
     async fn commit_transaction(
         &self,
         _session_id: &str,
-        _transaction_id: &str,
-    ) -> Result<Option<String>, tonic::Status> {
+        _transaction_id: &TransactionId,
+    ) -> Result<Option<TransactionId>, tonic::Status> {
         Err(tonic::Status::unimplemented("not needed for this test"))
     }
 
     async fn rollback_transaction(
         &self,
         _session_id: &str,
-        _transaction_id: &str,
-    ) -> Result<Option<String>, tonic::Status> {
+        _transaction_id: &TransactionId,
+    ) -> Result<Option<TransactionId>, tonic::Status> {
         Err(tonic::Status::unimplemented("not needed for this test"))
     }
 
@@ -462,23 +585,26 @@ impl OperationExecutor for CapturingSqlExecutor {
         Err(tonic::Status::unimplemented("not needed for this test"))
     }
 
-    async fn begin_transaction(&self, _session_id: &str) -> Result<Option<String>, tonic::Status> {
+    async fn begin_transaction(
+        &self,
+        _session_id: &str,
+    ) -> Result<Option<TransactionId>, tonic::Status> {
         Err(tonic::Status::unimplemented("not needed for this test"))
     }
 
     async fn commit_transaction(
         &self,
         _session_id: &str,
-        _transaction_id: &str,
-    ) -> Result<Option<String>, tonic::Status> {
+        _transaction_id: &TransactionId,
+    ) -> Result<Option<TransactionId>, tonic::Status> {
         Err(tonic::Status::unimplemented("not needed for this test"))
     }
 
     async fn rollback_transaction(
         &self,
         _session_id: &str,
-        _transaction_id: &str,
-    ) -> Result<Option<String>, tonic::Status> {
+        _transaction_id: &TransactionId,
+    ) -> Result<Option<TransactionId>, tonic::Status> {
         Err(tonic::Status::unimplemented("not needed for this test"))
     }
 
@@ -714,7 +840,7 @@ async fn commit_with_wrong_tx_id_fails() {
     let resp = service
         .commit_transaction(plain_request(CommitTransactionRequest {
             session_id: "pg-tx-5".to_string(),
-            transaction_id: "wrong-id".to_string(),
+            transaction_id: TX_ID_WRONG.to_string(),
         }))
         .await;
     assert!(resp.is_err());
@@ -899,7 +1025,7 @@ async fn transaction_rpcs_delegate_to_configured_operation_executor() {
         .into_inner()
         .transaction_id;
 
-    assert_eq!(tx_id, "01960f7b-3d15-7d6d-b26c-7e4db6f25f8d");
+    assert_eq!(tx_id, TX_ID_RECORDING);
     assert_eq!(executor.begin_calls.load(Ordering::Relaxed), 1);
 
     service
@@ -955,6 +1081,11 @@ async fn close_session_rolls_back_via_configured_operation_executor() {
         .transaction_id;
     assert!(!tx_id.is_empty());
 
+    service.session_registry().clear_transaction_state_if_matches(
+        &session_id,
+        Some(&TransactionId::new(tx_id.clone())),
+    );
+
     service
         .close_session(plain_request(CloseSessionRequest {
             session_id: session_id.clone(),
@@ -980,12 +1111,19 @@ async fn begin_transaction_reclaims_stale_remote_transaction_via_executor() {
         .into_inner()
         .session_id;
 
-    service
+    let tx_id = service
         .begin_transaction(plain_request(BeginTransactionRequest {
             session_id: session_id.clone(),
         }))
         .await
-        .unwrap();
+        .unwrap()
+        .into_inner()
+        .transaction_id;
+
+    service.session_registry().clear_transaction_state_if_matches(
+        &session_id,
+        Some(&TransactionId::new(tx_id)),
+    );
 
     service
         .begin_transaction(plain_request(BeginTransactionRequest {
@@ -1031,19 +1169,19 @@ async fn begin_transaction_reconciles_local_state_when_stale_remote_tx_is_missin
         .into_inner()
         .transaction_id;
 
-    assert_eq!(first_tx, "tx-stale-1");
-    assert_eq!(replacement_tx, "tx-replacement-2");
+    assert_eq!(first_tx, TX_ID_STALE);
+    assert_eq!(replacement_tx, TX_ID_REPLACEMENT);
 
     let session = service
         .session_registry()
         .get(&session_id)
         .expect("session remains open");
-    assert_eq!(session.transaction_id(), Some("tx-replacement-2"));
+    assert_eq!(session.transaction_id(), Some(TX_ID_REPLACEMENT));
 }
 
 #[tokio::test]
 async fn commit_transaction_clears_local_state_when_remote_tx_is_already_gone() {
-    let executor = Arc::new(CommitNotFoundExecutor);
+    let executor = Arc::new(CommitNotFoundExecutor::default());
     let service = KalamPgService::new(false, None).with_operation_executor(executor);
 
     let session_id = service
@@ -1084,7 +1222,7 @@ async fn commit_transaction_clears_local_state_when_remote_tx_is_already_gone() 
 
 #[tokio::test]
 async fn close_session_succeeds_when_remote_tx_is_already_committed() {
-    let executor = Arc::new(RollbackCommittedExecutor);
+    let executor = Arc::new(RollbackCommittedExecutor::default());
     let service = KalamPgService::new(false, None).with_operation_executor(executor);
 
     let session_id = service
@@ -1105,7 +1243,7 @@ async fn close_session_succeeds_when_remote_tx_is_already_committed() {
         .unwrap()
         .into_inner()
         .transaction_id;
-    assert_eq!(tx_id, "tx-close-committed");
+    assert_eq!(tx_id, TX_ID_CLOSE_COMMITTED);
 
     service
         .close_session(plain_request(CloseSessionRequest {

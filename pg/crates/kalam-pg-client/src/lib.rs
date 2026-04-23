@@ -323,13 +323,18 @@ impl RemoteKalamClient {
     }
 
     /// Open an authenticated session. Auth metadata is sent only on this call.
-    /// Returns a server-issued opaque session handle.
+    /// Returns the server-accepted session handle.
     pub async fn open_session(
         &self,
+        session_id: Option<&str>,
         current_schema: Option<&str>,
     ) -> Result<RemoteSessionHandle, KalamPgError> {
         let request = self.authenticated_request(OpenSessionRequest {
-            session_id: String::new(), // Server generates the session ID.
+            session_id: session_id
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("")
+                .to_string(),
             current_schema: current_schema
                 .map(str::trim)
                 .filter(|value| !value.is_empty())

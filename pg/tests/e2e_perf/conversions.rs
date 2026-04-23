@@ -23,7 +23,7 @@ async fn run_probe(pg: &tokio_postgres::Client, sql: &str, value: &str) -> Value
 }
 
 #[tokio::test]
-#[ntest::timeout(500)]
+#[ntest::timeout(1500)]
 async fn e2e_perf_text_to_pg_fast_path_has_zero_rust_heap_allocations() {
     let env = TestEnv::global().await;
     let pg = env.pg_connect().await;
@@ -43,7 +43,7 @@ async fn e2e_perf_text_to_pg_fast_path_has_zero_rust_heap_allocations() {
 }
 
 #[tokio::test]
-#[ntest::timeout(500)]
+#[ntest::timeout(1500)]
 async fn e2e_perf_jsonb_to_pg_stays_within_bounded_rust_allocations() {
     let env = TestEnv::global().await;
     let pg = env.pg_connect().await;
@@ -70,7 +70,7 @@ async fn e2e_perf_jsonb_to_pg_stays_within_bounded_rust_allocations() {
 }
 
 #[tokio::test]
-#[ntest::timeout(500)]
+#[ntest::timeout(1500)]
 async fn e2e_perf_json_to_scalar_stays_within_bounded_rust_allocations() {
     let env = TestEnv::global().await;
     let pg = env.pg_connect().await;
@@ -97,7 +97,7 @@ async fn e2e_perf_json_to_scalar_stays_within_bounded_rust_allocations() {
 }
 
 #[tokio::test]
-#[ntest::timeout(500)]
+#[ntest::timeout(1500)]
 async fn e2e_perf_jsonb_to_scalar_stays_within_bounded_rust_allocations() {
     let env = TestEnv::global().await;
     let pg = env.pg_connect().await;

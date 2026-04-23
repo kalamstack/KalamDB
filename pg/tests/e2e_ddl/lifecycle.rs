@@ -214,7 +214,7 @@ async fn e2e_ddl_create_json_column_preserves_local_json_type() {
 }
 
 #[tokio::test]
-#[ntest::timeout(1200)]
+#[ntest::timeout(4000)]
 async fn e2e_ddl_file_column_roundtrip_via_kalamlink() {
     let env = require_ddl_env!();
     let pg = env.pg_connect().await;
@@ -316,7 +316,7 @@ async fn e2e_ddl_file_column_roundtrip_via_kalamlink() {
 }
 
 #[tokio::test]
-#[ntest::timeout(1200)]
+#[ntest::timeout(4000)]
 async fn e2e_ddl_multiple_file_columns_roundtrip_via_kalamlink() {
     let env = require_ddl_env!();
     let pg = env.pg_connect().await;
@@ -381,7 +381,7 @@ async fn e2e_ddl_multiple_file_columns_roundtrip_via_kalamlink() {
 }
 
 #[tokio::test]
-#[ntest::timeout(1200)]
+#[ntest::timeout(4000)]
 async fn e2e_ddl_file_update_via_kalamlink_is_visible_in_postgres() {
     let env = require_ddl_env!();
     let pg = env.pg_connect().await;

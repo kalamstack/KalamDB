@@ -6,9 +6,10 @@ use async_trait::async_trait;
 use tonic::Status;
 
 use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::UserId;
+use kalamdb_commons::models::{TransactionId, UserId};
 use kalamdb_commons::{TableId, TableType};
 
+use crate::session_registry::LivePgTransaction;
 use crate::service::{ScanRpcRequest, ScanRpcResponse};
 use crate::{DeleteRpcRequest, InsertRpcRequest, UpdateRpcRequest};
 
@@ -27,21 +28,24 @@ pub trait OperationExecutor: Send + Sync + 'static {
     async fn execute_insert(&self, request: InsertRequest) -> Result<MutationResult, Status>;
     async fn execute_update(&self, request: UpdateRequest) -> Result<MutationResult, Status>;
     async fn execute_delete(&self, request: DeleteRequest) -> Result<MutationResult, Status>;
-    async fn begin_transaction(&self, _session_id: &str) -> Result<Option<String>, Status> {
+    async fn active_transaction(&self, _session_id: &str) -> Result<Option<LivePgTransaction>, Status> {
+        Ok(None)
+    }
+    async fn begin_transaction(&self, _session_id: &str) -> Result<Option<TransactionId>, Status> {
         Ok(None)
     }
     async fn commit_transaction(
         &self,
         _session_id: &str,
-        _transaction_id: &str,
-    ) -> Result<Option<String>, Status> {
+        _transaction_id: &TransactionId,
+    ) -> Result<Option<TransactionId>, Status> {
         Ok(None)
     }
     async fn rollback_transaction(
         &self,
         _session_id: &str,
-        _transaction_id: &str,
-    ) -> Result<Option<String>, Status> {
+        _transaction_id: &TransactionId,
+    ) -> Result<Option<TransactionId>, Status> {
         Ok(None)
     }
     async fn execute_sql(&self, sql: &str) -> Result<String, Status>;

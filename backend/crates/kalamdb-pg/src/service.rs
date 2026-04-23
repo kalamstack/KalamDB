@@ -6,7 +6,7 @@ use async_trait::async_trait;
 #[cfg(feature = "server")]
 use kalamdb_auth::{authenticate, helpers::basic_auth, AuthRequest, AuthenticationResult, UserRepository};
 #[cfg(feature = "server")]
-use kalamdb_commons::models::ConnectionInfo;
+use kalamdb_commons::models::{ConnectionInfo, TransactionId};
 use tonic::codegen::*;
 #[cfg(feature = "server")]
 use tonic::Request;
@@ -1136,16 +1136,31 @@ impl KalamPgService {
             || message.contains("while it is rolled_back")
     }
 
-    fn tracked_transaction_id(&self, session_id: &str) -> Option<String> {
+    async fn tracked_transaction_id(&self, session_id: &str) -> Option<TransactionId> {
+        if let Some(executor) = self.operation_executor.as_deref() {
+            match executor.active_transaction(session_id).await {
+                Ok(Some(transaction)) => return Some(transaction.transaction_id().clone()),
+                Ok(None) => {},
+                Err(status) => {
+                    log::debug!(
+                        "PG tracked_transaction_id: authoritative lookup failed for session '{}' with {}: {}; falling back to pinned session state",
+                        session_id,
+                        status.code(),
+                        status.message()
+                    );
+                },
+            }
+        }
+
         self.session_registry
             .get(session_id)
-            .and_then(|session| session.transaction_id().map(ToOwned::to_owned))
+            .and_then(|session| session.transaction_id_value().cloned())
     }
 
     fn reconcile_local_transaction_state(
         &self,
         session_id: &str,
-        transaction_id: &str,
+        transaction_id: &TransactionId,
         rpc_name: &str,
         status: &Status,
     ) {
@@ -1164,7 +1179,7 @@ impl KalamPgService {
     async fn cleanup_after_terminal_transaction_error(
         &self,
         session_id: &str,
-        transaction_id: &str,
+        transaction_id: &TransactionId,
         rpc_name: &str,
         status: &Status,
     ) {
@@ -1212,7 +1227,7 @@ impl KalamPgService {
         rpc_name: &str,
         status: &Status,
     ) {
-        if let Some(transaction_id) = self.tracked_transaction_id(session_id) {
+        if let Some(transaction_id) = self.tracked_transaction_id(session_id).await {
             self.cleanup_after_terminal_transaction_error(
                 session_id,
                 &transaction_id,
@@ -1245,7 +1260,7 @@ impl KalamPgService {
     async fn handle_explicit_transaction_result<T>(
         &self,
         session_id: &str,
-        transaction_id: &str,
+        transaction_id: &TransactionId,
         rpc_name: &str,
         result: Result<T, Status>,
     ) -> Result<T, Status> {
@@ -1263,6 +1278,34 @@ impl KalamPgService {
             },
             Err(status) => Err(status),
         }
+    }
+
+    /// Finalize an explicit commit/rollback that was already driven through the
+    /// executor (if one is configured). Reconciles the registry bookkeeping and
+    /// returns the finalized transaction id the RPC should echo back.
+    async fn finalize_explicit_transaction_with_executor(
+        &self,
+        session_id: &str,
+        transaction_id: &TransactionId,
+        rpc_name: &'static str,
+        executor_result: Result<Option<TransactionId>, Status>,
+    ) -> Result<TransactionId, Status> {
+        let finalized_id = self
+            .handle_explicit_transaction_result(
+                session_id,
+                transaction_id,
+                rpc_name,
+                executor_result,
+            )
+            .await?
+            .unwrap_or_else(|| transaction_id.clone());
+
+        self.session_registry
+            .clear_transaction_state_if_matches(session_id, Some(&finalized_id))
+            .ok_or_else(|| {
+                Status::failed_precondition(format!("session '{}' not found", session_id))
+            })?;
+        Ok(finalized_id)
     }
 
     fn record_session_activity<T>(
@@ -1340,6 +1383,7 @@ impl PgService for KalamPgService {
             .filter(|value| !value.is_empty());
 
         let session = self.session_registry.open_authenticated(
+            Some(request.session_id.as_str()),
             current_schema,
             remote_addr.as_deref(),
             bridge_auth,
@@ -1363,28 +1407,26 @@ impl PgService for KalamPgService {
         }
 
         // Allow close even for expired sessions so cleanup always works.
-        if let Some(session) = self.session_registry.get(session_id) {
-            if let Some(transaction_id) = session.transaction_id().map(ToOwned::to_owned) {
-                if let Some(executor) = self.operation_executor.as_deref() {
-                    match executor.rollback_transaction(session_id, &transaction_id).await {
-                        Ok(_) => {},
-                        Err(status) if Self::should_reconcile_local_transaction_state(&status) => {
-                            self.reconcile_local_transaction_state(
-                                session_id,
-                                &transaction_id,
-                                "close_session",
-                                &status,
-                            );
-                        },
-                        Err(status) => {
-                            log::warn!(
-                                "PG close_session: proceeding after remote rollback error for session '{}' tx '{}': {}",
-                                session_id,
-                                transaction_id,
-                                status
-                            );
-                        },
-                    }
+        if let Some(transaction_id) = self.tracked_transaction_id(session_id).await {
+            if let Some(executor) = self.operation_executor.as_deref() {
+                match executor.rollback_transaction(session_id, &transaction_id).await {
+                    Ok(_) => {},
+                    Err(status) if Self::should_reconcile_local_transaction_state(&status) => {
+                        self.reconcile_local_transaction_state(
+                            session_id,
+                            &transaction_id,
+                            "close_session",
+                            &status,
+                        );
+                    },
+                    Err(status) => {
+                        log::warn!(
+                            "PG close_session: proceeding after remote rollback error for session '{}' tx '{}': {}",
+                            session_id,
+                            transaction_id,
+                            status
+                        );
+                    },
                 }
             }
         }
@@ -1423,7 +1465,9 @@ impl PgService for KalamPgService {
         let session_id = request.get_ref().session_id.trim().to_string();
         self.validate_session_handle(&session_id)?;
         self.record_session_activity(session_id.as_str(), None, "Insert", &request);
-        self.session_registry.mark_transaction_writes(session_id.as_str());
+        if self.operation_executor.is_none() {
+            self.session_registry.mark_transaction_writes(session_id.as_str());
+        }
         let inner = request.into_inner();
         log::debug!(
             "PG insert: {}.{} rows={}",
@@ -1451,7 +1495,9 @@ impl PgService for KalamPgService {
         let session_id = request.get_ref().session_id.trim().to_string();
         self.validate_session_handle(&session_id)?;
         self.record_session_activity(session_id.as_str(), None, "Update", &request);
-        self.session_registry.mark_transaction_writes(session_id.as_str());
+        if self.operation_executor.is_none() {
+            self.session_registry.mark_transaction_writes(session_id.as_str());
+        }
         let inner = request.into_inner();
         log::debug!("PG update: {}.{}", inner.namespace, inner.table_name);
         let domain_req = operation_executor::update_request_from_rpc(&inner)?;
@@ -1474,7 +1520,9 @@ impl PgService for KalamPgService {
         let session_id = request.get_ref().session_id.trim().to_string();
         self.validate_session_handle(&session_id)?;
         self.record_session_activity(session_id.as_str(), None, "Delete", &request);
-        self.session_registry.mark_transaction_writes(session_id.as_str());
+        if self.operation_executor.is_none() {
+            self.session_registry.mark_transaction_writes(session_id.as_str());
+        }
         let inner = request.into_inner();
         log::debug!("PG delete: {}.{}", inner.namespace, inner.table_name);
         let domain_req = operation_executor::delete_request_from_rpc(&inner)?;
@@ -1507,39 +1555,37 @@ impl PgService for KalamPgService {
             Some("BeginTransaction"),
         );
 
-        if let Some(session) = self.session_registry.get(session_id) {
-            if let Some(stale_transaction_id) = session.transaction_id().map(ToOwned::to_owned) {
-                log::warn!(
-                    "PG begin_transaction: auto-rolling back stale transaction '{}' for session '{}'",
-                    stale_transaction_id,
-                    session_id
-                );
+        if let Some(stale_transaction_id) = self.tracked_transaction_id(session_id).await {
+            log::warn!(
+                "PG begin_transaction: auto-rolling back stale transaction '{}' for session '{}'",
+                stale_transaction_id,
+                session_id
+            );
 
-                if let Some(executor) = self.operation_executor.as_deref() {
-                    match executor.rollback_transaction(session_id, &stale_transaction_id).await {
-                        Ok(_) => {},
-                        Err(status) if Self::should_reconcile_local_transaction_state(&status) => {
-                            self.reconcile_local_transaction_state(
-                                session_id,
-                                &stale_transaction_id,
-                                "begin_transaction",
-                                &status,
-                            );
-                        },
-                        Err(status) => return Err(status),
-                    }
+            if let Some(executor) = self.operation_executor.as_deref() {
+                match executor.rollback_transaction(session_id, &stale_transaction_id).await {
+                    Ok(_) => {},
+                    Err(status) if Self::should_reconcile_local_transaction_state(&status) => {
+                        self.reconcile_local_transaction_state(
+                            session_id,
+                            &stale_transaction_id,
+                            "begin_transaction",
+                            &status,
+                        );
+                    },
+                    Err(status) => return Err(status),
                 }
-
-                self.session_registry
-                    .clear_transaction_state_if_matches(session_id, Some(&stale_transaction_id));
             }
+
+            self.session_registry
+                .clear_transaction_state_if_matches(session_id, Some(&stale_transaction_id));
         }
 
         let transaction_id = if let Some(executor) = self.operation_executor.as_deref() {
             match executor.begin_transaction(session_id).await? {
                 Some(transaction_id) => self
                     .session_registry
-                    .begin_transaction_with_id(session_id, transaction_id.as_str())
+                    .pin_transaction(session_id, &transaction_id)
                     .map_err(Status::failed_precondition)?,
                 None => self
                     .session_registry
@@ -1554,7 +1600,9 @@ impl PgService for KalamPgService {
 
         log::debug!("PG begin_transaction: session={} tx={}", session_id, transaction_id);
 
-        Ok(Response::new(BeginTransactionResponse { transaction_id }))
+        Ok(Response::new(BeginTransactionResponse {
+            transaction_id: transaction_id.to_string(),
+        }))
     }
 
     async fn commit_transaction(
@@ -1569,6 +1617,8 @@ impl PgService for KalamPgService {
         if transaction_id.is_empty() {
             return Err(Status::invalid_argument("transaction_id must not be empty"));
         }
+        let transaction_id = TransactionId::try_new(transaction_id.to_string())
+            .map_err(|e| Status::invalid_argument(e.to_string()))?;
 
         self.session_registry.open_or_get_with_context(
             session_id,
@@ -1578,31 +1628,24 @@ impl PgService for KalamPgService {
         );
 
         let committed_id = if let Some(executor) = self.operation_executor.as_deref() {
-            let committed_id = match self
-                .handle_explicit_transaction_result(
-                    session_id,
-                    transaction_id,
-                    "commit_transaction",
-                    executor.commit_transaction(session_id, transaction_id).await,
-                )
-                .await?
-            {
-                Some(committed_id) => committed_id,
-                None => transaction_id.to_string(),
-            };
-            self.session_registry
-                .commit_transaction(session_id, committed_id.as_str())
-                .map_err(Status::failed_precondition)?
+            let executor_result = executor.commit_transaction(session_id, &transaction_id).await;
+            self.finalize_explicit_transaction_with_executor(
+                session_id,
+                &transaction_id,
+                "commit_transaction",
+                executor_result,
+            )
+            .await?
         } else {
             self.session_registry
-                .commit_transaction(session_id, transaction_id)
+                .commit_transaction(session_id, &transaction_id)
                 .map_err(Status::failed_precondition)?
         };
 
         log::debug!("PG commit_transaction: session={} tx={}", session_id, committed_id);
 
         Ok(Response::new(CommitTransactionResponse {
-            transaction_id: committed_id,
+            transaction_id: committed_id.to_string(),
         }))
     }
 
@@ -1615,6 +1658,8 @@ impl PgService for KalamPgService {
         let session_id = inner.session_id.trim();
         let transaction_id = inner.transaction_id.trim();
         self.validate_session_handle(session_id)?;
+        let transaction_id = TransactionId::try_new(transaction_id.to_string())
+            .map_err(|e| Status::invalid_argument(e.to_string()))?;
 
         self.session_registry.open_or_get_with_context(
             session_id,
@@ -1624,31 +1669,24 @@ impl PgService for KalamPgService {
         );
 
         let rolled_back_id = if let Some(executor) = self.operation_executor.as_deref() {
-            let rolled_back_id = match self
-                .handle_explicit_transaction_result(
-                    session_id,
-                    transaction_id,
-                    "rollback_transaction",
-                    executor.rollback_transaction(session_id, transaction_id).await,
-                )
-                .await?
-            {
-                Some(rolled_back_id) => rolled_back_id,
-                None => transaction_id.to_string(),
-            };
-            self.session_registry
-                .rollback_transaction(session_id, rolled_back_id.as_str())
-                .map_err(Status::failed_precondition)?
+            let executor_result = executor.rollback_transaction(session_id, &transaction_id).await;
+            self.finalize_explicit_transaction_with_executor(
+                session_id,
+                &transaction_id,
+                "rollback_transaction",
+                executor_result,
+            )
+            .await?
         } else {
             self.session_registry
-                .rollback_transaction(session_id, transaction_id)
+                .rollback_transaction(session_id, &transaction_id)
                 .map_err(Status::failed_precondition)?
         };
 
         log::debug!("PG rollback_transaction: session={} tx={}", session_id, rolled_back_id);
 
         Ok(Response::new(RollbackTransactionResponse {
-            transaction_id: rolled_back_id,
+            transaction_id: rolled_back_id.to_string(),
         }))
     }
 

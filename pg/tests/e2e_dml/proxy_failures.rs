@@ -561,7 +561,7 @@ async fn e2e_proxy_blackhole_timeout_recovers_after_traffic_is_restored() {
         &table,
         &proxy_host,
         proxy_port,
-        Some("timeout '400'"),
+        None,
     )
     .await;
 
@@ -572,6 +572,12 @@ async fn e2e_proxy_blackhole_timeout_recovers_after_traffic_is_restored() {
     .await
     .expect("seed row before blackhole");
     wait_for_row_count(&pg, &qualified_table, 1, Duration::from_secs(3)).await;
+
+    pg.batch_execute(&format!(
+        "ALTER SERVER {server_name} OPTIONS (ADD timeout '1200');"
+    ))
+    .await
+    .expect("set low proxy timeout before blackhole phase");
 
     proxy.blackhole();
 

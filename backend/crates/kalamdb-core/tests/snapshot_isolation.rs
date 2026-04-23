@@ -120,7 +120,7 @@ async fn snapshot_isolation_hides_later_commits_from_open_transaction() {
         .await
         .expect("begin transaction succeeds")
         .expect("transaction id returned");
-    assert!(!transaction_id.is_empty());
+    assert!(!transaction_id.as_str().is_empty());
 
     assert!(scan_names(&service, &table_id, session_b).await.is_empty());
 

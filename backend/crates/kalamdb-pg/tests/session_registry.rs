@@ -1,3 +1,4 @@
+use kalamdb_commons::models::TransactionId;
 use kalamdb_pg::{SessionRegistry, TransactionState};
 
 #[test]
@@ -30,7 +31,7 @@ fn session_registry_begin_commit_transaction() {
     registry.open_or_get("s1");
 
     let tx_id = registry.begin_transaction("s1").expect("begin");
-    assert!(!tx_id.is_empty());
+    assert!(!tx_id.as_str().is_empty());
 
     let session = registry.open_or_get("s1");
     assert_eq!(session.transaction_id(), Some(tx_id.as_str()));
@@ -80,7 +81,10 @@ fn session_registry_commit_wrong_tx_id_fails() {
     registry.open_or_get("s1");
 
     let _tx_id = registry.begin_transaction("s1").expect("begin");
-    let err = registry.commit_transaction("s1", "wrong-tx-id").expect_err("wrong tx id");
+    let wrong_tx_id = TransactionId::new("01960f7b-3d16-7d6d-b26c-7e4db6f25f8d");
+    let err = registry
+        .commit_transaction("s1", &wrong_tx_id)
+        .expect_err("wrong tx id");
     assert!(err.contains("mismatch"));
 }
 
@@ -89,8 +93,10 @@ fn session_registry_rollback_without_transaction_is_noop() {
     let registry = SessionRegistry::default();
     registry.open_or_get("s1");
 
-    let result = registry.rollback_transaction("s1", "");
+    let tx_id = TransactionId::new("01960f7b-3d17-7d6d-b26c-7e4db6f25f8d");
+    let result = registry.rollback_transaction("s1", &tx_id);
     assert!(result.is_ok());
+    assert_eq!(result.unwrap(), tx_id);
 }
 
 #[test]
@@ -173,7 +179,8 @@ fn session_registry_clear_transaction_state_requires_matching_tx_id() {
     registry.open_or_get("s1");
 
     let tx_id = registry.begin_transaction("s1").expect("begin");
-    registry.clear_transaction_state_if_matches("s1", Some("different-tx"));
+    let different_tx_id = TransactionId::new("01960f7b-3d18-7d6d-b26c-7e4db6f25f8d");
+    registry.clear_transaction_state_if_matches("s1", Some(&different_tx_id));
 
     let session = registry.open_or_get("s1");
     assert_eq!(session.transaction_id(), Some(tx_id.as_str()));

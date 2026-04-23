@@ -174,12 +174,30 @@ pub(super) fn startup_deadline(timeouts: &KalamLinkTimeouts) -> Option<TokioInst
     }
 }
 
+pub(super) fn resume_startup_deadline(timeouts: &KalamLinkTimeouts) -> Option<TokioInstant> {
+    if KalamLinkTimeouts::is_no_timeout(timeouts.initial_data_timeout) {
+        return None;
+    }
+
+    let timeout = if KalamLinkTimeouts::is_no_timeout(timeouts.subscribe_timeout) {
+        timeouts.initial_data_timeout
+    } else {
+        timeouts.initial_data_timeout.min(timeouts.subscribe_timeout)
+    };
+
+    Some(TokioInstant::now() + timeout)
+}
+
 pub(super) fn reset_startup_deadline(
     entry: &mut SubEntry,
     timeouts: &KalamLinkTimeouts,
     is_resume: bool,
 ) {
-    entry.ready_deadline = startup_deadline(timeouts);
+    entry.ready_deadline = if is_resume {
+        resume_startup_deadline(timeouts)
+    } else {
+        startup_deadline(timeouts)
+    };
     entry.reconnect_resubscribe_pending = is_resume;
 }
 

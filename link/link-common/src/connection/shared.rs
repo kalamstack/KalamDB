@@ -212,10 +212,12 @@ impl Drop for SharedConnection {
 #[cfg(test)]
 mod tests {
     use super::registry::{
-        clear_startup_deadline, reset_startup_deadline, startup_deadline, SubEntry,
+        clear_startup_deadline, reset_startup_deadline, resume_startup_deadline,
+        startup_deadline, SubEntry,
     };
     use super::*;
     use tokio::sync::{mpsc, oneshot};
+    use tokio::time::Instant as TokioInstant;
 
     #[test]
     fn startup_deadline_disabled_when_initial_timeout_is_zero() {
@@ -253,5 +255,20 @@ mod tests {
         clear_startup_deadline(&mut entry);
         assert!(entry.ready_deadline.is_none());
         assert!(!entry.reconnect_resubscribe_pending);
+    }
+
+    #[test]
+    fn resume_startup_deadline_uses_subscribe_timeout_window() {
+        let timeouts = KalamLinkTimeouts {
+            subscribe_timeout: Duration::from_secs(5),
+            initial_data_timeout: Duration::from_secs(30),
+            ..KalamLinkTimeouts::default()
+        };
+
+        let deadline = resume_startup_deadline(&timeouts).expect("resume deadline should exist");
+        let remaining = deadline.saturating_duration_since(TokioInstant::now());
+
+        assert!(remaining <= Duration::from_millis(5_100));
+        assert!(remaining > Duration::from_secs(4));
     }
 }
