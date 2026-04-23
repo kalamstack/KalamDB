@@ -61,7 +61,8 @@ pub struct ServerConfig {
 pub struct CorsSettings {
     /// Allowed origins. Use ["*"] for any origin, or specify exact origins.
     /// Example: ["https://app.example.com", "https://admin.example.com"]
-    /// Empty list = same as ["*"] (allow any origin)
+    /// Empty list is treated like a wildcard at runtime, but startup validation
+    /// rejects it for non-localhost HTTP exposure.
     #[serde(default)]
     pub allowed_origins: Vec<String>,
 
@@ -119,17 +120,17 @@ fn default_cors_max_age() -> u64 {
 impl Default for CorsSettings {
     fn default() -> Self {
         Self {
-            // SECURITY: Default to empty which means allow-any-origin.
-            // When allow_credentials is true and origins is empty, the CORS
-            // middleware will NOT reflect arbitrary origins — actix-cors
-            // rejects allow_any_origin+supports_credentials at startup.
-            // Users must configure explicit origins for credentialed requests.
+            // SECURITY: Keep the default empty so deployments must opt into
+            // specific browser-origin behavior through config or env overrides.
+            // The runtime treats an empty list as wildcard CORS, but startup
+            // validation rejects that for non-localhost HTTP exposure.
             allowed_origins: Vec::new(),
             allowed_methods: default_cors_methods(),
             allowed_headers: default_cors_headers(),
             expose_headers: Vec::new(),
             // SECURITY: Default to false to prevent unsafe wildcard+credentials.
-            // Users must explicitly enable credentials AND configure allowed_origins.
+            // Users must explicitly enable credentials and configure
+            // allowed_origins for credentialed cross-origin traffic.
             allow_credentials: false,
             max_age: default_cors_max_age(),
             allow_private_network: false,

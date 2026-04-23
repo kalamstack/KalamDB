@@ -183,6 +183,15 @@ fn load_server_config(config_path: &Path) -> ServerConfig {
         std::process::exit(1);
     }
 
+    if config.should_warn_on_non_local_http_wildcard_cors() {
+        eprintln!(
+            "⚠️  SECURITY WARNING: Non-localhost HTTP exposure is using security.cors.allowed_origins = [\"*\"]"
+        );
+        eprintln!(
+            "⚠️  Any browser origin can reach this server. Replace '*' with an explicit origin list before production use."
+        );
+    }
+
     if let Err(e) = validate_startup_ports(&config) {
         eprintln!("❌ FATAL: Port preflight check failed: {}", e);
         eprintln!("❌ Server cannot start until both HTTP and Raft RPC ports are available");

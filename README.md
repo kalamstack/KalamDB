@@ -2,6 +2,13 @@
   <img src="docs/images/kalamdb_logo.png" alt="KalamDB logo" width="260" />
 </p>
 
+
+Give AI agents one SQL tool to your app data.
+
+KalamDB is a SQL-first realtime backend for agent-native apps.
+Agents and frontends use the same backend directly: SQL over HTTP for reads and writes, live query rows over WebSocket for subscriptions. USER tables, auth, and `EXECUTE AS USER` keep access policy-scoped instead of exposing broad backend access.
+
+
 <p align="center">
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-1.92%2B-orange.svg" alt="Rust" /></a>
   <a href="https://www.apache.org/licenses/LICENSE-2.0"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License" /></a>
@@ -21,29 +28,29 @@
   <a href="https://pub.dev/packages/kalam_link"><img src="https://img.shields.io/pub/v/kalam_link?label=dart%20sdk" alt="Dart SDK" /></a>
 </p>
 
-KalamDB is a SQL-first realtime state database for AI agents, chat products, and multi-tenant SaaS.
-It combines SQL execution, live subscriptions, pub/sub streams, and hot/cold storage in one Rust runtime.
 
-Supported SDKs: [TypeScript/JavaScript](https://www.npmjs.com/package/@kalamdb/client) and [Dart/Flutter](https://pub.dev/packages/kalam_link).
+SDKs: [TypeScript/JavaScript](https://www.npmjs.com/package/@kalamdb/client) and [Dart/Flutter](https://pub.dev/packages/kalam_link).
 
 PostgreSQL extension Docker image: [jamals86/pg-kalam](https://hub.docker.com/r/jamals86/pg-kalam) with `pg_kalam` preinstalled.
 
-> Frontend clients can execute SQL directly against KalamDB. This is not only a backend database layer.
+> Frontend clients can execute SQL directly against KalamDB. You keep one SQL API plus live subscriptions instead of maintaining a custom REST or GraphQL CRUD layer for every agent workflow.
 
-## Frontend-First SQL Execution
+## One SQL Tool, Live Rows
 
-To avoid confusion: KalamDB is designed for both frontend and backend SQL execution.
+KalamDB is designed for both frontend and backend SQL execution.
 
-- Frontend (web/mobile/desktop): run SQL for user-scoped reads/writes and realtime subscriptions.
-- Backend/workers: run automation, cross-tenant system jobs, and service workflows.
-- Same SQL model on both sides: `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `SUBSCRIBE TO`, `CONSUME`, `ACK`.
+- Agents and workers use one SQL tool plus the current schema instead of dozens of narrow CRUD tools.
+- Frontends run the same backend directly for user-scoped reads, writes, and live row updates.
+- Queries and writes go through the HTTP SQL API; realtime subscriptions reuse the shared WebSocket connection.
+- Service code can act on behalf of a user with `EXECUTE AS USER` when a workflow needs a trusted handoff.
 
-This is what lets chat UIs and agent apps read/write state directly and receive live updates without adding separate polling or fanout infrastructure.
+This is what lets chat UIs, support agents, approval flows, and other product workflows share one data plane without separate polling, sync, or fanout infrastructure.
 
 ## Why KalamDB
 
-- Frontend-direct SQL and realtime subscriptions, so web and mobile apps can read, write, and stay in sync without a separate sync layer.
-- Multi-tenant isolation by default, with the same SQL returning user-scoped data safely across frontend and backend clients.
+- One SQL tool for agents, so app workflows can read and write allowed data without a custom CRUD surface for every action.
+- Live UI by default, with frontend-direct SQL and realtime subscriptions keeping web and mobile apps in sync without a separate sync layer.
+- Per-user isolation by default, with the same SQL returning user-scoped data safely across frontend and backend clients.
 - Built-in authentication and authorization with Basic auth, JWT, OAuth 2.0 (Google Workspace, GitHub, Azure AD), and RBAC.
 - Unified application primitives: SQL tables, live queries, pub/sub topics, consumer groups, and file attachments in one runtime.
 - Hybrid storage engine tuned for product workloads: RocksDB for fast active writes, Parquet for compressed historical storage and analytics.
@@ -51,6 +58,16 @@ This is what lets chat UIs and agent apps read/write state directly and receive 
 - Vector embeddings and vector search workflows for semantic retrieval, agent memory, and AI-powered product features.
 - Distributed clustering with Multi-Raft replication and failover for resilient production deployments.
 - First-party tooling for operators and app teams: Admin UI, `kalam` CLI, and official TypeScript and Dart SDKs.
+
+## Agent-Native Workflow
+
+- Read current app state with `SELECT` from the same backend your product already uses.
+- Write drafts, tasks, approvals, or replies into normal app tables with SQL.
+- Subscribe the frontend to pending rows live over WebSocket.
+- Commit final writes through the same backend path, including `EXECUTE AS USER` when a trusted service acts for a user.
+- Let the UI update from row changes instead of a second sync system.
+
+See [examples/chat-with-ai](examples/chat-with-ai/README.md) for the base live agent loop already in the repo.
 
 ## Feature & Status
 

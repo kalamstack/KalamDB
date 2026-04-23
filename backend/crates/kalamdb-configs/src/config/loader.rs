@@ -31,16 +31,12 @@ fn endpoint_is_localhost(value: &str) -> bool {
     is_localhost_host(extract_host_component(value))
 }
 
-fn is_explicit_origin_allowlist(origins: &[String]) -> bool {
-    !origins.is_empty()
-        && origins.iter().all(|origin| {
-            let trimmed = origin.trim();
-            !trimmed.is_empty() && trimmed != "*"
-        })
+fn has_configured_origin_policy(origins: &[String]) -> bool {
+    origins.iter().any(|origin| !origin.trim().is_empty())
 }
 
-fn has_explicit_browser_origin_policy(config: &ServerConfig) -> bool {
-    is_explicit_origin_allowlist(&config.security.cors.allowed_origins)
+fn uses_wildcard_origin_policy(origins: &[String]) -> bool {
+    origins.iter().any(|origin| origin.trim() == "*")
 }
 
 fn is_non_local_http_exposure(config: &ServerConfig) -> bool {
@@ -97,6 +93,14 @@ impl ServerConfig {
         self.validate()?;
 
         Ok(())
+    }
+
+    /// Returns true when startup should emit a security warning because the
+    /// server is reachable from non-localhost clients while CORS is configured
+    /// to accept any browser origin.
+    pub fn should_warn_on_non_local_http_wildcard_cors(&self) -> bool {
+        is_non_local_http_exposure(self)
+            && uses_wildcard_origin_policy(&self.security.cors.allowed_origins)
     }
 
     /// Validate configuration settings
@@ -204,9 +208,11 @@ impl ServerConfig {
             }
         }
 
-        if is_non_local_http_exposure(self) && !has_explicit_browser_origin_policy(self) {
+        if is_non_local_http_exposure(self)
+            && !has_configured_origin_policy(&self.security.cors.allowed_origins)
+        {
             return Err(anyhow::anyhow!(
-                "Non-localhost HTTP exposure requires an explicit security.cors.allowed_origins allowlist (empty and '*' are not allowed)"
+                "Non-localhost HTTP exposure requires security.cors.allowed_origins to be configured (empty is not allowed)"
             ));
         }
 
@@ -309,24 +315,24 @@ mod tests {
     }
 
     #[test]
-    fn test_non_localhost_bind_requires_explicit_browser_origins() {
+    fn test_non_localhost_bind_requires_configured_browser_origins() {
         let mut config = ServerConfig::default();
         config.server.host = "0.0.0.0".to_string();
 
         let err = config
             .validate()
-            .expect_err("non-localhost bind should require origin allowlist");
-        assert!(err.to_string().contains("explicit"));
+            .expect_err("non-localhost bind should require configured origins");
+        assert!(err.to_string().contains("configured"));
     }
 
     #[test]
-    fn test_non_localhost_bind_rejects_wildcard_browser_origins() {
+    fn test_non_localhost_bind_allows_wildcard_browser_origins_with_warning() {
         let mut config = ServerConfig::default();
         config.server.host = "0.0.0.0".to_string();
         config.security.cors.allowed_origins = vec!["*".to_string()];
 
-        let err = config.validate().expect_err("wildcard origins should be rejected");
-        assert!(err.to_string().contains("allowlist"));
+        assert!(config.validate().is_ok());
+        assert!(config.should_warn_on_non_local_http_wildcard_cors());
     }
 
     #[test]
@@ -339,6 +345,16 @@ mod tests {
         ];
 
         assert!(config.validate().is_ok());
+        assert!(!config.should_warn_on_non_local_http_wildcard_cors());
+    }
+
+    #[test]
+    fn test_localhost_bind_does_not_warn_on_wildcard_browser_origins() {
+        let mut config = ServerConfig::default();
+        config.security.cors.allowed_origins = vec!["*".to_string()];
+
+        assert!(config.validate().is_ok());
+        assert!(!config.should_warn_on_non_local_http_wildcard_cors());
     }
 
     #[test]

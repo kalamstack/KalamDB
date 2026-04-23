@@ -1,14 +1,15 @@
 # 🚀 KalamDB on Docker Hub
 
-KalamDB is a SQL-first realtime state database for AI agents, chat products, and multi-tenant SaaS.
+KalamDB is a SQL-first realtime backend for agent-native apps.
+Give AI agents one SQL tool to your app data, while your frontend subscribes to live rows from the same backend.
 
 It combines in one runtime:
 
-- ⚡ SQL reads and writes
-- 🔄 Live subscriptions
+- ⚡ One SQL API for reads and writes
+- 🔄 Live subscriptions over WebSocket
 - 📡 Pub/sub streams
 - 🔐 Built-in auth with JWT support
-- 🧱 Multi-tenant isolation
+- 🧱 Per-user isolation with policy-scoped access
 - 💾 Hot storage on RocksDB
 - 📦 Cold storage on Parquet
 - 🛠️ Included CLI tools in the image

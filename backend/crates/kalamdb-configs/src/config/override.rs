@@ -11,7 +11,7 @@ fn parse_csv_env_list(value: &str) -> Vec<String> {
 }
 
 impl ServerConfig {
-    /// Apply environment variable overrides for sensitive configuration
+    /// Apply environment variable overrides for runtime configuration.
     ///
     /// Supported environment variables (T030):
     /// - KALAMDB_SERVER_HOST: Override server.host
@@ -31,17 +31,13 @@ impl ServerConfig {
     /// - KALAMDB_CLUSTER_RPC_ADDR: Override cluster.rpc_addr
     /// - KALAMDB_CLUSTER_API_ADDR: Override cluster.api_addr
     /// - KALAMDB_CLUSTER_PEERS: Override cluster.peers
-    /// - KALAMDB_CLUSTER_RPC_TLS_ENABLED: Override cluster.rpc_tls.enabled
-    /// - KALAMDB_CLUSTER_RPC_TLS_CA_CERT_PATH: Override cluster.rpc_tls.ca_cert_path
-    /// - KALAMDB_CLUSTER_RPC_TLS_NODE_CERT_PATH: Override cluster.rpc_tls.node_cert_path
-    /// - KALAMDB_CLUSTER_RPC_TLS_NODE_KEY_PATH: Override cluster.rpc_tls.node_key_path
     /// - KALAMDB_JWT_SECRET: Override auth.jwt_secret
     /// - KALAMDB_PG_AUTH_TOKEN: Override auth.pg_auth_token
     /// - KALAMDB_JWT_TRUSTED_ISSUERS: Override auth.jwt_trusted_issuers
     /// - KALAMDB_JWT_EXPIRY_HOURS: Override auth.jwt_expiry_hours
     /// - KALAMDB_COOKIE_SECURE: Override auth.cookie_secure
     /// - KALAMDB_ALLOW_REMOTE_SETUP: Override auth.allow_remote_setup
-    /// - KALAMDB_SECURITY_CORS_ALLOWED_ORIGINS: Override security.cors.allowed_origins
+    /// - KALAMDB_SECURITY_CORS_ALLOWED_ORIGINS: Override security.cors.allowed_origins with a comma-separated list or "*"
     /// - KALAMDB_SECURITY_TRUSTED_PROXY_RANGES: Override security.trusted_proxy_ranges
     /// - KALAMDB_RATE_LIMIT_AUTH_REQUESTS_PER_IP_PER_SEC: Override rate_limit.max_auth_requests_per_ip_per_sec
     /// - KALAMDB_WEBSOCKET_CLIENT_TIMEOUT_SECS: Override websocket.client_timeout_secs
