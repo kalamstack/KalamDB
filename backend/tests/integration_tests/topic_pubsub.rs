@@ -24,6 +24,7 @@ use serde_json::{json, Value};
 struct HttpConsumeMessage {
     offset: u64,
     partition_id: u32,
+    key: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -519,6 +520,28 @@ async fn test_cdc_insert_to_consume_workflow() {
         // is covered by dedicated CDC/topic tests in more controlled setups.
         assert!(first_batch.row_count <= 10, "Unexpected row count: {}", first_batch.row_count);
     }
+
+    let http_server = http_server::get_global_server().await;
+    let auth_header = http_server.bearer_auth_header("root").expect("Failed to create root auth header");
+    let group = format!("cdc-key-check-{}", consolidated_helpers::unique_table("group"));
+    let http_consume = wait_until_group_reads_at_least(
+        http_server,
+        &auth_header,
+        "test_cdc_ns.events_stream",
+        &group,
+        json!("earliest"),
+        10,
+        2,
+    )
+    .await;
+
+    let consumed_keys: std::collections::HashSet<String> = http_consume
+        .messages
+        .iter()
+        .filter_map(|message| message.key.clone())
+        .collect();
+    assert!(consumed_keys.contains("evt1"), "Expected consumed key set to contain evt1");
+    assert!(consumed_keys.contains("evt2"), "Expected consumed key set to contain evt2");
 }
 
 /// Test CONSUME with schema validation

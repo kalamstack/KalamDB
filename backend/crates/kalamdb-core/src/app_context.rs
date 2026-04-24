@@ -22,7 +22,8 @@ use kalamdb_commons::{constants::ColumnFamilyNames, NodeId};
 use kalamdb_configs::ServerConfig;
 use kalamdb_filestore::StorageRegistry;
 use kalamdb_live::{
-    ConnectionsManager, LiveQueryManager, NotificationService, TopicPublisherService,
+    ConnectionsManager, LiveQueryManager, NotificationService, TopicPrimaryKeyLookup,
+    TopicPublisherService,
 };
 use kalamdb_pg::{KalamPgService, LivePgTransaction};
 use kalamdb_raft::CommandExecutor;
@@ -38,6 +39,36 @@ use std::time::{Duration, Instant};
 
 use crate::metrics::runtime::collect_runtime_metrics;
 use crate::schema_registry::TablesSchemaRegistryAdapter;
+
+struct SchemaRegistryTopicPrimaryKeyLookup {
+    schema_registry: Arc<SchemaRegistry>,
+}
+
+impl SchemaRegistryTopicPrimaryKeyLookup {
+    fn new(schema_registry: Arc<SchemaRegistry>) -> Self {
+        Self { schema_registry }
+    }
+}
+
+impl TopicPrimaryKeyLookup for SchemaRegistryTopicPrimaryKeyLookup {
+    fn primary_key_columns(
+        &self,
+        table_id: &kalamdb_commons::models::TableId,
+    ) -> kalamdb_commons::errors::Result<Vec<String>> {
+        let table_def = self.schema_registry.get_table_if_exists(table_id).map_err(|error| {
+            kalamdb_commons::errors::CommonError::Internal(format!(
+                "Failed to load table definition for {}: {}",
+                table_id, error
+            ))
+        })?;
+
+        Ok(table_def
+            .map(|definition| {
+                definition.get_primary_key_columns().into_iter().map(str::to_owned).collect()
+            })
+            .unwrap_or_default())
+    }
+}
 
 // Use RwLock instead of OnceLock to allow resetting in tests
 // The RwLock is wrapped in a OnceLock for lazy initialization
@@ -438,10 +469,15 @@ impl AppContext {
 
             // Create unified topic publisher service for pub/sub infrastructure
             let visibility_timeout = Duration::from_secs(config.topics.visibility_timeout_secs);
-            let topic_publisher = Arc::new(TopicPublisherService::with_visibility_timeout(
-                storage_backend.clone(),
-                visibility_timeout,
-            ));
+            let topic_primary_key_lookup: Arc<dyn TopicPrimaryKeyLookup> =
+                Arc::new(SchemaRegistryTopicPrimaryKeyLookup::new(schema_registry.clone()));
+            let topic_publisher = Arc::new(
+                TopicPublisherService::with_visibility_timeout_and_primary_key_lookup(
+                    storage_backend.clone(),
+                    visibility_timeout,
+                    Some(topic_primary_key_lookup),
+                ),
+            );
 
             // Create the shared committed snapshot tracker used by the transaction coordinator
             let commit_sequence_tracker = Arc::new(CommitSequenceTracker::new(0));
@@ -833,10 +869,15 @@ impl AppContext {
 
         // Create unified topic publisher service for tests
         let visibility_timeout = Duration::from_secs(config.topics.visibility_timeout_secs);
-        let topic_publisher = Arc::new(TopicPublisherService::with_visibility_timeout(
-            storage_backend.clone(),
-            visibility_timeout,
-        ));
+        let topic_primary_key_lookup: Arc<dyn TopicPrimaryKeyLookup> =
+            Arc::new(SchemaRegistryTopicPrimaryKeyLookup::new(schema_registry.clone()));
+        let topic_publisher = Arc::new(
+            TopicPublisherService::with_visibility_timeout_and_primary_key_lookup(
+                storage_backend.clone(),
+                visibility_timeout,
+                Some(topic_primary_key_lookup),
+            ),
+        );
 
         // Create transaction snapshot tracker for tests
         let commit_sequence_tracker = Arc::new(CommitSequenceTracker::new(0));

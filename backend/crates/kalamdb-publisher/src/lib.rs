@@ -26,4 +26,4 @@ mod routing;
 mod service;
 
 pub use models::TopicCacheStats;
-pub use service::TopicPublisherService;
+pub use service::{TopicPrimaryKeyLookup, TopicPublisherService};

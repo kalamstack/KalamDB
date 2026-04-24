@@ -90,6 +90,7 @@ import {
 import { ExplorerTableContextMenu } from "@/features/sql-studio/components/ExplorerTableContextMenu";
 import {
   buildSyncedSqlStudioWorkspaceState,
+  loadSyncedSqlStudioWorkspaceState,
   saveSyncedSqlStudioWorkspaceState,
   subscribeToSyncedSqlStudioWorkspaceState,
   type SqlStudioSyncedWorkspaceState,
@@ -226,6 +227,7 @@ export default function SqlStudio() {
   const liveSubscriptionIdRef = useRef<Record<string, string>>({});
   const consumedPrefillKeyRef = useRef<string | null>(null);
   const activeTabIdRef = useRef<string | null>(null);
+  const tabsRef = useRef<QueryTab[]>(tabs);
   const lastSyncedWorkspaceSnapshotRef = useRef<string | null>(null);
 
   const activeTab = useMemo(
@@ -248,56 +250,69 @@ export default function SqlStudio() {
   }, [schema, selectedTableKey]);
 
   useEffect(() => {
+    tabsRef.current = tabs;
+  }, [tabs]);
+
+  useEffect(() => {
     activeTabIdRef.current = activeTabId;
   }, [activeTabId]);
 
   const applySyncedWorkspace = useCallback((workspace: SqlStudioSyncedWorkspaceState) => {
-    startTransition(() => {
-      dispatch(hydrateSqlStudioWorkspace({
-        tabs: workspace.tabs.map(mapPersistedTabToQueryTab),
-        savedQueries: workspace.savedQueries.map(mapPersistedSavedQuery),
-        activeTabId: workspace.activeTabId,
-      }));
-    });
+    dispatch(hydrateSqlStudioWorkspace({
+      tabs: workspace.tabs.map(mapPersistedTabToQueryTab),
+      savedQueries: workspace.savedQueries.map(mapPersistedSavedQuery),
+      activeTabId: workspace.activeTabId,
+    }));
   }, [dispatch]);
 
-  // Initialize with a single blank tab while waiting for remote workspace to load.
   useEffect(() => {
-    if (tabs.length > 0) {
-      setIsUiHydrated(true);
+    const username = user?.username?.trim();
+    if (!username) {
+      setIsUiHydrated(false);
+      setIsRemoteWorkspaceHydrated(false);
+      lastSyncedWorkspaceSnapshotRef.current = null;
       return;
     }
 
-    const blankTab = createQueryTab(1);
-    dispatch(hydrateSqlStudioWorkspace({
-      tabs: [blankTab],
-      savedQueries: [],
-      activeTabId: blankTab.id,
-    }));
-    setIsUiHydrated(true);
-  }, [dispatch, tabs.length]);
-
-  useEffect(() => {
-    if (!isUiHydrated || !user?.username) {
-      return;
-    }
-
-    const username = user.username;
+    setIsUiHydrated(false);
+    setIsRemoteWorkspaceHydrated(false);
+    lastSyncedWorkspaceSnapshotRef.current = null;
 
     let cancelled = false;
     let remoteUnsubscribe: Unsubscribe | null = null;
-    let didReceiveInitialSnapshot = false;
+
+    const hydrateBlankWorkspace = () => {
+      if (tabsRef.current.length > 0) {
+        return;
+      }
+
+      const blankTab = createQueryTab(1);
+      dispatch(hydrateSqlStudioWorkspace({
+        tabs: [blankTab],
+        savedQueries: [],
+        activeTabId: blankTab.id,
+      }));
+    };
 
     void (async () => {
       try {
+        const initialWorkspace = await loadSyncedSqlStudioWorkspaceState(username);
+        if (cancelled) {
+          return;
+        }
+
+        if (initialWorkspace) {
+          lastSyncedWorkspaceSnapshotRef.current = serializeSyncedWorkspaceSnapshot(initialWorkspace);
+          applySyncedWorkspace(initialWorkspace);
+        } else {
+          hydrateBlankWorkspace();
+        }
+
+        setIsUiHydrated(true);
+
         remoteUnsubscribe = await subscribeToSyncedSqlStudioWorkspaceState(username, (nextWorkspace) => {
           if (cancelled) {
             return;
-          }
-
-          if (!didReceiveInitialSnapshot) {
-            didReceiveInitialSnapshot = true;
-            setIsRemoteWorkspaceHydrated(true);
           }
 
           if (!nextWorkspace) {
@@ -313,6 +328,10 @@ export default function SqlStudio() {
           applySyncedWorkspace(nextWorkspace);
         });
 
+        if (!cancelled) {
+          setIsRemoteWorkspaceHydrated(true);
+        }
+
         if (cancelled && remoteUnsubscribe) {
           void remoteUnsubscribe();
           remoteUnsubscribe = null;
@@ -320,6 +339,8 @@ export default function SqlStudio() {
       } catch (error) {
         if (!cancelled) {
           console.error("Failed to initialize synced SQL Studio workspace subscription", error);
+          hydrateBlankWorkspace();
+          setIsUiHydrated(true);
           setIsRemoteWorkspaceHydrated(true);
         }
       }
@@ -331,7 +352,7 @@ export default function SqlStudio() {
         void remoteUnsubscribe();
       }
     };
-  }, [applySyncedWorkspace, isUiHydrated, user?.username]);
+  }, [applySyncedWorkspace, dispatch, user?.username]);
 
   useEffect(() => {
     if (!selectedTableKey && schema.length > 0 && schema[0].tables.length > 0) {
@@ -411,12 +432,12 @@ export default function SqlStudio() {
     await refetchSchemaTree();
   }, [refetchSchemaTree]);
 
-  const addTab = () => {
+  const addTab = useCallback(() => {
     const nextIndex = tabs.length + 1;
     const tab = createQueryTab(nextIndex);
     dispatch(addWorkspaceTab(tab));
     dispatch(setWorkspaceActiveTabId(tab.id));
-  };
+  }, [dispatch, tabs.length]);
 
   const cleanupLiveSubscription = useCallback((tabId: string) => {
     const unsubscribe = liveUnsubscribeRef.current[tabId];
@@ -837,6 +858,49 @@ export default function SqlStudio() {
       isDirty: false,
     });
   }, [dispatch, savedQueries, tabs, tabResults, updateTab]);
+
+  const saveActiveTab = useCallback(() => {
+    if (!activeTab) {
+      return;
+    }
+
+    saveTab(activeTab.id, false);
+  }, [activeTab, saveTab]);
+
+  useEffect(() => {
+    const handleGlobalShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat) {
+        return;
+      }
+
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      if (key === "t") {
+        event.preventDefault();
+        event.stopPropagation();
+        addTab();
+        return;
+      }
+
+      if (key === "s") {
+        if (!activeTab) {
+          return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        saveActiveTab();
+      }
+    };
+
+    window.addEventListener("keydown", handleGlobalShortcut, true);
+    return () => {
+      window.removeEventListener("keydown", handleGlobalShortcut, true);
+    };
+  }, [activeTab, addTab, saveActiveTab]);
 
   const renameActiveTab = useCallback((title: string) => {
     if (!activeTab) {

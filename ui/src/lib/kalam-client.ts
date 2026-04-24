@@ -178,8 +178,16 @@ async function disconnectSdkClient(targetClient: KalamDBClient | null): Promise<
 
 async function initializeSubscriptionClient(jwtToken: string): Promise<KalamDBClient> {
   return queueLifecycle(async () => {
-    if (jwtToken === currentToken && subscriptionClient && isSubscriptionInitialized && subscriptionClient.isConnected()) {
-      debugLog('[kalam-client] Returning existing initialized subscription client');
+    if (jwtToken === currentToken && subscriptionClient && isSubscriptionInitialized) {
+      applySubscriptionClientListeners(subscriptionClient);
+
+      if (!subscriptionClient.isConnected()) {
+        debugLog('[kalam-client] Reconnecting existing subscription client...');
+        await subscriptionClient.connect();
+      } else {
+        debugLog('[kalam-client] Returning existing initialized subscription client');
+      }
+
       return subscriptionClient;
     }
 

@@ -50,4 +50,4 @@ pub use fanout::{
 };
 
 // Re-export from kalamdb-publisher crate
-pub use kalamdb_publisher::{TopicCacheStats, TopicPublisherService};
+pub use kalamdb_publisher::{TopicCacheStats, TopicPrimaryKeyLookup, TopicPublisherService};

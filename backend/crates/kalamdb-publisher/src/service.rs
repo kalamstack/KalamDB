@@ -28,6 +28,12 @@ use crate::offset::OffsetAllocator;
 use crate::payload;
 use crate::routing::RouteCache;
 
+/// Lookup primary-key columns for a table so topic keys can be derived from
+/// stable row identity instead of the full row payload.
+pub trait TopicPrimaryKeyLookup: Send + Sync {
+    fn primary_key_columns(&self, table_id: &TableId) -> Result<Vec<String>>;
+}
+
 /// Default visibility timeout for pending claims.
 ///
 /// If a consumer fetches messages but does not ack within this window, the
@@ -146,6 +152,8 @@ pub struct TopicPublisherService {
     offset_store: Arc<TopicOffsetsTableProvider>,
     /// In-memory route cache: TableId → routes.
     route_cache: RouteCache,
+    /// Schema-backed lookup for deriving stable topic keys from table primary keys.
+    primary_key_lookup: Option<Arc<dyn TopicPrimaryKeyLookup>>,
     /// Atomic per-topic-partition offset counters.
     offset_allocator: OffsetAllocator,
     /// In-memory per-(topic, group, partition) claim state used to avoid
@@ -161,13 +169,31 @@ pub struct TopicPublisherService {
 impl TopicPublisherService {
     /// Create a new TopicPublisherService with stores backed by the given storage.
     pub fn new(storage_backend: Arc<dyn StorageBackend>) -> Self {
-        Self::with_visibility_timeout(storage_backend, DEFAULT_VISIBILITY_TIMEOUT)
+        Self::with_visibility_timeout_and_primary_key_lookup(
+            storage_backend,
+            DEFAULT_VISIBILITY_TIMEOUT,
+            None,
+        )
     }
 
     /// Create a new TopicPublisherService with a custom visibility timeout.
     pub fn with_visibility_timeout(
         storage_backend: Arc<dyn StorageBackend>,
         visibility_timeout: Duration,
+    ) -> Self {
+        Self::with_visibility_timeout_and_primary_key_lookup(
+            storage_backend,
+            visibility_timeout,
+            None,
+        )
+    }
+
+    /// Create a new TopicPublisherService with a custom visibility timeout and
+    /// an optional primary-key lookup for deriving stable topic keys.
+    pub fn with_visibility_timeout_and_primary_key_lookup(
+        storage_backend: Arc<dyn StorageBackend>,
+        visibility_timeout: Duration,
+        primary_key_lookup: Option<Arc<dyn TopicPrimaryKeyLookup>>,
     ) -> Self {
         // Ensure the topic message partition exists.
         // Consumer offsets live in system.topic_offsets (system_topic_offsets CF),
@@ -183,10 +209,18 @@ impl TopicPublisherService {
             message_store,
             offset_store,
             route_cache: RouteCache::new(),
+            primary_key_lookup,
             offset_allocator: OffsetAllocator::new(),
             group_claim_state: DashMap::new(),
             partition_write_locks: DashMap::new(),
             visibility_timeout,
+        }
+    }
+
+    fn primary_key_columns_for(&self, table_id: &TableId) -> Result<Vec<String>> {
+        match &self.primary_key_lookup {
+            Some(lookup) => lookup.primary_key_columns(table_id),
+            None => Ok(Vec::new()),
         }
     }
 
@@ -278,6 +312,7 @@ impl TopicPublisherService {
         if matching.is_empty() {
             return Ok(0);
         }
+        let primary_key_columns = self.primary_key_columns_for(table_id)?;
 
         let mut total_published = 0;
 
@@ -294,15 +329,11 @@ impl TopicPublisherService {
             let payload_bytes = payload::extract_payload(&entry.route, row, table_id)?;
 
             // Extract message key (optional).
-            let key = payload::extract_key(row)?;
+            let key = payload::extract_key(row, &primary_key_columns)?;
 
             // Select partition.
             let partition_id = if let Some(ref k) = key {
-                use std::collections::hash_map::DefaultHasher;
-                use std::hash::{Hash, Hasher};
-                let mut hasher = DefaultHasher::new();
-                k.hash(&mut hasher);
-                (hasher.finish() % entry.topic_partitions as u64) as u32
+                (payload::hash_key(k) % entry.topic_partitions as u64) as u32
             } else {
                 (payload::hash_row(row) % entry.topic_partitions as u64) as u32
             };
@@ -392,6 +423,7 @@ impl TopicPublisherService {
         if matching.is_empty() {
             return Ok(0);
         }
+        let primary_key_columns = self.primary_key_columns_for(table_id)?;
 
         // Check if any route uses Full/Diff mode (needs _table injection).
         let needs_full_payload = matching.iter().any(|e| {
@@ -414,6 +446,11 @@ impl TopicPublisherService {
                 .collect::<Result<Vec<_>>>()?
         };
 
+        let prepared_keys: Vec<Option<String>> = prepared
+            .iter()
+            .map(|prep| prep.extract_key(&primary_key_columns))
+            .collect::<Result<Vec<_>>>()?;
+
         let mut total_published = 0;
         let timestamp_ms = chrono::Utc::now().timestamp_millis();
 
@@ -423,7 +460,11 @@ impl TopicPublisherService {
                 std::collections::HashMap::new();
 
             for (idx, prep) in prepared.iter().enumerate() {
-                let partition_id = (prep.hash_row() % entry.topic_partitions as u64) as u32;
+                let partition_hash = match prepared_keys[idx].as_deref() {
+                    Some(key) => payload::hash_key(key),
+                    None => prep.hash_row(),
+                };
+                let partition_id = (partition_hash % entry.topic_partitions as u64) as u32;
                 partition_groups.entry(partition_id).or_default().push(idx);
             }
 
@@ -434,18 +475,17 @@ impl TopicPublisherService {
 
                 // Pre-extract payloads and keys OUTSIDE the lock to minimize
                 // lock hold time. Serialization is the expensive part.
-                let mut pre_encoded: Vec<(Vec<u8>, Vec<u8>)> =
+                let mut pre_encoded: Vec<(Vec<u8>, Option<String>)> =
                     Vec::with_capacity(row_indices.len());
                 for &row_idx in row_indices {
                     let prep = &prepared[row_idx];
                     let payload_bytes = prep.extract_payload(&entry.route, table_id)?;
-                    let key = prep.extract_key();
+                    let key = prepared_keys[row_idx].clone();
 
                     // We'll fill in the actual offset inside the lock.
                     // For now, pre-encode everything except offset-dependent fields.
                     // Store (payload_bytes, key) temporarily.
-                    let key_bytes = key.map(|k| k.into_bytes()).unwrap_or_default();
-                    pre_encoded.push((payload_bytes, key_bytes));
+                    pre_encoded.push((payload_bytes, key));
                 }
 
                 // Acquire partition lock only for offset allocation + RocksDB write.
@@ -463,15 +503,8 @@ impl TopicPublisherService {
 
                 // Now build messages with real offsets and serialize them.
                 let mut raw_entries = Vec::with_capacity(pre_encoded.len());
-                for (i, (payload_bytes, key_bytes)) in pre_encoded.into_iter().enumerate() {
+                for (i, (payload_bytes, key)) in pre_encoded.into_iter().enumerate() {
                     let offset = start_offset + i as u64;
-                    let key = if key_bytes.is_empty() {
-                        None
-                    } else {
-                        // SAFETY: key_bytes comes from String::into_bytes() via extract_key(),
-                        // which always produces valid UTF-8.
-                        Some(unsafe { String::from_utf8_unchecked(key_bytes) })
-                    };
 
                     let message = TopicMessage::new_with_user(
                         entry.topic_id.clone(),
@@ -724,6 +757,16 @@ mod tests {
     use kalamdb_store::test_utils::InMemoryBackend;
     use kalamdb_system::providers::topics::TopicRoute;
 
+    struct FixedPrimaryKeyLookup {
+        columns: Vec<String>,
+    }
+
+    impl TopicPrimaryKeyLookup for FixedPrimaryKeyLookup {
+        fn primary_key_columns(&self, _table_id: &TableId) -> Result<Vec<String>> {
+            Ok(self.columns.clone())
+        }
+    }
+
     fn create_test_row(id: i32, name: &str) -> Row {
         let mut values = std::collections::BTreeMap::new();
         values.insert("id".to_string(), ScalarValue::Int32(Some(id)));
@@ -732,11 +775,20 @@ mod tests {
     }
 
     fn create_test_topic(topic_id: TopicId, table_id: TableId, op: TopicOp) -> Topic {
+        create_test_topic_with_partitions(topic_id, table_id, op, 2)
+    }
+
+    fn create_test_topic_with_partitions(
+        topic_id: TopicId,
+        table_id: TableId,
+        op: TopicOp,
+        partitions: u32,
+    ) -> Topic {
         Topic {
             topic_id: topic_id.clone(),
             name: format!("topic_{}", topic_id.as_str()),
             alias: None,
-            partitions: 2,
+            partitions,
             retention_seconds: None,
             retention_max_bytes: None,
             routes: vec![TopicRoute {
@@ -749,6 +801,18 @@ mod tests {
             created_at: 0,
             updated_at: 0,
         }
+    }
+
+    fn service_with_primary_key(columns: &[&str]) -> TopicPublisherService {
+        let backend = Arc::new(InMemoryBackend::new());
+        let lookup: Arc<dyn TopicPrimaryKeyLookup> = Arc::new(FixedPrimaryKeyLookup {
+            columns: columns.iter().map(|column| (*column).to_string()).collect(),
+        });
+        TopicPublisherService::with_visibility_timeout_and_primary_key_lookup(
+            backend,
+            Duration::from_secs(60),
+            Some(lookup),
+        )
     }
 
     #[test]
@@ -832,6 +896,71 @@ mod tests {
             all_messages.extend(messages);
         }
         assert_eq!(all_messages.len(), 3);
+    }
+
+    #[test]
+    fn test_publish_uses_primary_key_as_message_key() {
+        let service = service_with_primary_key(&["id"]);
+
+        let ns = NamespaceId::new("test_ns");
+        let table_id = TableId::new(ns.clone(), TableName::from("users"));
+        let topic_id = TopicId::new("pk_topic");
+
+        let topic = create_test_topic(topic_id.clone(), table_id.clone(), TopicOp::Insert);
+        service.add_topic(topic);
+
+        let row = create_test_row(42, "Alice");
+        let published = service.publish_message(&table_id, TopicOp::Insert, &row, None).unwrap();
+        assert_eq!(published, 1);
+
+        let mut messages = Vec::new();
+        for partition_id in 0..2 {
+            messages.extend(service.fetch_messages(&topic_id, partition_id, 0, 10).unwrap());
+        }
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].key.as_deref(), Some("42"));
+    }
+
+    #[test]
+    fn test_batch_publish_same_primary_key_stays_in_one_partition() {
+        let service = service_with_primary_key(&["id"]);
+
+        let ns = NamespaceId::new("test_ns");
+        let table_id = TableId::new(ns.clone(), TableName::from("users"));
+        let topic_id = TopicId::new("pk_batch_topic");
+        let partitions = 32;
+
+        let topic =
+            create_test_topic_with_partitions(topic_id.clone(), table_id.clone(), TopicOp::Insert, partitions);
+        service.add_topic(topic);
+
+        let first = create_test_row(7, "alpha");
+        let second = (0..256)
+            .map(|idx| create_test_row(7, &format!("variant_{}", idx)))
+            .find(|candidate| {
+                payload::hash_row(&first) % partitions as u64
+                    != payload::hash_row(candidate) % partitions as u64
+            })
+            .expect("expected a same-PK row with a different full-row hash partition");
+
+        let published = service
+            .publish_batch(&table_id, TopicOp::Insert, &[first.clone(), second.clone()], None)
+            .unwrap();
+        assert_eq!(published, 2);
+
+        let mut seen_partition_ids = HashSet::new();
+        let mut matching_messages = Vec::new();
+        for partition_id in 0..partitions {
+            for message in service.fetch_messages(&topic_id, partition_id, 0, 10).unwrap() {
+                matching_messages.push(message.clone());
+                seen_partition_ids.insert(message.partition_id);
+            }
+        }
+
+        assert_eq!(matching_messages.len(), 2);
+        assert_eq!(seen_partition_ids.len(), 1, "same PK should hash to the same partition");
+        assert!(matching_messages.iter().all(|message| message.key.as_deref() == Some("7")));
     }
 
     #[test]

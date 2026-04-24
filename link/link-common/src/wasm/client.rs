@@ -433,6 +433,189 @@ fn clear_active_socket(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn schedule_auto_reconnect(
+    connection_options: Rc<RefCell<ConnectionOptions>>,
+    subscription_state: Rc<RefCell<HashMap<String, SubscriptionState>>>,
+    reconnect_attempts: Rc<RefCell<u32>>,
+    is_reconnecting: Rc<RefCell<bool>>,
+    ws_ref: Rc<RefCell<Option<WebSocket>>>,
+    ping_interval_id: Rc<RefCell<i32>>,
+    url: String,
+    auth: WasmAuthProvider,
+    auth_provider_cb: Rc<RefCell<Option<js_sys::Function>>>,
+    on_connect_cb: Rc<RefCell<Option<js_sys::Function>>>,
+    on_disconnect_cb: Rc<RefCell<Option<js_sys::Function>>>,
+    on_error_cb: Rc<RefCell<Option<js_sys::Function>>>,
+    on_receive_cb: Rc<RefCell<Option<js_sys::Function>>>,
+    negotiated_ser: Rc<Cell<SerializationType>>,
+) {
+    let (delay, disable_compression) = {
+        let opts = connection_options.borrow();
+        if !opts.auto_reconnect || *is_reconnecting.borrow() {
+            return;
+        }
+
+        let current_attempts = *reconnect_attempts.borrow();
+        if let Some(max) = opts.max_reconnect_attempts {
+            if current_attempts >= max {
+                wasm_debug_log!(&format!(
+                    "KalamClient: Max reconnection attempts ({}) reached",
+                    max
+                ));
+                emit_runtime_ws_error(&on_error_cb, "Max reconnection attempts reached", false);
+                return;
+            }
+        }
+
+        (
+            std::cmp::min(
+                opts.reconnect_delay_ms * (2u64.pow(current_attempts)),
+                opts.max_reconnect_delay_ms,
+            ),
+            opts.disable_compression,
+        )
+    };
+
+    wasm_debug_log!(&format!(
+        "KalamClient: Scheduling reconnection in {}ms (attempt {})",
+        delay,
+        *reconnect_attempts.borrow() + 1
+    ));
+
+    let reconnect_fn = Closure::wrap(Box::new(move || {
+        {
+            let opts = connection_options.borrow();
+            if !opts.auto_reconnect {
+                return;
+            }
+        }
+
+        if ws_ref.borrow().is_some() {
+            return;
+        }
+
+        *is_reconnecting.borrow_mut() = true;
+        *reconnect_attempts.borrow_mut() += 1;
+
+        let reconnect_url = url.clone();
+        let reconnect_auth = auth.clone();
+        let reconnect_auth_provider = Rc::clone(&auth_provider_cb);
+        let reconnect_connection_options = Rc::clone(&connection_options);
+        let reconnect_subscription_state = Rc::clone(&subscription_state);
+        let reconnect_reconnect_attempts = Rc::clone(&reconnect_attempts);
+        let reconnect_is_reconnecting = Rc::clone(&is_reconnecting);
+        let reconnect_ws_ref = Rc::clone(&ws_ref);
+        let reconnect_ping_interval_id = Rc::clone(&ping_interval_id);
+        let reconnect_on_connect = Rc::clone(&on_connect_cb);
+        let reconnect_on_disconnect = Rc::clone(&on_disconnect_cb);
+        let reconnect_on_error = Rc::clone(&on_error_cb);
+        let reconnect_on_receive = Rc::clone(&on_receive_cb);
+        let reconnect_negotiated_ser = Rc::clone(&negotiated_ser);
+        let next_url = url.clone();
+        let next_auth = auth.clone();
+        let next_auth_provider = Rc::clone(&auth_provider_cb);
+        let next_connection_options = Rc::clone(&connection_options);
+        let next_subscription_state = Rc::clone(&subscription_state);
+        let next_reconnect_attempts = Rc::clone(&reconnect_attempts);
+        let next_is_reconnecting = Rc::clone(&is_reconnecting);
+        let next_ws_ref = Rc::clone(&ws_ref);
+        let next_ping_interval_id = Rc::clone(&ping_interval_id);
+        let next_on_connect = Rc::clone(&on_connect_cb);
+        let next_on_disconnect = Rc::clone(&on_disconnect_cb);
+        let next_on_error = Rc::clone(&on_error_cb);
+        let next_on_receive = Rc::clone(&on_receive_cb);
+        let next_negotiated_ser = Rc::clone(&negotiated_ser);
+
+        wasm_bindgen_futures::spawn_local(async move {
+            match reconnect_internal_with_auth(
+                reconnect_url,
+                reconnect_auth,
+                reconnect_auth_provider.borrow().clone(),
+                disable_compression,
+            )
+            .await
+            {
+                Ok(ws) => {
+                    *reconnect_ws_ref.borrow_mut() = Some(ws.clone());
+                    install_runtime_disconnect_handlers(
+                        &ws,
+                        Rc::clone(&reconnect_subscription_state),
+                        Rc::clone(&reconnect_ws_ref),
+                        Rc::clone(&reconnect_ping_interval_id),
+                        Rc::clone(&reconnect_on_disconnect),
+                        Rc::clone(&reconnect_on_error),
+                    );
+                    install_runtime_message_handler(
+                        &ws,
+                        Rc::clone(&reconnect_subscription_state),
+                        Rc::clone(&reconnect_on_receive),
+                        Rc::clone(&reconnect_negotiated_ser),
+                    );
+                    if let Some(cb) = reconnect_on_connect.borrow().as_ref() {
+                        let _ = cb.call0(&JsValue::NULL);
+                    }
+                    wasm_debug_log!("KalamClient: Reconnection successful");
+                    *reconnect_reconnect_attempts.borrow_mut() = 0;
+                    install_auto_reconnect_listener(
+                        &ws,
+                        Rc::clone(&next_connection_options),
+                        Rc::clone(&reconnect_subscription_state),
+                        Rc::clone(&next_reconnect_attempts),
+                        Rc::clone(&next_is_reconnecting),
+                        Rc::clone(&next_ws_ref),
+                        Rc::clone(&next_ping_interval_id),
+                        next_url,
+                        next_auth,
+                        Rc::clone(&next_auth_provider),
+                        Rc::clone(&next_on_connect),
+                        Rc::clone(&next_on_disconnect),
+                        Rc::clone(&next_on_error),
+                        Rc::clone(&next_on_receive),
+                        Rc::clone(&next_negotiated_ser),
+                    );
+                    resubscribe_all(
+                        Rc::clone(&reconnect_ws_ref),
+                        Rc::clone(&reconnect_subscription_state),
+                        reconnect_negotiated_ser.get(),
+                    )
+                    .await;
+                    reconnect::restart_ping_timer(
+                        &reconnect_ws_ref,
+                        &reconnect_connection_options,
+                        &reconnect_ping_interval_id,
+                        &reconnect_negotiated_ser,
+                    );
+                    *reconnect_is_reconnecting.borrow_mut() = false;
+                },
+                Err(_e) => {
+                    wasm_debug_log!(&format!("KalamClient: Reconnection failed: {:?}", _e));
+                    *reconnect_is_reconnecting.borrow_mut() = false;
+                    schedule_auto_reconnect(
+                        next_connection_options,
+                        next_subscription_state,
+                        next_reconnect_attempts,
+                        next_is_reconnecting,
+                        next_ws_ref,
+                        next_ping_interval_id,
+                        next_url,
+                        next_auth,
+                        next_auth_provider,
+                        next_on_connect,
+                        next_on_disconnect,
+                        next_on_error,
+                        next_on_receive,
+                        next_negotiated_ser,
+                    );
+                },
+            }
+        });
+    }) as Box<dyn FnMut()>);
+
+    super::helpers::global_set_timeout(reconnect_fn.as_ref().unchecked_ref(), delay as i32);
+    reconnect_fn.forget();
+}
+
 fn install_runtime_disconnect_handlers(
     ws: &WebSocket,
     subscriptions: Rc<RefCell<HashMap<String, SubscriptionState>>>,
@@ -1155,6 +1338,15 @@ impl KalamClient {
 
         wasm_debug_log!("KalamClient: WebSocket connection established and authenticated");
 
+        if !self.subscription_state.borrow().is_empty() {
+            resubscribe_all(
+                Rc::clone(&self.ws),
+                Rc::clone(&self.subscription_state),
+                self.negotiated_ser.get(),
+            )
+            .await;
+        }
+
         // Start keepalive ping timer (no-op when interval is 0)
         self.start_ping_timer();
 
@@ -1196,7 +1388,7 @@ impl KalamClient {
     ///
     /// Browser WebSocket APIs do not expose protocol-level Ping frames, so
     /// the WASM client sends a JSON `{"type":"ping"}` message at this
-    /// interval. Set to `0` to disable. Default: 30 000 ms.
+    /// interval. Set to `0` to disable. Default: 5 000 ms.
     ///
     /// The change takes effect on the next `connect()` or reconnect.
     ///
@@ -1867,154 +2059,22 @@ fn install_auto_reconnect_listener(
         if !is_active_socket {
             return;
         }
-
-        let opts = connection_options.borrow();
-        if !opts.auto_reconnect || *is_reconnecting.borrow() {
-            return;
-        }
-
-        let current_attempts = *reconnect_attempts.borrow();
-        if let Some(max) = opts.max_reconnect_attempts {
-            if current_attempts >= max {
-                wasm_debug_log!(&format!(
-                    "KalamClient: Max reconnection attempts ({}) reached",
-                    max
-                ));
-                return;
-            }
-        }
-
-        let delay = std::cmp::min(
-            opts.reconnect_delay_ms * (2u64.pow(current_attempts)),
-            opts.max_reconnect_delay_ms,
+        schedule_auto_reconnect(
+            Rc::clone(&connection_options),
+            Rc::clone(&subscription_state),
+            Rc::clone(&reconnect_attempts),
+            Rc::clone(&is_reconnecting),
+            Rc::clone(&ws_ref),
+            Rc::clone(&ping_interval_id),
+            url.clone(),
+            auth.clone(),
+            Rc::clone(&auth_provider_cb),
+            Rc::clone(&on_connect_cb),
+            Rc::clone(&on_disconnect_cb),
+            Rc::clone(&on_error_cb),
+            Rc::clone(&on_receive_cb),
+            Rc::clone(&negotiated_ser),
         );
-
-        wasm_debug_log!(&format!(
-            "KalamClient: Scheduling reconnection in {}ms (attempt {})",
-            delay,
-            current_attempts + 1
-        ));
-
-        let disable_compression = opts.disable_compression;
-
-        let is_reconnecting_clone = is_reconnecting.clone();
-        let reconnect_attempts_clone = reconnect_attempts.clone();
-        let subscription_state_clone = subscription_state.clone();
-        let ws_ref_clone = ws_ref.clone();
-        let ping_interval_id_clone = ping_interval_id.clone();
-        let connection_options_clone = connection_options.clone();
-        let url_clone = url.clone();
-        let auth_clone = auth.clone();
-        let auth_provider_cb_clone = auth_provider_cb.borrow().clone();
-        let on_connect_clone = on_connect_cb.clone();
-        let on_disconnect_clone = on_disconnect_cb.clone();
-        let on_error_clone = on_error_cb.clone();
-        let on_receive_clone = on_receive_cb.clone();
-        let auth_provider_rc = auth_provider_cb.clone();
-        let negotiated_ser_clone = negotiated_ser.clone();
-
-        let reconnect_fn = Closure::wrap(Box::new(move || {
-            {
-                let opts = connection_options_clone.borrow();
-                if !opts.auto_reconnect {
-                    return;
-                }
-            }
-
-            if ws_ref_clone.borrow().is_some() {
-                return;
-            }
-
-            *is_reconnecting_clone.borrow_mut() = true;
-            *reconnect_attempts_clone.borrow_mut() += 1;
-
-            let url = url_clone.clone();
-            let auth = auth_clone.clone();
-            let next_url = url_clone.clone();
-            let next_auth = auth_clone.clone();
-            let ws_ref = ws_ref_clone.clone();
-            let subscription_state = subscription_state_clone.clone();
-            let is_reconnecting = is_reconnecting_clone.clone();
-            let reconnect_attempts = reconnect_attempts_clone.clone();
-            let ping_id = ping_interval_id_clone.clone();
-            let conn_opts = connection_options_clone.clone();
-            let cb = auth_provider_cb_clone.clone();
-            let on_connect = on_connect_clone.clone();
-            let on_disconnect = on_disconnect_clone.clone();
-            let on_error = on_error_clone.clone();
-            let on_receive = on_receive_clone.clone();
-            let connection_options_next = connection_options_clone.clone();
-            let reconnect_attempts_next = reconnect_attempts_clone.clone();
-            let is_reconnecting_next = is_reconnecting_clone.clone();
-            let ws_ref_next = ws_ref_clone.clone();
-            let ping_id_next = ping_interval_id_clone.clone();
-            let auth_provider_next = auth_provider_rc.clone();
-            let negotiated_ser_inner = negotiated_ser_clone.clone();
-            let negotiated_ser_next = negotiated_ser_clone.clone();
-
-            wasm_bindgen_futures::spawn_local(async move {
-                match reconnect_internal_with_auth(url, auth, cb, disable_compression).await {
-                    Ok(ws) => {
-                        *ws_ref.borrow_mut() = Some(ws.clone());
-                        install_runtime_disconnect_handlers(
-                            &ws,
-                            Rc::clone(&subscription_state),
-                            Rc::clone(&ws_ref),
-                            Rc::clone(&ping_id),
-                            Rc::clone(&on_disconnect),
-                            Rc::clone(&on_error),
-                        );
-                        install_runtime_message_handler(
-                            &ws,
-                            Rc::clone(&subscription_state),
-                            Rc::clone(&on_receive),
-                            Rc::clone(&negotiated_ser_inner),
-                        );
-                        if let Some(cb) = on_connect.borrow().as_ref() {
-                            let _ = cb.call0(&JsValue::NULL);
-                        }
-                        wasm_debug_log!("KalamClient: Reconnection successful");
-                        *reconnect_attempts.borrow_mut() = 0;
-                        install_auto_reconnect_listener(
-                            &ws,
-                            Rc::clone(&connection_options_next),
-                            Rc::clone(&subscription_state),
-                            Rc::clone(&reconnect_attempts_next),
-                            Rc::clone(&is_reconnecting_next),
-                            Rc::clone(&ws_ref_next),
-                            Rc::clone(&ping_id_next),
-                            next_url,
-                            next_auth,
-                            Rc::clone(&auth_provider_next),
-                            Rc::clone(&on_connect),
-                            Rc::clone(&on_disconnect),
-                            Rc::clone(&on_error),
-                            Rc::clone(&on_receive),
-                            Rc::clone(&negotiated_ser_next),
-                        );
-                        resubscribe_all(
-                            ws_ref.clone(),
-                            subscription_state,
-                            negotiated_ser_inner.get(),
-                        )
-                        .await;
-                        reconnect::restart_ping_timer(
-                            &ws_ref,
-                            &conn_opts,
-                            &ping_id,
-                            &negotiated_ser_inner,
-                        );
-                    },
-                    Err(_e) => {
-                        wasm_debug_log!(&format!("KalamClient: Reconnection failed: {:?}", _e));
-                    },
-                }
-                *is_reconnecting.borrow_mut() = false;
-            });
-        }) as Box<dyn FnMut()>);
-
-        super::helpers::global_set_timeout(reconnect_fn.as_ref().unchecked_ref(), delay as i32);
-        reconnect_fn.forget();
     }) as Box<dyn FnMut(CloseEvent)>);
 
     ws.add_event_listener_with_callback("close", onclose_reconnect.as_ref().unchecked_ref())

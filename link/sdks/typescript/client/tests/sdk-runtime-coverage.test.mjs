@@ -24,6 +24,7 @@ function createRuntimeCoverageWasmClient() {
     deleteCalls: [],
     subscribeCalls: [],
     liveSubscribeCalls: [],
+    connectCalls: 0,
     reconnectConfig: {
       autoReconnect: undefined,
       initialDelayMs: undefined,
@@ -41,6 +42,7 @@ function createRuntimeCoverageWasmClient() {
       return connected;
     },
     async connect() {
+      this.connectCalls += 1;
       connected = true;
     },
     async disconnect() {
@@ -357,6 +359,21 @@ test('login refresh and reconnect helpers delegate to wasm client', async () => 
     globalThis.fetch = originalFetch;
     WasmKalamClient.withJwt = originalWithJwt;
   }
+});
+
+test('connect delegates to wasm client and marks the client connected', async () => {
+  const client = createClient({
+    url: 'http://127.0.0.1:8080',
+    authProvider: async () => Auth.jwt('coverage-token'),
+  });
+  const fakeWasmClient = createRuntimeCoverageWasmClient();
+  client.initialized = true;
+  client.wasmClient = fakeWasmClient;
+
+  await client.connect();
+
+  assert.equal(fakeWasmClient.connectCalls, 1);
+  assert.equal(client.isConnected(), true);
 });
 
 test('live uses subscribe fallback when getKey is provided and handles updates/deletes/errors', async () => {

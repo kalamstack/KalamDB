@@ -316,6 +316,9 @@ export async function subscribeToSyncedSqlStudioWorkspaceState(
   username: string,
   onChange: (state: SqlStudioSyncedWorkspaceState | null) => void,
 ): Promise<Unsubscribe> {
+  const initialWorkspace = await loadSyncedSqlStudioWorkspaceState(username);
+  onChange(initialWorkspace);
+
   const rowId = buildWorkspaceRowId(username);
   return subscribeRows<Record<string, unknown>>(
     buildWorkspaceSubscriptionSql(rowId),

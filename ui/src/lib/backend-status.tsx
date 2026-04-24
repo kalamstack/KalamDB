@@ -115,10 +115,25 @@ export function BackendStatusProvider({ children }: { children: ReactNode }) {
       setSocketMessage(event.error.message || "WebSocket disconnected.");
     });
 
+    const reconnectVisibleTab = () => {
+      if (document.visibilityState === "hidden") {
+        return;
+      }
+
+      void ensureSocketConnected();
+    };
+
+    document.addEventListener("visibilitychange", reconnectVisibleTab);
+    window.addEventListener("focus", reconnectVisibleTab);
+    window.addEventListener("pageshow", reconnectVisibleTab);
+
     void ensureSocketConnected();
 
     return () => {
       unsubscribeConnectivity();
+      document.removeEventListener("visibilitychange", reconnectVisibleTab);
+      window.removeEventListener("focus", reconnectVisibleTab);
+      window.removeEventListener("pageshow", reconnectVisibleTab);
     };
   }, [accessToken, ensureSocketConnected, isAuthenticated]);
 

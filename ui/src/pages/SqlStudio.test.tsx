@@ -23,6 +23,7 @@ const mockSetClientSendListener = vi.fn();
 const mockUnsubscribe = vi.fn();
 const mockRemoteUnsubscribe = vi.fn();
 const mockSaveSyncedSqlStudioWorkspaceState = vi.fn();
+const mockLoadSyncedSqlStudioWorkspaceState = vi.fn();
 const mockSubscribeToSyncedSqlStudioWorkspaceState = vi.fn();
 const mockRefetchSchemaTree = vi.fn();
 
@@ -88,6 +89,7 @@ vi.mock("@/services/sqlStudioWorkspaceSyncService", () => ({
       updatedAt: "2026-03-27T00:00:00.000Z",
     };
   },
+  loadSyncedSqlStudioWorkspaceState: (...args: unknown[]) => mockLoadSyncedSqlStudioWorkspaceState(...args),
   saveSyncedSqlStudioWorkspaceState: (...args: unknown[]) => mockSaveSyncedSqlStudioWorkspaceState(...args),
   subscribeToSyncedSqlStudioWorkspaceState: (...args: unknown[]) => mockSubscribeToSyncedSqlStudioWorkspaceState(...args),
 }));
@@ -221,7 +223,7 @@ function createTestStore() {
   });
 }
 
-function renderSqlStudio(store = createTestStore()) {
+async function renderSqlStudio(store = createTestStore()) {
   const view = render(
     <Provider store={store}>
       <MemoryRouter>
@@ -231,6 +233,13 @@ function renderSqlStudio(store = createTestStore()) {
       </MemoryRouter>
     </Provider>,
   );
+
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
   return { store, ...view };
 }
 
@@ -267,6 +276,7 @@ describe("SqlStudio page", () => {
     mockSetClientSendListener.mockReset();
     mockUnsubscribe.mockReset();
     mockRemoteUnsubscribe.mockReset();
+    mockLoadSyncedSqlStudioWorkspaceState.mockReset();
     mockSaveSyncedSqlStudioWorkspaceState.mockReset();
     mockSubscribeToSyncedSqlStudioWorkspaceState.mockReset();
     mockRefetchSchemaTree.mockReset();
@@ -313,6 +323,7 @@ describe("SqlStudio page", () => {
       liveCallback = callback;
       return mockUnsubscribe;
     });
+    mockLoadSyncedSqlStudioWorkspaceState.mockResolvedValue(null);
     mockSaveSyncedSqlStudioWorkspaceState.mockResolvedValue(undefined);
     mockSubscribeToSyncedSqlStudioWorkspaceState.mockImplementation(async (_username: string, callback: (workspace: Record<string, unknown> | null) => void) => {
       syncedWorkspaceCallback = callback;
@@ -350,7 +361,7 @@ describe("SqlStudio page", () => {
       logs: [],
     });
 
-    renderSqlStudio();
+    await renderSqlStudio();
 
     fireEvent.change(getSqlEditor(), {
       target: { value: "SELECT id, name FROM default.events" },
@@ -362,6 +373,23 @@ describe("SqlStudio page", () => {
     });
 
     expect(await screen.findByText("Ada")).toBeTruthy();
+  });
+
+  it("starts with an empty query editor and opens new tabs empty", async () => {
+    const { store } = await renderSqlStudio();
+
+    expect((getSqlEditor() as HTMLTextAreaElement).value).toBe("");
+
+    fireEvent.click(screen.getByTitle("New query tab"));
+
+    await waitFor(() => {
+      const state = store.getState().sqlStudioWorkspace;
+      expect(state.tabs).toHaveLength(2);
+      expect(state.activeTabId).toBe(state.tabs[1]?.id ?? null);
+      expect(state.tabs[1]?.sql).toBe("");
+    });
+
+    expect((getSqlEditor() as HTMLTextAreaElement).value).toBe("");
   });
 
   it("starts with the inspector collapsed and renders table metadata when expanded", async () => {
@@ -401,7 +429,7 @@ describe("SqlStudio page", () => {
       refetch: mockRefetchSchemaTree,
     });
 
-    renderSqlStudio();
+    await renderSqlStudio();
 
     expect(screen.queryByText("Table Information")).toBeNull();
     expect(screen.queryByText("Commit")).toBeNull();
@@ -423,7 +451,7 @@ describe("SqlStudio page", () => {
   });
 
   it("refreshes the Explorer when the refresh button is clicked", async () => {
-    renderSqlStudio();
+    await renderSqlStudio();
 
     fireEvent.click(screen.getByRole("button", { name: /refresh explorer/i }));
 
@@ -433,7 +461,7 @@ describe("SqlStudio page", () => {
   });
 
   it("refetches the Explorer schema after a successful create table query", async () => {
-    renderSqlStudio();
+    await renderSqlStudio();
 
     fireEvent.change(getSqlEditor(), {
       target: { value: "CREATE TABLE default.audit_log (id INT PRIMARY KEY)" },
@@ -461,7 +489,7 @@ describe("SqlStudio page", () => {
       logs: [],
     });
 
-    renderSqlStudio();
+    await renderSqlStudio();
 
     const fullSql = "SELECT id FROM default.events; SELECT name FROM default.events";
     const selectedSql = "SELECT id FROM default.events";
@@ -497,7 +525,7 @@ describe("SqlStudio page", () => {
       logs: [],
     });
 
-    renderSqlStudio();
+    await renderSqlStudio();
 
     const fullSql = "SELECT id FROM default.events; SELECT name FROM default.events";
     const selectedSql = "SELECT name FROM default.events";
@@ -522,8 +550,38 @@ describe("SqlStudio page", () => {
     });
   });
 
+  it("opens a SQL Studio tab with Ctrl/Cmd+T", async () => {
+    const { store } = await renderSqlStudio();
+
+    fireEvent.keyDown(window, { key: "t", ctrlKey: true });
+
+    await waitFor(() => {
+      const state = store.getState().sqlStudioWorkspace;
+      expect(state.tabs).toHaveLength(2);
+      expect(state.activeTabId).toBe(state.tabs[1]?.id ?? null);
+      expect(state.tabs[1]?.sql).toBe("");
+    });
+  });
+
+  it("saves the active query with Ctrl/Cmd+S", async () => {
+    const { store } = await renderSqlStudio();
+
+    fireEvent.change(getSqlEditor(), {
+      target: { value: "SELECT id, name FROM default.events" },
+    });
+
+    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+
+    await waitFor(() => {
+      const state = store.getState().sqlStudioWorkspace;
+      expect(state.savedQueries).toHaveLength(1);
+      expect(state.savedQueries[0]?.sql).toBe("SELECT id, name FROM default.events");
+      expect(state.tabs[0]?.savedQueryId).toBeTruthy();
+    });
+  });
+
   it("starts a live subscription from the SQL Studio page and renders incoming change rows", async () => {
-    renderSqlStudio();
+    await renderSqlStudio();
 
     fireEvent.change(getSqlEditor(), {
       target: { value: "SELECT id, name FROM default.events" },
@@ -561,7 +619,7 @@ describe("SqlStudio page", () => {
   });
 
   it("removes the browser-added limit when live mode is enabled", async () => {
-    renderSqlStudio();
+    await renderSqlStudio();
 
     fireEvent.change(getSqlEditor(), {
       target: { value: "SELECT * FROM default.events LIMIT 100;" },
@@ -582,8 +640,8 @@ describe("SqlStudio page", () => {
     });
   });
 
-  it("keeps manual limit queries unchanged when live mode is enabled", () => {
-    renderSqlStudio();
+  it("keeps manual limit queries unchanged when live mode is enabled", async () => {
+    await renderSqlStudio();
 
     fireEvent.change(getSqlEditor(), {
       target: { value: "SELECT id FROM default.events LIMIT 100;" },
@@ -595,7 +653,7 @@ describe("SqlStudio page", () => {
   });
 
   it("passes the live subscription from option as an exact string checkpoint", async () => {
-    renderSqlStudio();
+    await renderSqlStudio();
 
     fireEvent.change(getSqlEditor(), {
       target: { value: "SELECT id, name FROM default.events" },
@@ -625,7 +683,7 @@ describe("SqlStudio page", () => {
       resolveSubscribe = resolve as (value: () => Promise<void>) => void;
     }));
 
-    renderSqlStudio();
+    await renderSqlStudio();
 
     fireEvent.change(getSqlEditor(), {
       target: { value: "SELECT * FROM dba.favorites LIMIT 100" },
@@ -650,7 +708,7 @@ describe("SqlStudio page", () => {
   });
 
   it("orders live subscription rows by _seq descending, including the initial batch", async () => {
-    renderSqlStudio();
+    await renderSqlStudio();
 
     fireEvent.change(getSqlEditor(), {
       target: { value: "SELECT id, name, _seq FROM default.events" },
@@ -691,7 +749,7 @@ describe("SqlStudio page", () => {
   });
 
   it("appends raw websocket send and receive traces to the log", async () => {
-    const { store } = renderSqlStudio();
+    const { store } = await renderSqlStudio();
 
     fireEvent.change(getSqlEditor(), {
       target: { value: "SELECT id, name FROM default.events" },
@@ -722,7 +780,7 @@ describe("SqlStudio page", () => {
   });
 
   it("marks the live query as errored when the websocket disconnects", async () => {
-    const { store } = renderSqlStudio();
+    const { store } = await renderSqlStudio();
 
     fireEvent.change(getSqlEditor(), {
       target: { value: "SELECT id, name FROM default.events" },
@@ -758,7 +816,7 @@ describe("SqlStudio page", () => {
   });
 
   it("shows a change badge on background subscription tabs and clears it when the tab is opened", async () => {
-    renderSqlStudio();
+    await renderSqlStudio();
 
     fireEvent.change(getSqlEditor(), {
       target: { value: "SELECT id, name FROM default.events" },
@@ -802,7 +860,11 @@ describe("SqlStudio page", () => {
   });
 
   it("hydrates and updates the synced workspace from dba.favorites", async () => {
-    renderSqlStudio();
+    const { store } = await renderSqlStudio();
+
+    await waitFor(() => {
+      expect(mockSubscribeToSyncedSqlStudioWorkspaceState).toHaveBeenCalled();
+    });
 
     await act(async () => {
       syncedWorkspaceCallback?.({
@@ -839,8 +901,12 @@ describe("SqlStudio page", () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByRole("button", { name: /synced query/i })).toBeTruthy();
-    expect(screen.getByText("Favorite Query")).toBeTruthy();
+    await waitFor(() => {
+      const state = store.getState().sqlStudioWorkspace;
+      expect(state.tabs[0]?.title).toBe("Synced Query");
+      expect(state.tabs[0]?.sql).toBe("SELECT * FROM default.events");
+      expect(state.savedQueries[0]?.title).toBe("Favorite Query");
+    });
     
     // Verify it is inside the favorites section
     const favoriteButton = screen.getByText("Favorite Query").closest("button");
@@ -881,11 +947,76 @@ describe("SqlStudio page", () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByRole("button", { name: /synced query updated/i })).toBeTruthy();
+    await waitFor(() => {
+      const state = store.getState().sqlStudioWorkspace;
+      expect(state.tabs[0]?.title).toBe("Synced Query Updated");
+      expect(state.tabs[0]?.sql).toBe("SELECT id FROM default.events");
+      expect(state.savedQueries[0]?.sql).toBe("SELECT id FROM default.events");
+    });
+  });
+
+  it("loads favorites from the database before bootstrapping a blank workspace", async () => {
+    vi.useFakeTimers();
+
+    const workspace = {
+      version: 1,
+      tabs: [
+        {
+          id: "synced-tab",
+          name: "Favorite Query",
+          query: "SELECT * FROM default.events",
+          settings: {
+            isDirty: false,
+            isLive: false,
+            liveStatus: "idle",
+            resultView: "results",
+            lastSavedAt: null,
+            savedQueryId: "saved-1",
+          },
+        },
+      ],
+      savedQueries: [
+        {
+          id: "saved-1",
+          title: "Favorite Query",
+          sql: "SELECT * FROM default.events",
+          lastSavedAt: "2026-03-27T00:00:00.000Z",
+          isLive: false,
+          openedRecently: true,
+          isCurrentTab: true,
+        },
+      ],
+      activeTabId: "synced-tab",
+      updatedAt: "2026-03-27T00:00:00.000Z",
+    };
+
+    mockLoadSyncedSqlStudioWorkspaceState.mockResolvedValue(workspace);
+
+    await renderSqlStudio();
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getAllByRole("button", { name: /favorite query/i }).length).toBeGreaterThan(0);
+
+    expect(screen.queryByRole("button", { name: /untitled query/i })).toBeNull();
+    expect(mockLoadSyncedSqlStudioWorkspaceState).toHaveBeenCalledWith("root");
+    expect(mockLoadSyncedSqlStudioWorkspaceState.mock.invocationCallOrder[0]).toBeLessThan(
+      mockSubscribeToSyncedSqlStudioWorkspaceState.mock.invocationCallOrder[0],
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(800);
+    });
+
+    expect(mockSaveSyncedSqlStudioWorkspaceState).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 
   it("persists favorites through the synced workspace payload", async () => {
-    renderSqlStudio();
+    await renderSqlStudio();
 
     await act(async () => {
       syncedWorkspaceCallback?.(null);
@@ -918,7 +1049,7 @@ describe("SqlStudio page", () => {
 
   it("keeps the current workspace when the page remounts", async () => {
     const store = createTestStore();
-    const firstRender = renderSqlStudio(store);
+    const firstRender = await renderSqlStudio(store);
 
     await act(async () => {
       syncedWorkspaceCallback?.(null);
@@ -935,7 +1066,7 @@ describe("SqlStudio page", () => {
     });
 
     firstRender.unmount();
-    renderSqlStudio(store);
+    await renderSqlStudio(store);
 
     expect(screen.getAllByText("Untitled query").length).toBeGreaterThan(0);
     expect(screen.getByDisplayValue("SELECT id, name FROM default.events")).toBeTruthy();
@@ -944,7 +1075,7 @@ describe("SqlStudio page", () => {
   it("debounces synced workspace writes", async () => {
     vi.useFakeTimers();
 
-    renderSqlStudio();
+    await renderSqlStudio();
 
     await act(async () => {
       syncedWorkspaceCallback?.(null);

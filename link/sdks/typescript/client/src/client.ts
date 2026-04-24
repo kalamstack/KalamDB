@@ -402,6 +402,16 @@ export class KalamDBClient {
     }
   }
 
+  /**
+   * Explicitly establish or restore the shared WebSocket connection.
+   *
+   * This preserves any stored subscription state in the underlying WASM
+   * client, so reconnecting an existing instance can resume live queries.
+   */
+  async connect(): Promise<void> {
+    await this.connectInternal();
+  }
+
   /** Disconnect and clean up all subscriptions */
   async disconnect(): Promise<void> {
     this.log(LogLevel.Info, 'connection', 'Disconnecting...');

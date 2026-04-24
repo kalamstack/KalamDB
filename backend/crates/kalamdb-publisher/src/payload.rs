@@ -21,13 +21,11 @@ use kalamdb_system::providers::topics::TopicRoute;
 pub(crate) struct PreparedRow {
     /// Pre-serialized payload bytes for Key mode.
     key_payload: Vec<u8>,
+    /// Cached JSON map for primary-key extraction without reserializing the row.
+    json_map: std::collections::HashMap<String, KalamCellValue>,
     /// Pre-serialized payload bytes for Full/Diff mode (with `_table` already injected).
     /// Only `Some` when `from_row_with_table` is used.
     full_payload: Option<Vec<u8>>,
-    /// Cached JSON string for key/hash operations.
-    json_string: String,
-    /// Whether the row was empty (no values).
-    is_empty: bool,
     /// Pre-computed hash for partition selection.
     partition_hash: u64,
 }
@@ -37,23 +35,14 @@ impl PreparedRow {
     pub fn from_row(row: &Row) -> Result<Self> {
         let json_map = row_to_json_map(row)
             .map_err(|e| CommonError::Internal(format!("Failed to convert row to JSON: {}", e)))?;
-        let is_empty = json_map.is_empty();
         let key_payload = serde_json::to_vec(&json_map)
             .map_err(|e| CommonError::Internal(format!("Failed to serialize keys: {}", e)))?;
         // SAFETY: serde_json::to_vec() always produces valid UTF-8 JSON bytes.
-        let json_string = unsafe { String::from_utf8_unchecked(key_payload.clone()) };
-        let partition_hash = {
-            use std::collections::hash_map::DefaultHasher;
-            use std::hash::{Hash, Hasher};
-            let mut hasher = DefaultHasher::new();
-            json_string.hash(&mut hasher);
-            hasher.finish()
-        };
+        let partition_hash = hash_key(unsafe { std::str::from_utf8_unchecked(&key_payload) });
         Ok(Self {
             key_payload,
+            json_map,
             full_payload: None,
-            json_string,
-            is_empty,
             partition_hash,
         })
     }
@@ -65,27 +54,19 @@ impl PreparedRow {
     pub fn from_row_with_table(row: &Row, table_id: &TableId) -> Result<Self> {
         let mut json_map = row_to_json_map(row)
             .map_err(|e| CommonError::Internal(format!("Failed to convert row to JSON: {}", e)))?;
-        let is_empty = json_map.is_empty();
         let key_payload = serde_json::to_vec(&json_map)
             .map_err(|e| CommonError::Internal(format!("Failed to serialize keys: {}", e)))?;
         // SAFETY: serde_json::to_vec() always produces valid UTF-8 JSON bytes.
-        let json_string = unsafe { String::from_utf8_unchecked(key_payload.clone()) };
-        let partition_hash = {
-            use std::collections::hash_map::DefaultHasher;
-            use std::hash::{Hash, Hasher};
-            let mut hasher = DefaultHasher::new();
-            json_string.hash(&mut hasher);
-            hasher.finish()
-        };
+        let partition_hash = hash_key(unsafe { std::str::from_utf8_unchecked(&key_payload) });
         // Pre-insert _table and serialize for Full/Diff payloads.
         json_map.insert("_table".to_string(), KalamCellValue::text(table_id.to_string()));
         let full_payload = serde_json::to_vec(&json_map)
             .map_err(|e| CommonError::Internal(format!("Failed to serialize row: {}", e)))?;
+        json_map.remove("_table");
         Ok(Self {
             key_payload,
+            json_map,
             full_payload: Some(full_payload),
-            json_string,
-            is_empty,
             partition_hash,
         })
     }
@@ -119,14 +100,10 @@ impl PreparedRow {
         }
     }
 
-    /// Extract a message key from the pre-computed JSON.
+    /// Extract a message key from the cached primary-key columns.
     #[inline]
-    pub fn extract_key(&self) -> Option<String> {
-        if self.is_empty {
-            None
-        } else {
-            Some(self.json_string.clone())
-        }
+    pub fn extract_key(&self, primary_key_columns: &[String]) -> Result<Option<String>> {
+        extract_primary_key(&self.json_map, primary_key_columns)
     }
 
     /// Hash the row for consistent partition selection using the cached hash.
@@ -151,36 +128,26 @@ pub(crate) fn extract_payload(
     }
 }
 
-/// Extract a message key from a Row (for keyed/partitioned topics).
-pub(crate) fn extract_key(row: &Row) -> Result<Option<String>> {
-    // TODO: Add partition_key_expr support
-    if row.values.is_empty() {
-        return Ok(None);
-    }
-
+/// Extract a message key from a Row using the table primary key columns.
+pub(crate) fn extract_key(row: &Row, primary_key_columns: &[String]) -> Result<Option<String>> {
     let json_map = row_to_json_map(row)
         .map_err(|e| CommonError::Internal(format!("Failed to convert row to JSON: {}", e)))?;
 
-    let json_str = serde_json::to_string(&json_map)
-        .map_err(|e| CommonError::Internal(format!("Failed to serialize key: {}", e)))?;
-
-    Ok(Some(json_str))
+    extract_primary_key(&json_map, primary_key_columns)
 }
 
 /// Hash a row for consistent partition selection.
 pub(crate) fn hash_row(row: &Row) -> u64 {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-
     // Hash the JSON representation for consistency
     if let Ok(json_map) = row_to_json_map(row) {
         if let Ok(json_str) = serde_json::to_string(&json_map) {
-            json_str.hash(&mut hasher);
-            return hasher.finish();
+            return hash_key(&json_str);
         }
     }
+
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
 
     // Fallback: hash column names only
     for key in row.values.keys() {
@@ -190,7 +157,50 @@ pub(crate) fn hash_row(row: &Row) -> u64 {
     hasher.finish()
 }
 
+/// Hash a serialized topic key using the same stable hash as partition selection.
+pub(crate) fn hash_key(key: &str) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    key.hash(&mut hasher);
+    hasher.finish()
+}
+
 // ---- Internal helpers ----
+
+fn extract_primary_key(
+    json_map: &std::collections::HashMap<String, KalamCellValue>,
+    primary_key_columns: &[String],
+) -> Result<Option<String>> {
+    if primary_key_columns.is_empty() {
+        return Ok(None);
+    }
+
+    if primary_key_columns.len() == 1 {
+        let column = &primary_key_columns[0];
+        let value = json_map.get(column).ok_or_else(|| {
+            CommonError::InvalidInput(format!("Row missing primary key column '{}'", column))
+        })?;
+
+        return Ok(Some(match value.as_str() {
+            Some(text) => text.to_string(),
+            None => value.to_string(),
+        }));
+    }
+
+    let mut key_map = std::collections::BTreeMap::new();
+    for column in primary_key_columns {
+        let value = json_map.get(column).ok_or_else(|| {
+            CommonError::InvalidInput(format!("Row missing primary key column '{}'", column))
+        })?;
+        key_map.insert(column.as_str(), value);
+    }
+
+    serde_json::to_string(&key_map)
+        .map(Some)
+        .map_err(|e| CommonError::Internal(format!("Failed to serialize key: {}", e)))
+}
 
 fn extract_key_columns(row: &Row) -> Result<Vec<u8>> {
     if row.values.is_empty() {
