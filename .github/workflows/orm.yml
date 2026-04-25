@@ -25,13 +25,36 @@ jobs:
           KALAMDB_JWT_SECRET: "ci-test-secret-at-least-32-chars-long"
           KALAMDB_ALLOW_REMOTE_SETUP: "true"
 
+    env:
+      RUST_VERSION: "1.92.0"
+      WASM_PACK_VERSION: "0.14.0"
+
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: orm-client-build
+          cache-on-failure: true
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version "$WASM_PACK_VERSION" --locked
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+
+      - name: Build @kalamdb/client from source
+        working-directory: link/sdks/typescript/client
+        run: npm install && npm run build
 
       - name: Wait for KalamDB
         run: |
@@ -60,7 +83,7 @@ jobs:
 
       - name: Run unit tests
         working-directory: link/sdks/typescript/orm
-        run: node --test tests/file-column.test.mjs tests/strip-defaults.test.mjs
+        run: node --test tests/file-column.test.mjs tests/strip-defaults.test.mjs tests/temporal-normalize.test.mjs
 
       - name: Run integration tests
         working-directory: link/sdks/typescript/orm
