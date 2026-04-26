@@ -1,15 +1,19 @@
 //! Typed handler for RESTORE DATABASE statement
 
+use std::sync::Arc;
+
 use kalamdb_commons::JobId;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
-use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
-use kalamdb_jobs::executors::restore::RestoreParams;
-use kalamdb_jobs::AppContextJobsExt;
+use kalamdb_core::{
+    app_context::AppContext,
+    error::KalamDbError,
+    sql::{
+        context::{ExecutionContext, ExecutionResult, ScalarValue},
+        executor::handlers::TypedStatementHandler,
+    },
+};
+use kalamdb_jobs::{executors::restore::RestoreParams, AppContextJobsExt};
 use kalamdb_sql::ddl::RestoreDatabaseStatement;
 use kalamdb_system::JobType;
-use std::sync::Arc;
 
 /// Handler for RESTORE DATABASE FROM '<path>'
 pub struct RestoreDatabaseHandler {
@@ -61,7 +65,8 @@ impl TypedStatementHandler<RestoreDatabaseStatement> for RestoreDatabaseHandler 
 
         Ok(ExecutionResult::Success {
             message: format!(
-                "Database restore started from '{}'. Job ID: {}. Server restart required after completion.",
+                "Database restore started from '{}'. Job ID: {}. Server restart required after \
+                 completion.",
                 statement.backup_path,
                 job_id.as_str()
             ),

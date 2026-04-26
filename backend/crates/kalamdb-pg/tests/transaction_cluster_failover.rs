@@ -3,12 +3,10 @@ mod support;
 use std::collections::BTreeMap;
 
 use datafusion_common::ScalarValue;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::NodeId;
+use kalamdb_commons::models::{rows::Row, NodeId};
 use kalamdb_core::transactions::TransactionRaftBinding;
 use kalamdb_pg::{InsertRpcRequest, PgService, RollbackTransactionRequest};
 use ntest::timeout;
-
 use support::{
     await_shared_leader, begin_transaction, new_cluster_service_with_tables, open_session,
     parse_transaction_id, request, scan_shared_rows,

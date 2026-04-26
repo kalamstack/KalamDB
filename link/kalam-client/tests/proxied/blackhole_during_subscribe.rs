@@ -1,8 +1,10 @@
+use std::time::Duration;
+
+use kalam_client::SubscriptionConfig;
+use tokio::time::timeout;
+
 use super::helpers::*;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
-use kalam_client::SubscriptionConfig;
-use std::time::Duration;
-use tokio::time::timeout;
 
 /// Blackhole the proxy right as the client sends its subscribe request.
 /// The TCP socket stays open but no data flows. The client should detect a

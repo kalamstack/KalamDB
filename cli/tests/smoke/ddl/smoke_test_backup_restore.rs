@@ -1,22 +1,22 @@
 //! Smoke tests for BACKUP DATABASE / RESTORE DATABASE SQL commands.
 //!
 //! ## What is tested
-//! - `BACKUP DATABASE TO '<path>'` creates a job that completes and writes the expected
-//!   backup directory layout (`rocksdb/`, `storage/`, `snapshots/`, `streams/`).
+//! - `BACKUP DATABASE TO '<path>'` creates a job that completes and writes the expected backup
+//!   directory layout (`rocksdb/`, `storage/`, `snapshots/`, `streams/`).
 //! - `RESTORE DATABASE FROM '<path>'` creates a restore job that reaches a terminal state.
 //! - Non-DBA users receive an authorization error when attempting either command.
-//! - `RESTORE DATABASE FROM '<non-existent-path>'` returns a clear error immediately
-//!   (no job created).
+//! - `RESTORE DATABASE FROM '<non-existent-path>'` returns a clear error immediately (no job
+//!   created).
 //!
 //! ## Notes
-//! - Backup/restore paths must be reachable on the **server's** filesystem.
-//!   For the auto-started test server this is the local machine's temp directory.
-//! - Restore requires a server restart to reload data — these tests verify only
-//!   that the restore job itself completes, not post-restart data consistency.
+//! - Backup/restore paths must be reachable on the **server's** filesystem. For the auto-started
+//!   test server this is the local machine's temp directory.
+//! - Restore requires a server restart to reload data — these tests verify only that the restore
+//!   job itself completes, not post-restart data consistency.
+
+use std::{path::PathBuf, time::Duration};
 
 use crate::common::*;
-use std::path::PathBuf;
-use std::time::Duration;
 
 /// Timeout for a backup job (RocksDB BackupEngine + file copies can be slow).
 const BACKUP_JOB_TIMEOUT: Duration = Duration::from_secs(120);

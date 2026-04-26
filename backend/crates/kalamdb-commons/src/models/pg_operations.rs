@@ -6,9 +6,10 @@
 #[cfg(feature = "arrow")]
 use arrow::record_batch::RecordBatch;
 
-use crate::models::rows::Row;
-use crate::models::UserId;
-use crate::{TableId, TableType};
+use crate::{
+    models::{rows::Row, UserId},
+    TableId, TableType,
+};
 
 /// Domain-typed scan request.
 pub struct ScanRequest {

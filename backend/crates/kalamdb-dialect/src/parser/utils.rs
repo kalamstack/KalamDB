@@ -4,17 +4,20 @@
 //! custom parsers (CREATE STORAGE, STORAGE FLUSH, KILL JOB, etc.).
 
 use core::ops::ControlFlow;
+
 use kalamdb_commons::TableId;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use sqlparser::ast::{
-    BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgumentList,
-    FunctionArguments, Ident, ObjectName, ObjectNamePart, Statement, TableFactor, TableObject,
-    VisitMut, VisitorMut,
+use sqlparser::{
+    ast::{
+        BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgumentList,
+        FunctionArguments, Ident, ObjectName, ObjectNamePart, Statement, TableFactor, TableObject,
+        VisitMut, VisitorMut,
+    },
+    dialect::Dialect,
+    parser::{Parser, ParserError, ParserOptions},
+    tokenizer::{Span, Token},
 };
-use sqlparser::dialect::Dialect;
-use sqlparser::parser::{Parser, ParserError, ParserOptions};
-use sqlparser::tokenizer::{Span, Token};
 
 use crate::dialect::KalamDbDialect;
 
@@ -112,11 +115,7 @@ fn rewrite_json_operators_for_datafusion(sql: &str) -> String {
 }
 
 fn statements_to_sql(statements: &[Statement]) -> String {
-    statements
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join("; ")
+    statements.iter().map(ToString::to_string).collect::<Vec<_>>().join("; ")
 }
 
 struct JsonOperatorRewriter;
@@ -144,10 +143,7 @@ fn rewrite_json_expr(expr: &Expr) -> Option<Expr> {
         _ => return None,
     };
 
-    Some(make_function_call(
-        function_name,
-        vec![(**left).clone(), (**right).clone()],
-    ))
+    Some(make_function_call(function_name, vec![(**left).clone(), (**right).clone()]))
 }
 
 fn make_function_call(name: &str, args: Vec<Expr>) -> Expr {
@@ -610,8 +606,9 @@ fn find_whole_word(haystack: &str, needle: &str) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use sqlparser::dialect::GenericDialect;
+
+    use super::*;
 
     #[test]
     fn test_normalize_sql() {
@@ -734,10 +731,7 @@ mod tests {
             "SELECT CURRENT_USER(), CURRENT_USER_ID(), CURRENT_ROLE()",
         );
         // CURRENT_USER_ID() is an alias for CURRENT_USER() (both return user id).
-        assert_eq!(
-            rewritten,
-            "SELECT KDB_CURRENT_USER(), KDB_CURRENT_USER(), KDB_CURRENT_ROLE()"
-        );
+        assert_eq!(rewritten, "SELECT KDB_CURRENT_USER(), KDB_CURRENT_USER(), KDB_CURRENT_ROLE()");
     }
 
     #[test]
@@ -750,35 +744,23 @@ mod tests {
 
     #[test]
     fn test_rewrite_json_arrow_operator_for_datafusion() {
-        let rewritten = rewrite_context_functions_for_datafusion(
-            "SELECT doc->'profile' AS profile FROM docs",
-        );
-        assert_eq!(
-            rewritten,
-            "SELECT json_get_json(doc, 'profile') AS profile FROM docs"
-        );
+        let rewritten =
+            rewrite_context_functions_for_datafusion("SELECT doc->'profile' AS profile FROM docs");
+        assert_eq!(rewritten, "SELECT json_get_json(doc, 'profile') AS profile FROM docs");
     }
 
     #[test]
     fn test_rewrite_json_long_arrow_operator_for_datafusion() {
-        let rewritten = rewrite_context_functions_for_datafusion(
-            "SELECT doc->>'name' AS name FROM docs",
-        );
-        assert_eq!(
-            rewritten,
-            "SELECT json_as_text(doc, 'name') AS name FROM docs"
-        );
+        let rewritten =
+            rewrite_context_functions_for_datafusion("SELECT doc->>'name' AS name FROM docs");
+        assert_eq!(rewritten, "SELECT json_as_text(doc, 'name') AS name FROM docs");
     }
 
     #[test]
     fn test_rewrite_json_question_operator_for_datafusion() {
-        let rewritten = rewrite_context_functions_for_datafusion(
-            "SELECT doc ? 'customer_id' FROM docs",
-        );
-        assert_eq!(
-            rewritten,
-            "SELECT json_contains(doc, 'customer_id') FROM docs"
-        );
+        let rewritten =
+            rewrite_context_functions_for_datafusion("SELECT doc ? 'customer_id' FROM docs");
+        assert_eq!(rewritten, "SELECT json_contains(doc, 'customer_id') FROM docs");
     }
 
     #[test]
@@ -788,7 +770,8 @@ mod tests {
         );
         assert_eq!(
             rewritten,
-            "SELECT json_as_text(json_get_json(json_get_json(doc, 'user'), 'address'), 'zip') AS zip FROM docs"
+            "SELECT json_as_text(json_get_json(json_get_json(doc, 'user'), 'address'), 'zip') AS \
+             zip FROM docs"
         );
     }
 
@@ -799,7 +782,8 @@ mod tests {
         );
         assert_eq!(
             rewritten,
-            "SELECT json_as_text(doc, 'priority') AS p FROM docs WHERE json_as_text(doc, 'status') = 'active'"
+            "SELECT json_as_text(doc, 'priority') AS p FROM docs WHERE json_as_text(doc, \
+             'status') = 'active'"
         );
     }
 }

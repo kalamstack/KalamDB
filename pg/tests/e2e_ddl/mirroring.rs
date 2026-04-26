@@ -65,7 +65,8 @@ async fn e2e_ddl_create_table_mirrors_columns_identically() {
         kalam_columns.iter().all(|name| {
             pg_columns.contains(name) || name == "_userid" || name == "_seq" || name == "_deleted"
         }),
-        "KalamDB should only add known internal columns beyond the PostgreSQL schema: {kalam_columns:?}"
+        "KalamDB should only add known internal columns beyond the PostgreSQL schema: \
+         {kalam_columns:?}"
     );
 
     pg.batch_execute(&format!("DROP FOREIGN TABLE IF EXISTS {ns}.{table};"))
@@ -97,10 +98,8 @@ async fn e2e_ddl_preserves_primary_key_not_null_and_defaults() {
 
     let columns = env
         .kalamdb_sql(&format!(
-            "SELECT column_name, default_value, nullable, primary_key \
-             FROM system.columns \
-             WHERE namespace_id = '{ns}' AND table_name = '{table}' \
-             ORDER BY ordinal"
+            "SELECT column_name, default_value, nullable, primary_key FROM system.columns WHERE \
+             namespace_id = '{ns}' AND table_name = '{table}' ORDER BY ordinal"
         ))
         .await;
     let rows = columns["results"]

@@ -1,16 +1,18 @@
-use crate::permissions::{check_system_table_access, session_error_to_datafusion};
+use std::{any::Any, fmt::Debug, sync::Arc};
+
 use arrow::datatypes::SchemaRef;
 use async_trait::async_trait;
-use datafusion::catalog::Session;
-use datafusion::datasource::{TableProvider, TableType};
-use datafusion::error::Result as DataFusionResult;
-use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
-use datafusion::physical_plan::ExecutionPlan;
+use datafusion::{
+    catalog::Session,
+    datasource::{TableProvider, TableType},
+    error::Result as DataFusionResult,
+    logical_expr::{Expr, TableProviderFilterPushDown},
+    physical_plan::ExecutionPlan,
+};
 use kalamdb_commons::models::TableId;
-use std::any::Any;
-use std::fmt::Debug;
-use std::sync::Arc;
 use tracing::Instrument;
+
+use crate::permissions::{check_system_table_access, session_error_to_datafusion};
 
 pub struct SecuredSystemTableProvider {
     inner: Arc<dyn TableProvider>,
@@ -96,11 +98,14 @@ pub fn secure_provider(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use arrow::array::StringArray;
-    use arrow::datatypes::{DataType, Field, Schema};
+    use arrow::{
+        array::StringArray,
+        datatypes::{DataType, Field, Schema},
+    };
     use datafusion::datasource::MemTable;
     use kalamdb_commons::{NamespaceId, TableName};
+
+    use super::*;
 
     fn create_mock_provider() -> Arc<dyn TableProvider> {
         let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Utf8, false)]));

@@ -45,15 +45,14 @@ pub mod executor;
 pub mod raft;
 
 // Re-exports
+use std::sync::Arc;
+
 pub use applier::{RaftApplier, UnifiedApplier};
 pub use command::{CommandResult, CommandType, Validate};
 pub use error::ApplierError;
 pub use executor::CommandExecutorImpl;
-
 // Re-export Raft appliers
 pub use raft::{ProviderMetaApplier, ProviderSharedDataApplier, ProviderUserDataApplier};
-
-use std::sync::Arc;
 
 use crate::app_context::AppContext;
 

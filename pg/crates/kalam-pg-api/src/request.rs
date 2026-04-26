@@ -1,8 +1,10 @@
-use crate::filter::ScanFilter;
-use crate::session::{RemoteSessionContext, TenantContext};
 use kalam_pg_common::KalamPgError;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::{TableId, TableType};
+use kalamdb_commons::{models::rows::Row, TableId, TableType};
+
+use crate::{
+    filter::ScanFilter,
+    session::{RemoteSessionContext, TenantContext},
+};
 
 fn validate_write_scope(
     table_type: TableType,

@@ -3,8 +3,10 @@ use kalam_client::models::{QueryResult, ResponseStatus};
 use kalamdb_raft::GroupId;
 use tokio::time::{sleep, Duration, Instant};
 
-use super::test_support::cluster::ClusterTestServer;
-use super::test_support::consolidated_helpers::{get_count_value, unique_namespace};
+use super::test_support::{
+    cluster::ClusterTestServer,
+    consolidated_helpers::{get_count_value, unique_namespace},
+};
 
 fn result_i64(result: &QueryResult, column: &str) -> Result<i64> {
     let row = result
@@ -118,7 +120,8 @@ async fn test_sql_transaction_forwarded_from_follower_preserves_atomic_staging()
 
     let create_table = meta_leader
         .execute_sql(&format!(
-            "CREATE TABLE {}.items (id BIGINT PRIMARY KEY, name TEXT) WITH (TYPE='SHARED', STORAGE_ID='local')",
+            "CREATE TABLE {}.items (id BIGINT PRIMARY KEY, name TEXT) WITH (TYPE='SHARED', \
+             STORAGE_ID='local')",
             namespace
         ))
         .await?;
@@ -131,12 +134,10 @@ async fn test_sql_transaction_forwarded_from_follower_preserves_atomic_staging()
     wait_for_table_visible(shared_leader, &namespace).await?;
 
     let batch = format!(
-        "/* strict */ BEGIN; \
-         INSERT INTO {}.items (id, name) VALUES (4101, 'alpha'); \
-         INSERT INTO {}.items (id, name) VALUES (4102, 'beta'); \
-         SELECT COUNT(*) AS visible_rows FROM {}.items; \
-         SELECT write_count AS staged_writes, touched_tables_count AS staged_tables FROM system.transactions WHERE origin = 'SqlBatch'; \
-         COMMIT;",
+        "/* strict */ BEGIN; INSERT INTO {}.items (id, name) VALUES (4101, 'alpha'); INSERT INTO \
+         {}.items (id, name) VALUES (4102, 'beta'); SELECT COUNT(*) AS visible_rows FROM \
+         {}.items; SELECT write_count AS staged_writes, touched_tables_count AS staged_tables \
+         FROM system.transactions WHERE origin = 'SqlBatch'; COMMIT;",
         namespace, namespace, namespace
     );
 

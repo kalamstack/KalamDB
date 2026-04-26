@@ -5,24 +5,26 @@
 //! Provides a simplified view of table metadata similar to information_schema.tables.
 //! This replaces the persisted system.tables (now renamed to system.schemas).
 //!
-//! **Schema**: namespace_id, table_name, table_type, storage_id, version, options, comment, updated, created
+//! **Schema**: namespace_id, table_name, table_type, storage_id, version, options, comment,
+//! updated, created
 //!
 //! **DataFusion Pattern**: Implements VirtualView trait for consistent view behavior
 
-use crate::error::RegistryError;
-use crate::view_base::VirtualView;
-use datafusion::arrow::array::{
-    ArrayRef, Int64Builder, StringBuilder, TimestampMicrosecondBuilder,
-};
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::RecordBatch;
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::schemas::{
-    ColumnDefault, ColumnDefinition, TableDefinition, TableOptions, TableType,
-};
-use kalamdb_commons::{NamespaceId, SystemTable, TableName};
-use kalamdb_system::SystemTablesRegistry;
 use std::sync::{Arc, OnceLock};
+
+use datafusion::arrow::{
+    array::{ArrayRef, Int64Builder, StringBuilder, TimestampMicrosecondBuilder},
+    datatypes::SchemaRef,
+    record_batch::RecordBatch,
+};
+use kalamdb_commons::{
+    datatypes::KalamDataType,
+    schemas::{ColumnDefault, ColumnDefinition, TableDefinition, TableOptions, TableType},
+    NamespaceId, SystemTable, TableName,
+};
+use kalamdb_system::SystemTablesRegistry;
+
+use crate::{error::RegistryError, view_base::VirtualView};
 
 /// Get the tables view schema (memoized)
 fn tables_schema() -> SchemaRef {

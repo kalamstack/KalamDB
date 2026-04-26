@@ -9,12 +9,13 @@
 //! - [x] Cold artifacts are valid
 //! - [x] Data not duplicated
 
-use super::helpers::*;
+use std::time::Duration;
 
 use kalam_client::models::ResponseStatus;
 use kalamdb_commons::Role;
-use std::time::Duration;
 use tokio::time::sleep;
+
+use super::helpers::*;
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -79,8 +80,11 @@ async fn test_scenario_06_jobs_lifecycle() -> anyhow::Result<()> {
     sleep(Duration::from_millis(500)).await;
 
     let resp = server
-                .execute_sql("SELECT job_id, job_type, status, parameters FROM system.jobs WHERE job_type = 'flush' ORDER BY created_at DESC LIMIT 5")
-                .await?;
+        .execute_sql(
+            "SELECT job_id, job_type, status, parameters FROM system.jobs WHERE job_type = \
+             'flush' ORDER BY created_at DESC LIMIT 5",
+        )
+        .await?;
 
     if resp.status == ResponseStatus::Success {
         let rows = get_rows(&resp);
@@ -268,11 +272,12 @@ async fn test_scenario_06_job_status_transitions() -> anyhow::Result<()> {
 
     while tokio::time::Instant::now() < deadline {
         let resp = server
-                    .execute_sql(&format!(
-                        "SELECT status FROM system.jobs WHERE job_type = 'flush' AND parameters LIKE '%{}%' ORDER BY created_at DESC LIMIT 1",
-                        ns
-                    ))
-                    .await?;
+            .execute_sql(&format!(
+                "SELECT status FROM system.jobs WHERE job_type = 'flush' AND parameters LIKE \
+                 '%{}%' ORDER BY created_at DESC LIMIT 1",
+                ns
+            ))
+            .await?;
 
         if resp.status == ResponseStatus::Success {
             if let Some(row) = get_rows(&resp).first() {

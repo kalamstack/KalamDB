@@ -12,19 +12,20 @@
 //!
 //! **Schema**: TableDefinition provides consistent metadata for views
 
-use crate::error::RegistryError;
-use crate::view_base::VirtualView;
-use datafusion::arrow::array::{
-    ArrayRef, BooleanArray, Int32Array, Int64Array, RecordBatch, StringBuilder,
-};
-use datafusion::arrow::datatypes::SchemaRef;
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::schemas::{
-    ColumnDefault, ColumnDefinition, TableDefinition, TableOptions, TableType,
-};
-use kalamdb_commons::{NamespaceId, TableId, TableName};
-use kalamdb_system::SystemTable;
 use std::sync::{Arc, OnceLock};
+
+use datafusion::arrow::{
+    array::{ArrayRef, BooleanArray, Int32Array, Int64Array, RecordBatch, StringBuilder},
+    datatypes::SchemaRef,
+};
+use kalamdb_commons::{
+    datatypes::KalamDataType,
+    schemas::{ColumnDefault, ColumnDefinition, TableDefinition, TableOptions, TableType},
+    NamespaceId, TableId, TableName,
+};
+use kalamdb_system::SystemTable;
+
+use crate::{error::RegistryError, view_base::VirtualView};
 
 /// Get the describe schema (memoized)
 fn describe_schema() -> SchemaRef {

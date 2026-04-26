@@ -3,9 +3,10 @@
 //! This test executes the SQL script from test_stream_ttl.sql to validate
 //! that stream tables with TTL properly evict old events.
 
-use super::test_support::consolidated_helpers::unique_namespace;
 use kalam_client::models::ResponseStatus;
 use tokio::time::{sleep, Duration};
+
+use super::test_support::consolidated_helpers::unique_namespace;
 
 /// Test stream table TTL eviction using the SQL script approach
 #[tokio::test]

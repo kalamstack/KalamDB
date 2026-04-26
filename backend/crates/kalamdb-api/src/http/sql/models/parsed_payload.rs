@@ -1,9 +1,10 @@
 //! Parsed SQL payload models
 
+use std::collections::HashMap;
+
 use bytes::Bytes;
 use kalamdb_commons::models::NamespaceId;
 use serde_json::Value as JsonValue;
-use std::collections::HashMap;
 
 use super::ErrorCode;
 

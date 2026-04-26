@@ -6,9 +6,12 @@
 //! - ALTER TOPIC ADD SOURCE: Add a table route to a topic
 //! - CONSUME FROM: Consume messages from a topic
 
-use crate::parser::utils::{extract_identifier, extract_keyword_value, normalize_sql};
-use crate::DdlAst;
 use kalamdb_commons::models::{PayloadMode, TableId, TopicOp};
+
+use crate::{
+    parser::utils::{extract_identifier, extract_keyword_value, normalize_sql},
+    DdlAst,
+};
 
 /// CREATE TOPIC statement
 ///
@@ -334,7 +337,7 @@ pub fn parse_ack(sql: &str) -> Result<AckStatement, String> {
 
 // Helper functions
 
-//TODO: We aready have a method inside tableId for this. Refactor to use that.
+// TODO: We aready have a method inside tableId for this. Refactor to use that.
 fn parse_table_id(table_str: &str) -> Result<TableId, String> {
     // Support both "table" and "namespace.table" formats
     if table_str.contains('.') {

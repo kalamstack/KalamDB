@@ -1,5 +1,4 @@
-use std::io::Cursor;
-use std::time::Duration;
+use std::{io::Cursor, time::Duration};
 
 use arrow::record_batch::RecordBatch;
 use arrow_ipc::reader::StreamReader;
@@ -13,8 +12,10 @@ use kalamdb_pg::{
 };
 #[cfg(feature = "tls")]
 use tonic::transport::{Certificate, ClientTlsConfig, Identity};
-use tonic::transport::{Channel, Endpoint};
-use tonic::Request;
+use tonic::{
+    transport::{Channel, Endpoint},
+    Request,
+};
 
 /// Load PEM material from either an inline PEM string or a file path.
 fn load_pem(value: &str) -> Result<Vec<u8>, String> {
@@ -31,14 +32,12 @@ fn build_basic_auth_metadata(
     password: &str,
 ) -> Result<tonic::metadata::MetadataValue<tonic::metadata::Ascii>, KalamPgError> {
     use base64::Engine;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", user, password));
+    let encoded =
+        base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", user, password));
     format!("Basic {}", encoded)
         .parse::<tonic::metadata::MetadataValue<_>>()
         .map_err(|error| {
-            KalamPgError::Validation(format!(
-                "failed to build Basic auth metadata: {}",
-                error
-            ))
+            KalamPgError::Validation(format!("failed to build Basic auth metadata: {}", error))
         })
 }
 
@@ -204,8 +203,8 @@ impl RemoteKalamClient {
             KalamPgError::ServerUnreachable(server_addr.to_string())
         } else if detail.contains("timed out") || detail.contains("deadline") {
             KalamPgError::Execution(format!(
-                "connection to KalamDB server at {server_addr} timed out – \
-                 check the server is running and the port is correct"
+                "connection to KalamDB server at {server_addr} timed out – check the server is \
+                 running and the port is correct"
             ))
         } else if detail.contains("certificate") || detail.contains("tls") || detail.contains("TLS")
         {
@@ -242,7 +241,8 @@ impl RemoteKalamClient {
                 KalamPgError::Execution(format!("not found: {msg}"))
             },
             Code::Unauthenticated => KalamPgError::Execution(
-                "authentication failed – check auth_mode, auth_header, or account_login credentials in CREATE SERVER OPTIONS"
+                "authentication failed – check auth_mode, auth_header, or account_login \
+                 credentials in CREATE SERVER OPTIONS"
                     .to_string(),
             ),
             Code::PermissionDenied => {
@@ -624,12 +624,14 @@ impl RemoteKalamClient {
 
     /// Serialize Arrow RecordBatches into a Vec of JSON object strings (one per row).
     fn batches_to_json_rows(batches: &[RecordBatch]) -> Vec<String> {
-        use arrow::array::{
-            Array, BooleanArray, Float32Array, Float64Array, Int16Array, Int32Array, Int64Array,
-            Int8Array, LargeStringArray, StringArray, UInt16Array, UInt32Array, UInt64Array,
-            UInt8Array,
+        use arrow::{
+            array::{
+                Array, BooleanArray, Float32Array, Float64Array, Int16Array, Int32Array,
+                Int64Array, Int8Array, LargeStringArray, StringArray, UInt16Array, UInt32Array,
+                UInt64Array, UInt8Array,
+            },
+            datatypes::DataType,
         };
-        use arrow::datatypes::DataType;
 
         let mut rows = Vec::new();
         for batch in batches {

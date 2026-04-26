@@ -1,7 +1,8 @@
-use crate::args::Cli;
-use crate::connect::create_session;
-use kalam_cli::{CLIConfiguration, FileCredentialStore, Result};
 use std::time::Duration;
+
+use kalam_cli::{CLIConfiguration, FileCredentialStore, Result};
+
+use crate::{args::Cli, connect::create_session};
 
 fn print_list_subscriptions() {
     println!("Subscription management:");

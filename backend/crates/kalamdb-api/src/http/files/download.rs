@@ -1,14 +1,13 @@
 //! File download handler
 
+use std::sync::Arc;
+
 use actix_web::{get, web, HttpResponse, Responder};
 use kalamdb_auth::AuthSessionExtractor;
-use kalamdb_commons::models::TableId;
-use kalamdb_commons::schemas::TableType;
-use kalamdb_commons::TableAccess;
+use kalamdb_commons::{models::TableId, schemas::TableType, TableAccess};
 use kalamdb_core::app_context::AppContext;
 use kalamdb_session::{can_access_shared_table, can_impersonate_role, AuthSession};
 use kalamdb_system::FileRef;
-use std::sync::Arc;
 
 use super::models::DownloadQuery;
 use crate::http::sql::models::{ErrorCode, SqlResponse};
@@ -66,7 +65,8 @@ pub async fn download_file(
                 },
                 Ok(Err(e)) => {
                     log::warn!(
-                        "Failed to resolve impersonation target for file download: user_id={}, error={}",
+                        "Failed to resolve impersonation target for file download: user_id={}, \
+                         error={}",
                         requested_user_id,
                         e
                     );
@@ -78,7 +78,8 @@ pub async fn download_file(
                 },
                 Err(e) => {
                     log::warn!(
-                        "Failed to resolve impersonation target for file download: user_id={}, error={}",
+                        "Failed to resolve impersonation target for file download: user_id={}, \
+                         error={}",
                         requested_user_id,
                         e
                     );
@@ -160,7 +161,7 @@ pub async fn download_file(
         .await
     {
         Ok(data) => {
-            //TODO: Get content type from the stored file metadata
+            // TODO: Get content type from the stored file metadata
             // Guess content type from file extension in file_id
             let content_type = guess_content_type(&file_id);
 
@@ -194,8 +195,9 @@ fn guess_content_type(file_id: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kalamdb_commons::Role;
+
+    use super::*;
 
     #[test]
     fn download_impersonation_respects_target_role_matrix() {

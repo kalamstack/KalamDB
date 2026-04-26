@@ -10,12 +10,11 @@
 //! providers (namespaces, tables, storages, users, jobs).
 
 use async_trait::async_trait;
-use kalamdb_commons::models::schemas::{TableDefinition, TableType};
-use kalamdb_commons::models::{JobId, NamespaceId, NodeId, StorageId, TableId, UserId};
-use kalamdb_system::providers::jobs::models::Job;
-use kalamdb_system::JobStatus;
-use kalamdb_system::Storage;
-use kalamdb_system::User;
+use kalamdb_commons::models::{
+    schemas::{TableDefinition, TableType},
+    JobId, NamespaceId, NodeId, StorageId, TableId, UserId,
+};
+use kalamdb_system::{providers::jobs::models::Job, JobStatus, Storage, User};
 
 use crate::RaftError;
 
@@ -319,12 +318,18 @@ impl MetaApplier for NoOpMetaApplier {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use kalamdb_commons::models::{AuthType, NamespaceId, TableName};
-    use kalamdb_commons::Role;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    use kalamdb_commons::{
+        models::{AuthType, NamespaceId, TableName},
+        Role,
+    };
     use kalamdb_system::JobType;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
+
+    use super::*;
 
     /// Mock applier that tracks all operations
     struct MockMetaApplier {

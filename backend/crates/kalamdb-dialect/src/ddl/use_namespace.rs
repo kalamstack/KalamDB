@@ -8,8 +8,9 @@
 //! This sets the default schema for the current session using DataFusion's
 //! native configuration: `datafusion.catalog.default_schema`
 
-use crate::ddl::DdlResult;
 use kalamdb_commons::models::NamespaceId;
+
+use crate::ddl::DdlResult;
 
 /// USE NAMESPACE statement
 ///

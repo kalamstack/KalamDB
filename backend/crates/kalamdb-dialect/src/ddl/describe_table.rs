@@ -6,9 +6,9 @@
 //! - DESC TABLE table_name
 //! - DESCRIBE TABLE table_name HISTORY (show schema versions)
 
-use crate::ddl::DdlResult;
-
 use kalamdb_commons::models::{NamespaceId, TableName};
+
+use crate::ddl::DdlResult;
 
 /// DESCRIBE TABLE statement
 #[derive(Debug, Clone, PartialEq)]

@@ -9,5 +9,8 @@
 
 #[allow(dead_code)]
 pub fn test_app_context() {
-    panic!("test_app_context is not available in server integration tests - this test should be #[ignore]");
+    panic!(
+        "test_app_context is not available in server integration tests - this test should be \
+         #[ignore]"
+    );
 }

@@ -1,11 +1,12 @@
 // Smoke Test: All datatypes coverage across USER, SHARED, and STREAM tables
-// Creates user & shared tables enumerating every KalamDataType, performs CRUD (create/insert/update/delete/select)
-// and creates a stream table with insert/select verification.
+// Creates user & shared tables enumerating every KalamDataType, performs CRUD
+// (create/insert/update/delete/select) and creates a stream table with insert/select verification.
 //
 // This validates parser + executor acceptance of full type list in DDL plus basic DML paths.
 
-use crate::common::*;
 use std::time::Duration;
+
+use crate::common::*;
 
 fn execute_sql_as_root_via_http_json(sql: &str) -> Result<String, Box<dyn std::error::Error>> {
     let runtime = tokio::runtime::Runtime::new()?;
@@ -86,11 +87,13 @@ fn smoke_all_datatypes_user_shared_stream() {
     // Sample values (omit embedding_col to avoid complex literal syntax; it will remain NULL)
     // BYTES literal: use simple text (backend may coerce) or hex; choose text for simplicity.
     let insert_values_row1 = format!(
-        "INSERT INTO {} (bool_col, int_col, big_int_col, text_col) VALUES (true, 123, 1234567890123, 'hello')",
+        "INSERT INTO {} (bool_col, int_col, big_int_col, text_col) VALUES (true, 123, \
+         1234567890123, 'hello')",
         user_full
     );
     let insert_values_row2 = format!(
-        "INSERT INTO {} (bool_col, int_col, big_int_col, text_col) VALUES (false, -321, 987654321, 'world')",
+        "INSERT INTO {} (bool_col, int_col, big_int_col, text_col) VALUES (false, -321, \
+         987654321, 'world')",
         user_full
     );
     execute_sql_as_root_via_http(&insert_values_row1).expect("insert user row1 should succeed");

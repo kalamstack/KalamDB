@@ -10,13 +10,19 @@
 //! - Efficient range scans for version history
 //! - Single storage partition for simplicity
 
-use crate::SystemTable;
-use kalamdb_commons::models::{NamespaceId, TableId, TableVersionId};
-use kalamdb_commons::schemas::TableDefinition;
-use kalamdb_commons::storage::Partition;
-use kalamdb_store::entity_store::{CrossUserTableStore, EntityStore};
-use kalamdb_store::StorageBackend;
 use std::sync::Arc;
+
+use kalamdb_commons::{
+    models::{NamespaceId, TableId, TableVersionId},
+    schemas::TableDefinition,
+    storage::Partition,
+};
+use kalamdb_store::{
+    entity_store::{CrossUserTableStore, EntityStore},
+    StorageBackend,
+};
+
+use crate::SystemTable;
 
 /// Store for `system.schemas` definitions.
 ///
@@ -240,12 +246,7 @@ impl SchemasStore {
                 .namespace_id()
                 .as_str()
                 .cmp(right_id.namespace_id().as_str())
-                .then_with(|| {
-                    left_id
-                        .table_name()
-                        .as_str()
-                        .cmp(right_id.table_name().as_str())
-                })
+                .then_with(|| left_id.table_name().as_str().cmp(right_id.table_name().as_str()))
                 .then_with(|| left_def.schema_version.cmp(&right_def.schema_version))
         });
 
@@ -291,12 +292,14 @@ impl SchemasStore {
 
 #[cfg(test)]
 mod tests {
+    use kalamdb_commons::{
+        datatypes::KalamDataType,
+        schemas::{ColumnDefinition, TableDefinition, TableOptions, TableType},
+        NamespaceId, Role, TableId, TableName,
+    };
+    use kalamdb_store::{test_utils::InMemoryBackend, CrossUserTableStore};
+
     use super::*;
-    use kalamdb_commons::datatypes::KalamDataType;
-    use kalamdb_commons::schemas::{ColumnDefinition, TableDefinition, TableOptions, TableType};
-    use kalamdb_commons::{NamespaceId, Role, TableId, TableName};
-    use kalamdb_store::test_utils::InMemoryBackend;
-    use kalamdb_store::CrossUserTableStore;
 
     fn create_test_store() -> SchemasStore {
         let backend: Arc<dyn StorageBackend> = Arc::new(InMemoryBackend::new());
@@ -517,9 +520,7 @@ mod tests {
         table_def.schema_version = 2;
         store.put_version(&table_id, &table_def).unwrap();
 
-        let versions = store
-            .scan_namespace_with_versions(table_id.namespace_id())
-            .unwrap();
+        let versions = store.scan_namespace_with_versions(table_id.namespace_id()).unwrap();
 
         assert_eq!(versions.len(), 2);
         assert_eq!(versions[0].1.schema_version, 1);

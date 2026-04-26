@@ -2,13 +2,14 @@
 //!
 //! Clears old snapshots from the cluster storage
 
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::executor::handlers::{
-    ExecutionContext, ExecutionResult, ScalarValue, StatementHandler,
+use std::sync::Arc;
+
+use kalamdb_core::{
+    app_context::AppContext,
+    error::KalamDbError,
+    sql::executor::handlers::{ExecutionContext, ExecutionResult, ScalarValue, StatementHandler},
 };
 use kalamdb_sql::classifier::{SqlStatement, SqlStatementKind};
-use std::sync::Arc;
 
 pub struct ClusterClearHandler {
     app_context: Arc<AppContext>,
@@ -116,10 +117,8 @@ impl StatementHandler for ClusterClearHandler {
 
         // Build response message
         let mut message = format!(
-            "Cluster clear completed\n\
-             Snapshots directory: {}\n\
-             Total snapshots found: {} ({:.2} MB)\n\
-             Snapshots cleared: {} ({:.2} MB freed)",
+            "Cluster clear completed\nSnapshots directory: {}\nTotal snapshots found: {} ({:.2} \
+             MB)\nSnapshots cleared: {} ({:.2} MB freed)",
             snapshots_dir.display(),
             total_files,
             total_size as f64 / 1024.0 / 1024.0,

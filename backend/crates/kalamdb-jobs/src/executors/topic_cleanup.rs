@@ -21,12 +21,13 @@
 //! }
 //! ```
 
-use crate::executors::{JobContext, JobDecision, JobExecutor, JobParams};
 use async_trait::async_trait;
 use kalamdb_commons::models::TopicId;
 use kalamdb_core::error::KalamDbError;
 use kalamdb_system::JobType;
 use serde::{Deserialize, Serialize};
+
+use crate::executors::{JobContext, JobDecision, JobExecutor, JobParams};
 
 /// Typed parameters for topic cleanup operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,7 +136,8 @@ impl JobExecutor for TopicCleanupExecutor {
         // This job is responsible for cleaning up the actual data (messages + offsets).
 
         let message = format!(
-            "Cleaned up topic '{}' - {} consumer group offsets deleted, {} messages deleted, {} bytes freed",
+            "Cleaned up topic '{}' - {} consumer group offsets deleted, {} messages deleted, {} \
+             bytes freed",
             topic_name, offsets_deleted, messages_deleted, bytes_freed
         );
 

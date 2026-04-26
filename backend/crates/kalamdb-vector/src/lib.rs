@@ -16,7 +16,6 @@ pub use hot_staging::{
     SharedVectorPkIndex, UserVectorHotOpId, UserVectorHotStore, UserVectorPkIndex, VectorHotOp,
     VectorHotOpType,
 };
-
 pub use sql::{
     CosineDistanceFunction, UnavailableVectorSearchRuntime, VectorSearchRuntime, VectorSearchScope,
     VectorSearchTableFunction,

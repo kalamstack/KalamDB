@@ -1,6 +1,5 @@
-use crate::app_context::AppContext;
-use crate::error::KalamDbError;
-use crate::manifest::ManifestService;
+use std::sync::Arc;
+
 use datafusion::arrow::datatypes::SchemaRef;
 use kalamdb_commons::models::{TableId, UserId};
 use kalamdb_filestore::StorageCached;
@@ -10,7 +9,8 @@ use kalamdb_vector::{
     flush_user_scope_vectors as flush_user_scope_vectors_impl, VectorFlushError,
     VectorManifestStore,
 };
-use std::sync::Arc;
+
+use crate::{app_context::AppContext, error::KalamDbError, manifest::ManifestService};
 
 struct CoreVectorManifestStore<'a> {
     manifest_service: &'a ManifestService,

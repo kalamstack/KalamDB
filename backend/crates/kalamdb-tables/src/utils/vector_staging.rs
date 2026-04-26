@@ -1,14 +1,14 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
-use crate::error::KalamDbError;
-use crate::utils::{base, unified_dml};
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::StorageKey;
-use kalamdb_commons::TableId;
+use kalamdb_commons::{models::rows::Row, StorageKey, TableId};
 use kalamdb_store::IndexedEntityStore;
 use kalamdb_system::VectorMetric;
 use kalamdb_vector::{VectorHotOp, VectorHotOpType};
+
+use crate::{
+    error::KalamDbError,
+    utils::{base, unified_dml},
+};
 
 pub(crate) fn build_vector_upsert_batch_ops<T, I, K, FRow, FKey>(
     table_id: &TableId,
@@ -114,12 +114,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{build_vector_delete_ops, build_vector_upsert_batch_ops};
     use datafusion::scalar::ScalarValue;
-    use kalamdb_commons::ids::SeqId;
-    use kalamdb_commons::models::rows::Row;
-    use kalamdb_commons::models::{NamespaceId, TableName};
-    use kalamdb_commons::TableId;
+    use kalamdb_commons::{
+        ids::SeqId,
+        models::{rows::Row, NamespaceId, TableName},
+        TableId,
+    };
+
+    use super::{build_vector_delete_ops, build_vector_upsert_batch_ops};
 
     fn table_id() -> TableId {
         TableId::new(NamespaceId::new("app"), TableName::new("items"))

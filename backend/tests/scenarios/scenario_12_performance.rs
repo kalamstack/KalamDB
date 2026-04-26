@@ -9,10 +9,11 @@
 //! - [x] Insert time per batch
 //! - [x] Subscription snapshot timing
 
-use super::helpers::*;
+use std::time::{Duration, Instant};
 
 use kalamdb_commons::Role;
-use std::time::{Duration, Instant};
+
+use super::helpers::*;
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -56,15 +57,21 @@ async fn test_scenario_12_insert_performance() -> anyhow::Result<()> {
         for _ in 0..batch_size {
             id_counter += 1;
             let resp = client
-                        .execute_query(
-                            &format!(
-                                "INSERT INTO {}.metrics (id, timestamp, value, label) VALUES ({}, {}, {}, 'batch_{}')",
-                                ns, id_counter, id_counter * 1000, id_counter as f64 * 1.5, batch_size
-                            ), None,
-                            None,
-                            None,
-                        )
-                        .await?;
+                .execute_query(
+                    &format!(
+                        "INSERT INTO {}.metrics (id, timestamp, value, label) VALUES ({}, {}, {}, \
+                         'batch_{}')",
+                        ns,
+                        id_counter,
+                        id_counter * 1000,
+                        id_counter as f64 * 1.5,
+                        batch_size
+                    ),
+                    None,
+                    None,
+                    None,
+                )
+                .await?;
             assert!(resp.success(), "Insert id {}", id_counter);
         }
 
@@ -237,15 +244,17 @@ async fn test_scenario_12_subscription_snapshot_timing() -> anyhow::Result<()> {
         // Insert data
         for i in 1..=(data_size as i64) {
             let resp = client
-                        .execute_query(
-                            &format!(
-                                "INSERT INTO {}.documents (id, title, content) VALUES ({}, 'Doc {}', 'Content for document number {}')",
-                                ns, i, i, i
-                            ), None,
-                            None,
-                            None,
-                        )
-                        .await?;
+                .execute_query(
+                    &format!(
+                        "INSERT INTO {}.documents (id, title, content) VALUES ({}, 'Doc {}', \
+                         'Content for document number {}')",
+                        ns, i, i, i
+                    ),
+                    None,
+                    None,
+                    None,
+                )
+                .await?;
             assert!(resp.success(), "Insert doc {}", i);
         }
 

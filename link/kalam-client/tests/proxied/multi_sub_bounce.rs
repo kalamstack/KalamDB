@@ -1,9 +1,10 @@
+use std::{sync::atomic::Ordering, time::Duration};
+
+use kalam_client::SubscriptionConfig;
+use tokio::time::{sleep, timeout, Instant};
+
 use super::helpers::*;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
-use kalam_client::SubscriptionConfig;
-use std::sync::atomic::Ordering;
-use std::time::Duration;
-use tokio::time::{sleep, timeout, Instant};
 
 /// Three active subscriptions on different tables experience a server bounce
 /// (down then up). After recovery ALL three should resume from their respective

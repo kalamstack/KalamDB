@@ -1,30 +1,37 @@
+use std::{collections::HashMap, sync::Arc, time::Instant};
+
 use actix_web::{http::StatusCode, HttpRequest, HttpResponse};
 use bytes::Bytes;
-use kalamdb_commons::models::NamespaceId;
-use kalamdb_commons::schemas::TableType;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::schema_registry::SchemaRegistry;
-use kalamdb_core::sql::context::ExecutionContext;
-use kalamdb_core::sql::executor::request_transaction_state::RequestTransactionState;
-use kalamdb_core::sql::executor::{PreparedExecutionStatement, ScalarValue, SqlExecutor};
-use kalamdb_core::sql::SqlImpersonationService;
+use kalamdb_commons::{models::NamespaceId, schemas::TableType};
+use kalamdb_core::{
+    app_context::AppContext,
+    error::KalamDbError,
+    schema_registry::SchemaRegistry,
+    sql::{
+        context::ExecutionContext,
+        executor::{
+            request_transaction_state::RequestTransactionState, PreparedExecutionStatement,
+            ScalarValue, SqlExecutor,
+        },
+        SqlImpersonationService,
+    },
+};
 use kalamdb_sql::classifier::SqlStatementKind;
 use kalamdb_system::FileSubfolderState;
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Instant;
 
-use super::file_utils::{stage_and_finalize_files, substitute_file_placeholders};
-use super::forward::handle_not_leader_error;
-use super::helpers::{
-    cleanup_files, execute_single_statement, execute_single_statement_raw,
-    execution_result_to_query_result, stream_sql_rows_response,
-};
-use super::models::{ErrorCode, QueryRequest, QueryResult, SqlResponse};
-use super::request::took_ms;
-use super::statements::{
-    classify_sql, resolve_execute_as_user, resolve_result_username, PreparedApiExecutionStatement,
+use super::{
+    file_utils::{stage_and_finalize_files, substitute_file_placeholders},
+    forward::handle_not_leader_error,
+    helpers::{
+        cleanup_files, execute_single_statement, execute_single_statement_raw,
+        execution_result_to_query_result, stream_sql_rows_response,
+    },
+    models::{ErrorCode, QueryRequest, QueryResult, SqlResponse},
+    request::took_ms,
+    statements::{
+        classify_sql, resolve_execute_as_user, resolve_result_username,
+        PreparedApiExecutionStatement,
+    },
 };
 
 #[inline]
@@ -233,7 +240,8 @@ pub(super) async fn execute_file_upload_path(
         None => {
             return HttpResponse::BadRequest().json(SqlResponse::error_for_privilege(
                 ErrorCode::InvalidInput,
-                "Could not determine target table from SQL. Use fully qualified table name (namespace.table).",
+                "Could not determine target table from SQL. Use fully qualified table name \
+                 (namespace.table).",
                 took_ms(start_time),
                 exec_ctx.is_admin(),
             ));
@@ -259,8 +267,8 @@ pub(super) async fn execute_file_upload_path(
         return HttpResponse::BadRequest().json(SqlResponse::error_for_privilege(
             ErrorCode::SqlExecutionError,
             &format!(
-                "EXECUTE AS USER is not allowed on SHARED tables (table '{}'). \
-                 AS USER impersonation is only supported for USER tables.",
+                "EXECUTE AS USER is not allowed on SHARED tables (table '{}'). AS USER \
+                 impersonation is only supported for USER tables.",
                 table_id
             ),
             took_ms(start_time),
@@ -523,8 +531,8 @@ pub(super) async fn execute_batch_path(
                 return HttpResponse::BadRequest().json(SqlResponse::error_for_privilege(
                     ErrorCode::SqlExecutionError,
                     &format!(
-                        "EXECUTE AS USER is not allowed on SHARED tables (table '{}'). \
-                         AS USER impersonation is only supported for USER tables.",
+                        "EXECUTE AS USER is not allowed on SHARED tables (table '{}'). AS USER \
+                         impersonation is only supported for USER tables.",
                         table_id
                     ),
                     took_ms(start_time),

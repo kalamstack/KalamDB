@@ -200,7 +200,7 @@ mod tests {
             err,
             DecompressError::OutputTooLarge {
                 advertised: 1024,
-                limit: 16
+                limit: 16,
             }
         ));
     }

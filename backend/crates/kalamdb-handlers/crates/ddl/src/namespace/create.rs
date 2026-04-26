@@ -6,15 +6,21 @@
 //! When a namespace is created, it is also registered as a DataFusion schema
 //! so that queries like `SELECT * FROM namespace.table` work correctly.
 
-use crate::helpers::guards::require_admin;
+use std::sync::Arc;
+
 use datafusion::catalog::MemorySchemaProvider;
 use kalamdb_commons::models::{NamespaceId, UserId};
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
-use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
+use kalamdb_core::{
+    app_context::AppContext,
+    error::KalamDbError,
+    sql::{
+        context::{ExecutionContext, ExecutionResult, ScalarValue},
+        executor::handlers::TypedStatementHandler,
+    },
+};
 use kalamdb_sql::ddl::CreateNamespaceStatement;
-use std::sync::Arc;
+
+use crate::helpers::guards::require_admin;
 
 /// Typed handler for CREATE NAMESPACE statements
 pub struct CreateNamespaceHandler {
@@ -140,11 +146,11 @@ impl TypedStatementHandler<CreateNamespaceStatement> for CreateNamespaceHandler 
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use kalamdb_commons::models::UserId;
-    use kalamdb_commons::Role;
+    use kalamdb_commons::{models::UserId, Role};
     use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
     use kalamdb_system::Namespace;
+
+    use super::*;
 
     fn test_context() -> ExecutionContext {
         ExecutionContext::new(UserId::from("test_user"), Role::Dba, create_test_session_simple())

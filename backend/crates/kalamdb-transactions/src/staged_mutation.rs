@@ -1,8 +1,9 @@
 use std::fmt;
 
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::{OperationKind, TableId, TransactionId, UserId};
-use kalamdb_commons::TableType;
+use kalamdb_commons::{
+    models::{rows::Row, OperationKind, TableId, TransactionId, UserId},
+    TableType,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::overlay::TransactionOverlayEntry;
@@ -120,11 +121,13 @@ pub fn build_insert_staged_mutations(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_insert_staged_mutations, StagedInsertBuildError};
     use datafusion::scalar::ScalarValue;
-    use kalamdb_commons::models::rows::Row;
-    use kalamdb_commons::models::{TableName, TransactionId, UserId};
-    use kalamdb_commons::{NamespaceId, TableId, TableType};
+    use kalamdb_commons::{
+        models::{rows::Row, TableName, TransactionId, UserId},
+        NamespaceId, TableId, TableType,
+    };
+
+    use super::{build_insert_staged_mutations, StagedInsertBuildError};
 
     fn test_table_id() -> TableId {
         TableId::new(NamespaceId::new("app"), TableName::new("items"))

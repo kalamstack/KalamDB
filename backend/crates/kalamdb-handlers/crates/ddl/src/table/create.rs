@@ -1,13 +1,17 @@
 //! Typed DDL handler for CREATE TABLE statements
 
-use kalamdb_commons::models::TableId;
-use kalamdb_commons::schemas::TableType;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
-use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
-use kalamdb_sql::ddl::CreateTableStatement;
 use std::sync::Arc;
+
+use kalamdb_commons::{models::TableId, schemas::TableType};
+use kalamdb_core::{
+    app_context::AppContext,
+    error::KalamDbError,
+    sql::{
+        context::{ExecutionContext, ExecutionResult, ScalarValue},
+        executor::handlers::TypedStatementHandler,
+    },
+};
+use kalamdb_sql::ddl::CreateTableStatement;
 
 /// Typed handler for CREATE TABLE statements (all table types: USER, SHARED, STREAM)
 pub struct CreateTableHandler {
@@ -43,8 +47,7 @@ impl TypedStatementHandler<CreateTableStatement> for CreateTableHandler {
         _params: Vec<ScalarValue>,
         context: &ExecutionContext,
     ) -> Result<ExecutionResult, KalamDbError> {
-        use crate::helpers::audit;
-        use crate::helpers::table_creation;
+        use crate::helpers::{audit, table_creation};
 
         let mut statement = statement;
         let effective_type = Self::resolve_table_type(&statement, context);
@@ -132,13 +135,16 @@ impl TypedStatementHandler<CreateTableStatement> for CreateTableHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use arrow::datatypes::{DataType, Field, Schema};
-    use kalamdb_commons::models::{NamespaceId, UserId};
-    use kalamdb_commons::schemas::TableType;
-    use kalamdb_commons::Role;
+    use kalamdb_commons::{
+        models::{NamespaceId, UserId},
+        schemas::TableType,
+        Role,
+    };
     use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
     use kalamdb_system::Storage;
+
+    use super::*;
 
     fn create_test_context(role: Role) -> ExecutionContext {
         ExecutionContext::new(UserId::new("test_user"), role, create_test_session_simple())

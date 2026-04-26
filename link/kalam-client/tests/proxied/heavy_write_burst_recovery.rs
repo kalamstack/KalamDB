@@ -1,10 +1,10 @@
+use std::{collections::HashSet, sync::atomic::Ordering, time::Duration};
+
+use kalam_client::SubscriptionConfig;
+use tokio::time::{sleep, timeout};
+
 use super::helpers::*;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
-use kalam_client::SubscriptionConfig;
-use std::collections::HashSet;
-use std::sync::atomic::Ordering;
-use std::time::Duration;
-use tokio::time::{sleep, timeout};
 
 /// A large burst of writes (50 rows) is performed while the client is
 /// disconnected. After recovery, every single row must arrive exactly once

@@ -50,9 +50,7 @@ pub mod user_tables;
 pub mod utils;
 
 // Re-export commonly used types
-pub use error::KalamDbError;
-pub use error::{Result, TableError};
-
+pub use error::{KalamDbError, Result, TableError};
 // Re-export table stores
 pub use kalamdb_commons::models::StreamTableRow;
 pub use kalamdb_commons::models::UserTableRow;
@@ -61,21 +59,26 @@ pub use kalamdb_vector::{
     normalize_vector_column_name, SharedVectorHotOpId, SharedVectorHotStore, UserVectorHotOpId,
     UserVectorHotStore, VectorHotOp, VectorHotOpType,
 };
-pub use shared_tables::pk_index::{create_shared_table_pk_index, SharedTablePkIndex};
-pub use shared_tables::shared_table_store::{
-    new_indexed_shared_table_store, new_shared_table_store, SharedTableIndexedStore,
-    SharedTableRow, SharedTableStore,
+pub use shared_tables::{
+    pk_index::{create_shared_table_pk_index, SharedTablePkIndex},
+    shared_table_store::{
+        new_indexed_shared_table_store, new_shared_table_store, SharedTableIndexedStore,
+        SharedTableRow, SharedTableStore,
+    },
 };
 pub use stream_tables::stream_table_store::{
     new_stream_table_store, StreamTableStorageMode, StreamTableStore, StreamTableStoreConfig,
 };
-pub use topics::topic_message_models::{TopicMessage, TopicMessageId};
-pub use topics::topic_message_store::TopicMessageStore;
-pub use user_tables::pk_index::{create_user_table_pk_index, UserTablePkIndex};
-pub use user_tables::user_table_store::{
-    new_indexed_user_table_store, new_user_table_store, UserTableIndexedStore, UserTableStore,
+pub use topics::{
+    topic_message_models::{TopicMessage, TopicMessageId},
+    topic_message_store::TopicMessageStore,
 };
-
+pub use user_tables::{
+    pk_index::{create_user_table_pk_index, UserTablePkIndex},
+    user_table_store::{
+        new_indexed_user_table_store, new_user_table_store, UserTableIndexedStore, UserTableStore,
+    },
+};
 // Re-export providers for core integration
 pub use utils::{
     BaseTableProvider, KalamTableProvider, SharedTableProvider, StreamTableProvider,

@@ -3,21 +3,23 @@
 //! This module provides a DataFusion TableProvider implementation for the system.storages table.
 //! Uses the new EntityStore architecture with StorageId keys.
 
-use crate::error::SystemError;
-use crate::providers::base::{
-    extract_filter_value, system_rows_to_batch, SimpleProviderDefinition,
-};
-use crate::providers::storages::models::Storage;
-use crate::system_row_mapper::{model_to_system_row, system_row_to_model};
-use datafusion::arrow::array::RecordBatch;
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::logical_expr::Expr;
-use kalamdb_commons::models::rows::SystemTableRow;
-use kalamdb_commons::StorageId;
-use kalamdb_commons::SystemTable;
-use kalamdb_store::entity_store::EntityStore;
-use kalamdb_store::{IndexedEntityStore, StorageBackend};
 use std::sync::{Arc, OnceLock};
+
+use datafusion::{
+    arrow::{array::RecordBatch, datatypes::SchemaRef},
+    logical_expr::Expr,
+};
+use kalamdb_commons::{models::rows::SystemTableRow, StorageId, SystemTable};
+use kalamdb_store::{entity_store::EntityStore, IndexedEntityStore, StorageBackend};
+
+use crate::{
+    error::SystemError,
+    providers::{
+        base::{extract_filter_value, system_rows_to_batch, SimpleProviderDefinition},
+        storages::models::Storage,
+    },
+    system_row_mapper::{model_to_system_row, system_row_to_model},
+};
 
 /// System.storages table provider using EntityStore architecture
 #[derive(Clone)]
@@ -171,10 +173,11 @@ crate::impl_simple_system_table_provider!(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::StorageType;
     use datafusion::datasource::TableProvider;
     use kalamdb_store::test_utils::InMemoryBackend;
+
+    use super::*;
+    use crate::StorageType;
 
     fn create_test_provider() -> StoragesTableProvider {
         let backend: Arc<dyn StorageBackend> = Arc::new(InMemoryBackend::new());
@@ -268,7 +271,10 @@ mod tests {
         // Scan
         let batch = provider.scan_all_storages().unwrap();
         assert_eq!(batch.num_rows(), 1);
-        assert_eq!(batch.num_columns(), 11); // storage_id, storage_name, description, storage_type, base_directory, credentials, config_json, shared_tables_template, user_tables_template, created_at, updated_at
+        assert_eq!(batch.num_columns(), 11); // storage_id, storage_name, description, storage_type,
+                                             // base_directory, credentials, config_json,
+                                             // shared_tables_template, user_tables_template,
+                                             // created_at, updated_at
     }
 
     #[tokio::test]

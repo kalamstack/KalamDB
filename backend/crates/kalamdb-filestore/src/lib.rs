@@ -33,6 +33,8 @@ pub use error::{FilestoreError, Result};
 pub use files::{FileStorageService, StagedFile, StagingManager};
 pub use health::{ConnectivityTestResult, HealthStatus, StorageHealthResult, StorageHealthService};
 pub use manifest::json::{manifest_exists, read_manifest_json, write_manifest_json};
-pub use parquet::reader::{parse_parquet_stream, RecordBatchFileStream};
-pub use parquet::writer::ParquetWriteResult;
+pub use parquet::{
+    reader::{parse_parquet_stream, RecordBatchFileStream},
+    writer::ParquetWriteResult,
+};
 pub use registry::{StorageCached, StorageRegistry};

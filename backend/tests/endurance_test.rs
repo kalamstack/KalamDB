@@ -10,21 +10,25 @@
 #[path = "common/testserver/mod.rs"]
 mod test_support;
 
-use anyhow::{Context, Result};
-use kalam_client::models::ChangeEvent;
-use kalam_client::{KalamLinkClient, SubscriptionManager};
-use kalamdb_commons::Role;
-use rand::rngs::StdRng;
-use rand::{RngExt, SeedableRng};
-use std::collections::VecDeque;
-use std::env;
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::time::sleep;
+use std::{
+    collections::VecDeque,
+    env,
+    sync::{
+        atomic::{AtomicI64, AtomicU64, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
 
-use test_support::consolidated_helpers::{create_user_and_client, unique_namespace, unique_table};
-use test_support::http_server::get_global_server;
+use anyhow::{Context, Result};
+use kalam_client::{models::ChangeEvent, KalamLinkClient, SubscriptionManager};
+use kalamdb_commons::Role;
+use rand::{rngs::StdRng, RngExt, SeedableRng};
+use test_support::{
+    consolidated_helpers::{create_user_and_client, unique_namespace, unique_table},
+    http_server::get_global_server,
+};
+use tokio::time::sleep;
 
 const DEFAULT_DURATION_SECS: u64 = 60 * 60;
 const DEFAULT_USER_COUNT: usize = 100;
@@ -86,7 +90,8 @@ async fn run_subscriber(
 ) -> Result<()> {
     let mut subscription = client
         .subscribe(&format!(
-            "SELECT id, conversation_id, role_id, content FROM {}.messages WHERE conversation_id = {}",
+            "SELECT id, conversation_id, role_id, content FROM {}.messages WHERE conversation_id \
+             = {}",
             namespace, conversation_id
         ))
         .await
@@ -154,7 +159,8 @@ async fn run_chat_user(
                 username, conversation_id, message_id, op_counter
             );
             let sql = format!(
-                "INSERT INTO {}.messages (id, conversation_id, role_id, content, created_at_ms, edited_at_ms) VALUES ({}, {}, 'user', '{}', {}, 0)",
+                "INSERT INTO {}.messages (id, conversation_id, role_id, content, created_at_ms, \
+                 edited_at_ms) VALUES ({}, {}, 'user', '{}', {}, 0)",
                 namespace,
                 message_id,
                 conversation_id,
@@ -172,7 +178,8 @@ async fn run_chat_user(
         } else if operation < 72 {
             if let Some(message_id) = own_messages.back().copied() {
                 let sql = format!(
-                    "UPDATE {}.messages SET content = 'edited:{}:{}', edited_at_ms = {} WHERE id = {}",
+                    "UPDATE {}.messages SET content = 'edited:{}:{}', edited_at_ms = {} WHERE id \
+                     = {}",
                     namespace,
                     sql_quote(&username),
                     op_counter,
@@ -194,7 +201,8 @@ async fn run_chat_user(
         } else if operation < 92 {
             let event_id = next_message_id.fetch_add(1, Ordering::Relaxed);
             let sql = format!(
-                "INSERT INTO {}.typing_events (id, conversation_id, event_type, created_at_ms) VALUES ({}, {}, 'typing', {})",
+                "INSERT INTO {}.typing_events (id, conversation_id, event_type, created_at_ms) \
+                 VALUES ({}, {}, 'typing', {})",
                 namespace,
                 event_id,
                 conversation_id,
@@ -323,7 +331,8 @@ async fn test_chat_app_endurance_with_100_parallel_users() -> Result<()> {
     for (_, client) in &user_clients {
         for conversation_id in 1..=conversation_count {
             let sql = format!(
-                "INSERT INTO {}.conversations (id, title, created_at_ms) VALUES ({}, 'Conversation {}', {})",
+                "INSERT INTO {}.conversations (id, title, created_at_ms) VALUES ({}, \
+                 'Conversation {}', {})",
                 namespace,
                 conversation_id,
                 conversation_id,
@@ -358,7 +367,9 @@ async fn test_chat_app_endurance_with_100_parallel_users() -> Result<()> {
             let conversation_id = rng.random_range(1..=(conversation_count as i64));
             let message_id = assistant_message_ids.fetch_add(1, Ordering::Relaxed);
             let sql = format!(
-                "EXECUTE AS USER '{}' (INSERT INTO {}.messages (id, conversation_id, role_id, content, created_at_ms, edited_at_ms) VALUES ({}, {}, 'assistant', 'assistant-reply:{}:{}', {}, 0))",
+                "EXECUTE AS USER '{}' (INSERT INTO {}.messages (id, conversation_id, role_id, \
+                 content, created_at_ms, edited_at_ms) VALUES ({}, {}, 'assistant', \
+                 'assistant-reply:{}:{}', {}, 0))",
                 sql_quote(target_user),
                 assistant_namespace,
                 message_id,
@@ -490,7 +501,8 @@ async fn test_chat_app_endurance_with_100_parallel_users() -> Result<()> {
 
     let duplicate_check = server
         .execute_sql(&format!(
-            "EXECUTE AS USER '{}' (SELECT COUNT(*) AS total_rows, COUNT(DISTINCT id) AS distinct_rows FROM {}.messages)",
+            "EXECUTE AS USER '{}' (SELECT COUNT(*) AS total_rows, COUNT(DISTINCT id) AS \
+             distinct_rows FROM {}.messages)",
             sql_quote(&user_clients[0].0),
             namespace
         ))
@@ -519,7 +531,9 @@ async fn test_chat_app_endurance_with_100_parallel_users() -> Result<()> {
     let error_count = errors.load(Ordering::Relaxed);
 
     eprintln!(
-        "Endurance workload complete: duration_secs={} users={} subscribers={} conversations={} inserts={} updates={} deletes={} typing_events={} queries={} subscriber_events={} health_checks={} final_rows={}",
+        "Endurance workload complete: duration_secs={} users={} subscribers={} conversations={} \
+         inserts={} updates={} deletes={} typing_events={} queries={} subscriber_events={} \
+         health_checks={} final_rows={}",
         duration.as_secs(),
         user_count,
         subscriber_count,

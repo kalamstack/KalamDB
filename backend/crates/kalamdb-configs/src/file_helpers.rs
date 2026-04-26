@@ -16,8 +16,9 @@ use std::path::{Path, PathBuf};
 /// # Examples
 ///
 /// ```
-/// use kalamdb_configs::file_helpers::normalize_dir_path;
 /// use std::path::Path;
+///
+/// use kalamdb_configs::file_helpers::normalize_dir_path;
 ///
 /// let abs = normalize_dir_path("./data");
 /// assert!(abs.is_empty() || Path::new(&abs).is_absolute());

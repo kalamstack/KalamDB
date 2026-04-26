@@ -14,12 +14,12 @@
 //! The default ordering is by primary key columns in ASC order.
 //! If no primary key is defined, we fall back to _seq (system sequence column).
 
-use crate::app_context::AppContext;
-use crate::error::KalamDbError;
-use datafusion::logical_expr::{LogicalPlan, SortExpr};
-use kalamdb_commons::constants::SystemColumnNames;
-use kalamdb_commons::models::TableId;
 use std::sync::Arc;
+
+use datafusion::logical_expr::{LogicalPlan, SortExpr};
+use kalamdb_commons::{constants::SystemColumnNames, models::TableId};
+
+use crate::{app_context::AppContext, error::KalamDbError};
 
 /// Check if a LogicalPlan already has an ORDER BY clause at the top level
 ///

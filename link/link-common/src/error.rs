@@ -16,15 +16,13 @@ pub type Result<T> = std::result::Result<T, KalamLinkError>;
 /// use kalam_client::{KalamLinkClient, KalamLinkError};
 ///
 /// # async fn example() -> kalam_client::Result<()> {
-/// let client = KalamLinkClient::builder()
-///     .base_url("http://invalid-host:9999")
-///     .build()?;
+/// let client = KalamLinkClient::builder().base_url("http://invalid-host:9999").build()?;
 ///
 /// match client.execute_query("SELECT 1", None, None, None).await {
 ///     Ok(response) => println!("Success: {:?}", response),
 ///     Err(KalamLinkError::NetworkError(msg)) => {
 ///         eprintln!("Connection failed: {}", msg);
-///     }
+///     },
 ///     Err(e) => eprintln!("Other error: {}", e),
 /// }
 /// # Ok(())

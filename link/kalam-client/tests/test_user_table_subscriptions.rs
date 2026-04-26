@@ -15,12 +15,14 @@
 //! cargo test --test test_user_table_subscriptions -- --nocapture
 //! ```
 
-use kalam_client::auth::AuthProvider;
-use kalam_client::models::{BatchStatus, ResponseStatus};
-use kalam_client::subscription::SubscriptionManager;
-use kalam_client::{ChangeEvent, KalamLinkClient, QueryResponse, SubscriptionConfig};
-use std::time::Duration;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+use kalam_client::{
+    auth::AuthProvider,
+    models::{BatchStatus, ResponseStatus},
+    subscription::SubscriptionManager,
+    ChangeEvent, KalamLinkClient, QueryResponse, SubscriptionConfig,
+};
 use tokio::time::{sleep, timeout};
 
 mod common;
@@ -448,14 +450,19 @@ async fn test_multiple_filtered_subscriptions() {
                 let type_str = extract_string_value(type_obj);
                 println!("📊 Extracted type value: {:?}", type_str);
 
-                // CRITICAL: Verify filtering - 'thinking' subscription should ONLY receive 'thinking' rows
+                // CRITICAL: Verify filtering - 'thinking' subscription should ONLY receive
+                // 'thinking' rows
                 assert_eq!(
-                    type_str.as_deref(), 
+                    type_str.as_deref(),
                     Some("thinking"),
-                    "FILTERING CHECK FAILED: 'thinking' subscription received row with type={:?}, expected 'thinking'",
+                    "FILTERING CHECK FAILED: 'thinking' subscription received row with type={:?}, \
+                     expected 'thinking'",
                     type_str
                 );
-                println!("✅ FILTERING WORKS: 'thinking' subscription correctly received ONLY 'thinking' type row");
+                println!(
+                    "✅ FILTERING WORKS: 'thinking' subscription correctly received ONLY \
+                     'thinking' type row"
+                );
             } else {
                 panic!("Row doesn't have 'type' field. Full row: {:?}", row);
             }
@@ -482,14 +489,19 @@ async fn test_multiple_filtered_subscriptions() {
             if let Some(type_obj) = row.get("type") {
                 let type_str = extract_string_value(type_obj);
 
-                // CRITICAL: Verify filtering - 'typing' subscription should ONLY receive 'typing' rows
+                // CRITICAL: Verify filtering - 'typing' subscription should ONLY receive 'typing'
+                // rows
                 assert_eq!(
                     type_str.as_deref(),
                     Some("typing"),
-                    "FILTERING CHECK FAILED: 'typing' subscription received row with type={:?}, expected 'typing'",
+                    "FILTERING CHECK FAILED: 'typing' subscription received row with type={:?}, \
+                     expected 'typing'",
                     type_str
                 );
-                println!("✅ FILTERING WORKS: 'typing' subscription correctly received ONLY 'typing' type row");
+                println!(
+                    "✅ FILTERING WORKS: 'typing' subscription correctly received ONLY 'typing' \
+                     type row"
+                );
             }
         }
     }
@@ -530,8 +542,13 @@ async fn test_multiple_filtered_subscriptions() {
                         rows,
                         old_rows,
                     } => {
-                        println!("📥 'thinking' sub received Update: subscription_id={}, rows={}, old_rows={}", 
-                            subscription_id, rows.len(), old_rows.len());
+                        println!(
+                            "📥 'thinking' sub received Update: subscription_id={}, rows={}, \
+                             old_rows={}",
+                            subscription_id,
+                            rows.len(),
+                            old_rows.len()
+                        );
 
                         // Verify the update came through
                         if let Some(row) = rows.first() {
@@ -589,7 +606,8 @@ async fn test_multiple_filtered_subscriptions() {
         Err(e) => println!("⚠️  Error during unsubscribe (may be OK): {}", e),
     }
 
-    // === Step 7: Insert another 'typing' row and verify 'thinking' subscription does NOT receive it ===
+    // === Step 7: Insert another 'typing' row and verify 'thinking' subscription does NOT receive
+    // it ===
     println!("\n🔄 Step 7: Verifying filtered subscriptions don't receive unmatched inserts...");
     sleep(Duration::from_millis(100)).await;
 
@@ -628,10 +646,17 @@ async fn test_multiple_filtered_subscriptions() {
                             let type_str = extract_string_value(type_obj);
                             if type_str.as_deref() == Some("typing") {
                                 received_wrong_type = true;
-                                println!("❌ FILTERING FAILED: 'thinking' subscription received 'typing' row!");
+                                println!(
+                                    "❌ FILTERING FAILED: 'thinking' subscription received \
+                                     'typing' row!"
+                                );
                                 println!("📊 Unexpected row: {:?}", row);
                             } else {
-                                println!("📥 'thinking' received insert with type={:?} (unexpected but not 'typing')", type_str);
+                                println!(
+                                    "📥 'thinking' received insert with type={:?} (unexpected but \
+                                     not 'typing')",
+                                    type_str
+                                );
                             }
                         }
                     }
@@ -654,7 +679,10 @@ async fn test_multiple_filtered_subscriptions() {
 
     if Instant::now() >= check_deadline && !received_wrong_type {
         // Timeout is EXPECTED if filtering works correctly
-        println!("✅ FILTERING VERIFIED: 'thinking' subscription correctly did NOT receive 'typing' insert (timeout)");
+        println!(
+            "✅ FILTERING VERIFIED: 'thinking' subscription correctly did NOT receive 'typing' \
+             insert (timeout)"
+        );
     }
 
     assert!(

@@ -1,11 +1,8 @@
-use std::collections::HashSet;
-use std::sync::Arc;
-use std::time::Instant;
+use std::{collections::HashSet, sync::Arc, time::Instant};
 
 use kalamdb_commons::models::{TableId, TransactionId, TransactionOrigin, TransactionState};
 
-use super::binding::TransactionRaftBinding;
-use super::ExecutionOwnerKey;
+use super::{binding::TransactionRaftBinding, ExecutionOwnerKey};
 
 /// Hot transaction metadata kept separate from the staged write buffer.
 #[derive(Debug, Clone)]

@@ -30,19 +30,20 @@
 //! - Timestamps serialized as raw microsecond values (numbers)
 //! - Boolean, String, Float values as native JSON types
 
-use crate::errors::CommonError;
-// Chrono no longer needed - DataFusion handles timestamp serialization natively
-use crate::models::rows::Row;
-use crate::models::KalamCellValue;
-use arrow::array::*;
-use arrow::datatypes::{DataType, Field, SchemaRef, TimeUnit};
-use arrow::record_batch::RecordBatch;
+use std::{collections::BTreeMap, convert::TryFrom, sync::Arc};
+
+use arrow::{
+    array::*,
+    datatypes::{DataType, Field, SchemaRef, TimeUnit},
+    record_batch::RecordBatch,
+};
 use datafusion_common::{DataFusionError, ScalarValue};
 use serde_json::Value as JsonValue;
-use std::collections::BTreeMap;
-use std::convert::TryFrom;
-use std::sync::Arc;
 use uuid::Uuid;
+
+// Chrono no longer needed - DataFusion handles timestamp serialization natively
+use crate::models::rows::Row;
+use crate::{errors::CommonError, models::KalamCellValue};
 
 /// Type alias for Arc<dyn Array> to improve readability
 type ArrayRef = Arc<dyn Array>;
@@ -72,9 +73,9 @@ pub fn coerce_rows(rows: Vec<Row>, schema: &SchemaRef) -> Result<Vec<Row>, Strin
                 }
             }
 
-            // 2. Coerce existing values in-place using get_mut + mem::replace.
-            //    This avoids rebuilding the entire BTreeMap (no remove/re-insert,
-            //    no new String key allocations for existing columns).
+            // 2. Coerce existing values in-place using get_mut + mem::replace. This avoids
+            //    rebuilding the entire BTreeMap (no remove/re-insert, no new String key allocations
+            //    for existing columns).
             for field in schema.fields() {
                 if let Some(val) = row.values.get_mut(field.name().as_str()) {
                     let owned = std::mem::replace(val, ScalarValue::Null);
@@ -420,7 +421,8 @@ fn coerce_uuid_scalar(value: ScalarValue, field: &Field) -> Result<Option<Scalar
         ScalarValue::FixedSizeBinary(size, Some(bytes)) => {
             if size != 16 || bytes.len() != 16 {
                 return Err(format!(
-                    "UUID fixed binary literal must be 16 bytes for column '{}', got size {} and len {}",
+                    "UUID fixed binary literal must be 16 bytes for column '{}', got size {} and \
+                     len {}",
                     field.name(),
                     size,
                     bytes.len()
@@ -434,10 +436,11 @@ fn coerce_uuid_scalar(value: ScalarValue, field: &Field) -> Result<Option<Scalar
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::{collections::BTreeMap, sync::Arc};
+
     use arrow::datatypes::{DataType, Field, Schema};
-    use std::collections::BTreeMap;
-    use std::sync::Arc;
+
+    use super::*;
 
     fn make_row(entries: Vec<(&str, ScalarValue)>) -> Row {
         let mut values = BTreeMap::new();
@@ -582,7 +585,8 @@ mod tests {
     // detects no-op UPDATEs (same logical value, potentially different ScalarValue type).
 
     /// Build a schema matching the user's chat.messages table:
-    /// id TEXT PK, thread_id TEXT, role TEXT, content TEXT, created_at TIMESTAMP, _seq INT64, _commit_seq UINT64, _deleted BOOLEAN
+    /// id TEXT PK, thread_id TEXT, role TEXT, content TEXT, created_at TIMESTAMP, _seq INT64,
+    /// _commit_seq UINT64, _deleted BOOLEAN
     fn chat_messages_schema() -> Arc<Schema> {
         Arc::new(Schema::new(vec![
             Field::new("id", DataType::Utf8, false),
@@ -682,7 +686,8 @@ mod tests {
 
     #[test]
     fn noop_update_without_coercion_would_fail_for_timestamp() {
-        // Demonstrates the bug: without coercion, Int64(1704067200000000) != TimestampMicrosecond(1704067200000000)
+        // Demonstrates the bug: without coercion, Int64(1704067200000000) !=
+        // TimestampMicrosecond(1704067200000000)
         let update_val = ScalarValue::Int64(Some(1704067200000000));
         let stored_val = ScalarValue::TimestampMicrosecond(Some(1704067200000000), None);
 
@@ -793,8 +798,7 @@ pub fn arrow_value_to_scalar(
     array: &dyn Array,
     row_idx: usize,
 ) -> Result<ScalarValue, DataFusionError> {
-    use arrow::array::*;
-    use arrow::datatypes::*;
+    use arrow::{array::*, datatypes::*};
 
     if array.is_null(row_idx) {
         return Ok(ScalarValue::try_from(array.data_type()).unwrap_or(ScalarValue::Null));
@@ -1108,10 +1112,7 @@ where
     let mut json_values = Vec::with_capacity(values.len());
     for index in 0..values.len() {
         let scalar = ScalarValue::try_from_array(values.as_ref(), index).map_err(|error| {
-            CommonError::invalid_input(format!(
-                "Failed to extract list element scalar: {}",
-                error
-            ))
+            CommonError::invalid_input(format!("Failed to extract list element scalar: {}", error))
         })?;
         json_values.push(scalar_value_to_json(&scalar)?.0);
     }
@@ -1166,8 +1167,8 @@ pub fn record_batch_to_json_rows(
 ///
 /// **Used by:** REST API `/v1/api/sql` endpoint for query results
 ///
-/// Returns rows as arrays of values where each value's position corresponds to the schema field index.
-/// Example output: `[["123", "Alice", 1699000000000000], ["456", "Bob", 1699000001000000]]`
+/// Returns rows as arrays of values where each value's position corresponds to the schema field
+/// index. Example output: `[["123", "Alice", 1699000000000000], ["456", "Bob", 1699000001000000]]`
 ///
 /// # Arguments
 /// * `batch` - Arrow RecordBatch from DataFusion query execution

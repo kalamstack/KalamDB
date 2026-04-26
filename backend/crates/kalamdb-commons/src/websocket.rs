@@ -92,20 +92,21 @@
 //! }
 //! ```
 
-use crate::ids::SeqId;
-use crate::models::rows::Row;
-use crate::models::KalamCellValue;
-use crate::models::UserId;
-use crate::schemas::SchemaField;
 pub use crate::websocket_auth::WsAuthCredentials;
+use crate::{
+    ids::SeqId,
+    models::{rows::Row, KalamCellValue, UserId},
+    schemas::SchemaField,
+};
 
 // Simple Row type for WASM (JSON only)
 #[cfg(feature = "wasm")]
 pub type Row = serde_json::Map<String, serde_json::Value>;
 
+use std::collections::{BTreeMap, HashMap};
+
 use datafusion_common::ScalarValue;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
 
 /// Wire-format serialization type negotiated during authentication.
 ///
@@ -328,10 +329,6 @@ pub struct SubscriptionOptions {
     #[serde(skip_serializing_if = "Option::is_none", alias = "from_seq_id")]
     pub from: Option<SeqId>,
 
-    /// Preserve the original snapshot boundary across reconnects while the
-    /// initial load is still in progress.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub snapshot_end_seq: Option<SeqId>,
 }
 
 /// Batch control metadata for paginated initial data loading
@@ -355,9 +352,6 @@ pub struct BatchControl {
 
     /// The SeqId of the last row in this batch (used for next request)
     pub last_seq_id: Option<SeqId>,
-
-    /// The snapshot boundary (max SeqId at start of load)
-    pub snapshot_end_seq: Option<SeqId>,
 }
 
 /// Status of the initial data loading process
@@ -622,7 +616,6 @@ impl BatchControl {
                 BatchStatus::Ready
             },
             last_seq_id: None,
-            snapshot_end_seq: None,
         }
     }
 
@@ -641,17 +634,11 @@ impl BatchControl {
                 BatchStatus::Ready
             },
             last_seq_id: None,
-            snapshot_end_seq: None,
         }
     }
 
     /// Create batch control with all fields specified
-    pub fn new(
-        batch_num: u32,
-        has_more: bool,
-        last_seq_id: Option<SeqId>,
-        snapshot_end_seq: Option<SeqId>,
-    ) -> Self {
+    pub fn new(batch_num: u32, has_more: bool, last_seq_id: Option<SeqId>) -> Self {
         let status = if batch_num == 0 {
             if has_more {
                 BatchStatus::Loading
@@ -669,7 +656,6 @@ impl BatchControl {
             has_more,
             status,
             last_seq_id,
-            snapshot_end_seq,
         }
     }
 }
@@ -863,9 +849,8 @@ impl WireNotification {
         // back to the allocating path when we actually see a byte that would
         // need JSON escaping.
         let sid_bytes = self.subscription_id.as_bytes();
-        let needs_escape = sid_bytes
-            .iter()
-            .any(|&b| b == b'\\' || b == b'"' || b < 0x20 || b >= 0x7f);
+        let needs_escape =
+            sid_bytes.iter().any(|&b| b == b'\\' || b == b'"' || b < 0x20 || b >= 0x7f);
         if needs_escape {
             let escaped = self.subscription_id.replace('\\', "\\\\").replace('"', "\\\"");
             buf.extend_from_slice(escaped.as_bytes());
@@ -903,11 +888,12 @@ impl ChangeType {
 
 #[cfg(test)]
 mod tests {
+    use std::{collections::BTreeMap, sync::Arc};
+
+    use datafusion_common::ScalarValue;
+
     use super::*;
     use crate::models::rows::Row;
-    use datafusion_common::ScalarValue;
-    use std::collections::BTreeMap;
-    use std::sync::Arc;
 
     fn create_test_row(id: i64, message: &str) -> Row {
         let mut values = BTreeMap::new();
@@ -1045,8 +1031,7 @@ mod tests {
 
     #[test]
     fn test_next_batch_request() {
-        use crate::ids::SeqId;
-        use crate::websocket::ClientMessage;
+        use crate::{ids::SeqId, websocket::ClientMessage};
 
         let msg = ClientMessage::next_batch("sub-1".to_string(), Some(SeqId::new(100)));
         let json = serde_json::to_string(&msg).unwrap();

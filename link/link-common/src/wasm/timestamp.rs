@@ -27,7 +27,8 @@ impl WasmTimestampFormatter {
     /// Create a formatter with a specific format
     ///
     /// # Arguments
-    /// * `format` - One of: "iso8601", "iso8601-date", "iso8601-datetime", "unix-ms", "unix-sec", "relative", "rfc2822", "rfc3339"
+    /// * `format` - One of: "iso8601", "iso8601-date", "iso8601-datetime", "unix-ms", "unix-sec",
+    ///   "relative", "rfc2822", "rfc3339"
     #[wasm_bindgen(js_name = withFormat)]
     pub fn with_format(format: &str) -> Result<WasmTimestampFormatter, JsValue> {
         let fmt = match format {

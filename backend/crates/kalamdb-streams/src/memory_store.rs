@@ -4,14 +4,22 @@
 //! that don't need persistence. Data is organized by user_id and then by timestamp
 //! for efficient time-range queries.
 
-use crate::config::StreamLogConfig;
-use crate::error::{Result, StreamLogError};
-use crate::record::StreamLogRecord;
-use crate::store_trait::StreamLogStore;
-use kalamdb_commons::ids::StreamTableRowId;
-use kalamdb_commons::models::{StreamTableRow, TableId, UserId};
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::RwLock;
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    sync::RwLock,
+};
+
+use kalamdb_commons::{
+    ids::StreamTableRowId,
+    models::{StreamTableRow, TableId, UserId},
+};
+
+use crate::{
+    config::StreamLogConfig,
+    error::{Result, StreamLogError},
+    record::StreamLogRecord,
+    store_trait::StreamLogStore,
+};
 
 /// Key for the in-memory store: (user_id string, timestamp_ms, row_id bytes for uniqueness)
 type RowKey = (String, u64, Vec<u8>);
@@ -376,12 +384,15 @@ impl StreamLogStore for MemoryStreamLogStore {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use datafusion::scalar::ScalarValue;
-    use kalamdb_commons::ids::SeqId;
-    use kalamdb_commons::models::rows::Row;
-    use kalamdb_commons::models::{NamespaceId, TableName};
     use std::collections::BTreeMap;
+
+    use datafusion::scalar::ScalarValue;
+    use kalamdb_commons::{
+        ids::SeqId,
+        models::{rows::Row, NamespaceId, TableName},
+    };
+
+    use super::*;
 
     fn build_row(user_id: &UserId, seq: SeqId) -> StreamTableRow {
         let values: BTreeMap<String, ScalarValue> = BTreeMap::new();

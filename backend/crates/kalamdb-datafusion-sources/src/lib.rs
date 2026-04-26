@@ -9,14 +9,12 @@
 //!
 //! ## Module boundaries
 //!
-//! - [`provider`]: scan descriptors, capability matrix, and thin
-//!   `TableProvider`-adjacent traits.
-//! - [`exec`]: shared [`ExecutionPlan`][datafusion::physical_plan::ExecutionPlan]
-//!   scaffolding built on the DataFusion 53.x surface.
+//! - [`provider`]: scan descriptors, capability matrix, and thin `TableProvider`-adjacent traits.
+//! - [`exec`]: shared [`ExecutionPlan`][datafusion::physical_plan::ExecutionPlan] scaffolding built
+//!   on the DataFusion 53.x surface.
 //! - [`stream`]: [`SendableRecordBatchStream`][datafusion::execution::SendableRecordBatchStream]
 //!   adapters that preserve Arrow buffer sharing where possible.
-//! - [`pruning`]: filter, projection, limit, and pruning descriptors reused by
-//!   every source family.
+//! - [`pruning`]: filter, projection, limit, and pruning descriptors reused by every source family.
 //! - [`stats`]: partition statistics and `PlanProperties` builders.
 //!
 //! ## Library policy

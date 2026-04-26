@@ -1,9 +1,13 @@
-use super::{CLISession, OutputFormat};
-use crate::error::{CLIError, Result};
-use crate::parser::Command;
+use std::time::Instant;
+
 use colored::Colorize;
 use kalam_client::SubscriptionConfig;
-use std::time::Instant;
+
+use super::{CLISession, OutputFormat};
+use crate::{
+    error::{CLIError, Result},
+    parser::Command,
+};
 
 impl CLISession {
     /// Execute a parsed command
@@ -117,13 +121,15 @@ impl CLISession {
             },
             Command::ListTables => {
                 self.execute(
-                    "SELECT namespace_id AS namespace, table_name, table_type FROM system.tables ORDER BY namespace_id, table_name",
+                    "SELECT namespace_id AS namespace, table_name, table_type FROM system.tables \
+                     ORDER BY namespace_id, table_name",
                 )
                 .await?;
             },
             Command::Describe(table) => {
                 let query = format!(
-                    "SELECT * FROM information_schema.columns WHERE table_name = '{}' ORDER BY ordinal_position",
+                    "SELECT * FROM information_schema.columns WHERE table_name = '{}' ORDER BY \
+                     ordinal_position",
                     table
                 );
                 self.execute(&query).await?;
@@ -185,7 +191,8 @@ impl CLISession {
             },
             Command::Stats => {
                 self.execute(
-                    "SELECT metric_name, metric_value FROM system.stats ORDER BY metric_name LIMIT 5000",
+                    "SELECT metric_name, metric_value FROM system.stats ORDER BY metric_name \
+                     LIMIT 5000",
                 )
                 .await?;
             },
@@ -296,14 +303,8 @@ impl CLISession {
         );
         println!("{}", "║  Cluster Commands".bright_blue().bold());
         println!("║    {:<48} Trigger snapshot", "\\cluster snapshot".cyan());
-        println!(
-            "║    {:<48} Purge logs up to index",
-            "\\cluster purge --upto <index>".cyan()
-        );
-        println!(
-            "║    {:<48} Trigger cluster election",
-            "\\cluster trigger-election".cyan()
-        );
+        println!("║    {:<48} Purge logs up to index", "\\cluster purge --upto <index>".cyan());
+        println!("║    {:<48} Trigger cluster election", "\\cluster trigger-election".cyan());
         println!(
             "║    {:<48} Transfer cluster leadership",
             "\\cluster transfer-leader <node_id>".cyan()
@@ -311,10 +312,7 @@ impl CLISession {
         println!("║    {:<48} Leader stepdown", "\\cluster stepdown".cyan());
         println!("║    {:<48} Clear old snapshots", "\\cluster clear".cyan());
         println!("║    {:<48} List cluster nodes", "\\cluster list".cyan());
-        println!(
-            "║    {:<48} List all raft groups",
-            "\\cluster list groups".cyan()
-        );
+        println!("║    {:<48} List all raft groups", "\\cluster list groups".cyan());
         println!("║    {:<48} Cluster status", "\\cluster status".cyan());
         println!(
             "║    {:<48} Join node {}",
@@ -343,14 +341,8 @@ impl CLISession {
             "║    {:<32} Show stored credentials",
             "\\show-credentials, \\credentials".cyan()
         );
-        println!(
-            "║    {:<32} Update credentials",
-            "\\update-credentials <u> <p>".cyan()
-        );
-        println!(
-            "║    {:<32} Delete stored credentials",
-            "\\delete-credentials".cyan()
-        );
+        println!("║    {:<32} Update credentials", "\\update-credentials <u> <p>".cyan());
+        println!("║    {:<32} Delete stored credentials", "\\delete-credentials".cyan());
 
         // Topic Consumption
         println!(
@@ -405,8 +397,10 @@ impl CLISession {
         timeout: Option<u64>,
     ) -> Result<()> {
         use kalam_client::consumer::AutoOffsetReset;
-        use tokio::signal;
-        use tokio::time::{sleep, Duration};
+        use tokio::{
+            signal,
+            time::{sleep, Duration},
+        };
 
         // Warn if no consumer group specified
         if group.is_none() {
@@ -435,7 +429,8 @@ impl CLISession {
                         AutoOffsetReset::Offset(offset)
                     } else {
                         return Err(CLIError::ParseError(format!(
-                            "Invalid --from value: {}. Use 'earliest', 'latest', or a numeric offset",
+                            "Invalid --from value: {}. Use 'earliest', 'latest', or a numeric \
+                             offset",
                             from_str
                         )));
                     }
@@ -520,7 +515,9 @@ impl CLISession {
                         format!(
                             "❌ Topic '{}' not found or consume endpoint not available.\n   {}",
                             topic,
-                            "Create the topic with: CREATE TOPIC <name> SOURCE TABLE <namespace>.<table>".dimmed()
+                            "Create the topic with: CREATE TOPIC <name> SOURCE TABLE \
+                             <namespace>.<table>"
+                                .dimmed()
                         )
                     } else if error_msg.contains("401") || error_msg.contains("403") {
                         format!(

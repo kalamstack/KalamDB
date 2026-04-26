@@ -1,7 +1,6 @@
 use kalam_pg_common::{KalamPgError, DELETED_COLUMN, SEQ_COLUMN, USER_ID_COLUMN};
 use kalam_pg_types::foreign_column_definition;
-use kalamdb_commons::models::schemas::TableDefinition;
-use kalamdb_commons::TableType;
+use kalamdb_commons::{models::schemas::TableDefinition, TableType};
 
 /// Build the SQL statement used by `IMPORT FOREIGN SCHEMA` for a Kalam table.
 pub fn create_foreign_table_sql(
@@ -26,7 +25,8 @@ pub fn create_foreign_table_sql(
     columns.push(format!("\"{}\" BOOLEAN", DELETED_COLUMN));
 
     Ok(format!(
-        "CREATE FOREIGN TABLE \"{}\".\"{}\" ({}) SERVER \"{}\" OPTIONS (namespace '{}', table '{}', table_type '{}')",
+        "CREATE FOREIGN TABLE \"{}\".\"{}\" ({}) SERVER \"{}\" OPTIONS (namespace '{}', table \
+         '{}', table_type '{}')",
         quote_identifier(foreign_schema),
         quote_identifier(table_definition.table_name.as_str()),
         columns.join(", "),

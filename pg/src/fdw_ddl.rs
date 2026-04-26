@@ -1,20 +1,25 @@
 //! ProcessUtility hook that propagates DDL on KalamDB-backed PostgreSQL tables.
 //!
 //! Intercepts:
-//! - `CREATE TABLE ... USING kalamdb` → remote `CREATE <type> TABLE` + internal `CREATE FOREIGN TABLE`
+//! - `CREATE TABLE ... USING kalamdb` → remote `CREATE <type> TABLE` + internal `CREATE FOREIGN
+//!   TABLE`
 //! - `CREATE FOREIGN TABLE`           → `CREATE NAMESPACE IF NOT EXISTS` + `CREATE <type> TABLE`
-//!   (auto-injects `_seq BIGINT` and `_userid TEXT` system columns into
-//!   the local PG schema; rejects explicit declarations of these columns)
+//!   (auto-injects `_seq BIGINT` and `_userid TEXT` system columns into the local PG schema;
+//!   rejects explicit declarations of these columns)
 //! - `ALTER FOREIGN TABLE`            → `ALTER TABLE ADD/DROP COLUMN`
 //! - `DROP FOREIGN TABLE`             → `DROP <type> TABLE IF EXISTS`
 
-use crate::fdw_options::parse_options;
+use std::{
+    collections::BTreeMap,
+    ffi::{CStr, CString},
+    str::FromStr,
+};
+
 use kalam_pg_common::{KalamPgError, SEQ_COLUMN, USER_ID_COLUMN};
 use kalamdb_commons::TableType;
 use pgrx::pg_sys;
-use std::collections::BTreeMap;
-use std::ffi::{CStr, CString};
-use std::str::FromStr;
+
+use crate::fdw_options::parse_options;
 
 const DEFAULT_KALAM_SERVER: &str = "kalam_server";
 
@@ -246,8 +251,7 @@ fn call_prev(
 }
 
 unsafe fn report_sql_error(message: &str) -> ! {
-    use pgrx::pg_sys::elog::PgLogLevel;
-    use pgrx::pg_sys::errcodes::PgSqlErrorCode;
+    use pgrx::pg_sys::{elog::PgLogLevel, errcodes::PgSqlErrorCode};
 
     const PERCENT_S: &CStr = c"%s";
     const DOMAIN: *const std::os::raw::c_char = std::ptr::null_mut();
@@ -1074,8 +1078,8 @@ fn validate_no_system_columns(statement_sql: &str) -> Result<(), KalamPgError> {
         if let Some(ident) = first_sql_identifier(&entry) {
             if matches!(ident.as_str(), "_userid" | "_seq" | "_deleted") {
                 return Err(KalamPgError::Validation(format!(
-                    "system column '{}' must not be declared explicitly; \
-                     it is auto-injected by pg_kalam",
+                    "system column '{}' must not be declared explicitly; it is auto-injected by \
+                     pg_kalam",
                     ident
                 )));
             }
@@ -1514,7 +1518,8 @@ mod tests {
     #[test]
     fn split_top_level_sql_list_handles_nested_parentheses() {
         let entries = split_top_level_sql_list(
-            "id BIGINT DEFAULT SNOWFLAKE_ID(), amount NUMERIC(10, 2), created TIMESTAMP DEFAULT NOW()",
+            "id BIGINT DEFAULT SNOWFLAKE_ID(), amount NUMERIC(10, 2), created TIMESTAMP DEFAULT \
+             NOW()",
         );
         assert_eq!(entries.len(), 3);
         assert_eq!(entries[1], "amount NUMERIC(10, 2)");
@@ -1595,7 +1600,8 @@ mod tests {
 
     #[test]
     fn extract_with_options_from_sql_works_for_using_kalamdb() {
-        let sql = "CREATE TABLE t (id INT) USING kalamdb WITH (type = 'user', storage_id = 'local', flush_policy = 'rows:100,interval:60');";
+        let sql = "CREATE TABLE t (id INT) USING kalamdb WITH (type = 'user', storage_id = \
+                   'local', flush_policy = 'rows:100,interval:60');";
         let opts = super::extract_with_options_from_sql(sql);
         assert_eq!(opts.get("type").unwrap(), "user");
         assert_eq!(opts.get("storage_id").unwrap(), "local");
@@ -1635,7 +1641,8 @@ mod tests {
 
     #[test]
     fn create_statement_has_if_not_exists_detects_clause() {
-        let sql = "CREATE TABLE IF NOT EXISTS app.items (id BIGINT) USING kalamdb WITH (type = 'shared');";
+        let sql = "CREATE TABLE IF NOT EXISTS app.items (id BIGINT) USING kalamdb WITH (type = \
+                   'shared');";
         assert!(super::create_statement_has_if_not_exists(sql).expect("parse IF NOT EXISTS"));
 
         let sql = "CREATE TABLE app.items (id BIGINT) USING kalamdb WITH (type = 'shared');";
@@ -1668,7 +1675,8 @@ mod tests {
 
     #[test]
     fn validate_no_system_columns_rejects_deleted() {
-        let sql = "CREATE FOREIGN TABLE t (id TEXT, _deleted BOOLEAN) SERVER s OPTIONS (table_type 'shared');";
+        let sql = "CREATE FOREIGN TABLE t (id TEXT, _deleted BOOLEAN) SERVER s OPTIONS \
+                   (table_type 'shared');";
         let err = validate_no_system_columns(sql).expect_err("should reject _deleted");
         assert!(err.to_string().contains("_deleted"));
     }

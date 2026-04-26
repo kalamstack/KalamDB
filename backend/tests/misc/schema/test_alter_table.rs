@@ -8,8 +8,9 @@
 //! - Schema versioning
 //! - Cache invalidation after ALTER
 
-use super::test_support::{fixtures, TestServer};
 use kalam_client::models::ResponseStatus;
+
+use super::test_support::{fixtures, TestServer};
 
 /// T022a: ALTER TABLE ADD COLUMN
 #[actix_web::test]

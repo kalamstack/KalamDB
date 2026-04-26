@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::serialization::generated::entity_envelope_generated::kalamdb::serialization as fb;
-use crate::storage::StorageError;
+use crate::{
+    serialization::generated::entity_envelope_generated::kalamdb::serialization as fb,
+    storage::StorageError,
+};
 
 type Result<T> = std::result::Result<T, StorageError>;
 

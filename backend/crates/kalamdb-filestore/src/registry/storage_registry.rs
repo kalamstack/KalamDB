@@ -4,14 +4,17 @@
 //! Includes an in-memory cache to avoid repeated RocksDB lookups when multiple tables
 //! share the same storage.
 
-use crate::error::{FilestoreError, Result};
-use crate::registry::storage_cached::StorageCached;
+use std::sync::Arc;
+
 use dashmap::DashMap;
 use kalamdb_commons::models::StorageId;
 use kalamdb_configs::config::types::RemoteStorageTimeouts;
-use kalamdb_system::Storage;
-use kalamdb_system::StoragesTableProvider;
-use std::sync::Arc;
+use kalamdb_system::{Storage, StoragesTableProvider};
+
+use crate::{
+    error::{FilestoreError, Result},
+    registry::storage_cached::StorageCached,
+};
 
 /// Registry for managing storage backends
 ///
@@ -333,9 +336,11 @@ impl StorageRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use kalamdb_store::test_utils::InMemoryBackend;
     use std::sync::Arc;
+
+    use kalamdb_store::test_utils::InMemoryBackend;
+
+    use super::*;
 
     // These are unit tests for template validation logic.
     // Use an in-memory backend so validation tests do not depend on RocksDB lifecycle.

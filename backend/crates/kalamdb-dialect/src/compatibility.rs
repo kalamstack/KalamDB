@@ -4,11 +4,11 @@
 //! data types into Arrow data types that KalamDB understands.  Centralising
 //! these conversions keeps the CREATE TABLE parsers in sync across crates.
 
+use std::string::String;
+
 use arrow::datatypes::{DataType, IntervalUnit, TimeUnit};
 use kalamdb_commons::models::datatypes::{FromArrowType, KalamDataType};
-use sqlparser::ast::DataType::*;
-use sqlparser::ast::{DataType as SQLDataType, ObjectName};
-use std::string::String;
+use sqlparser::ast::{DataType as SQLDataType, DataType::*, ObjectName};
 
 /// Map a parsed `sqlparser` data type into an Arrow data type while accounting
 /// for PostgreSQL/MySQL aliases (e.g. `SERIAL`, `INT4`, `AUTO_INCREMENT`).
@@ -146,10 +146,9 @@ fn map_custom_type(name: &ObjectName, modifiers: &[String]) -> Result<DataType, 
         "embedding" => {
             // Extract dimension from modifiers
             if modifiers.len() != 1 {
-                return Err(
-                    "EMBEDDING type requires exactly one dimension parameter, e.g., EMBEDDING(384)"
-                        .to_string(),
-                );
+                return Err("EMBEDDING type requires exactly one dimension parameter, e.g., \
+                            EMBEDDING(384)"
+                    .to_string());
             }
 
             let dim_str = &modifiers[0];
@@ -196,8 +195,9 @@ fn map_custom_type(name: &ObjectName, modifiers: &[String]) -> Result<DataType, 
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use sqlparser::ast::Ident;
+
+    use super::*;
 
     fn custom(name: &str) -> SQLDataType {
         SQLDataType::Custom(
@@ -397,11 +397,17 @@ pub fn format_mysql_column_not_found(column_name: &str) -> String {
 /// use kalamdb_dialect::compatibility::format_mysql_syntax_error;
 ///
 /// let msg = format_mysql_syntax_error("FROM", 1);
-/// assert_eq!(msg, "ERROR 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'FROM' at line 1");
+/// assert_eq!(
+///     msg,
+///     "ERROR 1064 (42000): You have an error in your SQL syntax; check the manual that \
+///      corresponds to your MySQL server version for the right syntax to use near 'FROM' at line \
+///      1"
+/// );
 /// ```
 pub fn format_mysql_syntax_error(token: &str, line: usize) -> String {
     format!(
-        "ERROR 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near '{}' at line {}",
+        "ERROR 1064 (42000): You have an error in your SQL syntax; check the manual that \
+         corresponds to your MySQL server version for the right syntax to use near '{}' at line {}",
         token, line
     )
 }
@@ -448,7 +454,9 @@ mod error_formatting_tests {
     fn test_mysql_syntax_error() {
         assert_eq!(
             format_mysql_syntax_error("FROM", 1),
-            "ERROR 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'FROM' at line 1"
+            "ERROR 1064 (42000): You have an error in your SQL syntax; check the manual that \
+             corresponds to your MySQL server version for the right syntax to use near 'FROM' at \
+             line 1"
         );
     }
 }

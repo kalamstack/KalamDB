@@ -1,15 +1,20 @@
+use std::sync::Arc;
+
 use datafusion::arrow::{
     array::{ArrayRef, BinaryBuilder, Int32Array, Int64Array, StringBuilder},
     record_batch::RecordBatch,
 };
 use kalamdb_commons::models::{ConsumerGroupId, TopicId};
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
-use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
+use kalamdb_core::{
+    app_context::AppContext,
+    error::KalamDbError,
+    sql::{
+        context::{ExecutionContext, ExecutionResult, ScalarValue},
+        executor::handlers::TypedStatementHandler,
+    },
+};
 use kalamdb_sql::ddl::{ConsumePosition, ConsumeStatement};
 use kalamdb_tables::topics::topic_message_schema::topic_message_schema;
-use std::sync::Arc;
 
 pub struct ConsumeHandler {
     app_context: Arc<AppContext>,
@@ -37,21 +42,16 @@ impl TypedStatementHandler<ConsumeStatement> for ConsumeHandler {
         let topic_publisher = self.app_context.topic_publisher();
         let limit = statement.limit.unwrap_or(100) as usize;
         let partition_id = 0u32;
-        let group_id = statement
-            .group_id
-            .as_ref()
-            .map(|group_name| ConsumerGroupId::new(group_name));
+        let group_id =
+            statement.group_id.as_ref().map(|group_name| ConsumerGroupId::new(group_name));
 
         let committed_offset = group_id.as_ref().and_then(|group_id| {
-            topic_publisher
-                .get_group_offsets(&topic_id, group_id)
-                .ok()
-                .and_then(|offsets| {
-                    offsets
-                        .iter()
-                        .find(|offset| offset.partition_id == partition_id)
-                        .map(|offset| offset.last_acked_offset + 1)
-                })
+            topic_publisher.get_group_offsets(&topic_id, group_id).ok().and_then(|offsets| {
+                offsets
+                    .iter()
+                    .find(|offset| offset.partition_id == partition_id)
+                    .map(|offset| offset.last_acked_offset + 1)
+            })
         });
 
         let start_offset = match committed_offset {

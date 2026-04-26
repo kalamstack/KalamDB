@@ -9,9 +9,11 @@
 // Run with:
 //   cargo test --test smoke smoke_test_subscription_listing
 
-use crate::common::*;
-use kalam_client::{ChangeEvent, KalamLinkClient, KalamLinkTimeouts, SubscriptionConfig};
 use std::time::Duration;
+
+use kalam_client::{ChangeEvent, KalamLinkClient, KalamLinkTimeouts, SubscriptionConfig};
+
+use crate::common::*;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 

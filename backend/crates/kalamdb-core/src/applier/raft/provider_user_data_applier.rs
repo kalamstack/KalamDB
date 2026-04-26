@@ -5,16 +5,17 @@
 //!
 //! Called by UserDataStateMachine after Raft consensus on all nodes.
 
-use async_trait::async_trait;
 use std::sync::Arc;
 
-use crate::app_context::AppContext;
-use crate::applier::executor::CommandExecutorImpl;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::{TransactionId, UserId};
-use kalamdb_commons::TableId;
+use async_trait::async_trait;
+use kalamdb_commons::{
+    models::{rows::Row, TransactionId, UserId},
+    TableId,
+};
 use kalamdb_raft::{RaftError, TransactionApplyResult, UserDataApplier};
 use kalamdb_transactions::StagedMutation;
+
+use crate::{app_context::AppContext, applier::executor::CommandExecutorImpl};
 
 /// UserDataApplier implementation using Unified Command Executor
 ///
@@ -40,6 +41,7 @@ impl UserDataApplier for ProviderUserDataApplier {
         table_id: &TableId,
         user_id: &UserId,
         rows: &[Row],
+        commit_seq: u64,
     ) -> Result<usize, RaftError> {
         log::debug!(
             "ProviderUserDataApplier: Inserting into {} for user {} ({} rows)",
@@ -50,7 +52,7 @@ impl UserDataApplier for ProviderUserDataApplier {
 
         self.executor
             .dml()
-            .insert_user_data(table_id, user_id, rows)
+            .insert_user_data_with_commit_seq(table_id, user_id, rows, commit_seq)
             .await
             .map_err(|e| RaftError::provider(e.to_string()))
     }
@@ -61,6 +63,7 @@ impl UserDataApplier for ProviderUserDataApplier {
         user_id: &UserId,
         updates: &[Row],
         filter: Option<&str>,
+        commit_seq: u64,
     ) -> Result<usize, RaftError> {
         log::debug!(
             "ProviderUserDataApplier: Updating {} for user {} ({} rows)",
@@ -71,7 +74,7 @@ impl UserDataApplier for ProviderUserDataApplier {
 
         self.executor
             .dml()
-            .update_user_data(table_id, user_id, updates, filter)
+            .update_user_data_with_commit_seq(table_id, user_id, updates, filter, commit_seq)
             .await
             .map_err(|e| RaftError::provider(e.to_string()))
     }
@@ -81,12 +84,13 @@ impl UserDataApplier for ProviderUserDataApplier {
         table_id: &TableId,
         user_id: &UserId,
         pk_values: Option<&[String]>,
+        commit_seq: u64,
     ) -> Result<usize, RaftError> {
         log::debug!("ProviderUserDataApplier: Deleting from {} for user {}", table_id, user_id);
 
         self.executor
             .dml()
-            .delete_user_data(table_id, user_id, pk_values)
+            .delete_user_data_with_commit_seq(table_id, user_id, pk_values, commit_seq)
             .await
             .map_err(|e| RaftError::provider(e.to_string()))
     }
@@ -95,10 +99,11 @@ impl UserDataApplier for ProviderUserDataApplier {
         &self,
         transaction_id: &TransactionId,
         mutations: &[StagedMutation],
+        commit_seq: u64,
     ) -> Result<TransactionApplyResult, RaftError> {
         self.executor
             .dml()
-            .apply_user_transaction_batch(transaction_id, mutations)
+            .apply_user_transaction_batch_with_commit_seq(transaction_id, mutations, commit_seq)
             .await
             .map_err(|e| RaftError::provider(e.to_string()))
     }

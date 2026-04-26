@@ -1,5 +1,4 @@
-use kalamdb_core::applier::ApplierError;
-use kalamdb_core::error::KalamDbError;
+use kalamdb_core::{applier::ApplierError, error::KalamDbError};
 use kalamdb_system::SystemError;
 use kalamdb_tables::TableError;
 use thiserror::Error;

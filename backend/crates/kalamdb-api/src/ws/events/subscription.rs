@@ -2,18 +2,19 @@
 //!
 //! Handles the Subscribe message for live query subscriptions.
 
+use std::sync::Arc;
+
 use actix_ws::Session;
-use kalamdb_commons::websocket::{BatchControl, SubscriptionRequest, MAX_ROWS_PER_BATCH};
-use kalamdb_commons::WebSocketMessage;
+use kalamdb_commons::{
+    websocket::{BatchControl, SubscriptionRequest, MAX_ROWS_PER_BATCH},
+    WebSocketMessage,
+};
 use kalamdb_core::providers::arrow_json_conversion::row_into_json_map;
 use kalamdb_live::{InitialDataOptions, LiveQueryManager, SharedConnectionState};
 use log::{debug, error, warn};
-use std::sync::Arc;
-
-use crate::limiter::RateLimiter;
-use crate::ws::models::WsErrorCode;
 
 use super::{send_error, send_message};
+use crate::{limiter::RateLimiter, ws::models::WsErrorCode};
 
 /// Handle subscription request
 ///
@@ -72,7 +73,7 @@ pub async fn handle_subscribe(
     // - batch_size: Hint for server-side batch sizing
     let initial_opts = subscription_options.map(|options| {
         if let Some(from_seq) = options.from {
-            InitialDataOptions::batch(Some(from_seq), options.snapshot_end_seq, batch_size)
+            InitialDataOptions::batch(Some(from_seq), None, batch_size)
         } else if let Some(n) = options.last_rows {
             InitialDataOptions::last(n as usize)
         } else {
@@ -101,11 +102,10 @@ pub async fn handle_subscribe(
                     0, // batch_num
                     initial.has_more,
                     initial.last_seq,
-                    initial.snapshot_end_seq,
                 )
             } else {
                 // No initial data - empty result, ready immediately
-                BatchControl::new(0, false, None, None)
+                BatchControl::new(0, false, None)
             };
 
             let ack = WebSocketMessage::subscription_ack(

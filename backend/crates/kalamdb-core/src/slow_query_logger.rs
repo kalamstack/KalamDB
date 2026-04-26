@@ -3,13 +3,12 @@
 //! Logs queries that exceed a configurable threshold to a separate slow.log file.
 //! Designed for minimal performance overhead using async file I/O.
 
-use crate::schema_registry::TableType;
+use std::{fs::OpenOptions, io::Write, path::Path, sync::Arc};
+
 use kalamdb_commons::models::{TableName, UserId};
-use std::fs::OpenOptions;
-use std::io::Write;
-use std::path::Path;
-use std::sync::Arc;
 use tokio::sync::mpsc;
+
+use crate::schema_registry::TableType;
 
 /// Slow query log entry
 #[derive(Debug, Clone)]
@@ -18,7 +17,8 @@ pub struct SlowQueryEntry {
     pub duration_secs: f64,
     pub row_count: usize,
     pub user_id: UserId,
-    pub table_type: TableType, //use backend/crates/kalamdb-commons/src/models/schemas/table_type.rs
+    pub table_type: TableType, /* use backend/crates/kalamdb-commons/src/models/schemas/
+                                * table_type.rs */
     pub table_name: Option<TableName>,
     pub timestamp: i64,
 }
@@ -34,7 +34,8 @@ impl SlowQueryLogger {
     ///
     /// # Arguments
     /// * `log_path` - Path to slow.log file
-    /// * `threshold_ms` - Minimum duration to log in milliseconds (queries faster than this are ignored)
+    /// * `threshold_ms` - Minimum duration to log in milliseconds (queries faster than this are
+    ///   ignored)
     ///
     /// # Returns
     /// Arc-wrapped logger instance
@@ -64,7 +65,8 @@ impl SlowQueryLogger {
                             .unwrap_or_else(|| "unknown".to_string());
 
                         let log_line = format!(
-                            "[{}] SLOW QUERY - user={}, table={} ({}), duration={:.3}s, rows={}, query={}\n",
+                            "[{}] SLOW QUERY - user={}, table={} ({}), duration={:.3}s, rows={}, \
+                             query={}\n",
                             timestamp,
                             entry.user_id,
                             table_info,
@@ -167,8 +169,9 @@ impl SlowQueryLogger {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kalamdb_commons::models::UserId;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_slow_query_logger_threshold() {

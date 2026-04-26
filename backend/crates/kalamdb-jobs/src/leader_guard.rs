@@ -19,12 +19,12 @@
 //! This ensures that even with leadership changes mid-execution,
 //! only one node executes each job.
 
-use chrono::Utc;
-use kalamdb_raft::{CommandExecutor, GroupId, MetaCommand, MetaResponse};
 use std::sync::Arc;
 
+use chrono::Utc;
 use kalamdb_commons::models::{JobId, NodeId};
 use kalamdb_core::error::KalamDbError;
+use kalamdb_raft::{CommandExecutor, GroupId, MetaCommand, MetaResponse};
 
 /// Result of checking leadership status
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -177,14 +177,16 @@ impl LeaderOnlyJobGuard {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     use async_trait::async_trait;
     use kalamdb_commons::models::UserId;
     use kalamdb_raft::{
         ClusterInfo, ClusterNodeInfo, DataResponse, NodeRole, NodeStatus, Result,
         SharedDataCommand, UserDataCommand,
     };
-    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use super::*;
 
     /// Mock CommandExecutor for testing
     #[derive(Debug)]

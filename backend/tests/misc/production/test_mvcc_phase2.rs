@@ -12,9 +12,9 @@
 //! - T063: RocksDB prefix scan `{user_id}:` → efficiently returns only that user's rows
 //! - T064: RocksDB range scan `_seq > threshold` → efficiently skips older versions
 
+use kalam_client::{models::ResponseStatus, parse_i64};
+
 use super::test_support::{consolidated_helpers, fixtures, TestServer};
-use kalam_client::models::ResponseStatus;
-use kalam_client::parse_i64;
 
 /// T051: CREATE TABLE without PK should be rejected
 #[actix_web::test]

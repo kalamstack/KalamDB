@@ -2,11 +2,14 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
-use hyper::header::{AUTHORIZATION, CONTENT_TYPE};
-use hyper::{Method, Request, StatusCode};
-use hyper_util::client::legacy::connect::HttpConnector;
-use hyper_util::client::legacy::Client;
-use hyper_util::rt::TokioExecutor;
+use hyper::{
+    header::{AUTHORIZATION, CONTENT_TYPE},
+    Method, Request, StatusCode,
+};
+use hyper_util::{
+    client::legacy::{connect::HttpConnector, Client},
+    rt::TokioExecutor,
+};
 use serde_json::Value;
 
 #[derive(Clone)]

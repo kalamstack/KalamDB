@@ -1,12 +1,16 @@
 #[cfg(test)]
 mod tests {
-    use crate::models::*;
-    use kalam_client::models::{
-        BatchControl, BatchStatus, ChangeEvent, ErrorDetail, LoginResponse, LoginUserInfo,
-        QueryResponse, QueryResult, ResponseStatus, SchemaField,
-    };
-    use kalam_client::{FieldFlag, KalamDataType};
     use std::collections::BTreeSet;
+
+    use kalam_client::{
+        models::{
+            BatchControl, BatchStatus, ChangeEvent, ErrorDetail, LoginResponse, LoginUserInfo,
+            QueryResponse, QueryResult, ResponseStatus, SchemaField,
+        },
+        FieldFlag, KalamDataType,
+    };
+
+    use crate::models::*;
 
     // -----------------------------------------------------------------------
     // Auth provider conversion
@@ -230,7 +234,6 @@ mod tests {
             has_more,
             status,
             last_seq_id: None,
-            snapshot_end_seq: None,
         }
     }
 
@@ -471,8 +474,7 @@ mod tests {
 
     #[test]
     fn subscription_info_from_native() {
-        use kalam_client::models::SubscriptionInfo;
-        use kalam_client::SeqId;
+        use kalam_client::{models::SubscriptionInfo, SeqId};
 
         let native = SubscriptionInfo {
             id: "sub-42".to_string(),

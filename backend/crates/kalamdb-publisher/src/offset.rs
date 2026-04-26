@@ -1,9 +1,12 @@
 //! Atomic offset allocation for topic partitions.
 
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
+
 use dashmap::DashMap;
 use kalamdb_commons::models::TopicId;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct TopicPartitionKey {

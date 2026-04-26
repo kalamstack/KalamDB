@@ -1,21 +1,29 @@
-use crate::hot_staging::{
-    new_indexed_shared_vector_hot_store, new_indexed_user_vector_hot_store,
-    normalize_vector_column_name, SharedVectorHotOpId, UserVectorHotOpId, VectorHotOp,
-    VectorHotOpType,
+use std::{
+    collections::HashMap,
+    fmt::{Display, Formatter},
+    sync::Arc,
 };
-use crate::snapshot_codec::{decode_snapshot, encode_snapshot, VixSnapshotEntry, VixSnapshotFile};
-use crate::usearch_engine::{add_vector, create_index, export_vector, load_index, serialize_index};
+
 use bytes::Bytes;
 use datafusion::arrow::datatypes::{DataType, SchemaRef};
-use kalamdb_commons::ids::SeqId;
-use kalamdb_commons::models::{TableId, UserId};
-use kalamdb_commons::schemas::TableType;
+use kalamdb_commons::{
+    ids::SeqId,
+    models::{TableId, UserId},
+    schemas::TableType,
+};
 use kalamdb_filestore::{FilestoreError, StorageCached};
 use kalamdb_store::{EntityStore, StorageBackend};
 use kalamdb_system::{Manifest, VectorEngine, VectorMetric};
-use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
+
+use crate::{
+    hot_staging::{
+        new_indexed_shared_vector_hot_store, new_indexed_user_vector_hot_store,
+        normalize_vector_column_name, SharedVectorHotOpId, UserVectorHotOpId, VectorHotOp,
+        VectorHotOpType,
+    },
+    snapshot_codec::{decode_snapshot, encode_snapshot, VixSnapshotEntry, VixSnapshotFile},
+    usearch_engine::{add_vector, create_index, export_vector, load_index, serialize_index},
+};
 
 const VECTOR_SCAN_LIMIT: usize = 100_000;
 

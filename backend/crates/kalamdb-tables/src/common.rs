@@ -1,8 +1,7 @@
-use kalamdb_commons::KSerializable;
-use kalamdb_commons::StorageKey;
-use kalamdb_commons::TableId;
-use kalamdb_store::{IndexDefinition, IndexedEntityStore, Partition, StorageBackend};
 use std::sync::Arc;
+
+use kalamdb_commons::{KSerializable, StorageKey, TableId};
+use kalamdb_store::{IndexDefinition, IndexedEntityStore, Partition, StorageBackend};
 
 /// Build the canonical RocksDB partition name for a table scope.
 ///

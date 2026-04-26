@@ -11,23 +11,25 @@
 //! to catch up before applying. This ensures data operations don't run before
 //! their dependent metadata (tables, users) is applied locally.
 
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
+
 use async_trait::async_trait;
+use kalamdb_commons::{models::TransactionId, TableType};
+use kalamdb_transactions::StagedMutation;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-
-use crate::applier::UserDataApplier;
-use crate::{DataResponse, GroupId, RaftCommand, RaftError, UserDataCommand};
-use kalamdb_commons::models::TransactionId;
-use kalamdb_commons::TableType;
-use kalamdb_transactions::StagedMutation;
 
 use super::{
-    decode as bincode_decode, encode as bincode_encode, ApplyResult, KalamStateMachine,
-    StateMachineSnapshot,
+    decode as bincode_decode, encode as bincode_encode, get_coordinator, ApplyResult,
+    KalamStateMachine, PendingBuffer, PendingCommand, StateMachineSnapshot,
 };
-use super::{get_coordinator, PendingBuffer, PendingCommand};
+use crate::{
+    applier::UserDataApplier, commit_seq_from_log_position, DataResponse, GroupId, RaftCommand,
+    RaftError, UserDataCommand,
+};
 
 /// Snapshot data for UserDataStateMachine
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,6 +80,8 @@ pub struct UserDataStateMachine {
     last_applied_index: AtomicU64,
     /// Last applied log term
     last_applied_term: AtomicU64,
+    /// Notifies waiters when the applied index advances.
+    last_applied_tx: tokio::sync::watch::Sender<u64>,
     /// Approximate data size in bytes
     approximate_size: AtomicU64,
     /// Total operations processed
@@ -102,11 +106,12 @@ impl std::fmt::Debug for UserDataStateMachine {
 impl UserDataStateMachine {
     /// Create a new UserDataStateMachine for the specified shard
     pub fn new(shard: u32) -> Self {
-        assert!(shard < 32, "Shard must be 0-31");
+        let (last_applied_tx, _) = tokio::sync::watch::channel(0);
         Self {
             shard,
             last_applied_index: AtomicU64::new(0),
             last_applied_term: AtomicU64::new(0),
+            last_applied_tx,
             approximate_size: AtomicU64::new(0),
             total_operations: AtomicU64::new(0),
             applier: RwLock::new(None),
@@ -116,11 +121,12 @@ impl UserDataStateMachine {
 
     /// Create a new UserDataStateMachine with an applier
     pub fn with_applier(shard: u32, applier: Arc<dyn UserDataApplier>) -> Self {
-        assert!(shard < 32, "Shard must be 0-31");
+        let (last_applied_tx, _) = tokio::sync::watch::channel(0);
         Self {
             shard,
             last_applied_index: AtomicU64::new(0),
             last_applied_term: AtomicU64::new(0),
+            last_applied_tx,
             approximate_size: AtomicU64::new(0),
             total_operations: AtomicU64::new(0),
             applier: RwLock::new(Some(applier)),
@@ -158,7 +164,8 @@ impl UserDataStateMachine {
 
         for pending in drained {
             let cmd = Self::decode_apply_command(&pending.command_bytes)?;
-            let _ = self.apply_decoded_command(cmd).await?;
+            let commit_seq = commit_seq_from_log_position(self.group_id(), pending.log_index);
+            let _ = self.apply_decoded_command(cmd, commit_seq).await?;
             log::debug!(
                 "UserDataStateMachine[{}]: Applied buffered command log_index={}",
                 self.shard,
@@ -174,9 +181,17 @@ impl UserDataStateMachine {
         self.pending_buffer.len()
     }
 
+    fn publish_last_applied(&self, index: u64) {
+        self.last_applied_tx.send_replace(index);
+    }
+
     /// Apply a user data command
     /// Note: user_id is extracted from inside each command variant
-    async fn apply_command(&self, cmd: UserDataCommand) -> Result<DataResponse, RaftError> {
+    async fn apply_command(
+        &self,
+        cmd: UserDataCommand,
+        commit_seq: u64,
+    ) -> Result<DataResponse, RaftError> {
         // Get applier reference
         let applier = {
             let guard = self.applier.read();
@@ -199,7 +214,7 @@ impl UserDataStateMachine {
 
                 // Persist data via applier if available
                 let rows_affected = if let Some(ref a) = applier {
-                    match a.insert(&table_id, &user_id, &rows).await {
+                    match a.insert(&table_id, &user_id, &rows, commit_seq).await {
                         Ok(count) => count,
                         Err(e) => {
                             // Convert applier errors to DataResponse::Error
@@ -236,7 +251,10 @@ impl UserDataStateMachine {
                 log::debug!("UserDataStateMachine[{}]: Update {:?}", self.shard, table_id);
 
                 let rows_affected = if let Some(ref a) = applier {
-                    match a.update(&table_id, &user_id, &updates, filter.as_deref()).await {
+                    match a
+                        .update(&table_id, &user_id, &updates, filter.as_deref(), commit_seq)
+                        .await
+                    {
                         Ok(count) => count,
                         Err(e) => {
                             log::warn!(
@@ -268,7 +286,7 @@ impl UserDataStateMachine {
                 log::debug!("UserDataStateMachine[{}]: Delete from {:?}", self.shard, table_id);
 
                 let rows_affected = if let Some(ref a) = applier {
-                    match a.delete(&table_id, &user_id, pk_values.as_deref()).await {
+                    match a.delete(&table_id, &user_id, pk_values.as_deref(), commit_seq).await {
                         Ok(count) => count,
                         Err(e) => {
                             log::warn!(
@@ -316,13 +334,14 @@ impl UserDataStateMachine {
     async fn apply_decoded_command(
         &self,
         cmd: UserApplyCommand,
+        commit_seq: u64,
     ) -> Result<DataResponse, RaftError> {
         match cmd {
-            UserApplyCommand::User(command) => self.apply_command(command).await,
+            UserApplyCommand::User(command) => self.apply_command(command, commit_seq).await,
             UserApplyCommand::TransactionCommit {
                 transaction_id,
                 mutations,
-            } => self.apply_transaction_commit(transaction_id, mutations).await,
+            } => self.apply_transaction_commit(transaction_id, mutations, commit_seq).await,
         }
     }
 
@@ -330,6 +349,7 @@ impl UserDataStateMachine {
         &self,
         transaction_id: TransactionId,
         mutations: Vec<StagedMutation>,
+        commit_seq: u64,
     ) -> Result<DataResponse, RaftError> {
         if mutations
             .iter()
@@ -349,7 +369,7 @@ impl UserDataStateMachine {
             return Ok(DataResponse::error("No applier set, transaction commit not persisted"));
         };
 
-        match applier.apply_transaction_batch(&transaction_id, &mutations).await {
+        match applier.apply_transaction_batch(&transaction_id, &mutations, commit_seq).await {
             Ok(result) => {
                 self.total_operations.fetch_add(1, Ordering::Relaxed);
                 Ok(DataResponse::TransactionCommitted(result))
@@ -390,7 +410,8 @@ impl KalamStateMachine for UserDataStateMachine {
             let current_meta = get_coordinator().current_index();
             if required_meta > current_meta {
                 log::debug!(
-                    "UserDataStateMachine[{}]: Buffering command (required_meta={} > current_meta={})",
+                    "UserDataStateMachine[{}]: Buffering command (required_meta={} > \
+                     current_meta={})",
                     self.shard,
                     required_meta,
                     current_meta
@@ -405,6 +426,7 @@ impl KalamStateMachine for UserDataStateMachine {
                 // Mark as applied (buffered) to satisfy Raft log progress
                 self.last_applied_index.store(index, Ordering::Release);
                 self.last_applied_term.store(term, Ordering::Release);
+                self.publish_last_applied(index);
 
                 return Ok(ApplyResult::NoOp);
             }
@@ -416,11 +438,13 @@ impl KalamStateMachine for UserDataStateMachine {
         }
 
         // Apply current command
-        let response = self.apply_decoded_command(cmd).await?;
+        let commit_seq = commit_seq_from_log_position(self.group_id(), index);
+        let response = self.apply_decoded_command(cmd, commit_seq).await?;
 
         // Update last applied
         self.last_applied_index.store(index, Ordering::Release);
         self.last_applied_term.store(term, Ordering::Release);
+        self.publish_last_applied(index);
 
         // Serialize response
         let response_data = crate::codec::command_codec::encode_data_response(&response)?;
@@ -430,6 +454,21 @@ impl KalamStateMachine for UserDataStateMachine {
 
     fn last_applied_index(&self) -> u64 {
         self.last_applied_index.load(Ordering::Acquire)
+    }
+
+    fn subscribe_last_applied(&self) -> Option<tokio::sync::watch::Receiver<u64>> {
+        Some(self.last_applied_tx.subscribe())
+    }
+
+    fn mark_applied_index(&self, index: u64, term: u64) {
+        let last_applied = self.last_applied_index.load(Ordering::Acquire);
+        if index <= last_applied {
+            return;
+        }
+
+        self.last_applied_index.store(index, Ordering::Release);
+        self.last_applied_term.store(term, Ordering::Release);
+        self.publish_last_applied(index);
     }
 
     fn last_applied_term(&self) -> u64 {
@@ -471,10 +510,14 @@ impl KalamStateMachine for UserDataStateMachine {
         self.total_operations.store(data.total_operations, Ordering::Release);
         self.last_applied_index.store(snapshot.last_applied_index, Ordering::Release);
         self.last_applied_term.store(snapshot.last_applied_term, Ordering::Release);
+        self.publish_last_applied(snapshot.last_applied_index);
 
         log::info!(
-            "UserDataStateMachine[{}]: Restored from snapshot at index {}, term {}, {} pending commands",
-            self.shard, snapshot.last_applied_index, snapshot.last_applied_term,
+            "UserDataStateMachine[{}]: Restored from snapshot at index {}, term {}, {} pending \
+             commands",
+            self.shard,
+            snapshot.last_applied_index,
+            snapshot.last_applied_term,
             self.pending_buffer.len()
         );
 
@@ -488,13 +531,15 @@ impl KalamStateMachine for UserDataStateMachine {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use async_trait::async_trait;
-    use kalamdb_commons::models::rows::Row;
-    use kalamdb_commons::models::NamespaceId;
-    use kalamdb_commons::models::OperationKind;
-    use kalamdb_commons::{TableId, UserId};
     use std::collections::BTreeMap;
+
+    use async_trait::async_trait;
+    use kalamdb_commons::{
+        models::{rows::Row, NamespaceId, OperationKind},
+        TableId, UserId,
+    };
+
+    use super::*;
 
     struct TransactionBatchUserApplier;
 
@@ -505,6 +550,7 @@ mod tests {
             _table_id: &TableId,
             _user_id: &UserId,
             rows: &[Row],
+            _commit_seq: u64,
         ) -> Result<usize, RaftError> {
             Ok(rows.len())
         }
@@ -515,6 +561,7 @@ mod tests {
             _user_id: &UserId,
             _updates: &[Row],
             _filter: Option<&str>,
+            _commit_seq: u64,
         ) -> Result<usize, RaftError> {
             Ok(1)
         }
@@ -524,6 +571,7 @@ mod tests {
             _table_id: &TableId,
             _user_id: &UserId,
             _pk_values: Option<&[String]>,
+            _commit_seq: u64,
         ) -> Result<usize, RaftError> {
             Ok(1)
         }
@@ -532,10 +580,11 @@ mod tests {
             &self,
             _transaction_id: &TransactionId,
             mutations: &[StagedMutation],
+            commit_seq: u64,
         ) -> Result<crate::TransactionApplyResult, RaftError> {
             Ok(crate::TransactionApplyResult {
                 rows_affected: mutations.len(),
-                commit_seq: 77,
+                commit_seq,
                 notifications_sent: 0,
                 manifest_updates: 0,
                 publisher_events: 0,
@@ -591,7 +640,10 @@ mod tests {
                 match response {
                     DataResponse::TransactionCommitted(result) => {
                         assert_eq!(result.rows_affected, 1);
-                        assert_eq!(result.commit_seq, 77);
+                        assert_eq!(
+                            result.commit_seq,
+                            commit_seq_from_log_position(GroupId::DataUserShard(0), 1)
+                        );
                     },
                     other => panic!("unexpected response: {:?}", other),
                 }

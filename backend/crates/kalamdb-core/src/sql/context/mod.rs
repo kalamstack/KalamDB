@@ -12,11 +12,9 @@
 mod execution_context;
 mod execution_result;
 
-pub use execution_context::ExecutionContext;
-pub use execution_result::ExecutionResult;
-
-// Re-export SessionUserContext from kalamdb-session-datafusion for TableProviders.
-pub use kalamdb_session_datafusion::SessionUserContext;
-
 // Re-export DataFusion's ScalarValue for convenience
 pub use datafusion::scalar::ScalarValue;
+pub use execution_context::ExecutionContext;
+pub use execution_result::ExecutionResult;
+// Re-export SessionUserContext from kalamdb-session-datafusion for TableProviders.
+pub use kalamdb_session_datafusion::SessionUserContext;

@@ -8,33 +8,33 @@
 //! - Partition tolerance
 //! - All Raft groups coverage (meta + user shards + shared)
 
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
-
-use kalamdb_commons::models::rows::Row;
-use serde_json;
-
-use chrono::Utc;
-use tokio::time::sleep;
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    sync::{
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use async_trait::async_trait;
-use kalamdb_commons::models::schemas::TableType;
-use kalamdb_commons::models::{JobId, NamespaceId, NodeId, StorageId, TableName, UserId};
-use kalamdb_commons::TableId;
+use chrono::Utc;
+use kalamdb_commons::{
+    models::{
+        rows::Row, schemas::TableType, JobId, NamespaceId, NodeId, StorageId, TableName, UserId,
+    },
+    TableId,
+};
 use kalamdb_raft::{
     commands::{MetaCommand, SharedDataCommand, UserDataCommand},
     manager::{PeerNode, RaftManager, RaftManagerConfig},
-    GroupId,
-};
-use kalamdb_raft::{
-    ApplyResult, KalamRaftStorage, KalamStateMachine, RaftError, StateMachineSnapshot,
+    ApplyResult, GroupId, KalamRaftStorage, KalamStateMachine, RaftError, StateMachineSnapshot,
 };
 use kalamdb_sharding::ShardRouter;
-use kalamdb_system::providers::jobs::models::Job;
-use kalamdb_system::{JobStatus, JobType};
+use kalamdb_system::{providers::jobs::models::Job, JobStatus, JobType};
 use openraft::{Entry, EntryPayload, LogId, RaftSnapshotBuilder, RaftStorage};
+use serde_json;
+use tokio::time::sleep;
 
 // =============================================================================
 // Test Cluster Infrastructure

@@ -12,9 +12,11 @@
 // Run with:
 //   cargo test --test smoke smoke_subscription_multi_reconnect
 
-use crate::common::*;
-use kalam_client::{models::ChangeEvent, KalamLinkClient, KalamLinkTimeouts, SubscriptionConfig};
 use std::time::Duration;
+
+use kalam_client::{models::ChangeEvent, KalamLinkClient, KalamLinkTimeouts, SubscriptionConfig};
+
+use crate::common::*;
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 

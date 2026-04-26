@@ -1,17 +1,23 @@
-use super::types::CreateTableStatement;
-use crate::compatibility::map_sql_type_to_kalam;
-use crate::parser::utils::{format_span, parse_sql_statements};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
+
 use arrow::datatypes::{Field, Schema};
-use kalamdb_commons::conversions::with_kalam_data_type_metadata;
-use kalamdb_commons::models::datatypes::ToArrowType;
-use kalamdb_commons::models::{NamespaceId, StorageId, TableAccess, TableName};
-use kalamdb_commons::schemas::policy::FlushPolicy;
-use kalamdb_commons::schemas::{ColumnDefault, TableType};
+use kalamdb_commons::{
+    conversions::with_kalam_data_type_metadata,
+    models::{datatypes::ToArrowType, NamespaceId, StorageId, TableAccess, TableName},
+    schemas::{policy::FlushPolicy, ColumnDefault, TableType},
+};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use sqlparser::ast::{ColumnOption, CreateTable, ObjectNamePart, Statement, TableConstraint};
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+
+use super::types::CreateTableStatement;
+use crate::{
+    compatibility::map_sql_type_to_kalam,
+    parser::utils::{format_span, parse_sql_statements},
+};
 
 static RE_ALPHANUMERIC: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-zA-Z0-9_]+$").unwrap());
 static RE_STORAGE_ID: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-zA-Z0-9_-]+$").unwrap());
@@ -67,7 +73,9 @@ impl CreateTableStatement {
                         TableName::from(name.0[1].to_string().as_str()),
                     )
                 } else {
-                    return Err("Invalid table name format. Expected 'table_name' or 'namespace.table_name'".to_string());
+                    return Err("Invalid table name format. Expected 'table_name' or \
+                                'namespace.table_name'"
+                        .to_string());
                 };
 
                 // Validate names
@@ -78,12 +86,10 @@ impl CreateTableStatement {
                     });
                     let location = span.map(format_span);
                     return Err(format!(
-                        "Invalid namespace name '{}'. Only alphanumeric characters and underscores are allowed{}.",
+                        "Invalid namespace name '{}'. Only alphanumeric characters and \
+                         underscores are allowed{}.",
                         namespace_id,
-                        location
-                            .as_deref()
-                            .map(|s| format!(" ({})", s))
-                            .unwrap_or_default()
+                        location.as_deref().map(|s| format!(" ({})", s)).unwrap_or_default()
                     ));
                 }
                 if !RE_ALPHANUMERIC.is_match(table_name.as_str()) {
@@ -93,12 +99,10 @@ impl CreateTableStatement {
                     });
                     let location = span.map(format_span);
                     return Err(format!(
-                        "Invalid table name '{}'. Only alphanumeric characters and underscores are allowed{}.",
+                        "Invalid table name '{}'. Only alphanumeric characters and underscores \
+                         are allowed{}.",
                         table_name,
-                        location
-                            .as_deref()
-                            .map(|s| format!(" ({})", s))
-                            .unwrap_or_default()
+                        location.as_deref().map(|s| format!(" ({})", s)).unwrap_or_default()
                     ));
                 }
 
@@ -125,14 +129,20 @@ impl CreateTableStatement {
 
                         match key_str.as_str() {
                             "TYPE" => {
-                                let requested_type = TableType::from_str_opt(&value_str).ok_or_else(|| {
-                                    format!("Invalid TYPE option '{}'. Supported: USER, SHARED, STREAM", value_str)
-                                })?;
+                                let requested_type = TableType::from_str_opt(&value_str)
+                                    .ok_or_else(|| {
+                                        format!(
+                                            "Invalid TYPE option '{}'. Supported: USER, SHARED, \
+                                             STREAM",
+                                            value_str
+                                        )
+                                    })?;
 
                                 if let Some(prefix_type) = create_prefix_table_type {
                                     if requested_type != prefix_type {
                                         return Err(format!(
-                                            "Conflicting table type definitions: CREATE {:?} TABLE vs TYPE option {:?}",
+                                            "Conflicting table type definitions: CREATE {:?} \
+                                             TABLE vs TYPE option {:?}",
                                             prefix_type, requested_type
                                         ));
                                     }
@@ -142,7 +152,11 @@ impl CreateTableStatement {
                             },
                             "STORAGE_ID" => {
                                 if !RE_STORAGE_ID.is_match(&value_str) {
-                                    return Err(format!("Invalid STORAGE_ID '{}'. Only alphanumeric, underscore, and hyphen allowed.", value_str));
+                                    return Err(format!(
+                                        "Invalid STORAGE_ID '{}'. Only alphanumeric, underscore, \
+                                         and hyphen allowed.",
+                                        value_str
+                                    ));
                                 }
                                 storage_id = Some(StorageId::from(value_str));
                             },
@@ -159,7 +173,11 @@ impl CreateTableStatement {
                                     let key = kv.next();
                                     let value = kv.next();
                                     if key.is_none() || value.is_none() {
-                                        return Err(format!("Invalid FLUSH_POLICY format '{}'. Expected 'key:value'", part));
+                                        return Err(format!(
+                                            "Invalid FLUSH_POLICY format '{}'. Expected \
+                                             'key:value'",
+                                            part
+                                        ));
                                     }
                                     match key.unwrap().to_uppercase().as_str() {
                                         "ROWS" => {
@@ -195,10 +213,9 @@ impl CreateTableStatement {
                                         interval_seconds: interval,
                                     }
                                 } else {
-                                    return Err(
-                                        "FLUSH_POLICY must specify 'rows' or 'interval' > 0"
-                                            .to_string(),
-                                    );
+                                    return Err("FLUSH_POLICY must specify 'rows' or 'interval' \
+                                                > 0"
+                                    .to_string());
                                 };
 
                                 // Validate policy immediately
@@ -222,7 +239,13 @@ impl CreateTableStatement {
                                     "PRIVATE" => Some(TableAccess::Private),
                                     "RESTRICTED" => Some(TableAccess::Restricted),
                                     "DBA" => Some(TableAccess::Dba),
-                                    _ => return Err(format!("Invalid ACCESS_LEVEL '{}'. Supported: PUBLIC, PRIVATE, RESTRICTED, DBA", value_str)),
+                                    _ => {
+                                        return Err(format!(
+                                            "Invalid ACCESS_LEVEL '{}'. Supported: PUBLIC, \
+                                             PRIVATE, RESTRICTED, DBA",
+                                            value_str
+                                        ))
+                                    },
                                 };
                             },
                             _ => return Err(format!("Unknown table option '{}'", key_str)),
@@ -282,7 +305,8 @@ impl CreateTableStatement {
                     let col_name = col.name.value;
                     if !RE_ALPHANUMERIC.is_match(&col_name) {
                         return Err(format!(
-                            "Invalid column name '{}'. Only alphanumeric characters and underscores are allowed.",
+                            "Invalid column name '{}'. Only alphanumeric characters and \
+                             underscores are allowed.",
                             col_name
                         ));
                     }

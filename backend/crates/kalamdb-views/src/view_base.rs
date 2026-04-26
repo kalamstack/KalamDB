@@ -8,25 +8,25 @@
 //! Views memoize their Arrow schema using a `static OnceLock<SchemaRef>`.
 //! Each view's schema is computed once and shared across all uses.
 
-use crate::error::RegistryError;
+use std::{any::Any, sync::Arc};
+
 use async_trait::async_trait;
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::common::DFSchema;
-use datafusion::datasource::{TableProvider, TableType};
-use datafusion::error::{DataFusionError, Result as DataFusionResult};
-use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
-use datafusion::physical_expr::PhysicalExpr;
-use datafusion::physical_plan::ExecutionPlan;
-use kalamdb_datafusion_sources::exec::{
-    finalize_deferred_batch, DeferredBatchExec, DeferredBatchSource,
+use datafusion::{
+    arrow::{datatypes::SchemaRef, record_batch::RecordBatch},
+    common::DFSchema,
+    datasource::{TableProvider, TableType},
+    error::{DataFusionError, Result as DataFusionResult},
+    logical_expr::{Expr, TableProviderFilterPushDown},
+    physical_expr::PhysicalExpr,
+    physical_plan::ExecutionPlan,
 };
-use kalamdb_datafusion_sources::provider::{
-    combined_filter, pushdown_results_for_filters, FilterCapability,
+use kalamdb_datafusion_sources::{
+    exec::{finalize_deferred_batch, DeferredBatchExec, DeferredBatchSource},
+    provider::{combined_filter, pushdown_results_for_filters, FilterCapability},
 };
 use kalamdb_system::SystemTable;
-use std::any::Any;
-use std::sync::Arc;
+
+use crate::error::RegistryError;
 
 /// VirtualView trait defines the core behavior for virtual tables (views)
 ///

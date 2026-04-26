@@ -332,7 +332,6 @@ interface BatchControl {
   has_more: boolean;
   status: 'loading' | 'loading_batch' | 'ready';
   last_seq_id?: string;
-  snapshot_end_seq?: string;
 }
 ```
 

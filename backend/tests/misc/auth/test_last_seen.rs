@@ -7,12 +7,13 @@
 //! These tests verify token authentication behavior and are placeholders for
 //! future last_seen implementation at the HTTP/WebSocket handler level.
 
-use super::test_support::TestServer;
 use kalamdb_auth::{authenticate, AuthRequest};
 use kalamdb_commons::{
     models::{ConnectionInfo, UserId},
     Role,
 };
+
+use super::test_support::TestServer;
 
 fn bearer_auth_header(username: &str, user_id: &str, role: Role) -> String {
     let secret = kalamdb_configs::defaults::default_auth_jwt_secret();

@@ -1,8 +1,9 @@
 // File: backend/crates/kalamdb-commons/src/models/job_id.rs
 // Type-safe wrapper for job identifiers
 
-use serde::{Deserialize, Serialize};
 use std::fmt;
+
+use serde::{Deserialize, Serialize};
 
 use crate::StorageKey;
 

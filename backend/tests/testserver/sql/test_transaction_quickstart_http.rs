@@ -2,9 +2,10 @@
 
 use std::time::Duration;
 
-use super::test_support::consolidated_helpers::{get_count_value, unique_namespace};
 use kalam_client::models::ResponseStatus;
 use tokio::time::{sleep, Instant};
+
+use super::test_support::consolidated_helpers::{get_count_value, unique_namespace};
 
 async fn create_messages_table(
     server: &super::test_support::http_server::HttpTestServer,
@@ -17,7 +18,8 @@ async fn create_messages_table(
 
     let resp = server
         .execute_sql(&format!(
-            "CREATE TABLE {}.messages (id BIGINT PRIMARY KEY, name TEXT) WITH (TYPE='SHARED', STORAGE_ID='local')",
+            "CREATE TABLE {}.messages (id BIGINT PRIMARY KEY, name TEXT) WITH (TYPE='SHARED', \
+             STORAGE_ID='local')",
             namespace
         ))
         .await?;
@@ -41,7 +43,8 @@ async fn create_typing_events_table(
 
     let resp = server
         .execute_sql(&format!(
-            "CREATE TABLE {}.typing_events (id BIGINT PRIMARY KEY, conversation_id BIGINT, event_type TEXT, created_at_ms BIGINT) WITH (TYPE='STREAM', TTL_SECONDS=3600)",
+            "CREATE TABLE {}.typing_events (id BIGINT PRIMARY KEY, conversation_id BIGINT, \
+             event_type TEXT, created_at_ms BIGINT) WITH (TYPE='STREAM', TTL_SECONDS=3600)",
             namespace
         ))
         .await?;
@@ -121,7 +124,8 @@ async fn test_sql_transaction_commit_and_sequential_blocks_over_http() -> anyhow
 
     let resp = server
         .execute_sql(&format!(
-            "BEGIN; INSERT INTO {}.messages (id, name) VALUES (3001, 'rest'); INSERT INTO {}.messages (id, name) VALUES (3002, 'rest-2'); COMMIT;",
+            "BEGIN; INSERT INTO {}.messages (id, name) VALUES (3001, 'rest'); INSERT INTO \
+             {}.messages (id, name) VALUES (3002, 'rest-2'); COMMIT;",
             namespace, namespace
         ))
         .await?;
@@ -136,7 +140,8 @@ async fn test_sql_transaction_commit_and_sequential_blocks_over_http() -> anyhow
 
     let resp = server
         .execute_sql(&format!(
-            "BEGIN; INSERT INTO {}.messages (id, name) VALUES (3010, 'kept'); COMMIT; BEGIN; INSERT INTO {}.messages (id, name) VALUES (3011, 'dropped'); ROLLBACK;",
+            "BEGIN; INSERT INTO {}.messages (id, name) VALUES (3010, 'kept'); COMMIT; BEGIN; \
+             INSERT INTO {}.messages (id, name) VALUES (3011, 'dropped'); ROLLBACK;",
             namespace, namespace
         ))
         .await?;
@@ -164,7 +169,8 @@ async fn test_sql_transaction_statement_failure_rolls_back_over_http() -> anyhow
 
     let resp = server
         .execute_sql(&format!(
-            "BEGIN; INSERT INTO {}.messages (id, name) VALUES (3003, 'ok'); INSERT INTO {}.messages (id, missing_col) VALUES (3004, 'bad'); COMMIT;",
+            "BEGIN; INSERT INTO {}.messages (id, name) VALUES (3003, 'ok'); INSERT INTO \
+             {}.messages (id, missing_col) VALUES (3004, 'bad'); COMMIT;",
             namespace, namespace
         ))
         .await?;
@@ -209,7 +215,8 @@ async fn test_sql_transaction_rejects_stream_table_writes_over_http() -> anyhow:
 
     let resp = server
         .execute_sql(&format!(
-            "BEGIN; INSERT INTO {}.typing_events (id, conversation_id, event_type, created_at_ms) VALUES (9001, 7, 'typing', 1700000000000); COMMIT;",
+            "BEGIN; INSERT INTO {}.typing_events (id, conversation_id, event_type, created_at_ms) \
+             VALUES (9001, 7, 'typing', 1700000000000); COMMIT;",
             namespace
         ))
         .await?;

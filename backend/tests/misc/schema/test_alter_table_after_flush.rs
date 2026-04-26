@@ -8,9 +8,9 @@
 //! This is a critical scenario because it tests schema compatibility
 //! between hot storage (RocksDB) and cold storage (Parquet files).
 
+use kalam_client::{models::ResponseStatus, parse_i64};
+
 use super::test_support::{consolidated_helpers, fixtures, flush_helpers, TestServer};
-use kalam_client::models::ResponseStatus;
-use kalam_client::parse_i64;
 
 /// Test ALTER TABLE ADD COLUMN after flushing data to cold storage
 ///
@@ -231,7 +231,8 @@ async fn test_multiple_alter_operations_with_flushes() {
     server
         .execute_sql_as_user(
             &format!(
-                "INSERT INTO {}.events (id, event_type, user_id) VALUES ('e2', 'logout', 'user123')",
+                "INSERT INTO {}.events (id, event_type, user_id) VALUES ('e2', 'logout', \
+                 'user123')",
                 ns
             ),
             "user1",

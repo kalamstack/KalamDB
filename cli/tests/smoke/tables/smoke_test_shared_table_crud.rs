@@ -1,8 +1,10 @@
 // Smoke Test 2: Shared table CRUD
-// Covers: namespace creation, shared table creation, insert/select, delete/update, final select, drop table
+// Covers: namespace creation, shared table creation, insert/select, delete/update, final select,
+// drop table
+
+use std::time::Duration;
 
 use crate::common::*;
-use std::time::Duration;
 
 #[ntest::timeout(180000)]
 #[test]
@@ -49,7 +51,8 @@ fn smoke_shared_table_crud() {
     assert!(out.contains("alpha"), "expected 'alpha' in results: {}", out);
     assert!(out.contains("beta"), "expected 'beta' in results: {}", out);
 
-    // 4) Retrieve ids for rows we will mutate (backend requires primary key equality for UPDATE/DELETE)
+    // 4) Retrieve ids for rows we will mutate (backend requires primary key equality for
+    //    UPDATE/DELETE)
     // Use JSON output for reliable parsing
     let id_sel =
         format!("SELECT id, name FROM {} WHERE name IN ('alpha','beta') ORDER BY name", full);

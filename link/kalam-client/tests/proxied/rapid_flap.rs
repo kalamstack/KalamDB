@@ -1,9 +1,10 @@
+use std::{sync::atomic::Ordering, time::Duration};
+
+use kalam_client::SubscriptionConfig;
+use tokio::time::{sleep, timeout};
+
 use super::helpers::*;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
-use kalam_client::SubscriptionConfig;
-use std::sync::atomic::Ordering;
-use std::time::Duration;
-use tokio::time::{sleep, timeout};
 
 /// Rapid connection flapping: bring the proxy up and down in quick succession
 /// (sub-second cycles). The client must survive without panicking, must not

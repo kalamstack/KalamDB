@@ -9,8 +9,9 @@
 //!
 //! Reference: docs/SQL.md DML section lines 471-584
 
-use crate::common::*;
 use std::time::{Duration, Instant};
+
+use crate::common::*;
 
 /// Test multi-row INSERT with batch VALUES
 ///
@@ -391,7 +392,10 @@ fn smoke_test_hard_delete_stream_table() {
     // Issue: delete_by_pk_value returns Ok(false) instead of actually deleting rows
     // See: backend/crates/kalamdb-tables/src/stream_tables/stream_table_provider.rs:291
     if all_output.contains("click") {
-        println!("⚠️  WARNING: STREAM table DELETE not working - rows still present (known backend limitation)");
+        println!(
+            "⚠️  WARNING: STREAM table DELETE not working - rows still present (known backend \
+             limitation)"
+        );
         println!("⚠️  TODO: Implement delete_by_pk_value for STREAM tables");
         // TODO: Uncomment when backend fix is implemented:
         // panic!("Expected click events to be physically removed from STREAM table");

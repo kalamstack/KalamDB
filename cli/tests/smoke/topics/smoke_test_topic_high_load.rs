@@ -10,15 +10,23 @@
 //!
 //! **Requirements**: Running KalamDB server with Topics feature enabled
 
-use crate::common;
-use kalam_client::consumer::{AutoOffsetReset, ConsumerRecord, TopicOp};
-use kalam_client::KalamLinkTimeouts;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
+
+use kalam_client::{
+    consumer::{AutoOffsetReset, ConsumerRecord, TopicOp},
+    KalamLinkTimeouts,
+};
 use kalamdb_configs::config::defaults::default_topic_visibility_timeout_secs;
-use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::Mutex as TokioMutex;
+
+use crate::common;
 
 /// Create a test client using common infrastructure
 async fn create_test_client() -> kalam_client::KalamLinkClient {
@@ -191,7 +199,8 @@ async fn test_topic_high_load_concurrent_publishers() {
     // Create multiple tables with different types and schemas
     let shared_table = format!("{}.shared_metrics", namespace);
     execute_sql(&format!(
-        "CREATE SHARED TABLE {} (id BIGINT PRIMARY KEY, name TEXT, value DOUBLE, active BOOLEAN, counter INT, timestamp BIGINT)",
+        "CREATE SHARED TABLE {} (id BIGINT PRIMARY KEY, name TEXT, value DOUBLE, active BOOLEAN, \
+         counter INT, timestamp BIGINT)",
         shared_table
     ))
     .await
@@ -199,7 +208,8 @@ async fn test_topic_high_load_concurrent_publishers() {
 
     let user_table = format!("{}.user_profiles", namespace);
     execute_sql(&format!(
-        "CREATE USER TABLE {} (id INT PRIMARY KEY, username TEXT, score DOUBLE, level INT, verified BOOLEAN)",
+        "CREATE USER TABLE {} (id INT PRIMARY KEY, username TEXT, score DOUBLE, level INT, \
+         verified BOOLEAN)",
         user_table
     ))
     .await
@@ -207,7 +217,8 @@ async fn test_topic_high_load_concurrent_publishers() {
 
     let stream_table = format!("{}.event_stream", namespace);
     execute_sql(&format!(
-        "CREATE STREAM TABLE {} (event_id BIGINT, event_type TEXT, payload TEXT, value INT, success BOOLEAN) WITH (TTL_SECONDS = 3600)",
+        "CREATE STREAM TABLE {} (event_id BIGINT, event_type TEXT, payload TEXT, value INT, \
+         success BOOLEAN) WITH (TTL_SECONDS = 3600)",
         stream_table
     ))
     .await
@@ -215,7 +226,8 @@ async fn test_topic_high_load_concurrent_publishers() {
 
     let product_table = format!("{}.products", namespace);
     execute_sql(&format!(
-        "CREATE SHARED TABLE {} (product_id INT PRIMARY KEY, product_name TEXT, price DOUBLE, stock INT, available BOOLEAN)",
+        "CREATE SHARED TABLE {} (product_id INT PRIMARY KEY, product_name TEXT, price DOUBLE, \
+         stock INT, available BOOLEAN)",
         product_table
     ))
     .await
@@ -223,7 +235,8 @@ async fn test_topic_high_load_concurrent_publishers() {
 
     let session_table = format!("{}.user_sessions", namespace);
     execute_sql(&format!(
-        "CREATE USER TABLE {} (session_id BIGINT PRIMARY KEY, user_id INT, duration INT, active BOOLEAN, score DOUBLE)",
+        "CREATE USER TABLE {} (session_id BIGINT PRIMARY KEY, user_id INT, duration INT, active \
+         BOOLEAN, score DOUBLE)",
         session_table
     ))
     .await
@@ -360,7 +373,8 @@ async fn test_topic_high_load_concurrent_publishers() {
                                     || last_new_record_time.elapsed() > Duration::from_secs(3))
                             {
                                 eprintln!(
-                                    "[CONSUMER] No new records, stopping (unique: {}, time_since_new: {}s)",
+                                    "[CONSUMER] No new records, stopping (unique: {}, \
+                                     time_since_new: {}s)",
                                     seen_offsets.len(),
                                     last_new_record_time.elapsed().as_secs()
                                 );
@@ -429,7 +443,8 @@ async fn test_topic_high_load_concurrent_publishers() {
                     0 => {
                         // Shared metrics: INSERT then UPDATE
                         let insert_sql = format!(
-                            "INSERT INTO {} (id, name, value, active, counter, timestamp) VALUES ({}, 'metric_{}', {}, {}, {}, {})",
+                            "INSERT INTO {} (id, name, value, active, counter, timestamp) VALUES \
+                             ({}, 'metric_{}', {}, {}, {}, {})",
                             shared_table,
                             record_id,
                             record_id,
@@ -476,7 +491,8 @@ async fn test_topic_high_load_concurrent_publishers() {
                     1 => {
                         // User profiles: INSERT then UPDATE
                         let insert_sql = format!(
-                            "INSERT INTO {} (id, username, score, level, verified) VALUES ({}, 'user_{}', {}, {}, {})",
+                            "INSERT INTO {} (id, username, score, level, verified) VALUES ({}, \
+                             'user_{}', {}, {}, {})",
                             user_table,
                             record_id,
                             record_id,
@@ -522,7 +538,8 @@ async fn test_topic_high_load_concurrent_publishers() {
                     2 => {
                         // Stream events: INSERT only (2 records per iteration)
                         let insert_sql = format!(
-                            "INSERT INTO {} (event_id, event_type, payload, value, success) VALUES ({}, 'type_{}', 'payload_{}', {}, {})",
+                            "INSERT INTO {} (event_id, event_type, payload, value, success) \
+                             VALUES ({}, 'type_{}', 'payload_{}', {}, {})",
                             stream_table,
                             record_id,
                             record_id % 10,
@@ -548,7 +565,8 @@ async fn test_topic_high_load_concurrent_publishers() {
                         // Another INSERT for stream
                         let record_id2 = record_id + 100000;
                         let insert_sql2 = format!(
-                            "INSERT INTO {} (event_id, event_type, payload, value, success) VALUES ({}, 'type_{}', 'payload_{}', {}, {})",
+                            "INSERT INTO {} (event_id, event_type, payload, value, success) \
+                             VALUES ({}, 'type_{}', 'payload_{}', {}, {})",
                             stream_table,
                             record_id2,
                             record_id2 % 10,
@@ -572,7 +590,8 @@ async fn test_topic_high_load_concurrent_publishers() {
                     3 => {
                         // Products: INSERT then UPDATE
                         let insert_sql = format!(
-                            "INSERT INTO {} (product_id, product_name, price, stock, available) VALUES ({}, 'product_{}', {}, {}, {})",
+                            "INSERT INTO {} (product_id, product_name, price, stock, available) \
+                             VALUES ({}, 'product_{}', {}, {}, {})",
                             product_table,
                             record_id,
                             record_id,
@@ -618,7 +637,8 @@ async fn test_topic_high_load_concurrent_publishers() {
                     4 => {
                         // User sessions: INSERT then UPDATE
                         let insert_sql = format!(
-                            "INSERT INTO {} (session_id, user_id, duration, active, score) VALUES ({}, {}, {}, {}, {})",
+                            "INSERT INTO {} (session_id, user_id, duration, active, score) VALUES \
+                             ({}, {}, {}, {}, {})",
                             session_table,
                             record_id as i64,
                             record_id % 10000,
@@ -769,8 +789,9 @@ async fn test_topic_high_load_concurrent_publishers() {
 
     assert!(
         unique_coverage >= min_unique_coverage,
-        "Expected at least {}% unique event coverage, got {:.1}% ({}/{}) - Synchronous publishing should capture all events.\n\
-         Check for table creation failures or write errors that prevent events from being published.",
+        "Expected at least {}% unique event coverage, got {:.1}% ({}/{}) - Synchronous publishing \
+         should capture all events.\nCheck for table creation failures or write errors that \
+         prevent events from being published.",
         min_unique_coverage,
         unique_coverage,
         received_events.len(),
@@ -1288,8 +1309,8 @@ async fn test_topic_four_consumers_same_group_no_duplicates() {
 
 /// High-load recovery test:
 /// 1. Consumer A claims a range and never commits (simulated ack failure/crash).
-/// 2. After visibility timeout, Consumer B (same group) must recover and process
-///    the entire stream without offset gaps, even with per-message processing latency.
+/// 2. After visibility timeout, Consumer B (same group) must recover and process the entire stream
+///    without offset gaps, even with per-message processing latency.
 #[tokio::test]
 #[ntest::timeout(180000)]
 async fn test_topic_ack_failure_recovery_no_message_loss_with_latency() {

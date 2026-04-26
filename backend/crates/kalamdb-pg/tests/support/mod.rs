@@ -1,23 +1,26 @@
 #![allow(dead_code)]
 
-use std::collections::HashMap;
-use std::io::Cursor;
-use std::sync::Arc;
+use std::{collections::HashMap, io::Cursor, sync::Arc};
 
 use arrow::record_batch::RecordBatch;
 use arrow_ipc::reader::StreamReader;
 use datafusion_common::ScalarValue;
-use kalamdb_commons::conversions::arrow_json_conversion::record_batch_to_json_rows;
-use kalamdb_commons::models::datatypes::KalamDataType;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::schemas::{ColumnDefinition, TableDefinition, TableOptions};
-use kalamdb_commons::models::KalamCellValue;
-use kalamdb_commons::models::{NamespaceId, TableId, TableName, TransactionId};
-use kalamdb_commons::schemas::ColumnDefault;
-use kalamdb_commons::{TableAccess, TableType};
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::operations::service::OperationService;
-use kalamdb_core::test_helpers::{test_app_context, test_app_context_simple};
+use kalamdb_commons::{
+    conversions::arrow_json_conversion::record_batch_to_json_rows,
+    models::{
+        datatypes::KalamDataType,
+        rows::Row,
+        schemas::{ColumnDefinition, TableDefinition, TableOptions},
+        KalamCellValue, NamespaceId, TableId, TableName, TransactionId,
+    },
+    schemas::ColumnDefault,
+    TableAccess, TableType,
+};
+use kalamdb_core::{
+    app_context::AppContext,
+    operations::service::OperationService,
+    test_helpers::{test_app_context, test_app_context_simple},
+};
 use kalamdb_pg::{
     BeginTransactionRequest, CloseSessionRequest, CommitTransactionRequest, InsertRpcRequest,
     KalamPgService, OpenSessionRequest, PgService, RollbackTransactionRequest, ScanRpcRequest,

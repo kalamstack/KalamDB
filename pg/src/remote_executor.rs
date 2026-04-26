@@ -1,8 +1,10 @@
 use async_trait::async_trait;
 use datafusion_common::ScalarValue;
-use kalam_pg_api::request::{DeleteRequest, InsertRequest, ScanRequest, UpdateRequest};
-use kalam_pg_api::response::{MutationResponse, ScanResponse};
-use kalam_pg_api::KalamBackendExecutor;
+use kalam_pg_api::{
+    request::{DeleteRequest, InsertRequest, ScanRequest, UpdateRequest},
+    response::{MutationResponse, ScanResponse},
+    KalamBackendExecutor,
+};
 use kalam_pg_client::RemoteKalamClient;
 use kalam_pg_common::KalamPgError;
 

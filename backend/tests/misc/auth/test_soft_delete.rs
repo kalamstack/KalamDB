@@ -6,8 +6,9 @@
 //! - Deleted data can be recovered
 //! - _deleted field is accessible when explicitly selected
 
-use super::test_support::{consolidated_helpers::unique_namespace, fixtures, TestServer};
 use kalam_client::models::ResponseStatus;
+
+use super::test_support::{consolidated_helpers::unique_namespace, fixtures, TestServer};
 
 #[actix_web::test]
 async fn test_soft_delete_hides_rows() {
@@ -40,7 +41,8 @@ async fn test_soft_delete_hides_rows() {
     server
         .execute_sql_as_user(
             &format!(
-                "INSERT INTO {}.tasks (id, title, completed) VALUES ('task2', 'Second task', false)",
+                "INSERT INTO {}.tasks (id, title, completed) VALUES ('task2', 'Second task', \
+                 false)",
                 namespace
             ),
             "user1",
@@ -112,7 +114,8 @@ async fn test_soft_delete_preserves_data() {
     server
         .execute_sql_as_user(
             &format!(
-                "INSERT INTO {}.tasks (id, title, completed) VALUES ('task1', 'Important task', false)",
+                "INSERT INTO {}.tasks (id, title, completed) VALUES ('task1', 'Important task', \
+                 false)",
                 namespace
             ),
             "user1",
@@ -157,7 +160,9 @@ async fn test_deleted_field_default_false() {
     server
         .execute_sql_as_user(
             &format!(
-                "CREATE TABLE {}.tasks (\n                id TEXT PRIMARY KEY,\n                title TEXT\n            ) WITH (\n                TYPE = 'USER',\n                STORAGE_ID = 'local'\n            )",
+                "CREATE TABLE {}.tasks (\n                id TEXT PRIMARY KEY,\n                \
+                 title TEXT\n            ) WITH (\n                TYPE = 'USER',\n                \
+                 STORAGE_ID = 'local'\n            )",
                 namespace
             ),
             "user1",
@@ -200,7 +205,9 @@ async fn test_multiple_deletes() {
     server
         .execute_sql_as_user(
             &format!(
-                "CREATE TABLE {}.tasks (\n                id TEXT PRIMARY KEY,\n                title TEXT\n            ) WITH (\n                TYPE = 'USER',\n                STORAGE_ID = 'local'\n            )",
+                "CREATE TABLE {}.tasks (\n                id TEXT PRIMARY KEY,\n                \
+                 title TEXT\n            ) WITH (\n                TYPE = 'USER',\n                \
+                 STORAGE_ID = 'local'\n            )",
                 namespace
             ),
             "user1",
@@ -261,7 +268,9 @@ async fn test_delete_with_where_clause() {
     server
         .execute_sql_as_user(
             &format!(
-                "CREATE TABLE {}.tasks (\n                id TEXT PRIMARY KEY,\n                title TEXT,\n                priority INT\n            ) WITH (\n                TYPE = 'USER',\n                STORAGE_ID = 'local'\n            )",
+                "CREATE TABLE {}.tasks (\n                id TEXT PRIMARY KEY,\n                \
+                 title TEXT,\n                priority INT\n            ) WITH (\n                \
+                 TYPE = 'USER',\n                STORAGE_ID = 'local'\n            )",
                 namespace
             ),
             "user1",
@@ -332,7 +341,9 @@ async fn test_count_excludes_deleted_rows() {
     server
         .execute_sql_as_user(
             &format!(
-                "CREATE TABLE {}.tasks (\n                id TEXT PRIMARY KEY,\n                title TEXT\n            ) WITH (\n                TYPE = 'USER',\n                STORAGE_ID = 'local'\n            )",
+                "CREATE TABLE {}.tasks (\n                id TEXT PRIMARY KEY,\n                \
+                 title TEXT\n            ) WITH (\n                TYPE = 'USER',\n                \
+                 STORAGE_ID = 'local'\n            )",
                 namespace
             ),
             "user1",

@@ -4,6 +4,19 @@
 //! subscriptions. Handles a shared connection handle, subscription registry,
 //! event routing, and reconnect behavior.
 
+use std::{
+    sync::{
+        atomic::{AtomicBool, AtomicU32, Ordering},
+        Arc, RwLock,
+    },
+    time::Duration,
+};
+
+use tokio::{
+    sync::{mpsc, oneshot},
+    task::JoinHandle,
+};
+
 use crate::{
     auth::ResolvedAuth,
     error::{KalamLinkError, Result},
@@ -12,15 +25,6 @@ use crate::{
     seq_id::SeqId,
     timeouts::KalamLinkTimeouts,
 };
-use std::{
-    sync::{
-        atomic::{AtomicBool, AtomicU32, Ordering},
-        Arc, RwLock,
-    },
-    time::Duration,
-};
-use tokio::sync::{mpsc, oneshot};
-use tokio::task::JoinHandle;
 
 mod reconnect;
 mod registry;
@@ -211,13 +215,18 @@ impl Drop for SharedConnection {
 
 #[cfg(test)]
 mod tests {
-    use super::registry::{
-        clear_startup_deadline, reset_startup_deadline, resume_startup_deadline,
-        startup_deadline, SubEntry,
+    use tokio::{
+        sync::{mpsc, oneshot},
+        time::Instant as TokioInstant,
     };
-    use super::*;
-    use tokio::sync::{mpsc, oneshot};
-    use tokio::time::Instant as TokioInstant;
+
+    use super::{
+        registry::{
+            clear_startup_deadline, reset_startup_deadline, resume_startup_deadline,
+            startup_deadline, SubEntry,
+        },
+        *,
+    };
 
     #[test]
     fn startup_deadline_disabled_when_initial_timeout_is_zero() {
@@ -238,7 +247,6 @@ mod tests {
             last_seq_id: None,
             consumed_seq_id: None,
             batch_seq_id: None,
-            snapshot_end_seq: None,
             is_loading: true,
             generation: 1,
             created_at_ms: 0,

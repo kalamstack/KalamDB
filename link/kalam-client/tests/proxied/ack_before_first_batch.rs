@@ -1,10 +1,10 @@
+use std::{collections::HashSet, sync::atomic::Ordering, time::Duration};
+
+use kalam_client::{models::BatchStatus, ChangeEvent, SubscriptionConfig, SubscriptionOptions};
+use tokio::time::{sleep, timeout};
+
 use super::helpers::*;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
-use kalam_client::{models::BatchStatus, ChangeEvent, SubscriptionConfig, SubscriptionOptions};
-use std::collections::HashSet;
-use std::sync::atomic::Ordering;
-use std::time::Duration;
-use tokio::time::{sleep, timeout};
 
 /// Disconnect after the server acknowledges the subscription but before the
 /// client finishes receiving the initial data batches. The subscription should

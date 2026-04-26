@@ -3,19 +3,17 @@
 //! This test verifies KalamDB can write flushed data to MinIO and that
 //! manifest.json + Parquet data files are created for both USER and SHARED tables.
 
-use crate::common::*;
+use std::{borrow::Cow, env, sync::Arc, time::Duration};
+
 use futures_util::StreamExt;
-use object_store::aws::AmazonS3Builder;
-use object_store::path::Path as ObjectPath;
-use object_store::prefix::PrefixStore;
-use object_store::ObjectStore;
-use object_store::ObjectStoreExt;
+use object_store::{
+    aws::AmazonS3Builder, path::Path as ObjectPath, prefix::PrefixStore, ObjectStore,
+    ObjectStoreExt,
+};
 use serde_json::{json, Value as JsonValue};
-use std::borrow::Cow;
-use std::env;
-use std::sync::Arc;
-use std::time::Duration;
 use tokio::runtime::Runtime;
+
+use crate::common::*;
 
 const MINIO_ENDPOINT: &str = "http://127.0.0.1:9120";
 const MINIO_ACCESS_KEY: &str = "minioadmin";
@@ -47,7 +45,7 @@ fn test_minio_storage_end_to_end() {
     if let Err(err) = minio_bucket_reachable(&runtime, &probe_store) {
         eprintln!("❌ MinIO auth/connectivity check failed: {}", err);
         eprintln!("   Verify endpoint, access key, secret key, and bucket.");
-        //fail the test early
+        // fail the test early
         panic!("MinIO auth/connectivity check failed");
     }
     println!("✅ MinIO auth/connectivity check passed");
@@ -85,13 +83,10 @@ fn test_minio_storage_end_to_end() {
     println!("   Base directory: {}", base_directory);
 
     let create_storage_sql = format!(
-        "CREATE STORAGE {storage_id} \
-            TYPE s3 \
-            NAME 'MinIO Test Storage' \
-            BASE_DIRECTORY '{base_directory}' \
-            CONFIG '{config_json}' \
-            SHARED_TABLES_TEMPLATE 'ns_{{namespace}}/shared_{{tableName}}' \
-            USER_TABLES_TEMPLATE 'ns_{{namespace}}/user_{{tableName}}/user_{{userId}}'",
+        "CREATE STORAGE {storage_id} TYPE s3 NAME 'MinIO Test Storage' BASE_DIRECTORY \
+         '{base_directory}' CONFIG '{config_json}' SHARED_TABLES_TEMPLATE \
+         'ns_{{namespace}}/shared_{{tableName}}' USER_TABLES_TEMPLATE \
+         'ns_{{namespace}}/user_{{tableName}}/user_{{userId}}'",
     );
 
     match execute_sql_as_root_via_cli(&create_storage_sql) {
@@ -114,8 +109,8 @@ fn test_minio_storage_end_to_end() {
 
     println!("\n📊 Step 3: Creating USER table '{}.{}'...", namespace, user_table);
     let create_user_table_sql = format!(
-        "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, name VARCHAR NOT NULL) \
-            WITH (TYPE='USER', STORAGE_ID='{}', FLUSH_POLICY='rows:2')",
+        "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, name VARCHAR NOT NULL) WITH (TYPE='USER', \
+         STORAGE_ID='{}', FLUSH_POLICY='rows:2')",
         namespace, user_table, storage_id
     );
     execute_sql_as_root_via_cli(&create_user_table_sql).expect("user table creation");
@@ -123,8 +118,8 @@ fn test_minio_storage_end_to_end() {
 
     println!("\n📊 Step 4: Creating SHARED table '{}.{}'...", namespace, shared_table);
     let create_shared_table_sql = format!(
-        "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, body TEXT NOT NULL) \
-            WITH (TYPE='SHARED', STORAGE_ID='{}', FLUSH_POLICY='rows:2')",
+        "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, body TEXT NOT NULL) WITH (TYPE='SHARED', \
+         STORAGE_ID='{}', FLUSH_POLICY='rows:2')",
         namespace, shared_table, storage_id
     );
     execute_sql_as_root_via_cli(&create_shared_table_sql).expect("shared table creation");
@@ -262,13 +257,10 @@ fn test_minio_storage_check() {
 
     println!("\n🗄️  Step 1: Creating MinIO storage '{}' for check...", storage_id);
     let create_storage_sql = format!(
-        "CREATE STORAGE {storage_id} \
-            TYPE s3 \
-            NAME 'MinIO Check Storage' \
-            BASE_DIRECTORY '{base_directory}' \
-            CONFIG '{config_json}' \
-            SHARED_TABLES_TEMPLATE 'ns_{{namespace}}/shared_{{tableName}}' \
-            USER_TABLES_TEMPLATE 'ns_{{namespace}}/user_{{tableName}}/user_{{userId}}'",
+        "CREATE STORAGE {storage_id} TYPE s3 NAME 'MinIO Check Storage' BASE_DIRECTORY \
+         '{base_directory}' CONFIG '{config_json}' SHARED_TABLES_TEMPLATE \
+         'ns_{{namespace}}/shared_{{tableName}}' USER_TABLES_TEMPLATE \
+         'ns_{{namespace}}/user_{{tableName}}/user_{{userId}}'",
     );
 
     execute_sql_as_root_via_cli(&create_storage_sql).expect("storage creation");
@@ -397,8 +389,8 @@ struct StorageMeta {
 
 fn fetch_storage_metadata(storage_id: &str) -> StorageMeta {
     let sql = format!(
-        "SELECT base_directory, shared_tables_template, user_tables_template \
-         FROM system.storages WHERE storage_id = '{}'",
+        "SELECT base_directory, shared_tables_template, user_tables_template FROM system.storages \
+         WHERE storage_id = '{}'",
         storage_id
     );
     let output = execute_sql_as_root_via_client_json(&sql).expect("storage metadata query");
@@ -571,8 +563,9 @@ fn wait_for_storage_check_healthy(storage_id: &str, timeout: Duration) -> Result
     }
 
     Err(format!(
-        "MinIO storage unhealthy after {:?}. Last check: {}. \n\
-Set MINIO_ENDPOINT/MINIO_ACCESS_KEY/MINIO_SECRET_KEY/MINIO_BUCKET/MINIO_REGION if server cannot reach MinIO.",
+        "MinIO storage unhealthy after {:?}. Last check: {}. \nSet \
+         MINIO_ENDPOINT/MINIO_ACCESS_KEY/MINIO_SECRET_KEY/MINIO_BUCKET/MINIO_REGION if server \
+         cannot reach MinIO.",
         timeout, last_error
     ))
 }

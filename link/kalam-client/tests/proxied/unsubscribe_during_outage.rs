@@ -1,9 +1,10 @@
+use std::{sync::atomic::Ordering, time::Duration};
+
+use kalam_client::SubscriptionConfig;
+use tokio::time::{sleep, timeout};
+
 use super::helpers::*;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
-use kalam_client::SubscriptionConfig;
-use std::sync::atomic::Ordering;
-use std::time::Duration;
-use tokio::time::{sleep, timeout};
 
 /// Close (unsubscribe from) a subscription while the client is disconnected.
 /// On reconnect the shared connection must NOT re-subscribe the dropped query,

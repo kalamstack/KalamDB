@@ -108,15 +108,19 @@ pub(super) fn is_expected_ws_disconnect(error: &ProtocolError) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_protocol_from_query, validate_origin};
+    use std::sync::Arc;
+
     use actix_web::{http::StatusCode, test::TestRequest};
-    use kalamdb_commons::websocket::{CompressionType, SerializationType};
-    use kalamdb_commons::NodeId;
+    use kalamdb_commons::{
+        websocket::{CompressionType, SerializationType},
+        NodeId,
+    };
     use kalamdb_configs::ServerConfig;
     use kalamdb_core::app_context::AppContext;
     use kalamdb_store::test_utils::InMemoryBackend;
-    use std::sync::Arc;
     use uuid::Uuid;
+
+    use super::{parse_protocol_from_query, validate_origin};
 
     fn test_app_context_with_origin_policy(
         cors_allowed_origins: Vec<String>,

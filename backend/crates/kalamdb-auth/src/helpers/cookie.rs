@@ -42,8 +42,8 @@ fn build_token_cookie<'a>(
             cookie::time::OffsetDateTime::from_unix_timestamp(expiry.timestamp()).unwrap_or_else(
                 |_| {
                     log::warn!(
-                        "JWT expiry timestamp {} is out of OffsetDateTime range; \
-                        falling back to current time plus 24 h",
+                        "JWT expiry timestamp {} is out of OffsetDateTime range; falling back to \
+                         current time plus 24 h",
                         expiry.timestamp()
                     );
                     cookie::time::OffsetDateTime::now_utc() + cookie::time::Duration::hours(24)

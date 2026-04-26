@@ -1,8 +1,10 @@
 //! Authenticated Session Context
 
-use crate::UserContext;
-use kalamdb_commons::models::{ConnectionInfo, ReadContext, Role, UserId};
 use std::sync::Arc;
+
+use kalamdb_commons::models::{ConnectionInfo, ReadContext, Role, UserId};
+
+use crate::UserContext;
 
 /// Authentication method used for the session
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

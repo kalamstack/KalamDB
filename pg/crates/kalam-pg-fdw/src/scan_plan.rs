@@ -1,5 +1,6 @@
-use crate::virtual_column::VirtualColumn;
 use kalam_pg_api::ScanRequest;
+
+use crate::virtual_column::VirtualColumn;
 
 /// Planned FDW scan request plus FDW-only virtual-column metadata.
 #[derive(Debug, Clone)]

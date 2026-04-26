@@ -2,18 +2,23 @@
 
 pub mod tcp_proxy;
 
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::{Mutex, OnceLock},
+    time::Duration,
+};
+
 use kalamdb_configs::ServerConfig;
 use kalamdb_server::lifecycle::RunningTestHttpServer;
 use reqwest::Client;
 use serde_json::json;
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
 use tempfile::TempDir;
-use tokio::runtime::{Handle, Runtime};
-use tokio::sync::Mutex as TokioMutex;
-use tokio::time::{sleep, Instant};
+use tokio::{
+    runtime::{Handle, Runtime},
+    sync::Mutex as TokioMutex,
+    time::{sleep, Instant},
+};
 
 static SERVER_URL: OnceLock<String> = OnceLock::new();
 static ISOLATED_SERVER_URL: OnceLock<String> = OnceLock::new();

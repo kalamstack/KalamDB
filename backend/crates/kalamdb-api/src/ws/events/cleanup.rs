@@ -2,9 +2,10 @@
 //!
 //! Handles cleanup when a WebSocket connection is closed.
 
+use std::sync::Arc;
+
 use kalamdb_live::{ConnectionsManager, LiveQueryManager, SharedConnectionState};
 use log::debug;
-use std::sync::Arc;
 
 use crate::limiter::RateLimiter;
 

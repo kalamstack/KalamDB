@@ -1,7 +1,7 @@
 //! Stream table provider implementation with RLS + TTL
 //!
-//! This module provides StreamTableProvider implementing BaseTableProvider<StreamTableRowId, StreamTableRow>
-//! for ephemeral event streams with Row-Level Security and TTL-based eviction.
+//! This module provides StreamTableProvider implementing BaseTableProvider<StreamTableRowId,
+//! StreamTableRow> for ephemeral event streams with Row-Level Security and TTL-based eviction.
 //!
 //! **Key Features**:
 //! - Direct fields (no wrapper layer)
@@ -11,49 +11,58 @@
 //! - Commit log-backed storage (append-only, no Parquet)
 //! - TTL-based eviction in scan operations
 
-use crate::error::KalamDbError;
-use crate::error_extensions::KalamDbResultExt;
-use crate::stream_tables::{StreamTableRow, StreamTableStore};
-use crate::utils::base::{extract_seq_bounds_from_filter, BaseTableProvider, TableProviderCore};
-use crate::utils::row_utils::extract_user_context;
-use async_trait::async_trait;
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::catalog::Session;
-use datafusion::common::DFSchema;
-use datafusion::datasource::TableProvider;
-use datafusion::error::DataFusionError;
-use datafusion::error::Result as DataFusionResult;
-use datafusion::logical_expr::dml::InsertOp;
-use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
-use datafusion::physical_expr::PhysicalExpr;
-use datafusion::physical_plan::ExecutionPlan;
-use datafusion::scalar::ScalarValue;
-use kalamdb_commons::ids::{SeqId, StreamTableRowId};
-use kalamdb_commons::models::UserId;
-use kalamdb_session_datafusion::{check_user_table_write_access, session_error_to_datafusion};
-use kalamdb_datafusion_sources::exec::{
-    finalize_deferred_batch, DeferredBatchExec, DeferredBatchSource,
+use std::{
+    any::Any,
+    collections::HashSet,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
 };
-use kalamdb_datafusion_sources::provider::{
-    combined_filter, merged_projection_scan_descriptor, pushdown_results_for_filters,
-    remap_projection_indices, FilterCapability, ScanDescriptor, SourceProvider,
-};
-use std::any::Any;
-use std::collections::HashSet;
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
+use async_trait::async_trait;
+use datafusion::{
+    arrow::{datatypes::SchemaRef, record_batch::RecordBatch},
+    catalog::Session,
+    common::DFSchema,
+    datasource::TableProvider,
+    error::{DataFusionError, Result as DataFusionResult},
+    logical_expr::{dml::InsertOp, Expr, TableProviderFilterPushDown},
+    physical_expr::PhysicalExpr,
+    physical_plan::ExecutionPlan,
+    scalar::ScalarValue,
+};
 // Arrow <-> JSON helpers
 use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::websocket::ChangeNotification;
+use kalamdb_commons::{
+    ids::{SeqId, StreamTableRowId},
+    models::UserId,
+    websocket::ChangeNotification,
+};
+use kalamdb_datafusion_sources::{
+    exec::{finalize_deferred_batch, DeferredBatchExec, DeferredBatchSource},
+    provider::{
+        combined_filter, merged_projection_scan_descriptor, pushdown_results_for_filters,
+        remap_projection_indices, FilterCapability, ScanDescriptor, SourceProvider,
+    },
+};
+use kalamdb_session_datafusion::{check_user_table_write_access, session_error_to_datafusion};
+
+use crate::{
+    error::KalamDbError,
+    error_extensions::KalamDbResultExt,
+    stream_tables::{StreamTableRow, StreamTableStore},
+    utils::{
+        base::{extract_seq_bounds_from_filter, BaseTableProvider, TableProviderCore},
+        row_utils::extract_user_context,
+    },
+};
 
 /// Stream table provider with RLS and TTL filtering
 ///
 /// **Architecture**:
 /// - Stateless provider (user context passed per-operation)
 /// - Direct fields (no wrapper layer)
-/// - Shared core via Arc<TableProviderCore> (holds schema, pk_name, column_defaults, non_null_columns)
+/// - Shared core via Arc<TableProviderCore> (holds schema, pk_name, column_defaults,
+///   non_null_columns)
 /// - RLS enforced via user_id parameter
 /// - HOT-ONLY storage (ephemeral data, no Parquet)
 /// - TTL-based eviction
@@ -589,7 +598,9 @@ impl TableProvider for StreamTableProvider {
         };
 
         let output_projection = if !filters.is_empty() {
-            projection.map(|indices| remap_projection_indices(&descriptor.schema, &merged_schema, indices))
+            projection.map(|indices| {
+                remap_projection_indices(&descriptor.schema, &merged_schema, indices)
+            })
         } else {
             None
         };

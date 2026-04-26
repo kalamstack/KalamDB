@@ -22,7 +22,6 @@
 //! // Invalid operation errors
 //! validate_input()
 //!     .into_invalid_operation("Input validation failed")?;
-//!
 //! ```
 
 use crate::error::KalamDbError;

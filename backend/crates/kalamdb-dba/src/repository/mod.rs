@@ -2,13 +2,12 @@ mod notifications_repository;
 mod shared_repository;
 mod stats_repository;
 
-use kalamdb_commons::models::TableId;
-use kalamdb_commons::schemas::TableDefinition;
-use kalamdb_core::app_context::AppContext;
-use serde::Serialize;
 use std::sync::Arc;
 
+use kalamdb_commons::{models::TableId, schemas::TableDefinition};
+use kalamdb_core::app_context::AppContext;
 pub use notifications_repository::NotificationsRepository;
+use serde::Serialize;
 pub use shared_repository::SharedTableRepository;
 pub use stats_repository::StatsRepository;
 

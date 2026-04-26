@@ -2,10 +2,13 @@
 //!
 //! Tests that SELECT * returns columns in ordinal_position order
 
+use kalamdb_commons::models::{
+    datatypes::KalamDataType,
+    schemas::{ColumnDefinition, TableDefinition, TableType},
+    NamespaceId, TableId, TableName,
+};
+
 use super::test_support::TestServer;
-use kalamdb_commons::models::datatypes::KalamDataType;
-use kalamdb_commons::models::schemas::{ColumnDefinition, TableDefinition, TableType};
-use kalamdb_commons::models::{NamespaceId, TableId, TableName};
 
 fn unique_namespace(prefix: &str) -> String {
     let run_id = std::time::SystemTime::now()

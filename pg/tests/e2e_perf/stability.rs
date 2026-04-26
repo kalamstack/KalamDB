@@ -1,10 +1,13 @@
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+
 use super::common::{
     bulk_delete_all, count_rows, create_shared_kalam_table, kalamdb_pid, pg_backend_pid,
     process_group_rss_kb, process_rss_kb, sample_process_group_peak_rss_kb,
     sample_process_peak_rss_kb, timed_query, unique_name, TestEnv,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 
 #[tokio::test]
 #[ntest::timeout(39000)]
@@ -55,12 +58,9 @@ async fn e2e_perf_local_memory_stays_bounded_under_batch_insert_and_scan() {
     let final_delta_kb = final_rss_kb.saturating_sub(baseline_rss_kb);
 
     eprintln!(
-        "[PERF] Memory stability {TOTAL} rows: total {elapsed_ms:.1}ms, scan {scan_ms:.1}ms, baseline {} KB, peak {} KB, final {} KB, peak delta {} KB, final delta {} KB",
-        baseline_rss_kb,
-        peak_rss_kb,
-        final_rss_kb,
-        peak_delta_kb,
-        final_delta_kb
+        "[PERF] Memory stability {TOTAL} rows: total {elapsed_ms:.1}ms, scan {scan_ms:.1}ms, \
+         baseline {} KB, peak {} KB, final {} KB, peak delta {} KB, final delta {} KB",
+        baseline_rss_kb, peak_rss_kb, final_rss_kb, peak_delta_kb, final_delta_kb
     );
 
     assert!(
@@ -138,18 +138,24 @@ async fn e2e_perf_multi_session_pg_extension_memory_stays_bounded() {
                 let rows = client
                     .query(
                         &format!(
-                            "SELECT id, payload FROM {qualified_table} WHERE worker_id = $1 ORDER BY id LIMIT 5"
+                            "SELECT id, payload FROM {qualified_table} WHERE worker_id = $1 ORDER \
+                             BY id LIMIT 5"
                         ),
                         &[&(worker as i32)],
                     )
                     .await
                     .expect("multi-session point read");
-                assert!(!rows.is_empty(), "session {worker} should be able to read its inserted rows");
+                assert!(
+                    !rows.is_empty(),
+                    "session {worker} should be able to read its inserted rows"
+                );
 
                 let last_index = ((batch + 1) * ROWS_PER_BATCH) - 1;
                 client
                     .execute(
-                        &format!("UPDATE {qualified_table} SET payload = payload || '-u' WHERE id = $1"),
+                        &format!(
+                            "UPDATE {qualified_table} SET payload = payload || '-u' WHERE id = $1"
+                        ),
                         &[&format!("sess-{worker}-{last_index}")],
                     )
                     .await
@@ -203,7 +209,8 @@ async fn e2e_perf_multi_session_pg_extension_memory_stays_bounded() {
     let final_delta_kb = final_rss_kb.saturating_sub(baseline_rss_kb);
 
     eprintln!(
-        "[PERF] Multi-session pg_kalam workload: sessions {}, rows {}, total {:.1}ms, baseline {} KB, peak {} KB, final {} KB, peak delta {} KB, final delta {} KB",
+        "[PERF] Multi-session pg_kalam workload: sessions {}, rows {}, total {:.1}ms, baseline {} \
+         KB, peak {} KB, final {} KB, peak delta {} KB, final delta {} KB",
         SESSIONS,
         total_expected,
         elapsed_ms,

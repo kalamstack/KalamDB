@@ -1,8 +1,6 @@
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use std::sync::Arc;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
+use kalamdb_core::{app_context::AppContext, error::KalamDbError};
 // Re-export the WebSocket session tracking functions from kalamdb-observability
 pub use kalamdb_observability::{
     decrement_websocket_sessions, get_websocket_session_count, idle_duration,

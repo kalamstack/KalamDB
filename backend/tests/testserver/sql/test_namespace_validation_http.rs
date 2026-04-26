@@ -1,10 +1,13 @@
 //! Namespace validation tests over the real HTTP SQL API.
 
-use super::test_support::auth_helper::create_user_auth_header;
-use super::test_support::consolidated_helpers::{unique_namespace, unique_table};
 use kalam_client::models::ResponseStatus;
 use kalamdb_commons::Role;
 use tokio::time::Duration;
+
+use super::test_support::{
+    auth_helper::create_user_auth_header,
+    consolidated_helpers::{unique_namespace, unique_table},
+};
 
 #[tokio::test]
 #[ntest::timeout(60000)] // 60 seconds - namespace validation test

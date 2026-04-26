@@ -48,43 +48,40 @@ pub use impls::{
     ClusterCoordinator, ManifestService, NotificationService, SchemaRegistry, TopicPublisher,
 };
 pub use initialization::initialize_system_tables;
-pub use registry::SystemTablesRegistry;
-pub use services::SystemColumnsService;
+// Re-export from kalamdb-commons for convenience
+pub use kalamdb_commons::models::{AuthType, OAuthProvider, Role};
 // Re-export SystemTable and StoragePartition from kalamdb_commons for consistent usage
 pub use kalamdb_commons::{schemas, NamespaceId, StoragePartition, SystemTable, TableName};
-
 // Re-export DataFusion session security adapters for convenience
 pub use kalamdb_session_datafusion::{
     check_system_table_access, secure_provider, SecuredSystemTableProvider, SessionUserContext,
 };
-
+// Re-export other system table models for convenience
+pub use providers::audit_logs::models::AuditLogEntry;
+// Re-export job models for convenience
+pub use providers::jobs::models::{
+    Job, JobFilter, JobOptions, JobSortField, JobStatus, JobType, SortOrder,
+};
+// Re-export live query models for convenience
+pub use providers::live::models::{LiveQuery, LiveQueryStatus};
+pub use providers::{
+    job_nodes::models::JobNode,
+    manifest::models::{
+        ColumnStats, FileRef, FileSubfolderState, Manifest, ManifestCacheEntry, SegmentMetadata,
+        SegmentStatus, SyncState, VectorEngine, VectorIndexMetadata, VectorIndexState,
+        VectorMetric,
+    },
+    namespaces::models::Namespace,
+    storages::models::{Storage, StorageType},
+    users::models::{
+        AuthData, User, DEFAULT_LOCKOUT_DURATION_MINUTES, DEFAULT_MAX_FAILED_ATTEMPTS,
+    },
+};
 // Re-export all providers
 pub use providers::{
     AuditLogsTableProvider, InMemoryChecker, JobNodesTableProvider, JobsTableProvider,
     ManifestTableProvider, NamespacesTableProvider, SchemasTableProvider, StoragesTableProvider,
     UsersTableProvider,
 };
-
-// Re-export live query models for convenience
-pub use providers::live::models::{LiveQuery, LiveQueryStatus};
-
-// Re-export job models for convenience
-pub use providers::jobs::models::{
-    Job, JobFilter, JobOptions, JobSortField, JobStatus, JobType, SortOrder,
-};
-
-// Re-export other system table models for convenience
-pub use providers::audit_logs::models::AuditLogEntry;
-pub use providers::job_nodes::models::JobNode;
-pub use providers::manifest::models::{
-    ColumnStats, FileRef, FileSubfolderState, Manifest, ManifestCacheEntry, SegmentMetadata,
-    SegmentStatus, SyncState, VectorEngine, VectorIndexMetadata, VectorIndexState, VectorMetric,
-};
-pub use providers::namespaces::models::Namespace;
-pub use providers::storages::models::{Storage, StorageType};
-pub use providers::users::models::{
-    AuthData, User, DEFAULT_LOCKOUT_DURATION_MINUTES, DEFAULT_MAX_FAILED_ATTEMPTS,
-};
-
-// Re-export from kalamdb-commons for convenience
-pub use kalamdb_commons::models::{AuthType, OAuthProvider, Role};
+pub use registry::SystemTablesRegistry;
+pub use services::SystemColumnsService;

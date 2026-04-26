@@ -1,10 +1,13 @@
 //! Job-node execution state for system.job_nodes table.
 
-use crate::JobStatus;
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::models::ids::{JobId, JobNodeId, NodeId};
+use kalamdb_commons::{
+    datatypes::KalamDataType,
+    models::ids::{JobId, JobNodeId, NodeId},
+};
 use kalamdb_macros::table;
 use serde::{Deserialize, Serialize};
+
+use crate::JobStatus;
 
 #[table(name = "job_nodes", comment = "Per-node job execution state")]
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

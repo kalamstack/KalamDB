@@ -1,8 +1,8 @@
-use super::CLISession;
-use crate::history::CommandHistory;
-use crate::CLI_VERSION;
 use colored::Colorize;
 use kalam_client::KalamLinkError;
+
+use super::CLISession;
+use crate::{history::CommandHistory, CLI_VERSION};
 
 impl CLISession {
     pub(super) fn normalize_server_field(value: String) -> Option<String> {
@@ -72,7 +72,8 @@ impl CLISession {
         );
         if let Some(ref err) = health_status {
             if self.connected {
-                // Server is reachable but health detail could not be retrieved (e.g. localhost-only restriction)
+                // Server is reachable but health detail could not be retrieved (e.g. localhost-only
+                // restriction)
                 println!("  Health check:   {}", format!("Note ({})", err).yellow());
             } else {
                 println!("  Last check:     {}", format!("Failed ({})", err).red());

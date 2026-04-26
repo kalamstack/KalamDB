@@ -1,7 +1,6 @@
 //! Namespace entity for system.namespaces table.
 
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::models::ids::NamespaceId;
+use kalamdb_commons::{datatypes::KalamDataType, models::ids::NamespaceId};
 use kalamdb_macros::table;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -24,15 +23,15 @@ use serde_json::Value;
 /// ## Example
 ///
 /// ```rust
-/// use kalamdb_system::Namespace;
 /// use kalamdb_commons::NamespaceId;
+/// use kalamdb_system::Namespace;
 ///
 /// let namespace = Namespace {
 ///     namespace_id: NamespaceId::default(),
-///     name: "default".to_string(),
-///     created_at: 1730000000000,
-///     options: Some(serde_json::json!({})),
-///     table_count: 0,
+///     name:         "default".to_string(),
+///     created_at:   1730000000000,
+///     options:      Some(serde_json::json!({})),
+///     table_count:  0,
 /// };
 /// ```
 /// Namespace struct with fields ordered for optimal memory alignment.
@@ -90,7 +89,7 @@ pub struct Namespace {
         default = "None",
         comment = "Number of tables in this namespace"
     )]
-    pub table_count: i32, //TODO: Remove this field and calculate on the fly
+    pub table_count: i32, // TODO: Remove this field and calculate on the fly
 }
 
 impl Namespace {

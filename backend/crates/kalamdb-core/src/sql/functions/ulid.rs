@@ -11,14 +11,14 @@
 //! ULIDs are URL-safe, case-insensitive, and time-ordered, making them
 //! suitable for PRIMARY KEY columns and correlation IDs.
 
-use datafusion::arrow::array::{ArrayRef, StringArray};
-use datafusion::error::{DataFusionError, Result as DataFusionResult};
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
+use std::{any::Any, sync::Arc};
+
+use datafusion::{
+    arrow::array::{ArrayRef, StringArray},
+    error::{DataFusionError, Result as DataFusionResult},
+    logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility},
 };
 use kalamdb_commons::arrow_utils::{arrow_utf8, ArrowDataType};
-use std::any::Any;
-use std::sync::Arc;
 use ulid::Ulid;
 
 /// ULID() scalar function implementation
@@ -91,9 +91,11 @@ impl ScalarUDFImpl for UlidFunction {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use datafusion::logical_expr::ScalarUDF;
     use std::collections::HashSet;
+
+    use datafusion::logical_expr::ScalarUDF;
+
+    use super::*;
 
     #[test]
     fn test_ulid_function_creation() {

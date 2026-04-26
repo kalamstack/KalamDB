@@ -19,20 +19,22 @@
 //! }
 //! ```
 
-use crate::executors::{JobContext, JobDecision, JobExecutor, JobParams};
+use std::sync::Arc;
+
 use async_trait::async_trait;
-use kalamdb_commons::schemas::TableType;
-use kalamdb_commons::TableId;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::operations::table_cleanup::{
-    cleanup_metadata_internal, cleanup_parquet_files_internal, cleanup_table_data_internal,
+use kalamdb_commons::{schemas::TableType, TableId};
+// Re-export so consumers can keep importing from this module.
+pub use kalamdb_core::operations::table_cleanup::{CleanupOperation, StorageCleanupDetails};
+use kalamdb_core::{
+    error::KalamDbError,
+    operations::table_cleanup::{
+        cleanup_metadata_internal, cleanup_parquet_files_internal, cleanup_table_data_internal,
+    },
 };
 use kalamdb_system::JobType;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
-// Re-export so consumers can keep importing from this module.
-pub use kalamdb_core::operations::table_cleanup::{CleanupOperation, StorageCleanupDetails};
+use crate::executors::{JobContext, JobDecision, JobExecutor, JobParams};
 
 /// Typed parameters for cleanup operations (T191)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,7 +135,8 @@ impl JobExecutor for CleanupExecutor {
 
         // Build success message with metrics
         let message = format!(
-            "Cleaned up table {} successfully - {} rows deleted, {} bytes freed, {} cache entries invalidated",
+            "Cleaned up table {} successfully - {} rows deleted, {} bytes freed, {} cache entries \
+             invalidated",
             table_id, rows_deleted, bytes_freed, cache_entries_invalidated
         );
 
@@ -161,9 +164,9 @@ impl Default for CleanupExecutor {
 
 #[cfg(test)]
 mod tests {
+    use kalamdb_commons::{NamespaceId, StorageId, TableName};
+
     use super::*;
-    use kalamdb_commons::StorageId;
-    use kalamdb_commons::{NamespaceId, TableName};
 
     #[test]
     fn test_executor_properties() {

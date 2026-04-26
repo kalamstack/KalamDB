@@ -9,9 +9,9 @@
 //! unavoidable without a per-connection write pipeline; this keeps it to
 //! exactly one modestly-sized allocation rather than several doublings.
 
-use flate2::write::GzEncoder;
-use flate2::Compression;
 use std::io::Write;
+
+use flate2::{write::GzEncoder, Compression};
 
 /// Default compression threshold in bytes (512 bytes)
 /// Messages smaller than this are sent uncompressed

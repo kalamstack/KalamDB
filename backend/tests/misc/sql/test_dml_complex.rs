@@ -6,8 +6,9 @@
 //! - UPDATE/DELETE across flushed and unflushed data
 //! - Multi-row operations
 
-use super::test_support::{fixtures, flush_helpers, TestServer};
 use kalam_client::models::ResponseStatus;
+
+use super::test_support::{fixtures, flush_helpers, TestServer};
 
 /// T017a: UPDATE with simple multi-column predicate (single equality)
 ///

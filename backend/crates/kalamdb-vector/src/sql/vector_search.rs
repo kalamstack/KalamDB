@@ -1,35 +1,42 @@
-use crate::hot_query_cache::search_hot_candidates;
-use crate::snapshot_codec::decode_snapshot;
-use crate::usearch_engine::{load_index, search_index};
+use std::{any::Any, collections::HashMap, fmt::Debug, sync::Arc};
+
 use async_trait::async_trait;
-use datafusion::arrow::array::{
-    Array, ArrayRef, Float32Array, Float64Array, Int32Array, Int64Array, StringArray, UInt32Array,
-    UInt64Array,
+use datafusion::{
+    arrow::{
+        array::{
+            Array, ArrayRef, Float32Array, Float64Array, Int32Array, Int64Array, StringArray,
+            UInt32Array, UInt64Array,
+        },
+        datatypes::{DataType, Field, Schema, SchemaRef},
+        record_batch::RecordBatch,
+    },
+    catalog::{Session, TableFunctionImpl},
+    common::{DFSchema, DataFusionError, Result},
+    datasource::TableProvider,
+    logical_expr::{Expr, TableProviderFilterPushDown, TableType as DataFusionTableType},
+    physical_expr::PhysicalExpr,
+    physical_plan::ExecutionPlan,
+    scalar::ScalarValue,
 };
-use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::catalog::{Session, TableFunctionImpl};
-use datafusion::common::{DFSchema, DataFusionError, Result};
-use datafusion::datasource::TableProvider;
-use datafusion::logical_expr::{Expr, TableProviderFilterPushDown, TableType as DataFusionTableType};
-use datafusion::physical_expr::PhysicalExpr;
-use datafusion::physical_plan::ExecutionPlan;
-use datafusion::scalar::ScalarValue;
-use kalamdb_datafusion_sources::exec::{
-    finalize_deferred_batch, DeferredBatchExec, DeferredBatchSource,
+use kalamdb_commons::{
+    ids::SeqId,
+    models::{TableId, UserId},
+    schemas::TableType,
 };
-use kalamdb_datafusion_sources::provider::{combined_filter, FilterCapability};
-use kalamdb_commons::ids::SeqId;
-use kalamdb_commons::models::{TableId, UserId};
-use kalamdb_commons::schemas::TableType;
+use kalamdb_datafusion_sources::{
+    exec::{finalize_deferred_batch, DeferredBatchExec, DeferredBatchSource},
+    provider::{combined_filter, FilterCapability},
+};
 use kalamdb_filestore::{FilestoreError, StorageCached};
 use kalamdb_session_datafusion::extract_user_id;
 use kalamdb_store::StorageBackend;
 use kalamdb_system::VectorMetric;
-use std::any::Any;
-use std::collections::HashMap;
-use std::fmt::Debug;
-use std::sync::Arc;
+
+use crate::{
+    hot_query_cache::search_hot_candidates,
+    snapshot_codec::decode_snapshot,
+    usearch_engine::{load_index, search_index},
+};
 
 const DEFAULT_TOP_K: usize = 10;
 const CANDIDATE_MULTIPLIER: usize = 4;
@@ -209,7 +216,8 @@ impl DeferredBatchSource for VectorSearchScanSource {
                         })?;
                         if parsed.dimensions as usize != self.args.query_vector.len() {
                             return Err(DataFusionError::Execution(format!(
-                                "vector_search query vector dimensions mismatch: query has {}, index has {}",
+                                "vector_search query vector dimensions mismatch: query has {}, \
+                                 index has {}",
                                 self.args.query_vector.len(),
                                 parsed.dimensions
                             )));
@@ -238,9 +246,7 @@ impl DeferredBatchSource for VectorSearchScanSource {
             }
         }
 
-        let candidate_limit = search_limit
-            .saturating_mul(CANDIDATE_MULTIPLIER)
-            .max(search_limit);
+        let candidate_limit = search_limit.saturating_mul(CANDIDATE_MULTIPLIER).max(search_limit);
 
         let hot_search = search_hot_candidates(
             Arc::clone(&scope.backend),
@@ -259,13 +265,14 @@ impl DeferredBatchSource for VectorSearchScanSource {
             .max(candidate_limit);
 
         if let Some(index) = &base_index {
-            let raw = search_index(index, &self.args.query_vector, cold_candidate_limit)
-                .map_err(|error| {
+            let raw = search_index(index, &self.args.query_vector, cold_candidate_limit).map_err(
+                |error| {
                     DataFusionError::Execution(format!(
                         "Failed to search base vector index: {}",
                         error
                     ))
-                })?;
+                },
+            )?;
             for (key, distance) in raw {
                 let Some(pk) = base_snapshot_key_to_pk.get(&key) else {
                     continue;
@@ -476,7 +483,9 @@ fn parse_query_vector(value: &ScalarValue) -> Result<Vec<f32>> {
 fn parse_args(args: &[Expr]) -> Result<VectorSearchArgs> {
     if args.len() < 3 || args.len() > 4 {
         return Err(DataFusionError::Plan(
-            "vector_search(table_id, column_name, query_vector[, top_k]) expects 3 or 4 literal arguments".to_string(),
+            "vector_search(table_id, column_name, query_vector[, top_k]) expects 3 or 4 literal \
+             arguments"
+                .to_string(),
         ));
     }
 
@@ -576,18 +585,16 @@ impl TableProvider for VectorSearchTableProvider {
             None
         };
 
-        Ok(Arc::new(DeferredBatchExec::new(Arc::new(
-            VectorSearchScanSource {
-                runtime: Arc::clone(&self.runtime),
-                args: self.args.clone(),
-                session_user: extract_user_id(state),
-                physical_filter,
-                projection: projection.cloned(),
-                limit,
-                base_schema,
-                output_schema,
-            },
-        ))))
+        Ok(Arc::new(DeferredBatchExec::new(Arc::new(VectorSearchScanSource {
+            runtime: Arc::clone(&self.runtime),
+            args: self.args.clone(),
+            session_user: extract_user_id(state),
+            physical_filter,
+            projection: projection.cloned(),
+            limit,
+            base_schema,
+            output_schema,
+        }))))
     }
 
     fn supports_filters_pushdown(

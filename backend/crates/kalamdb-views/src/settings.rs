@@ -13,19 +13,23 @@
 //!
 //! **Schema**: TableDefinition provides consistent metadata for views
 
-use crate::view_base::VirtualView;
-use datafusion::arrow::array::{ArrayRef, StringBuilder};
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::RecordBatch;
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::schemas::{
-    ColumnDefault, ColumnDefinition, TableDefinition, TableOptions, TableType,
+use std::sync::{Arc, OnceLock};
+
+use datafusion::arrow::{
+    array::{ArrayRef, StringBuilder},
+    datatypes::SchemaRef,
+    record_batch::RecordBatch,
 };
-use kalamdb_commons::{NamespaceId, TableName};
+use kalamdb_commons::{
+    datatypes::KalamDataType,
+    schemas::{ColumnDefault, ColumnDefinition, TableDefinition, TableOptions, TableType},
+    NamespaceId, TableName,
+};
 use kalamdb_configs::ServerConfig;
 use kalamdb_system::SystemTable;
 use parking_lot::RwLock;
-use std::sync::{Arc, OnceLock};
+
+use crate::view_base::VirtualView;
 
 /// Get the settings schema (memoized)
 fn settings_schema() -> SchemaRef {
@@ -143,7 +147,6 @@ impl SettingsView {
             config: Arc::new(RwLock::new(Some(config))),
         }
     }
-
 }
 
 impl Default for SettingsView {
@@ -208,10 +211,27 @@ impl VirtualView for SettingsView {
 
             // Cluster Settings (optional)
             if let Some(cluster) = &config.cluster {
-                add_settings!(names, values, descriptions, categories, [
-                    ("storage.data_path", config.storage.data_path, "Base data directory (auto-creates rocksdb/, storage/, snapshots/ subdirs)", "storage"),
-                    ("cluster.cluster_id", cluster.cluster_id, "Unique cluster identifier", "cluster"),
-                ]);
+                add_settings!(
+                    names,
+                    values,
+                    descriptions,
+                    categories,
+                    [
+                        (
+                            "storage.data_path",
+                            config.storage.data_path,
+                            "Base data directory (auto-creates rocksdb/, storage/, snapshots/ \
+                             subdirs)",
+                            "storage"
+                        ),
+                        (
+                            "cluster.cluster_id",
+                            cluster.cluster_id,
+                            "Unique cluster identifier",
+                            "cluster"
+                        ),
+                    ]
+                );
             }
 
             // Storage Settings
@@ -398,7 +418,8 @@ impl VirtualView for SettingsView {
                     (
                         "flush.check_interval_seconds",
                         config.flush.check_interval_seconds,
-                        "How often the background scheduler checks for pending flushes (seconds, 0 = disabled)",
+                        "How often the background scheduler checks for pending flushes (seconds, \
+                         0 = disabled)",
                         "flush"
                     ),
                 ]
@@ -518,7 +539,8 @@ impl VirtualView for SettingsView {
                     (
                         "rate_limit.max_auth_requests_per_ip_per_sec",
                         config.rate_limit.max_auth_requests_per_ip_per_sec,
-                        "Maximum auth requests per second per IP (applies to /auth/login, /auth/refresh, /setup)",
+                        "Maximum auth requests per second per IP (applies to /auth/login, \
+                         /auth/refresh, /setup)",
                         "rate_limit"
                     ),
                     (
@@ -530,7 +552,8 @@ impl VirtualView for SettingsView {
                     (
                         "rate_limit.max_requests_per_ip_per_sec",
                         config.rate_limit.max_requests_per_ip_per_sec,
-                        "Maximum requests per second per IP BEFORE authentication (if exceeded → IP BAN)",
+                        "Maximum requests per second per IP BEFORE authentication (if exceeded → \
+                         IP BAN)",
                         "rate_limit"
                     ),
                     (

@@ -108,7 +108,9 @@ impl CommandParser {
             "\\cluster" => {
                 if args.is_empty() {
                     Err(CLIError::ParseError(
-                        "\\cluster requires: snapshot, purge, trigger-election, transfer-leader, stepdown, clear, list, status, join, or leave".into(),
+                        "\\cluster requires: snapshot, purge, trigger-election, transfer-leader, \
+                         stepdown, clear, list, status, join, or leave"
+                            .into(),
                     ))
                 } else {
                     let sub = args[0].to_ascii_lowercase();
@@ -245,7 +247,9 @@ impl CommandParser {
             "\\consume" => {
                 if args.is_empty() {
                     return Err(CLIError::ParseError(
-                        "\\consume requires a topic name. Usage: \\consume <topic> [--group NAME] [--from earliest|latest|OFFSET] [--limit N] [--timeout SECONDS]".into(),
+                        "\\consume requires a topic name. Usage: \\consume <topic> [--group NAME] \
+                         [--from earliest|latest|OFFSET] [--limit N] [--timeout SECONDS]"
+                            .into(),
                     ));
                 }
                 let topic = args[0].to_string();

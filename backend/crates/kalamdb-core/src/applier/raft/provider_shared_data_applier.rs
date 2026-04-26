@@ -5,16 +5,17 @@
 //!
 //! Called by SharedDataStateMachine after Raft consensus on all nodes.
 
-use async_trait::async_trait;
 use std::sync::Arc;
 
-use crate::app_context::AppContext;
-use crate::applier::executor::CommandExecutorImpl;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::TransactionId;
-use kalamdb_commons::TableId;
+use async_trait::async_trait;
+use kalamdb_commons::{
+    models::{rows::Row, TransactionId},
+    TableId,
+};
 use kalamdb_raft::{RaftError, SharedDataApplier, TransactionApplyResult};
 use kalamdb_transactions::StagedMutation;
+
+use crate::{app_context::AppContext, applier::executor::CommandExecutorImpl};
 
 /// SharedDataApplier implementation using Unified Command Executor
 ///
@@ -35,12 +36,17 @@ impl ProviderSharedDataApplier {
 
 #[async_trait]
 impl SharedDataApplier for ProviderSharedDataApplier {
-    async fn insert(&self, table_id: &TableId, rows: &[Row]) -> Result<usize, RaftError> {
+    async fn insert(
+        &self,
+        table_id: &TableId,
+        rows: &[Row],
+        commit_seq: u64,
+    ) -> Result<usize, RaftError> {
         log::debug!("ProviderSharedDataApplier: Inserting into {} ({} rows)", table_id, rows.len());
 
         self.executor
             .dml()
-            .insert_shared_data(table_id, rows)
+            .insert_shared_data_with_commit_seq(table_id, rows, commit_seq)
             .await
             .map_err(|e| RaftError::provider(e.to_string()))
     }
@@ -50,12 +56,13 @@ impl SharedDataApplier for ProviderSharedDataApplier {
         table_id: &TableId,
         updates: &[Row],
         filter: Option<&str>,
+        commit_seq: u64,
     ) -> Result<usize, RaftError> {
         log::debug!("ProviderSharedDataApplier: Updating {} ({} rows)", table_id, updates.len());
 
         self.executor
             .dml()
-            .update_shared_data(table_id, updates, filter)
+            .update_shared_data_with_commit_seq(table_id, updates, filter, commit_seq)
             .await
             .map_err(|e| RaftError::provider(e.to_string()))
     }
@@ -64,12 +71,13 @@ impl SharedDataApplier for ProviderSharedDataApplier {
         &self,
         table_id: &TableId,
         pk_values: Option<&[String]>,
+        commit_seq: u64,
     ) -> Result<usize, RaftError> {
         log::debug!("ProviderSharedDataApplier: Deleting from {}", table_id);
 
         self.executor
             .dml()
-            .delete_shared_data(table_id, pk_values)
+            .delete_shared_data_with_commit_seq(table_id, pk_values, commit_seq)
             .await
             .map_err(|e| RaftError::provider(e.to_string()))
     }
@@ -78,10 +86,11 @@ impl SharedDataApplier for ProviderSharedDataApplier {
         &self,
         transaction_id: &TransactionId,
         mutations: &[StagedMutation],
+        commit_seq: u64,
     ) -> Result<TransactionApplyResult, RaftError> {
         self.executor
             .dml()
-            .apply_shared_transaction_batch(transaction_id, mutations)
+            .apply_shared_transaction_batch_with_commit_seq(transaction_id, mutations, commit_seq)
             .await
             .map_err(|e| RaftError::provider(e.to_string()))
     }

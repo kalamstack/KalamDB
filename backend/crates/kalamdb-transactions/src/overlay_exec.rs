@@ -1,26 +1,28 @@
-use std::any::Any;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::execution::{SendableRecordBatchStream, TaskContext};
-use datafusion::physical_expr::EquivalenceProperties;
-use datafusion::physical_plan::{
-    DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties, Partitioning,
-    PlanProperties,
+use std::{
+    any::Any,
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
 };
-use datafusion::scalar::ScalarValue;
-use datafusion::{common::Result as DataFusionResult, error::DataFusionError};
-use futures_util::TryStreamExt;
 
-use kalamdb_commons::conversions::arrow_json_conversion::json_rows_to_arrow_batch;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::UserId;
-use kalamdb_commons::TableId;
-use kalamdb_datafusion_sources::exec::projected_schema;
-use kalamdb_datafusion_sources::stream::one_shot_batch_stream;
+use datafusion::{
+    arrow::{datatypes::SchemaRef, record_batch::RecordBatch},
+    common::Result as DataFusionResult,
+    error::DataFusionError,
+    execution::{SendableRecordBatchStream, TaskContext},
+    physical_expr::EquivalenceProperties,
+    physical_plan::{
+        DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties, Partitioning,
+        PlanProperties,
+    },
+    scalar::ScalarValue,
+};
+use futures_util::TryStreamExt;
+use kalamdb_commons::{
+    conversions::arrow_json_conversion::json_rows_to_arrow_batch,
+    models::{rows::Row, UserId},
+    TableId,
+};
+use kalamdb_datafusion_sources::{exec::projected_schema, stream::one_shot_batch_stream};
 
 use crate::overlay::TransactionOverlay;
 
@@ -343,13 +345,17 @@ fn merge_row(base: &mut Row, overlay: &Row) {
 
 #[cfg(test)]
 mod tests {
-    use datafusion::arrow::array::{Int64Array, StringArray};
-    use datafusion::arrow::datatypes::{DataType, Field, Schema};
+    use datafusion::arrow::{
+        array::{Int64Array, StringArray},
+        datatypes::{DataType, Field, Schema},
+    };
+    use kalamdb_commons::{
+        models::{NamespaceId, OperationKind, TableName, TransactionId},
+        TableType,
+    };
 
     use super::*;
     use crate::overlay::TransactionOverlayEntry;
-    use kalamdb_commons::models::{NamespaceId, OperationKind, TableName, TransactionId};
-    use kalamdb_commons::TableType;
 
     fn row(values: &[(&str, ScalarValue)]) -> Row {
         let mut fields = BTreeMap::new();
@@ -526,8 +532,7 @@ mod tests {
 
     #[tokio::test]
     async fn overlay_exec_applies_overlay_once_across_multiple_input_partitions() {
-        use datafusion::execution::context::SessionContext;
-        use datafusion::physical_plan::collect;
+        use datafusion::{execution::context::SessionContext, physical_plan::collect};
         use kalamdb_datafusion_sources::stream::one_shot_batch_stream;
 
         #[derive(Debug)]
@@ -601,9 +606,7 @@ mod tests {
                 }
 
                 let batch = RecordBatch::new_empty(Arc::clone(&self.schema));
-                Ok(one_shot_batch_stream(Arc::clone(&self.schema), async move {
-                    Ok(batch)
-                }))
+                Ok(one_shot_batch_stream(Arc::clone(&self.schema), async move { Ok(batch) }))
             }
         }
 

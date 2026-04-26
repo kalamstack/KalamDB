@@ -17,11 +17,12 @@ mod common;
 
 /// Cluster-specific common utilities
 mod cluster_common {
-    use crate::common::*;
+    use std::{sync::OnceLock, time::Duration};
+
     use kalam_client::{KalamCellValue, KalamLinkTimeouts, QueryResponse};
     use serde_json::Value;
-    use std::sync::OnceLock;
-    use std::time::Duration;
+
+    use crate::common::*;
 
     /// Get cluster node URLs from environment or use defaults
     pub fn cluster_urls() -> Vec<String> {
@@ -86,7 +87,8 @@ mod cluster_common {
     }
 
     /// Execute a query on a specific cluster node and return the count
-    /// Note: With leader-only reads (Spec 021), this will automatically use the leader node for client reads
+    /// Note: With leader-only reads (Spec 021), this will automatically use the leader node for
+    /// client reads
     pub fn query_count_on_url(base_url: &str, sql: &str) -> i64 {
         // Try the specified URL first, but if we get NOT_LEADER error, retry on leader
         let result = query_count_on_url_internal(base_url, sql);
@@ -361,7 +363,8 @@ mod cluster_common {
         execute_on_node_response_internal(base_url, sql, true)
     }
 
-    /// Execute SQL on a specific cluster node and return the structured response without leader routing
+    /// Execute SQL on a specific cluster node and return the structured response without leader
+    /// routing
     #[allow(dead_code)]
     pub fn execute_on_node_response_raw(
         base_url: &str,
@@ -501,7 +504,8 @@ mod cluster_common {
         execute_on_node_as_user_response_internal(base_url, username, password, sql, true)
     }
 
-    /// Execute SQL on a specific cluster node as a custom user and return the response without leader routing
+    /// Execute SQL on a specific cluster node as a custom user and return the response without
+    /// leader routing
     #[allow(dead_code)]
     pub fn execute_on_node_as_user_response_raw(
         base_url: &str,

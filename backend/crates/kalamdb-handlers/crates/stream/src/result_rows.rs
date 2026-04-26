@@ -1,11 +1,11 @@
+use std::sync::Arc;
+
 use datafusion::arrow::{
     array::{ArrayRef, Int32Array, Int64Array, StringBuilder},
     datatypes::{DataType, Field, Schema},
     record_batch::RecordBatch,
 };
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::context::ExecutionResult;
-use std::sync::Arc;
+use kalamdb_core::{error::KalamDbError, sql::context::ExecutionResult};
 
 pub fn ack_result(
     topic_name: &str,

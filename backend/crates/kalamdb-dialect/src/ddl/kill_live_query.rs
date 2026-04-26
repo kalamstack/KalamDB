@@ -3,9 +3,9 @@
 //! Parses SQL statements like:
 //! - KILL LIVE QUERY 'user123-conn_abc-messages-updatedMessages'
 
-use crate::ddl::DdlResult;
-
 use kalamdb_commons::models::{ConnectionId, LiveQueryId, UserId};
+
+use crate::ddl::DdlResult;
 
 /// KILL LIVE QUERY statement
 #[derive(Debug, Clone, PartialEq)]

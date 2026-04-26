@@ -3,8 +3,10 @@
 //! These tests verify that the CLI properly handles authentication failures
 //! and prompts for credentials when stored credentials become invalid.
 
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::{
+    path::PathBuf,
+    process::{Command, Stdio},
+};
 
 /// Helper to get the CLI binary path
 fn get_cli_binary() -> PathBuf {
@@ -131,7 +133,10 @@ fn test_expired_token_flow() {
     println!("\nSteps to test expired token handling:");
     println!("1. Login and save credentials:");
     println!("   cargo run --release -- --user testuser --password testpass --save-credentials");
-    println!("\n2. Wait for the access token to expire (or manually edit the expiry in credentials file)");
+    println!(
+        "\n2. Wait for the access token to expire (or manually edit the expiry in credentials \
+         file)"
+    );
     println!("\n3. Run CLI without arguments:");
     println!("   cargo run --release");
     println!("\n4. Expected behavior:");

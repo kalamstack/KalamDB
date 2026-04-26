@@ -1,6 +1,6 @@
-use kalam_client::models::QueryResult;
-use kalam_client::KalamCellValue;
 use std::collections::HashMap;
+
+use kalam_client::{models::QueryResult, KalamCellValue};
 
 /// Extension trait for `QueryResult` to provide test-friendly row access.
 #[allow(dead_code)]

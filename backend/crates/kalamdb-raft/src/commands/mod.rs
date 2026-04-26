@@ -18,10 +18,9 @@ mod shared_data;
 mod user_data;
 
 // Unified Meta commands
-pub use meta::{MetaCommand, MetaResponse};
-
 // Data commands (split into separate files for better organization)
-pub use data_response::{DataResponse, TransactionApplyResult};
+pub use data_response::{commit_seq_from_log_position, DataResponse, TransactionApplyResult};
+pub use meta::{MetaCommand, MetaResponse};
 pub use shared_data::SharedDataCommand;
 pub use user_data::UserDataCommand;
 

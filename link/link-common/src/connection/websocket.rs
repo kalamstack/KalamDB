@@ -4,25 +4,24 @@
 //! with optional local bind addresses, message parsing, keepalive jitter,
 //! decompression, and protocol message helpers.
 
-use crate::{
-    auth::AuthProvider,
-    error::{KalamLinkError, Result},
-    models::{ChangeEvent, ClientMessage, ServerMessage, WsAuthCredentials},
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+    io::{Error as IoError, ErrorKind},
+    net::{IpAddr, SocketAddr},
+    time::Duration,
 };
+
 use futures_util::{SinkExt, StreamExt};
 use reqwest::Url;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-use std::io::{Error as IoError, ErrorKind};
-use std::net::{IpAddr, SocketAddr};
-use std::time::Duration;
-use tokio::net::{lookup_host, TcpSocket, TcpStream};
-use tokio::time::Instant as TokioInstant;
+use tokio::{
+    net::{lookup_host, TcpSocket, TcpStream},
+    time::Instant as TokioInstant,
+};
 use tokio_tungstenite::{
     client_async_tls_with_config, connect_async,
     tungstenite::{
-        error::Error as WsError,
-        error::UrlError,
+        error::{Error as WsError, UrlError},
         handshake::client::Response as WsResponse,
         http::header::{HeaderValue, AUTHORIZATION},
         protocol::Message,
@@ -30,6 +29,11 @@ use tokio_tungstenite::{
 };
 
 use super::{MAX_WS_BINARY_MESSAGE_BYTES, MAX_WS_DECOMPRESSED_MESSAGE_BYTES};
+use crate::{
+    auth::AuthProvider,
+    error::{KalamLinkError, Result},
+    models::{ChangeEvent, ClientMessage, ServerMessage, WsAuthCredentials},
+};
 
 /// The concrete WebSocket stream type used throughout the shared SDK transport layer.
 pub(crate) type WebSocketStream =
@@ -280,7 +284,9 @@ pub(crate) fn apply_ws_auth_headers(
 ) -> Result<()> {
     match auth {
         AuthProvider::BasicAuth(_, _) => Err(KalamLinkError::AuthenticationError(
-            "WebSocket authentication requires a JWT token. Use AuthProvider::jwt_token or login first.".to_string(),
+            "WebSocket authentication requires a JWT token. Use AuthProvider::jwt_token or login \
+             first."
+                .to_string(),
         )),
         AuthProvider::JwtToken(token) => {
             let value = format!("Bearer {}", token);
@@ -333,7 +339,9 @@ async fn send_authenticate_message(
     let credentials = match auth {
         AuthProvider::BasicAuth(_, _) => {
             return Err(KalamLinkError::AuthenticationError(
-                "WebSocket authentication requires a JWT token. Use AuthProvider::jwt_token or login first.".to_string(),
+                "WebSocket authentication requires a JWT token. Use AuthProvider::jwt_token or \
+                 login first."
+                    .to_string(),
             ));
         },
         AuthProvider::JwtToken(token) => WsAuthCredentials::Jwt {
@@ -557,10 +565,10 @@ pub(crate) async fn send_client_message(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::auth::AuthProvider;
-    use crate::error::KalamLinkError;
     use tokio_tungstenite::tungstenite::{client::IntoClientRequest, http::header::AUTHORIZATION};
+
+    use super::*;
+    use crate::{auth::AuthProvider, error::KalamLinkError};
 
     #[test]
     fn test_ws_url_conversion() {
@@ -684,8 +692,9 @@ mod tests {
 
     #[test]
     fn test_parse_message_msgpack_server_message() {
-        use crate::models::{ProtocolOptions, SerializationType, ServerMessage};
         use kalamdb_commons::{Role, UserId};
+
+        use crate::models::{ProtocolOptions, SerializationType, ServerMessage};
 
         let msg = ServerMessage::AuthSuccess {
             user: UserId::from("user-1"),

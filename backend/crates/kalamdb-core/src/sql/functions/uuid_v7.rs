@@ -5,20 +5,20 @@
 //!
 //! UUIDv7 format:
 //! - 48 bits: Unix timestamp in milliseconds
-//! - 12 bits: randomized version and variant bits  
+//! - 12 bits: randomized version and variant bits
 //! - 62 bits: random data
 //!
 //! UUIDv7 provides time-ordered UUIDs suitable for PRIMARY KEY columns
 //! while maintaining global uniqueness.
 
-use datafusion::arrow::array::{ArrayRef, StringArray};
-use datafusion::error::{DataFusionError, Result as DataFusionResult};
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
+use std::{any::Any, sync::Arc};
+
+use datafusion::{
+    arrow::array::{ArrayRef, StringArray},
+    error::{DataFusionError, Result as DataFusionResult},
+    logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility},
 };
 use kalamdb_commons::arrow_utils::{arrow_utf8, ArrowDataType};
-use std::any::Any;
-use std::sync::Arc;
 use uuid::Uuid;
 
 /// UUID_V7() scalar function implementation
@@ -88,9 +88,11 @@ impl ScalarUDFImpl for UuidV7Function {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use datafusion::logical_expr::ScalarUDF;
     use std::collections::HashSet;
+
+    use datafusion::logical_expr::ScalarUDF;
+
+    use super::*;
 
     #[test]
     fn test_uuid_v7_function_creation() {
@@ -175,17 +177,15 @@ mod tests {
 
     // Test removed - testing internal DataFusion behavior that changed in newer versions
     // The signature() method already validates no arguments are accepted
-    /*
-    #[test]
-    fn test_uuid_v7_with_arguments_fails() {
-        let func_impl = UuidV7Function::new();
-        let args = vec![ColumnarValue::Array(Arc::new(StringArray::from(vec![
-            "arg",
-        ])))];
-        let result = func_impl.invoke(&args);
-        assert!(result.is_err());
-    }
-    */
+    // #[test]
+    // fn test_uuid_v7_with_arguments_fails() {
+    // let func_impl = UuidV7Function::new();
+    // let args = vec![ColumnarValue::Array(Arc::new(StringArray::from(vec![
+    // "arg",
+    // ])))];
+    // let result = func_impl.invoke(&args);
+    // assert!(result.is_err());
+    // }
 
     #[test]
     fn test_uuid_v7_return_type() {

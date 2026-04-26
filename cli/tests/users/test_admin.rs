@@ -9,8 +9,9 @@
 //! - Administrative SQL operations
 //! - Namespace and table management
 
-use crate::common::*;
 use std::time::Duration;
+
+use crate::common::*;
 
 /// Test configuration constants
 const TEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -178,8 +179,11 @@ SELECT * FROM {};"#,
     // Verify execution - should show Query OK messages and final result
     assert!(
         (stdout.contains("Item One") || stdout.contains("Query OK")) && output.status.success(),
-        "Batch execution should succeed with proper messages.\nstdout: {}\nstderr: {}\nstatus: {:?}",
-        stdout, stderr, output.status
+        "Batch execution should succeed with proper messages.\nstdout: {}\nstderr: {}\nstatus: \
+         {:?}",
+        stdout,
+        stderr,
+        output.status
     );
 
     // Cleanup

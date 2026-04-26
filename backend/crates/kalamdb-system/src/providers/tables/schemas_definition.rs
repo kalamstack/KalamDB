@@ -1,10 +1,11 @@
-use datafusion::arrow::datatypes::SchemaRef;
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::schemas::{
-    ColumnDefault, ColumnDefinition, TableDefinition, TableOptions, TableType,
-};
-use kalamdb_commons::{NamespaceId, SystemTable, TableName};
 use std::sync::OnceLock;
+
+use datafusion::arrow::datatypes::SchemaRef;
+use kalamdb_commons::{
+    datatypes::KalamDataType,
+    schemas::{ColumnDefault, ColumnDefinition, TableDefinition, TableOptions, TableType},
+    NamespaceId, SystemTable, TableName,
+};
 
 pub fn schemas_table_definition() -> TableDefinition {
     let columns = vec![

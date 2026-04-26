@@ -1,9 +1,10 @@
+use std::{sync::atomic::Ordering, time::Duration};
+
+use kalam_client::SubscriptionConfig;
+use tokio::time::timeout;
+
 use super::helpers::*;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
-use kalam_client::SubscriptionConfig;
-use std::sync::atomic::Ordering;
-use std::time::Duration;
-use tokio::time::timeout;
 
 /// After a complex outage+recovery sequence, verify that connect and disconnect
 /// event counters are consistent: each reconnect fires exactly one on_connect,

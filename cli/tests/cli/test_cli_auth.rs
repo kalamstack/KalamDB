@@ -9,9 +9,9 @@
 //! - Credential rotation and updates
 //! - JWT token storage (never user/password)
 
-use crate::common::*;
-
 use std::fs;
+
+use crate::common::*;
 
 // ============================================================================
 // UNIT TESTS - FileCredentialStore (no server needed)
@@ -354,7 +354,10 @@ fn test_cli_save_credentials_creates_file() {
             assert!(contents.contains(&instance), "Should contain instance name");
             println!("✓ Credentials file created at: {:?}", creds_path);
         } else {
-            eprintln!("⚠️  No JWT token in credentials file (root password may not be set). Skipping test.");
+            eprintln!(
+                "⚠️  No JWT token in credentials file (root password may not be set). Skipping \
+                 test."
+            );
         }
     } else {
         eprintln!(

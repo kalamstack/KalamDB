@@ -13,17 +13,18 @@
 //! - [x] Subscriptions deliver only matching doc_id
 //! - [x] No cross-user leakage in USER edits
 
-use super::helpers::*;
+use std::time::Duration;
 
 use kalamdb_commons::Role;
-use std::time::Duration;
 use tokio::time::sleep;
+
+use super::helpers::*;
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Main collaborative editing scenario test
-/// NOTE: This test is ignored because SHARED table subscriptions are not supported (FR-128, FR-129).
-/// The subscription infrastructure only supports USER tables for per-user real-time sync.
+/// NOTE: This test is ignored because SHARED table subscriptions are not supported (FR-128,
+/// FR-129). The subscription infrastructure only supports USER tables for per-user real-time sync.
 #[tokio::test]
 #[ignore = "SHARED table subscriptions not supported by design (FR-128, FR-129)"]
 async fn test_scenario_07_collaborative_editing() -> anyhow::Result<()> {
@@ -86,15 +87,17 @@ async fn test_scenario_07_collaborative_editing() -> anyhow::Result<()> {
     // =========================================================
     let admin_client = server.link_client("root");
     let resp = admin_client
-                .execute_query(
-                    &format!(
-                        "INSERT INTO {}.documents (id, title, content) VALUES (1, 'Shared Doc', 'Initial content')",
-                        ns
-                    ), None,
-                    None,
-                    None,
-                )
-                .await?;
+        .execute_query(
+            &format!(
+                "INSERT INTO {}.documents (id, title, content) VALUES (1, 'Shared Doc', 'Initial \
+                 content')",
+                ns
+            ),
+            None,
+            None,
+            None,
+        )
+        .await?;
     assert!(resp.success(), "Create shared document");
 
     // =========================================================
@@ -160,28 +163,32 @@ async fn test_scenario_07_collaborative_editing() -> anyhow::Result<()> {
 
     // User 1 sets presence
     let resp = admin_client
-                .execute_query(
-                    &format!(
-                        "INSERT INTO {}.presence (id, doc_id, user_id, cursor_pos, status) VALUES (1, 1, 'collab_user1', 100, 'typing')",
-                        ns
-                    ), None,
-                    None,
-                    None,
-                )
-                .await?;
+        .execute_query(
+            &format!(
+                "INSERT INTO {}.presence (id, doc_id, user_id, cursor_pos, status) VALUES (1, 1, \
+                 'collab_user1', 100, 'typing')",
+                ns
+            ),
+            None,
+            None,
+            None,
+        )
+        .await?;
     assert!(resp.success(), "User1 presence");
 
     // User 2 sets presence
     let resp = admin_client
-                .execute_query(
-                    &format!(
-                        "INSERT INTO {}.presence (id, doc_id, user_id, cursor_pos, status) VALUES (2, 1, 'collab_user2', 50, 'viewing')",
-                        ns
-                    ), None,
-                    None,
-                    None,
-                )
-                .await?;
+        .execute_query(
+            &format!(
+                "INSERT INTO {}.presence (id, doc_id, user_id, cursor_pos, status) VALUES (2, 1, \
+                 'collab_user2', 50, 'viewing')",
+                ns
+            ),
+            None,
+            None,
+            None,
+        )
+        .await?;
     assert!(resp.success(), "User2 presence");
 
     // Verify presence is visible immediately
@@ -220,28 +227,32 @@ async fn test_scenario_07_collaborative_editing() -> anyhow::Result<()> {
 
     // User 1 creates private edit history
     let resp = user1_client
-                .execute_query(
-                    &format!(
-                        "INSERT INTO {}.user_edits (id, doc_id, edit_type, edit_data) VALUES (1, 1, 'insert', 'private data')",
-                        ns
-                    ), None,
-                    None,
-                    None,
-                )
-                .await?;
+        .execute_query(
+            &format!(
+                "INSERT INTO {}.user_edits (id, doc_id, edit_type, edit_data) VALUES (1, 1, \
+                 'insert', 'private data')",
+                ns
+            ),
+            None,
+            None,
+            None,
+        )
+        .await?;
     assert!(resp.success(), "User1 private edit");
 
     // User 2 creates their own edit history
     let resp = user2_client
-                .execute_query(
-                    &format!(
-                        "INSERT INTO {}.user_edits (id, doc_id, edit_type, edit_data) VALUES (2, 1, 'delete', 'other private data')",
-                        ns
-                    ), None,
-                    None,
-                    None,
-                )
-                .await?;
+        .execute_query(
+            &format!(
+                "INSERT INTO {}.user_edits (id, doc_id, edit_type, edit_data) VALUES (2, 1, \
+                 'delete', 'other private data')",
+                ns
+            ),
+            None,
+            None,
+            None,
+        )
+        .await?;
     assert!(resp.success(), "User2 private edit");
 
     // User 1 should only see their own edits
@@ -309,28 +320,32 @@ async fn test_scenario_07_presence_subscription() -> anyhow::Result<()> {
     // Insert presence for doc_id = 1 (should appear in subscription)
     let client2 = server.link_client("root");
     let resp = client2
-                .execute_query(
-                    &format!(
-                        "INSERT INTO {}.presence (id, doc_id, user_id, status) VALUES (1, 1, 'user1', 'active')",
-                        ns
-                    ), None,
-                    None,
-                    None,
-                )
-                .await?;
+        .execute_query(
+            &format!(
+                "INSERT INTO {}.presence (id, doc_id, user_id, status) VALUES (1, 1, 'user1', \
+                 'active')",
+                ns
+            ),
+            None,
+            None,
+            None,
+        )
+        .await?;
     assert!(resp.success(), "Insert presence for doc 1");
 
     // Insert presence for doc_id = 2 (should NOT appear in subscription)
     let resp = client2
-                .execute_query(
-                    &format!(
-                        "INSERT INTO {}.presence (id, doc_id, user_id, status) VALUES (2, 2, 'user2', 'active')",
-                        ns
-                    ), None,
-                    None,
-                    None,
-                )
-                .await?;
+        .execute_query(
+            &format!(
+                "INSERT INTO {}.presence (id, doc_id, user_id, status) VALUES (2, 2, 'user2', \
+                 'active')",
+                ns
+            ),
+            None,
+            None,
+            None,
+        )
+        .await?;
     assert!(resp.success(), "Insert presence for doc 2");
 
     // Wait for insert event (should only get doc 1)

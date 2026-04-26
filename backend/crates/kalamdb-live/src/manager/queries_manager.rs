@@ -11,22 +11,31 @@
 //! When data is applied on any node (leader or follower), the provider's methods
 //! fire local notifications - no need for separate HTTP cluster broadcast.
 
-use crate::error::LiveError;
-use crate::helpers::filter_eval::parse_where_clause;
-use crate::helpers::initial_data::{InitialDataFetcher, InitialDataOptions, InitialDataResult};
-use crate::manager::ConnectionsManager;
-use crate::models::{SharedConnectionState, SubscriptionResult};
-use crate::subscription::SubscriptionService;
-use crate::traits::LiveSchemaLookup;
+use std::sync::Arc;
+
 use datafusion::sql::sqlparser::ast::Expr;
-use kalamdb_commons::ids::SeqId;
-use kalamdb_commons::models::{ConnectionId, LiveQueryId, NamespaceId, TableId, TableName, UserId};
-use kalamdb_commons::schemas::{SchemaField, TableDefinition};
-use kalamdb_commons::websocket::SubscriptionRequest;
-use kalamdb_commons::{NodeId, Role};
+use kalamdb_commons::{
+    ids::SeqId,
+    models::{ConnectionId, LiveQueryId, NamespaceId, TableId, TableName, UserId},
+    schemas::{SchemaField, TableDefinition},
+    websocket::SubscriptionRequest,
+    NodeId, Role,
+};
 use kalamdb_sql::parser::query_parser::QueryParser;
 use kalamdb_system::LiveQuery as SystemLiveQuery;
-use std::sync::Arc;
+use tokio::sync::OnceCell;
+
+use crate::{
+    error::LiveError,
+    helpers::{
+        filter_eval::parse_where_clause,
+        initial_data::{InitialDataFetcher, InitialDataOptions, InitialDataResult},
+    },
+    manager::ConnectionsManager,
+    models::{SharedConnectionState, SubscriptionResult},
+    subscription::SubscriptionService,
+    traits::{LiveApplyBarrier, LiveSchemaLookup},
+};
 
 /// Live query manager
 pub struct LiveQueryManager {
@@ -34,6 +43,7 @@ pub struct LiveQueryManager {
     registry: Arc<ConnectionsManager>,
     initial_data_fetcher: Arc<InitialDataFetcher>,
     schema_lookup: Arc<dyn LiveSchemaLookup>,
+    apply_barrier: OnceCell<Arc<dyn LiveApplyBarrier>>,
     node_id: NodeId,
 
     // Delegated services
@@ -53,19 +63,25 @@ impl LiveQueryManager {
                 // Row-level security filters data to only their rows during query execution
                 Ok(())
             },
-            kalamdb_commons::TableType::System if !is_admin => Err(LiveError::PermissionDenied(
-                format!("Cannot subscribe to system table '{}': insufficient privileges. Only DBA and system roles can subscribe to system tables.", table_id)
-            )),
+            kalamdb_commons::TableType::System if !is_admin => {
+                Err(LiveError::PermissionDenied(format!(
+                    "Cannot subscribe to system table '{}': insufficient privileges. Only DBA and \
+                     system roles can subscribe to system tables.",
+                    table_id
+                )))
+            },
             kalamdb_commons::TableType::Shared => {
                 // SHARED tables require access-level check:
                 // - Public: any authenticated user can subscribe
                 // - Private/Restricted: only DBA/System/Service roles
-                let access_level = kalamdb_session::permissions::shared_table_access_level(table_def);
+                let access_level =
+                    kalamdb_session::permissions::shared_table_access_level(table_def);
                 if kalamdb_session::permissions::can_access_shared_table(access_level, user_role) {
                     Ok(())
                 } else {
                     Err(LiveError::PermissionDenied(format!(
-                        "Cannot subscribe to shared table '{}': access level '{}' requires elevated privileges.",
+                        "Cannot subscribe to shared table '{}': access level '{}' requires \
+                         elevated privileges.",
                         table_id, access_level
                     )))
                 }
@@ -119,6 +135,7 @@ impl LiveQueryManager {
             registry,
             initial_data_fetcher,
             schema_lookup,
+            apply_barrier: OnceCell::new(),
             node_id,
             subscription_service,
         }
@@ -127,6 +144,13 @@ impl LiveQueryManager {
     /// Wire the SQL executor (called once during bootstrap after SqlExecutor is created).
     pub fn set_sql_executor(&self, executor: Arc<dyn crate::traits::LiveSqlExecutor>) {
         self.initial_data_fetcher.set_sql_executor(executor);
+    }
+
+    /// Wire an optional apply barrier used before follower snapshots.
+    pub fn set_apply_barrier(&self, barrier: Arc<dyn LiveApplyBarrier>) {
+        if self.apply_barrier.set(barrier).is_err() {
+            log::warn!("LiveApplyBarrier already initialized in LiveQueryManager");
+        }
     }
 
     /// Get the node_id for this manager
@@ -211,12 +235,11 @@ impl LiveQueryManager {
         let table_id = TableId::new(namespace_id.clone(), table_name);
 
         if namespace_id.is_system_namespace() && !matches!(user_role, Role::Dba | Role::System) {
-            return Err(LiveError::PermissionDenied(
-                format!(
-                    "Cannot subscribe to system table '{}': insufficient privileges. Only DBA and system roles can subscribe to system tables.",
-                    table_id
-                ),
-            ));
+            return Err(LiveError::PermissionDenied(format!(
+                "Cannot subscribe to system table '{}': insufficient privileges. Only DBA and \
+                 system roles can subscribe to system tables.",
+                table_id
+            )));
         }
 
         // Look up table definition from in-memory cache.
@@ -231,6 +254,14 @@ impl LiveQueryManager {
         // - SYSTEM tables: Accessible only to DBA/System roles
         // - SHARED tables: Access-level gated (public OK, private/restricted require elevated role)
         Self::validate_table_subscription_permission(user_role, &table_def, &table_id)?;
+
+        if initial_data_options.is_some() {
+            if let Some(barrier) = self.apply_barrier.get() {
+                barrier
+                    .wait_for_table_apply_barrier(&table_id, table_def.table_type, &user_id)
+                    .await?;
+            }
+        }
 
         // Determine batch size
         let batch_size = request
@@ -298,11 +329,28 @@ impl LiveQueryManager {
                         .unwrap_or_else(|| SeqId::from(0))
                 };
 
+                let snapshot_commit_seq = if fetch_options.until_commit_seq.is_some() {
+                    fetch_options.until_commit_seq
+                } else {
+                    self.initial_data_fetcher
+                        .compute_snapshot_end_commit_seq(
+                            &live_id,
+                            user_role,
+                            &table_id,
+                            table_def.table_type,
+                            &fetch_options,
+                            where_clause.as_deref(),
+                        )
+                        .await?
+                };
+
                 fetch_options.until_seq = Some(snapshot_seq);
-                self.subscription_service.update_snapshot_end_seq(
+                fetch_options.until_commit_seq = snapshot_commit_seq;
+                self.subscription_service.update_snapshot_boundaries(
                     connection_state,
                     &request.id,
-                    snapshot_seq,
+                    Some(snapshot_seq),
+                    snapshot_commit_seq,
                 );
 
                 self.initial_data_fetcher
@@ -399,7 +447,8 @@ impl LiveQueryManager {
             since_seq,
             initial_load.snapshot_end_seq,
             initial_load.batch_size,
-        );
+        )
+        .with_commit_range(None, initial_load.snapshot_end_commit_seq);
 
         self.initial_data_fetcher
             .fetch_initial_data(
@@ -465,12 +514,17 @@ impl LiveQueryManager {
 
 #[cfg(test)]
 mod tests {
+    use kalamdb_commons::{
+        models::{NamespaceId, TableId, TableName},
+        schemas::{
+            table_options::{SharedTableOptions, SystemTableOptions},
+            TableDefinition, TableOptions,
+        },
+        Role, TableAccess, TableType,
+    };
+
     use super::LiveQueryManager;
     use crate::error::LiveError;
-    use kalamdb_commons::models::{NamespaceId, TableId, TableName};
-    use kalamdb_commons::schemas::table_options::{SharedTableOptions, SystemTableOptions};
-    use kalamdb_commons::schemas::{TableDefinition, TableOptions};
-    use kalamdb_commons::{Role, TableAccess, TableType};
 
     fn table_id() -> TableId {
         TableId::new(NamespaceId::from("shared"), TableName::from("events"))

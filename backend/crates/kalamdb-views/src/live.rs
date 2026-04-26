@@ -5,17 +5,18 @@
 //! Provides the current set of active subscriptions from the in-memory
 //! connection registry.
 
-use crate::view_base::VirtualView;
-use datafusion::arrow::array::{
-    ArrayRef, Int64Builder, StringBuilder, TimestampMicrosecondBuilder,
+use std::sync::{Arc, OnceLock};
+
+use datafusion::arrow::{
+    array::{ArrayRef, Int64Builder, StringBuilder, TimestampMicrosecondBuilder},
+    datatypes::SchemaRef,
+    record_batch::RecordBatch,
 };
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::RecordBatch;
-use kalamdb_commons::schemas::TableDefinition;
-use kalamdb_commons::SystemTable;
+use kalamdb_commons::{schemas::TableDefinition, SystemTable};
 use kalamdb_system::LiveQuery;
 use parking_lot::RwLock;
-use std::sync::{Arc, OnceLock};
+
+use crate::view_base::VirtualView;
 
 /// Live-query snapshot callback type.
 pub type LiveSnapshotCallback = Arc<dyn Fn() -> Vec<LiveQuery> + Send + Sync>;
@@ -161,10 +162,13 @@ pub type LiveTableProvider = crate::view_base::ViewTableProvider<LiveView>;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use kalamdb_commons::models::{ConnectionId, LiveQueryId, NamespaceId, UserId};
-    use kalamdb_commons::{NodeId, TableName};
+    use kalamdb_commons::{
+        models::{ConnectionId, LiveQueryId, NamespaceId, UserId},
+        NodeId, TableName,
+    };
     use kalamdb_system::LiveQueryStatus;
+
+    use super::*;
 
     fn sample_live_query() -> LiveQuery {
         let user_id = UserId::new("u_live");

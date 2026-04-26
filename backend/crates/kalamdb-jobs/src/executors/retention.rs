@@ -20,14 +20,15 @@
 //! }
 //! ```
 
-use crate::executors::{JobContext, JobDecision, JobExecutor, JobParams};
+use std::sync::Arc;
+
 use async_trait::async_trait;
-use kalamdb_commons::schemas::TableType;
-use kalamdb_commons::TableId;
+use kalamdb_commons::{schemas::TableType, TableId};
 use kalamdb_core::error::KalamDbError;
 use kalamdb_system::JobType;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+
+use crate::executors::{JobContext, JobDecision, JobExecutor, JobParams};
 
 /// Typed parameters for retention operations (T192)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,8 +103,8 @@ impl JobExecutor for RetentionExecutor {
         ));
 
         // TODO: Implement actual retention enforcement logic
-        // Current limitation: UserTableRow/SharedTableRow/StreamTableRow don't have deleted_at field yet
-        // When adding soft-delete support to table rows:
+        // Current limitation: UserTableRow/SharedTableRow/StreamTableRow don't have deleted_at
+        // field yet When adding soft-delete support to table rows:
         //   1. Add `deleted_at: Option<i64>` field to UserTableRow/SharedTableRow/StreamTableRow
         //   2. Scan table using store.scan_prefix() (no filter needed - small datasets)
         //   3. Filter rows where deleted_at.is_some() && deleted_at.unwrap() < cutoff_time
@@ -147,8 +148,9 @@ impl Default for RetentionExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kalamdb_commons::{NamespaceId, TableName};
+
+    use super::*;
 
     #[test]
     fn test_executor_properties() {

@@ -1,13 +1,14 @@
-use super::{KTableRow, Row};
-use crate::ids::SeqId;
-use crate::models::UserId;
 use serde::{Deserialize, Serialize};
+
+use super::{KTableRow, Row};
+use crate::{ids::SeqId, models::UserId};
 
 /// User table row data
 ///
 /// **MVCC Architecture (Phase 12, User Story 5)**:
 /// - Removed: row_id (redundant with _seq), _updated (timestamp embedded in _seq Snowflake ID)
-/// - Kept: user_id (row owner), _seq (version identifier with embedded timestamp), `_commit_seq` (commit-order visibility), _deleted (tombstone), fields (all user columns including PK)
+/// - Kept: user_id (row owner), _seq (version identifier with embedded timestamp), `_commit_seq`
+///   (commit-order visibility), _deleted (tombstone), fields (all user columns including PK)
 ///
 /// **Note on System Column Naming**:
 /// The underscore prefix (`_seq`, `_deleted`) follows SQL convention for system-managed columns.

@@ -21,10 +21,12 @@ pub(crate) async fn healthcheck_handler(req: HttpRequest) -> HttpResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::healthcheck_handler;
+    use std::net::SocketAddr;
+
     use actix_web::{body::to_bytes, http::StatusCode, test::TestRequest};
     use serde_json::Value;
-    use std::net::SocketAddr;
+
+    use super::healthcheck_handler;
 
     async fn execute_healthcheck(req: actix_web::HttpRequest) -> (StatusCode, Value) {
         let response = healthcheck_handler(req).await;

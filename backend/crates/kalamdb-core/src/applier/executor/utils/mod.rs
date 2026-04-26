@@ -1,10 +1,8 @@
 pub mod fileref_util;
 
-use std::future::Future;
-use std::sync::Arc;
+use std::{future::Future, sync::Arc};
 
-use crate::app_context::AppContext;
-use crate::applier::ApplierError;
+use crate::{app_context::AppContext, applier::ApplierError};
 
 pub(super) async fn run_blocking_applier<T, F>(operation: F) -> Result<T, ApplierError>
 where

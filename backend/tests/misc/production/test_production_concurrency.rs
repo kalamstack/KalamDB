@@ -3,10 +3,10 @@
 //! Tests concurrent access patterns, contention handling, and race conditions.
 //! These tests ensure KalamDB handles multiple simultaneous operations safely.
 
-use super::test_support::{consolidated_helpers, TestServer};
-use kalam_client::models::ResponseStatus;
-use kalam_client::parse_i64;
+use kalam_client::{models::ResponseStatus, parse_i64};
 use kalamdb_commons::Role;
+
+use super::test_support::{consolidated_helpers, TestServer};
 
 /// Verify concurrent inserts to same user table work correctly
 #[tokio::test]

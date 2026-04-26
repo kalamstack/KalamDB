@@ -1,6 +1,7 @@
-use crate::pg_type_name::pg_type_name_for;
 use kalam_pg_common::KalamPgError;
 use kalamdb_commons::models::schemas::ColumnDefinition;
+
+use crate::pg_type_name::pg_type_name_for;
 
 /// Build a PostgreSQL column definition for a foreign table column.
 pub fn foreign_column_definition(column: &ColumnDefinition) -> Result<String, KalamPgError> {

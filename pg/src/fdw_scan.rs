@@ -1,16 +1,17 @@
 //! FDW scan callbacks: GetForeignRelSize, GetForeignPaths, GetForeignPlan,
 //! BeginForeignScan, IterateForeignScan, ReScanForeignScan, EndForeignScan.
 
-use crate::arrow_to_pg::arrow_value_to_datum;
-use crate::fdw_options::parse_options;
-use crate::fdw_state::KalamScanState;
-use crate::relation_table_options::resolve_table_options_for_relation;
+use std::ffi::CStr;
+
 use datafusion_common::ScalarValue;
 use kalam_pg_api::ScanFilter;
 use kalam_pg_common::{KalamPgError, DELETED_COLUMN, SEQ_COLUMN, USER_ID_COLUMN};
-use pgrx::pg_guard;
-use pgrx::pg_sys;
-use std::ffi::CStr;
+use pgrx::{pg_guard, pg_sys};
+
+use crate::{
+    arrow_to_pg::arrow_value_to_datum, fdw_options::parse_options, fdw_state::KalamScanState,
+    relation_table_options::resolve_table_options_for_relation,
+};
 
 /// `GetForeignRelSize` callback: estimate relation size.
 #[pg_guard]

@@ -1,10 +1,10 @@
+use std::{collections::HashSet, sync::atomic::Ordering, time::Duration};
+
+use kalam_client::{SubscriptionConfig, SubscriptionOptions};
+use tokio::time::{sleep, timeout};
+
 use super::helpers::*;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
-use kalam_client::{SubscriptionConfig, SubscriptionOptions};
-use std::collections::HashSet;
-use std::sync::atomic::Ordering;
-use std::time::Duration;
-use tokio::time::{sleep, timeout};
 
 /// A large initial snapshot should still complete when the connection drops
 /// more than once before the client reaches steady-state live delivery.

@@ -1,8 +1,8 @@
 // Authentication error types for KalamDB
 
-use crate::oidc::OidcError;
-
 use thiserror::Error;
+
+use crate::oidc::OidcError;
 
 /// Errors that can occur during authentication and authorization.
 #[derive(Error, Debug)]

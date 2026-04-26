@@ -11,15 +11,18 @@
 //! - Automatic refresh-token rotation
 //!
 //! ```rust,no_run
-//! use kalam_client::{AuthProvider, DynamicAuthProvider};
-//! use std::sync::Arc;
-//! use std::pin::Pin;
-//! use std::future::Future;
+//! use std::{future::Future, pin::Pin, sync::Arc};
 //!
-//! struct MyTokenStore { /* ... */ }
+//! use kalam_client::{AuthProvider, DynamicAuthProvider};
+//!
+//! struct MyTokenStore {
+//!     // ...
+//! }
 //!
 //! impl DynamicAuthProvider for MyTokenStore {
-//!     fn get_auth(&self) -> Pin<Box<dyn Future<Output = kalam_client::Result<AuthProvider>> + Send + '_>> {
+//!     fn get_auth(
+//!         &self,
+//!     ) -> Pin<Box<dyn Future<Output = kalam_client::Result<AuthProvider>> + Send + '_>> {
 //!         Box::pin(async {
 //!             // fetch / refresh token here
 //!             Ok(AuthProvider::jwt_token("fresh-token".into()))
@@ -31,10 +34,9 @@
 //! // .auth_provider(Arc::new(MyTokenStore { ... }))
 //! ```
 
+use std::{future::Future, pin::Pin, sync::Arc};
+
 use crate::error::{KalamLinkError, Result};
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
 
 /// Authentication credentials for KalamDB server.
 ///
@@ -102,7 +104,9 @@ impl AuthProvider {
     ) -> Result<reqwest::RequestBuilder> {
         match self {
             Self::BasicAuth(_, _) => Err(KalamLinkError::AuthenticationError(
-                "User/password credentials can only be used with /v1/api/auth/login; exchange them for a JWT before sending authenticated requests.".to_string(),
+                "User/password credentials can only be used with /v1/api/auth/login; exchange \
+                 them for a JWT before sending authenticated requests."
+                    .to_string(),
             )),
             Self::JwtToken(token) => Ok(request.bearer_auth(token)),
             Self::None => Ok(request),

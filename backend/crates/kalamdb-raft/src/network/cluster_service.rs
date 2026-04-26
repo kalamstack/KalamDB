@@ -22,7 +22,6 @@ use tonic_prost::ProstCodec;
 // ─── Request/Response Messages ──────────────────────────────────────────────
 // All message types live in the `models` sub-module; they are re-exported here
 // so that the rest of this file (client, server, tests) can use them directly.
-
 pub use super::models::{
     ForwardSqlRequest, ForwardSqlResponse, ForwardSqlResponsePayload, GetNodeInfoRequest,
     GetNodeInfoResponse, PingRequest, PingResponse,
@@ -31,8 +30,9 @@ pub use super::models::{
 // ─── gRPC Client ────────────────────────────────────────────────────────────
 
 pub mod cluster_client {
-    use super::*;
     use tonic::codegen::*;
+
+    use super::*;
 
     /// Cluster service gRPC client
     #[derive(Debug, Clone)]
@@ -113,9 +113,11 @@ pub mod cluster_client {
 // ─── gRPC Server ────────────────────────────────────────────────────────────
 
 pub mod cluster_server {
-    use super::*;
     use std::sync::Arc;
+
     use tonic::codegen::*;
+
+    use super::*;
 
     /// Cluster service trait — implement this to handle incoming cluster RPCs.
     #[async_trait::async_trait]

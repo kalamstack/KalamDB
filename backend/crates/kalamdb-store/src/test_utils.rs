@@ -2,13 +2,14 @@
 //!
 //! Provides generic test helpers plus feature-gated backend-specific helpers.
 
-use std::collections::{BTreeMap, HashMap};
-use std::sync::RwLock;
-
-use crate::storage_trait::{Operation, Partition, StorageBackend, StorageStats};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::RwLock,
+};
 
 #[cfg(feature = "rocksdb")]
 pub use crate::backends::rocksdb::test_utils::TestDb;
+use crate::storage_trait::{Operation, Partition, StorageBackend, StorageStats};
 
 /// In-memory implementation of StorageBackend for testing.
 ///
@@ -186,10 +187,7 @@ impl StorageBackend for InMemoryBackend {
 
         StorageStats::from([
             ("storage_backend".to_string(), "in_memory".to_string()),
-            (
-                "storage_partition_count".to_string(),
-                partition_count.to_string(),
-            ),
+            ("storage_partition_count".to_string(), partition_count.to_string()),
         ])
     }
 }

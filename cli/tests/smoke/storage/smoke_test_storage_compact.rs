@@ -1,9 +1,13 @@
 //! Smoke test: STORAGE COMPACT TABLE triggers job completion and updates RocksDB files
 
-use crate::common::*;
+use std::{
+    path::{Path, PathBuf},
+    time::{Duration, SystemTime},
+};
+
 use serde_json::Value as JsonValue;
-use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+
+use crate::common::*;
 
 fn rocksdb_dir() -> PathBuf {
     let storage_dir = storage_base_dir();

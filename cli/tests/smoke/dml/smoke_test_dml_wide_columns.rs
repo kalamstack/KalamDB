@@ -2,8 +2,9 @@
 // Covers: insert -> check -> update -> check -> multi-column update -> check -> delete -> check
 // Also verifies subscription delivers UPDATE and DELETE events
 
-use crate::common::*;
 use std::time::Duration;
+
+use crate::common::*;
 
 fn create_namespace(ns: &str) {
     let _ = execute_sql_as_root_via_client(&format!("CREATE NAMESPACE IF NOT EXISTS {}", ns));
@@ -22,7 +23,8 @@ fn extract_first_id_from_json(json_output: &str) -> Option<String> {
 fn run_dml_sequence(full: &str, _is_shared: bool) {
     // insert row 1
     let ins1 = format!(
-        "INSERT INTO {} (name, age, active, score, balance, note) VALUES ('alpha', 25, true, 12.5, 1000, 'note-a')",
+        "INSERT INTO {} (name, age, active, score, balance, note) VALUES ('alpha', 25, true, \
+         12.5, 1000, 'note-a')",
         full
     );
     let out1 = execute_sql_as_root_via_client(&ins1).expect("insert 1 should succeed");
@@ -30,7 +32,8 @@ fn run_dml_sequence(full: &str, _is_shared: bool) {
 
     // insert row 2
     let ins2 = format!(
-        "INSERT INTO {} (name, age, active, score, balance, note) VALUES ('beta', 30, false, 99.9, 2000, 'note-b')",
+        "INSERT INTO {} (name, age, active, score, balance, note) VALUES ('beta', 30, false, \
+         99.9, 2000, 'note-b')",
         full
     );
     let out2 = execute_sql_as_root_via_client(&ins2).expect("insert 2 should succeed");
@@ -65,7 +68,8 @@ fn run_dml_sequence(full: &str, _is_shared: bool) {
 
     // multi-column update on alpha
     let upd2 = format!(
-        "UPDATE {} SET name='alpha2', age=42, active=false, score=88.75, balance=4321, note='note-upd' WHERE id = {}",
+        "UPDATE {} SET name='alpha2', age=42, active=false, score=88.75, balance=4321, \
+         note='note-upd' WHERE id = {}",
         full, id_alpha
     );
     let out_upd2 = execute_sql_as_root_via_client(&upd2).expect("update 2 should succeed");
@@ -192,14 +196,16 @@ fn smoke_subscription_update_delete_notifications() {
     create_namespace(&namespace);
 
     let create_sql = format!(
-        "CREATE TABLE {} (id INT PRIMARY KEY, name VARCHAR, updated_at TIMESTAMP, is_deleted BOOLEAN, note VARCHAR) WITH (TYPE = 'USER')",
+        "CREATE TABLE {} (id INT PRIMARY KEY, name VARCHAR, updated_at TIMESTAMP, is_deleted \
+         BOOLEAN, note VARCHAR) WITH (TYPE = 'USER')",
         full
     );
     execute_sql_as_root_via_client(&create_sql).expect("create user table should succeed");
 
     // Insert initial row BEFORE subscribing
     let _ = execute_sql_as_root_via_client(&format!(
-        "INSERT INTO {} (id, name, updated_at, is_deleted, note) VALUES (1, 'one', 1730497770045, false, 'n1')",
+        "INSERT INTO {} (id, name, updated_at, is_deleted, note) VALUES (1, 'one', 1730497770045, \
+         false, 'n1')",
         full
     ));
 

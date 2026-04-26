@@ -18,8 +18,9 @@
 //! Implementations (users.rs, shared.rs, streams.rs)
 //! ```
 
-use crate::error::KalamDbError;
 use serde::{Deserialize, Serialize};
+
+use crate::error::KalamDbError;
 
 /// Metadata for user table flush operations
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -132,8 +133,12 @@ impl FlushDedupStats {
             table_ref
         );
         log::debug!(
-            "📊 [FLUSH DEDUP] Version resolution complete: {} rows → {} unique (dedup: {:.1}%, deleted: {})",
-            self.rows_before_dedup, self.rows_after_dedup, self.dedup_ratio(), self.deleted_count
+            "📊 [FLUSH DEDUP] Version resolution complete: {} rows → {} unique (dedup: {:.1}%, \
+             deleted: {})",
+            self.rows_before_dedup,
+            self.rows_after_dedup,
+            self.dedup_ratio(),
+            self.deleted_count
         );
         log::debug!(
             "📊 [FLUSH DEDUP] Final: {} rows to flush ({} tombstones filtered)",
@@ -187,15 +192,18 @@ pub mod config {
 
 /// Common helper functions for flush operations
 pub mod helpers {
-    use crate::error::KalamDbError;
-    use crate::error_extensions::KalamDbResultExt;
-    use crate::providers::arrow_json_conversion::json_rows_to_arrow_batch;
-    use datafusion::arrow::datatypes::SchemaRef;
-    use datafusion::arrow::record_batch::RecordBatch;
-    use datafusion::scalar::ScalarValue;
-    use kalamdb_commons::constants::SystemColumnNames;
-    use kalamdb_commons::models::rows::Row;
-    use kalamdb_commons::next_storage_key_bytes;
+    use datafusion::{
+        arrow::{datatypes::SchemaRef, record_batch::RecordBatch},
+        scalar::ScalarValue,
+    };
+    use kalamdb_commons::{
+        constants::SystemColumnNames, models::rows::Row, next_storage_key_bytes,
+    };
+
+    use crate::{
+        error::KalamDbError, error_extensions::KalamDbResultExt,
+        providers::arrow_json_conversion::json_rows_to_arrow_batch,
+    };
 
     /// Extract primary key field name from Arrow schema
     ///

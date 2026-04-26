@@ -6,11 +6,11 @@
 //! # Performance Features
 //!
 //! - **Column Projection**: Only read the columns you need, reducing I/O and memory
-//! - **Row Group Pruning via Bloom Filters**: Skip entire row groups where the bloom
-//!   filter reports a value is "definitely not present"
-//! - **Streaming I/O**: All reads use `ParquetObjectReader` — reads only the footer
-//!   eagerly and fetches column chunks on demand via range requests (remote) or
-//!   file seeks (local). No full-file downloads.
+//! - **Row Group Pruning via Bloom Filters**: Skip entire row groups where the bloom filter reports
+//!   a value is "definitely not present"
+//! - **Streaming I/O**: All reads use `ParquetObjectReader` — reads only the footer eagerly and
+//!   fetches column chunks on demand via range requests (remote) or file seeks (local). No
+//!   full-file downloads.
 //!
 //! # Usage Tiers
 //!
@@ -18,17 +18,17 @@
 //! |----------|:-:|:-:|----------|
 //! | `parse_parquet_stream` | Optional | ✓ | General streaming read (recommended) |
 
-use crate::error::{FilestoreError, Result};
+use std::{pin::Pin, sync::Arc};
+
 use arrow::record_batch::RecordBatch;
-use datafusion::parquet::arrow::async_reader::{
-    ParquetObjectReader, ParquetRecordBatchStreamBuilder,
+use datafusion::parquet::arrow::{
+    async_reader::{ParquetObjectReader, ParquetRecordBatchStreamBuilder},
+    ProjectionMask,
 };
-use datafusion::parquet::arrow::ProjectionMask;
 use futures_util::TryStreamExt;
-use object_store::path::Path as ObjectPath;
-use object_store::ObjectStore;
-use std::pin::Pin;
-use std::sync::Arc;
+use object_store::{path::Path as ObjectPath, ObjectStore};
+
+use crate::error::{FilestoreError, Result};
 
 // ========== Async streaming reader (ObjectStore-backed) ==========
 
@@ -97,21 +97,21 @@ fn resolve_column_indices(
 
 #[cfg(test)]
 mod tests {
+    use std::{env, fs, sync::Arc};
+
+    use arrow::{
+        array::{Array, BooleanArray, Float64Array, Int64Array, StringArray},
+        record_batch::RecordBatch,
+    };
+    use kalamdb_commons::{
+        arrow_utils::{field_boolean, field_float64, field_int64, field_utf8, schema},
+        models::{ids::StorageId, TableId},
+        schemas::TableType,
+    };
+    use kalamdb_system::{providers::storages::models::StorageType, Storage};
+
     use super::*;
     use crate::registry::StorageCached;
-    use arrow::array::{Array, BooleanArray, Float64Array, Int64Array, StringArray};
-    use arrow::record_batch::RecordBatch;
-    use kalamdb_commons::arrow_utils::{
-        field_boolean, field_float64, field_int64, field_utf8, schema,
-    };
-    use kalamdb_commons::models::ids::StorageId;
-    use kalamdb_commons::models::TableId;
-    use kalamdb_commons::schemas::TableType;
-    use kalamdb_system::providers::storages::models::StorageType;
-    use kalamdb_system::Storage;
-    use std::env;
-    use std::fs;
-    use std::sync::Arc;
 
     fn create_test_storage(temp_dir: &std::path::Path) -> Storage {
         let now = chrono::Utc::now().timestamp_millis();

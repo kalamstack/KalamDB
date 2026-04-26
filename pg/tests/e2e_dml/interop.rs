@@ -66,7 +66,8 @@ async fn wait_for_execute_as_user_count(
     loop {
         let result = env
             .kalamdb_sql(&format!(
-                "EXECUTE AS USER '{user_id}' (SELECT COUNT(*) FROM {qualified_table} WHERE id = '{row_id}')"
+                "EXECUTE AS USER '{user_id}' (SELECT COUNT(*) FROM {qualified_table} WHERE id = \
+                 '{row_id}')"
             ))
             .await;
         let count = sql_first_cell_i64(&result).unwrap_or_default();
@@ -76,7 +77,8 @@ async fn wait_for_execute_as_user_count(
 
         if std::time::Instant::now() >= deadline {
             panic!(
-                "EXECUTE AS USER '{user_id}' expected count {expected} for {qualified_table}.{row_id}, got {count}"
+                "EXECUTE AS USER '{user_id}' expected count {expected} for \
+                 {qualified_table}.{row_id}, got {count}"
             );
         }
 
@@ -178,10 +180,8 @@ async fn e2e_select_filters_and_postgres_join_work() {
     delete_all(&pg, &format!("e2e.{table}"), "id").await;
 
     pg.batch_execute(&format!(
-        "INSERT INTO e2e.{table} (id, title, value) VALUES \
-         ('j1', 'Alpha', 10), \
-         ('j2', 'Beta', 20), \
-         ('j3', 'Gamma', 30);"
+        "INSERT INTO e2e.{table} (id, title, value) VALUES ('j1', 'Alpha', 10), ('j2', 'Beta', \
+         20), ('j3', 'Gamma', 30);"
     ))
     .await
     .expect("insert join test rows");
@@ -237,18 +237,14 @@ async fn e2e_shared_tables_can_join_each_other_in_postgres() {
     create_shared_kalam_table(&pg, &orders_table, "id TEXT, customer_id TEXT, total INTEGER").await;
 
     pg.batch_execute(&format!(
-        "INSERT INTO e2e.{customers_table} (id, name) VALUES \
-         ('c1', 'Alice'), \
-         ('c2', 'Bob');"
+        "INSERT INTO e2e.{customers_table} (id, name) VALUES ('c1', 'Alice'), ('c2', 'Bob');"
     ))
     .await
     .expect("insert shared customers");
 
     pg.batch_execute(&format!(
-        "INSERT INTO e2e.{orders_table} (id, customer_id, total) VALUES \
-         ('o1', 'c1', 15), \
-         ('o2', 'c1', 20), \
-         ('o3', 'c2', 30);"
+        "INSERT INTO e2e.{orders_table} (id, customer_id, total) VALUES ('o1', 'c1', 15), ('o2', \
+         'c1', 20), ('o3', 'c2', 30);"
     ))
     .await
     .expect("insert shared orders");
@@ -320,7 +316,8 @@ async fn e2e_search_path_schema_mirror_works_without_namespace_option() {
     let result_text = serde_json::to_string(&result).unwrap_or_default();
     assert!(
         result_text.contains("spath-1") && result_text.contains("From search_path"),
-        "search_path-mirrored Kalam table should write into KalamDB namespace {schema}: {result_text}"
+        "search_path-mirrored Kalam table should write into KalamDB namespace {schema}: \
+         {result_text}"
     );
 
     pg.batch_execute(&format!(
@@ -348,9 +345,8 @@ async fn e2e_user_tables_can_join_each_other_in_postgres() {
     set_user_id(&pg, &user_id).await;
 
     let insert_profiles_sql = format!(
-        "INSERT INTO e2e.{profiles_table} (id, display_name) VALUES \
-         ('u1', 'Alice'), \
-         ('u2', 'Bob');"
+        "INSERT INTO e2e.{profiles_table} (id, display_name) VALUES ('u1', 'Alice'), ('u2', \
+         'Bob');"
     );
     retry_transient_user_leader_error("insert user profiles", || {
         pg.batch_execute(&insert_profiles_sql)
@@ -358,8 +354,7 @@ async fn e2e_user_tables_can_join_each_other_in_postgres() {
     .await;
 
     let insert_memberships_sql = format!(
-        "INSERT INTO e2e.{memberships_table} (id, profile_id, plan) VALUES \
-         ('m1', 'u1', 'pro'), \
+        "INSERT INTO e2e.{memberships_table} (id, profile_id, plan) VALUES ('m1', 'u1', 'pro'), \
          ('m2', 'u2', 'team');"
     );
     retry_transient_user_leader_error("insert user memberships", || {
@@ -402,7 +397,8 @@ async fn e2e_user_table_explicit_userid_routes_to_target_user() {
 
     set_user_id(&pg, &writer.user_id).await;
     let insert_sql = format!(
-        "INSERT INTO {qualified_table} (id, body, _userid) VALUES ('{row_id}', 'routed-via-explicit-userid', '{}')",
+        "INSERT INTO {qualified_table} (id, body, _userid) VALUES ('{row_id}', \
+         'routed-via-explicit-userid', '{}')",
         target.user_id
     );
 

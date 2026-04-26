@@ -10,13 +10,14 @@
 //! for data groups.
 
 use chrono::{DateTime, Utc};
-use kalamdb_commons::models::schemas::{TableDefinition, TableType};
-use kalamdb_commons::models::{JobId, NamespaceId, NodeId, StorageId, UserId};
-use kalamdb_commons::TableId;
-use kalamdb_system::providers::jobs::models::Job;
-use kalamdb_system::JobStatus;
-use kalamdb_system::Storage;
-use kalamdb_system::User;
+use kalamdb_commons::{
+    models::{
+        schemas::{TableDefinition, TableType},
+        JobId, NamespaceId, NodeId, StorageId, UserId,
+    },
+    TableId,
+};
+use kalamdb_system::{providers::jobs::models::Job, JobStatus, Storage, User};
 use serde::{Deserialize, Serialize};
 
 /// Commands for the unified metadata Raft group
@@ -288,8 +289,9 @@ impl MetaResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kalamdb_commons::{AuthType, Role};
+
+    use super::*;
 
     fn test_user() -> User {
         User {

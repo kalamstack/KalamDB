@@ -9,11 +9,13 @@
 //! **Test Philosophy**: Follow TDD - these tests verify the unified authentication
 //! flow that is used by both HTTP and WebSocket handlers.
 
-use super::test_support::{auth_helper, TestServer};
+use std::sync::Arc;
+
 use base64::Engine as _;
 use kalamdb_auth::AuthError;
 use kalamdb_commons::{models::ConnectionInfo, Role};
-use std::sync::Arc;
+
+use super::test_support::{auth_helper, TestServer};
 
 /// Test successful Bearer auth with valid token
 #[tokio::test]

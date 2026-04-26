@@ -10,21 +10,27 @@
 //! - Apply deletion filters to queries
 //!
 //! ## MVCC Architecture Changes
-//! - **Removed**: `_id` (replaced by user-defined PK), `_updated` (replaced by _seq.timestamp_millis())
+//! - **Removed**: `_id` (replaced by user-defined PK), `_updated` (replaced by
+//!   _seq.timestamp_millis())
 //! - **Added**: `_seq: SeqId` - Snowflake ID for version tracking with embedded timestamp
 //! - **Kept**: `_deleted: bool` - Soft delete flag
 //!
 //! ## Architecture
-//! - **SnowflakeGenerator**: Generates time-ordered unique IDs (41-bit timestamp + 10-bit worker + 12-bit sequence)
+//! - **SnowflakeGenerator**: Generates time-ordered unique IDs (41-bit timestamp + 10-bit worker +
+//!   12-bit sequence)
 //! - **SeqId Wrapper**: Wraps Snowflake ID with timestamp extraction methods
-//! - **Soft Deletes**: Records marked `_deleted=true` are filtered from queries unless explicitly requested
+//! - **Soft Deletes**: Records marked `_deleted=true` are filtered from queries unless explicitly
+//!   requested
+
+use std::sync::Arc;
+
+use kalamdb_commons::{
+    constants::SystemColumnNames,
+    ids::{snowflake::SnowflakeGenerator, SeqId},
+    models::schemas::{ColumnDefault, ColumnDefinition, TableDefinition},
+};
 
 use crate::error::SystemError;
-use kalamdb_commons::constants::SystemColumnNames;
-use kalamdb_commons::ids::snowflake::SnowflakeGenerator;
-use kalamdb_commons::ids::SeqId;
-use kalamdb_commons::models::schemas::{ColumnDefault, ColumnDefinition, TableDefinition};
-use std::sync::Arc;
 
 /// System Columns Service
 ///
@@ -251,8 +257,10 @@ mod tests {
 
     #[test]
     fn test_add_system_columns() {
-        use kalamdb_commons::models::schemas::{TableOptions, TableType};
-        use kalamdb_commons::{NamespaceId, TableName};
+        use kalamdb_commons::{
+            models::schemas::{TableOptions, TableType},
+            NamespaceId, TableName,
+        };
 
         let svc = SystemColumnsService::new(1);
         let mut table_def = TableDefinition::new(

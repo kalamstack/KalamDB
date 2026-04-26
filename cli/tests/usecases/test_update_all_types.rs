@@ -1,9 +1,9 @@
-use crate::common::*;
+use std::{collections::HashMap, thread, time::Duration};
+
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 use serde_json::Value;
-use std::collections::HashMap;
-use std::thread;
-use std::time::Duration;
+
+use crate::common::*;
 
 fn extract_first_row_from_cli_json(output: &str) -> Value {
     let json: Value = parse_json_from_cli_output(output)
@@ -367,7 +367,8 @@ fn test_update_all_types_user_table() {
     assert!(output.contains("456"), "Updated int not found");
     let row = extract_first_row_from_cli_json(&output);
     assert_decimal_column_eq(&row, "col_decimal", 200.75, &output);
-    // Note: JSON formatting might vary (whitespace), so we might need loose check or just check presence of "updated"
+    // Note: JSON formatting might vary (whitespace), so we might need loose check or just check
+    // presence of "updated"
     assert!(output.contains("updated"), "Updated JSON content not found");
 
     // Flush table

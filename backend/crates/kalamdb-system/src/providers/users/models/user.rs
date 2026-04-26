@@ -2,12 +2,14 @@
 //!
 //! Represents a database user with authentication and authorization information.
 
-use crate::providers::storages::models::StorageMode;
-use crate::providers::users::models::auth_data::AuthData;
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::models::{ids::UserId, AuthType, Role, StorageId};
+use kalamdb_commons::{
+    datatypes::KalamDataType,
+    models::{ids::UserId, AuthType, Role, StorageId},
+};
 use kalamdb_macros::table;
 use serde::{Deserialize, Serialize};
+
+use crate::providers::{storages::models::StorageMode, users::models::auth_data::AuthData};
 
 /// Default maximum failed login attempts before lockout
 pub const DEFAULT_MAX_FAILED_ATTEMPTS: i32 = 5;
@@ -43,25 +45,25 @@ pub const DEFAULT_LOCKOUT_DURATION_MINUTES: i64 = 15;
 /// ## Example
 ///
 /// ```rust
+/// use kalamdb_commons::{AuthType, Role, StorageId, StorageMode, UserId};
 /// use kalamdb_system::User;
-/// use kalamdb_commons::{UserId, Role, AuthType, StorageMode, StorageId};
 ///
 /// let user = User {
-///     user_id: UserId::new("u_123456"),
-///     password_hash: "$2b$12$...".to_string(),
-///     role: Role::User,
-///     email: Some("alice@example.com".to_string()),
-///     auth_type: AuthType::Password,
-///     auth_data: None,
-///     storage_mode: StorageMode::Table,
-///     storage_id: Some(StorageId::new("storage_1")),
+///     user_id:               UserId::new("u_123456"),
+///     password_hash:         "$2b$12$...".to_string(),
+///     role:                  Role::User,
+///     email:                 Some("alice@example.com".to_string()),
+///     auth_type:             AuthType::Password,
+///     auth_data:             None,
+///     storage_mode:          StorageMode::Table,
+///     storage_id:            Some(StorageId::new("storage_1")),
 ///     failed_login_attempts: 0,
-///     locked_until: None,
-///     last_login_at: None,
-///     created_at: 1730000000000,
-///     updated_at: 1730000000000,
-///     last_seen: None,
-///     deleted_at: None,
+///     locked_until:          None,
+///     last_login_at:         None,
+///     created_at:            1730000000000,
+///     updated_at:            1730000000000,
+///     last_seen:             None,
+///     deleted_at:            None,
 /// };
 /// ```
 /// User struct with fields ordered for optimal memory alignment.

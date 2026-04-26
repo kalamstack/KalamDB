@@ -2,16 +2,17 @@
 //!
 //! Handles incoming inter-node gRPC calls and dispatches them into core services.
 
-use std::sync::Arc;
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 
 use kalamdb_auth::{authenticate, AuthRequest, CoreUsersRepo, UserRepository};
-use kalamdb_commons::conversions::{
-    mask_sensitive_rows_for_role, record_batch_to_json_arrays, schema_fields_from_arrow_schema,
+use kalamdb_commons::{
+    conversions::{
+        mask_sensitive_rows_for_role, record_batch_to_json_arrays, schema_fields_from_arrow_schema,
+    },
+    models::{ConnectionInfo, KalamCellValue, NamespaceId, UserId},
+    schemas::SchemaField,
+    Role,
 };
-use kalamdb_commons::models::{ConnectionInfo, KalamCellValue, NamespaceId, UserId};
-use kalamdb_commons::schemas::SchemaField;
-use kalamdb_commons::Role;
 use kalamdb_raft::{
     forward_sql_param, ClusterMessageHandler, ForwardSqlParam, ForwardSqlRequest,
     ForwardSqlResponsePayload, GetNodeInfoRequest, GetNodeInfoResponse, PingRequest, RaftExecutor,
@@ -19,11 +20,13 @@ use kalamdb_raft::{
 use kalamdb_session::{AuthMethod, AuthSession};
 use serde::Serialize;
 
-use crate::app_context::AppContext;
-use crate::sql::context::ExecutionContext;
-use crate::sql::executor::PreparedExecutionStatement;
-use crate::sql::ExecutionResult;
-use crate::sql::SqlImpersonationService;
+use crate::{
+    app_context::AppContext,
+    sql::{
+        context::ExecutionContext, executor::PreparedExecutionStatement, ExecutionResult,
+        SqlImpersonationService,
+    },
+};
 
 // ── Response types (match SqlResponse JSON shape, no intermediate Value tree) ──
 
@@ -228,9 +231,7 @@ impl CoreClusterHandler {
 
         let (sql, execute_as_username) = match kalamdb_sql::execute_as::parse_execute_as(statement)?
         {
-            Some(envelope) => {
-                (envelope.inner_sql, Some(envelope.username))
-            },
+            Some(envelope) => (envelope.inner_sql, Some(envelope.username)),
             None => (trimmed.to_string(), None),
         };
 
@@ -429,7 +430,8 @@ impl ClusterMessageHandler for CoreClusterHandler {
                     400,
                     "SQL_EXECUTION_ERROR",
                     &format!(
-                        "Statement {} failed: EXECUTE AS USER is not allowed on SHARED tables (table '{}'). AS USER impersonation is only supported for USER tables.",
+                        "Statement {} failed: EXECUTE AS USER is not allowed on SHARED tables \
+                         (table '{}'). AS USER impersonation is only supported for USER tables.",
                         idx + 1,
                         table_name
                     ),
@@ -557,17 +559,22 @@ impl ClusterMessageHandler for CoreClusterHandler {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use arrow::{
+        array::{Int64Array, StringArray},
+        datatypes::{DataType, Field, Schema},
+        record_batch::RecordBatch,
+    };
+    use datafusion::scalar::ScalarValue;
+    use kalamdb_commons::{
+        conversions::with_kalam_data_type_metadata,
+        models::{datatypes::KalamDataType, Role},
+    };
+    use kalamdb_raft::ForwardSqlParam;
+
     use super::CoreClusterHandler;
     use crate::sql::ExecutionResult;
-    use arrow::array::{Int64Array, StringArray};
-    use arrow::datatypes::{DataType, Field, Schema};
-    use arrow::record_batch::RecordBatch;
-    use datafusion::scalar::ScalarValue;
-    use kalamdb_commons::conversions::with_kalam_data_type_metadata;
-    use kalamdb_commons::models::datatypes::KalamDataType;
-    use kalamdb_commons::models::Role;
-    use kalamdb_raft::ForwardSqlParam;
-    use std::sync::Arc;
 
     #[test]
     fn forwarded_rows_include_schema_and_rows() {

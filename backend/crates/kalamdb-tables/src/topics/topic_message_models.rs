@@ -4,9 +4,12 @@
 //! - TopicMessageId: Composite key for message identification
 //! - TopicMessage: Message envelope with payload and metadata
 
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::models::{TopicId, TopicOp, UserId};
-use kalamdb_commons::{decode_key, encode_key, encode_prefix, KSerializable, StorageKey};
+use kalamdb_commons::{
+    datatypes::KalamDataType,
+    decode_key, encode_key, encode_prefix,
+    models::{TopicId, TopicOp, UserId},
+    KSerializable, StorageKey,
+};
 use kalamdb_macros::table;
 use serde::{Deserialize, Serialize};
 

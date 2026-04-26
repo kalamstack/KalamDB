@@ -3,12 +3,17 @@
 //! Receives events routed by the shared
 //! [`SharedConnection`](crate::connection::SharedConnection).
 
-use crate::{
-    error::Result, models::ChangeEvent, seq_id::SeqId, subscription::buffer_event,
-    subscription::event_progress, timeouts::KalamLinkTimeouts,
-};
 use std::collections::VecDeque;
+
 use tokio::sync::mpsc;
+
+use crate::{
+    error::Result,
+    models::ChangeEvent,
+    seq_id::SeqId,
+    subscription::{buffer_event, event_progress},
+    timeouts::KalamLinkTimeouts,
+};
 
 /// Manages WebSocket subscriptions for real-time change notifications.
 ///
@@ -18,9 +23,7 @@ use tokio::sync::mpsc;
 /// use kalam_client::KalamLinkClient;
 ///
 /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let client = KalamLinkClient::builder()
-///     .base_url("http://localhost:3000")
-///     .build()?;
+/// let client = KalamLinkClient::builder().base_url("http://localhost:3000").build()?;
 ///
 /// let mut subscription = client.subscribe("SELECT * FROM messages").await?;
 ///
@@ -88,12 +91,17 @@ impl SubscriptionManager {
         let Some(progress_tx) = self.shared_progress_tx.as_ref() else {
             return;
         };
-        let Some((seq_id, advance_resume)) = event_progress(event) else {
+        let Some(progress) = event_progress(event) else {
             return;
         };
 
         let _ = progress_tx
-            .send((self.subscription_id.clone(), self.generation, seq_id, advance_resume))
+            .send((
+                self.subscription_id.clone(),
+                self.generation,
+                progress.seq_id,
+                progress.advance_resume,
+            ))
             .await;
     }
 

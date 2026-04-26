@@ -1,5 +1,6 @@
-use kalam_client::{AuthProvider, KalamLinkClient};
 use std::time::{Duration, Instant};
+
+use kalam_client::{AuthProvider, KalamLinkClient};
 
 use super::common::{ensure_schema_exists, require_ddl_env, unique_name};
 
@@ -246,7 +247,8 @@ async fn e2e_ddl_file_column_roundtrip_via_kalamlink() {
         .expect("build KalamLink client");
 
     let insert_sql = format!(
-        "INSERT INTO {namespace}.{table} (id, attachment) VALUES ('{row_id}', FILE(\"attachment\"))"
+        "INSERT INTO {namespace}.{table} (id, attachment) VALUES ('{row_id}', \
+         FILE(\"attachment\"))"
     );
     let insert_result = client
         .execute_with_files(
@@ -347,7 +349,8 @@ async fn e2e_ddl_multiple_file_columns_roundtrip_via_kalamlink() {
 
     let client = kalamlink_client(&env.bearer_token);
     let insert_sql = format!(
-        "INSERT INTO {namespace}.{table} (id, avatar, contract) VALUES ('{row_id}', FILE(\"avatar\"), FILE(\"contract\"))"
+        "INSERT INTO {namespace}.{table} (id, avatar, contract) VALUES ('{row_id}', \
+         FILE(\"avatar\"), FILE(\"contract\"))"
     );
     let insert_result = client
         .execute_with_files(
@@ -411,7 +414,8 @@ async fn e2e_ddl_file_update_via_kalamlink_is_visible_in_postgres() {
 
     let client = kalamlink_client(&env.bearer_token);
     let insert_sql = format!(
-        "INSERT INTO {namespace}.{table} (id, attachment) VALUES ('{row_id}', FILE(\"attachment\"))"
+        "INSERT INTO {namespace}.{table} (id, attachment) VALUES ('{row_id}', \
+         FILE(\"attachment\"))"
     );
     let insert_result = client
         .execute_with_files(

@@ -1,7 +1,7 @@
 //! File permission tests over HTTP.
 
-use super::test_support::auth_helper::create_user_auth_header_with_id;
-use super::test_support::http_server::start_http_test_server;
+use std::path::{Path, PathBuf};
+
 use kalam_client::models::ResponseStatus as LinkResponseStatus;
 use kalamdb_api::http::sql::models::{ResponseStatus, SqlResponse};
 use kalamdb_commons::Role;
@@ -9,8 +9,11 @@ use kalamdb_system::FileRef;
 use reqwest::multipart;
 use serde_json::Value as JsonValue;
 use serial_test::serial;
-use std::path::{Path, PathBuf};
 use uuid::Uuid;
+
+use super::test_support::{
+    auth_helper::create_user_auth_header_with_id, http_server::start_http_test_server,
+};
 
 fn unique_suffix() -> String {
     Uuid::new_v4().simple().to_string()
@@ -267,7 +270,8 @@ async fn test_failed_insert_cleans_up_files() -> anyhow::Result<()> {
         assert_eq!(resp.status, LinkResponseStatus::Success, "CREATE NAMESPACE failed");
 
         let create_table_sql = format!(
-            "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, name TEXT NOT NULL, doc FILE) WITH (TYPE='USER')",
+            "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, name TEXT NOT NULL, doc FILE) WITH \
+             (TYPE='USER')",
             namespace, table_name
         );
         let resp = server.execute_sql(&create_table_sql).await?;
@@ -294,11 +298,7 @@ async fn test_failed_insert_cleans_up_files() -> anyhow::Result<()> {
         let table_path =
             table_path_for_user(&server.storage_root(), &namespace, &table_name, &alice_id);
         let leaked = find_files_in_subfolders(&table_path, "f");
-        assert!(
-            leaked.is_empty(),
-            "Failed insert should cleanup staged files: {:?}",
-            leaked
-        );
+        assert!(leaked.is_empty(), "Failed insert should cleanup staged files: {:?}", leaked);
 
         let _ = server
             .execute_sql(&format!("DROP TABLE IF EXISTS {}.{}", namespace, table_name))

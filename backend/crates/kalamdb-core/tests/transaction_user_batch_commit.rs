@@ -3,16 +3,17 @@ mod support;
 use std::sync::Arc;
 
 use datafusion_common::ScalarValue;
-use kalamdb_commons::models::pg_operations::InsertRequest;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::{OperationKind, TransactionOrigin, UserId};
-use kalamdb_commons::TableType;
-use kalamdb_core::operations::service::OperationService;
-use kalamdb_core::transactions::{ExecutionOwnerKey, StagedMutation};
+use kalamdb_commons::{
+    models::{pg_operations::InsertRequest, rows::Row, OperationKind, TransactionOrigin, UserId},
+    TableType,
+};
+use kalamdb_core::{
+    operations::service::OperationService,
+    transactions::{ExecutionOwnerKey, StagedMutation},
+};
 use kalamdb_pg::OperationExecutor;
 use kalamdb_sharding::ShardRouter;
 use kalamdb_tables::UserTableProvider;
-
 use support::{create_cluster_app_context, create_user_table, row, unique_namespace};
 
 fn insert_mutation(

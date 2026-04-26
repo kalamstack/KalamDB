@@ -14,15 +14,17 @@
 //! 3. Verify correct results are returned
 //! 4. Measure performance to ensure O(1) lookup behavior
 
-use super::test_support::{consolidated_helpers, TestServer};
-use kalam_client::models::ResponseStatus;
-use kalam_client::parse_i64;
-use kalamdb_commons::models::{ConnectionId, ConnectionInfo};
-use kalamdb_commons::websocket::{SubscriptionOptions, SubscriptionRequest};
-use kalamdb_commons::{AuthType, JobId, NodeId, Role, StorageId, UserId};
-use kalamdb_system::providers::storages::models::StorageMode;
-use kalamdb_system::{Job, JobStatus, JobType, User};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use kalam_client::{models::ResponseStatus, parse_i64};
+use kalamdb_commons::{
+    models::{ConnectionId, ConnectionInfo},
+    websocket::{SubscriptionOptions, SubscriptionRequest},
+    AuthType, JobId, NodeId, Role, StorageId, UserId,
+};
+use kalamdb_system::{providers::storages::models::StorageMode, Job, JobStatus, JobType, User};
+
+use super::test_support::{consolidated_helpers, TestServer};
 
 /// Test: system.users uses user_id for WHERE user_id = '...' queries
 ///
@@ -196,7 +198,8 @@ async fn test_system_jobs_status_index() {
 
     // Check what statuses actually exist
     let status_query = format!(
-        "SELECT status, COUNT(*) AS count FROM system.jobs WHERE job_id LIKE '{}%' GROUP BY status ORDER BY status",
+        "SELECT status, COUNT(*) AS count FROM system.jobs WHERE job_id LIKE '{}%' GROUP BY \
+         status ORDER BY status",
         job_prefix
     );
     let status_response = server.execute_sql(&status_query).await;
@@ -217,7 +220,8 @@ async fn test_system_jobs_status_index() {
 
     // Test 1: Query for Running jobs (should use status index)
     let query_running = format!(
-        "SELECT COUNT(*) AS job_count FROM system.jobs WHERE status = 'running' AND job_id LIKE '{}%'",
+        "SELECT COUNT(*) AS job_count FROM system.jobs WHERE status = 'running' AND job_id LIKE \
+         '{}%'",
         job_prefix
     );
     let start = Instant::now();
@@ -248,7 +252,8 @@ async fn test_system_jobs_status_index() {
 
     // Test 2: Query for completed jobs
     let query_completed = format!(
-        "SELECT job_id, status FROM system.jobs WHERE status = 'completed' AND job_id LIKE '{}%' LIMIT 5",
+        "SELECT job_id, status FROM system.jobs WHERE status = 'completed' AND job_id LIKE '{}%' \
+         LIMIT 5",
         job_prefix
     );
     let response2 = server.execute_sql(&query_completed).await;
@@ -264,7 +269,8 @@ async fn test_system_jobs_status_index() {
 
     // Test 3: Query for failed jobs
     let query_failed = format!(
-        "SELECT COUNT(*) AS failed_count FROM system.jobs WHERE status = 'failed' AND job_id LIKE '{}%'",
+        "SELECT COUNT(*) AS failed_count FROM system.jobs WHERE status = 'failed' AND job_id LIKE \
+         '{}%'",
         job_prefix
     );
     let response3 = server.execute_sql(&query_failed).await;
@@ -505,7 +511,8 @@ async fn test_index_performance_scaling() {
 
     assert!(
         ratio < 6.0,
-        "Query time scaled too much ({}x). Expected O(1) with index, got O(n) behavior. This suggests the index is NOT being used!",
+        "Query time scaled too much ({}x). Expected O(1) with index, got O(n) behavior. This \
+         suggests the index is NOT being used!",
         ratio
     );
 

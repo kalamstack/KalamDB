@@ -6,10 +6,14 @@
 // The parallelism is handled within a single process using std threads that share
 // a single tokio runtime.
 
-use crate::common::*;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
 use serde_json::Value;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+
+use crate::common::*;
 
 // Keep enough parallelism to exercise concurrent reads without poisoning later smoke
 // tests on externally managed servers that enforce stricter request/IP guards.
@@ -27,17 +31,9 @@ fn print_phase0_explain_baseline(label: &str, query: &str) {
 
     let analyze_sql = format!("EXPLAIN ANALYZE {}", query);
     let analyze_output = execute_sql_as_root_via_client(&analyze_sql).unwrap_or_else(|error| {
-        panic!(
-            "phase-0 EXPLAIN ANALYZE failed for '{}': {}",
-            analyze_sql,
-            error
-        )
+        panic!("phase-0 EXPLAIN ANALYZE failed for '{}': {}", analyze_sql, error)
     });
-    println!(
-        "Phase-0 EXPLAIN ANALYZE baseline [{}]:\n{}",
-        label,
-        analyze_output
-    );
+    println!("Phase-0 EXPLAIN ANALYZE baseline [{}]:\n{}", label, analyze_output);
 }
 
 #[ntest::timeout(180000)]
@@ -64,7 +60,8 @@ fn smoke_test_00_parallel_query_burst() {
 
     // Create the user table with simple schema
     let create_table_sql = format!(
-        "CREATE TABLE IF NOT EXISTS {} (id INT PRIMARY KEY, value VARCHAR NOT NULL) WITH (TYPE = 'USER', FLUSH_POLICY = 'rows:1000')",
+        "CREATE TABLE IF NOT EXISTS {} (id INT PRIMARY KEY, value VARCHAR NOT NULL) WITH (TYPE = \
+         'USER', FLUSH_POLICY = 'rows:1000')",
         full_table_name
     );
     execute_sql_as_root_via_client(&create_table_sql).expect("CREATE TABLE should succeed");
@@ -242,7 +239,8 @@ fn extract_scalar(json_output: &str, field: &str) -> i64 {
 
     let field_value = extract_typed_value(field_value);
 
-    // Handle both number and string representations (large ints are serialized as strings for JS safety)
+    // Handle both number and string representations (large ints are serialized as strings for JS
+    // safety)
     match &field_value {
         Value::Number(n) => n
             .as_i64()

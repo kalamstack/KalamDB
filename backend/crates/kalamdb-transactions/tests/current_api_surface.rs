@@ -7,8 +7,7 @@ fn uses_current_execution_plan_surface() {
 
 #[allow(dead_code)]
 fn uses_current_record_batch_stream_surface() {
-    use datafusion::execution::RecordBatchStream;
-    use datafusion::physical_plan::SendableRecordBatchStream;
+    use datafusion::{execution::RecordBatchStream, physical_plan::SendableRecordBatchStream};
     fn _assert_trait<T: RecordBatchStream>() {}
     fn _accept(_stream: SendableRecordBatchStream) {}
 }

@@ -1,28 +1,36 @@
 //! Core implementation of SchemaRegistry
 
-use crate::app_context::AppContext;
-use crate::error::KalamDbError;
-use crate::error_extensions::KalamDbResultExt;
-use crate::schema_registry::cached_table_data::CachedTableData;
+// use kalamdb_system::NotificationService as NotificationServiceTrait;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, OnceLock,
+    },
+};
+
 use chrono::Utc;
 use dashmap::DashMap;
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::datasource::TableProvider;
-use datafusion::logical_expr::expr::ScalarFunction as ScalarFunctionExpr;
-use datafusion::logical_expr::Expr;
-use kalamdb_commons::constants::SystemColumnNames;
-use kalamdb_commons::conversions::json_value_to_scalar;
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::models::schemas::TableDefinition;
-use kalamdb_commons::models::{StorageId, TableId, TableVersionId};
-use kalamdb_commons::schemas::{ColumnDefault, ColumnDefinition, TableType};
-use kalamdb_commons::SystemTable;
+use datafusion::{
+    arrow::datatypes::SchemaRef,
+    datasource::TableProvider,
+    logical_expr::{expr::ScalarFunction as ScalarFunctionExpr, Expr},
+};
+use kalamdb_commons::{
+    constants::SystemColumnNames,
+    conversions::json_value_to_scalar,
+    datatypes::KalamDataType,
+    models::{schemas::TableDefinition, StorageId, TableId, TableVersionId},
+    schemas::{ColumnDefault, ColumnDefinition, TableType},
+    SystemTable,
+};
 use kalamdb_live::models::ChangeNotification;
 use kalamdb_system::{NotificationService, SchemaRegistry as SchemaRegistryTrait};
-// use kalamdb_system::NotificationService as NotificationServiceTrait;
-use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
+
+use crate::{
+    app_context::AppContext, error::KalamDbError, error_extensions::KalamDbResultExt,
+    schema_registry::cached_table_data::CachedTableData,
+};
 
 #[derive(Debug, Default)]
 struct SystemSchemaReconcileStats {
@@ -211,7 +219,8 @@ impl SchemaRegistry {
 
         if stats.created > 0 || stats.upgraded > 0 {
             log::info!(
-                "[SchemaRegistry] System schema reconciliation: created={}, upgraded={}, unchanged={}",
+                "[SchemaRegistry] System schema reconciliation: created={}, upgraded={}, \
+                 unchanged={}",
                 stats.created,
                 stats.upgraded,
                 stats.unchanged
@@ -555,15 +564,18 @@ impl SchemaRegistry {
         &self,
         table_def: &TableDefinition,
     ) -> Result<Arc<dyn kalamdb_tables::KalamTableProvider>, KalamDbError> {
-        use crate::providers::{
-            SharedTableProvider, StreamTableProvider, TableProviderCore, UserTableProvider,
-        };
-        use crate::schema_registry::TablesSchemaRegistryAdapter;
         use kalamdb_commons::schemas::TableOptions;
         use kalamdb_sharding::ShardRouter;
         use kalamdb_tables::{
             new_indexed_shared_table_store, new_indexed_user_table_store, new_stream_table_store,
             StreamTableStoreConfig,
+        };
+
+        use crate::{
+            providers::{
+                SharedTableProvider, StreamTableProvider, TableProviderCore, UserTableProvider,
+            },
+            schema_registry::TablesSchemaRegistryAdapter,
         };
 
         let app_ctx = self.app_context();
@@ -911,7 +923,8 @@ impl SchemaRegistry {
             // Check if table already exists - if so, deregister it first
             if schema.table_exist(table_name) {
                 log::debug!(
-                    "[SchemaRegistry] Table {} already registered in DataFusion; deregistering before re-registration",
+                    "[SchemaRegistry] Table {} already registered in DataFusion; deregistering \
+                     before re-registration",
                     table_id
                 );
                 match schema.deregister_table(table_name) {
@@ -922,9 +935,11 @@ impl SchemaRegistry {
                         );
                     },
                     Ok(None) => {
-                        // Table existed but deregister returned None - shouldn't happen but handle it
+                        // Table existed but deregister returned None - shouldn't happen but handle
+                        // it
                         log::warn!(
-                            "[SchemaRegistry] table_exist returned true but deregister_table returned None for {}",
+                            "[SchemaRegistry] table_exist returned true but deregister_table \
+                             returned None for {}",
                             table_id
                         );
                     },
@@ -1233,12 +1248,15 @@ impl Default for SchemaRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::SchemaRegistry;
     use chrono::{Duration, Utc};
-    use kalamdb_commons::datatypes::KalamDataType;
-    use kalamdb_commons::models::schemas::{ColumnDefinition, TableDefinition};
-    use kalamdb_commons::schemas::{ColumnDefault, TableOptions, TableType};
-    use kalamdb_commons::{NamespaceId, TableName};
+    use kalamdb_commons::{
+        datatypes::KalamDataType,
+        models::schemas::{ColumnDefinition, TableDefinition},
+        schemas::{ColumnDefault, TableOptions, TableType},
+        NamespaceId, TableName,
+    };
+
+    use super::SchemaRegistry;
 
     fn base_table_definition() -> TableDefinition {
         TableDefinition::new(

@@ -1,7 +1,10 @@
-use crate::executors::{JobContext, JobParams};
 use kalamdb_commons::TableId;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::providers::{row_utils::system_user_id, BaseTableProvider, SharedTableProvider};
+use kalamdb_core::{
+    error::KalamDbError,
+    providers::{row_utils::system_user_id, BaseTableProvider, SharedTableProvider},
+};
+
+use crate::executors::{JobContext, JobParams};
 
 pub(crate) async fn cleanup_empty_shared_scope_if_needed<T: JobParams>(
     ctx: &JobContext<T>,

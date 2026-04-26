@@ -7,8 +7,9 @@
 //! - Data persistence after flush operations
 //! - Flush command error handling
 
-use crate::common::*;
 use std::time::Duration;
+
+use crate::common::*;
 
 /// T059: Test explicit flush command
 #[test]

@@ -18,11 +18,15 @@
 //!
 //! Tests will be skipped if the server is not running.
 
-use kalam_client::auth::AuthProvider;
-use kalam_client::models::ResponseStatus;
-use kalam_client::{ChangeEvent, KalamLinkClient, QueryResponse, SubscriptionConfig};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::{
+    sync::atomic::{AtomicU64, Ordering},
+    time::Duration,
+};
+
+use kalam_client::{
+    auth::AuthProvider, models::ResponseStatus, ChangeEvent, KalamLinkClient, QueryResponse,
+    SubscriptionConfig,
+};
 use tokio::time::{sleep, timeout};
 
 mod common;
@@ -410,7 +414,8 @@ async fn test_websocket_initial_data_snapshot() {
         if let Ok(resp) = check {
             if resp.status == ResponseStatus::Success {
                 eprintln!(
-                    "⚠️  InitialData snapshot not received within timeout; data is queryable. Skipping strict assertion."
+                    "⚠️  InitialData snapshot not received within timeout; data is queryable. \
+                     Skipping strict assertion."
                 );
                 cleanup_test_data(&table).await.ok();
                 return;
@@ -473,7 +478,8 @@ async fn test_websocket_insert_notification() {
 
             // Insert new data that should trigger notification
             execute_sql(&format!(
-                "INSERT INTO {} (event_id, event_type, data) VALUES ('{}', 'realtime', 'insert_test')",
+                "INSERT INTO {} (event_id, event_type, data) VALUES ('{}', 'realtime', \
+                 'insert_test')",
                 table,
                 unique_event_id()
             ))
@@ -958,11 +964,9 @@ async fn test_error_connection_refused() {
 async fn test_server_running_check() {
     if !common::is_server_running().await {
         eprintln!(
-            "\n⚠️  Server is not running at {}\n\n\
-            To run these tests:\n\
-            1. Terminal 1: cd backend && cargo run --bin kalamdb-server\n\
-            2. Terminal 2: cd cli && cargo test --test test_websocket_integration\n\n\
-            Tests will be skipped if server is not running.\n",
+            "\n⚠️  Server is not running at {}\n\nTo run these tests:\n1. Terminal 1: cd backend \
+             && cargo run --bin kalamdb-server\n2. Terminal 2: cd cli && cargo test --test \
+             test_websocket_integration\n\nTests will be skipped if server is not running.\n",
             common::server_url()
         );
         // Don't panic - just skip

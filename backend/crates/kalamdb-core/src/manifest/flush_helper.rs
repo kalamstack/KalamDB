@@ -3,19 +3,16 @@
 //! Centralizes manifest-related logic used during flush operations to eliminate
 //! code duplication between user and shared table flush implementations.
 
+use std::{collections::HashMap, path::Path, sync::Arc};
+
+use datafusion::arrow::{array::*, compute, record_batch::RecordBatch};
+use kalamdb_commons::{
+    arrow_utils::compute_min_max, constants::SystemColumnNames, ids::SeqId, TableId, UserId,
+};
+use kalamdb_system::{ColumnStats, Manifest, SegmentMetadata};
+
 use super::ManifestService;
 use crate::error::KalamDbError;
-use datafusion::arrow::array::*;
-use datafusion::arrow::compute;
-use datafusion::arrow::record_batch::RecordBatch;
-use kalamdb_commons::arrow_utils::compute_min_max;
-use kalamdb_commons::constants::SystemColumnNames;
-use kalamdb_commons::ids::SeqId;
-use kalamdb_commons::{TableId, UserId};
-use kalamdb_system::{ColumnStats, Manifest, SegmentMetadata};
-use std::collections::HashMap;
-use std::path::Path;
-use std::sync::Arc;
 
 /// Helper for manifest operations during flush
 pub struct FlushManifestHelper {
@@ -232,7 +229,8 @@ impl FlushManifestHelper {
             })?;
 
         log::debug!(
-            "[MANIFEST] ✅ Updated manifest and cache: {} (user_id={:?}, file={}, rows={}, size={} bytes)",
+            "[MANIFEST] ✅ Updated manifest and cache: {} (user_id={:?}, file={}, rows={}, \
+             size={} bytes)",
             table_id,
             user_id.map(|u| u.as_str()),
             file_path.display(),
@@ -318,10 +316,14 @@ impl FlushManifestHelper {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use datafusion::arrow::array::{Int64Array, StringArray};
-    use datafusion::arrow::datatypes::{DataType, Field, Schema};
     use std::sync::Arc as StdArc;
+
+    use datafusion::arrow::{
+        array::{Int64Array, StringArray},
+        datatypes::{DataType, Field, Schema},
+    };
+
+    use super::*;
 
     #[test]
     fn test_generate_batch_filename() {

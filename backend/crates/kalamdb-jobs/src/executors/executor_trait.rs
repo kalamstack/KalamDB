@@ -37,16 +37,17 @@
 //! }
 //! ```
 
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
+// Note: CancellationToken is not available in tokio::sync in older versions
+// We'll use a simple atomic bool for now
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+
+use kalamdb_core::{app_context::AppContext, error::KalamDbError};
 use kalamdb_system::JobType;
 use log::{debug, error, info, trace, warn};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-
-// Note: CancellationToken is not available in tokio::sync in older versions
-// We'll use a simple atomic bool for now
-use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Simple cancellation token wrapper
 #[derive(Clone)]
@@ -295,7 +296,8 @@ pub trait JobExecutor: Send + Sync {
     /// - Local file cleanup
     /// - RocksDB compaction
     ///
-    /// By default, delegates to `execute()` for backwards compatibility with single-phase executors.
+    /// By default, delegates to `execute()` for backwards compatibility with single-phase
+    /// executors.
     ///
     /// # Returns
     /// - `Ok(JobDecision::Completed { .. })` - Local work completed successfully
@@ -346,8 +348,9 @@ pub trait JobExecutor: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kalamdb_core::test_helpers::test_app_context_simple;
+
+    use super::*;
 
     #[test]
     fn test_job_decision_completed() {

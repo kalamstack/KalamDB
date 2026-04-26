@@ -1,12 +1,13 @@
-use crate::error::KalamDbError;
-use crate::manifest::ManifestAccessPlanner;
-use crate::utils::core::TableProviderCore;
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::logical_expr::Expr;
-use kalamdb_commons::models::schemas::TableType;
-use kalamdb_commons::models::UserId;
-use kalamdb_commons::TableId;
+use datafusion::{
+    arrow::{datatypes::SchemaRef, record_batch::RecordBatch},
+    logical_expr::Expr,
+};
+use kalamdb_commons::{
+    models::{schemas::TableType, UserId},
+    TableId,
+};
+
+use crate::{error::KalamDbError, manifest::ManifestAccessPlanner, utils::core::TableProviderCore};
 
 /// Async helper for loading Parquet batches via ManifestAccessPlanner.
 ///
@@ -108,7 +109,8 @@ pub(crate) async fn scan_parquet_files_as_batch_async(
         },
         Ok(None) => {
             log::trace!(
-                "[PARQUET_SCAN_ASYNC] Manifest cache MISS | table={} | {} | fallback=directory_scan",
+                "[PARQUET_SCAN_ASYNC] Manifest cache MISS | table={} | {} | \
+                 fallback=directory_scan",
                 table_id,
                 scope_label
             );
@@ -163,7 +165,8 @@ pub(crate) async fn scan_parquet_files_as_batch_async(
         .await?;
 
     log::trace!(
-        "[PARQUET_SCAN_ASYNC] Scan complete: table={} {} total_batches={} skipped={} scanned={} rows={} use_degraded_mode={}",
+        "[PARQUET_SCAN_ASYNC] Scan complete: table={} {} total_batches={} skipped={} scanned={} \
+         rows={} use_degraded_mode={}",
         table_id,
         scope_label,
         total_batches,

@@ -13,8 +13,9 @@
 //! 4. Verify job completes successfully
 //! 5. Query all data and verify correct row count from both sources
 
-use crate::common::*;
 use std::time::Duration;
+
+use crate::common::*;
 
 const JOB_TIMEOUT: Duration = Duration::from_secs(30);
 const FLUSH_POLICY_ROWS: usize = 50;

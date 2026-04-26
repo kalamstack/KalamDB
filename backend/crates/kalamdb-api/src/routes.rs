@@ -2,8 +2,9 @@
 //!
 //! This module configures all HTTP and WebSocket routes for the KalamDB API.
 
-use crate::{http, ui, ws};
 use actix_web::web;
+
+use crate::{http, ui, ws};
 
 /// Configure API routes for KalamDB
 ///

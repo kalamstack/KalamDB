@@ -1,13 +1,11 @@
-use super::types::JobsManager;
 use chrono::Utc;
 use kalamdb_commons::{JobId, NodeId};
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::error_extensions::KalamDbResultExt;
-use kalamdb_raft::commands::MetaCommand;
-use kalamdb_raft::NodeStatus;
-use kalamdb_system::providers::jobs::models::JobFilter;
-use kalamdb_system::{JobStatus, JobType};
+use kalamdb_core::{error::KalamDbError, error_extensions::KalamDbResultExt};
+use kalamdb_raft::{commands::MetaCommand, NodeStatus};
+use kalamdb_system::{providers::jobs::models::JobFilter, JobStatus, JobType};
 use log::Level;
+
+use super::types::JobsManager;
 
 /// Lazy-formatting version of log_job_event.
 /// Avoids String allocation when the log level is disabled.

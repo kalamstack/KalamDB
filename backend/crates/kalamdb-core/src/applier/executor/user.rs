@@ -9,9 +9,10 @@ use std::sync::Arc;
 use kalamdb_commons::models::UserId;
 use kalamdb_system::User;
 
-use crate::app_context::AppContext;
-use crate::applier::executor::utils::run_blocking_applier;
-use crate::applier::ApplierError;
+use crate::{
+    app_context::AppContext,
+    applier::{executor::utils::run_blocking_applier, ApplierError},
+};
 
 /// Executor for user management operations
 pub struct UserExecutor {

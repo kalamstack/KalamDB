@@ -1,12 +1,12 @@
 //! System-wide constants for KalamDB.
 //!
 //! This module centralizes constant definitions used across all crates, including:
-//! - Column family names (non-system)
+//! - Logical storage partition names (non-system)
 //! - Reserved identifiers
 
-/// RocksDB column family names.
+/// Logical storage partition names.
 ///
-/// Provides centralized naming for all column families used in KalamDB storage.
+/// Provides centralized naming for storage partitions used in KalamDB.
 pub struct ColumnFamilyNames;
 
 #[allow(non_upper_case_globals)]
@@ -16,13 +16,13 @@ impl ColumnFamilyNames {
     /// Unified information_schema tables (replaces system_table_schemas + system_columns)
     pub const INFORMATION_SCHEMA_TABLES: &'static str = "information_schema_tables";
 
-    /// Prefix for user table column families (appended with table name)
+    /// Prefix for user table partitions (appended with table name)
     pub const USER_TABLE_PREFIX: &'static str = "user_";
 
-    /// Prefix for shared table column families (appended with table name)
+    /// Prefix for shared table partitions (appended with table name)
     pub const SHARED_TABLE_PREFIX: &'static str = "shared_";
 
-    /// Prefix for stream table column families (appended with table name)
+    /// Prefix for stream table partitions (appended with table name)
     pub const STREAM_TABLE_PREFIX: &'static str = "stream_";
 }
 

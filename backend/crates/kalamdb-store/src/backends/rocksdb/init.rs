@@ -1,18 +1,20 @@
 //! RocksDB initialization utilities for KalamDB.
 //!
 //! Provides a thin helper to open a RocksDB instance with required
-//! system column families present.
+//! fixed physical column families present.
 
-use super::cf_tuning::{apply_cf_settings, apply_db_settings};
+use std::{path::Path, sync::Arc};
+
 use anyhow::Result;
-use kalamdb_commons::system_tables::StoragePartition;
-use kalamdb_commons::SystemTable;
 use kalamdb_configs::RocksDbSettings;
 use rocksdb::{BlockBasedOptions, Cache, ColumnFamilyDescriptor, Options, DB};
-use std::path::Path;
-use std::sync::Arc;
 
-/// RocksDB initializer for creating/opening a database with system CFs.
+use super::{
+    cf_tuning::{apply_cf_settings, apply_db_settings},
+    keyspace::fixed_column_families,
+};
+
+/// RocksDB initializer for creating/opening a database with fixed physical CFs.
 pub struct RocksDbInit {
     db_path: String,
     settings: RocksDbSettings,
@@ -32,7 +34,7 @@ impl RocksDbInit {
         Self::new(db_path, RocksDbSettings::default())
     }
 
-    /// Open or create the RocksDB database and ensure system CFs exist.
+    /// Open or create the RocksDB database and ensure fixed physical CFs exist.
     pub fn open(&self) -> Result<Arc<DB>> {
         let mut db_opts = Options::default();
         db_opts.create_if_missing(true);
@@ -98,24 +100,7 @@ impl RocksDbInit {
             _ => vec!["default".to_string()],
         };
 
-        for table in SystemTable::all_tables().iter() {
-            if let Some(name) = table.column_family_name() {
-                if !existing.iter().any(|existing_name| existing_name == name) {
-                    existing.push(name.to_string());
-                }
-            }
-        }
-
-        let extra_partitions = [
-            StoragePartition::InformationSchemaTables.name(),
-            StoragePartition::SystemUsersUsernameIdx.name(),
-            StoragePartition::SystemUsersRoleIdx.name(),
-            StoragePartition::SystemUsersDeletedAtIdx.name(),
-            StoragePartition::ManifestCache.name(),
-            StoragePartition::SystemJobsStatusIdx.name(),
-        ];
-
-        for name in extra_partitions {
+        for name in fixed_column_families() {
             if !existing.iter().any(|existing_name| existing_name == name) {
                 existing.push(name.to_string());
             }

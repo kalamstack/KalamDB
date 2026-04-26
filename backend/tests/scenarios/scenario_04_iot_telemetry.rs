@@ -12,11 +12,12 @@
 //! - [x] Flush does not change query results
 //! - [x] Cold artifacts valid and non-empty
 
-use super::helpers::*;
+use std::time::Duration;
 
 use futures_util::StreamExt;
 use kalam_client::models::ResponseStatus;
-use std::time::Duration;
+
+use super::helpers::*;
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(180);
 const ROW_COUNT: usize = 5000;
@@ -77,10 +78,20 @@ async fn test_scenario_04_iot_telemetry_5k_rows() -> anyhow::Result<()> {
             let firmware = format!("v1.{}.{}", row_num / 1000, row_num % 100);
 
             let sql = format!(
-                        "INSERT INTO {}.telemetry (id, device_id, temp, humidity, pressure, battery, is_charging, firmware, payload) \
-                         VALUES ({}, '{}', {}, {}, {}, {}, {}, '{}', 'payload_data_{}')",
-                        ns, row_num, device_id, temp, humidity, pressure, battery, is_charging, firmware, row_num
-                    );
+                "INSERT INTO {}.telemetry (id, device_id, temp, humidity, pressure, battery, \
+                 is_charging, firmware, payload) VALUES ({}, '{}', {}, {}, {}, {}, {}, '{}', \
+                 'payload_data_{}')",
+                ns,
+                row_num,
+                device_id,
+                temp,
+                humidity,
+                pressure,
+                battery,
+                is_charging,
+                firmware,
+                row_num
+            );
 
             let resp = client.execute_query(&sql, None, None, None).await?;
             if !resp.success() {
@@ -195,8 +206,8 @@ async fn test_scenario_04_iot_telemetry_5k_rows() -> anyhow::Result<()> {
 }
 
 /// Test anomaly subscription for IoT data
-/// NOTE: This test is ignored because SHARED table subscriptions are not supported (FR-128, FR-129).
-/// The subscription infrastructure only supports USER tables for per-user real-time sync.
+/// NOTE: This test is ignored because SHARED table subscriptions are not supported (FR-128,
+/// FR-129). The subscription infrastructure only supports USER tables for per-user real-time sync.
 #[tokio::test]
 #[ignore = "SHARED table subscriptions not supported by design (FR-128, FR-129)"]
 async fn test_scenario_04_anomaly_subscription() -> anyhow::Result<()> {
@@ -225,15 +236,17 @@ async fn test_scenario_04_anomaly_subscription() -> anyhow::Result<()> {
     // Insert some normal data
     for i in 1..=10 {
         let resp = client
-                    .execute_query(
-                        &format!(
-                            "INSERT INTO {}.telemetry (id, device_id, temp, battery) VALUES ({}, 'device_1', 25.0, 80.0)",
-                            ns, i
-                        ), None,
-                        None,
-                        None,
-                    )
-                    .await?;
+            .execute_query(
+                &format!(
+                    "INSERT INTO {}.telemetry (id, device_id, temp, battery) VALUES ({}, \
+                     'device_1', 25.0, 80.0)",
+                    ns, i
+                ),
+                None,
+                None,
+                None,
+            )
+            .await?;
         assert!(resp.success(), "Insert normal data {}", i);
     }
 
@@ -253,28 +266,32 @@ async fn test_scenario_04_anomaly_subscription() -> anyhow::Result<()> {
 
     // High temperature anomaly
     let resp = client2
-                .execute_query(
-                    &format!(
-                        "INSERT INTO {}.telemetry (id, device_id, temp, battery) VALUES (100, 'device_2', 75.0, 50.0)",
-                        ns
-                    ), None,
-                    None,
-                    None,
-                )
-                .await?;
+        .execute_query(
+            &format!(
+                "INSERT INTO {}.telemetry (id, device_id, temp, battery) VALUES (100, 'device_2', \
+                 75.0, 50.0)",
+                ns
+            ),
+            None,
+            None,
+            None,
+        )
+        .await?;
     assert!(resp.success(), "Insert high temp anomaly");
 
     // Low battery anomaly
     let resp = client2
-                .execute_query(
-                    &format!(
-                        "INSERT INTO {}.telemetry (id, device_id, temp, battery) VALUES (101, 'device_3', 25.0, 5.0)",
-                        ns
-                    ), None,
-                    None,
-                    None,
-                )
-                .await?;
+        .execute_query(
+            &format!(
+                "INSERT INTO {}.telemetry (id, device_id, temp, battery) VALUES (101, 'device_3', \
+                 25.0, 5.0)",
+                ns
+            ),
+            None,
+            None,
+            None,
+        )
+        .await?;
     assert!(resp.success(), "Insert low battery anomaly");
 
     // Wait for insert events
@@ -321,10 +338,20 @@ async fn test_scenario_04_wide_column_scan() -> anyhow::Result<()> {
     // Insert 500 rows
     for i in 0..500 {
         let sql = format!(
-                    "INSERT INTO {}.telemetry (id, device_id, temp, humidity, pressure, battery, is_charging, firmware, payload) \
-                     VALUES ({}, 'device_{}', {}, {}, {}, {}, {}, 'v1.0.{}', 'payload_{}')",
-                    ns, i, i % 10, 20.0 + (i % 30) as f64, 50.0, 1000.0, 80.0, i % 2 == 0, i, i
-                );
+            "INSERT INTO {}.telemetry (id, device_id, temp, humidity, pressure, battery, \
+             is_charging, firmware, payload) VALUES ({}, 'device_{}', {}, {}, {}, {}, {}, \
+             'v1.0.{}', 'payload_{}')",
+            ns,
+            i,
+            i % 10,
+            20.0 + (i % 30) as f64,
+            50.0,
+            1000.0,
+            80.0,
+            i % 2 == 0,
+            i,
+            i
+        );
         let resp = client.execute_query(&sql, None, None, None).await?;
         if !resp.success() {
             eprintln!("Insert {} failed", i);

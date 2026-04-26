@@ -1,10 +1,9 @@
-use super::common::{TestEnv, unique_name};
 use serde_json::Value;
 
+use super::common::{unique_name, TestEnv};
+
 fn large_json_text_payload() -> String {
-    let items = (0..4096)
-        .map(|index| format!("item-{index:04}"))
-        .collect::<Vec<_>>();
+    let items = (0..4096).map(|index| format!("item-{index:04}")).collect::<Vec<_>>();
     serde_json::to_string(&items).expect("serialize large json payload")
 }
 

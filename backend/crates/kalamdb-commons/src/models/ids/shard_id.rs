@@ -3,8 +3,9 @@
 //! Used in storage path templates for sharded data distribution.
 //! Format: `shard_{number}` (e.g., `shard_0`, `shard_42`)
 
-use serde::{Deserialize, Serialize};
 use std::fmt;
+
+use serde::{Deserialize, Serialize};
 
 /// Type-safe shard identifier.
 ///

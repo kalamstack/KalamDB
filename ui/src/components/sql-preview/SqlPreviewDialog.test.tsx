@@ -34,6 +34,16 @@ vi.mock("@monaco-editor/react", () => ({
   },
 }));
 
+vi.mock("@/components/ui/resizable", () => ({
+  ResizablePanelGroup: ({ children, className }: { children: React.ReactNode; className?: string }) => (
+    <div className={className}>{children}</div>
+  ),
+  ResizablePanel: ({ children, className }: { children: React.ReactNode; className?: string }) => (
+    <div className={className}>{children}</div>
+  ),
+  ResizableHandle: ({ className }: { className?: string }) => <div className={className} aria-hidden="true" />,
+}));
+
 describe("SqlPreviewDialog", () => {
   it("renders the review SQL in a read-only Monaco surface and executes the batch once", async () => {
     const sql = [

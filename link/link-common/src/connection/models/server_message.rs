@@ -1,13 +1,13 @@
-use kalamdb_commons::{Role, UserId};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::models::KalamCellValue;
-use crate::models::SchemaField;
-use crate::subscription::models::BatchControl;
-use crate::subscription::models::ChangeTypeRaw;
+use kalamdb_commons::{Role, UserId};
+use serde::{Deserialize, Serialize};
 
 use super::ProtocolOptions;
+use crate::{
+    models::{KalamCellValue, SchemaField},
+    subscription::models::{BatchControl, ChangeTypeRaw},
+};
 
 /// WebSocket message types sent from server to client
 #[derive(Debug, Clone, Serialize, Deserialize)]

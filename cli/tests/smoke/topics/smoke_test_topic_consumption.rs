@@ -7,15 +7,20 @@
 //!
 //! **Requirements**: Running KalamDB server with Topics feature enabled
 
-use crate::common;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use base64::Engine;
-use kalam_client::consumer::{AutoOffsetReset, ConsumerRecord, TopicOp};
-use kalam_client::KalamLinkTimeouts;
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
+
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
+use kalam_client::{
+    consumer::{AutoOffsetReset, ConsumerRecord, TopicOp},
+    KalamLinkTimeouts,
+};
 use reqwest::Client;
 use serde::Deserialize;
-use std::collections::{HashMap, HashSet};
-use std::time::Duration;
+
+use crate::common;
 
 #[derive(Debug, Deserialize)]
 struct HttpTopicConsumeResponse {
@@ -185,11 +190,7 @@ async fn get_user_id(user_id: &str) -> String {
     ))
     .await
     .expect("Failed to query system.users");
-    assert!(
-        response_is_success(&response),
-        "user lookup should succeed: {}",
-        response
-    );
+    assert!(response_is_success(&response), "user lookup should succeed: {}", response);
 
     let rows = common::get_rows_as_hashmaps(&response).expect("user lookup should return rows");
     let first_row = rows.first().expect("user lookup should return one row");
@@ -249,9 +250,7 @@ async fn poll_topic_messages_http_until(
 
     panic!(
         "Timed out waiting for at least {} topic messages on {} (last_count={})",
-        min_messages,
-        topic,
-        last_count
+        min_messages, topic, last_count
     );
 }
 
@@ -1152,7 +1151,8 @@ async fn test_topic_http_consume_preserves_impersonated_user_and_payloads() {
         &service_user,
         password,
         &format!(
-            "EXECUTE AS USER '{}' (INSERT INTO {} (id, body, status, version) VALUES (1, 'alice message v1', 'draft', 1))",
+            "EXECUTE AS USER '{}' (INSERT INTO {} (id, body, status, version) VALUES (1, 'alice \
+             message v1', 'draft', 1))",
             alice_user_id, full_table
         ),
     )
@@ -1162,7 +1162,8 @@ async fn test_topic_http_consume_preserves_impersonated_user_and_payloads() {
         &service_user,
         password,
         &format!(
-            "EXECUTE AS USER '{}' (UPDATE {} SET body = 'alice message v2', status = 'sent', version = 2 WHERE id = 1)",
+            "EXECUTE AS USER '{}' (UPDATE {} SET body = 'alice message v2', status = 'sent', \
+             version = 2 WHERE id = 1)",
             alice_user_id, full_table
         ),
     )
@@ -1172,7 +1173,8 @@ async fn test_topic_http_consume_preserves_impersonated_user_and_payloads() {
         &service_user,
         password,
         &format!(
-            "EXECUTE AS USER '{}' (INSERT INTO {} (id, body, status, version) VALUES (2, 'bob message v1', 'queued', 1))",
+            "EXECUTE AS USER '{}' (INSERT INTO {} (id, body, status, version) VALUES (2, 'bob \
+             message v1', 'queued', 1))",
             bob_user_id, full_table
         ),
     )
@@ -1181,10 +1183,7 @@ async fn test_topic_http_consume_preserves_impersonated_user_and_payloads() {
     execute_sql_as(
         &service_user,
         password,
-        &format!(
-            "EXECUTE AS USER '{}' (DELETE FROM {} WHERE id = 2)",
-            bob_user_id, full_table
-        ),
+        &format!("EXECUTE AS USER '{}' (DELETE FROM {} WHERE id = 2)", bob_user_id, full_table),
     )
     .await;
 
@@ -1198,7 +1197,9 @@ async fn test_topic_http_consume_preserves_impersonated_user_and_payloads() {
         "Single-partition topic should preserve sequential offsets"
     );
     assert!(
-        messages.iter().all(|message| message.topic_id == topic && message.partition_id == 0),
+        messages
+            .iter()
+            .all(|message| message.topic_id == topic && message.partition_id == 0),
         "All consumed messages should belong to the requested topic partition"
     );
     assert!(
@@ -1279,7 +1280,8 @@ async fn test_topic_http_consume_preserves_impersonated_user_and_payloads() {
     }
 
     let _ = common::execute_sql_via_http_as_root(&format!("DROP TOPIC {}", topic)).await;
-    let _ = common::execute_sql_via_http_as_root(&format!("DROP NAMESPACE {} CASCADE", namespace)).await;
+    let _ = common::execute_sql_via_http_as_root(&format!("DROP NAMESPACE {} CASCADE", namespace))
+        .await;
     let _ = common::execute_sql_via_http_as_root(&format!("DROP USER {}", service_user)).await;
     let _ = common::execute_sql_via_http_as_root(&format!("DROP USER {}", alice_user)).await;
     let _ = common::execute_sql_via_http_as_root(&format!("DROP USER {}", bob_user)).await;
@@ -1295,7 +1297,8 @@ async fn test_topic_sql_consume_docs_getting_started_flow() {
 
     execute_sql(&format!("CREATE NAMESPACE {}", namespace)).await;
     execute_sql(&format!(
-        "CREATE USER TABLE {} (id TEXT PRIMARY KEY DEFAULT ULID(), author TEXT NOT NULL, msg TEXT NOT NULL, attachment FILE, created TIMESTAMP NOT NULL DEFAULT NOW())",
+        "CREATE USER TABLE {} (id TEXT PRIMARY KEY DEFAULT ULID(), author TEXT NOT NULL, msg TEXT \
+         NOT NULL, attachment FILE, created TIMESTAMP NOT NULL DEFAULT NOW())",
         full_table
     ))
     .await;
@@ -1307,7 +1310,8 @@ async fn test_topic_sql_consume_docs_getting_started_flow() {
     .await;
 
     execute_sql(&format!(
-        "INSERT INTO {} (author, msg) VALUES ('user', 'Write a short summary of this support ticket.')",
+        "INSERT INTO {} (author, msg) VALUES ('user', 'Write a short summary of this support \
+         ticket.')",
         full_table
     ))
     .await;
@@ -1351,11 +1355,15 @@ async fn test_topic_sql_consume_docs_getting_started_flow() {
         parse_string_field(&payload, "msg").as_deref(),
         Some("Write a short summary of this support ticket.")
     );
-    assert!(parse_string_field(&payload, "id").is_some(), "payload should include generated ULID");
+    assert!(
+        parse_string_field(&payload, "id").is_some(),
+        "payload should include generated ULID"
+    );
     assert!(payload.get("created").is_some(), "payload should include created timestamp");
 
     let _ = common::execute_sql_via_http_as_root(&format!("DROP TOPIC {}", topic)).await;
-    let _ = common::execute_sql_via_http_as_root(&format!("DROP NAMESPACE {} CASCADE", namespace)).await;
+    let _ = common::execute_sql_via_http_as_root(&format!("DROP NAMESPACE {} CASCADE", namespace))
+        .await;
 }
 
 #[tokio::test]
@@ -1413,10 +1421,7 @@ async fn test_topic_http_consume_direct_multi_user_publishers_no_missing_changes
         execute_sql_as(
             &user_a_name,
             &password_a,
-            &format!(
-                "UPDATE {} SET body = 'user-a-v2', version = 2 WHERE id = 101",
-                full_table_a
-            ),
+            &format!("UPDATE {} SET body = 'user-a-v2', version = 2 WHERE id = 101", full_table_a),
         )
         .await;
         execute_sql_as(
@@ -1440,10 +1445,7 @@ async fn test_topic_http_consume_direct_multi_user_publishers_no_missing_changes
         execute_sql_as(
             &user_b_name,
             &password_b,
-            &format!(
-                "UPDATE {} SET body = 'user-b-v2', version = 2 WHERE id = 202",
-                full_table_b
-            ),
+            &format!("UPDATE {} SET body = 'user-b-v2', version = 2 WHERE id = 202", full_table_b),
         )
         .await;
         execute_sql_as(
@@ -1467,10 +1469,7 @@ async fn test_topic_http_consume_direct_multi_user_publishers_no_missing_changes
         execute_sql_as(
             &user_c_name,
             &password_c,
-            &format!(
-                "UPDATE {} SET body = 'user-c-v2', version = 2 WHERE id = 303",
-                full_table_c
-            ),
+            &format!("UPDATE {} SET body = 'user-c-v2', version = 2 WHERE id = 303", full_table_c),
         )
         .await;
         execute_sql_as(
@@ -1495,7 +1494,9 @@ async fn test_topic_http_consume_direct_multi_user_publishers_no_missing_changes
         "Direct multi-user publishing should not leave gaps in offsets"
     );
     assert!(
-        messages.iter().all(|message| message.topic_id == topic && message.partition_id == 0),
+        messages
+            .iter()
+            .all(|message| message.topic_id == topic && message.partition_id == 0),
         "All consumed messages should belong to the requested topic partition"
     );
 
@@ -1529,10 +1530,14 @@ async fn test_topic_http_consume_direct_multi_user_publishers_no_missing_changes
     .into_iter()
     .collect();
 
-    assert_eq!(observed, expected, "Topic consume should return every direct user change exactly once");
+    assert_eq!(
+        observed, expected,
+        "Topic consume should return every direct user change exactly once"
+    );
 
     let _ = common::execute_sql_via_http_as_root(&format!("DROP TOPIC {}", topic)).await;
-    let _ = common::execute_sql_via_http_as_root(&format!("DROP NAMESPACE {} CASCADE", namespace)).await;
+    let _ = common::execute_sql_via_http_as_root(&format!("DROP NAMESPACE {} CASCADE", namespace))
+        .await;
     let _ = common::execute_sql_via_http_as_root(&format!("DROP USER {}", user_a)).await;
     let _ = common::execute_sql_via_http_as_root(&format!("DROP USER {}", user_b)).await;
     let _ = common::execute_sql_via_http_as_root(&format!("DROP USER {}", user_c)).await;

@@ -11,19 +11,22 @@
 //!    - Key: `{role}:{user_id}`
 //!    - Enables: "All users with role 'admin'"
 
-use super::users_indexes::create_users_indexes;
-use crate::error::{SystemError, SystemResultExt};
-use crate::providers::base::{system_rows_to_batch, IndexedProviderDefinition};
-use crate::providers::users::models::User;
-use crate::system_row_mapper::{model_to_system_row, system_row_to_model};
-use crate::SystemTable;
-use datafusion::arrow::array::RecordBatch;
-use datafusion::arrow::datatypes::SchemaRef;
-use kalamdb_commons::models::rows::SystemTableRow;
-use kalamdb_commons::UserId;
-use kalamdb_store::entity_store::EntityStore;
-use kalamdb_store::{IndexedEntityStore, StorageBackend};
 use std::sync::{Arc, OnceLock};
+
+use datafusion::arrow::{array::RecordBatch, datatypes::SchemaRef};
+use kalamdb_commons::{models::rows::SystemTableRow, UserId};
+use kalamdb_store::{entity_store::EntityStore, IndexedEntityStore, StorageBackend};
+
+use super::users_indexes::create_users_indexes;
+use crate::{
+    error::{SystemError, SystemResultExt},
+    providers::{
+        base::{system_rows_to_batch, IndexedProviderDefinition},
+        users::models::User,
+    },
+    system_row_mapper::{model_to_system_row, system_row_to_model},
+    SystemTable,
+};
 
 /// Type alias for the indexed users store
 pub type UsersStore = IndexedEntityStore<UserId, SystemTableRow>;
@@ -176,10 +179,11 @@ crate::impl_indexed_system_table_provider!(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use datafusion::datasource::TableProvider;
     use kalamdb_commons::{AuthType, Role, StorageId};
     use kalamdb_store::test_utils::InMemoryBackend;
+
+    use super::*;
 
     fn create_test_provider() -> UsersTableProvider {
         let backend: Arc<dyn StorageBackend> = Arc::new(InMemoryBackend::new());

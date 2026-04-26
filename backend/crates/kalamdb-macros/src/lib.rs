@@ -425,7 +425,8 @@ impl ColumnArgs {
             other => syn::Error::new(
                 proc_macro2::Span::call_site(),
                 format!(
-                    "unsupported default '{}'; expected None, Literal(true|false), or Function(NAME)",
+                    "unsupported default '{}'; expected None, Literal(true|false), or \
+                     Function(NAME)",
                     other
                 ),
             )

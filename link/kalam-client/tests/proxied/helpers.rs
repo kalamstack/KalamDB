@@ -1,17 +1,23 @@
 #![allow(dead_code)]
 
-use crate::common;
-use kalam_client::auth::AuthProvider;
-use kalam_client::seq_tracking::{extract_max_seq, row_seq};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
+
 use kalam_client::{
+    auth::AuthProvider,
+    seq_tracking::{extract_max_seq, row_seq},
     ChangeEvent, ConnectionOptions, EventHandlers, KalamCellValue, KalamLinkClient,
     KalamLinkTimeouts, SeqId,
 };
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
 use tokio::time::{sleep, Instant};
+
+use crate::common;
 
 pub const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 pub const RECONNECT_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -240,12 +246,9 @@ pub async fn wait_for_reconnect(
 
         if Instant::now() >= deadline {
             panic!(
-                "{}: reconnect did not complete within {:?} (connect_count={}, expected_connects={}, connected={})",
-                context,
-                RECONNECT_WAIT_TIMEOUT,
-                current_connects,
-                expected_connects,
-                connected
+                "{}: reconnect did not complete within {:?} (connect_count={}, \
+                 expected_connects={}, connected={})",
+                context, RECONNECT_WAIT_TIMEOUT, current_connects, expected_connects, connected
             );
         }
 

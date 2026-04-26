@@ -1,5 +1,6 @@
-use crate::seq_id::SeqId;
 use serde::{Deserialize, Serialize};
+
+use crate::seq_id::SeqId;
 
 /// Status of the initial data loading process
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -34,8 +35,4 @@ pub struct BatchControl {
     /// The SeqId of the last row in this batch (used for subsequent requests)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_seq_id: Option<SeqId>,
-
-    /// Snapshot boundary SeqId captured at subscription time
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub snapshot_end_seq: Option<SeqId>,
 }

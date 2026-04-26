@@ -1,13 +1,15 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-use std::sync::Arc;
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+    sync::Arc,
+};
 
 use kalamdb_commons::models::{TransactionId, TransactionOrigin};
 
-use crate::app_context::AppContext;
-use crate::error::KalamDbError;
-use crate::sql::context::ExecutionContext;
-use crate::transactions::ExecutionOwnerKey;
+use crate::{
+    app_context::AppContext, error::KalamDbError, sql::context::ExecutionContext,
+    transactions::ExecutionOwnerKey,
+};
 
 #[derive(Debug, Clone)]
 pub struct RequestTransactionState<'a> {

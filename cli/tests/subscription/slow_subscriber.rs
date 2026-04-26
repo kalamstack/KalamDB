@@ -17,10 +17,14 @@
 // Run with:
 //   cargo test --test subscription slow_subscriber
 
-use crate::common::*;
+use std::{
+    sync::{Arc, Barrier},
+    time::Duration,
+};
+
 use kalam_client::{KalamLinkTimeouts, SubscriptionConfig, SubscriptionOptions};
-use std::sync::{Arc, Barrier};
-use std::time::Duration;
+
+use crate::common::*;
 
 const DRAIN_IDLE_GRACE: Duration = Duration::from_secs(3);
 
@@ -582,7 +586,8 @@ fn subscription_multiple_concurrent_slow_subscribers() {
     execute_sql_as_root_via_client(&format!("CREATE NAMESPACE IF NOT EXISTS {}", ns))
         .expect("create namespace");
     execute_sql_as_root_via_client(&format!(
-        "CREATE TABLE {} (id INT PRIMARY KEY, val VARCHAR) WITH (TYPE = 'SHARED', ACCESS_LEVEL = 'PUBLIC')",
+        "CREATE TABLE {} (id INT PRIMARY KEY, val VARCHAR) WITH (TYPE = 'SHARED', ACCESS_LEVEL = \
+         'PUBLIC')",
         full
     ))
     .expect("create shared table");

@@ -8,13 +8,18 @@
 //! - Shared table PK index: INSERT 100 rows → UPDATE by PK → verify O(1) lookup
 //! - Performance comparison: Update with many rows vs few rows should have similar latency
 
-use super::test_support::flush_helpers::{
-    execute_flush_synchronously, execute_shared_flush_synchronously,
+use std::{
+    cmp::max,
+    time::{Duration, Instant},
 };
-use super::test_support::{consolidated_helpers, fixtures, TestServer};
+
 use kalam_client::models::ResponseStatus;
-use std::cmp::max;
-use std::time::{Duration, Instant};
+
+use super::test_support::{
+    consolidated_helpers, fixtures,
+    flush_helpers::{execute_flush_synchronously, execute_shared_flush_synchronously},
+    TestServer,
+};
 
 fn median_duration(samples: &mut [Duration]) -> Duration {
     samples.sort();
@@ -29,7 +34,7 @@ fn median_duration(samples: &mut [Duration]) -> Duration {
 /// Strategy:
 /// 1. Insert 100 rows
 /// 2. Measure UPDATE latency for a specific row
-/// 3. Insert 1000 more rows  
+/// 3. Insert 1000 more rows
 /// 4. Measure UPDATE latency again
 /// 5. Verify latency doesn't scale linearly with row count (O(1) not O(n))
 #[actix_web::test]
@@ -191,9 +196,8 @@ async fn test_user_table_pk_index_update() {
     // The latency should be sub-linear even if not O(1) due to other factors
     assert!(
         latency_1000_rows <= max_allowed,
-        "UPDATE latency scaled too much with row count. \
-        With 100 rows: {:?}, with 1000 rows: {:?}. \
-        Expected sub-linear scaling with PK index.",
+        "UPDATE latency scaled too much with row count. With 100 rows: {:?}, with 1000 rows: \
+         {:?}. Expected sub-linear scaling with PK index.",
         latency_100_rows,
         latency_1000_rows
     );
@@ -331,9 +335,8 @@ async fn test_shared_table_pk_index_update() {
 
     assert!(
         latency_1000_rows <= max_allowed,
-        "UPDATE latency scaled too much with row count. \
-        With 100 rows: {:?}, with 1000 rows: {:?}. \
-        Expected sub-linear scaling with PK index.",
+        "UPDATE latency scaled too much with row count. With 100 rows: {:?}, with 1000 rows: \
+         {:?}. Expected sub-linear scaling with PK index.",
         latency_100_rows,
         latency_1000_rows
     );
@@ -450,9 +453,8 @@ async fn test_user_table_pk_index_select() {
 
     assert!(
         latency_2500_rows <= max_allowed,
-        "SELECT latency scaled too much with row count. \
-        With 500 rows: {:?}, with 2500 rows: {:?}. \
-        This suggests the PK index may not be used for efficient lookup.",
+        "SELECT latency scaled too much with row count. With 500 rows: {:?}, with 2500 rows: \
+         {:?}. This suggests the PK index may not be used for efficient lookup.",
         latency_500_rows,
         latency_2500_rows
     );
@@ -579,9 +581,8 @@ async fn test_user_table_pk_index_delete() {
 
     assert!(
         latency_1500_rows <= max_allowed,
-        "DELETE latency scaled too much with row count. \
-        With 300 rows: {:?}, with 1500 rows: {:?}. \
-        This suggests the PK index may not be used for efficient lookup.",
+        "DELETE latency scaled too much with row count. With 300 rows: {:?}, with 1500 rows: \
+         {:?}. This suggests the PK index may not be used for efficient lookup.",
         latency_300_rows,
         latency_1500_rows
     );
@@ -709,7 +710,8 @@ async fn test_user_table_pk_index_update_after_flush() {
     let all_with_deleted = server
         .execute_sql_as_user(
             &format!(
-                "SELECT id, value, _seq, _deleted FROM {}.user_items WHERE _deleted = true OR _deleted = false",
+                "SELECT id, value, _seq, _deleted FROM {}.user_items WHERE _deleted = true OR \
+                 _deleted = false",
                 ns
             ),
             "flush_user",

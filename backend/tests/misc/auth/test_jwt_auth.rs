@@ -13,14 +13,18 @@
 //! **Phase 4 - User Story 2**: Token-Based Authentication
 //! Task IDs: T059-T064 (Integration tests for JWT auth)
 
-use super::test_support::{auth_helper, TestServer};
+use std::sync::Arc;
+
 use actix_web::{test, web, App};
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
-use kalamdb_auth::providers::jwt_auth::{JwtClaims as AuthJwtClaims, KALAMDB_ISSUER};
-use kalamdb_auth::{CoreUsersRepo, UserRepository};
+use kalamdb_auth::{
+    providers::jwt_auth::{JwtClaims as AuthJwtClaims, KALAMDB_ISSUER},
+    CoreUsersRepo, UserRepository,
+};
 use kalamdb_commons::{Role, UserId};
 use serde::Serialize;
-use std::sync::Arc;
+
+use super::test_support::{auth_helper, TestServer};
 
 fn jwt_secret_for_tests() -> String {
     kalamdb_configs::ServerConfig::default().auth.jwt_secret

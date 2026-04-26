@@ -8,18 +8,20 @@
 //! - CTEs with JOINs
 //! - CTEs with filtering
 
-use chrono::Utc;
-use kalamdb_commons::models::StorageId;
-use kalamdb_commons::{NodeId, Role, UserId};
-use kalamdb_configs::ServerConfig;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult};
-use kalamdb_core::sql::executor::handler_registry::HandlerRegistry;
-use kalamdb_core::sql::executor::SqlExecutor;
-use kalamdb_store::test_utils::TestDb;
-use kalamdb_system::providers::storages::models::StorageType;
-use kalamdb_system::Storage;
 use std::sync::Arc;
+
+use chrono::Utc;
+use kalamdb_commons::{models::StorageId, NodeId, Role, UserId};
+use kalamdb_configs::ServerConfig;
+use kalamdb_core::{
+    app_context::AppContext,
+    sql::{
+        context::{ExecutionContext, ExecutionResult},
+        executor::{handler_registry::HandlerRegistry, SqlExecutor},
+    },
+};
+use kalamdb_store::test_utils::TestDb;
+use kalamdb_system::{providers::storages::models::StorageType, Storage};
 
 /// Helper to create a fully-wired SqlExecutor with all handlers registered.
 fn create_executor(app_context: Arc<AppContext>) -> SqlExecutor {
@@ -101,7 +103,8 @@ async fn setup_test_table(
     // Create a test table
     executor
         .execute(
-            "CREATE USER TABLE test_ns.employees (id INT PRIMARY KEY, name TEXT, department TEXT, salary INT)",
+            "CREATE USER TABLE test_ns.employees (id INT PRIMARY KEY, name TEXT, department TEXT, \
+             salary INT)",
             exec_ctx,
             vec![],
         )
@@ -110,11 +113,16 @@ async fn setup_test_table(
 
     // Insert test data
     let insert_queries = vec![
-        "INSERT INTO test_ns.employees (id, name, department, salary) VALUES (1, 'Alice', 'Engineering', 100000)",
-        "INSERT INTO test_ns.employees (id, name, department, salary) VALUES (2, 'Bob', 'Engineering', 90000)",
-        "INSERT INTO test_ns.employees (id, name, department, salary) VALUES (3, 'Charlie', 'Sales', 80000)",
-        "INSERT INTO test_ns.employees (id, name, department, salary) VALUES (4, 'Diana', 'Sales', 85000)",
-        "INSERT INTO test_ns.employees (id, name, department, salary) VALUES (5, 'Eve', 'Marketing', 75000)",
+        "INSERT INTO test_ns.employees (id, name, department, salary) VALUES (1, 'Alice', \
+         'Engineering', 100000)",
+        "INSERT INTO test_ns.employees (id, name, department, salary) VALUES (2, 'Bob', \
+         'Engineering', 90000)",
+        "INSERT INTO test_ns.employees (id, name, department, salary) VALUES (3, 'Charlie', \
+         'Sales', 80000)",
+        "INSERT INTO test_ns.employees (id, name, department, salary) VALUES (4, 'Diana', \
+         'Sales', 85000)",
+        "INSERT INTO test_ns.employees (id, name, department, salary) VALUES (5, 'Eve', \
+         'Marketing', 75000)",
     ];
 
     for query in insert_queries {

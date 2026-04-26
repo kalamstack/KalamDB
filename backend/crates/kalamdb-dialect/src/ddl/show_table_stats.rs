@@ -4,15 +4,15 @@
 //! - SHOW STATS FOR TABLE table_name
 //! - SHOW STATS FOR TABLE namespace.table_name
 
-use crate::ddl::DdlResult;
-
 use kalamdb_commons::models::{NamespaceId, TableName};
+
+use crate::ddl::DdlResult;
 
 /// SHOW TABLE STATS statement
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShowTableStatsStatement {
     /// Optional namespace (if qualified name used)
-    pub namespace_id: Option<NamespaceId>, //TODO: consider making this mandatory
+    pub namespace_id: Option<NamespaceId>, // TODO: consider making this mandatory
 
     /// Table name to show statistics for
     pub table_name: TableName,

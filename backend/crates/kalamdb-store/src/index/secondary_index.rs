@@ -1,7 +1,9 @@
+use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
+
 use super::extractor::{FunctionExtractor, IndexKeyExtractor};
 use crate::storage_trait::{Partition, Result, StorageBackend, StorageError};
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
 /// Secondary index implementation for entity stores.
 ///
@@ -240,7 +242,8 @@ where
     {
         assert!(
             self.unique,
-            "get_primary_key() only works for unique indexes. Use get_primary_keys() for non-unique indexes."
+            "get_primary_key() only works for unique indexes. Use get_primary_keys() for \
+             non-unique indexes."
         );
 
         match self.backend.get(&self.partition, index_key.as_ref())? {
@@ -306,10 +309,11 @@ where
 
 #[cfg(all(test, feature = "rocksdb"))]
 mod tests {
-    use super::*;
-    use crate::{RocksDBBackend, RocksDbInit};
     use serde::{Deserialize, Serialize};
     use tempfile::TempDir;
+
+    use super::*;
+    use crate::{RocksDBBackend, RocksDbInit};
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
     struct TestUser {

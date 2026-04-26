@@ -2,9 +2,10 @@
 //!
 //! Tests that all 13 KalamDataTypes convert to Arrow and back losslessly
 
+use std::sync::Arc;
+
 use arrow::datatypes::{DataType as ArrowDataType, Field, TimeUnit};
 use kalamdb_commons::models::datatypes::{FromArrowType, KalamDataType, ToArrowType};
-use std::sync::Arc;
 
 #[test]
 fn test_all_kalambdata_types_convert_to_arrow_losslessly() {
@@ -127,7 +128,8 @@ fn test_type_conversion_performance() {
     let ops_per_sec = total_ops as f64 / elapsed.as_secs_f64();
 
     println!(
-        "✅ Type conversion performance: {:.0} ops/sec ({} iterations × {} types × 2 directions = {} ops in {:?})",
+        "✅ Type conversion performance: {:.0} ops/sec ({} iterations × {} types × 2 directions = \
+         {} ops in {:?})",
         ops_per_sec,
         iterations,
         test_types.len(),

@@ -31,8 +31,8 @@
 //! ## Example Usage
 //!
 //! ```rust
-//! use kalamdb_commons::models::{UserId, NamespaceId, TableName};
-//! use kalamdb_system::{User, Job, LiveQuery};
+//! use kalamdb_commons::models::{NamespaceId, TableName, UserId};
+//! use kalamdb_system::{Job, LiveQuery, User};
 //!
 //! let user_id = UserId::new("user_123");
 //! let namespace_id = NamespaceId::default();
@@ -78,9 +78,7 @@ pub use errors::{CommonError, NotLeaderError, Result};
 pub use helpers::arrow_utils;
 #[cfg(feature = "arrow-utils")]
 pub use helpers::arrow_utils::{empty_batch, RecordBatchBuilder};
-pub use helpers::file_helpers;
-pub use helpers::security;
-pub use helpers::string_interner;
+pub use helpers::{file_helpers, security, string_interner};
 pub use models::{
     // Phase 15 (008-schema-consolidation): Re-export schema types
     datatypes,

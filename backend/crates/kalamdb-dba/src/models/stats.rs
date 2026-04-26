@@ -1,10 +1,13 @@
-use crate::models::DBA_NAMESPACE;
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::models::{NamespaceId, TableId, TableName};
-use kalamdb_commons::schemas::{TableDefinition, TableOptions};
-use kalamdb_commons::TableAccess;
+use kalamdb_commons::{
+    datatypes::KalamDataType,
+    models::{NamespaceId, TableId, TableName},
+    schemas::{TableDefinition, TableOptions},
+    TableAccess,
+};
 use kalamdb_macros::table;
 use serde::{Deserialize, Serialize};
+
+use crate::models::DBA_NAMESPACE;
 
 #[table(
     name = "stats",

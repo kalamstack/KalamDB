@@ -7,12 +7,15 @@
 //! - Latest pointer: (namespace, table, VERSION_KIND_LATEST)
 //! - Versioned:      (namespace, table, VERSION_KIND_VERSIONED, version)
 
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 use super::table_id::TableId;
-use crate::storage_key::{decode_key, encode_key, encode_prefix};
-use crate::StorageKey;
+use crate::{
+    storage_key::{decode_key, encode_key, encode_prefix},
+    StorageKey,
+};
 
 /// Marker for the "latest" version pointer
 pub const LATEST_MARKER: &str = "<lat>";
@@ -199,8 +202,7 @@ impl StorageKey for TableVersionId {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::ids::NamespaceId;
-    use crate::models::schemas::TableName;
+    use crate::models::{ids::NamespaceId, schemas::TableName};
 
     fn test_table_id() -> TableId {
         TableId::new(NamespaceId::default(), TableName::new("users"))

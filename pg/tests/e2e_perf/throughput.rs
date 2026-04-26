@@ -71,7 +71,8 @@ async fn e2e_perf_sequential_insert_100() {
     let rows_per_sec = TOTAL as f64 / (insert_ms / 1000.0);
 
     eprintln!(
-        "[PERF] Sequential INSERT {TOTAL} rows (txn): {insert_ms:.0}ms ({rows_per_sec:.0} rows/sec)"
+        "[PERF] Sequential INSERT {TOTAL} rows (txn): {insert_ms:.0}ms ({rows_per_sec:.0} \
+         rows/sec)"
     );
 
     assert!(
@@ -106,7 +107,8 @@ async fn e2e_perf_sequential_insert_1k() {
     let autocommit_rps = TOTAL as f64 / (autocommit_ms / 1000.0);
 
     eprintln!(
-        "[PERF] Sequential INSERT {TOTAL} rows (autocommit): {autocommit_ms:.0}ms ({autocommit_rps:.0} rows/sec)"
+        "[PERF] Sequential INSERT {TOTAL} rows (autocommit): {autocommit_ms:.0}ms \
+         ({autocommit_rps:.0} rows/sec)"
     );
     bulk_delete_all(&pg, &qualified_table, "id").await;
 
@@ -129,7 +131,8 @@ async fn e2e_perf_sequential_insert_1k() {
 
     assert!(
         txn_rps > 250.0 && txn_rps > autocommit_rps * 0.6,
-        "Transactional INSERT only {txn_rps:.0} rows/sec ({:.1}x autocommit) — expected > 250 rows/sec and > 0.6x autocommit",
+        "Transactional INSERT only {txn_rps:.0} rows/sec ({:.1}x autocommit) — expected > 250 \
+         rows/sec and > 0.6x autocommit",
         txn_rps / autocommit_rps
     );
 
@@ -152,13 +155,15 @@ async fn e2e_perf_sequential_insert_1k() {
     let pipe_rps = TOTAL as f64 / (pipe_ms / 1000.0);
 
     eprintln!(
-        "[PERF] Sequential INSERT {TOTAL} rows (pipelined): {pipe_ms:.0}ms ({pipe_rps:.0} rows/sec)"
+        "[PERF] Sequential INSERT {TOTAL} rows (pipelined): {pipe_ms:.0}ms ({pipe_rps:.0} \
+         rows/sec)"
     );
     eprintln!("[PERF] Pipeline speedup vs autocommit: {:.1}x", pipe_rps / autocommit_rps);
 
     assert!(
         pipe_rps > 300.0 && pipe_rps > autocommit_rps * 0.8,
-        "Pipelined INSERT only {pipe_rps:.0} rows/sec ({:.1}x autocommit) — expected > 300 rows/sec and > 0.8x autocommit",
+        "Pipelined INSERT only {pipe_rps:.0} rows/sec ({:.1}x autocommit) — expected > 300 \
+         rows/sec and > 0.8x autocommit",
         pipe_rps / autocommit_rps
     );
     pg.disconnect().await;
@@ -252,7 +257,8 @@ async fn e2e_perf_point_select() {
     let avg_ms = total_ms / QUERIES as f64;
 
     eprintln!(
-        "[PERF] Point SELECT ({QUERIES} queries over {TOTAL} rows): avg {avg_ms:.1}ms/query, total {total_ms:.0}ms"
+        "[PERF] Point SELECT ({QUERIES} queries over {TOTAL} rows): avg {avg_ms:.1}ms/query, \
+         total {total_ms:.0}ms"
     );
     assert!(avg_ms < 5_000.0, "Point SELECT avg {avg_ms:.0}ms — expected < 5000ms");
     pg.disconnect().await;
@@ -368,7 +374,8 @@ async fn e2e_perf_user_table_insert_scan() {
         timed_query(&pg, &format!("SELECT id, data FROM {qualified_table}")).await;
 
     eprintln!(
-        "[PERF] User table: INSERT {TOTAL} rows in {insert_ms:.0}ms, SCAN returned {} rows in {scan_ms:.1}ms",
+        "[PERF] User table: INSERT {TOTAL} rows in {insert_ms:.0}ms, SCAN returned {} rows in \
+         {scan_ms:.1}ms",
         rows.len()
     );
     assert_eq!(rows.len(), TOTAL, "user scan count mismatch");
@@ -424,7 +431,8 @@ async fn e2e_perf_cross_verify_latency() {
     let max_ms = latencies.iter().cloned().fold(0.0_f64, f64::max);
 
     eprintln!(
-        "[PERF] Cross-verify ({ITERATIONS} iterations): avg {avg_ms:.1}ms, min {min_ms:.1}ms, max {max_ms:.1}ms"
+        "[PERF] Cross-verify ({ITERATIONS} iterations): avg {avg_ms:.1}ms, min {min_ms:.1}ms, max \
+         {max_ms:.1}ms"
     );
     assert!(avg_ms < 10_000.0, "Cross-verify avg {avg_ms:.0}ms — expected < 10000ms");
     pg.disconnect().await;

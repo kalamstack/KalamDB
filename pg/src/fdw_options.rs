@@ -1,11 +1,10 @@
 //! Parse FDW options from PostgreSQL `List` of `DefElem` nodes.
 
+use std::{collections::BTreeMap, ffi::CStr};
+
 use pgrx::pg_sys;
-use std::collections::BTreeMap;
-use std::ffi::CStr;
 
 /// Parse FDW options from a PostgreSQL `List*` of `DefElem*` nodes into a Rust map.
-///
 pub fn parse_options(options: *mut pg_sys::List) -> BTreeMap<String, String> {
     let mut result = BTreeMap::new();
     if options.is_null() {

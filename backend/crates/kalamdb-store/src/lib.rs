@@ -30,33 +30,27 @@ pub mod storage_trait;
 
 #[cfg(feature = "rocksdb")]
 pub use backends::rocksdb::{RocksDBBackend, RocksDbInit};
-pub use storage_trait::{
-    Operation, Partition, StorageBackend, StorageBackendAsync, StorageError, StorageStats,
-};
-
-// Re-export StorageKey from kalamdb-commons to avoid import inconsistency
-pub use kalamdb_commons::StorageKey;
-
 // Phase 14: Export new type-safe EntityStore traits
 pub use entity_store::{
     CrossUserTableStore,
     EntityStore,
     EntityStoreAsync, // Async versions using spawn_blocking internally
 };
-
 // Export index types
 pub use index::{FunctionExtractor, IndexKeyExtractor, SecondaryIndex};
-
-// Phase 15: Export IndexedEntityStore for automatic index management
-pub use indexed_store::{IndexDefinition, IndexedEntityStore};
-
 #[cfg(feature = "datafusion")]
 pub use indexed_store::{extract_i64_equality, extract_string_equality};
-
+// Phase 15: Export IndexedEntityStore for automatic index management
+pub use indexed_store::{IndexDefinition, IndexedEntityStore};
+// Re-export StorageKey from kalamdb-commons to avoid import inconsistency
+pub use kalamdb_commons::StorageKey;
 // Phase 17: Export Raft storage types
 pub use raft_storage::{
     GroupId, RaftLogEntry, RaftLogId, RaftPartitionStore, RaftSnapshotData, RaftSnapshotMeta,
     RaftVote, RAFT_PARTITION_NAME,
+};
+pub use storage_trait::{
+    Operation, Partition, StorageBackend, StorageBackendAsync, StorageError, StorageStats,
 };
 
 // Make test_utils available for testing in dependent crates
@@ -78,8 +72,6 @@ pub fn open_storage_backend(
     #[cfg(not(feature = "rocksdb"))]
     {
         let _ = (db_path, settings);
-        anyhow::bail!(
-            "kalamdb-store was built without the rocksdb backend feature enabled"
-        )
+        anyhow::bail!("kalamdb-store was built without the rocksdb backend feature enabled")
     }
 }

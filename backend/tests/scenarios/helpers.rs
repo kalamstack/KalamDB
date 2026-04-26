@@ -7,16 +7,12 @@
 //! - Flush/storage artifact validation
 //! - Parallel test utilities
 
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
+
 use anyhow::Result;
-use kalam_client::models::{ChangeEvent, ResponseStatus};
-use kalam_client::{KalamCellValue, SubscriptionManager};
-use std::collections::{HashMap, HashSet};
-use std::time::Duration;
-use tokio::time::{sleep, timeout, Instant};
-
-use crate::test_support::consolidated_helpers as helpers;
-use crate::test_support::http_server::HttpTestServer;
-
 // Re-export commonly used consolidated helpers
 pub use helpers::{
     assert_error_contains, assert_manifest_exists, assert_min_row_count, assert_no_duplicates,
@@ -27,6 +23,13 @@ pub use helpers::{
     get_string_value, json_to_i64, run_parallel_users, unique_namespace, unique_table,
     wait_for_ack,
 };
+use kalam_client::{
+    models::{ChangeEvent, ResponseStatus},
+    KalamCellValue, SubscriptionManager,
+};
+use tokio::time::{sleep, timeout, Instant};
+
+use crate::test_support::{consolidated_helpers as helpers, http_server::HttpTestServer};
 
 // =============================================================================
 // Scenario-Specific Helpers

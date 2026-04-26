@@ -8,29 +8,37 @@
 //! This module supports both in-memory storage (for testing) and persistent
 //! storage via `kalamdb-store::RaftPartitionStore` (for production).
 
-use std::collections::BTreeMap;
-use std::fmt::Debug;
-use std::io::Cursor;
-use std::ops::RangeBounds;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-
-use kalamdb_store::raft_storage::{
-    RaftLogEntry, RaftLogId, RaftPartitionStore, RaftSnapshotData, RaftSnapshotMeta, RaftVote,
+use std::{
+    collections::BTreeMap,
+    fmt::Debug,
+    io::Cursor,
+    ops::RangeBounds,
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
-use kalamdb_store::StorageBackend;
-use openraft::storage::{LogState, RaftLogReader, RaftStorage, Snapshot};
+
+use kalamdb_store::{
+    raft_storage::{
+        RaftLogEntry, RaftLogId, RaftPartitionStore, RaftSnapshotData, RaftSnapshotMeta, RaftVote,
+    },
+    StorageBackend,
+};
 use openraft::{
+    storage::{LogState, RaftLogReader, RaftStorage, Snapshot},
     Entry, EntryPayload, LogId, OptionalSend, RaftSnapshotBuilder, SnapshotMeta, StorageError,
     StorageIOError, StoredMembership, Vote,
 };
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
-use crate::state_machine::{decode, encode, KalamStateMachine};
-use crate::storage::types::{KalamNode, KalamTypeConfig};
-use crate::GroupId;
+use crate::{
+    state_machine::{decode, encode, KalamStateMachine},
+    storage::types::{KalamNode, KalamTypeConfig},
+    GroupId,
+};
 
 /// Stored snapshot data
 #[derive(Debug, Clone)]
@@ -114,12 +122,12 @@ const LOG_CACHE_MAX_BYTES: usize = 16 * 1024 * 1024;
 ///
 /// ## Storage Modes
 ///
-/// - **In-memory only**: When created with `new()`, all data is stored in memory.
-///   Suitable for testing or single-node deployments where durability isn't critical.
+/// - **In-memory only**: When created with `new()`, all data is stored in memory. Suitable for
+///   testing or single-node deployments where durability isn't critical.
 ///
-/// - **Persistent**: When created with `new_persistent()`, log entries, votes, and
-///   metadata are durably stored via `RaftPartitionStore`. A bounded in-memory cache
-///   keeps recent entries for fast access.
+/// - **Persistent**: When created with `new_persistent()`, log entries, votes, and metadata are
+///   durably stored via `RaftPartitionStore`. A bounded in-memory cache keeps recent entries for
+///   fast access.
 pub struct KalamRaftStorage<SM: KalamStateMachine + Send + Sync + 'static> {
     /// Which Raft group this storage belongs to
     group_id: GroupId,
@@ -315,7 +323,8 @@ impl<SM: KalamStateMachine + Send + Sync + 'static> KalamRaftStorage<SM> {
             .unwrap_or(0);
 
         log::debug!(
-            "KalamRaftStorage[{}]: Recovered state - last_applied={:?}, last_purged={:?}, committed={:?}, vote={:?}",
+            "KalamRaftStorage[{}]: Recovered state - last_applied={:?}, last_purged={:?}, \
+             committed={:?}, vote={:?}",
             group_id,
             last_applied.map(|id| id.index),
             last_purged.map(|id| id.index),
@@ -399,7 +408,9 @@ impl<SM: KalamStateMachine + Send + Sync + 'static> KalamRaftStorage<SM> {
             let restore_ms = restore_start.elapsed().as_secs_f64() * 1000.0;
 
             log::info!(
-                "KalamRaftStorage[{}]: Restored state machine from snapshot (last_applied_index={}, last_applied_term={}) - deserialize: {:.2}ms, restore: {:.2}ms, total: {:.2}ms",
+                "KalamRaftStorage[{}]: Restored state machine from snapshot \
+                 (last_applied_index={}, last_applied_term={}) - deserialize: {:.2}ms, restore: \
+                 {:.2}ms, total: {:.2}ms",
                 self.group_id,
                 sm_data.state_applied_index,
                 sm_data.state_applied_term,
@@ -428,6 +439,11 @@ impl<SM: KalamStateMachine + Send + Sync + 'static> KalamRaftStorage<SM> {
     /// (has applied entries) and should NOT call initialize() again.
     pub fn get_last_applied(&self) -> Option<LogId<u64>> {
         *self.last_applied.read()
+    }
+
+    /// Get the committed log ID from storage.
+    pub fn get_committed(&self) -> Option<LogId<u64>> {
+        *self.committed.read()
     }
 
     /// Check if this storage has any persisted Raft state
@@ -881,6 +897,7 @@ impl<SM: KalamStateMachine + Send + Sync + 'static> RaftStorage<KalamTypeConfig>
 
             match &entry.payload {
                 EntryPayload::Blank => {
+                    self.state_machine.mark_applied_index(index, term);
                     results.push(Vec::new());
                 },
                 EntryPayload::Normal(data) => {
@@ -919,6 +936,7 @@ impl<SM: KalamStateMachine + Send + Sync + 'static> RaftStorage<KalamTypeConfig>
                             }
                         }
                     }
+                    self.state_machine.mark_applied_index(index, term);
                     results.push(Vec::new());
                 },
             }
@@ -1102,18 +1120,23 @@ impl<SM: KalamStateMachine + Send + Sync + 'static> RaftLogReader<KalamTypeConfi
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::state_machine::MetaStateMachine;
-    use crate::state_machine::{ApplyResult, KalamStateMachine, StateMachineSnapshot};
-    use crate::RaftError;
+    use std::sync::{
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+        Arc,
+    };
+
     use async_trait::async_trait;
-    use kalamdb_store::raft_storage::RAFT_PARTITION_NAME;
-    use kalamdb_store::storage_trait::Result as StoreResult;
-    use kalamdb_store::test_utils::InMemoryBackend;
-    use kalamdb_store::{Operation, Partition, StorageBackend};
+    use kalamdb_store::{
+        raft_storage::RAFT_PARTITION_NAME, storage_trait::Result as StoreResult,
+        test_utils::InMemoryBackend, Operation, Partition, StorageBackend,
+    };
     use openraft::EntryPayload;
-    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-    use std::sync::Arc;
+
+    use super::*;
+    use crate::{
+        state_machine::{ApplyResult, KalamStateMachine, MetaStateMachine, StateMachineSnapshot},
+        RaftError,
+    };
 
     #[tokio::test]
     async fn test_storage_creation() {

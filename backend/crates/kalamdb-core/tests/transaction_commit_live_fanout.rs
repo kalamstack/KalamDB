@@ -1,21 +1,18 @@
 mod support;
 
-use std::sync::Arc;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::{
-    ConnectionId, LiveQueryId, OperationKind, TransactionOrigin, UserId,
+use kalamdb_commons::{
+    models::{rows::Row, ConnectionId, LiveQueryId, OperationKind, TransactionOrigin, UserId},
+    websocket::ChangeType,
+    TableType,
 };
-use kalamdb_commons::websocket::ChangeType;
-use kalamdb_commons::TableType;
 use kalamdb_core::transactions::{ExecutionOwnerKey, StagedMutation};
 use kalamdb_live::models::{
     NotificationSender, SubscriptionFlowControl, SubscriptionHandle, SubscriptionRuntimeMetadata,
 };
-use tokio::sync::mpsc;
-
 use support::{create_cluster_app_context, create_shared_table, row, unique_namespace};
+use tokio::sync::mpsc;
 
 fn make_shared_handle(
     subscription_id: &str,

@@ -1,27 +1,39 @@
 #![allow(dead_code)]
 
-use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU16, Ordering};
-use std::sync::Arc;
+use std::{
+    collections::BTreeMap,
+    sync::{
+        atomic::{AtomicU16, Ordering},
+        Arc,
+    },
+};
 
 use chrono::Utc;
 use datafusion_common::ScalarValue;
-use kalamdb_commons::conversions::arrow_json_conversion::record_batch_to_json_rows;
-use kalamdb_commons::models::datatypes::KalamDataType;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::schemas::{ColumnDefinition, TableDefinition, TableOptions};
-use kalamdb_commons::models::{NamespaceId, StorageId, TableId, TableName, UserId};
-use kalamdb_commons::schemas::ColumnDefault;
-use kalamdb_commons::{NodeId, Role, TableAccess, TableType};
+use kalamdb_commons::{
+    conversions::arrow_json_conversion::record_batch_to_json_rows,
+    models::{
+        datatypes::KalamDataType,
+        rows::Row,
+        schemas::{ColumnDefinition, TableDefinition, TableOptions},
+        NamespaceId, StorageId, TableId, TableName, UserId,
+    },
+    schemas::ColumnDefault,
+    NodeId, Role, TableAccess, TableType,
+};
 use kalamdb_configs::ServerConfig;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult};
-use kalamdb_core::sql::executor::handler_registry::HandlerRegistry;
-use kalamdb_core::sql::executor::request_transaction_state::RequestTransactionState;
-use kalamdb_core::sql::executor::SqlExecutor;
+use kalamdb_core::{
+    app_context::AppContext,
+    sql::{
+        context::{ExecutionContext, ExecutionResult},
+        executor::{
+            handler_registry::HandlerRegistry, request_transaction_state::RequestTransactionState,
+            SqlExecutor,
+        },
+    },
+};
 use kalamdb_store::test_utils::TestDb;
-use kalamdb_system::providers::storages::models::StorageType;
-use kalamdb_system::Storage;
+use kalamdb_system::{providers::storages::models::StorageType, Storage};
 use uuid::Uuid;
 
 static TEST_PORT_OFFSET: AtomicU16 = AtomicU16::new(0);

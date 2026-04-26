@@ -2,13 +2,13 @@
 //!
 //! This module defines secondary indexes for the system.manifest table.
 
-use crate::StoragePartition;
-use datafusion::scalar::ScalarValue;
-use kalamdb_commons::models::rows::SystemTableRow;
-use kalamdb_commons::storage::Partition;
-use kalamdb_commons::{ManifestId, StorageKey};
-use kalamdb_store::IndexDefinition;
 use std::sync::Arc;
+
+use datafusion::scalar::ScalarValue;
+use kalamdb_commons::{models::rows::SystemTableRow, storage::Partition, ManifestId, StorageKey};
+use kalamdb_store::IndexDefinition;
+
+use crate::StoragePartition;
 
 /// Index for querying manifests by PendingWrite state.
 ///
@@ -60,11 +60,15 @@ pub fn create_manifest_indexes() -> Vec<Arc<dyn IndexDefinition<ManifestId, Syst
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use datafusion::scalar::ScalarValue;
-    use kalamdb_commons::models::rows::{Row, SystemTableRow};
-    use kalamdb_commons::{NamespaceId, TableId, TableName, UserId};
     use std::collections::BTreeMap;
+
+    use datafusion::scalar::ScalarValue;
+    use kalamdb_commons::{
+        models::rows::{Row, SystemTableRow},
+        NamespaceId, TableId, TableName, UserId,
+    };
+
+    use super::*;
 
     fn create_test_row(sync_state: &str) -> SystemTableRow {
         let mut fields = BTreeMap::new();

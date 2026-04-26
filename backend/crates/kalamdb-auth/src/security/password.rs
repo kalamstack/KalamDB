@@ -1,9 +1,10 @@
 // Password hashing and validation module
 
-use crate::errors::error::{AuthError, AuthResult};
+use std::{collections::HashSet, sync::OnceLock};
+
 use bcrypt::{hash, verify, DEFAULT_COST};
-use std::collections::HashSet;
-use std::sync::OnceLock;
+
+use crate::errors::error::{AuthError, AuthResult};
 
 /// Bcrypt cost factor for password hashing.
 /// Higher values = more secure but slower.

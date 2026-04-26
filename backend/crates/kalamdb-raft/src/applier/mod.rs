@@ -16,7 +16,6 @@ mod user_data_applier;
 
 // Unified Meta applier
 pub use meta_applier::{MetaApplier, NoOpMetaApplier};
-
 // Data appliers (split into separate files for better organization)
 pub use shared_data_applier::{NoOpSharedDataApplier, SharedDataApplier};
 pub use user_data_applier::{NoOpUserDataApplier, UserDataApplier};

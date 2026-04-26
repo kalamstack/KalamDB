@@ -1,5 +1,4 @@
-use kalamdb_commons::models::UserId;
-use kalamdb_commons::{TableId, TableType};
+use kalamdb_commons::{models::UserId, TableId, TableType};
 
 /// Typed FDW delete input before it is converted into a backend request.
 #[derive(Debug, Clone)]

@@ -1,5 +1,7 @@
-pub use crate::e2e_common::{ensure_schema_exists, postgres_error_text, unique_name};
-pub use crate::e2e_ddl_common::DdlTestEnv;
+pub use crate::{
+    e2e_common::{ensure_schema_exists, postgres_error_text, unique_name},
+    e2e_ddl_common::DdlTestEnv,
+};
 
 /// Early-return from a DDL test when pgrx prerequisites are not met.
 /// Usage: `let env = require_ddl_env!();`

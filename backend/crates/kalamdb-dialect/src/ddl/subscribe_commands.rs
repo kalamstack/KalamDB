@@ -51,13 +51,14 @@
 //! ```
 //! ```
 
+use kalamdb_commons::{websocket::SubscriptionOptions, NamespaceId, TableName};
+use sqlparser::{
+    ast::{ObjectName, ObjectNamePart, SetExpr, Statement, TableFactor},
+    dialect::{GenericDialect, PostgreSqlDialect},
+};
+
 use super::DdlResult;
-use crate::parser::query_parser::QueryParser;
-use crate::parser::utils::parse_sql_statements;
-use kalamdb_commons::websocket::SubscriptionOptions;
-use kalamdb_commons::{NamespaceId, TableName};
-use sqlparser::ast::{ObjectName, ObjectNamePart, SetExpr, Statement, TableFactor};
-use sqlparser::dialect::{GenericDialect, PostgreSqlDialect};
+use crate::parser::{query_parser::QueryParser, utils::parse_sql_statements};
 
 /// SUBSCRIBE TO statement for live query subscriptions.
 ///
@@ -95,7 +96,8 @@ impl SubscribeStatement {
     /// assert_eq!(stmt.select_query, "SELECT * FROM app.messages");
     ///
     /// // Custom column selection
-    /// let stmt = SubscribeStatement::parse("SUBSCRIBE TO SELECT event_type FROM app.messages").unwrap();
+    /// let stmt =
+    ///     SubscribeStatement::parse("SUBSCRIBE TO SELECT event_type FROM app.messages").unwrap();
     /// assert_eq!(stmt.select_query, "SELECT event_type FROM app.messages");
     /// ```
     pub fn parse(sql: &str) -> DdlResult<Self> {
@@ -292,10 +294,12 @@ impl SubscribeStatement {
     /// ```
     /// use kalamdb_dialect::ddl::subscribe_commands::SubscribeStatement;
     ///
-    /// let stmt = SubscribeStatement::parse("SUBSCRIBE TO app.messages WHERE user_id = 'alice'").unwrap();
+    /// let stmt =
+    ///     SubscribeStatement::parse("SUBSCRIBE TO app.messages WHERE user_id = 'alice'").unwrap();
     /// assert_eq!(stmt.to_select_sql(), "SELECT * FROM app.messages WHERE user_id = 'alice'");
     ///
-    /// let stmt = SubscribeStatement::parse("SUBSCRIBE TO SELECT event_type FROM app.messages").unwrap();
+    /// let stmt =
+    ///     SubscribeStatement::parse("SUBSCRIBE TO SELECT event_type FROM app.messages").unwrap();
     /// assert_eq!(stmt.to_select_sql(), "SELECT event_type FROM app.messages");
     /// ```
     pub fn to_select_sql(&self) -> String {
@@ -362,7 +366,11 @@ fn parse_subscribe_options(options_str: &str) -> DdlResult<SubscriptionOptions> 
                     from = Some(SeqId::new(seq_val));
                 },
                 _ => {
-                    return Err(format!("Unknown subscription option: '{}'. Valid options are: last_rows, batch_size, from", key));
+                    return Err(format!(
+                        "Unknown subscription option: '{}'. Valid options are: last_rows, \
+                         batch_size, from",
+                        key
+                    ));
                 },
             }
         } else {
@@ -374,7 +382,6 @@ fn parse_subscribe_options(options_str: &str) -> DdlResult<SubscriptionOptions> 
         batch_size,
         last_rows,
         from,
-        snapshot_end_seq: None,
     })
 }
 
@@ -609,7 +616,8 @@ mod tests {
     #[test]
     fn test_parse_subscribe_with_where_and_multiple_options() {
         let stmt = SubscribeStatement::parse(
-            "SUBSCRIBE TO app.messages WHERE user_id = 'alice' OPTIONS (last_rows=50, batch_size=25)",
+            "SUBSCRIBE TO app.messages WHERE user_id = 'alice' OPTIONS (last_rows=50, \
+             batch_size=25)",
         )
         .unwrap();
         assert_eq!(stmt.namespace, NamespaceId::from("app"));

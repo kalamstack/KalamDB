@@ -2,14 +2,13 @@
 //!
 //! Re-export OpenRaft's ServerState and provide a NodeStatus enum for node health tracking.
 
-use openraft::ServerState;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::str::FromStr;
+use std::{fmt, str::FromStr};
 
+use openraft::ServerState;
 // Re-export OpenRaft's ServerState as NodeRole for consistency
 // ServerState has: Leader, Follower, Learner, Candidate, Shutdown
 pub use openraft::ServerState as NodeRole;
+use serde::{Deserialize, Serialize};
 
 /// Helper trait to convert ServerState to string
 pub trait ServerStateExt {

@@ -1,12 +1,13 @@
+use std::{collections::HashSet, sync::atomic::Ordering, time::Duration};
+
+use kalam_client::{
+    models::BatchStatus, seq_tracking::row_seq, ChangeEvent, SeqId, SubscriptionConfig,
+    SubscriptionOptions,
+};
+use tokio::time::{sleep, timeout, Instant};
+
 use super::helpers::*;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
-use kalam_client::models::BatchStatus;
-use kalam_client::seq_tracking::row_seq;
-use kalam_client::{ChangeEvent, SeqId, SubscriptionConfig, SubscriptionOptions};
-use std::collections::HashSet;
-use std::sync::atomic::Ordering;
-use std::time::Duration;
-use tokio::time::{sleep, timeout, Instant};
 
 fn observe_loading_event(
     event: &ChangeEvent,
@@ -159,9 +160,8 @@ async fn test_loading_snapshot_with_live_writes_resumes_without_duplicate_rows()
                         writer
                             .execute_query(
                                 &format!(
-                                    "INSERT INTO {} (id, value) VALUES \
-                                     ('loading-live-0', 'during-loading-0'), \
-                                     ('loading-live-1', 'during-loading-1')",
+                                    "INSERT INTO {} (id, value) VALUES ('loading-live-0', \
+                                     'during-loading-0'), ('loading-live-1', 'during-loading-1')",
                                     table
                                 ),
                                 None,

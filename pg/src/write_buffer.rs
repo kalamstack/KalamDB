@@ -16,14 +16,17 @@
 //! - `PRE_COMMIT` xact callback → flush ALL pending writes before commit
 //! - `BeginForeignScan` on same table → flush for read-your-writes consistency
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use kalam_pg_api::{InsertRequest, KalamBackendExecutor, TenantContext};
 use kalam_pg_common::KalamPgError;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::UserId;
-use kalamdb_commons::{TableId, TableType};
+use kalamdb_commons::{
+    models::{rows::Row, UserId},
+    TableId, TableType,
+};
 
 /// Maximum rows to buffer before auto-flushing.
 const FLUSH_THRESHOLD: usize = 256;
@@ -194,15 +197,14 @@ pub fn discard_all() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    use std::collections::BTreeMap;
-    use std::sync::LazyLock;
+    use std::{collections::BTreeMap, sync::LazyLock};
 
     use async_trait::async_trait;
     use datafusion_common::ScalarValue;
     use kalam_pg_api::{DeleteRequest, MutationResponse, ScanRequest, ScanResponse, UpdateRequest};
     use kalamdb_commons::models::{NamespaceId, TableName};
+
+    use super::*;
 
     static TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 

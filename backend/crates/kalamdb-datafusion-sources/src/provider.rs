@@ -7,8 +7,9 @@
 use std::sync::Arc;
 
 use arrow_schema::SchemaRef;
-use crate::pruning::{FilterRequest, LimitRequest, ProjectionRequest, PruningRequest};
 use datafusion::logical_expr::{utils::expr_to_columns, Expr, TableProviderFilterPushDown};
+
+use crate::pruning::{FilterRequest, LimitRequest, ProjectionRequest, PruningRequest};
 
 /// Capability reporting for a single pushdown filter.
 ///
@@ -99,7 +100,9 @@ impl ScanDescriptor {
 
     pub fn projection_request(&self) -> ProjectionRequest {
         match self.projection.as_deref() {
-            Some(indices) => ProjectionRequest { columns: Some(Arc::from(indices)) },
+            Some(indices) => ProjectionRequest {
+                columns: Some(Arc::from(indices)),
+            },
             None => ProjectionRequest::full(),
         }
     }
@@ -115,11 +118,7 @@ impl ScanDescriptor {
     }
 
     pub fn pruning_request(&self) -> PruningRequest {
-        PruningRequest::new(
-            self.projection_request(),
-            self.filter_request(),
-            self.limit_request(),
-        )
+        PruningRequest::new(self.projection_request(), self.filter_request(), self.limit_request())
     }
 }
 
@@ -165,8 +164,7 @@ pub fn merged_projection_for_filters(
     match projection {
         Some(indices) if filters.is_empty() => Some(indices.clone()),
         Some(indices) => {
-            let mut needed: std::collections::HashSet<usize> =
-                indices.iter().copied().collect();
+            let mut needed: std::collections::HashSet<usize> = indices.iter().copied().collect();
             let mut filter_columns = std::collections::HashSet::new();
             for filter in filters {
                 let _ = expr_to_columns(filter, &mut filter_columns);

@@ -1,7 +1,9 @@
-use crate::time_bucket::StreamTimeBucket;
+use std::path::PathBuf;
+
 use kalamdb_commons::models::TableId;
 use kalamdb_sharding::ShardRouter;
-use std::path::PathBuf;
+
+use crate::time_bucket::StreamTimeBucket;
 
 /// Stream log configuration.
 #[derive(Debug, Clone)]

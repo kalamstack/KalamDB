@@ -1,22 +1,27 @@
 #![allow(unused_imports)]
 
-use super::cluster::ClusterTestServer;
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::{mpsc, Arc},
+    thread,
+};
+
 use anyhow::{Context, Result};
-use kalam_client::models::{QueryResponse, ResponseStatus};
-use kalam_client::{AuthProvider, KalamLinkClient, KalamLinkTimeouts};
+use kalam_client::{
+    models::{QueryResponse, ResponseStatus},
+    AuthProvider, KalamLinkClient, KalamLinkTimeouts,
+};
 use kalamdb_commons::{NamespaceId, Role, UserId};
 use kalamdb_core::app_context::AppContext;
 use once_cell::sync::{Lazy, OnceCell as SyncOnceCell};
 use serde_json::Value as JsonValue;
-use std::collections::HashMap;
-use std::path::Path;
-use std::path::PathBuf;
-use std::sync::mpsc;
-use std::sync::Arc;
-use std::thread;
-use tokio::sync::Mutex;
-use tokio::sync::OnceCell;
-use tokio::time::{sleep, Duration, Instant};
+use tokio::{
+    sync::{Mutex, OnceCell},
+    time::{sleep, Duration, Instant},
+};
+
+use super::cluster::ClusterTestServer;
 
 static GLOBAL_HTTP_TEST_RUNTIME: SyncOnceCell<Arc<tokio::runtime::Runtime>> = SyncOnceCell::new();
 
@@ -331,7 +336,11 @@ impl HttpTestServer {
         password: &str,
         role: &Role,
     ) -> Result<String> {
-        let check_sql = format!("SELECT user_id, COUNT(*) AS user_count FROM system.users WHERE user_id = '{}' GROUP BY user_id", username);
+        let check_sql = format!(
+            "SELECT user_id, COUNT(*) AS user_count FROM system.users WHERE user_id = '{}' GROUP \
+             BY user_id",
+            username
+        );
         let resp = self.execute_sql(&check_sql).await?;
 
         // Check if user exists and get their user_id
@@ -436,13 +445,16 @@ impl HttpTestServer {
         };
 
         // Try to get cached user_id, fall back to username
-        let user_id = self.get_cached_user_id(username)
-            .unwrap_or_else(|| {
-                if username != "root" {
-                    eprintln!("WARNING: link_client('{}') called without cached user_id. USER table RLS may not work correctly.", username);
-                }
-                username.to_string()
-            });
+        let user_id = self.get_cached_user_id(username).unwrap_or_else(|| {
+            if username != "root" {
+                eprintln!(
+                    "WARNING: link_client('{}') called without cached user_id. USER table RLS may \
+                     not work correctly.",
+                    username
+                );
+            }
+            username.to_string()
+        });
 
         self.link_client_with_id(&user_id, username, &role)
     }
@@ -470,7 +482,8 @@ impl HttpTestServer {
         self.execute_sql_with_auth_and_params(sql, auth_header, Vec::new()).await
     }
 
-    /// Execute SQL (optionally parameterized) via the real HTTP API using an explicit `Authorization` header.
+    /// Execute SQL (optionally parameterized) via the real HTTP API using an explicit
+    /// `Authorization` header.
     pub async fn execute_sql_with_auth_and_params(
         &self,
         sql: &str,
@@ -644,8 +657,10 @@ impl HttpTestServer {
         let probe = format!("SELECT 1 AS ok FROM {}.{} LIMIT 1", namespace_id.as_str(), table_name);
         let mut last_error: Option<String> = None;
         let system_probe = format!(
-            "SELECT COUNT(*) AS cnt FROM system.schemas WHERE namespace_id='{}' AND table_name='{}'",
-            namespace_id.as_str(), table_name
+            "SELECT COUNT(*) AS cnt FROM system.schemas WHERE namespace_id='{}' AND \
+             table_name='{}'",
+            namespace_id.as_str(),
+            table_name
         );
         let mut last_system_cnt: Option<u64> = None;
 
@@ -705,7 +720,8 @@ impl HttpTestServer {
 
             if Instant::now() >= deadline {
                 return Err(anyhow::anyhow!(
-                    "CREATE TABLE did not become queryable in time ({}.{}): last_error={:?} system.schemas_cnt={:?}",
+                    "CREATE TABLE did not become queryable in time ({}.{}): last_error={:?} \
+                     system.schemas_cnt={:?}",
                     namespace_id.as_str(),
                     table_name,
                     last_error,
@@ -909,7 +925,8 @@ async fn wait_for_cluster_ready(nodes: &[HttpTestServer]) -> Result<()> {
 
         if Instant::now() >= deadline {
             return Err(anyhow::anyhow!(
-                "Timed out waiting for 3-node cluster to converge (meta_leaders={}, shared_leaders={})",
+                "Timed out waiting for 3-node cluster to converge (meta_leaders={}, \
+                 shared_leaders={})",
                 meta_leader_count,
                 shared_leader_count
             ));
@@ -1063,9 +1080,11 @@ async fn start_cluster_server() -> Result<ClusterTestServer> {
 // All other tests should use get_global_server() for better performance.
 // ============================================================================
 
-/// Run a test closure against a freshly started HTTP test server (with config override), then shut it down.
+/// Run a test closure against a freshly started HTTP test server (with config override), then shut
+/// it down.
 ///
-/// **DEPRECATED**: Only use this if you need a config override. Otherwise use `get_global_server()`.
+/// **DEPRECATED**: Only use this if you need a config override. Otherwise use
+/// `get_global_server()`.
 #[allow(dead_code)]
 pub async fn with_http_test_server_config<T, F>(
     override_config: impl FnOnce(&mut kalamdb_configs::ServerConfig),

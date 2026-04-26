@@ -1,7 +1,7 @@
-use crate::oidc::OidcError;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine as _;
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use jsonwebtoken::{decode_header, Algorithm};
+
+use crate::oidc::OidcError;
 
 /// Extract the `alg` field from the JWT header without verifying the signature.
 pub(crate) fn extract_algorithm_unverified(token: &str) -> Result<Algorithm, OidcError> {

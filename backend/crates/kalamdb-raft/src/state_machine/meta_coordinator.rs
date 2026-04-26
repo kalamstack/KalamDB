@@ -7,16 +7,19 @@
 //! - Atomic tracking of current meta index
 //! - Notification mechanism for data shards to wake up and drain
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
+
 use tokio::sync::Notify;
 
 /// Coordinates meta index updates and notifies data shards
 ///
 /// Used by:
 /// - MetaStateMachine: calls `advance()` after applying each entry
-/// - Data state machines: call `current_index()` to check watermark,
-///   and `subscribe()` to get notified when meta advances
+/// - Data state machines: call `current_index()` to check watermark, and `subscribe()` to get
+///   notified when meta advances
 #[derive(Debug)]
 pub struct MetadataCoordinator {
     /// Current meta group last_applied_index

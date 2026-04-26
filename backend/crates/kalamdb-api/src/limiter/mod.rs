@@ -1,6 +1,7 @@
 //! Rate limiting and connection guard module
 //!
-//! This module provides lightweight, zero-copy rate limiting for REST API and WebSocket connections.
+//! This module provides lightweight, zero-copy rate limiting for REST API and WebSocket
+//! connections.
 //!
 //! ## Components
 //!

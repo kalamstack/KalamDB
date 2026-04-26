@@ -108,8 +108,9 @@ impl TopicRoute {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kalamdb_commons::models::{NamespaceId, TableName};
+
+    use super::*;
 
     #[test]
     fn test_topic_route_builder() {

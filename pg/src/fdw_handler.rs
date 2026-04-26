@@ -3,8 +3,7 @@
 //! Provides the `kalam_handler` and `kalam_validator` C functions
 //! and registers the `pg_kalam` foreign data wrapper via extension SQL.
 
-use pgrx::pg_guard;
-use pgrx::pg_sys;
+use pgrx::{pg_guard, pg_sys};
 
 /// Build a fully populated `FdwRoutine` for the Kalam FDW.
 fn create_fdw_routine() -> *mut pg_sys::FdwRoutine {

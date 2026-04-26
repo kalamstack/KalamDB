@@ -1,28 +1,25 @@
 mod support;
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use datafusion_common::ScalarValue;
 use kalamdb_auth::{create_and_sign_token, services::unified::init_auth_config};
-use kalamdb_commons::conversions::arrow_json_conversion::record_batch_to_json_rows;
-use kalamdb_commons::models::pg_operations::InsertRequest;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::{KalamCellValue, TransactionId, UserId};
-use kalamdb_commons::TableType;
+use kalamdb_commons::{
+    conversions::arrow_json_conversion::record_batch_to_json_rows,
+    models::{pg_operations::InsertRequest, rows::Row, KalamCellValue, TransactionId, UserId},
+    TableType,
+};
 use kalamdb_configs::ServerConfig;
-use kalamdb_core::operations::service::OperationService;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::sql::context::ExecutionResult;
-use kalamdb_core::transactions::ExecutionOwnerKey;
+use kalamdb_core::{
+    app_context::AppContext, operations::service::OperationService, sql::context::ExecutionResult,
+    transactions::ExecutionOwnerKey,
+};
 use kalamdb_pg::{
     BeginTransactionRequest, InsertRpcRequest, KalamPgService, OpenSessionRequest,
     OperationExecutor, PgService, RollbackTransactionRequest, ScanRpcRequest,
 };
 use kalamdb_raft::RaftExecutor;
-use kalamdb_system::providers::storages::models::StorageMode;
-use kalamdb_system::{AuthType, Role, User};
+use kalamdb_system::{providers::storages::models::StorageMode, AuthType, Role, User};
 use support::{
     create_cluster_app_context, create_cluster_app_context_with_config, create_executor,
     create_shared_table, execute_ok, insert_sql, observer_exec_ctx, request_exec_ctx,
@@ -83,7 +80,11 @@ fn shared_insert_request(
     }
 }
 
-async fn open_session(app_ctx: &Arc<AppContext>, service: &KalamPgService, session_label: &str) -> String {
+async fn open_session(
+    app_ctx: &Arc<AppContext>,
+    service: &KalamPgService,
+    session_label: &str,
+) -> String {
     init_auth_config(&app_ctx.config().auth, &app_ctx.config().oauth);
 
     let bridge_user_id = UserId::new(format!("{}_bridge_dba", session_label.replace('-', "_")));
@@ -123,9 +124,10 @@ async fn open_session(app_ctx: &Arc<AppContext>, service: &KalamPgService, sessi
         session_id: String::new(),
         current_schema: None,
     });
-    request
-        .metadata_mut()
-        .insert("authorization", format!("Bearer {}", token).parse().expect("valid auth metadata"));
+    request.metadata_mut().insert(
+        "authorization",
+        format!("Bearer {}", token).parse().expect("valid auth metadata"),
+    );
 
     service
         .open_session(request)
@@ -200,7 +202,8 @@ async fn system_transactions_shows_active_pg_and_sql_transactions_while_sessions
         execute_ok(
             &executor,
             &observer_ctx,
-            "SELECT transaction_id, owner_id, origin, state, write_count FROM system.transactions ORDER BY origin, transaction_id",
+            "SELECT transaction_id, owner_id, origin, state, write_count FROM system.transactions \
+             ORDER BY origin, transaction_id",
         )
         .await,
     );
@@ -229,7 +232,8 @@ async fn system_transactions_shows_active_pg_and_sql_transactions_while_sessions
         execute_ok(
             &executor,
             &observer_ctx,
-            "SELECT session_id, transaction_id, transaction_state FROM system.sessions ORDER BY session_id",
+            "SELECT session_id, transaction_id, transaction_state FROM system.sessions ORDER BY \
+             session_id",
         )
         .await,
     );
@@ -314,7 +318,8 @@ async fn pg_passive_timeout_hides_stale_transaction_fields_from_sessions_view() 
             &executor,
             &observer_ctx,
             &format!(
-                "SELECT session_id, state, transaction_id, transaction_state FROM system.sessions WHERE session_id = '{session_id}'"
+                "SELECT session_id, state, transaction_id, transaction_state FROM system.sessions \
+                 WHERE session_id = '{session_id}'"
             ),
         )
         .await,
@@ -337,7 +342,8 @@ async fn pg_passive_timeout_hides_stale_transaction_fields_from_sessions_view() 
             &executor,
             &observer_ctx,
             &format!(
-                "SELECT session_id, state, transaction_id, transaction_state FROM system.sessions WHERE session_id = '{session_id}'"
+                "SELECT session_id, state, transaction_id, transaction_state FROM system.sessions \
+                 WHERE session_id = '{session_id}'"
             ),
         )
         .await,
@@ -352,7 +358,8 @@ async fn pg_passive_timeout_hides_stale_transaction_fields_from_sessions_view() 
             &executor,
             &observer_ctx,
             &format!(
-                "SELECT transaction_id FROM system.transactions WHERE transaction_id = '{transaction_id}'"
+                "SELECT transaction_id FROM system.transactions WHERE transaction_id = \
+                 '{transaction_id}'"
             ),
         )
         .await,
@@ -395,7 +402,8 @@ async fn pg_timeout_after_write_clears_sessions_and_transactions_views() {
             &executor,
             &observer_ctx,
             &format!(
-                "SELECT session_id, state, transaction_id, transaction_state FROM system.sessions WHERE session_id = '{session_id}'"
+                "SELECT session_id, state, transaction_id, transaction_state FROM system.sessions \
+                 WHERE session_id = '{session_id}'"
             ),
         )
         .await,
@@ -416,7 +424,8 @@ async fn pg_timeout_after_write_clears_sessions_and_transactions_views() {
             &executor,
             &observer_ctx,
             &format!(
-                "SELECT transaction_id, state, write_count FROM system.transactions WHERE transaction_id = '{transaction_id}'"
+                "SELECT transaction_id, state, write_count FROM system.transactions WHERE \
+                 transaction_id = '{transaction_id}'"
             ),
         )
         .await,
@@ -453,7 +462,8 @@ async fn pg_timeout_after_write_clears_sessions_and_transactions_views() {
             &executor,
             &observer_ctx,
             &format!(
-                "SELECT session_id, state, transaction_id, transaction_state FROM system.sessions WHERE session_id = '{session_id}'"
+                "SELECT session_id, state, transaction_id, transaction_state FROM system.sessions \
+                 WHERE session_id = '{session_id}'"
             ),
         )
         .await,
@@ -468,7 +478,8 @@ async fn pg_timeout_after_write_clears_sessions_and_transactions_views() {
             &executor,
             &observer_ctx,
             &format!(
-                "SELECT transaction_id FROM system.transactions WHERE transaction_id = '{transaction_id}'"
+                "SELECT transaction_id FROM system.transactions WHERE transaction_id = \
+                 '{transaction_id}'"
             ),
         )
         .await,
@@ -506,7 +517,8 @@ async fn pg_timeout_after_read_clears_sessions_and_transactions_views() {
             &executor,
             &observer_ctx,
             &format!(
-                "SELECT transaction_id, state, write_count FROM system.transactions WHERE transaction_id = '{transaction_id}'"
+                "SELECT transaction_id, state, write_count FROM system.transactions WHERE \
+                 transaction_id = '{transaction_id}'"
             ),
         )
         .await,
@@ -552,7 +564,8 @@ async fn pg_timeout_after_read_clears_sessions_and_transactions_views() {
             &executor,
             &observer_ctx,
             &format!(
-                "SELECT session_id, state, transaction_id, transaction_state FROM system.sessions WHERE session_id = '{session_id}'"
+                "SELECT session_id, state, transaction_id, transaction_state FROM system.sessions \
+                 WHERE session_id = '{session_id}'"
             ),
         )
         .await,
@@ -567,7 +580,8 @@ async fn pg_timeout_after_read_clears_sessions_and_transactions_views() {
             &executor,
             &observer_ctx,
             &format!(
-                "SELECT transaction_id FROM system.transactions WHERE transaction_id = '{transaction_id}'"
+                "SELECT transaction_id FROM system.transactions WHERE transaction_id = \
+                 '{transaction_id}'"
             ),
         )
         .await,

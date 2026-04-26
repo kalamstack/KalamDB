@@ -1,6 +1,7 @@
 mod common;
-use common::*;
 use std::time::Duration;
+
+use common::*;
 
 async fn execute_sql(sql: &str) -> Result<String, String> {
     execute_sql_as_root_via_client(sql).map_err(|e| e.to_string())

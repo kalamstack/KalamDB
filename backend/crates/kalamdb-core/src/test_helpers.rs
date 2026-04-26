@@ -4,23 +4,23 @@
 //! They have no dependency on `kalamdb-jobs`, so they are safe to use from other crates'
 //! test code via `kalamdb-core = { ..., features = ["test-helpers"] }` in dev-dependencies.
 
-use crate::app_context::AppContext;
-use datafusion::prelude::SessionContext;
-use kalamdb_commons::models::{NodeId, StorageId};
-use kalamdb_store::test_utils::TestDb;
-use kalamdb_store::StorageBackend;
-use kalamdb_system::{StoragePartition, SystemTable};
+#[cfg(any(test, feature = "test-helpers"))]
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
+#[cfg(any(test, feature = "test-helpers"))]
+use std::sync::Once;
 
+use datafusion::prelude::SessionContext;
 // ── Imports needed by init_test_app_context / test_app_context ─────────────────
 #[cfg(any(test, feature = "test-helpers"))]
 use kalamdb_commons::models::NamespaceId;
+use kalamdb_commons::models::{NodeId, StorageId};
+use kalamdb_store::{test_utils::TestDb, StorageBackend};
+use kalamdb_system::{StoragePartition, SystemTable};
 #[cfg(any(test, feature = "test-helpers"))]
 use once_cell::sync::OnceCell;
-#[cfg(any(test, feature = "test-helpers"))]
-use std::sync::atomic::{AtomicU16, Ordering};
-#[cfg(any(test, feature = "test-helpers"))]
-use std::sync::Once;
+
+use crate::app_context::AppContext;
 
 #[cfg(any(test, feature = "test-helpers"))]
 static TEST_DB: OnceCell<Arc<TestDb>> = OnceCell::new();

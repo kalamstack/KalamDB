@@ -22,9 +22,9 @@
 //! STORAGE COMPACT ALL IN namespace;
 //! ```
 
-use crate::ddl::parsing;
-use crate::parser::utils::normalize_sql;
 use kalamdb_commons::{NamespaceId, TableName};
+
+use crate::{ddl::parsing, parser::utils::normalize_sql};
 
 const ERR_EXPECTED_NAMESPACE: &str = "Expected STORAGE COMPACT ALL IN namespace";
 

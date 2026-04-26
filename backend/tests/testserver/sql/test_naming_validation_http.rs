@@ -1,7 +1,8 @@
 //! Naming validation tests over the real HTTP SQL API.
 
-use super::test_support::consolidated_helpers::unique_namespace;
 use kalam_client::models::ResponseStatus;
+
+use super::test_support::consolidated_helpers::unique_namespace;
 
 #[tokio::test]
 #[ntest::timeout(60000)] // 60 seconds - naming validation test

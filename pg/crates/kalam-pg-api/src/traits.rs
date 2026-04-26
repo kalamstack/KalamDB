@@ -1,7 +1,10 @@
-use crate::request::{DeleteRequest, InsertRequest, ScanRequest, UpdateRequest};
-use crate::response::{MutationResponse, ScanResponse};
 use async_trait::async_trait;
 use kalam_pg_common::KalamPgError;
+
+use crate::{
+    request::{DeleteRequest, InsertRequest, ScanRequest, UpdateRequest},
+    response::{MutationResponse, ScanResponse},
+};
 
 /// Backend executor abstraction for remote mode.
 #[async_trait]

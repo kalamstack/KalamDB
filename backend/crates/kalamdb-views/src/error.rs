@@ -1,7 +1,8 @@
 //! Error types for KalamDB views and registry
 
-use kalamdb_commons::models::StorageId;
 use std::fmt;
+
+use kalamdb_commons::models::StorageId;
 
 /// Registry-specific errors
 #[derive(Debug, Clone)]

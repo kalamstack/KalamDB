@@ -12,9 +12,10 @@
 //! This test ensures the authentication system works end-to-end
 //! and validates user lifecycle management.
 
-use super::test_support::{auth_helper, TestServer};
 use kalam_client::models::ResponseStatus;
 use kalamdb_commons::Role;
+
+use super::test_support::{auth_helper, TestServer};
 
 /// End-to-end authentication flow test
 #[actix_web::test]

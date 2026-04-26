@@ -7,15 +7,20 @@
 //! - [x] No missed events beyond accepted semantics
 //! - [x] Final counts match expected
 
-use super::helpers::*;
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use futures_util::StreamExt;
 use kalam_client::models::ChangeEvent;
 use kalamdb_commons::Role;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
 use tokio::time::sleep;
+
+use super::helpers::*;
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(90);
 
@@ -67,32 +72,34 @@ async fn test_scenario_08_burst_writes() -> anyhow::Result<()> {
     let insert_count = Arc::new(AtomicUsize::new(0));
     let base_client = client.clone();
     let handles: Vec<_> = (0..writer_count)
-                .map(|writer_idx| {
-                    let ns = ns.clone();
-                    let count = Arc::clone(&insert_count);
-                    let client = base_client.clone();
+        .map(|writer_idx| {
+            let ns = ns.clone();
+            let count = Arc::clone(&insert_count);
+            let client = base_client.clone();
 
-                    tokio::spawn(async move {
-                        for i in 0..writes_per_writer {
-                            let id = writer_idx * writes_per_writer + i;
-                            let resp = client
-                                .execute_query(
-                                    &format!(
-                                        "INSERT INTO {}.events (id, event_type, payload) VALUES ({}, 'burst', 'data_{}')",
-                                        ns, id, id
-                                    ), None,
-                                    None,
-                                    None,
-                                )
-                                .await?;
-                            if resp.success() {
-                                count.fetch_add(1, Ordering::SeqCst);
-                            }
-                        }
-                        Ok::<(), anyhow::Error>(())
-                    })
-                })
-                .collect();
+            tokio::spawn(async move {
+                for i in 0..writes_per_writer {
+                    let id = writer_idx * writes_per_writer + i;
+                    let resp = client
+                        .execute_query(
+                            &format!(
+                                "INSERT INTO {}.events (id, event_type, payload) VALUES ({}, \
+                                 'burst', 'data_{}')",
+                                ns, id, id
+                            ),
+                            None,
+                            None,
+                            None,
+                        )
+                        .await?;
+                    if resp.success() {
+                        count.fetch_add(1, Ordering::SeqCst);
+                    }
+                }
+                Ok::<(), anyhow::Error>(())
+            })
+        })
+        .collect();
 
     // =========================================================
     // Step 4: Collect events while writes happen

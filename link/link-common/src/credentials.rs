@@ -15,9 +15,10 @@
 //! - No plaintext passwords stored on disk
 //! - Tokens can have limited scopes
 
-use crate::error::Result;
 use kalamdb_commons::UserId;
 use serde::{Deserialize, Serialize};
+
+use crate::error::Result;
 
 /// Stored credentials for a KalamDB instance.
 ///
@@ -239,10 +240,7 @@ pub trait CredentialStore {
 /// use kalam_client::credentials::{CredentialStore, Credentials, MemoryCredentialStore};
 ///
 /// let mut store = MemoryCredentialStore::new();
-/// let creds = Credentials::new(
-///     "local".to_string(),
-///     "jwt.token.value".to_string(),
-/// );
+/// let creds = Credentials::new("local".to_string(), "jwt.token.value".to_string());
 ///
 /// store.set_credentials(&creds).unwrap();
 /// let retrieved = store.get_credentials("local").unwrap();

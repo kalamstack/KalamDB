@@ -1,9 +1,7 @@
-use super::trusted_proxies::parse_trusted_proxy_entries;
-use super::types::ServerConfig;
+use std::{fs, net::IpAddr, path::Path};
+
+use super::{trusted_proxies::parse_trusted_proxy_entries, types::ServerConfig};
 use crate::file_helpers::normalize_dir_path;
-use std::fs;
-use std::net::IpAddr;
-use std::path::Path;
 
 fn is_localhost_host(host: &str) -> bool {
     let trimmed = host.trim().trim_matches('[').trim_matches(']');
@@ -212,7 +210,8 @@ impl ServerConfig {
             && !has_configured_origin_policy(&self.security.cors.allowed_origins)
         {
             return Err(anyhow::anyhow!(
-                "Non-localhost HTTP exposure requires security.cors.allowed_origins to be configured (empty is not allowed)"
+                "Non-localhost HTTP exposure requires security.cors.allowed_origins to be \
+                 configured (empty is not allowed)"
             ));
         }
 
@@ -222,8 +221,10 @@ impl ServerConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::super::cluster::{ClusterConfig, PeerConfig};
-    use super::*;
+    use super::{
+        super::cluster::{ClusterConfig, PeerConfig},
+        *,
+    };
 
     fn local_cluster_config() -> ClusterConfig {
         ClusterConfig {

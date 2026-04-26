@@ -9,8 +9,9 @@
 // Note: Testing actual NOT_LEADER errors on follower nodes requires a multi-node cluster.
 // These tests focus on verifying the implementation is wired correctly on a single node.
 
-use crate::common::*;
 use std::time::Duration;
+
+use crate::common::*;
 
 /// Test that basic SELECT queries work on the leader node
 /// This verifies the leader check doesn't break normal operation

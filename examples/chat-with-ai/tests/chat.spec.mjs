@@ -11,8 +11,6 @@ const serverUrl = process.env.KALAMDB_URL ?? 'http://127.0.0.1:8080';
 const room = process.env.CHAT_TEST_ROOM ?? 'playwright-room-fallback';
 const adminUsername = 'admin';
 const adminPassword = 'kalamdb123';
-const rootUsername = 'root';
-const rootPassword = process.env.KALAMDB_ROOT_PASSWORD ?? 'kalamdb123';
 
 let agentProcess;
 const testGroup = `chat-demo-test-${Date.now()}`;
@@ -263,7 +261,7 @@ function assertNoDuplicateSeqRows(events, context) {
 }
 
 async function createUser(username) {
-  const token = await login(rootUsername, rootPassword);
+  const token = await login(adminUsername, adminPassword);
   await executeSql(token, `CREATE USER ${sqlLiteral(username)} WITH PASSWORD ${sqlLiteral(adminPassword)} ROLE user`);
 }
 
@@ -279,7 +277,7 @@ async function insertAssistantMessages(roomName, contents, username = adminUsern
     return;
   }
 
-  const token = await login(rootUsername, rootPassword);
+  const token = await login(adminUsername, adminPassword);
   await executeSql(token, `EXECUTE AS USER ${sqlLiteral(username)} (${statement})`);
 }
 

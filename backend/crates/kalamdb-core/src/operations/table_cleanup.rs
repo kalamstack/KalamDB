@@ -3,14 +3,18 @@
 //! These functions are shared by the `DropTableHandler` (in `kalamdb-handlers`)
 //! and the `CleanupExecutor` (in `kalamdb-jobs`).
 
-use crate::app_context::AppContext;
-use crate::error::KalamDbError;
-use crate::error_extensions::KalamDbResultExt;
-use crate::schema_registry::SchemaRegistry;
-use kalamdb_commons::models::{StorageId, TableId};
-use kalamdb_commons::schemas::TableType;
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+use kalamdb_commons::{
+    models::{StorageId, TableId},
+    schemas::TableType,
+};
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    app_context::AppContext, error::KalamDbError, error_extensions::KalamDbResultExt,
+    schema_registry::SchemaRegistry,
+};
 
 /// Cleanup operation types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

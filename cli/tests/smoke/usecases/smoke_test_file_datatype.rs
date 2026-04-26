@@ -9,12 +9,13 @@
 //!
 //! Run with: cargo test --test smoke smoke_test_file_datatype
 
+use reqwest::Client;
+use serde_json::Value;
+
 use crate::common::{
     force_auto_test_server_url_async, generate_unique_namespace, get_access_token_for_url,
     test_context,
 };
-use reqwest::Client;
-use serde_json::Value;
 
 #[tokio::test]
 #[ntest::timeout(60000)]
@@ -45,7 +46,8 @@ async fn test_file_datatype_upload_and_download() {
     // 3. Upload file via multipart endpoint
     let test_content = b"This is the file content for testing FILE datatype!";
     let sql = format!(
-        "INSERT INTO {}.{} (id, name, attachment) VALUES ('doc1', 'My Document', FILE(\"myfile.txt\"))",
+        "INSERT INTO {}.{} (id, name, attachment) VALUES ('doc1', 'My Document', \
+         FILE(\"myfile.txt\"))",
         ns, table
     );
     let boundary = "kalamdb-boundary";
@@ -59,7 +61,8 @@ async fn test_file_datatype_upload_and_download() {
     push_line(&mut body, &format!("--{}", boundary));
     push_line(
         &mut body,
-        "Content-Disposition: form-data; name=\"file:myfile.txt\"; filename=\"test-attachment.txt\"",
+        "Content-Disposition: form-data; name=\"file:myfile.txt\"; \
+         filename=\"test-attachment.txt\"",
     );
     push_line(&mut body, "Content-Type: text/plain");
     push_line(&mut body, "");

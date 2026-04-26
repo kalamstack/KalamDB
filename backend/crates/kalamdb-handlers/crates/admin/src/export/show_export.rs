@@ -1,16 +1,25 @@
 //! Typed handler for SHOW EXPORT statement
 
-use arrow::array::{RecordBatch, StringArray, TimestampMicrosecondArray};
-use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
-use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
+use std::sync::Arc;
+
+use arrow::{
+    array::{RecordBatch, StringArray, TimestampMicrosecondArray},
+    datatypes::{DataType, Field, Schema, TimeUnit},
+};
+use kalamdb_core::{
+    app_context::AppContext,
+    error::KalamDbError,
+    sql::{
+        context::{ExecutionContext, ExecutionResult, ScalarValue},
+        executor::handlers::TypedStatementHandler,
+    },
+};
 use kalamdb_jobs::AppContextJobsExt;
 use kalamdb_sql::ddl::ShowExportStatement;
-use kalamdb_system::providers::jobs::models::{Job, JobFilter, JobSortField, SortOrder};
-use kalamdb_system::JobType;
-use std::sync::Arc;
+use kalamdb_system::{
+    providers::jobs::models::{Job, JobFilter, JobSortField, SortOrder},
+    JobType,
+};
 
 /// Handler for SHOW EXPORT
 ///
@@ -48,9 +57,9 @@ impl ShowExportHandler {
 
     /// Extract export_id from job parameters JSON
     fn extract_export_id(job: &Job) -> Option<String> {
-        job.parameters.as_ref().and_then(|v| {
-            v.get("export_id").and_then(|e| e.as_str().map(String::from))
-        })
+        job.parameters
+            .as_ref()
+            .and_then(|v| v.get("export_id").and_then(|e| e.as_str().map(String::from)))
     }
 }
 

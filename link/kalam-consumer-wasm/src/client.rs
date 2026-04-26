@@ -1,7 +1,6 @@
 use base64::Engine;
-use wasm_bindgen::prelude::*;
-
 use link_common::models::{AckResponse, ConsumeMessage, ConsumeResponse, RowData, UserId};
+use wasm_bindgen::prelude::*;
 
 use crate::helpers::{
     fetch_json_response, js_value_to_json_string, response_text, serialize_json_to_js_value,
@@ -142,7 +141,9 @@ fn decode_consume_message(
             .get("key")
             .and_then(serde_json::Value::as_str)
             .map(ToOwned::to_owned)
-            .or_else(|| raw.get("message_id").and_then(serde_json::Value::as_str).map(ToOwned::to_owned)),
+            .or_else(|| {
+                raw.get("message_id").and_then(serde_json::Value::as_str).map(ToOwned::to_owned)
+            }),
         op: raw.get("op").and_then(serde_json::Value::as_str).map(ToOwned::to_owned),
         timestamp_ms: raw
             .get("timestamp_ms")

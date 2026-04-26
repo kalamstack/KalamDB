@@ -22,5 +22,5 @@ pub struct TopicMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
     /// Operation type that triggered this message (Insert, Update, Delete)
-    pub op: String, //TODO: Use TopicOp instead
+    pub op: String, // TODO: Use TopicOp instead
 }

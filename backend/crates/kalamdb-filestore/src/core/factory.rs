@@ -13,29 +13,29 @@
 //! and applied to all remote storage backends (S3, GCS, Azure).
 
 #[cfg(any(feature = "cloud-aws", feature = "cloud-gcp", feature = "cloud-azure"))]
-use crate::core::paths::parse_remote_url;
-use crate::error::{FilestoreError, Result};
+use std::time::Duration;
+use std::{path::PathBuf, sync::Arc};
+
 use kalamdb_configs::config::types::RemoteStorageTimeouts;
-use kalamdb_system::providers::storages::models::{
-    StorageLocationConfig, StorageLocationConfigError,
+use kalamdb_system::{
+    providers::storages::models::{StorageLocationConfig, StorageLocationConfigError},
+    Storage,
 };
-use kalamdb_system::Storage;
 #[cfg(feature = "cloud-aws")]
 use object_store::aws::AmazonS3Builder;
 #[cfg(feature = "cloud-azure")]
 use object_store::azure::MicrosoftAzureBuilder;
 #[cfg(feature = "cloud-gcp")]
 use object_store::gcp::GoogleCloudStorageBuilder;
-use object_store::local::LocalFileSystem;
-use object_store::path::Path as ObjectStorePath;
-use object_store::prefix::PrefixStore;
 #[cfg(any(feature = "cloud-aws", feature = "cloud-gcp", feature = "cloud-azure"))]
 use object_store::ClientOptions;
-use object_store::ObjectStore;
-use std::path::PathBuf;
-use std::sync::Arc;
+use object_store::{
+    local::LocalFileSystem, path::Path as ObjectStorePath, prefix::PrefixStore, ObjectStore,
+};
+
 #[cfg(any(feature = "cloud-aws", feature = "cloud-gcp", feature = "cloud-azure"))]
-use std::time::Duration;
+use crate::core::paths::parse_remote_url;
+use crate::error::{FilestoreError, Result};
 
 /// Build an `ObjectStore` instance from a Storage entity.
 ///
@@ -267,10 +267,10 @@ mod tests {
 
     #[test]
     fn test_build_object_store_filesystem() {
-        use kalamdb_commons::models::ids::StorageId;
-        use kalamdb_system::providers::storages::models::StorageType;
-        use kalamdb_system::Storage;
         use std::env;
+
+        use kalamdb_commons::models::ids::StorageId;
+        use kalamdb_system::{providers::storages::models::StorageType, Storage};
 
         let temp_dir = env::temp_dir().join("kalamdb_test_build_store");
         let _ = std::fs::remove_dir_all(&temp_dir);

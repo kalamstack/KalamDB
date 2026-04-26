@@ -1,3 +1,11 @@
+use std::{
+    sync::{Arc, RwLock},
+    time::Duration,
+};
+
+#[cfg(feature = "healthcheck")]
+use tokio::sync::Mutex;
+
 #[cfg(feature = "healthcheck")]
 use super::HealthCheckCache;
 use super::{KalamLinkClient, KalamLinkClientBuilder};
@@ -8,12 +16,6 @@ use crate::{
     query::AuthRefreshCallback,
     timeouts::KalamLinkTimeouts,
 };
-use std::{
-    sync::{Arc, RwLock},
-    time::Duration,
-};
-#[cfg(feature = "healthcheck")]
-use tokio::sync::Mutex;
 
 impl KalamLinkClientBuilder {
     pub(crate) fn new() -> Self {
@@ -132,7 +134,10 @@ impl KalamLinkClientBuilder {
             },
             #[cfg(not(feature = "http2"))]
             HttpVersion::Http2 => {
-                log::warn!("[CLIENT] HTTP/2 requested but 'http2' feature is not enabled; falling back to HTTP/1.1");
+                log::warn!(
+                    "[CLIENT] HTTP/2 requested but 'http2' feature is not enabled; falling back \
+                     to HTTP/1.1"
+                );
                 client_builder.http1_only()
             },
             HttpVersion::Auto => {

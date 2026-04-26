@@ -17,6 +17,7 @@ pub use commit_result::{
 pub use commit_sequence::CommitSequenceTracker;
 pub use coordinator::TransactionCoordinator;
 pub use handle::TransactionHandle;
+pub use kalamdb_transactions::{TransactionOverlay, TransactionOverlayEntry};
 pub use metrics::ActiveTransactionMetric;
 pub use overlay_view::{
     CoordinatorAccessValidator, CoordinatorMutationSink, CoordinatorOverlayView,
@@ -24,5 +25,3 @@ pub use overlay_view::{
 pub use owner::ExecutionOwnerKey;
 pub use staged_mutation::StagedMutation;
 pub use write_set::TransactionWriteSet;
-
-pub use kalamdb_transactions::{TransactionOverlay, TransactionOverlayEntry};

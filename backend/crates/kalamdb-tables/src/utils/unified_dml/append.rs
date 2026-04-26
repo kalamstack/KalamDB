@@ -3,15 +3,17 @@
 //! This module implements append_version(), the core function used by INSERT/UPDATE/DELETE
 //! to create new versions in the hot storage layer.
 
-use crate::error::KalamDbError;
-use crate::{SharedTableRow, SharedTableStore, UserTableRow, UserTableStore};
-use kalamdb_commons::conversions::arrow_json_conversion::json_to_row;
-use kalamdb_commons::ids::{SeqId, UserTableRowId};
-use kalamdb_commons::models::schemas::TableType;
-use kalamdb_commons::models::{TableId, UserId};
+use std::sync::Arc;
+
+use kalamdb_commons::{
+    conversions::arrow_json_conversion::json_to_row,
+    ids::{SeqId, UserTableRowId},
+    models::{schemas::TableType, TableId, UserId},
+};
 use kalamdb_store::EntityStore;
 use kalamdb_system::SystemColumnsService;
-use std::sync::Arc;
+
+use crate::{error::KalamDbError, SharedTableRow, SharedTableStore, UserTableRow, UserTableStore};
 
 /// Append a new version to the table's hot storage (synchronous)
 ///

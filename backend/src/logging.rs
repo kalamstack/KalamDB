@@ -5,13 +5,15 @@
 // `log::*` macro calls and routes them through the tracing subscriber so
 // span context is preserved end-to-end.
 
-use std::collections::HashMap;
-use std::fs::{self, OpenOptions};
-use std::path::Path;
 #[cfg(feature = "otel")]
 use std::sync::{Mutex, OnceLock};
 #[cfg(feature = "otel")]
 use std::time::Duration;
+use std::{
+    collections::HashMap,
+    fs::{self, OpenOptions},
+    path::Path,
+};
 
 use kalamdb_configs::config::types::OtlpSettings;
 #[cfg(feature = "otel")]
@@ -24,10 +26,9 @@ use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::Resource;
 #[cfg(feature = "otel")]
 use tracing_subscriber::filter::filter_fn;
-use tracing_subscriber::fmt::format::FmtSpan;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{EnvFilter, Layer};
+use tracing_subscriber::{
+    fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer,
+};
 
 #[cfg(feature = "otel")]
 static OTEL_TRACER_PROVIDER: OnceLock<Mutex<Option<SdkTracerProvider>>> = OnceLock::new();

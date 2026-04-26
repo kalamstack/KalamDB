@@ -111,7 +111,7 @@ mod tests {
         assert_eq!(
             id,
             CallerIdentity::PgExtension {
-                name: "myapp".to_string()
+                name: "myapp".to_string(),
             }
         );
     }
@@ -122,7 +122,7 @@ mod tests {
         assert_eq!(
             id,
             CallerIdentity::ClusterNode {
-                raw_id: "3".to_string()
+                raw_id: "3".to_string(),
             }
         );
     }

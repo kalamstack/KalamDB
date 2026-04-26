@@ -5,12 +5,15 @@
 //! possible, and adds test-specific utilities for common patterns.
 //!
 //! # Core Principle
-//! - Use `QueryResponse` built-in methods: `rows_as_maps()`, `first_row_as_map()`, `get_i64()`, `get_string()`
+//! - Use `QueryResponse` built-in methods: `rows_as_maps()`, `first_row_as_map()`, `get_i64()`,
+//!   `get_string()`
 //! - Add test-specific helpers here for common assertions and patterns
 //! - Keep all query helpers in this single file
 
-use kalam_client::models::{QueryResponse, ResponseStatus};
-use kalam_client::KalamCellValue;
+use kalam_client::{
+    models::{QueryResponse, ResponseStatus},
+    KalamCellValue,
+};
 use serde_json::Value as JsonValue;
 
 /// Get a count value from a COUNT(*) query response safely.

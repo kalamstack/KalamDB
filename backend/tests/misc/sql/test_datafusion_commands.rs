@@ -3,9 +3,10 @@
 //! Verifies that DataFusion built-in commands (EXPLAIN, SET, SHOW, DESCRIBE)
 //! work correctly for admin users and are blocked for non-admin users.
 
-use super::test_support::TestServer;
 use kalam_client::models::ResponseStatus;
 use kalamdb_commons::models::{Role, UserId};
+
+use super::test_support::TestServer;
 
 async fn insert_user(server: &TestServer, username: &str, role: Role) -> UserId {
     server.create_user(username, "TestPass123!", role).await
@@ -141,7 +142,8 @@ async fn test_show_columns_admin_allowed() {
 
     // Create namespace and table
     server.execute_sql("CREATE NAMESPACE df_cols_test").await;
-    let create_sql = "CREATE TABLE df_cols_test.test_table (id INT PRIMARY KEY, name TEXT, age INT) WITH (TYPE = 'SHARED')";
+    let create_sql = "CREATE TABLE df_cols_test.test_table (id INT PRIMARY KEY, name TEXT, age \
+                      INT) WITH (TYPE = 'SHARED')";
     server.execute_sql(create_sql).await;
 
     // SHOW COLUMNS should work for admin
@@ -163,7 +165,8 @@ async fn test_show_columns_user_denied() {
 
     // Create namespace and table
     server.execute_sql("CREATE NAMESPACE df_cols_test2").await;
-    let create_sql = "CREATE TABLE df_cols_test2.test_table (id INT PRIMARY KEY, name TEXT) WITH (TYPE = 'SHARED')";
+    let create_sql = "CREATE TABLE df_cols_test2.test_table (id INT PRIMARY KEY, name TEXT) WITH \
+                      (TYPE = 'SHARED')";
     server.execute_sql(create_sql).await;
 
     // SHOW COLUMNS should be denied for regular user
@@ -190,7 +193,8 @@ async fn test_describe_datafusion_style_admin_allowed() {
 
     // Create namespace and table
     server.execute_sql("CREATE NAMESPACE df_desc_test").await;
-    let create_sql = "CREATE TABLE df_desc_test.test_table (id INT PRIMARY KEY, name TEXT) WITH (TYPE = 'SHARED')";
+    let create_sql = "CREATE TABLE df_desc_test.test_table (id INT PRIMARY KEY, name TEXT) WITH \
+                      (TYPE = 'SHARED')";
     server.execute_sql(create_sql).await;
 
     // DESCRIBE (DataFusion style without TABLE keyword) should work for admin
@@ -212,7 +216,8 @@ async fn test_describe_datafusion_style_user_denied() {
 
     // Create namespace and table
     server.execute_sql("CREATE NAMESPACE df_desc_test2").await;
-    let create_sql = "CREATE TABLE df_desc_test2.test_table (id INT PRIMARY KEY, name TEXT) WITH (TYPE = 'SHARED')";
+    let create_sql = "CREATE TABLE df_desc_test2.test_table (id INT PRIMARY KEY, name TEXT) WITH \
+                      (TYPE = 'SHARED')";
     server.execute_sql(create_sql).await;
 
     // DESCRIBE should be denied for regular user
@@ -235,7 +240,8 @@ async fn test_system_role_datafusion_commands() {
 
     // Create namespace and table
     server.execute_sql("CREATE NAMESPACE df_sys_test").await;
-    let create_sql = "CREATE TABLE df_sys_test.test_table (id INT PRIMARY KEY, name TEXT) WITH (TYPE = 'SHARED')";
+    let create_sql = "CREATE TABLE df_sys_test.test_table (id INT PRIMARY KEY, name TEXT) WITH \
+                      (TYPE = 'SHARED')";
     server.execute_sql(create_sql).await;
 
     // System role should also be able to use DataFusion commands
@@ -267,7 +273,8 @@ async fn test_service_role_datafusion_commands_denied() {
 
     // Create namespace and table
     server.execute_sql("CREATE NAMESPACE df_svc_test").await;
-    let create_sql = "CREATE TABLE df_svc_test.test_table (id INT PRIMARY KEY, name TEXT) WITH (TYPE = 'SHARED')";
+    let create_sql = "CREATE TABLE df_svc_test.test_table (id INT PRIMARY KEY, name TEXT) WITH \
+                      (TYPE = 'SHARED')";
     server.execute_sql(create_sql).await;
 
     // Service role should NOT be able to use DataFusion commands (not admin)

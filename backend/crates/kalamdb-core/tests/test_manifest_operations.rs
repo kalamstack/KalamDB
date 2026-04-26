@@ -3,11 +3,12 @@
 //! These tests cover error scenarios, edge cases, and failure modes
 //! that could occur during manifest read/write operations.
 
-use kalamdb_commons::ids::SeqId;
-use kalamdb_commons::models::rows::StoredScalarValue;
-use kalamdb_commons::{NamespaceId, TableId, TableName, UserId};
-use kalamdb_system::{Manifest, SegmentMetadata};
 use std::collections::HashMap;
+
+use kalamdb_commons::{
+    ids::SeqId, models::rows::StoredScalarValue, NamespaceId, TableId, TableName, UserId,
+};
+use kalamdb_system::{Manifest, SegmentMetadata};
 
 #[test]
 fn test_manifest_serialization_deserialization() {

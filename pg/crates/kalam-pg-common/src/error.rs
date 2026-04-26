@@ -11,8 +11,8 @@ pub enum KalamPgError {
     Unsupported(String),
     /// The KalamDB server could not be reached at the given address.
     #[error(
-        "KalamDB server is not running or unreachable at {0} – \
-         start the server and verify the host/port in CREATE SERVER OPTIONS"
+        "KalamDB server is not running or unreachable at {0} – start the server and verify the \
+         host/port in CREATE SERVER OPTIONS"
     )]
     ServerUnreachable(String),
 }

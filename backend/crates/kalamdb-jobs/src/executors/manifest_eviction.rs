@@ -19,13 +19,14 @@
 //! - eviction_interval_seconds: How often the job runs (default: 600s = 10 minutes)
 //! - eviction_ttl_days: How many days before an unaccessed manifest is evicted (default: 7 days)
 
-use crate::executors::{JobContext, JobDecision, JobExecutor, JobParams};
+use std::sync::Arc;
+
 use async_trait::async_trait;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
+use kalamdb_core::{app_context::AppContext, error::KalamDbError};
 use kalamdb_system::JobType;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+
+use crate::executors::{JobContext, JobDecision, JobExecutor, JobParams};
 
 fn default_ttl_days() -> u64 {
     7

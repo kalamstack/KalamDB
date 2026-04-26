@@ -4,10 +4,15 @@
 //! the client can serialize/deserialize `_seq` values without depending
 //! on the heavy `kalamdb-commons` crate.
 
-use serde::de::{self, Visitor};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::fmt;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    fmt,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use serde::{
+    de::{self, Visitor},
+    Deserialize, Deserializer, Serialize, Serializer,
+};
 
 /// Sequence ID for MVCC versioning (Snowflake layout: timestamp | worker | seq)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

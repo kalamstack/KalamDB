@@ -2,12 +2,12 @@
 //!
 //! Validates user isolation, parallel operations, and live query notifications
 
-use crate::common::*;
-
 use std::{
     thread,
     time::{Duration, Instant},
 };
+
+use crate::common::*;
 
 const NUM_USERS: usize = 5;
 const ROWS_PER_USER: usize = 2000;
@@ -27,7 +27,7 @@ fn test_concurrent_users_isolation() {
     let test_start = Instant::now();
 
     // Generate unique user suffix to avoid conflicts
-    //Instead of timestamp add random str from 5 characters
+    // Instead of timestamp add random str from 5 characters
     let user_suffix = random_string(5);
 
     // Setup namespace and table
@@ -36,11 +36,11 @@ fn test_concurrent_users_isolation() {
     let full_table = format!("{}.{}", namespace, table_name);
 
     let setup_start = Instant::now();
-    //Drop the current table if it exists
+    // Drop the current table if it exists
     let drop_sql = format!("DROP TABLE IF EXISTS {}", full_table);
     let _ = execute_sql_as_root_via_cli(&drop_sql);
 
-    //Check if the table was dropped successfully
+    // Check if the table was dropped successfully
     let check_sql = format!("SELECT * FROM {}", full_table);
     let check_result = execute_sql_as_root_via_cli(&check_sql);
     if check_result.is_ok() {
@@ -56,7 +56,8 @@ fn test_concurrent_users_isolation() {
     }
 
     let create_table_sql = format!(
-        "CREATE TABLE {} (id INTEGER, message TEXT, timestamp BIGINT, current_user_id TEXT DEFAULT CURRENT_USER()) WITH (TYPE='USER', FLUSH_POLICY='rows:100')",
+        "CREATE TABLE {} (id INTEGER, message TEXT, timestamp BIGINT, current_user_id TEXT \
+         DEFAULT CURRENT_USER()) WITH (TYPE='USER', FLUSH_POLICY='rows:100')",
         full_table
     );
     if let Err(e) = execute_sql_as_root_via_cli(&create_table_sql) {

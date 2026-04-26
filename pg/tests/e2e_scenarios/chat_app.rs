@@ -52,26 +52,47 @@ async fn e2e_scenario_chat_app_support_workspace_flow() {
 
     pg_admin
         .batch_execute(&format!(
-            "INSERT INTO {schema}.{messages} (id, room_id, sender_id, body, sentiment, token_count) VALUES
-             ('m1', 'room-billing', 'cust-100', 'My invoice is wrong and I need a refund today', 'negative', 11),
-             ('m2', 'room-billing', 'agent-7', 'I can review the invoice and open a credit ticket', 'neutral', 12),
-             ('m3', 'room-billing', 'cust-100', 'Please escalate this before renewal', 'negative', 6),
-             ('m4', 'room-retain', 'lead-4', 'Offer annual discount when renewal risk is high', 'positive', 9);"
+            "INSERT INTO {schema}.{messages} (id, room_id, sender_id, body, sentiment, \
+             token_count) VALUES
+             ('m1', 'room-billing', 'cust-100', 'My invoice is wrong and I need a refund today', \
+             'negative', 11),
+             ('m2', 'room-billing', 'agent-7', 'I can review the invoice and open a credit \
+             ticket', 'neutral', 12),
+             ('m3', 'room-billing', 'cust-100', 'Please escalate this before renewal', 'negative', \
+             6),
+             ('m4', 'room-retain', 'lead-4', 'Offer annual discount when renewal risk is high', \
+             'positive', 9);"
         ))
         .await
         .expect("seed chat messages");
 
     pg_alice
         .execute(
-            &format!("INSERT INTO {schema}.{drafts} (id, room_id, body, last_model) VALUES ($1, $2, $3, $4)"),
-            &[&"draft-a1", &"room-billing", &"Prepared refund explanation with invoice steps", &"gpt-5.4"],
+            &format!(
+                "INSERT INTO {schema}.{drafts} (id, room_id, body, last_model) VALUES ($1, $2, \
+                 $3, $4)"
+            ),
+            &[
+                &"draft-a1",
+                &"room-billing",
+                &"Prepared refund explanation with invoice steps",
+                &"gpt-5.4",
+            ],
         )
         .await
         .expect("insert alice draft");
     pg_bob
         .execute(
-            &format!("INSERT INTO {schema}.{drafts} (id, room_id, body, last_model) VALUES ($1, $2, $3, $4)"),
-            &[&"draft-b1", &"room-retain", &"Drafted renewal outreach for risk account", &"gpt-5.4"],
+            &format!(
+                "INSERT INTO {schema}.{drafts} (id, room_id, body, last_model) VALUES ($1, $2, \
+                 $3, $4)"
+            ),
+            &[
+                &"draft-b1",
+                &"room-retain",
+                &"Drafted renewal outreach for risk account",
+                &"gpt-5.4",
+            ],
         )
         .await
         .expect("insert bob draft");
@@ -105,7 +126,8 @@ async fn e2e_scenario_chat_app_support_workspace_flow() {
 
     let escalation_feed = env
         .kalamdb_sql(&format!(
-            "SELECT sender_id, body FROM {schema}.{messages} WHERE room_id = 'room-billing' ORDER BY id"
+            "SELECT sender_id, body FROM {schema}.{messages} WHERE room_id = 'room-billing' ORDER \
+             BY id"
         ))
         .await;
     let escalation_feed_text = serde_json::to_string(&escalation_feed).unwrap_or_default();

@@ -1,8 +1,9 @@
-use crate::models::SubscriptionOptions;
-use crate::models::{ChangeEvent, ServerMessage};
-use crate::seq_id::SeqId;
-use crate::seq_tracking;
-use crate::subscription::{LiveRowsConfig, LiveRowsMaterializer};
+use crate::{
+    models::{ChangeEvent, ServerMessage, SubscriptionOptions},
+    seq_id::SeqId,
+    seq_tracking,
+    subscription::{LiveRowsConfig, LiveRowsMaterializer},
+};
 
 #[derive(Clone)]
 pub(crate) enum SubscriptionCallbackMode {

@@ -5,20 +5,22 @@ mod bearer;
 mod password;
 mod types;
 
-use crate::errors::error::{AuthError, AuthResult};
-use crate::models::context::AuthenticatedUser;
-use crate::providers::jwt_config;
-use crate::repository::user_repo::UserRepository;
-use crate::services::login_tracker::LoginTracker;
-use once_cell::sync::Lazy;
 use std::sync::Arc;
-use tracing::Instrument;
-
-use bearer::authenticate_bearer;
-use password::authenticate_user_password;
-pub use types::{AuthMethod, AuthRequest, AuthenticationResult};
 
 pub use audit::extract_user_id_for_audit;
+use bearer::authenticate_bearer;
+use once_cell::sync::Lazy;
+use password::authenticate_user_password;
+use tracing::Instrument;
+pub use types::{AuthMethod, AuthRequest, AuthenticationResult};
+
+use crate::{
+    errors::error::{AuthError, AuthResult},
+    models::context::AuthenticatedUser,
+    providers::jwt_config,
+    repository::user_repo::UserRepository,
+    services::login_tracker::LoginTracker,
+};
 
 /// Cached login tracker instance.
 static LOGIN_TRACKER: Lazy<LoginTracker> = Lazy::new(LoginTracker::new);
@@ -146,8 +148,9 @@ fn record_authenticated_span(user: &AuthenticatedUser) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kalamdb_commons::UserId;
+
+    use super::*;
 
     #[test]
     fn test_auth_method_debug() {

@@ -10,10 +10,11 @@
 //! - Session timeout and command history
 //! - Tab completion and verbose output
 
-use crate::common::*;
+use std::fs;
 
 use predicates::prelude::*;
-use std::fs;
+
+use crate::common::*;
 
 /// T036: Test CLI connection and prompt display
 #[test]

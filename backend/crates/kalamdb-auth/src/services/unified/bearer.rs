@@ -1,15 +1,19 @@
-use crate::errors::error::{AuthError, AuthResult};
-use crate::models::context::AuthenticatedUser;
-use crate::oidc::OidcError;
-use crate::providers::jwt_auth;
-use crate::providers::jwt_config;
-use crate::providers::jwt_config::JwtConfig;
-use crate::repository::user_repo::UserRepository;
-use jsonwebtoken::Algorithm;
-use kalamdb_commons::models::{ConnectionInfo, UserId};
-use kalamdb_commons::AuthType;
 use std::sync::Arc;
+
+use jsonwebtoken::Algorithm;
+use kalamdb_commons::{
+    models::{ConnectionInfo, UserId},
+    AuthType,
+};
 use tracing::Instrument;
+
+use crate::{
+    errors::error::{AuthError, AuthResult},
+    models::context::AuthenticatedUser,
+    oidc::OidcError,
+    providers::{jwt_auth, jwt_config, jwt_config::JwtConfig},
+    repository::user_repo::UserRepository,
+};
 
 pub(super) async fn authenticate_bearer(
     token: &str,
@@ -126,9 +130,9 @@ async fn validate_bearer_token(
         Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512 => {
             if !jwt_auth::is_internal_issuer(issuer) {
                 return Err(AuthError::MalformedAuthorization(format!(
-                    "HS256 tokens are only accepted for internally-issued tokens \
-                     (iss='{}'). External provider tokens must use an asymmetric \
-                     algorithm (RS256 / ES256). Received iss='{}'.",
+                    "HS256 tokens are only accepted for internally-issued tokens (iss='{}'). \
+                     External provider tokens must use an asymmetric algorithm (RS256 / ES256). \
+                     Received iss='{}'.",
                     jwt_auth::KALAMDB_ISSUER,
                     issuer
                 )));

@@ -4,12 +4,16 @@
 // - Inserts rows, triggers flush, and verifies parquet output directories match templates
 // - Drops tables and asserts directories are removed
 
-use crate::common::*;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    thread,
+    time::{Duration, Instant},
+};
+
 use serde_json::Value as JsonValue;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::thread;
-use std::time::{Duration, Instant};
+
+use crate::common::*;
 
 struct CleanupActions {
     actions: Vec<Box<dyn FnOnce() + Send + 'static>>,
@@ -215,9 +219,10 @@ fn smoke_storage_custom_templates() {
                     }
                     if collected.is_empty() {
                         panic!(
-                        "Expected parquet files under {} (direct or recursive) but none were found",
-                        expected_user_dir.display()
-                    );
+                            "Expected parquet files under {} (direct or recursive) but none were \
+                             found",
+                            expected_user_dir.display()
+                        );
                     }
                     collected
                 },
@@ -303,9 +308,10 @@ fn smoke_storage_custom_templates() {
                     }
                     if collected.is_empty() {
                         panic!(
-                        "Expected parquet files under {} (direct or recursive) but none were found",
-                        expected_shared_dir.display()
-                    );
+                            "Expected parquet files under {} (direct or recursive) but none were \
+                             found",
+                            expected_shared_dir.display()
+                        );
                     }
                     collected
                 },
@@ -462,7 +468,8 @@ fn assert_storage_registered(storage_id: &str, expected_base_dir: &str) {
 
 fn assert_table_storage(namespace: &str, table_name: &str, expected_storage_id: &str) {
     let sql = format!(
-        "SELECT table_name, namespace_id, options FROM system.schemas WHERE namespace_id = '{}' AND table_name = '{}'",
+        "SELECT table_name, namespace_id, options FROM system.schemas WHERE namespace_id = '{}' \
+         AND table_name = '{}'",
         namespace, table_name
     );
     let rows = query_rows(&sql);

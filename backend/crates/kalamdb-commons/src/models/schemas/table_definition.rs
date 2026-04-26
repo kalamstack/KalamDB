@@ -1,18 +1,24 @@
 //! Table definition - single source of truth for table schemas
 //!
-//! **Phase 16 Schema Versioning**: Schema history is now stored separately using TableVersionId keys.
-//! Each TableDefinition stores only its current `schema_version: u32`.
-//! Historical versions are stored as separate entries: `{tableId}<ver>{version:08}` -> TableDefinition
-//! The latest pointer `{tableId}<lat>` points to the current version.
+//! **Phase 16 Schema Versioning**: Schema history is now stored separately using TableVersionId
+//! keys. Each TableDefinition stores only its current `schema_version: u32`.
+//! Historical versions are stored as separate entries: `{tableId}<ver>{version:08}` ->
+//! TableDefinition The latest pointer `{tableId}<lat>` points to the current version.
 
-use crate::conversions::{with_kalam_column_flags_metadata, with_kalam_data_type_metadata};
-use crate::models::datatypes::{ArrowConversionError, ToArrowType};
-use crate::models::schemas::{ColumnDefinition, SchemaField, TableOptions, TableType};
-use crate::{NamespaceId, TableName};
+use std::sync::Arc;
+
 use arrow_schema::{Field, Schema as ArrowSchema};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::sync::Arc;
+
+use crate::{
+    conversions::{with_kalam_column_flags_metadata, with_kalam_data_type_metadata},
+    models::{
+        datatypes::{ArrowConversionError, ToArrowType},
+        schemas::{ColumnDefinition, SchemaField, TableOptions, TableType},
+    },
+    NamespaceId, TableName,
+};
 
 /// Complete definition of a table including schema, history, and options
 ///
@@ -417,9 +423,10 @@ impl TableDefinition {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::datatypes::KalamDataType;
-    use crate::models::schemas::ColumnDefault;
-    use crate::{NamespaceId, TableName};
+    use crate::{
+        models::{datatypes::KalamDataType, schemas::ColumnDefault},
+        NamespaceId, TableName,
+    };
 
     fn sample_columns() -> Vec<ColumnDefinition> {
         vec![

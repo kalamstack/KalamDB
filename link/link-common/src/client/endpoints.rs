@@ -1,3 +1,6 @@
+#[cfg(feature = "healthcheck")]
+use std::time::Instant;
+
 use super::KalamLinkClient;
 #[cfg(feature = "healthcheck")]
 use super::HEALTH_CHECK_TTL;
@@ -6,8 +9,6 @@ use crate::error::{KalamLinkError, Result};
 use crate::models::ClusterHealthResponse;
 #[cfg(feature = "healthcheck")]
 use crate::models::HealthCheckResponse;
-#[cfg(feature = "healthcheck")]
-use std::time::Instant;
 
 impl KalamLinkClient {
     /// Check server health and get server information

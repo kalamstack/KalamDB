@@ -1,20 +1,27 @@
 // Smoke test to stress WebSocket connection capacity and ensure HTTP API stays responsive
 
-use crate::common::*;
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
+
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::net::TcpStream;
-use tokio::runtime::Runtime;
-use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::{
-    client::IntoClientRequest,
-    http::header::{HeaderValue, AUTHORIZATION, USER_AGENT},
-    protocol::Message,
+use tokio::{net::TcpStream, runtime::Runtime, sync::mpsc};
+use tokio_tungstenite::{
+    connect_async,
+    tungstenite::{
+        client::IntoClientRequest,
+        http::header::{HeaderValue, AUTHORIZATION, USER_AGENT},
+        protocol::Message,
+    },
+    MaybeTlsStream, WebSocketStream,
 };
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
+
+use crate::common::*;
 
 const AUTH_USERNAME: &str = "admin";
 // Use conservative count to avoid overwhelming server during testing
@@ -58,7 +65,7 @@ fn smoke_test_websocket_capacity() {
         let token = get_access_token(AUTH_USERNAME, default_password())
             .await
             .unwrap_or_else(|e| panic!("Failed to get access token: {}", e));
-        
+
         // We need to keep connections alive while running SQL queries
         // The server sends ping frames every 5s, and we need to respond with pong
         // To do this, we split connections into read/write halves and spawn tasks
@@ -72,28 +79,22 @@ fn smoke_test_websocket_capacity() {
             // Timeout each connection attempt to avoid infinite hangs
             let stream = match tokio::time::timeout(
                 CONNECTION_TIMEOUT,
-                open_authenticated_connection(
-                    idx,
-                    &token,
-                    &table_for_rt,
-                    &subscription_id,
-                ),
+                open_authenticated_connection(idx, &token, &table_for_rt, &subscription_id),
             )
             .await
             {
                 Ok(s) => s,
-                Err(_) => panic!(
-                    "Timeout opening websocket #{} after {:?}",
-                    idx, CONNECTION_TIMEOUT
-                ),
+                Err(_) => {
+                    panic!("Timeout opening websocket #{} after {:?}", idx, CONNECTION_TIMEOUT)
+                },
             };
-            
+
             // Split the stream and spawn a background task to handle incoming messages
             // This ensures we respond to ping frames and don't timeout
             let (write, mut read) = stream.split();
             let (close_tx, mut close_rx) = mpsc::channel::<()>(1);
             close_senders.push(close_tx);
-            
+
             let stop = Arc::clone(&stop_flag);
             let handle = tokio::spawn(async move {
                 loop {
@@ -136,15 +137,13 @@ fn smoke_test_websocket_capacity() {
         }
 
         println!(
-            "Opened {} authenticated WebSocket connections with keepalive. Verifying SQL responsiveness...",
+            "Opened {} authenticated WebSocket connections with keepalive. Verifying SQL \
+             responsiveness...",
             close_senders.len()
         );
 
         let sql_duration = run_simple_sql().await;
-        println!(
-            "SELECT 1 completed in {:?} while websockets were open",
-            sql_duration
-        );
+        println!("SELECT 1 completed in {:?} while websockets were open", sql_duration);
         assert!(
             sql_duration <= SQL_RESPONSIVENESS_BUDGET,
             "SQL request took {:?}, exceeding {:?} budget while websockets were open",
@@ -153,12 +152,10 @@ fn smoke_test_websocket_capacity() {
         );
 
         let live_queries_snapshot = fetch_live_queries_snapshot().await;
-        println!(
-            "system.live snapshot while connections active:\n{}",
-            live_queries_snapshot
-        );
+        println!("system.live snapshot while connections active:\n{}", live_queries_snapshot);
 
-        let active_subscription_count = count_live_query_subscriptions(subscription_prefix_for_rt).await;
+        let active_subscription_count =
+            count_live_query_subscriptions(subscription_prefix_for_rt).await;
         assert!(
             active_subscription_count >= close_senders.len(),
             "Expected at least {} live query rows, found {}",
@@ -171,17 +168,17 @@ fn smoke_test_websocket_capacity() {
         for close_tx in close_senders {
             let _ = close_tx.send(()).await;
         }
-        
+
         // Wait for all reader tasks to complete and collect write halves
         for handle in reader_handles {
             match handle.await {
                 Ok((_idx, _write)) => {
                     // Reunite not possible after split, just drop the write half
                     // The connection will close when both halves are dropped
-                }
+                },
                 Err(e) => {
                     eprintln!("Reader task panicked: {}", e);
-                }
+                },
             }
         }
 
@@ -191,7 +188,8 @@ fn smoke_test_websocket_capacity() {
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         // Verify system.live entries are cleaned up after closing
-        let post_close_count = count_live_query_subscriptions(subscription_prefix_for_cleanup.clone()).await;
+        let post_close_count =
+            count_live_query_subscriptions(subscription_prefix_for_cleanup.clone()).await;
         println!(
             "Live queries count after closing connections: {} (should be 0)",
             post_close_count
@@ -432,9 +430,10 @@ async fn wait_for_subscription_ack(
                         "initial_data_batch" => continue,
                         other => {
                             return Err(format!(
-                            "Websocket #{} received unexpected message type '{}' while awaiting ack: {}",
-                            idx, other, payload
-                        ));
+                                "Websocket #{} received unexpected message type '{}' while \
+                                 awaiting ack: {}",
+                                idx, other, payload
+                            ));
                         },
                     }
                 }
@@ -447,7 +446,8 @@ async fn wait_for_subscription_ack(
             },
             other => {
                 return Err(format!(
-                    "Websocket #{} received unexpected message while awaiting subscription ack: {:?}",
+                    "Websocket #{} received unexpected message while awaiting subscription ack: \
+                     {:?}",
                     idx, other
                 ));
             },
@@ -460,7 +460,8 @@ fn setup_test_table(namespace: &str, full_table_name: &str) {
         .expect("CREATE NAMESPACE should succeed for websocket capacity test");
 
     let create_sql = format!(
-        "CREATE TABLE IF NOT EXISTS {} (id INT PRIMARY KEY, value VARCHAR NOT NULL) WITH (TYPE = 'USER')",
+        "CREATE TABLE IF NOT EXISTS {} (id INT PRIMARY KEY, value VARCHAR NOT NULL) WITH (TYPE = \
+         'USER')",
         full_table_name
     );
     execute_sql_as_root_via_client(&create_sql)

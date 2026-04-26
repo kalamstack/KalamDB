@@ -4,6 +4,15 @@
 //! and executing operations.
 
 #[cfg(feature = "healthcheck")]
+use std::time::Instant;
+use std::{
+    sync::{Arc, RwLock},
+    time::Duration,
+};
+
+use tokio::sync::Mutex;
+
+#[cfg(feature = "healthcheck")]
 use crate::models::HealthCheckResponse;
 use crate::{
     auth::{AuthProvider, ResolvedAuth},
@@ -13,13 +22,6 @@ use crate::{
     query::{AuthRefreshCallback, QueryExecutor},
     timeouts::KalamLinkTimeouts,
 };
-#[cfg(feature = "healthcheck")]
-use std::time::Instant;
-use std::{
-    sync::{Arc, RwLock},
-    time::Duration,
-};
-use tokio::sync::Mutex;
 
 mod builder;
 mod endpoints;

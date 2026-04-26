@@ -9,10 +9,8 @@
 //! User/Shared/Stream providers override it with actual batch-insert logic.
 
 use async_trait::async_trait;
-use datafusion::datasource::TableProvider;
-use datafusion::scalar::ScalarValue;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::UserId;
+use datafusion::{datasource::TableProvider, scalar::ScalarValue};
+use kalamdb_commons::models::{rows::Row, UserId};
 
 use crate::error::KalamDbError;
 

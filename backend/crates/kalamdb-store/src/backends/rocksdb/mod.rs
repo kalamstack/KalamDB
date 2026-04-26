@@ -3,15 +3,15 @@
 mod backend;
 mod cf_tuning;
 mod init;
+mod keyspace;
 pub mod test_utils;
 
-use std::path::Path;
-use std::sync::Arc;
-
-use crate::storage_trait::StorageBackend;
+use std::{path::Path, sync::Arc};
 
 pub use backend::RocksDBBackend;
 pub use init::RocksDbInit;
+
+use crate::storage_trait::StorageBackend;
 
 /// Open the RocksDB storage backend and return it through the generic storage trait.
 pub fn open_storage_backend(

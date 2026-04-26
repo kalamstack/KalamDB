@@ -1,10 +1,29 @@
-use super::registry::{
-    advance_entry_progress, cache_entry_seq, clear_startup_deadline, effective_entry_seq,
-    merge_resume_from, next_startup_deadline, register_subscription_entry,
-    remove_subscription_entry, reset_startup_deadline, should_send_subscription_options,
-    snapshot_subscriptions, ConnCmd, SubEntry,
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicBool, AtomicU32, Ordering},
+        Arc, RwLock,
+    },
+    time::Duration,
 };
-use super::routing::{route_event, send_subscribe, send_unsubscribe};
+
+use bytes::Bytes;
+use futures_util::{SinkExt, StreamExt};
+use tokio::{
+    sync::{mpsc, oneshot},
+    time::Instant as TokioInstant,
+};
+use tokio_tungstenite::tungstenite::{client::IntoClientRequest, protocol::Message};
+
+use super::{
+    registry::{
+        advance_entry_progress, cache_entry_seq, clear_startup_deadline, effective_entry_seq,
+        merge_resume_from, next_startup_deadline,
+        register_subscription_entry, remove_subscription_entry, reset_startup_deadline,
+        should_send_subscription_options, snapshot_subscriptions, ConnCmd, SubEntry,
+    },
+    routing::{route_event, send_subscribe, send_unsubscribe},
+};
 use crate::{
     auth::{AuthProvider, ResolvedAuth},
     connection::{
@@ -17,19 +36,6 @@ use crate::{
     models::{CompressionType, ConnectionOptions, SerializationType},
     timeouts::KalamLinkTimeouts,
 };
-use bytes::Bytes;
-use futures_util::{SinkExt, StreamExt};
-use std::{
-    collections::HashMap,
-    sync::{
-        atomic::{AtomicBool, AtomicU32, Ordering},
-        Arc, RwLock,
-    },
-    time::Duration,
-};
-use tokio::sync::{mpsc, oneshot};
-use tokio::time::Instant as TokioInstant;
-use tokio_tungstenite::tungstenite::{client::IntoClientRequest, protocol::Message};
 
 fn all_resumes_ready(subs: &HashMap<String, SubEntry>) -> bool {
     subs.values().all(|entry| !entry.reconnect_resubscribe_pending)
@@ -173,7 +179,6 @@ async fn resubscribe_all(
     );
     for (id, entry) in subs.iter_mut() {
         let mut options = entry.options.clone();
-        let was_loading = entry.is_loading;
         entry.batch_seq_id = None;
         entry.is_loading = true;
         reset_startup_deadline(entry, timeouts, true);
@@ -181,17 +186,11 @@ async fn resubscribe_all(
             options.from = Some(seq_id);
             entry.options.from = Some(seq_id);
         }
-        options.snapshot_end_seq = if was_loading {
-            entry.snapshot_end_seq
-        } else {
-            None
-        };
 
         log::info!(
-            "[kalam-sdk] Re-subscribing '{}' with from={:?}, snapshot_end={:?}",
+            "[kalam-sdk] Re-subscribing '{}' with from={:?}",
             id,
             entry.options.from.map(|seq| seq.to_string()),
-            options.snapshot_end_seq.map(|seq| seq.to_string())
         );
 
         let send_options = should_send_subscription_options(entry.request_initial_data, &options)
@@ -237,7 +236,7 @@ async fn handle_startup_timeouts(
             );
             log::warn!("[kalam-sdk] {}", message);
             clear_startup_deadline(&mut entry);
-            cache_entry_seq(seq_id_cache, id, &entry);
+            cache_entry_seq(seq_id_cache, id.as_str(), &entry);
             if let Some(result_tx) = entry.pending_result_tx.take() {
                 let _ = result_tx.send(Err(KalamLinkError::TimeoutError(message)));
             }
@@ -387,7 +386,12 @@ pub(super) async fn connection_task(
                                 log::debug!("[kalam-sdk] Replacing existing subscription '{}'", id);
                                 let _ = send_unsubscribe(ws, &id, negotiated_ser).await;
                                 if let Some(mut old_entry) =
-                                    remove_subscription_entry(&mut subs, &mut seq_id_cache, &id, None)
+                                    remove_subscription_entry(
+                                        &mut subs,
+                                        &mut seq_id_cache,
+                                        &id,
+                                        None,
+                                    )
                                 {
                                     if let Some(old_tx) = old_entry.pending_result_tx.take() {
                                         let _ = old_tx.send(Err(KalamLinkError::Cancelled));
@@ -422,7 +426,12 @@ pub(super) async fn connection_task(
                         },
                         Some(ConnCmd::Unsubscribe { id, generation }) => {
                             if let Some(mut entry) =
-                                remove_subscription_entry(&mut subs, &mut seq_id_cache, &id, generation)
+                                remove_subscription_entry(
+                                    &mut subs,
+                                    &mut seq_id_cache,
+                                    &id,
+                                    generation,
+                                )
                             {
                                 if let Some(result_tx) = entry.pending_result_tx.take() {
                                     let _ = result_tx.send(Err(KalamLinkError::Cancelled));
@@ -436,9 +445,19 @@ pub(super) async fn connection_task(
                                 );
                             }
                         },
-                        Some(ConnCmd::Progress { id, generation, seq_id, advance_resume }) => {
+                        Some(ConnCmd::Progress {
+                            id,
+                            generation,
+                            seq_id,
+                            advance_resume,
+                        }) => {
                             if let Some(entry) = subs.get_mut(&id) {
-                                advance_entry_progress(entry, generation, seq_id, advance_resume);
+                                advance_entry_progress(
+                                    entry,
+                                    generation,
+                                    seq_id,
+                                    advance_resume,
+                                );
                             }
                         },
                         Some(ConnCmd::ListSubscriptions { result_tx }) => {
@@ -636,7 +655,12 @@ pub(super) async fn connection_task(
                         advance_resume,
                     }) => {
                         if let Some(entry) = subs.get_mut(&id) {
-                            advance_entry_progress(entry, generation, seq_id, advance_resume);
+                            advance_entry_progress(
+                                entry,
+                                generation,
+                                seq_id,
+                                advance_resume,
+                            );
                         }
                     },
                     Some(ConnCmd::ListSubscriptions { result_tx }) => {
@@ -657,7 +681,7 @@ pub(super) async fn connection_task(
                     ));
                     let error_message = "Max reconnection attempts reached".to_string();
                     for (id, mut entry) in subs.drain() {
-                        cache_entry_seq(&mut seq_id_cache, id, &entry);
+                        cache_entry_seq(&mut seq_id_cache, id.as_str(), &entry);
                         if let Some(result_tx) = entry.pending_result_tx.take() {
                             let _ = result_tx
                                 .send(Err(KalamLinkError::WebSocketError(error_message.clone())));
@@ -727,7 +751,12 @@ pub(super) async fn connection_task(
                             Some(ConnCmd::Subscribe { id, sql, options, request_initial_data, event_tx, result_tx }) => {
                                 if subs.contains_key(&id) {
                                     if let Some(mut old_entry) =
-                                        remove_subscription_entry(&mut subs, &mut seq_id_cache, &id, None)
+                                        remove_subscription_entry(
+                                            &mut subs,
+                                            &mut seq_id_cache,
+                                            &id,
+                                            None,
+                                        )
                                     {
                                         if let Some(old_tx) = old_entry.pending_result_tx.take() {
                                             let _ = old_tx.send(Err(KalamLinkError::Cancelled));
@@ -749,16 +778,31 @@ pub(super) async fn connection_task(
                             },
                             Some(ConnCmd::Unsubscribe { id, generation }) => {
                                 if let Some(mut entry) =
-                                    remove_subscription_entry(&mut subs, &mut seq_id_cache, &id, generation)
+                                    remove_subscription_entry(
+                                        &mut subs,
+                                        &mut seq_id_cache,
+                                        &id,
+                                        generation,
+                                    )
                                 {
                                     if let Some(result_tx) = entry.pending_result_tx.take() {
                                         let _ = result_tx.send(Err(KalamLinkError::Cancelled));
                                     }
                                 }
                             },
-                            Some(ConnCmd::Progress { id, generation, seq_id, advance_resume }) => {
+                            Some(ConnCmd::Progress {
+                                id,
+                                generation,
+                                seq_id,
+                                advance_resume,
+                            }) => {
                                 if let Some(entry) = subs.get_mut(&id) {
-                                    advance_entry_progress(entry, generation, seq_id, advance_resume);
+                                    advance_entry_progress(
+                                        entry,
+                                        generation,
+                                        seq_id,
+                                        advance_resume,
+                                    );
                                 }
                             },
                             Some(ConnCmd::ListSubscriptions { result_tx }) => {

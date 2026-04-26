@@ -1,10 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::auth::models::WsAuthCredentials;
-use crate::seq_id::SeqId;
-use crate::subscription::models::SubscriptionRequest;
-
 use super::ProtocolOptions;
+use crate::{
+    auth::models::WsAuthCredentials, seq_id::SeqId, subscription::models::SubscriptionRequest,
+};
 
 /// Client-to-server request messages
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,8 +1,8 @@
 //! Test to verify subscription listener works correctly
 
-use crate::common::*;
-
 use std::time::Duration;
+
+use crate::common::*;
 
 #[test]
 fn test_subscription_listener_functionality() {

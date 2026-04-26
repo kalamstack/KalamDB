@@ -1,17 +1,23 @@
 //! Typed handler for STORAGE COMPACT ALL statement
 
-use kalamdb_commons::models::{TableId, TableName};
-use kalamdb_commons::schemas::TableType;
-use kalamdb_commons::JobId;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
-use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
-use kalamdb_jobs::executors::compact::CompactParams;
-use kalamdb_jobs::AppContextJobsExt;
+use std::sync::Arc;
+
+use kalamdb_commons::{
+    models::{TableId, TableName},
+    schemas::TableType,
+    JobId,
+};
+use kalamdb_core::{
+    app_context::AppContext,
+    error::KalamDbError,
+    sql::{
+        context::{ExecutionContext, ExecutionResult, ScalarValue},
+        executor::handlers::TypedStatementHandler,
+    },
+};
+use kalamdb_jobs::{executors::compact::CompactParams, AppContextJobsExt};
 use kalamdb_sql::ddl::CompactAllTablesStatement;
 use kalamdb_system::JobType;
-use std::sync::Arc;
 
 /// Handler for STORAGE COMPACT ALL
 pub struct CompactAllTablesHandler {

@@ -5,34 +5,37 @@
 //! Virtual views (stats, settings, etc.) are created lazily on first access and
 //! stored back into SchemaRegistry.
 
+use std::{any::Any, path::PathBuf, sync::Arc};
+
 use async_trait::async_trait;
-use datafusion::catalog::SchemaProvider;
-use datafusion::datasource::{TableProvider, TableType};
-use datafusion::error::Result as DataFusionResult;
+use datafusion::{
+    catalog::SchemaProvider,
+    datasource::{TableProvider, TableType},
+    error::Result as DataFusionResult,
+};
 use kalamdb_commons::SystemTable;
 use kalamdb_configs::ServerConfig;
 use kalamdb_raft::CommandExecutor;
 use kalamdb_session_datafusion::secure_provider;
 use kalamdb_system::SystemTablesRegistry;
+use kalamdb_views::{
+    cluster::create_cluster_provider,
+    cluster_groups::create_cluster_groups_provider,
+    columns_view::create_columns_view_provider,
+    datatypes::{DatatypesTableProvider, DatatypesView},
+    describe::DescribeView,
+    live::{LiveTableProvider, LiveView},
+    server_logs::create_server_logs_provider,
+    sessions::{SessionsTableProvider, SessionsView},
+    settings::{SettingsTableProvider, SettingsView},
+    stats::{StatsTableProvider, StatsView},
+    tables_view::create_tables_view_provider,
+    transactions::{TransactionsTableProvider, TransactionsView},
+    view_base::ViewTableProvider,
+};
 use parking_lot::RwLock;
-use std::any::Any;
-use std::path::PathBuf;
-use std::sync::Arc;
 
 use crate::schema_registry::SchemaRegistry;
-use kalamdb_views::cluster::create_cluster_provider;
-use kalamdb_views::cluster_groups::create_cluster_groups_provider;
-use kalamdb_views::columns_view::create_columns_view_provider;
-use kalamdb_views::datatypes::{DatatypesTableProvider, DatatypesView};
-use kalamdb_views::describe::DescribeView;
-use kalamdb_views::live::{LiveTableProvider, LiveView};
-use kalamdb_views::server_logs::create_server_logs_provider;
-use kalamdb_views::sessions::{SessionsTableProvider, SessionsView};
-use kalamdb_views::settings::{SettingsTableProvider, SettingsView};
-use kalamdb_views::stats::{StatsTableProvider, StatsView};
-use kalamdb_views::tables_view::create_tables_view_provider;
-use kalamdb_views::transactions::{TransactionsTableProvider, TransactionsView};
-use kalamdb_views::view_base::ViewTableProvider;
 
 /// Configuration for view initialization
 pub struct ViewConfig {
@@ -290,8 +293,9 @@ impl SchemaProvider for SystemSchemaProvider {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kalamdb_store::test_utils::InMemoryBackend;
+
+    use super::*;
 
     fn create_test_provider() -> SystemSchemaProvider {
         let backend: Arc<dyn kalamdb_store::StorageBackend> = Arc::new(InMemoryBackend::new());

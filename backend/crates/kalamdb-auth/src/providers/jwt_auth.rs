@@ -1,13 +1,14 @@
 // JWT authentication and validation module
 
+use jsonwebtoken::{
+    decode, decode_header, encode, errors::ErrorKind, Algorithm, DecodingKey, EncodingKey, Header,
+    Validation,
+};
+use kalamdb_commons::{Role, UserId};
+
 use crate::errors::error::{AuthError, AuthResult};
 pub(crate) use crate::oidc::{extract_algorithm_unverified, extract_issuer_unverified};
 pub use crate::oidc::{JwtClaims, TokenType, DEFAULT_JWT_EXPIRY_HOURS};
-use jsonwebtoken::errors::ErrorKind;
-use jsonwebtoken::{
-    decode, decode_header, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation,
-};
-use kalamdb_commons::{Role, UserId};
 
 /// Default issuer for KalamDB-issued tokens.
 pub const KALAMDB_ISSUER: &str = "kalamdb";
@@ -142,8 +143,9 @@ pub fn is_internal_issuer(issuer: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use jsonwebtoken::{encode, EncodingKey, Header};
+
+    use super::*;
 
     fn create_test_token(secret: &str, exp_offset_secs: i64) -> String {
         create_test_token_with_type(secret, exp_offset_secs, Some(TokenType::Access))

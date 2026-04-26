@@ -1,14 +1,17 @@
 //! Live query subscription row model for the system.live view.
 
-use super::LiveQueryStatus;
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::models::{
-    ids::{LiveQueryId, NamespaceId, UserId},
-    NodeId, TableName,
+use kalamdb_commons::{
+    datatypes::KalamDataType,
+    models::{
+        ids::{LiveQueryId, NamespaceId, UserId},
+        NodeId, TableName,
+    },
 };
 use kalamdb_macros::table;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+use super::LiveQueryStatus;
 
 /// Live query subscription row model for `system.live`.
 ///

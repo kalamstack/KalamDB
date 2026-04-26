@@ -26,8 +26,7 @@ fn uses_current_plan_properties_surface() {
 
 #[allow(dead_code)]
 fn uses_current_record_batch_stream_surface() {
-    use datafusion::execution::RecordBatchStream;
-    use datafusion::physical_plan::SendableRecordBatchStream;
+    use datafusion::{execution::RecordBatchStream, physical_plan::SendableRecordBatchStream};
     fn _assert_trait<T: RecordBatchStream>() {}
     fn _expect(_s: SendableRecordBatchStream) {}
 }
@@ -37,10 +36,11 @@ fn uses_shared_exec_and_stream_helpers() {
     use std::sync::Arc;
 
     use arrow_schema::Schema;
-    use datafusion::error::{DataFusionError, Result as DataFusionResult};
-    use datafusion::physical_plan::SendableRecordBatchStream;
-    use kalamdb_datafusion_sources::exec::projected_schema;
-    use kalamdb_datafusion_sources::stream::one_shot_batch_stream;
+    use datafusion::{
+        error::{DataFusionError, Result as DataFusionResult},
+        physical_plan::SendableRecordBatchStream,
+    };
+    use kalamdb_datafusion_sources::{exec::projected_schema, stream::one_shot_batch_stream};
 
     fn _project(schema: Arc<Schema>) -> DataFusionResult<Arc<Schema>> {
         projected_schema(&schema, None)

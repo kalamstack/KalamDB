@@ -1,7 +1,8 @@
 //! Consume response model
 
-use super::TopicMessage;
 use serde::Serialize;
+
+use super::TopicMessage;
 
 /// Response for POST /api/topics/consume
 #[derive(Debug, Serialize)]

@@ -82,9 +82,7 @@ fn session_registry_commit_wrong_tx_id_fails() {
 
     let _tx_id = registry.begin_transaction("s1").expect("begin");
     let wrong_tx_id = TransactionId::new("01960f7b-3d16-7d6d-b26c-7e4db6f25f8d");
-    let err = registry
-        .commit_transaction("s1", &wrong_tx_id)
-        .expect_err("wrong tx id");
+    let err = registry.commit_transaction("s1", &wrong_tx_id).expect_err("wrong tx id");
     assert!(err.contains("mismatch"));
 }
 

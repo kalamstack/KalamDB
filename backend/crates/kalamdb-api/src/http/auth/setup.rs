@@ -3,6 +3,8 @@
 //! POST /v1/api/auth/setup - Initial server setup (localhost only)
 //! GET /v1/api/auth/status - Check server setup status
 
+use std::sync::Arc;
+
 use actix_web::{web, HttpRequest, HttpResponse};
 use kalamdb_auth::{
     errors::error::AuthError,
@@ -10,12 +12,12 @@ use kalamdb_auth::{
     security::password::{hash_password, validate_password},
     UserRepository,
 };
-use kalamdb_commons::models::{StorageId, UserId};
-use kalamdb_commons::{AuthType, Role};
+use kalamdb_commons::{
+    models::{StorageId, UserId},
+    AuthType, Role,
+};
 use kalamdb_configs::AuthSettings;
-use kalamdb_system::providers::storages::models::StorageMode;
-use kalamdb_system::User;
-use std::sync::Arc;
+use kalamdb_system::{providers::storages::models::StorageMode, User};
 
 use super::models::{AuthErrorResponse, ServerSetupRequest, ServerSetupResponse, UserInfo};
 use crate::limiter::RateLimiter;
@@ -186,13 +188,15 @@ pub async fn server_setup_handler(
                 match user_repo.get_user_by_id(&dba_user_id).await {
                     Ok(existing_user) => {
                         log::info!(
-                            "Server setup raced with another caller; reusing existing DBA user '{}'",
+                            "Server setup raced with another caller; reusing existing DBA user \
+                             '{}'",
                             dba_user_id.as_str()
                         );
                         return HttpResponse::Ok().json(build_setup_response(
                             &existing_user,
                             format!(
-                                "Server setup already completed for DBA user '{}'. Please login to continue.",
+                                "Server setup already completed for DBA user '{}'. Please login \
+                                 to continue.",
                                 existing_user.user_id.as_str()
                             ),
                         ));
@@ -224,7 +228,8 @@ pub async fn server_setup_handler(
     HttpResponse::Ok().json(build_setup_response(
         &dba_user,
         format!(
-            "Server setup complete. Root password configured and DBA user '{}' created. Please login to continue.",
+            "Server setup complete. Root password configured and DBA user '{}' created. Please \
+             login to continue.",
             dba_user_id.as_str()
         ),
     ))

@@ -41,7 +41,6 @@ export interface BatchControl {
   has_more: boolean;
   status: BatchStatus;
   last_seq_id?: WireSeqId;
-  snapshot_end_seq?: WireSeqId;
 }
 
 export type ChangeTypeRaw = 'insert' | 'update' | 'delete';

@@ -11,7 +11,7 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use kalam_client::{KalamLinkClient, EventHandlers};
+//! use kalam_client::{EventHandlers, KalamLinkClient};
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let handlers = EventHandlers::new()
@@ -33,8 +33,7 @@
 //! # }
 //! ```
 
-use std::fmt;
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 /// Reason for a disconnect event.
 #[derive(Debug, Clone)]
@@ -185,8 +184,7 @@ impl EventHandlers {
     /// ```rust
     /// use kalam_client::EventHandlers;
     ///
-    /// let handlers = EventHandlers::new()
-    ///     .on_connect(|| println!("Connected!"));
+    /// let handlers = EventHandlers::new().on_connect(|| println!("Connected!"));
     /// ```
     pub fn on_connect(mut self, f: impl Fn() + Send + Sync + 'static) -> Self {
         self.on_connect = Some(Arc::new(f));
@@ -202,8 +200,8 @@ impl EventHandlers {
     /// ```rust
     /// use kalam_client::EventHandlers;
     ///
-    /// let handlers = EventHandlers::new()
-    ///     .on_disconnect(|reason| println!("Disconnected: {}", reason));
+    /// let handlers =
+    ///     EventHandlers::new().on_disconnect(|reason| println!("Disconnected: {}", reason));
     /// ```
     pub fn on_disconnect(mut self, f: impl Fn(DisconnectReason) + Send + Sync + 'static) -> Self {
         self.on_disconnect = Some(Arc::new(f));
@@ -237,8 +235,7 @@ impl EventHandlers {
     /// ```rust
     /// use kalam_client::EventHandlers;
     ///
-    /// let handlers = EventHandlers::new()
-    ///     .on_receive(|msg| println!("[RECV] {}", msg));
+    /// let handlers = EventHandlers::new().on_receive(|msg| println!("[RECV] {}", msg));
     /// ```
     pub fn on_receive(mut self, f: impl Fn(&str) + Send + Sync + 'static) -> Self {
         self.on_receive = Some(Arc::new(f));
@@ -254,8 +251,7 @@ impl EventHandlers {
     /// ```rust
     /// use kalam_client::EventHandlers;
     ///
-    /// let handlers = EventHandlers::new()
-    ///     .on_send(|msg| println!("[SEND] {}", msg));
+    /// let handlers = EventHandlers::new().on_send(|msg| println!("[SEND] {}", msg));
     /// ```
     pub fn on_send(mut self, f: impl Fn(&str) + Send + Sync + 'static) -> Self {
         self.on_send = Some(Arc::new(f));

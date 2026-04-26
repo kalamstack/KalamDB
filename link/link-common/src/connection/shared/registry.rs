@@ -1,3 +1,13 @@
+use std::{
+    collections::HashMap,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use tokio::{
+    sync::{mpsc, oneshot},
+    time::Instant as TokioInstant,
+};
+
 use crate::{
     connection::FAR_FUTURE,
     error::Result,
@@ -7,12 +17,6 @@ use crate::{
     subscription::final_resume_seq,
     timeouts::KalamLinkTimeouts,
 };
-use std::{
-    collections::HashMap,
-    time::{SystemTime, UNIX_EPOCH},
-};
-use tokio::sync::{mpsc, oneshot};
-use tokio::time::Instant as TokioInstant;
 
 #[inline]
 pub(super) fn now_ms() -> u64 {
@@ -85,7 +89,6 @@ pub(super) fn should_send_subscription_options(
         || options.batch_size.is_some()
         || options.last_rows.is_some()
         || options.from.is_some()
-        || options.snapshot_end_seq.is_some()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -115,7 +118,6 @@ pub(super) fn register_subscription_entry(
             last_seq_id: effective_from,
             consumed_seq_id: effective_from,
             batch_seq_id: None,
-            snapshot_end_seq: None,
             is_loading: true,
             generation,
             created_at_ms: now_ms(),
@@ -145,8 +147,9 @@ pub(super) fn remove_subscription_entry(
         return None;
     }
 
-    subs.remove(id)
-        .inspect(|entry| cache_entry_seq(seq_id_cache, id.to_string(), entry))
+    subs.remove(id).inspect(|entry| {
+        cache_entry_seq(seq_id_cache, id.to_string(), entry);
+    })
 }
 
 pub(super) fn advance_entry_progress(
@@ -219,14 +222,31 @@ pub(super) fn next_startup_deadline(subs: &HashMap<String, SubEntry>) -> TokioIn
         .unwrap_or_else(|| TokioInstant::now() + FAR_FUTURE)
 }
 
+pub(super) enum SubscriptionKeyMatch {
+    Direct,
+    Fallback(String),
+}
+
+impl SubscriptionKeyMatch {
+    #[inline]
+    pub(super) fn as_str<'a>(&'a self, incoming_sub_id: &'a str) -> &'a str {
+        match self {
+            Self::Direct => incoming_sub_id,
+            Self::Fallback(key) => key.as_str(),
+        }
+    }
+}
+
 pub(super) fn resolve_subscription_key(
     sub_id: &str,
     subs: &HashMap<String, SubEntry>,
-) -> Option<String> {
+) -> Option<SubscriptionKeyMatch> {
     if subs.contains_key(sub_id) {
-        Some(sub_id.to_string())
+        Some(SubscriptionKeyMatch::Direct)
     } else {
-        subs.keys().find(|client_id| sub_id.ends_with(client_id.as_str())).cloned()
+        subs.keys()
+            .find(|client_id| sub_id.ends_with(client_id.as_str()))
+            .map(|client_id| SubscriptionKeyMatch::Fallback(client_id.clone()))
     }
 }
 
@@ -263,7 +283,6 @@ pub(super) struct SubEntry {
     pub(super) last_seq_id: Option<SeqId>,
     pub(super) consumed_seq_id: Option<SeqId>,
     pub(super) batch_seq_id: Option<SeqId>,
-    pub(super) snapshot_end_seq: Option<SeqId>,
     pub(super) is_loading: bool,
     pub(super) generation: u64,
     pub(super) created_at_ms: u64,

@@ -8,8 +8,7 @@ use super::kalam_cell_value::KalamCellValue;
 /// # Example
 ///
 /// ```rust
-/// use kalam_client::models::KalamCellValue;
-/// use kalam_client::parse_i64;
+/// use kalam_client::{models::KalamCellValue, parse_i64};
 ///
 /// let num_value = KalamCellValue::int(42);
 /// let str_value = KalamCellValue::text("42");

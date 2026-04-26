@@ -3,13 +3,20 @@
 //! This module provides a zero-boilerplate way to register typed handlers
 //! in the HandlerRegistry without writing custom adapters for each handler.
 
-use crate::error::KalamDbError;
-use crate::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
-use crate::sql::executor::handler_registry::{SqlHandlerFuture, SqlStatementHandler};
-use crate::sql::executor::handlers::typed::TypedStatementHandler;
-use kalamdb_sql::classifier::SqlStatement;
-use kalamdb_sql::DdlAst;
 use std::marker::PhantomData;
+
+use kalamdb_sql::{classifier::SqlStatement, DdlAst};
+
+use crate::{
+    error::KalamDbError,
+    sql::{
+        context::{ExecutionContext, ExecutionResult, ScalarValue},
+        executor::{
+            handler_registry::{SqlHandlerFuture, SqlStatementHandler},
+            handlers::typed::TypedStatementHandler,
+        },
+    },
+};
 
 /// Generic adapter that bridges TypedStatementHandler<T> to SqlStatementHandler
 ///

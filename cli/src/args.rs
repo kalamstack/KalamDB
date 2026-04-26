@@ -1,6 +1,7 @@
+use std::path::PathBuf;
+
 use clap::Parser;
 use kalam_cli::OutputFormat;
-use std::path::PathBuf;
 
 // Build information - Create a static version string at compile time
 

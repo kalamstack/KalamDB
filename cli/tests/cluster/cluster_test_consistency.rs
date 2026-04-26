@@ -2,9 +2,9 @@
 //!
 //! Tests that verify data consistency across cluster nodes
 
-use crate::cluster_common::*;
-use crate::common::*;
 use std::time::Duration;
+
+use crate::{cluster_common::*, common::*};
 
 /// Test: System table counts are consistent across all cluster nodes
 #[test]
@@ -131,7 +131,8 @@ fn cluster_test_table_replication() {
         (
             "stream_tbl",
             format!(
-                "CREATE STREAM TABLE {}.stream_tbl (id BIGINT PRIMARY KEY, event STRING) WITH (TTL_SECONDS = 3600)",
+                "CREATE STREAM TABLE {}.stream_tbl (id BIGINT PRIMARY KEY, event STRING) WITH \
+                 (TTL_SECONDS = 3600)",
                 namespace
             ),
         ),
@@ -150,7 +151,8 @@ fn cluster_test_table_replication() {
             let result = execute_on_node(
                 url,
                 &format!(
-                    "SELECT table_name FROM system.schemas WHERE namespace_id = '{}' AND table_name = '{}'",
+                    "SELECT table_name FROM system.schemas WHERE namespace_id = '{}' AND \
+                     table_name = '{}'",
                     namespace, name
                 ),
             )

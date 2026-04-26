@@ -2,8 +2,8 @@
 //!
 //! This module contains:
 //! - [`models`]: Connection-level data models (always available)
-//! - [`websocket`]: Low-level WebSocket helpers (URL resolution, auth headers,
-//!   message parsing, keepalive jitter, local bind addresses, decompression)
+//! - [`websocket`]: Low-level WebSocket helpers (URL resolution, auth headers, message parsing,
+//!   keepalive jitter, local bind addresses, decompression)
 //! - [`shared`]: Shared multiplexed WebSocket connection with auto-reconnect
 
 pub mod models;

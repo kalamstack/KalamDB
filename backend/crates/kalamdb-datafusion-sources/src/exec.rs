@@ -5,29 +5,34 @@
 //! single monolithic plan type across families with very different semantics
 //! (MVCC merge, one-shot views, vector TVFs, overlay).
 
-use std::any::Any;
-use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap};
-use std::fmt;
-use std::sync::Arc;
+use std::{
+    any::Any,
+    cmp::Ordering,
+    collections::{BTreeMap, HashMap},
+    fmt,
+    sync::Arc,
+};
 
-use async_trait::async_trait;
-use arrow::array::{Array, BooleanArray, Int64Array, StringArray, UInt64Array};
-use arrow::compute;
-use arrow::record_batch::RecordBatch;
+use arrow::{
+    array::{Array, BooleanArray, Int64Array, StringArray, UInt64Array},
+    compute,
+    record_batch::RecordBatch,
+};
 use arrow_schema::SchemaRef;
-use crate::stats::single_partition_plan_properties;
-use crate::stream::one_shot_batch_stream;
-use datafusion::error::{DataFusionError, Result as DataFusionResult};
-use datafusion::execution::{SendableRecordBatchStream, TaskContext};
-use datafusion::physical_expr::PhysicalExpr;
-use datafusion::physical_plan::{DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties};
-use datafusion::scalar::ScalarValue;
-use kalamdb_commons::constants::SystemColumnNames;
-use kalamdb_commons::conversions::arrow_json_conversion::arrow_value_to_scalar;
-use kalamdb_commons::ids::SeqId;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::serialization::row_codec::RowMetadata;
+use async_trait::async_trait;
+use datafusion::{
+    error::{DataFusionError, Result as DataFusionResult},
+    execution::{SendableRecordBatchStream, TaskContext},
+    physical_expr::PhysicalExpr,
+    physical_plan::{DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties},
+    scalar::ScalarValue,
+};
+use kalamdb_commons::{
+    constants::SystemColumnNames, conversions::arrow_json_conversion::arrow_value_to_scalar,
+    ids::SeqId, models::rows::Row, serialization::row_codec::RowMetadata,
+};
+
+use crate::{stats::single_partition_plan_properties, stream::one_shot_batch_stream};
 
 /// Apply provider-side filter, projection, and limit handling to a deferred
 /// source batch after the source has materialized its raw rows.
@@ -103,13 +108,7 @@ pub fn prefers_version<S>(
 where
     S: Ord,
 {
-    version_ordering(
-        candidate_commit_seq,
-        candidate_seq,
-        current_commit_seq,
-        current_seq,
-    )
-    .is_gt()
+    version_ordering(candidate_commit_seq, candidate_seq, current_commit_seq, current_seq).is_gt()
 }
 
 /// Shared version candidate used by metadata-first MVCC merge helpers.
@@ -198,17 +197,10 @@ where
 {
     let hot_iter = hot_candidates.into_iter();
     let cold_iter = cold_candidates.into_iter();
-    let estimated_capacity = hot_iter
-        .size_hint()
-        .0
-        .saturating_add(cold_iter.size_hint().0)
-        .max(64);
+    let estimated_capacity = hot_iter.size_hint().0.saturating_add(cold_iter.size_hint().0).max(64);
     let mut best: HashMap<String, Candidate<H, C, S>> = HashMap::with_capacity(estimated_capacity);
 
-    for candidate in hot_iter
-        .map(Candidate::Hot)
-        .chain(cold_iter.map(Candidate::Cold))
-    {
+    for candidate in hot_iter.map(Candidate::Hot).chain(cold_iter.map(Candidate::Cold)) {
         if !is_visible_at_snapshot(candidate.commit_seq(), snapshot_commit_seq) {
             continue;
         }
@@ -315,12 +307,8 @@ where
     R: VersionedRow,
 {
     select_latest_versions(
-        hot_rows
-            .into_iter()
-            .map(|row| version_candidate_from_row(pk_name, &row, ())),
-        cold_rows
-            .into_iter()
-            .map(|row| version_candidate_from_row(pk_name, &row, ())),
+        hot_rows.into_iter().map(|row| version_candidate_from_row(pk_name, &row, ())),
+        cold_rows.into_iter().map(|row| version_candidate_from_row(pk_name, &row, ())),
         snapshot_commit_seq,
         false,
     )
@@ -335,12 +323,7 @@ pub fn count_resolved_from_metadata(
 ) -> DataFusionResult<usize> {
     let cold_metadata = parquet_batch_to_metadata(cold_batch, pk_name)?;
 
-    Ok(count_merged_rows(
-        pk_name,
-        hot_metadata,
-        cold_metadata,
-        snapshot_commit_seq,
-    ))
+    Ok(count_merged_rows(pk_name, hot_metadata, cold_metadata, snapshot_commit_seq))
 }
 
 pub fn merge_versioned_rows<K, R, I, J>(
@@ -500,19 +483,17 @@ impl<'a> ParquetBatchDecoder<'a> {
             .fields()
             .iter()
             .position(|field| field.name() == SystemColumnNames::COMMIT_SEQ);
-        let pk_idx = pk_name.and_then(|name| {
-            schema.fields().iter().position(|field| field.name() == name)
-        });
+        let pk_idx =
+            pk_name.and_then(|name| schema.fields().iter().position(|field| field.name() == name));
 
-        let seq_array = batch
-            .column(seq_idx)
-            .as_any()
-            .downcast_ref::<Int64Array>()
-            .ok_or_else(|| DataFusionError::Execution("_seq column is not Int64Array".to_string()))?;
+        let seq_array =
+            batch.column(seq_idx).as_any().downcast_ref::<Int64Array>().ok_or_else(|| {
+                DataFusionError::Execution("_seq column is not Int64Array".to_string())
+            })?;
         let deleted_array =
             deleted_idx.and_then(|idx| batch.column(idx).as_any().downcast_ref::<BooleanArray>());
-        let commit_seq_array = commit_seq_idx
-            .and_then(|idx| batch.column(idx).as_any().downcast_ref::<UInt64Array>());
+        let commit_seq_array =
+            commit_seq_idx.and_then(|idx| batch.column(idx).as_any().downcast_ref::<UInt64Array>());
         let pk_string_array =
             pk_idx.and_then(|idx| batch.column(idx).as_any().downcast_ref::<StringArray>());
         let value_column_indices = schema

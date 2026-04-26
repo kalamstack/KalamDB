@@ -2,19 +2,17 @@
 //!
 //! Handles the NextBatch message for paginated initial data fetching.
 
+use std::sync::Arc;
+
 use actix_ws::Session;
-use kalamdb_commons::ids::SeqId;
-use kalamdb_commons::websocket::BatchControl;
-use kalamdb_commons::WebSocketMessage;
+use kalamdb_commons::{ids::SeqId, websocket::BatchControl, WebSocketMessage};
 use kalamdb_core::providers::arrow_json_conversion::row_into_json_map;
 use kalamdb_live::{LiveQueryManager, SharedConnectionState};
 use log::error;
-use std::sync::Arc;
 use tracing::debug;
 
-use crate::ws::models::WsErrorCode;
-
 use super::{send_error, send_message};
+use crate::ws::models::WsErrorCode;
 
 /// Handle next batch request
 ///
@@ -43,12 +41,7 @@ pub async fn handle_next_batch(
     {
         Ok(result) => {
             // Use BatchControl::new() which handles status based on batch_num and has_more
-            let batch_control = BatchControl::new(
-                batch_num,
-                result.has_more,
-                result.last_seq,
-                result.snapshot_end_seq,
-            );
+            let batch_control = BatchControl::new(batch_num, result.has_more, result.last_seq);
 
             debug!(
                 "Sending batch {}: {} rows, has_more={}",

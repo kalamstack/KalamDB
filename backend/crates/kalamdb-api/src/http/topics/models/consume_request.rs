@@ -1,8 +1,9 @@
 //! Consume request model
 
-use super::StartPosition;
 use kalamdb_commons::models::{ConsumerGroupId, TopicId};
 use serde::Deserialize;
+
+use super::StartPosition;
 
 fn default_start_position() -> StartPosition {
     StartPosition::Latest

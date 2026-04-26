@@ -1,16 +1,20 @@
 //! Table type classification
 
+use std::{fmt, str::FromStr};
+
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::str::FromStr;
 
 /// Enum representing the type of table in KalamDB.
 ///
 /// Each table type has associated type-safe options:
-/// - **User** → `UserTableOptions`: Per-user tables with user-specific partitioning (e.g., `user_123/conversations`)
-/// - **Shared** → `SharedTableOptions`: Shared tables accessible across all users (e.g., `categories`)
-/// - **Stream** → `StreamTableOptions`: Event stream tables with TTL-based eviction (e.g., `chat_events`)
-/// - **System** → `SystemTableOptions`: Internal system metadata tables (e.g., `information_schema.tables`)
+/// - **User** → `UserTableOptions`: Per-user tables with user-specific partitioning (e.g.,
+///   `user_123/conversations`)
+/// - **Shared** → `SharedTableOptions`: Shared tables accessible across all users (e.g.,
+///   `categories`)
+/// - **Stream** → `StreamTableOptions`: Event stream tables with TTL-based eviction (e.g.,
+///   `chat_events`)
+/// - **System** → `SystemTableOptions`: Internal system metadata tables (e.g.,
+///   `information_schema.tables`)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TableType {
     /// Per-user tables with user-specific partitioning
@@ -18,11 +22,13 @@ pub enum TableType {
     User,
 
     /// Shared tables accessible across all users
-    /// Options: `SharedTableOptions` (access_level, enable_cache, cache_ttl_seconds, compression, enable_replication)
+    /// Options: `SharedTableOptions` (access_level, enable_cache, cache_ttl_seconds, compression,
+    /// enable_replication)
     Shared,
 
     /// Event stream tables with TTL-based eviction
-    /// Options: `StreamTableOptions` (ttl_seconds, eviction_strategy, max_stream_size_bytes, enable_compaction, watermark_delay_seconds, compression)
+    /// Options: `StreamTableOptions` (ttl_seconds, eviction_strategy, max_stream_size_bytes,
+    /// enable_compaction, watermark_delay_seconds, compression)
     Stream,
 
     /// Internal system metadata tables

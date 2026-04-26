@@ -14,11 +14,12 @@
 //! - [x] Post-flush joins still correct
 //! - [x] No cross-user leakage
 
-use super::helpers::*;
+use std::time::Duration;
 
 use kalam_client::models::ResponseStatus;
 use kalamdb_commons::Role;
-use std::time::Duration;
+
+use super::helpers::*;
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -54,15 +55,17 @@ async fn test_scenario_05_dashboards_shared_reference() -> anyhow::Result<()> {
     let client = server.link_client("root");
     for (id, name, price) in [(1, "Free", 0.0), (2, "Pro", 9.99), (3, "Enterprise", 99.99)] {
         let resp = client
-                    .execute_query(
-                        &format!(
-                            "INSERT INTO {}.plans (id, name, price, features) VALUES ({}, '{}', {}, 'features for {}')",
-                            ns, id, name, price, name
-                        ), None,
-                        None,
-                        None,
-                    )
-                    .await?;
+            .execute_query(
+                &format!(
+                    "INSERT INTO {}.plans (id, name, price, features) VALUES ({}, '{}', {}, \
+                     'features for {}')",
+                    ns, id, name, price, name
+                ),
+                None,
+                None,
+                None,
+            )
+            .await?;
         assert!(resp.success(), "Insert plan {}", name);
     }
 
@@ -197,15 +200,17 @@ async fn test_scenario_05_dashboards_shared_reference() -> anyhow::Result<()> {
     if resp.status == ResponseStatus::Success {
         // Insert new row with device_type
         let resp = user1_client
-                    .execute_query(
-                        &format!(
-                            "INSERT INTO {}.activity (id, plan_id, action, device_type) VALUES (1000, 2, 'mobile_action', 'mobile')",
-                            ns
-                        ), None,
-                        None,
-                        None,
-                    )
-                    .await?;
+            .execute_query(
+                &format!(
+                    "INSERT INTO {}.activity (id, plan_id, action, device_type) VALUES (1000, 2, \
+                     'mobile_action', 'mobile')",
+                    ns
+                ),
+                None,
+                None,
+                None,
+            )
+            .await?;
         // This might succeed or fail depending on implementation
         if resp.success() {
             // Verify old rows still readable
@@ -347,15 +352,17 @@ async fn test_scenario_05_schema_evolution() -> anyhow::Result<()> {
     if alter_resp.status == ResponseStatus::Success {
         // Insert with new column
         let _resp = client
-                    .execute_query(
-                        &format!(
-                            "INSERT INTO {}.events (id, event_name, metadata) VALUES (100, 'new_event', 'some metadata')",
-                            ns
-                        ), None,
-                        None,
-                        None,
-                    )
-                    .await?;
+            .execute_query(
+                &format!(
+                    "INSERT INTO {}.events (id, event_name, metadata) VALUES (100, 'new_event', \
+                     'some metadata')",
+                    ns
+                ),
+                None,
+                None,
+                None,
+            )
+            .await?;
         // Accept either success or error (column might not be immediately available)
 
         // Old data should still be readable

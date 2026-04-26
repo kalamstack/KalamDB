@@ -3,16 +3,26 @@
 //! When a namespace is dropped, its DataFusion schema becomes unavailable.
 //! Any queries referencing tables in the dropped namespace will fail.
 
-use crate::helpers::audit;
-use crate::helpers::guards::{block_anonymous_write, require_admin};
-use crate::table::drop::{capture_storage_cleanup_details, schedule_drop_table_cleanup};
-use kalamdb_commons::models::{NamespaceId, TableId};
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
-use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
-use kalamdb_sql::ddl::DropNamespaceStatement;
 use std::sync::Arc;
+
+use kalamdb_commons::models::{NamespaceId, TableId};
+use kalamdb_core::{
+    app_context::AppContext,
+    error::KalamDbError,
+    sql::{
+        context::{ExecutionContext, ExecutionResult, ScalarValue},
+        executor::handlers::TypedStatementHandler,
+    },
+};
+use kalamdb_sql::ddl::DropNamespaceStatement;
+
+use crate::{
+    helpers::{
+        audit,
+        guards::{block_anonymous_write, require_admin},
+    },
+    table::drop::{capture_storage_cleanup_details, schedule_drop_table_cleanup},
+};
 
 /// Typed handler for DROP NAMESPACE statements
 pub struct DropNamespaceHandler {
@@ -156,17 +166,25 @@ impl TypedStatementHandler<DropNamespaceStatement> for DropNamespaceHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use kalamdb_commons::models::datatypes::KalamDataType;
-    use kalamdb_commons::models::schemas::{ColumnDefinition, TableDefinition, TableOptions};
-    use kalamdb_commons::models::{TableName, UserId};
-    use kalamdb_commons::schemas::TableType;
-    use kalamdb_commons::Role;
+    use std::{
+        sync::Arc,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use kalamdb_commons::{
+        models::{
+            datatypes::KalamDataType,
+            schemas::{ColumnDefinition, TableDefinition, TableOptions},
+            TableName, UserId,
+        },
+        schemas::TableType,
+        Role,
+    };
     use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
     use kalamdb_store::EntityStore;
     use kalamdb_system::Namespace;
-    use std::sync::Arc;
-    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::*;
 
     fn init_app_context() -> Arc<AppContext> {
         test_app_context_simple()

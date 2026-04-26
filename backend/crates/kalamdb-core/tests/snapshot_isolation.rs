@@ -1,18 +1,20 @@
 mod support;
 
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use datafusion_common::ScalarValue;
-use kalamdb_commons::conversions::arrow_json_conversion::record_batch_to_json_rows;
-use kalamdb_commons::models::pg_operations::{InsertRequest, ScanRequest};
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::schemas::{ColumnDefinition, TableDefinition, TableOptions};
-use kalamdb_commons::models::{NamespaceId, TableId, TableName};
-use kalamdb_commons::schemas::ColumnDefault;
-use kalamdb_commons::{TableAccess, TableType};
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::operations::service::OperationService;
+use kalamdb_commons::{
+    conversions::arrow_json_conversion::record_batch_to_json_rows,
+    models::{
+        pg_operations::{InsertRequest, ScanRequest},
+        rows::Row,
+        schemas::{ColumnDefinition, TableDefinition, TableOptions},
+        NamespaceId, TableId, TableName,
+    },
+    schemas::ColumnDefault,
+    TableAccess, TableType,
+};
+use kalamdb_core::{app_context::AppContext, operations::service::OperationService};
 use kalamdb_pg::OperationExecutor;
 use support::create_cluster_app_context;
 

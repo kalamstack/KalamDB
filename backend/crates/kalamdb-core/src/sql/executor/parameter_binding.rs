@@ -5,9 +5,7 @@
 //! - DataFusion LogicalPlan placeholder replacement ($1, $2, ...)
 //! - ScalarValue type checking
 
-use datafusion::common::ParamValues;
-use datafusion::logical_expr::LogicalPlan;
-use datafusion::scalar::ScalarValue;
+use datafusion::{common::ParamValues, logical_expr::LogicalPlan, scalar::ScalarValue};
 
 use crate::error::KalamDbError;
 

@@ -8,13 +8,13 @@
 //! - T099: restore_from_rocksdb() after server restart
 //! - T100: SHOW MANIFEST returns all cached entries
 //! - T101: cache eviction and re-population
+use std::sync::Arc;
+
 use kalamdb_commons::{NamespaceId, TableId, TableName, UserId};
 use kalamdb_configs::ManifestCacheSettings;
 use kalamdb_core::manifest::ManifestService;
 use kalamdb_store::{test_utils::InMemoryBackend, StorageBackend};
-use kalamdb_system::providers::ManifestTableProvider;
-use kalamdb_system::{Manifest, SyncState};
-use std::sync::Arc;
+use kalamdb_system::{providers::ManifestTableProvider, Manifest, SyncState};
 
 fn create_test_service_with_config(config: ManifestCacheSettings) -> ManifestService {
     let backend: Arc<dyn StorageBackend> = Arc::new(InMemoryBackend::new());
@@ -127,8 +127,8 @@ fn test_update_after_flush_atomic_write() {
 //     let config = ManifestCacheSettings::default();
 
 //     // Service 1: Add entries
-//     let service1 = ManifestService::new(Arc::clone(&backend), "/tmp/test".to_string(), config.clone());
-//     let namespace1 = NamespaceId::new("ns1");
+//     let service1 = ManifestService::new(Arc::clone(&backend), "/tmp/test".to_string(),
+// config.clone());     let namespace1 = NamespaceId::new("ns1");
 //     let table1 = TableName::new("products");
 //     let table_id1 = TableId::new(namespace1.clone(), table1.clone());
 //     let manifest1 = create_test_manifest("ns1", "products", Some("u_123"));

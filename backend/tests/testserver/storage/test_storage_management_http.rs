@@ -6,8 +6,9 @@
 //! - Template validation
 //! - Prevent dropping in-use storage
 
-use super::test_support::consolidated_helpers::{unique_namespace, unique_table};
 use kalam_client::models::ResponseStatus;
+
+use super::test_support::consolidated_helpers::{unique_namespace, unique_table};
 
 #[tokio::test]
 async fn test_storage_management_over_http() -> anyhow::Result<()> {
@@ -55,16 +56,15 @@ async fn test_storage_management_over_http() -> anyhow::Result<()> {
         // Verify system.storages row
         let resp = server
             .execute_sql(&format!(
-                "SELECT storage_id, storage_type, storage_name FROM system.storages WHERE storage_id = '{}'",
+                "SELECT storage_id, storage_type, storage_name FROM system.storages WHERE \
+                 storage_id = '{}'",
                 storage_id
             ))
             .await?;
         anyhow::ensure!(resp.status == ResponseStatus::Success);
         let rows = resp.rows_as_maps();
         anyhow::ensure!(rows.len() == 1);
-        anyhow::ensure!(
-            rows[0].get("storage_type").and_then(|v| v.as_str()) == Some("filesystem")
-        );
+        anyhow::ensure!(rows[0].get("storage_type").and_then(|v| v.as_str()) == Some("filesystem"));
 
         // Duplicate storage_id should error
         let resp = server
@@ -135,14 +135,18 @@ async fn test_storage_management_over_http() -> anyhow::Result<()> {
 
         let resp = server
             .execute_sql(&format!(
-                "CREATE TABLE {}.t (id INT PRIMARY KEY, v TEXT) WITH (TYPE='SHARED', STORAGE_ID='{}')",
+                "CREATE TABLE {}.t (id INT PRIMARY KEY, v TEXT) WITH (TYPE='SHARED', \
+                 STORAGE_ID='{}')",
                 ns, storage_id
             ))
             .await?;
         anyhow::ensure!(resp.status == ResponseStatus::Success);
 
         let resp = server.execute_sql(&format!("DROP STORAGE {}", storage_id)).await?;
-        anyhow::ensure!(resp.status == ResponseStatus::Error, "expected DROP STORAGE in-use to error");
+        anyhow::ensure!(
+            resp.status == ResponseStatus::Error,
+            "expected DROP STORAGE in-use to error"
+        );
 
         // After dropping table, dropping storage should succeed
         let resp = server.execute_sql(&format!("DROP TABLE {}.t", ns)).await?;

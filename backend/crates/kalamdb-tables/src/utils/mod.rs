@@ -34,17 +34,17 @@ pub mod streams {
 }
 
 // Re-export key types for convenience
-pub use base::{BaseTableProvider, TableProviderCore};
 pub use core::TableServices;
+
+pub use base::{BaseTableProvider, TableProviderCore};
 pub use dml_provider::KalamTableProvider;
 pub use shared::SharedTableProvider;
 pub use streams::StreamTableProvider;
-pub use users::UserTableProvider;
-
 // Re-export unified DML functions
 pub use unified_dml::{
     append_version, append_version_sync, extract_user_pk_value, validate_primary_key,
 };
+pub use users::UserTableProvider;
 
 /// Provider consolidation summary
 ///

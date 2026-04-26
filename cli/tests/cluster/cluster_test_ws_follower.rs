@@ -2,11 +2,12 @@
 //!
 //! Verifies followers can deliver live query updates from leader writes.
 
-use crate::cluster_common::*;
-use crate::common::*;
+use std::time::Duration;
+
 use kalam_client::{ChangeEvent, KalamLinkTimeouts, SubscriptionManager};
 use serde_json::Value;
-use std::time::Duration;
+
+use crate::{cluster_common::*, common::*};
 
 fn parse_cluster_nodes() -> (String, String) {
     let urls = cluster_urls();

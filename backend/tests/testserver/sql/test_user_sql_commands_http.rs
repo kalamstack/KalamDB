@@ -7,7 +7,8 @@ use kalam_client::models::ResponseStatus;
 // Once we support per-test config overrides for the global server, this can be migrated.
 #[tokio::test]
 #[ntest::timeout(300000)] // 300 seconds - user SQL commands test (fresh server + bcrypt is slow in debug)
-#[ignore = "Hangs in debug mode: fresh server startup + bcrypt cost 12 exceeds timeout. Run with --release."]
+#[ignore = "Hangs in debug mode: fresh server startup + bcrypt cost 12 exceeds timeout. Run with \
+            --release."]
 async fn test_user_sql_commands_over_http() {
     super::test_support::http_server::with_http_test_server_config(
         |cfg| {

@@ -1,16 +1,18 @@
-use datafusion::arrow::array::{
-    Array, ArrayRef, FixedSizeListArray, Float32Array, Float64Array, Int32Array, Int64Array,
-    LargeListArray, ListArray, UInt32Array, UInt64Array,
+use std::{any::Any, sync::Arc};
+
+use datafusion::{
+    arrow::{
+        array::{
+            Array, ArrayRef, FixedSizeListArray, Float32Array, Float64Array, Int32Array,
+            Int64Array, LargeListArray, ListArray, UInt32Array, UInt64Array,
+        },
+        datatypes::DataType,
+    },
+    error::{DataFusionError, Result as DataFusionResult},
+    logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility},
+    scalar::ScalarValue,
 };
-use datafusion::arrow::datatypes::DataType;
-use datafusion::error::{DataFusionError, Result as DataFusionResult};
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
-};
-use datafusion::scalar::ScalarValue;
 use kalamdb_commons::arrow_utils::{arrow_float32, ArrowDataType};
-use std::any::Any;
-use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct CosineDistanceFunction;
@@ -306,9 +308,9 @@ fn parse_numeric_array(values: &dyn Array) -> DataFusionResult<Vec<f32>> {
 
 #[cfg(test)]
 mod tests {
+    use datafusion::{arrow::datatypes::Field, logical_expr::ScalarUDF};
+
     use super::*;
-    use datafusion::arrow::datatypes::Field;
-    use datafusion::logical_expr::ScalarUDF;
 
     #[test]
     fn test_cosine_distance_function_creation() {

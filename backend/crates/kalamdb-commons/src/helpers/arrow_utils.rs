@@ -4,19 +4,22 @@
 //! with common column types, reducing code duplication across system table
 //! providers and other RecordBatch construction sites.
 
-use arrow::array::{
-    ArrayRef, BooleanArray, Float32Array, Float64Array, Int16Array, Int32Array, Int64Array,
-    Int8Array, LargeStringArray, StringArray, StringBuilder, TimestampMicrosecondArray,
-    TimestampMillisecondArray, UInt16Array, UInt32Array, UInt64Array, UInt8Array,
+use std::sync::Arc;
+
+use arrow::{
+    array::{
+        ArrayRef, BooleanArray, Float32Array, Float64Array, Int16Array, Int32Array, Int64Array,
+        Int8Array, LargeStringArray, StringArray, StringBuilder, TimestampMicrosecondArray,
+        TimestampMillisecondArray, UInt16Array, UInt32Array, UInt64Array, UInt8Array,
+    },
+    compute,
+    compute::kernels::aggregate::{max_string, min_string},
+    datatypes::SchemaRef,
+    error::ArrowError,
+    record_batch::RecordBatch,
 };
-use arrow::compute;
-use arrow::compute::kernels::aggregate::{max_string, min_string};
-use arrow::datatypes::SchemaRef;
-use arrow::error::ArrowError;
-use arrow::record_batch::RecordBatch;
 pub use arrow_schema::DataType as ArrowDataType;
 use arrow_schema::{Field, Schema, TimeUnit};
-use std::sync::Arc;
 
 /// Arrow UTF-8 string type.
 pub fn arrow_utf8() -> ArrowDataType {
@@ -447,8 +450,9 @@ pub fn is_boolean(data_type: &ArrowDataType) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+
+    use super::*;
 
     fn test_schema() -> SchemaRef {
         Arc::new(Schema::new(vec![

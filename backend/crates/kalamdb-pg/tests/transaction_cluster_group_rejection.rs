@@ -4,11 +4,9 @@ use std::collections::BTreeMap;
 
 use datafusion_common::ScalarValue;
 use kalamdb_commons::models::rows::Row;
-use kalamdb_core::test_helpers::test_app_context;
-use kalamdb_core::transactions::TransactionRaftBinding;
+use kalamdb_core::{test_helpers::test_app_context, transactions::TransactionRaftBinding};
 use kalamdb_pg::{InsertRpcRequest, PgService};
 use ntest::timeout;
-
 use support::{
     await_user_leader, begin_transaction, build_service, create_shared_table, create_user_table,
     insert_user_row, open_session, parse_transaction_id, request, rollback_transaction,

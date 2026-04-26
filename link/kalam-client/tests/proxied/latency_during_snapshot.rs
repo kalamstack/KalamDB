@@ -1,8 +1,10 @@
+use std::time::Duration;
+
+use kalam_client::SubscriptionConfig;
+use tokio::time::timeout;
+
 use super::helpers::*;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
-use kalam_client::SubscriptionConfig;
-use std::time::Duration;
-use tokio::time::timeout;
 
 /// Inject high latency while the initial snapshot is being loaded.
 /// If latency exceeds `initial_data_timeout` the subscription should fail

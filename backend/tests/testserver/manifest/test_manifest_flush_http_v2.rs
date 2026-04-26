@@ -1,9 +1,10 @@
 //! Manifest flush behavior over the real HTTP SQL API.
 
-use super::test_support::consolidated_helpers::unique_namespace;
 use kalam_client::models::ResponseStatus;
 use kalamdb_system::Manifest;
 use tokio::time::{sleep, Duration, Instant};
+
+use super::test_support::consolidated_helpers::unique_namespace;
 
 fn find_manifest_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
     fn recurse(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
@@ -91,11 +92,12 @@ async fn test_shared_flush_creates_manifest_json_over_http() -> anyhow::Result<(
     assert_eq!(resp.status, ResponseStatus::Success);
 
     let resp = server
-                .execute_sql(&format!(
-                    "CREATE TABLE {}.{} (id INT PRIMARY KEY, name TEXT) WITH (TYPE = 'SHARED', FLUSH_POLICY = 'rows:5')",
-                    namespace, table
-                ))
-                .await?;
+        .execute_sql(&format!(
+            "CREATE TABLE {}.{} (id INT PRIMARY KEY, name TEXT) WITH (TYPE = 'SHARED', \
+             FLUSH_POLICY = 'rows:5')",
+            namespace, table
+        ))
+        .await?;
     assert_eq!(resp.status, ResponseStatus::Success);
 
     for i in 1..=7 {
@@ -165,7 +167,8 @@ async fn test_shared_flush_cleans_empty_segments_and_parquet_files() -> anyhow::
 
     let resp = server
         .execute_sql(&format!(
-            "CREATE TABLE {}.{} (id INT PRIMARY KEY, name TEXT) WITH (TYPE = 'SHARED', FLUSH_POLICY = 'rows:5')",
+            "CREATE TABLE {}.{} (id INT PRIMARY KEY, name TEXT) WITH (TYPE = 'SHARED', \
+             FLUSH_POLICY = 'rows:5')",
             namespace, table
         ))
         .await?;
@@ -246,7 +249,8 @@ async fn test_shared_flush_cleans_empty_segments_and_parquet_files() -> anyhow::
 
         if Instant::now() >= cleanup_deadline {
             anyhow::bail!(
-                "Expected empty manifest and no parquet files after cleanup for {}.{} (segments={}, files={:?})",
+                "Expected empty manifest and no parquet files after cleanup for {}.{} \
+                 (segments={}, files={:?})",
                 namespace,
                 table,
                 manifest.segments.len(),

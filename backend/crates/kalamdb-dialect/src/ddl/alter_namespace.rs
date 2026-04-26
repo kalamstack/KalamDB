@@ -3,11 +3,12 @@
 //! Parses SQL statements like:
 //! - ALTER NAMESPACE app SET OPTIONS (key1 = 'value1', key2 = 'value2')
 
-use crate::ddl::DdlResult;
+use std::collections::HashMap;
 
 use kalamdb_commons::models::NamespaceId;
 use serde_json::Value as JsonValue;
-use std::collections::HashMap;
+
+use crate::ddl::DdlResult;
 
 /// ALTER NAMESPACE statement
 #[derive(Debug, Clone, PartialEq)]
@@ -85,7 +86,8 @@ impl AlterNamespaceStatement {
 
         let mut options = HashMap::new();
 
-        // Simple parsing: split by comma (doesn't handle commas in strings, but good enough for now)
+        // Simple parsing: split by comma (doesn't handle commas in strings, but good enough for
+        // now)
         for pair in inner.split(',') {
             let mut parts = pair.splitn(2, '=').map(|s| s.trim());
             let key = parts.next();

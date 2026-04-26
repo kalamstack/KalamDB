@@ -4,12 +4,15 @@
 //! registered in `backend/Cargo.toml`, so they never ran. This suite migrates
 //! them to the near-production HTTP harness.
 
-use super::test_support::auth_helper::create_user_auth_header;
-use super::test_support::consolidated_helpers::{unique_namespace, unique_table};
-use super::test_support::http_server::HttpTestServer;
 use kalam_client::models::ResponseStatus;
 use kalamdb_commons::Role;
 use tokio::time::{sleep, Duration, Instant};
+
+use super::test_support::{
+    auth_helper::create_user_auth_header,
+    consolidated_helpers::{unique_namespace, unique_table},
+    http_server::HttpTestServer,
+};
 
 async fn wait_for_flush_jobs_settled(
     server: &HttpTestServer,

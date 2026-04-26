@@ -13,19 +13,27 @@
 //! **Schema Caching**: Memoized via `OnceLock`
 //! **Schema**: TableDefinition provides consistent metadata for views
 
-use crate::error::RegistryError;
-use crate::view_base::{ViewTableProvider, VirtualView};
-use datafusion::arrow::array::{ArrayRef, Int64Builder, StringBuilder};
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::RecordBatch;
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::schemas::{
-    ColumnDefault, ColumnDefinition, TableDefinition, TableOptions, TableType,
+use std::{
+    path::PathBuf,
+    sync::{Arc, OnceLock},
 };
-use kalamdb_commons::{NamespaceId, TableName};
+
+use datafusion::arrow::{
+    array::{ArrayRef, Int64Builder, StringBuilder},
+    datatypes::SchemaRef,
+    record_batch::RecordBatch,
+};
+use kalamdb_commons::{
+    datatypes::KalamDataType,
+    schemas::{ColumnDefault, ColumnDefinition, TableDefinition, TableOptions, TableType},
+    NamespaceId, TableName,
+};
 use kalamdb_system::SystemTable;
-use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
+
+use crate::{
+    error::RegistryError,
+    view_base::{ViewTableProvider, VirtualView},
+};
 
 /// Get or initialize the server_logs schema (memoized)
 fn server_logs_schema() -> SchemaRef {
@@ -306,9 +314,11 @@ pub fn create_server_logs_provider(logs_path: impl Into<PathBuf>) -> ServerLogsT
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::io::Write;
+
     use tempfile::tempdir;
+
+    use super::*;
 
     #[test]
     fn test_schema() {

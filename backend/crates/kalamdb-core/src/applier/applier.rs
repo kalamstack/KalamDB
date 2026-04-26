@@ -3,23 +3,23 @@
 //! All commands flow through Raft, even in single-node mode.
 //! This ensures the same code path is tested in both modes.
 
-use async_trait::async_trait;
-use chrono::Utc;
 use std::sync::Arc;
 
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::schemas::{TableDefinition, TableType};
-use kalamdb_commons::models::{NamespaceId, StorageId, TableId, TransactionId, UserId};
+use async_trait::async_trait;
+use chrono::Utc;
+use kalamdb_commons::models::{
+    rows::Row,
+    schemas::{TableDefinition, TableType},
+    NamespaceId, StorageId, TableId, TransactionId, UserId,
+};
 use kalamdb_raft::{
     DataResponse, GroupId, MetaCommand, RaftExecutor, SharedDataCommand, UserDataCommand,
 };
 use kalamdb_sharding::ShardRouter;
-use kalamdb_system::Storage;
-use kalamdb_system::User;
+use kalamdb_system::{Storage, User};
 use kalamdb_transactions::StagedMutation;
 
-use super::error::ApplierError;
-use super::executor::CommandExecutorImpl;
+use super::{error::ApplierError, executor::CommandExecutorImpl};
 use crate::app_context::AppContext;
 
 /// Unified Applier trait - the single interface for all command execution
@@ -278,7 +278,8 @@ impl RaftApplier {
             if let Some(existing_group) = expected_group {
                 if existing_group != group_id {
                     return Err(ApplierError::Validation(format!(
-                        "explicit transactions must remain within one data raft group; '{}' mapped to {:?} while prior mutations mapped to {:?}",
+                        "explicit transactions must remain within one data raft group; '{}' \
+                         mapped to {:?} while prior mutations mapped to {:?}",
                         mutation.table_id, group_id, existing_group
                     )));
                 }

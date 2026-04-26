@@ -24,11 +24,10 @@ pub use executors::{JobContext, JobDecision, JobExecutor as JobExecutorTrait, Jo
 pub use flush_scheduler::FlushScheduler;
 pub use health_monitor::HealthMonitor;
 pub use jobs_manager::JobsManager;
-pub use stream_eviction::StreamEvictionScheduler;
-
 // Phase 16 exports (cluster mode)
 pub use leader_failover::{JobRecoveryAction, LeaderFailoverHandler, RecoveryReport};
 pub use leader_guard::{LeaderOnlyJobGuard, LeadershipStatus};
+pub use stream_eviction::StreamEvictionScheduler;
 
 // ============================================================================
 // JobWaker implementation (bridges kalamdb-core trait → JobsManager)
@@ -43,8 +42,9 @@ impl kalamdb_core::job_waker::JobWaker for JobsManager {
 // ============================================================================
 // Extension trait: ergonomic `.job_manager()` on AppContext
 // ============================================================================
-use kalamdb_core::app_context::AppContext;
 use std::sync::Arc;
+
+use kalamdb_core::app_context::AppContext;
 
 /// Extension trait that provides typed access to the `JobsManager` stored
 /// inside `AppContext` (which stores it as `Arc<dyn Any>`).

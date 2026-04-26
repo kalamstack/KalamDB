@@ -46,7 +46,8 @@ fn test_hot_cold_storage_data_integrity() {
 
     // === Phase 1: INSERT into hot storage ===
     execute_sql(&format!(
-        "INSERT INTO {} (id, name, value) VALUES (1, 'Alice', 100), (2, 'Bob', 200), (3, 'Charlie', 300)",
+        "INSERT INTO {} (id, name, value) VALUES (1, 'Alice', 100), (2, 'Bob', 200), (3, \
+         'Charlie', 300)",
         full_table_name
     ))
     .expect("Initial INSERT failed");
@@ -296,7 +297,8 @@ fn test_update_operations_hot_and_cold() {
 
     // === Insert test data ===
     execute_sql(&format!(
-        "INSERT INTO {} (id, status, count) VALUES (1, 'active', 10), (2, 'inactive', 20), (3, 'pending', 30)",
+        "INSERT INTO {} (id, status, count) VALUES (1, 'active', 10), (2, 'inactive', 20), (3, \
+         'pending', 30)",
         full_table_name
     ))
     .expect("INSERT failed");

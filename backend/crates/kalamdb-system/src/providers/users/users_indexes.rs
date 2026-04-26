@@ -2,14 +2,14 @@
 //!
 //! This module defines secondary indexes for the system.users table.
 
-use crate::providers::users::models::User;
-use crate::system_row_mapper::system_row_to_model;
-use crate::StoragePartition;
-use kalamdb_commons::models::rows::SystemTableRow;
-use kalamdb_commons::storage::Partition;
-use kalamdb_commons::UserId;
-use kalamdb_store::IndexDefinition;
 use std::sync::Arc;
+
+use kalamdb_commons::{models::rows::SystemTableRow, storage::Partition, UserId};
+use kalamdb_store::IndexDefinition;
+
+use crate::{
+    providers::users::models::User, system_row_mapper::system_row_to_model, StoragePartition,
+};
 
 /// Index for querying users by role.
 ///
@@ -54,9 +54,10 @@ pub fn create_users_indexes() -> Vec<Arc<dyn IndexDefinition<UserId, SystemTable
 
 #[cfg(test)]
 mod tests {
+    use kalamdb_commons::{AuthType, Role, StorageId};
+
     use super::*;
     use crate::system_row_mapper::model_to_system_row;
-    use kalamdb_commons::{AuthType, Role, StorageId};
 
     fn create_test_user(id: &str, role: Role) -> User {
         User {

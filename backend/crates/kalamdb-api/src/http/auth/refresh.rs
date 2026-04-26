@@ -2,20 +2,21 @@
 //!
 //! POST /v1/api/auth/refresh - Refreshes the JWT token if still valid
 
+use std::sync::Arc;
+
 use actix_web::{web, HttpRequest, HttpResponse};
 use chrono::{Duration, Utc};
-use kalamdb_auth::providers::jwt_auth::{
-    create_and_sign_refresh_token, validate_jwt_token, TokenType,
-};
 use kalamdb_auth::{
     create_and_sign_token, create_auth_cookie, create_refresh_cookie, extract_client_ip_secure,
+    providers::jwt_auth::{create_and_sign_refresh_token, validate_jwt_token, TokenType},
     CookieConfig, UserRepository,
 };
 use kalamdb_configs::AuthSettings;
-use std::sync::Arc;
 
-use super::models::{AuthErrorResponse, LoginResponse, UserInfo};
-use super::{extract_refresh_or_bearer_token, map_auth_error_to_response};
+use super::{
+    extract_refresh_or_bearer_token, map_auth_error_to_response,
+    models::{AuthErrorResponse, LoginResponse, UserInfo},
+};
 use crate::limiter::RateLimiter;
 
 /// POST /v1/api/auth/refresh
@@ -168,8 +169,9 @@ pub async fn refresh_handler(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kalamdb_auth::providers::jwt_auth::JwtClaims;
+
+    use super::*;
 
     #[test]
     fn refresh_endpoint_only_accepts_refresh_token_type() {

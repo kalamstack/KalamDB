@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
-use arrow::datatypes::DataType;
-use arrow::record_batch::RecordBatch;
-use datafusion::physical_plan::{collect, ExecutionPlan};
-use datafusion::prelude::{col, lit, SessionContext};
+use arrow::{datatypes::DataType, record_batch::RecordBatch};
+use datafusion::{
+    physical_plan::{collect, ExecutionPlan},
+    prelude::{col, lit, SessionContext},
+};
+use kalamdb_commons::TableId;
 
 use super::error::OperationError;
 use crate::schema_registry::SchemaRegistry;
-use kalamdb_commons::TableId;
 
 /// Convert a string filter value to a typed DataFusion `Expr` literal
 /// based on the Arrow column type. Falls back to string literal for unknown types.

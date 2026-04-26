@@ -1,8 +1,9 @@
 // Comprehensive smoke test for core KalamDB operations
 // Tests system tables, namespaces, users, storage, and flush operations
 
-use crate::common::*;
 use std::time::Duration;
+
+use crate::common::*;
 
 #[ntest::timeout(180_000)]
 #[test]
@@ -271,7 +272,8 @@ fn test_flush_operations() {
         .expect("CREATE NAMESPACE should succeed");
 
     let create_table_sql = format!(
-        "CREATE TABLE {} (id INT PRIMARY KEY, value VARCHAR) WITH (TYPE = 'USER', FLUSH_POLICY = 'rows:100')",
+        "CREATE TABLE {} (id INT PRIMARY KEY, value VARCHAR) WITH (TYPE = 'USER', FLUSH_POLICY = \
+         'rows:100')",
         full_table_name
     );
     execute_sql_as_root_via_client(&create_table_sql).expect("CREATE TABLE should succeed");

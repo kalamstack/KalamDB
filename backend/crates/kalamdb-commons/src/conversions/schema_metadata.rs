@@ -3,9 +3,9 @@
 //! Centralized helpers for reading/writing Arrow Field metadata keys used by KalamDB.
 //! This ensures consistent key names and serialization across the codebase.
 
-use crate::models::datatypes::KalamDataType;
-use crate::schemas::FieldFlags;
 use arrow_schema::Field;
+
+use crate::{models::datatypes::KalamDataType, schemas::FieldFlags};
 
 /// Metadata key for serialized KalamDataType.
 pub const KALAM_DATA_TYPE_METADATA_KEY: &str = "kalam_data_type";
@@ -57,8 +57,7 @@ pub fn with_kalam_column_flags_metadata(mut field: Field, flags: &FieldFlags) ->
 pub fn schema_fields_from_arrow_schema(
     arrow_schema: &arrow_schema::SchemaRef,
 ) -> Vec<crate::schemas::SchemaField> {
-    use crate::conversions::arrow_conversion::FromArrowType;
-    use crate::models::datatypes::KalamDataType;
+    use crate::{conversions::arrow_conversion::FromArrowType, models::datatypes::KalamDataType};
 
     arrow_schema
         .fields()

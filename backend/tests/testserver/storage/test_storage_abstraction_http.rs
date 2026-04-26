@@ -3,8 +3,9 @@
 //! These tests intentionally go through the real HTTP API (`/v1/api/sql`) using the
 //! near-production server wiring from `tests/testserver/commons`.
 
-use kalam_client::models::ResponseStatus;
 use std::path::PathBuf;
+
+use kalam_client::models::ResponseStatus;
 
 fn file_uri(path: PathBuf) -> String {
     #[cfg(unix)]
@@ -56,10 +57,11 @@ async fn test_storage_abstraction_over_http() -> anyhow::Result<()> {
     );
 
     let response = server
-            .execute_sql(
-                "CREATE TABLE test_rocksdb_trait.test_table (id BIGINT PRIMARY KEY, name TEXT) WITH (TYPE = 'USER')",
-            )
-            .await?;
+        .execute_sql(
+            "CREATE TABLE test_rocksdb_trait.test_table (id BIGINT PRIMARY KEY, name TEXT) WITH \
+             (TYPE = 'USER')",
+        )
+        .await?;
     assert_eq!(
         response.status,
         ResponseStatus::Success,
@@ -115,10 +117,20 @@ async fn test_storage_abstraction_over_http() -> anyhow::Result<()> {
         response.error
     );
 
-    let response = server.execute_sql("CREATE TABLE test_partition_ns.table1 (id BIGINT PRIMARY KEY, data TEXT) WITH (TYPE = 'USER')").await?;
+    let response = server
+        .execute_sql(
+            "CREATE TABLE test_partition_ns.table1 (id BIGINT PRIMARY KEY, data TEXT) WITH (TYPE \
+             = 'USER')",
+        )
+        .await?;
     assert_eq!(response.status, ResponseStatus::Success);
 
-    let response = server.execute_sql("CREATE TABLE test_partition_ns.table2 (id BIGINT PRIMARY KEY, value BIGINT) WITH (TYPE = 'USER')").await?;
+    let response = server
+        .execute_sql(
+            "CREATE TABLE test_partition_ns.table2 (id BIGINT PRIMARY KEY, value BIGINT) WITH \
+             (TYPE = 'USER')",
+        )
+        .await?;
     assert_eq!(response.status, ResponseStatus::Success);
 
     let _ = server

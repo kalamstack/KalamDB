@@ -1,6 +1,6 @@
+use std::{thread, time::Duration};
+
 use crate::common::*;
-use std::thread;
-use std::time::Duration;
 
 /// Test UPDATE on rows with NULL values in non-PK columns (hot storage)
 #[test]
@@ -43,7 +43,8 @@ fn test_update_row_with_null_columns_hot() {
 
     // Insert row with NULL client_id
     let insert_sql = format!(
-        "INSERT INTO {} (id, client_id, conversation_id, sender, role, content, status) VALUES (12345, NULL, 999, 'AI Assistant', 'assistant', 'Test message', 'sent')",
+        "INSERT INTO {} (id, client_id, conversation_id, sender, role, content, status) VALUES \
+         (12345, NULL, 999, 'AI Assistant', 'assistant', 'Test message', 'sent')",
         full_table_name
     );
 
@@ -134,7 +135,8 @@ fn test_update_row_with_null_columns_cold() {
 
     // Insert row with NULL client_id
     let insert_sql = format!(
-        "INSERT INTO {} (id, client_id, conversation_id, sender, content) VALUES (98765, NULL, 888, 'Test Sender', 'Test content')",
+        "INSERT INTO {} (id, client_id, conversation_id, sender, content) VALUES (98765, NULL, \
+         888, 'Test Sender', 'Test content')",
         full_table_name
     );
 
@@ -294,7 +296,8 @@ fn test_update_multiple_rows_with_nulls() {
 
     // Create table
     let create_sql = format!(
-        "CREATE USER TABLE {} (id BIGINT NOT NULL PRIMARY KEY, optional_field TEXT, required_field TEXT NOT NULL)",
+        "CREATE USER TABLE {} (id BIGINT NOT NULL PRIMARY KEY, optional_field TEXT, \
+         required_field TEXT NOT NULL)",
         full_table_name
     );
 

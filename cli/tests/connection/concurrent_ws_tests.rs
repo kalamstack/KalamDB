@@ -8,11 +8,17 @@
 //! Run with:
 //!   cargo test --test connection concurrent_ws -- --test-threads=1
 
-use crate::common::*;
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
+
 use kalam_client::{KalamLinkTimeouts, SubscriptionConfig};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+
+use crate::common::*;
 
 /// Test: Open many concurrent WebSocket connections, each subscribing to the same table.
 /// Verify all receive an initial ack and at least one notification without heartbeat timeout.
@@ -182,12 +188,8 @@ fn test_concurrent_websocket_subscriptions() {
         let total_timeouts = timeouts.load(Ordering::Relaxed);
 
         eprintln!(
-            "\n=== Concurrent WS Test Results ===\n\
-         Connections attempted: {}\n\
-         Successfully subscribed: {}\n\
-         Received notification: {}\n\
-         Errors: {}\n\
-         Heartbeat timeouts: {}\n",
+            "\n=== Concurrent WS Test Results ===\nConnections attempted: {}\nSuccessfully \
+             subscribed: {}\nReceived notification: {}\nErrors: {}\nHeartbeat timeouts: {}\n",
             num_connections, total_subscribed, total_notified, total_errors, total_timeouts
         );
 
@@ -210,7 +212,7 @@ fn test_concurrent_websocket_subscriptions() {
         assert_eq!(
             total_timeouts, 0,
             "Expected zero heartbeat timeouts, got {} (this indicates the server heartbeat \
-         checker is too aggressive or connection handling is too slow)",
+             checker is too aggressive or connection handling is too slow)",
             total_timeouts
         );
     }); // rt.block_on
@@ -303,11 +305,8 @@ fn test_rapid_connect_disconnect() {
         let elapsed = start.elapsed();
 
         eprintln!(
-            "\n=== Rapid Connect/Disconnect Results ===\n\
-         Cycles: {}\n\
-         Successful: {}\n\
-         Elapsed: {:.2}s\n\
-         Avg per cycle: {:.1}ms\n",
+            "\n=== Rapid Connect/Disconnect Results ===\nCycles: {}\nSuccessful: {}\nElapsed: \
+             {:.2}s\nAvg per cycle: {:.1}ms\n",
             cycles,
             success_count,
             elapsed.as_secs_f64(),

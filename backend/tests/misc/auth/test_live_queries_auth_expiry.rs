@@ -2,9 +2,11 @@
 //!
 //! Verifies that auth expiry events correctly terminate WebSocket connections.
 
-use super::test_support::TestServer;
-use kalamdb_commons::models::{ConnectionId, ConnectionInfo, Role, UserId};
 use std::time::Duration;
+
+use kalamdb_commons::models::{ConnectionId, ConnectionInfo, Role, UserId};
+
+use super::test_support::TestServer;
 
 #[tokio::test]
 async fn test_live_query_auth_expiry() {

@@ -5,10 +5,12 @@
 //! coordinator and consumed by the notification service.
 
 use datafusion::scalar::ScalarValue;
-use kalamdb_commons::constants::SystemColumnNames;
-use kalamdb_commons::ids::SeqId;
-use kalamdb_commons::models::{TableId, TransactionId, UserId};
-use kalamdb_commons::websocket::ChangeNotification;
+use kalamdb_commons::{
+    constants::SystemColumnNames,
+    ids::SeqId,
+    models::{TableId, TransactionId, UserId},
+    websocket::ChangeNotification,
+};
 
 /// Owner scope for live fanout: either a shared table or a user-scoped table.
 ///

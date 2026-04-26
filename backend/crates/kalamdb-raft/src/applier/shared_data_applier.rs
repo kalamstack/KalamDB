@@ -6,8 +6,7 @@
 //! The implementation lives in kalamdb-core using provider infrastructure.
 
 use async_trait::async_trait;
-use kalamdb_commons::models::TransactionId;
-use kalamdb_commons::TableId;
+use kalamdb_commons::{models::TransactionId, TableId};
 use kalamdb_transactions::StagedMutation;
 
 use crate::{RaftError, TransactionApplyResult};
@@ -30,6 +29,7 @@ pub trait SharedDataApplier: Send + Sync {
         &self,
         table_id: &TableId,
         rows: &[kalamdb_commons::models::rows::Row],
+        commit_seq: u64,
     ) -> Result<usize, RaftError>;
 
     /// Update rows in a shared table
@@ -46,6 +46,7 @@ pub trait SharedDataApplier: Send + Sync {
         table_id: &TableId,
         updates: &[kalamdb_commons::models::rows::Row],
         filter: Option<&str>,
+        commit_seq: u64,
     ) -> Result<usize, RaftError>;
 
     /// Delete rows from a shared table
@@ -60,6 +61,7 @@ pub trait SharedDataApplier: Send + Sync {
         &self,
         table_id: &TableId,
         pk_values: Option<&[String]>,
+        commit_seq: u64,
     ) -> Result<usize, RaftError>;
 
     /// Apply an explicit-transaction write set inside one state-machine cycle.
@@ -67,6 +69,7 @@ pub trait SharedDataApplier: Send + Sync {
         &self,
         transaction_id: &TransactionId,
         mutations: &[StagedMutation],
+        commit_seq: u64,
     ) -> Result<TransactionApplyResult, RaftError>;
 }
 
@@ -79,6 +82,7 @@ impl SharedDataApplier for NoOpSharedDataApplier {
         &self,
         _table_id: &TableId,
         _rows: &[kalamdb_commons::models::rows::Row],
+        _commit_seq: u64,
     ) -> Result<usize, RaftError> {
         Ok(0)
     }
@@ -88,6 +92,7 @@ impl SharedDataApplier for NoOpSharedDataApplier {
         _table_id: &TableId,
         _updates: &[kalamdb_commons::models::rows::Row],
         _filter: Option<&str>,
+        _commit_seq: u64,
     ) -> Result<usize, RaftError> {
         Ok(0)
     }
@@ -96,6 +101,7 @@ impl SharedDataApplier for NoOpSharedDataApplier {
         &self,
         _table_id: &TableId,
         _pk_values: Option<&[String]>,
+        _commit_seq: u64,
     ) -> Result<usize, RaftError> {
         Ok(0)
     }
@@ -104,6 +110,7 @@ impl SharedDataApplier for NoOpSharedDataApplier {
         &self,
         _transaction_id: &TransactionId,
         _mutations: &[StagedMutation],
+        _commit_seq: u64,
     ) -> Result<TransactionApplyResult, RaftError> {
         Ok(TransactionApplyResult::default())
     }
@@ -111,10 +118,14 @@ impl SharedDataApplier for NoOpSharedDataApplier {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
     use kalamdb_commons::models::{NamespaceId, TableName};
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
+
+    use super::*;
 
     /// Mock shared applier for testing
     struct MockSharedDataApplier {
@@ -135,6 +146,7 @@ mod tests {
             &self,
             _table_id: &TableId,
             rows: &[kalamdb_commons::models::rows::Row],
+            _commit_seq: u64,
         ) -> Result<usize, RaftError> {
             self.insert_count.fetch_add(1, Ordering::SeqCst);
             Ok(rows.len())
@@ -145,6 +157,7 @@ mod tests {
             _table_id: &TableId,
             _updates: &[kalamdb_commons::models::rows::Row],
             _filter: Option<&str>,
+            _commit_seq: u64,
         ) -> Result<usize, RaftError> {
             Ok(1)
         }
@@ -153,6 +166,7 @@ mod tests {
             &self,
             _table_id: &TableId,
             _pk_values: Option<&[String]>,
+            _commit_seq: u64,
         ) -> Result<usize, RaftError> {
             Ok(1)
         }
@@ -161,6 +175,7 @@ mod tests {
             &self,
             _transaction_id: &TransactionId,
             mutations: &[StagedMutation],
+            _commit_seq: u64,
         ) -> Result<TransactionApplyResult, RaftError> {
             Ok(TransactionApplyResult {
                 rows_affected: mutations.len(),
@@ -178,7 +193,7 @@ mod tests {
         let table_id =
             TableId::new(NamespaceId::from("shared_ns"), TableName::from("shared_table"));
 
-        let result = applier.insert(&table_id, &[]).await;
+        let result = applier.insert(&table_id, &[], 1).await;
         assert!(result.is_ok());
         assert_eq!(applier.insert_count.load(Ordering::SeqCst), 1);
     }
@@ -188,8 +203,8 @@ mod tests {
         let applier = NoOpSharedDataApplier;
         let table_id = TableId::new(NamespaceId::from("test_ns"), TableName::from("test_table"));
 
-        assert_eq!(applier.insert(&table_id, &[]).await.unwrap(), 0);
-        assert_eq!(applier.update(&table_id, &[], None).await.unwrap(), 0);
-        assert_eq!(applier.delete(&table_id, None).await.unwrap(), 0);
+        assert_eq!(applier.insert(&table_id, &[], 1).await.unwrap(), 0);
+        assert_eq!(applier.update(&table_id, &[], None, 1).await.unwrap(), 0);
+        assert_eq!(applier.delete(&table_id, None, 1).await.unwrap(), 0);
     }
 }

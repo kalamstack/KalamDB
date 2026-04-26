@@ -7,13 +7,15 @@
 //! 3. Multiple subscriptions across different nodes should all receive the same events
 //! 4. Initial data should be consistent regardless of which node serves the subscription
 
-use crate::cluster_common::*;
-use crate::common::*;
+use std::{
+    sync::{atomic::Ordering, Arc},
+    time::Duration,
+};
+
 use kalam_client::{ChangeEvent, KalamLinkTimeouts, SubscriptionManager};
 use serde_json::Value;
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
-use std::time::Duration;
+
+use crate::{cluster_common::*, common::*};
 
 /// Parse cluster nodes to get leader and follower URLs
 fn get_leader_and_followers() -> (String, Vec<String>) {
@@ -159,7 +161,6 @@ async fn execute_query_with_retry(
 }
 
 /// Test: Subscription on leader receives changes from leader writes
-///
 #[test]
 fn cluster_test_subscription_leader_to_leader() {
     if !require_cluster_running() {
@@ -243,7 +244,6 @@ fn cluster_test_subscription_leader_to_leader() {
 }
 
 /// Test: Subscription on follower receives changes from leader writes
-///
 #[test]
 fn cluster_test_subscription_follower_to_leader() {
     if !require_cluster_running() {
@@ -335,7 +335,6 @@ fn cluster_test_subscription_follower_to_leader() {
 }
 
 /// Test: Multiple subscriptions across nodes receive identical events
-///
 #[test]
 fn cluster_test_subscription_multi_node_identical() {
     if !require_cluster_running() {
@@ -434,7 +433,6 @@ fn cluster_test_subscription_multi_node_identical() {
 }
 
 /// Test: Initial data is identical when subscribing to any node
-///
 #[test]
 fn cluster_test_subscription_initial_data_consistency() {
     if !require_cluster_running() {
@@ -495,7 +493,10 @@ fn cluster_test_subscription_initial_data_consistency() {
     }
 
     if !data_replicated {
-        panic!("Data did not replicate to all nodes within timeout (USER table replication may be slow under load)");
+        panic!(
+            "Data did not replicate to all nodes within timeout (USER table replication may be \
+             slow under load)"
+        );
     }
     println!("  ✓ Data replicated to all nodes");
 

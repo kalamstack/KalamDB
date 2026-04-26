@@ -1,11 +1,16 @@
-use super::models::{SharedVectorHotOpId, UserVectorHotOpId, VectorHotOp};
-use super::vector_hot_store::{
-    shared_vector_pk_index_partition_name, user_vector_pk_index_partition_name,
+use kalamdb_commons::{
+    models::{TableId, UserId},
+    storage::Partition,
+    storage_key::{encode_key, encode_prefix},
 };
-use kalamdb_commons::models::{TableId, UserId};
-use kalamdb_commons::storage::Partition;
-use kalamdb_commons::storage_key::{encode_key, encode_prefix};
 use kalamdb_store::IndexDefinition;
+
+use super::{
+    models::{SharedVectorHotOpId, UserVectorHotOpId, VectorHotOp},
+    vector_hot_store::{
+        shared_vector_pk_index_partition_name, user_vector_pk_index_partition_name,
+    },
+};
 
 /// Secondary index for user-scoped vector ops by (user_id, pk, seq).
 pub struct UserVectorPkIndex {
@@ -83,9 +88,12 @@ impl IndexDefinition<SharedVectorHotOpId, VectorHotOp> for SharedVectorPkIndex {
 
 #[cfg(test)]
 mod tests {
+    use kalamdb_commons::{
+        ids::SeqId,
+        models::{NamespaceId, TableName},
+    };
+
     use super::*;
-    use kalamdb_commons::ids::SeqId;
-    use kalamdb_commons::models::{NamespaceId, TableName};
 
     #[test]
     fn test_user_vector_pk_index_partition_name() {

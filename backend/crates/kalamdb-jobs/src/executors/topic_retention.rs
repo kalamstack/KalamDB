@@ -20,12 +20,13 @@
 //! }
 //! ```
 
-use crate::executors::{JobContext, JobDecision, JobExecutor, JobParams};
 use async_trait::async_trait;
 use kalamdb_commons::models::TopicId;
 use kalamdb_core::error::KalamDbError;
 use kalamdb_system::JobType;
 use serde::{Deserialize, Serialize};
+
+use crate::executors::{JobContext, JobDecision, JobExecutor, JobParams};
 
 /// Typed parameters for topic retention operations
 #[derive(Debug, Clone, Serialize, Deserialize)]

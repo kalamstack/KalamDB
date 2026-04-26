@@ -5,9 +5,11 @@
 //! This function remains as a compatibility no-op for callers that still invoke
 //! it during bootstrap.
 
-use crate::error::SystemError;
-use kalamdb_store::StorageBackend;
 use std::sync::Arc;
+
+use kalamdb_store::StorageBackend;
+
+use crate::error::SystemError;
 
 /// Compatibility no-op.
 ///
@@ -17,15 +19,17 @@ pub async fn initialize_system_tables(
     _storage_backend: Arc<dyn StorageBackend>,
 ) -> Result<(), SystemError> {
     log::debug!(
-        "initialize_system_tables() is a no-op; system schema reconciliation is handled by SchemaRegistry"
+        "initialize_system_tables() is a no-op; system schema reconciliation is handled by \
+         SchemaRegistry"
     );
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kalamdb_store::test_utils::InMemoryBackend;
+
+    use super::*;
 
     #[tokio::test]
     async fn initialization_is_noop_and_succeeds() {

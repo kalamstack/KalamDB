@@ -4,10 +4,9 @@
 //! These are "snapshot" tests that ensure the cluster has converged to
 //! a consistent state after a workload completes.
 
-use crate::cluster_common::*;
-use crate::common::*;
-use std::collections::HashSet;
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
+
+use crate::{cluster_common::*, common::*};
 
 /// Helper: Get row count from a node with retries
 fn get_row_count(url: &str, table: &str) -> i64 {
@@ -166,7 +165,8 @@ fn cluster_test_final_metadata_consistency() {
 
     // Verify namespace counts
     let ns_query = format!(
-        "SELECT namespace_id FROM system.namespaces WHERE namespace_id LIKE '{}%' ORDER BY namespace_id",
+        "SELECT namespace_id FROM system.namespaces WHERE namespace_id LIKE '{}%' ORDER BY \
+         namespace_id",
         base_ns
     );
 
@@ -284,12 +284,14 @@ fn cluster_test_final_mixed_workload_consistency() {
     }
 
     println!("  Phase 2: Updates (even IDs)...");
-    // Update even IDs - use individual PK updates since SHARED tables don't support predicate updates
+    // Update even IDs - use individual PK updates since SHARED tables don't support predicate
+    // updates
     for i in (0..200).step_by(2) {
         execute_on_node(
             &urls[0],
             &format!(
-                "UPDATE {}.workload_data SET status = 'updated', counter = 1, updated_at = 'phase2' WHERE id = {}",
+                "UPDATE {}.workload_data SET status = 'updated', counter = 1, updated_at = \
+                 'phase2' WHERE id = {}",
                 namespace, i
             ),
         )
@@ -320,7 +322,8 @@ fn cluster_test_final_mixed_workload_consistency() {
         execute_on_node(
             &urls[0],
             &format!(
-                "INSERT INTO {}.workload_data (id, status, counter, updated_at) VALUES ({}, 'new', 0, 'phase5')",
+                "INSERT INTO {}.workload_data (id, status, counter, updated_at) VALUES ({}, \
+                 'new', 0, 'phase5')",
                 namespace, i
             ),
         )

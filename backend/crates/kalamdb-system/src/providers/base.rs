@@ -14,21 +14,23 @@ use std::sync::Arc;
 
 use arrow::array::RecordBatch;
 use async_trait::async_trait;
-use datafusion::catalog::Session;
-use datafusion::common::{DataFusionError, DFSchema};
-use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
-use datafusion::physical_expr::PhysicalExpr;
-use datafusion::physical_plan::ExecutionPlan;
-use kalamdb_datafusion_sources::exec::{
-    finalize_deferred_batch, DeferredBatchExec, DeferredBatchSource,
+use datafusion::{
+    catalog::Session,
+    common::{DFSchema, DataFusionError},
+    logical_expr::{Expr, TableProviderFilterPushDown},
+    physical_expr::PhysicalExpr,
+    physical_plan::ExecutionPlan,
 };
-use kalamdb_datafusion_sources::pruning::{
-    FilterRequest, LimitRequest, ProjectionRequest, PruningRequest,
+use kalamdb_commons::{
+    conversions::json_rows_to_arrow_batch,
+    models::rows::{Row, SystemTableRow},
+    KSerializable, StorageKey,
 };
-use kalamdb_datafusion_sources::provider::{combined_filter, pushdown_results_for_filters, FilterCapability};
-use kalamdb_commons::conversions::json_rows_to_arrow_batch;
-use kalamdb_commons::models::rows::{Row, SystemTableRow};
-use kalamdb_commons::{KSerializable, StorageKey};
+use kalamdb_datafusion_sources::{
+    exec::{finalize_deferred_batch, DeferredBatchExec, DeferredBatchSource},
+    provider::{combined_filter, pushdown_results_for_filters, FilterCapability},
+    pruning::{FilterRequest, LimitRequest, ProjectionRequest, PruningRequest},
+};
 use kalamdb_store::{EntityStore, IndexedEntityStore};
 
 use crate::error::SystemError;
@@ -95,8 +97,7 @@ where
     K: StorageKey + Clone + Send + Sync + 'static,
     V: KSerializable + Clone + Send + Sync + 'static,
 {
-    use datafusion::logical_expr::Operator;
-    use datafusion::scalar::ScalarValue;
+    use datafusion::{logical_expr::Operator, scalar::ScalarValue};
 
     let mut start_key: Option<K> = None;
     let mut prefix: Option<K> = None;
@@ -130,15 +131,15 @@ where
     let store = provider.store();
     let mut pairs: Vec<(K, V)> = Vec::new();
     if let Some((index_idx, index_prefix)) = store.find_best_index_for_filters(&filters) {
-        let iter = store
-            .scan_by_index_iter(index_idx, Some(&index_prefix), scan_limit)
-            .map_err(|error| {
+        let iter = store.scan_by_index_iter(index_idx, Some(&index_prefix), scan_limit).map_err(
+            |error| {
                 DataFusionError::Execution(format!(
                     "Failed to scan {} by index: {}",
                     provider.table_name(),
                     error
                 ))
-            })?;
+            },
+        )?;
 
         let effective_limit = scan_limit.unwrap_or(100_000);
         for result in iter {
@@ -155,15 +156,13 @@ where
             }
         }
     } else {
-        let iter = store
-            .scan_iterator(prefix.as_ref(), start_key.as_ref())
-            .map_err(|error| {
-                DataFusionError::Execution(format!(
-                    "Failed to create iterator for {}: {}",
-                    provider.table_name(),
-                    error
-                ))
-            })?;
+        let iter = store.scan_iterator(prefix.as_ref(), start_key.as_ref()).map_err(|error| {
+            DataFusionError::Execution(format!(
+                "Failed to create iterator for {}: {}",
+                provider.table_name(),
+                error
+            ))
+        })?;
 
         let effective_limit = scan_limit.unwrap_or(100_000);
         for result in iter {
@@ -175,11 +174,7 @@ where
                     }
                 },
                 Err(error) => {
-                    log::warn!(
-                        "Error during scan of {}: {}",
-                        provider.table_name(),
-                        error
-                    );
+                    log::warn!("Error during scan of {}: {}", provider.table_name(), error);
                 },
             }
         }
@@ -264,14 +259,15 @@ where
         let filters = self.pruning.filters.filters.as_ref().to_vec();
         let limit = self.pruning.limit.limit;
         let table_name = self.provider.table_name().to_string();
-        let batch = tokio::task::spawn_blocking(move || build_indexed_batch(provider, filters, limit))
-            .await
-            .map_err(|error| {
-                DataFusionError::Execution(format!(
-                    "{} scan task failed: {}",
-                    table_name, error
-                ))
-            })??;
+        let batch =
+            tokio::task::spawn_blocking(move || build_indexed_batch(provider, filters, limit))
+                .await
+                .map_err(|error| {
+                    DataFusionError::Execution(format!(
+                        "{} scan task failed: {}",
+                        table_name, error
+                    ))
+                })??;
 
         finalize_deferred_batch(
             batch,
@@ -420,15 +416,17 @@ where
             None
         };
 
-        Ok(Arc::new(DeferredBatchExec::new(Arc::new(
-            IndexedSystemScanSource::<Self, K, V> {
-                provider: self.clone(),
-                pruning,
-                physical_filter,
-                output_schema,
-                _marker: std::marker::PhantomData,
-            },
-        ))))
+        Ok(Arc::new(DeferredBatchExec::new(Arc::new(IndexedSystemScanSource::<
+            Self,
+            K,
+            V,
+        > {
+            provider: self.clone(),
+            pruning,
+            physical_filter,
+            output_schema,
+            _marker: std::marker::PhantomData,
+        }))))
     }
 }
 
@@ -528,8 +526,7 @@ where
 
 /// Helper function to extract string equality filter value for a column
 pub fn extract_filter_value(filters: &[Expr], column_name: &str) -> Option<String> {
-    use datafusion::logical_expr::Operator;
-    use datafusion::scalar::ScalarValue;
+    use datafusion::{logical_expr::Operator, scalar::ScalarValue};
 
     for expr in filters {
         if let Expr::BinaryExpr(binary) = expr {
@@ -550,8 +547,7 @@ pub fn extract_range_filters(
     filters: &[Expr],
     column_name: &str,
 ) -> (Option<String>, Option<String>) {
-    use datafusion::logical_expr::Operator;
-    use datafusion::scalar::ScalarValue;
+    use datafusion::{logical_expr::Operator, scalar::ScalarValue};
 
     let mut start = None;
     let mut end = None;
@@ -576,17 +572,24 @@ pub fn extract_range_filters(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use datafusion::arrow::array::{RecordBatch, StringArray};
-    use datafusion::arrow::datatypes::{DataType, Field, Schema};
-    use datafusion::execution::context::SessionContext;
-    use datafusion::logical_expr::{col, lit};
-    use datafusion::physical_plan::collect;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Mutex,
+    };
+
+    use datafusion::{
+        arrow::{
+            array::{RecordBatch, StringArray},
+            datatypes::{DataType, Field, Schema},
+        },
+        execution::context::SessionContext,
+        logical_expr::{col, lit},
+        physical_plan::collect,
+    };
     use kalamdb_commons::{KSerializable, StorageKey};
-    use kalamdb_store::test_utils::InMemoryBackend;
-    use kalamdb_store::{IndexedEntityStore, StorageBackend};
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Mutex;
+    use kalamdb_store::{test_utils::InMemoryBackend, IndexedEntityStore, StorageBackend};
+
+    use super::*;
 
     #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
     struct DummyValue {
@@ -752,9 +755,12 @@ mod tests {
             }
             RecordBatch::try_new(
                 self.arrow_schema(),
-                vec![Arc::new(StringArray::from(ids)), Arc::new(StringArray::from(values))],
+                vec![
+                    Arc::new(StringArray::from(ids)),
+                    Arc::new(StringArray::from(values)),
+                ],
             )
-                .map_err(|e| SystemError::Other(e.to_string()))
+            .map_err(|e| SystemError::Other(e.to_string()))
         }
     }
 
@@ -838,9 +844,7 @@ mod tests {
         // Deferred scans should not touch storage during planning.
         assert_eq!(backend.scan_calls(), 0);
 
-        let batches = collect(plan, state.task_ctx())
-            .await
-            .expect("collect deferred system scan");
+        let batches = collect(plan, state.task_ctx()).await.expect("collect deferred system scan");
         assert_eq!(batches.iter().map(|batch| batch.num_rows()).sum::<usize>(), 1);
 
         assert_eq!(backend.scan_calls(), 1);
@@ -877,14 +881,9 @@ mod tests {
         let state = ctx.state();
         let filter = col("value").eq(lit("match"));
 
-        let plan = provider
-            .base_system_scan(&state, None, &[filter], Some(1))
-            .await
-            .unwrap();
+        let plan = provider.base_system_scan(&state, None, &[filter], Some(1)).await.unwrap();
 
-        let batches = collect(plan, state.task_ctx())
-            .await
-            .expect("collect filtered system scan");
+        let batches = collect(plan, state.task_ctx()).await.expect("collect filtered system scan");
         assert_eq!(batches.iter().map(|batch| batch.num_rows()).sum::<usize>(), 1);
 
         let values = batches
@@ -912,14 +911,9 @@ mod tests {
         let state = ctx.state();
         let filter = col("value").eq(lit("match"));
 
-        let plan = provider
-            .base_simple_scan(&state, None, &[filter], Some(1))
-            .await
-            .unwrap();
+        let plan = provider.base_simple_scan(&state, None, &[filter], Some(1)).await.unwrap();
 
-        let batches = collect(plan, state.task_ctx())
-            .await
-            .expect("collect filtered simple scan");
+        let batches = collect(plan, state.task_ctx()).await.expect("collect filtered simple scan");
         assert_eq!(batches.iter().map(|batch| batch.num_rows()).sum::<usize>(), 1);
         assert_eq!(limits.lock().unwrap().as_slice(), &[None]);
     }

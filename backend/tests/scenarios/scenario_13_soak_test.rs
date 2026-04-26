@@ -11,12 +11,17 @@
 //! - [x] Subscription stability under load
 //! - [x] Error rate and latency tracking
 
-use super::helpers::*;
+use std::{
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
 
 use kalamdb_commons::Role;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+
+use super::helpers::*;
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(180);
 
@@ -108,15 +113,20 @@ async fn test_scenario_13_mixed_workload_soak() -> anyhow::Result<()> {
                     0 | 1 | 2 => {
                         // Insert (60% of operations)
                         let resp = client
-                                    .execute_query(
-                                        &format!(
-                                            "INSERT INTO {}.orders (id, customer_id, amount, status) VALUES ({}, {}, {}, 'pending')",
-                                            ns_clone, local_id, user_idx, local_id as f64 * 10.5
-                                        ), None,
-                                        None,
-                                        None,
-                                    )
-                                    .await;
+                            .execute_query(
+                                &format!(
+                                    "INSERT INTO {}.orders (id, customer_id, amount, status) \
+                                     VALUES ({}, {}, {}, 'pending')",
+                                    ns_clone,
+                                    local_id,
+                                    user_idx,
+                                    local_id as f64 * 10.5
+                                ),
+                                None,
+                                None,
+                                None,
+                            )
+                            .await;
                         match resp {
                             Ok(r) if r.success() => {
                                 insert_count_clone.fetch_add(1, Ordering::Relaxed);
@@ -138,15 +148,18 @@ async fn test_scenario_13_mixed_workload_soak() -> anyhow::Result<()> {
                     3 => {
                         // Update (20% of operations)
                         let resp = client
-                                    .execute_query(
-                                        &format!(
-                                            "UPDATE {}.orders SET status = 'completed' WHERE id = {} AND status = 'pending'",
-                                            ns_clone, local_id - 1
-                                        ), None,
-                                        None,
-                                        None,
-                                    )
-                                    .await;
+                            .execute_query(
+                                &format!(
+                                    "UPDATE {}.orders SET status = 'completed' WHERE id = {} AND \
+                                     status = 'pending'",
+                                    ns_clone,
+                                    local_id - 1
+                                ),
+                                None,
+                                None,
+                                None,
+                            )
+                            .await;
                         match resp {
                             Ok(r) if r.success() => {
                                 update_count_clone.fetch_add(1, Ordering::Relaxed);
@@ -173,15 +186,17 @@ async fn test_scenario_13_mixed_workload_soak() -> anyhow::Result<()> {
                     _ => {
                         // Query (20% of operations)
                         let resp = client
-                                    .execute_query(
-                                        &format!(
-                                            "SELECT COUNT(*) as cnt FROM {}.orders WHERE status = 'pending'",
-                                            ns_clone
-                                        ), None,
-                                        None,
-                                        None,
-                                    )
-                                    .await;
+                            .execute_query(
+                                &format!(
+                                    "SELECT COUNT(*) as cnt FROM {}.orders WHERE status = \
+                                     'pending'",
+                                    ns_clone
+                                ),
+                                None,
+                                None,
+                                None,
+                            )
+                            .await;
                         match resp {
                             Ok(r) if r.success() => {
                                 query_count_clone.fetch_add(1, Ordering::Relaxed);
@@ -463,7 +478,8 @@ async fn test_scenario_13_concurrent_read_write() -> anyhow::Result<()> {
         let write_count_clone = Arc::clone(&write_count);
 
         let handle = tokio::spawn(async move {
-            // First, seed this user's own 10 counters (USER table RLS means each user needs their own data)
+            // First, seed this user's own 10 counters (USER table RLS means each user needs their
+            // own data)
             for i in 1..=10 {
                 let _ = client
                     .execute_query(

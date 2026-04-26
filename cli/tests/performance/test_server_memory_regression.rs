@@ -1,7 +1,9 @@
-use crate::common::*;
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
 
-use std::thread;
-use std::time::{Duration, Instant};
+use crate::common::*;
 
 const DEFAULT_ROWS: usize = 4_000;
 const DEFAULT_BATCH_SIZE: usize = 200;
@@ -102,7 +104,8 @@ fn create_memory_test_table(namespace: &str, table: &str) -> String {
     execute_sql_as_root_via_client(&format!("CREATE NAMESPACE {}", namespace))
         .expect("create namespace should succeed");
     execute_sql_as_root_via_client(&format!(
-        "CREATE TABLE {} (id BIGINT PRIMARY KEY, tenant TEXT NOT NULL, payload TEXT NOT NULL, seq BIGINT NOT NULL) WITH (TYPE = 'USER', FLUSH_POLICY = 'rows:500')",
+        "CREATE TABLE {} (id BIGINT PRIMARY KEY, tenant TEXT NOT NULL, payload TEXT NOT NULL, seq \
+         BIGINT NOT NULL) WITH (TYPE = 'USER', FLUSH_POLICY = 'rows:500')",
         full_table
     ))
     .expect("create table should succeed");
@@ -232,7 +235,9 @@ fn smoke_test_server_memory_regression() {
         Duration::from_millis(env_u64("KALAMDB_MEM_TEST_SAMPLE_DELAY_MS", DEFAULT_SAMPLE_DELAY_MS));
 
     println!(
-        "[config] rows={} batch={} payload_bytes={} query_loops={} peak_budget={}MB recovery_budget={}MB settle={}s warmup={} warmup_rows={} warmup_query_loops={} warmup_settle={}s",
+        "[config] rows={} batch={} payload_bytes={} query_loops={} peak_budget={}MB \
+         recovery_budget={}MB settle={}s warmup={} warmup_rows={} warmup_query_loops={} \
+         warmup_settle={}s",
         total_rows,
         batch_size,
         payload_bytes,
@@ -308,7 +313,8 @@ fn smoke_test_server_memory_regression() {
     let recovery_delta_mb = settled_mb.saturating_sub(baseline_mb);
 
     println!(
-        "[summary] insert_time={:.2}s read_time={:.2}s baseline={}MB peak={}MB recovered={}MB peak_delta={}MB recovery_delta={}MB",
+        "[summary] insert_time={:.2}s read_time={:.2}s baseline={}MB peak={}MB recovered={}MB \
+         peak_delta={}MB recovery_delta={}MB",
         insert_elapsed.as_secs_f64(),
         read_elapsed.as_secs_f64(),
         baseline_mb,
@@ -320,7 +326,8 @@ fn smoke_test_server_memory_regression() {
 
     assert!(
         peak_delta_mb <= peak_budget_mb,
-        "server memory spiked too far above baseline: baseline={}MB peak={}MB delta={}MB budget={}MB",
+        "server memory spiked too far above baseline: baseline={}MB peak={}MB delta={}MB \
+         budget={}MB",
         baseline_mb,
         peak_mb,
         peak_delta_mb,
@@ -328,7 +335,8 @@ fn smoke_test_server_memory_regression() {
     );
     assert!(
         recovery_delta_mb <= recovery_budget_mb,
-        "server memory did not recover near baseline after flush + cleanup: baseline={}MB recovered={}MB delta={}MB budget={}MB",
+        "server memory did not recover near baseline after flush + cleanup: baseline={}MB \
+         recovered={}MB delta={}MB budget={}MB",
         baseline_mb,
         settled_mb,
         recovery_delta_mb,

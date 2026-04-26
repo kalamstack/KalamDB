@@ -7,15 +7,19 @@
 //! - Checking Parquet file existence
 //! - Verifying job completion metrics
 
-use super::TestServer;
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
+
 use kalam_client::models::ResponseStatus;
 use kalamdb_commons::models::{NamespaceId, StorageId, TableId, TableName};
 use kalamdb_core::manifest::{FlushJobResult, SharedTableFlushJob, TableFlush, UserTableFlushJob};
 use kalamdb_tables::new_indexed_user_table_store;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::Duration;
 use tokio::time::sleep;
+
+use super::TestServer;
 
 /// Execute a flush job synchronously for testing
 ///
@@ -72,7 +76,8 @@ pub async fn execute_flush_synchronously(
         .map(|f| f.name().clone())
         .unwrap_or_else(|| "id".to_string());
 
-    // Construct a per-table UserTableIndexedStore directly (avoids reaching into provider internals)
+    // Construct a per-table UserTableIndexedStore directly (avoids reaching into provider
+    // internals)
     let user_table_store = Arc::new(new_indexed_user_table_store(
         server.app_context.storage_backend(),
         &table_id,
@@ -186,7 +191,10 @@ pub async fn wait_for_flush_job_completion(
         if response.status != ResponseStatus::Success {
             // system.jobs might not be accessible in some test setups
             // Just wait the full duration and return success
-            println!("  ℹ Cannot query system.jobs (not an error in test env), waiting for job to execute...");
+            println!(
+                "  ℹ Cannot query system.jobs (not an error in test env), waiting for job to \
+                 execute..."
+            );
             sleep(max_wait).await;
             return Ok("Job executed (system.jobs not queryable in test)".to_string());
         }
@@ -229,7 +237,9 @@ pub async fn wait_for_flush_job_completion(
                             let duration_ms = end - start;
                             if duration_ms == 0 {
                                 return Err(format!(
-                                    "Job {} completed but duration_ms = 0 (started_at: {}, finished_at: {}), which indicates a failure or instant completion bug",
+                                    "Job {} completed but duration_ms = 0 (started_at: {}, \
+                                     finished_at: {}), which indicates a failure or instant \
+                                     completion bug",
                                     job_id, start, end
                                 ));
                             }

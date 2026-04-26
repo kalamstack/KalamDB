@@ -14,15 +14,22 @@
 //! cd link && cargo test --test integration_tests
 //! ```
 
-use kalam_client::models::{BatchControl, BatchStatus, KalamDataType, ResponseStatus, SchemaField};
+use std::{
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, OnceLock,
+    },
+    time::Duration,
+};
+
 use kalam_client::{
+    models::{BatchControl, BatchStatus, KalamDataType, ResponseStatus, SchemaField},
     AuthProvider, ChangeEvent, KalamLinkClient, KalamLinkError, SubscriptionConfig,
 };
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
-use std::time::Duration;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
-use tokio::time::{sleep, timeout};
+use tokio::{
+    sync::{OwnedSemaphorePermit, Semaphore},
+    time::{sleep, timeout},
+};
 
 mod common;
 
@@ -371,7 +378,6 @@ fn sample_batch_control() -> BatchControl {
         has_more: false,
         status: BatchStatus::Ready,
         last_seq_id: None,
-        snapshot_end_seq: None,
     }
 }
 

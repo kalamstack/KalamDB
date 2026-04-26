@@ -1,5 +1,4 @@
-use arrow::array::RecordBatch;
-use arrow::datatypes::SchemaRef;
+use arrow::{array::RecordBatch, datatypes::SchemaRef};
 
 /// Result type for SQL execution
 #[derive(Debug, Clone)]

@@ -115,14 +115,15 @@ impl TransactionWriteSet {
 
 #[cfg(test)]
 mod tests {
-    use datafusion_common::ScalarValue;
     use std::collections::BTreeMap;
 
+    use datafusion_common::ScalarValue;
+    use kalamdb_commons::{
+        models::{rows::Row, NamespaceId, OperationKind, TableId, TableName},
+        TableType,
+    };
+
     use super::*;
-    use kalamdb_commons::models::rows::Row;
-    use kalamdb_commons::models::{NamespaceId, TableId};
-    use kalamdb_commons::models::{OperationKind, TableName};
-    use kalamdb_commons::TableType;
 
     fn row(values: &[(&'static str, ScalarValue)]) -> Row {
         let mut fields = BTreeMap::new();

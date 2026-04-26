@@ -1,26 +1,29 @@
 //! Table-layer MVCC helpers that remain after moving shared winner-selection
 //! and Parquet decoding logic into `kalamdb-datafusion-sources`.
 
-use crate::error::KalamDbError;
-use crate::SharedTableRow;
-use datafusion::arrow::array::RecordBatch;
-use datafusion::error::DataFusionError;
-use datafusion::scalar::ScalarValue;
+use datafusion::{arrow::array::RecordBatch, error::DataFusionError, scalar::ScalarValue};
+use kalamdb_commons::{ids::SeqId, serialization::row_codec::RowMetadata};
 use kalamdb_datafusion_sources::exec::{
     parquet_batch_to_metadata as shared_parquet_batch_to_metadata,
     parquet_batch_to_rows as shared_parquet_batch_to_rows, VersionedRow,
 };
-use kalamdb_commons::ids::SeqId;
-use kalamdb_commons::serialization::row_codec::RowMetadata;
+
+use crate::{error::KalamDbError, SharedTableRow};
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use datafusion::arrow::array::{BooleanArray, Int64Array, StringArray, UInt64Array};
-    use datafusion::arrow::datatypes::{DataType, Field, Schema};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    use datafusion::arrow::{
+        array::{BooleanArray, Int64Array, StringArray, UInt64Array},
+        datatypes::{DataType, Field, Schema},
+    };
     use kalamdb_commons::constants::SystemColumnNames;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
+
+    use super::*;
 
     #[derive(Debug, Clone)]
     struct TestVersionedRow {
@@ -186,10 +189,9 @@ mod tests {
     }
 }
 
-pub use kalamdb_datafusion_sources::exec::ParquetRowData;
 pub use kalamdb_datafusion_sources::exec::{
     count_merged_rows, count_resolved_from_metadata, merge_versioned_rows,
-    resolve_latest_kvs_from_cold_batch,
+    resolve_latest_kvs_from_cold_batch, ParquetRowData,
 };
 
 fn shared_decoder_error(error: DataFusionError) -> KalamDbError {
@@ -238,4 +240,3 @@ pub fn parquet_batch_to_metadata(
         .map(|rows| rows.into_iter().map(|metadata| (metadata.seq, metadata)).collect())
         .map_err(shared_decoder_error)
 }
-

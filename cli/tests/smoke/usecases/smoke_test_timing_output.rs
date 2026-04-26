@@ -5,9 +5,11 @@
 //!
 //! Reference: docs/CLI.md lines 146-152
 
-use crate::common::*;
-use regex::Regex;
 use std::time::Duration;
+
+use regex::Regex;
+
+use crate::common::*;
 
 /// Parse timing from CLI output like "Took: 1.234 ms"
 /// Returns timing in milliseconds or None if not found
@@ -36,7 +38,8 @@ fn smoke_test_timing_output_format() {
 
     // Create simple table
     execute_sql_as_root_via_cli(&format!(
-        "CREATE TABLE {} (id BIGINT PRIMARY KEY, value TEXT) WITH (TYPE='USER', FLUSH_POLICY='rows:1000')",
+        "CREATE TABLE {} (id BIGINT PRIMARY KEY, value TEXT) WITH (TYPE='USER', \
+         FLUSH_POLICY='rows:1000')",
         full
     ))
     .expect("create table");
@@ -212,7 +215,8 @@ fn smoke_test_timing_aggregation_query() {
 
     // Execute aggregation query
     let output = execute_sql_as_root_via_cli(&format!(
-        "SELECT category, COUNT(*) as count, SUM(amount) as total FROM {} GROUP BY category ORDER BY category",
+        "SELECT category, COUNT(*) as count, SUM(amount) as total FROM {} GROUP BY category ORDER \
+         BY category",
         full
     ))
     .expect("aggregation query");
@@ -249,7 +253,8 @@ fn smoke_test_timing_join_query() {
 
     // Create users table
     execute_sql_as_root_via_cli(&format!(
-        "CREATE TABLE {} (id BIGINT PRIMARY KEY, name TEXT) WITH (TYPE='SHARED', ACCESS_LEVEL='PUBLIC')",
+        "CREATE TABLE {} (id BIGINT PRIMARY KEY, name TEXT) WITH (TYPE='SHARED', \
+         ACCESS_LEVEL='PUBLIC')",
         full1
     ))
     .expect("create users table");
@@ -267,7 +272,8 @@ fn smoke_test_timing_join_query() {
 
     // Create orders table
     execute_sql_as_root_via_cli(&format!(
-        "CREATE TABLE {} (id BIGINT PRIMARY KEY, user_id BIGINT, total DOUBLE) WITH (TYPE='SHARED', ACCESS_LEVEL='PUBLIC')",
+        "CREATE TABLE {} (id BIGINT PRIMARY KEY, user_id BIGINT, total DOUBLE) WITH \
+         (TYPE='SHARED', ACCESS_LEVEL='PUBLIC')",
         full2
     ))
     .expect("create orders table");
@@ -380,7 +386,8 @@ fn smoke_test_timing_flush_operation() {
 
     // Create table with low flush threshold
     execute_sql_as_root_via_cli(&format!(
-        "CREATE TABLE {} (id BIGINT PRIMARY KEY, data TEXT) WITH (TYPE='USER', FLUSH_POLICY='rows:10')",
+        "CREATE TABLE {} (id BIGINT PRIMARY KEY, data TEXT) WITH (TYPE='USER', \
+         FLUSH_POLICY='rows:10')",
         full
     ))
     .expect("create table");

@@ -7,11 +7,12 @@
 //! - Audit logging: Both actor and subject logged
 //! - Performance: Permission checks complete in <10ms
 
-use super::test_support::TestServer;
 use kalam_client::models::ResponseStatus;
 use kalamdb_commons::models::{AuthType, Role, UserId};
 use kalamdb_system::providers::storages::models::StorageMode;
 use uuid::Uuid;
+
+use super::test_support::TestServer;
 
 async fn insert_user(server: &TestServer, username: &str, role: Role) -> UserId {
     let user_id = UserId::new(username);
@@ -83,7 +84,8 @@ async fn test_as_user_blocked_for_regular_user() {
     // Create namespace and USER table (using default/system for DDL)
     server.execute_sql(&format!("CREATE NAMESPACE {}", ns)).await;
     let create_table = format!(
-        "CREATE TABLE {}.items (item_id VARCHAR PRIMARY KEY, name VARCHAR) WITH (TYPE = 'USER', STORAGE_ID = 'local')",
+        "CREATE TABLE {}.items (item_id VARCHAR PRIMARY KEY, name VARCHAR) WITH (TYPE = 'USER', \
+         STORAGE_ID = 'local')",
         ns
     );
     server.execute_sql(&create_table).await; // Use default system user for table creation
@@ -124,14 +126,16 @@ async fn test_as_user_with_service_role() {
     // Create namespace and USER table as DBA
     server.execute_sql(&format!("CREATE NAMESPACE {}", ns)).await;
     let create_table = format!(
-        "CREATE TABLE {}.orders (order_id VARCHAR PRIMARY KEY, amount VARCHAR) WITH (TYPE = 'USER', STORAGE_ID = 'local')",
+        "CREATE TABLE {}.orders (order_id VARCHAR PRIMARY KEY, amount VARCHAR) WITH (TYPE = \
+         'USER', STORAGE_ID = 'local')",
         ns
     );
     server.execute_sql_as_user(&create_table, admin_user.as_str()).await;
 
     // INSERT AS USER target_user (should succeed)
     let insert_sql = format!(
-        "EXECUTE AS USER '{}' (INSERT INTO {}.orders (order_id, amount) VALUES ('ORD-123', '99.99'))",
+        "EXECUTE AS USER '{}' (INSERT INTO {}.orders (order_id, amount) VALUES ('ORD-123', \
+         '99.99'))",
         target_user.as_str(),
         ns
     );
@@ -170,7 +174,8 @@ async fn test_as_user_success_is_audited() {
     assert_eq!(ns_resp.status, ResponseStatus::Success, "CREATE NAMESPACE failed");
 
     let create_table = format!(
-        "CREATE TABLE {}.audit_items (id VARCHAR PRIMARY KEY, value VARCHAR) WITH (TYPE = 'USER', STORAGE_ID = 'local')",
+        "CREATE TABLE {}.audit_items (id VARCHAR PRIMARY KEY, value VARCHAR) WITH (TYPE = 'USER', \
+         STORAGE_ID = 'local')",
         ns
     );
     let create_resp = server.execute_sql_as_user(&create_table, "root").await;
@@ -227,7 +232,8 @@ async fn test_as_user_with_dba_role() {
     );
 
     let create_table = format!(
-        "CREATE TABLE {}.logs (log_id VARCHAR PRIMARY KEY, message VARCHAR) WITH (TYPE = 'USER', STORAGE_ID = 'local')",
+        "CREATE TABLE {}.logs (log_id VARCHAR PRIMARY KEY, message VARCHAR) WITH (TYPE = 'USER', \
+         STORAGE_ID = 'local')",
         ns
     );
     let table_resp = server.execute_sql_as_user(&create_table, dba_user.as_str()).await;
@@ -240,7 +246,8 @@ async fn test_as_user_with_dba_role() {
 
     // INSERT AS USER (should succeed)
     let insert_sql = format!(
-        "EXECUTE AS USER '{}' (INSERT INTO {}.logs (log_id, message) VALUES ('LOG-1', 'Test message'))",
+        "EXECUTE AS USER '{}' (INSERT INTO {}.logs (log_id, message) VALUES ('LOG-1', 'Test \
+         message'))",
         target_user.as_str(),
         ns
     );
@@ -263,14 +270,16 @@ async fn test_insert_as_user_ownership() {
     // Create namespace and USER table
     server.execute_sql(&format!("CREATE NAMESPACE {}", ns)).await;
     let create_table = format!(
-        "CREATE TABLE {}.messages (msg_id VARCHAR PRIMARY KEY, content VARCHAR) WITH (TYPE = 'USER', STORAGE_ID = 'local')",
+        "CREATE TABLE {}.messages (msg_id VARCHAR PRIMARY KEY, content VARCHAR) WITH (TYPE = \
+         'USER', STORAGE_ID = 'local')",
         ns
     );
     server.execute_sql_as_user(&create_table, admin_user.as_str()).await;
 
     // INSERT AS USER alice
     let insert_sql = format!(
-        "EXECUTE AS USER '{}' (INSERT INTO {}.messages (msg_id, content) VALUES ('MSG-1', 'Hello from Alice'))",
+        "EXECUTE AS USER '{}' (INSERT INTO {}.messages (msg_id, content) VALUES ('MSG-1', 'Hello \
+         from Alice'))",
         user_alice.as_str(),
         ns
     );
@@ -304,11 +313,16 @@ async fn test_update_as_user() {
 
     // Create namespace, USER table, and insert record as charlie
     server.execute_sql(&format!("CREATE NAMESPACE {}", ns)).await;
-    let create_table = format!("CREATE TABLE {}.profiles (profile_id VARCHAR PRIMARY KEY, status VARCHAR) WITH (TYPE = 'USER', STORAGE_ID = 'local')", ns);
+    let create_table = format!(
+        "CREATE TABLE {}.profiles (profile_id VARCHAR PRIMARY KEY, status VARCHAR) WITH (TYPE = \
+         'USER', STORAGE_ID = 'local')",
+        ns
+    );
     server.execute_sql_as_user(&create_table, admin_user.as_str()).await;
 
     let insert_sql = format!(
-        "EXECUTE AS USER '{}' (INSERT INTO {}.profiles (profile_id, status) VALUES ('PROF-1', 'active'))",
+        "EXECUTE AS USER '{}' (INSERT INTO {}.profiles (profile_id, status) VALUES ('PROF-1', \
+         'active'))",
         user_charlie.as_str(),
         ns
     );
@@ -316,7 +330,8 @@ async fn test_update_as_user() {
 
     // UPDATE AS USER charlie
     let update_sql = format!(
-        "EXECUTE AS USER '{}' (UPDATE {}.profiles SET status = 'inactive' WHERE profile_id = 'PROF-1')",
+        "EXECUTE AS USER '{}' (UPDATE {}.profiles SET status = 'inactive' WHERE profile_id = \
+         'PROF-1')",
         user_charlie.as_str(),
         ns
     );
@@ -348,11 +363,16 @@ async fn test_delete_as_user() {
 
     // Create namespace, USER table, and insert record as dave
     server.execute_sql(&format!("CREATE NAMESPACE {}", ns)).await;
-    let create_table = format!("CREATE TABLE {}.sessions (session_id VARCHAR PRIMARY KEY, active BOOLEAN) WITH (TYPE = 'USER', STORAGE_ID = 'local')", ns);
+    let create_table = format!(
+        "CREATE TABLE {}.sessions (session_id VARCHAR PRIMARY KEY, active BOOLEAN) WITH (TYPE = \
+         'USER', STORAGE_ID = 'local')",
+        ns
+    );
     server.execute_sql_as_user(&create_table, admin_user.as_str()).await;
 
     let insert_sql = format!(
-        "EXECUTE AS USER '{}' (INSERT INTO {}.sessions (session_id, active) VALUES ('SESS-1', true))",
+        "EXECUTE AS USER '{}' (INSERT INTO {}.sessions (session_id, active) VALUES ('SESS-1', \
+         true))",
         user_dave.as_str(),
         ns
     );
@@ -389,7 +409,8 @@ async fn test_select_as_user_scopes_reads() {
 
     server.execute_sql(&format!("CREATE NAMESPACE {}", ns)).await;
     let create_table = format!(
-        "CREATE TABLE {}.items (id VARCHAR PRIMARY KEY, value VARCHAR) WITH (TYPE = 'USER', STORAGE_ID = 'local')",
+        "CREATE TABLE {}.items (id VARCHAR PRIMARY KEY, value VARCHAR) WITH (TYPE = 'USER', \
+         STORAGE_ID = 'local')",
         ns
     );
     server.execute_sql(&create_table).await;
@@ -434,7 +455,8 @@ async fn test_stream_table_isolation_with_select_as_user() {
 
     server.execute_sql(&format!("CREATE NAMESPACE {}", ns)).await;
     let create_table = format!(
-        "CREATE TABLE {}.events (id VARCHAR PRIMARY KEY, payload VARCHAR) WITH (TYPE = 'STREAM', TTL_SECONDS = 3600)",
+        "CREATE TABLE {}.events (id VARCHAR PRIMARY KEY, payload VARCHAR) WITH (TYPE = 'STREAM', \
+         TTL_SECONDS = 3600)",
         ns
     );
     server.execute_sql(&create_table).await;
@@ -486,7 +508,8 @@ async fn test_as_user_on_shared_table_rejected() {
     );
 
     let create_table = format!(
-        "CREATE TABLE {}.global_config (config_key VARCHAR PRIMARY KEY, value VARCHAR) WITH (TYPE = 'SHARED')",
+        "CREATE TABLE {}.global_config (config_key VARCHAR PRIMARY KEY, value VARCHAR) WITH (TYPE \
+         = 'SHARED')",
         ns
     );
     let create_resp = server.execute_sql_as_user(&create_table, admin_user.as_str()).await;
@@ -499,7 +522,8 @@ async fn test_as_user_on_shared_table_rejected() {
 
     // INSERT AS USER on SHARED table (should fail)
     let insert_sql = format!(
-        "EXECUTE AS USER '{}' (INSERT INTO {}.global_config (config_key, value) VALUES ('setting1', 'value1'))",
+        "EXECUTE AS USER '{}' (INSERT INTO {}.global_config (config_key, value) VALUES \
+         ('setting1', 'value1'))",
         user_eve.as_str(),
         ns
     );
@@ -531,14 +555,16 @@ async fn test_as_user_nonexistent_user() {
     // Create namespace and USER table
     server.execute_sql(&format!("CREATE NAMESPACE {}", ns)).await;
     let create_table = format!(
-        "CREATE TABLE {}.logs (log_id VARCHAR PRIMARY KEY, message VARCHAR) WITH (TYPE = 'USER', STORAGE_ID = 'local')",
+        "CREATE TABLE {}.logs (log_id VARCHAR PRIMARY KEY, message VARCHAR) WITH (TYPE = 'USER', \
+         STORAGE_ID = 'local')",
         ns
     );
     server.execute_sql_as_user(&create_table, admin_user.as_str()).await;
 
     // INSERT AS USER with non-existent user
     let insert_sql = format!(
-        "EXECUTE AS USER 'nonexistent_user_12345' (INSERT INTO {}.logs (log_id, message) VALUES ('LOG-1', 'Test'))",
+        "EXECUTE AS USER 'nonexistent_user_12345' (INSERT INTO {}.logs (log_id, message) VALUES \
+         ('LOG-1', 'Test'))",
         ns
     );
     let resp = server.execute_sql_as_user(&insert_sql, admin_user.as_str()).await;
@@ -572,7 +598,8 @@ async fn test_as_user_performance() {
     );
 
     let create_table = format!(
-        "CREATE TABLE {}.perf_test (id VARCHAR PRIMARY KEY, data VARCHAR) WITH (TYPE = 'USER', STORAGE_ID = 'local')",
+        "CREATE TABLE {}.perf_test (id VARCHAR PRIMARY KEY, data VARCHAR) WITH (TYPE = 'USER', \
+         STORAGE_ID = 'local')",
         ns
     );
     let table_resp = server.execute_sql_as_user(&create_table, admin_user.as_str()).await;

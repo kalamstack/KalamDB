@@ -1,7 +1,8 @@
-use crate::common::*;
-use kalam_client::models::ChangeEvent;
-use kalam_client::KalamLinkTimeouts;
 use std::time::Duration;
+
+use kalam_client::{models::ChangeEvent, KalamLinkTimeouts};
+
+use crate::common::*;
 
 const MAX_SQL_QUERY_LENGTH: usize = 1024 * 1024;
 
@@ -144,7 +145,8 @@ fn smoke_security_system_tables_blocked_in_batch() {
         "SELECT 1; SELECT * FROM system.users",
         "SELECT 1; SELECT * FROM system.schemas",
         "SELECT 1; SELECT * FROM (SELECT * FROM system.users) AS u",
-        "SELECT 1; SELECT u.user_id FROM system.users u JOIN (SELECT user_id FROM system.users) s ON u.user_id = s.user_id",
+        "SELECT 1; SELECT u.user_id FROM system.users u JOIN (SELECT user_id FROM system.users) s \
+         ON u.user_id = s.user_id",
         "SELECT 1; SELECT * FROM system.users WHERE user_id IN (SELECT user_id FROM system.users)",
         "WITH u AS (SELECT * FROM system.users) SELECT * FROM u",
         "SELECT 1; EXPLAIN SELECT * FROM system.users",
@@ -172,7 +174,8 @@ fn smoke_security_system_tables_blocked_in_batch() {
 fn smoke_security_private_shared_table_blocked_in_batch() {
     if !is_server_running() {
         eprintln!(
-            "Skipping smoke_security_private_shared_table_blocked_in_batch: server not running at {}",
+            "Skipping smoke_security_private_shared_table_blocked_in_batch: server not running at \
+             {}",
             server_url()
         );
         return;
@@ -189,7 +192,8 @@ fn smoke_security_private_shared_table_blocked_in_batch() {
         .expect("Failed to create namespace");
 
     let create_table_sql = format!(
-        "CREATE TABLE {} (id BIGINT PRIMARY KEY, name TEXT) WITH (TYPE='SHARED', ACCESS_LEVEL='PRIVATE')",
+        "CREATE TABLE {} (id BIGINT PRIMARY KEY, name TEXT) WITH (TYPE='SHARED', \
+         ACCESS_LEVEL='PRIVATE')",
         full_table
     );
     execute_sql_as_root_via_client(&create_table_sql).expect("Failed to create shared table");
@@ -207,7 +211,8 @@ fn smoke_security_private_shared_table_blocked_in_batch() {
     .expect("Failed to create regular user");
 
     let batch_sql = format!(
-        "SELECT * FROM {table}; INSERT INTO {table} (id, name) VALUES (2, 'x'); UPDATE {table} SET name = 'y' WHERE id = 1; DELETE FROM {table} WHERE id = 1;",
+        "SELECT * FROM {table}; INSERT INTO {table} (id, name) VALUES (2, 'x'); UPDATE {table} \
+         SET name = 'y' WHERE id = 1; DELETE FROM {table} WHERE id = 1;",
         table = full_table
     );
     let batch_result = execute_sql_via_client_as(&regular_user, password, &batch_sql);
@@ -246,7 +251,8 @@ fn smoke_security_private_shared_table_blocked_in_batch() {
 fn smoke_security_subscription_blocked_for_system_and_private_shared() {
     if !is_server_running() {
         eprintln!(
-            "Skipping smoke_security_subscription_blocked_for_system_and_private_shared: server not running at {}",
+            "Skipping smoke_security_subscription_blocked_for_system_and_private_shared: server \
+             not running at {}",
             server_url()
         );
         return;
@@ -263,7 +269,8 @@ fn smoke_security_subscription_blocked_for_system_and_private_shared() {
         .expect("Failed to create namespace");
 
     let create_private_sql = format!(
-        "CREATE TABLE {} (id BIGINT PRIMARY KEY, name TEXT) WITH (TYPE='SHARED', ACCESS_LEVEL='PRIVATE')",
+        "CREATE TABLE {} (id BIGINT PRIMARY KEY, name TEXT) WITH (TYPE='SHARED', \
+         ACCESS_LEVEL='PRIVATE')",
         full_table
     );
     execute_sql_as_root_via_client(&create_private_sql).expect("Failed to create shared table");
@@ -271,7 +278,8 @@ fn smoke_security_subscription_blocked_for_system_and_private_shared() {
     let public_table = generate_unique_table("smoke_sub_public_tbl");
     let full_public = format!("{}.{}", namespace, public_table);
     let create_public_sql = format!(
-        "CREATE TABLE {} (id BIGINT PRIMARY KEY, name TEXT) WITH (TYPE='SHARED', ACCESS_LEVEL='PUBLIC')",
+        "CREATE TABLE {} (id BIGINT PRIMARY KEY, name TEXT) WITH (TYPE='SHARED', \
+         ACCESS_LEVEL='PUBLIC')",
         full_public
     );
     execute_sql_as_root_via_client(&create_public_sql)
@@ -368,7 +376,9 @@ fn smoke_security_system_table_write_blocked() {
         format!("CREATE USER {} WITH PASSWORD '{}' ROLE 'user'", user_name, user_pass);
     execute_sql_as_root_via_client(&create_user_sql).expect("Failed to create user");
 
-    let batch_sql = "INSERT INTO system.users (user_id) VALUES ('hacker'); UPDATE system.users SET user_id='x' WHERE user_id='root'; DELETE FROM system.users WHERE user_id='root';";
+    let batch_sql = "INSERT INTO system.users (user_id) VALUES ('hacker'); UPDATE system.users \
+                     SET user_id='x' WHERE user_id='root'; DELETE FROM system.users WHERE \
+                     user_id='root';";
     let result = execute_sql_via_client_as(&user_name, user_pass, batch_sql);
     expect_rejected(result, "system table write batch");
 

@@ -1,9 +1,10 @@
 //! Cluster test server for testing multiple node scenarios
-use super::http_server::HttpTestServer;
 use anyhow::Result;
 use kalam_client::models::QueryResponse;
 use rand::RngExt;
 use tokio::sync::Mutex;
+
+use super::http_server::HttpTestServer;
 
 /// A test cluster with 3 nodes for testing replication and consistency.
 pub struct ClusterTestServer {
@@ -149,7 +150,8 @@ impl ClusterTestServer {
 
                 if first_maps.len() != result_maps.len() {
                     eprintln!(
-                        "❌ Node consistency failed: Node 0 result set {} has {} rows, Node {} has {}",
+                        "❌ Node consistency failed: Node 0 result set {} has {} rows, Node {} \
+                         has {}",
                         j,
                         first_maps.len(),
                         i,

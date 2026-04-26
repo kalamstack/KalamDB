@@ -12,10 +12,12 @@
 //! - p99 latency: <200ms for cached auth, <500ms for uncached
 //! - Cache hit rate: >95% for repeated authentications
 
-use super::test_support::{auth_helper, TestServer};
+use std::time::{Duration, Instant};
+
 use actix_web::{test, web, App};
 use kalamdb_commons::{models::ConnectionInfo, Role};
-use std::time::{Duration, Instant};
+
+use super::test_support::{auth_helper, TestServer};
 
 /// Performance benchmark for Bearer token authentication
 ///
@@ -272,8 +274,9 @@ async fn test_auth_cache_effectiveness() {
 /// Test concurrent authentication load
 #[tokio::test]
 async fn test_concurrent_auth_load() {
-    use kalamdb_auth::{authenticate, AuthRequest, CachedUsersRepo, UserRepository};
     use std::sync::Arc;
+
+    use kalamdb_auth::{authenticate, AuthRequest, CachedUsersRepo, UserRepository};
 
     let server = TestServer::new_shared().await;
 

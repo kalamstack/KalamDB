@@ -23,11 +23,10 @@ pub mod shared;
 pub mod users;
 
 // Re-export common types
-pub use base::{
-    FlushDedupStats, FlushJobResult, FlushMetadata, SharedTableFlushMetadata, TableFlush,
-    UserTableFlushMetadata,
-};
 // Re-export common configuration and helpers
-pub use base::{config, helpers};
+pub use base::{
+    config, helpers, FlushDedupStats, FlushJobResult, FlushMetadata, SharedTableFlushMetadata,
+    TableFlush, UserTableFlushMetadata,
+};
 pub use shared::SharedTableFlushJob;
 pub use users::UserTableFlushJob;

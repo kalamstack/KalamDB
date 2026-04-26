@@ -2,10 +2,14 @@
 //!
 //! Represents a background job (flush, retention, cleanup, etc.).
 
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::models::ids::{JobId, NamespaceId, NodeId};
-use kalamdb_commons::models::TableName;
-use kalamdb_commons::KSerializable;
+use kalamdb_commons::{
+    datatypes::KalamDataType,
+    models::{
+        ids::{JobId, NamespaceId, NodeId},
+        TableName,
+    },
+    KSerializable,
+};
 use kalamdb_macros::table;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -20,7 +24,8 @@ use super::{JobStatus, JobType};
 /// - `job_id`: Unique job identifier (e.g., "job_123456")
 /// - `job_type`: Type of job (Flush, Compact, Cleanup, Backup, Restore)
 /// - `status`: Job status (Running, Completed, Failed, Cancelled)
-/// - `parameters`: Optional JSON object containing job parameters (includes namespace_id, table_name, etc.)
+/// - `parameters`: Optional JSON object containing job parameters (includes namespace_id,
+///   table_name, etc.)
 /// - `result`: Optional result message (for completed jobs)
 /// - `trace`: Optional stack trace (for failed jobs)
 /// - `memory_used`: Optional memory usage in bytes
@@ -332,16 +337,16 @@ impl Job {
 
     /// Extract namespace_id from parameters JSON
     pub fn namespace_id(&self) -> Option<NamespaceId> {
-        self.parameters.as_ref().and_then(|p| {
-            p.get("namespace_id")?.as_str().map(NamespaceId::new)
-        })
+        self.parameters
+            .as_ref()
+            .and_then(|p| p.get("namespace_id")?.as_str().map(NamespaceId::new))
     }
 
     /// Extract table_name from parameters JSON
     pub fn table_name(&self) -> Option<TableName> {
-        self.parameters.as_ref().and_then(|p| {
-            p.get("table_name")?.as_str().map(TableName::new)
-        })
+        self.parameters
+            .as_ref()
+            .and_then(|p| p.get("table_name")?.as_str().map(TableName::new))
     }
 
     /// Set parameters (JSON value)

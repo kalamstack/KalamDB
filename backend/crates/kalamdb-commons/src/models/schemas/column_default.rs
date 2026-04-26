@@ -1,7 +1,6 @@
 //! Column default value specification
 
-use serde::de::Error as DeError;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{de::Error as DeError, Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as JsonValue;
 
 /// Represents the default value for a column
@@ -195,8 +194,9 @@ impl ColumnDefault {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::json;
+
+    use super::*;
 
     #[test]
     fn test_none_default() {

@@ -4,10 +4,14 @@
 //! `Statistics` and `PlanProperties` types so providers can emit trustworthy
 //! metadata without duplicating builder code.
 
-use datafusion::common::stats::Precision;
-use datafusion::physical_expr::EquivalenceProperties;
-use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
-use datafusion::physical_plan::{Partitioning, PlanProperties, Statistics};
+use datafusion::{
+    common::stats::Precision,
+    physical_expr::EquivalenceProperties,
+    physical_plan::{
+        execution_plan::{Boundedness, EmissionType},
+        Partitioning, PlanProperties, Statistics,
+    },
+};
 
 /// Build conservative [`PlanProperties`] for a single-partition, bounded
 /// source. Sources with richer guarantees should call [`PlanProperties::new`]

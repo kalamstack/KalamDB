@@ -3,9 +3,11 @@
 //! Provides efficient binary serialization with tag bytes for type identification.
 //! Format: [tag byte][optional dimension for EMBEDDING]
 
-use crate::models::datatypes::KalamDataType;
 use std::io::{Read, Write};
+
 use thiserror::Error;
+
+use crate::models::datatypes::KalamDataType;
 
 #[derive(Error, Debug)]
 pub enum WireFormatError {
@@ -81,8 +83,9 @@ impl WireFormat for KalamDataType {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::io::Cursor;
+
+    use super::*;
 
     #[test]
     fn test_simple_type_round_trip() {

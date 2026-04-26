@@ -1,9 +1,11 @@
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::models::kalam_cell_value::KalamCellValue;
-use crate::models::kalam_cell_value::RowData;
-use crate::models::schema_field::SchemaField;
+use serde::{Deserialize, Serialize};
+
+use crate::models::{
+    kalam_cell_value::{KalamCellValue, RowData},
+    schema_field::SchemaField,
+};
 
 /// Individual query result within a SQL response.
 #[derive(Debug, Clone, Serialize, Deserialize)]

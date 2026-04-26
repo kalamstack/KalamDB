@@ -1,9 +1,12 @@
 //! System tables smoke coverage over the real HTTP SQL API.
 
-use super::test_support::auth_helper::create_user_auth_header_default;
-use super::test_support::consolidated_helpers::{unique_namespace, unique_table};
-use super::test_support::flush::flush_table_and_wait;
 use kalam_client::models::ResponseStatus;
+
+use super::test_support::{
+    auth_helper::create_user_auth_header_default,
+    consolidated_helpers::{unique_namespace, unique_table},
+    flush::flush_table_and_wait,
+};
 
 #[tokio::test]
 async fn test_system_tables_queryable_over_http() -> anyhow::Result<()> {
@@ -19,22 +22,24 @@ async fn test_system_tables_queryable_over_http() -> anyhow::Result<()> {
     let auth = create_user_auth_header_default(server, &user).await?;
 
     let resp = server
-                .execute_sql_with_auth(
-                    &format!(
-                        "CREATE TABLE {}.{} (id INT PRIMARY KEY, v TEXT) WITH (TYPE='USER', STORAGE_ID='local', FLUSH_POLICY='rows:5')",
-                        ns, table_user
-                    ),
-                    &auth,
-                )
-                .await?;
+        .execute_sql_with_auth(
+            &format!(
+                "CREATE TABLE {}.{} (id INT PRIMARY KEY, v TEXT) WITH (TYPE='USER', \
+                 STORAGE_ID='local', FLUSH_POLICY='rows:5')",
+                ns, table_user
+            ),
+            &auth,
+        )
+        .await?;
     anyhow::ensure!(resp.status == ResponseStatus::Success);
 
     let resp = server
-                .execute_sql(&format!(
-                    "CREATE TABLE {}.{} (id INT PRIMARY KEY, v TEXT) WITH (TYPE='SHARED', STORAGE_ID='local', FLUSH_POLICY='rows:5')",
-                    ns, table_shared
-                ))
-                .await?;
+        .execute_sql(&format!(
+            "CREATE TABLE {}.{} (id INT PRIMARY KEY, v TEXT) WITH (TYPE='SHARED', \
+             STORAGE_ID='local', FLUSH_POLICY='rows:5')",
+            ns, table_shared
+        ))
+        .await?;
     anyhow::ensure!(resp.status == ResponseStatus::Success);
 
     let resp = server
@@ -64,11 +69,12 @@ async fn test_system_tables_queryable_over_http() -> anyhow::Result<()> {
 
     // system.schemas
     let resp = server
-                .execute_sql(&format!(
-                    "SELECT table_name, table_type FROM system.schemas WHERE namespace_id = '{}' ORDER BY table_name",
-                    ns
-                ))
-                .await?;
+        .execute_sql(&format!(
+            "SELECT table_name, table_type FROM system.schemas WHERE namespace_id = '{}' ORDER BY \
+             table_name",
+            ns
+        ))
+        .await?;
     anyhow::ensure!(resp.status == ResponseStatus::Success);
     let rows = resp.rows_as_maps();
     anyhow::ensure!(rows.len() >= 2);

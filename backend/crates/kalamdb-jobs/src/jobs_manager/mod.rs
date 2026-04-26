@@ -1,6 +1,7 @@
 //! Unified Job Management System
 //!
-//! **Phase 9 (US6)**: Single JobsManager with typed JobIds, richer statuses, idempotency, retry/backoff, dedicated logging
+//! **Phase 9 (US6)**: Single JobsManager with typed JobIds, richer statuses, idempotency,
+//! retry/backoff, dedicated logging
 //!
 //! This module provides a centralized job management system with:
 //! - Typed JobIds with prefixes (FL, CL, RT, SE, UC, CO, BK, RS)

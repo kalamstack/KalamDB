@@ -156,7 +156,5 @@ fn references_column(filter: &Expr, column_name: &str) -> bool {
         return false;
     }
 
-    columns
-        .iter()
-        .any(|column| column.name.eq_ignore_ascii_case(column_name))
+    columns.iter().any(|column| column.name.eq_ignore_ascii_case(column_name))
 }

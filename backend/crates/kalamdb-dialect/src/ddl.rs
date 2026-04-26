@@ -47,6 +47,8 @@ pub use drop_table::{DropTableStatement, TableKind};
 pub use export_commands::{ExportUserDataStatement, ShowExportStatement};
 pub use flush_commands::{FlushAllTablesStatement, FlushTableStatement};
 pub use job_commands::{parse_job_command, JobCommand};
+// Re-export SubscriptionOptions from kalamdb_commons for convenience
+pub use kalamdb_commons::websocket::SubscriptionOptions;
 pub use kill_live_query::KillLiveQueryStatement;
 pub use manifest_commands::ShowManifestStatement;
 pub use restore_namespace::RestoreDatabaseStatement;
@@ -58,8 +60,6 @@ pub use storage_commands::{
     ShowStoragesStatement,
 };
 pub use subscribe_commands::SubscribeStatement;
-// Re-export SubscriptionOptions from kalamdb_commons for convenience
-pub use kalamdb_commons::websocket::SubscriptionOptions;
 pub use topic_commands::{
     AckStatement, AddTopicSourceStatement, ClearTopicStatement, ConsumePosition, ConsumeStatement,
     CreateTopicStatement, DropTopicStatement,

@@ -1,15 +1,15 @@
-use std::time::{Duration, Instant};
 use std::{
     env,
     ops::{Deref, DerefMut},
+    time::{Duration, Instant},
 };
 
 use serde_json::Value;
 use tokio_postgres::{Config, NoTls};
 
 use super::common::{
-    kalamdb_account_login_server_options, kalamdb_grpc_target, pg_backend_pid,
-    postgres_error_text, unique_name, TestEnv,
+    kalamdb_account_login_server_options, kalamdb_grpc_target, pg_backend_pid, postgres_error_text,
+    unique_name, TestEnv,
 };
 use crate::e2e_common::tcp_proxy::TcpDisconnectProxy;
 
@@ -141,9 +141,8 @@ async fn create_proxy_shared_foreign_table(
     extra_server_options: Option<&str>,
 ) {
     let mut server_options = kalamdb_account_login_server_options(host, port);
-    if let Some(extra_options) = extra_server_options
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+    if let Some(extra_options) =
+        extra_server_options.map(str::trim).filter(|value| !value.is_empty())
     {
         server_options.push_str(", ");
         server_options.push_str(extra_options);
@@ -155,17 +154,11 @@ async fn create_proxy_shared_foreign_table(
         .expect("create e2e schema");
     client
         .batch_execute(&format!(
-            "DROP FOREIGN TABLE IF EXISTS e2e.{table}; \
-             DROP SERVER IF EXISTS {server_name} CASCADE; \
-             CREATE SERVER {server_name} \
-                 FOREIGN DATA WRAPPER pg_kalam \
-                 OPTIONS ({server_options}); \
-             CREATE FOREIGN TABLE e2e.{table} ( \
-                 id TEXT, \
-                 title TEXT, \
-                 value INTEGER \
-             ) SERVER {server_name} \
-             OPTIONS (namespace 'e2e', \"table\" '{table}', table_type 'shared');"
+            "DROP FOREIGN TABLE IF EXISTS e2e.{table}; DROP SERVER IF EXISTS {server_name} \
+             CASCADE; CREATE SERVER {server_name} FOREIGN DATA WRAPPER pg_kalam OPTIONS \
+             ({server_options}); CREATE FOREIGN TABLE e2e.{table} ( id TEXT, title TEXT, value \
+             INTEGER ) SERVER {server_name} OPTIONS (namespace 'e2e', \"table\" '{table}', \
+             table_type 'shared');"
         ))
         .await
         .expect("create proxy foreign table");
@@ -177,7 +170,8 @@ async fn cleanup_proxy_table(env: &TestEnv, table: &str, server_name: &str) {
     let cleanup = env.pg_connect().await;
     cleanup
         .batch_execute(&format!(
-            "DROP FOREIGN TABLE IF EXISTS e2e.{table}; DROP SERVER IF EXISTS {server_name} CASCADE;"
+            "DROP FOREIGN TABLE IF EXISTS e2e.{table}; DROP SERVER IF EXISTS {server_name} \
+             CASCADE;"
         ))
         .await
         .ok();
@@ -236,10 +230,8 @@ async fn fetch_session_rows(env: &TestEnv, client_addr: &str) -> Vec<Vec<Value>>
     let client_addr = sql_escape_literal(client_addr);
     sql_rows(
         &env.kalamdb_sql(&format!(
-            "SELECT session_id, state, transaction_id, transaction_state \
-             FROM system.sessions \
-             WHERE client_addr = '{client_addr}' \
-             ORDER BY last_seen_at DESC"
+            "SELECT session_id, state, transaction_id, transaction_state FROM system.sessions \
+             WHERE client_addr = '{client_addr}' ORDER BY last_seen_at DESC"
         ))
         .await,
     )
@@ -248,8 +240,7 @@ async fn fetch_session_rows(env: &TestEnv, client_addr: &str) -> Vec<Vec<Value>>
 async fn fetch_transaction_rows(env: &TestEnv, transaction_id: &str) -> Vec<Vec<Value>> {
     sql_rows(
         &env.kalamdb_sql(&format!(
-            "SELECT transaction_id, owner_id, origin, state, write_count \
-             FROM system.transactions \
+            "SELECT transaction_id, owner_id, origin, state, write_count FROM system.transactions \
              WHERE transaction_id = '{transaction_id}'"
         ))
         .await,
@@ -367,7 +358,8 @@ async fn run_terminal_proxy_cleanup_scenario(action: TerminalAction) {
         .await
         .expect("proxy should expose the backend-facing client address");
 
-    let session_rows = wait_for_session_rows(env, &session_client_addr, Duration::from_secs(3)).await;
+    let session_rows =
+        wait_for_session_rows(env, &session_client_addr, Duration::from_secs(3)).await;
     assert_eq!(session_rows.len(), 1);
     assert_eq!(string_cell(&session_rows[0], 1).as_deref(), Some("idle in transaction"));
     assert_eq!(string_cell(&session_rows[0], 3).as_deref(), Some("active"));
@@ -555,15 +547,8 @@ async fn e2e_proxy_blackhole_timeout_recovers_after_traffic_is_restored() {
     let qualified_table = format!("e2e.{table}");
     let (proxy_host, proxy_port) = proxy_host_port(proxy.base_url());
 
-    create_proxy_shared_foreign_table(
-        &pg,
-        &server_name,
-        &table,
-        &proxy_host,
-        proxy_port,
-        None,
-    )
-    .await;
+    create_proxy_shared_foreign_table(&pg, &server_name, &table, &proxy_host, proxy_port, None)
+        .await;
 
     pg.execute(
         &format!("INSERT INTO {qualified_table} (id, title, value) VALUES ($1, $2, $3)"),
@@ -573,11 +558,9 @@ async fn e2e_proxy_blackhole_timeout_recovers_after_traffic_is_restored() {
     .expect("seed row before blackhole");
     wait_for_row_count(&pg, &qualified_table, 1, Duration::from_secs(3)).await;
 
-    pg.batch_execute(&format!(
-        "ALTER SERVER {server_name} OPTIONS (ADD timeout '1200');"
-    ))
-    .await
-    .expect("set low proxy timeout before blackhole phase");
+    pg.batch_execute(&format!("ALTER SERVER {server_name} OPTIONS (ADD timeout '1200');"))
+        .await
+        .expect("set low proxy timeout before blackhole phase");
 
     proxy.blackhole();
 

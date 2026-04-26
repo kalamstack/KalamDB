@@ -36,7 +36,7 @@ pub use providers::jwt_auth::{
     JwtClaims, TokenType, DEFAULT_JWT_EXPIRY_HOURS, KALAMDB_ISSUER,
 };
 pub use repository::user_repo::{CachedUsersRepo, CoreUsersRepo, UserRepository};
-pub use services::login_tracker::{LoginTracker, LoginTrackingConfig};
-pub use services::unified::{
-    authenticate, extract_user_id_for_audit, AuthRequest, AuthenticationResult,
+pub use services::{
+    login_tracker::{LoginTracker, LoginTrackingConfig},
+    unified::{authenticate, extract_user_id_for_audit, AuthRequest, AuthenticationResult},
 };

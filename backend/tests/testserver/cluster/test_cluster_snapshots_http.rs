@@ -1,6 +1,7 @@
+use std::path::{Path, PathBuf};
+
 use anyhow::Result;
 use kalam_client::models::ResponseStatus;
-use std::path::{Path, PathBuf};
 use tokio::time::{sleep, Duration, Instant};
 
 use super::test_support::http_server::start_http_test_server_with_config;
@@ -99,18 +100,25 @@ async fn test_cluster_snapshot_creation_and_reuse() -> Result<()> {
         let ns = "snap_ns";
         let table = "snap_table";
 
-        let resp = server
-            .execute_sql(&format!("CREATE NAMESPACE IF NOT EXISTS {}", ns))
-            .await?;
-        anyhow::ensure!(resp.status == ResponseStatus::Success, "CREATE NAMESPACE failed: {:?}", resp.error);
+        let resp = server.execute_sql(&format!("CREATE NAMESPACE IF NOT EXISTS {}", ns)).await?;
+        anyhow::ensure!(
+            resp.status == ResponseStatus::Success,
+            "CREATE NAMESPACE failed: {:?}",
+            resp.error
+        );
 
         let resp = server
             .execute_sql(&format!(
-                "CREATE TABLE {}.{} (id INT PRIMARY KEY, v TEXT) WITH (TYPE='SHARED', STORAGE_ID='local')",
+                "CREATE TABLE {}.{} (id INT PRIMARY KEY, v TEXT) WITH (TYPE='SHARED', \
+                 STORAGE_ID='local')",
                 ns, table
             ))
             .await?;
-        anyhow::ensure!(resp.status == ResponseStatus::Success, "CREATE TABLE failed: {:?}", resp.error);
+        anyhow::ensure!(
+            resp.status == ResponseStatus::Success,
+            "CREATE TABLE failed: {:?}",
+            resp.error
+        );
 
         let resp = server
             .execute_sql(&format!("INSERT INTO {}.{} (id, v) VALUES (1, 'a')", ns, table))
@@ -118,7 +126,11 @@ async fn test_cluster_snapshot_creation_and_reuse() -> Result<()> {
         anyhow::ensure!(resp.status == ResponseStatus::Success, "INSERT failed: {:?}", resp.error);
 
         let resp = server.execute_sql("CLUSTER SNAPSHOT").await?;
-        anyhow::ensure!(resp.status == ResponseStatus::Success, "CLUSTER SNAPSHOT failed: {:?}", resp.error);
+        anyhow::ensure!(
+            resp.status == ResponseStatus::Success,
+            "CLUSTER SNAPSHOT failed: {:?}",
+            resp.error
+        );
 
         let snapshots_dir = data_path.join("snapshots").join("meta");
         let _ = wait_for_snapshots(&snapshots_dir, 1).await?;

@@ -34,7 +34,6 @@ pub use consumer::{
 };
 #[cfg(all(feature = "tokio-runtime", feature = "consumer"))]
 pub use consumer::{ConsumerBuilder, TopicConsumer};
-
 pub use credentials::{CredentialStore, Credentials, MemoryCredentialStore};
 pub use error::{KalamLinkError, Result};
 pub use event_handlers::{ConnectionError, DisconnectReason, EventHandlers, MessageDirection};
@@ -49,20 +48,19 @@ pub use models::{
 };
 #[cfg(feature = "consumer")]
 pub use models::{AckResponse, ConsumeMessage, ConsumeRequest, ConsumeResponse};
-pub use seq_id::SeqId;
-pub use timeouts::{KalamLinkTimeouts, KalamLinkTimeoutsBuilder};
-pub use timestamp::{now, parse_iso8601, TimestampFormat, TimestampFormatter};
-
 #[cfg(feature = "tokio-runtime")]
 pub use query::AuthRefreshCallback;
 #[cfg(feature = "tokio-runtime")]
 pub use query::QueryExecutor;
 #[cfg(feature = "tokio-runtime")]
 pub use query::UploadProgressCallback;
+pub use seq_id::SeqId;
 #[cfg(feature = "tokio-runtime")]
 pub use subscription::LiveRowsSubscription;
 #[cfg(feature = "tokio-runtime")]
 pub use subscription::SubscriptionManager;
 pub use subscription::{LiveRowsConfig, LiveRowsEvent, LiveRowsMaterializer};
+pub use timeouts::{KalamLinkTimeouts, KalamLinkTimeoutsBuilder};
+pub use timestamp::{now, parse_iso8601, TimestampFormat, TimestampFormatter};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

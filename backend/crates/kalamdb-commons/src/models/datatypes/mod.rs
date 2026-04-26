@@ -23,7 +23,8 @@
 //!   - Numeric: Float32, Float64, Decimal(precision, scale)
 //!   - String: Utf8, LargeUtf8
 //!   - Binary: Binary, LargeBinary
-//!   - Temporal: Date32, Date64, Timestamp(unit, tz), Time32(unit), Time64(unit), Duration(unit), Interval(unit)
+//!   - Temporal: Date32, Date64, Timestamp(unit, tz), Time32(unit), Time64(unit), Duration(unit),
+//!     Interval(unit)
 //!   - Complex: List(inner), LargeList(inner), Struct(fields), Map(key, value, sorted)
 //!   - Special: Uuid, Json
 //!

@@ -2,10 +2,10 @@
 //!
 //! Provides bidirectional conversion between KalamDataType and Apache Arrow DataType.
 
-use crate::models::datatypes::KalamDataType;
-use arrow_schema::DataType as ArrowDataType;
-use arrow_schema::{Field, TimeUnit};
+use arrow_schema::{DataType as ArrowDataType, Field, TimeUnit};
 use thiserror::Error;
+
+use crate::models::datatypes::KalamDataType;
 
 #[derive(Error, Debug)]
 pub enum ArrowConversionError {

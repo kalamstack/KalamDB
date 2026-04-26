@@ -1,7 +1,8 @@
 //! Session error types
 
-use kalamdb_commons::models::{NamespaceId, Role, TableName};
 use std::fmt;
+
+use kalamdb_commons::models::{NamespaceId, Role, TableName};
 
 /// Result type for session operations
 pub type SessionResult<T> = Result<T, SessionError>;

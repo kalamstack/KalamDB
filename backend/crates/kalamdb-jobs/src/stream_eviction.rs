@@ -1,10 +1,13 @@
-use crate::JobsManager;
-use kalamdb_commons::models::{schemas::TableOptions, TableId};
-use kalamdb_commons::TableType;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_system::JobType;
 use std::sync::Arc;
+
+use kalamdb_commons::{
+    models::{schemas::TableOptions, TableId},
+    TableType,
+};
+use kalamdb_core::{app_context::AppContext, error::KalamDbError};
+use kalamdb_system::JobType;
+
+use crate::JobsManager;
 
 /// Scheduler for stream table eviction jobs
 pub struct StreamEvictionScheduler;
@@ -25,7 +28,7 @@ impl StreamEvictionScheduler {
         let mut stream_tables_found = 0;
         let mut jobs_created = 0;
 
-        //Loop over the tables
+        // Loop over the tables
         for table in tables.iter() {
             // Only process STREAM tables
             if table.table_type != TableType::Stream {

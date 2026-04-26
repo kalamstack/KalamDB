@@ -2,11 +2,11 @@
 //!
 //! Tests that verify Raft log replication behavior
 
-use crate::cluster_common::*;
-use crate::common::*;
+use std::time::{Duration, Instant};
+
 use serde_json::Value;
-use std::time::Duration;
-use std::time::Instant;
+
+use crate::{cluster_common::*, common::*};
 
 fn parse_count(response: &kalam_client::QueryResponse) -> Result<i64, String> {
     let result = response

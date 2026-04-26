@@ -11,15 +11,15 @@ use serde_json::Value as JsonValue;
 ///
 /// // Simple query without parameters
 /// let request = QueryRequest {
-///     sql: "SELECT * FROM users".to_string(),
-///     params: None,
+///     sql:          "SELECT * FROM users".to_string(),
+///     params:       None,
 ///     namespace_id: None,
 /// };
 ///
 /// // Parametrized query
 /// let request = QueryRequest {
-///     sql: "SELECT * FROM users WHERE id = $1".to_string(),
-///     params: Some(vec![json!(42)]),
+///     sql:          "SELECT * FROM users WHERE id = $1".to_string(),
+///     params:       Some(vec![json!(42)]),
 ///     namespace_id: None,
 /// };
 /// ```

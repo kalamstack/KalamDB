@@ -2,12 +2,11 @@ mod support;
 
 use std::sync::Arc;
 
-use ntest::timeout;
-
 use kalamdb_core::transactions::ExecutionOwnerKey;
 use kalamdb_pg::{
     CloseSessionRequest, CommitTransactionRequest, PgService, RollbackTransactionRequest,
 };
+use ntest::timeout;
 use support::{
     begin_transaction, insert_shared_row, new_service_with_tables, open_session,
     parse_transaction_id, request, scan_shared_rows,
@@ -74,7 +73,8 @@ async fn pg_commit_vs_rollback_repeats_without_leaking_state() {
         let rollback_ok = rollback_result.is_ok();
         assert_ne!(
             commit_ok, rollback_ok,
-            "exactly one PG terminal RPC should succeed: commit={commit_result:?} rollback={rollback_result:?}"
+            "exactly one PG terminal RPC should succeed: commit={commit_result:?} \
+             rollback={rollback_result:?}"
         );
         if commit_ok {
             committed_names.push(row_name);

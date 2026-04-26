@@ -1,9 +1,9 @@
 //! PostgreSQL Datum → KalamDB ScalarValue conversion for INSERT/UPDATE.
 
-use datafusion_common::ScalarValue;
-use pgrx::datum::JsonString;
-use pgrx::{pg_sys, text_to_rust_str_unchecked, FromDatum};
 use std::ffi::{c_void, CStr};
+
+use datafusion_common::ScalarValue;
+use pgrx::{datum::JsonString, pg_sys, text_to_rust_str_unchecked, FromDatum};
 
 /// Convert a PostgreSQL datum to a DataFusion ScalarValue based on the column's type OID.
 ///

@@ -11,25 +11,26 @@
 //   left off with no missed or replayed rows.
 //
 // Tests:
-//   1. smoke_subscription_reconnect_basic_resume
-//      Subscribe → insert → disconnect → insert-while-disconnected → reconnect
-//      → verify gap rows appear in the new subscription's initial snapshot.
+//   1. smoke_subscription_reconnect_basic_resume Subscribe → insert → disconnect →
+//      insert-while-disconnected → reconnect → verify gap rows appear in the new subscription's
+//      initial snapshot.
 //
-//   2. smoke_subscription_resume_from_seq_id
-//      Subscribe → record last seq_id from the server Ack → disconnect →
-//      insert gap rows → reconnect → re-subscribe WITH from_seq_id → verify
-//      only post-seq_id rows arrive and pre-disconnect rows are not replayed.
+//   2. smoke_subscription_resume_from_seq_id Subscribe → record last seq_id from the server Ack →
+//      disconnect → insert gap rows → reconnect → re-subscribe WITH from_seq_id → verify only
+//      post-seq_id rows arrive and pre-disconnect rows are not replayed.
 //
 // Run with:
 //   cargo test --test smoke smoke_subscription_reconnect
 //   cargo test --test smoke smoke_subscription_resume_from_seq_id
 
-use crate::common::*;
+use std::time::Duration;
+
 use kalam_client::{
     models::ChangeEvent, KalamLinkClient, KalamLinkTimeouts, SeqId, SubscriptionConfig,
     SubscriptionOptions,
 };
-use std::time::Duration;
+
+use crate::common::*;
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 

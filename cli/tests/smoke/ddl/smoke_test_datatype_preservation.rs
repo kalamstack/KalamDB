@@ -9,12 +9,13 @@
 //!
 //! Run with: cargo test --test smoke smoke_test_datatype_preservation
 
+use reqwest::Client;
+use serde_json::Value;
+
 use crate::common::{
     force_auto_test_server_url_async, generate_unique_namespace, get_access_token_for_url,
     test_context,
 };
-use reqwest::Client;
-use serde_json::Value;
 
 /// Test that all KalamDataTypes are preserved correctly in query results
 #[tokio::test]
@@ -81,7 +82,8 @@ async fn test_all_kalam_datatypes_are_preserved() {
         let data_type_str = match data_type_val {
             Value::String(s) => s.clone(),
             Value::Object(obj) => {
-                // Handle complex types like {"Embedding": 384} or {"Decimal": {"precision": 10, "scale": 2}}
+                // Handle complex types like {"Embedding": 384} or {"Decimal": {"precision": 10,
+                // "scale": 2}}
                 if let Some((key, _)) = obj.iter().next() {
                     key.clone()
                 } else {

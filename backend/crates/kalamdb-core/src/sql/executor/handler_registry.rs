@@ -11,15 +11,19 @@
 //! - **Testability**: Easy to mock handlers for unit tests
 //! - **Zero Overhead**: Registry lookup via DashMap is <1μs (vs 50-100ns for match)
 
-use crate::error::KalamDbError;
-use crate::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
-use crate::sql::executor::handler_adapter::{DynamicHandlerAdapter, TypedHandlerAdapter};
+use std::{future::Future, pin::Pin, sync::Arc};
+
 use dashmap::DashMap;
 use kalamdb_sql::classifier::SqlStatement;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
 use tracing::Instrument;
+
+use crate::{
+    error::KalamDbError,
+    sql::{
+        context::{ExecutionContext, ExecutionResult, ScalarValue},
+        executor::handler_adapter::{DynamicHandlerAdapter, TypedHandlerAdapter},
+    },
+};
 
 pub type SqlHandlerFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -87,7 +91,8 @@ pub struct HandlerRegistry {
 impl HandlerRegistry {
     /// Create an empty handler registry.
     ///
-    /// Handler registration is performed externally via `kalamdb_handlers::register_all_handlers()`.
+    /// Handler registration is performed externally via
+    /// `kalamdb_handlers::register_all_handlers()`.
     pub fn new() -> Self {
         Self {
             handlers: DashMap::new(),
@@ -210,10 +215,13 @@ impl HandlerRegistry {
 
 #[cfg(test)]
 mod tests {
+    use kalamdb_commons::{
+        models::{NamespaceId, UserId},
+        Role,
+    };
+
     use super::*;
     use crate::test_helpers::{create_test_session_simple, test_app_context_simple};
-    use kalamdb_commons::models::{NamespaceId, UserId};
-    use kalamdb_commons::Role;
 
     fn test_context() -> ExecutionContext {
         ExecutionContext::new(UserId::from("test_user"), Role::Dba, create_test_session_simple())

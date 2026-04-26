@@ -1,9 +1,11 @@
 //! Arrow to JSON conversion helpers
 
 use arrow::record_batch::RecordBatch;
-use kalamdb_commons::conversions::{mask_sensitive_rows_for_role, schema_fields_from_arrow_schema};
-use kalamdb_commons::models::Role;
-use kalamdb_commons::schemas::SchemaField;
+use kalamdb_commons::{
+    conversions::{mask_sensitive_rows_for_role, schema_fields_from_arrow_schema},
+    models::Role,
+    schemas::SchemaField,
+};
 use kalamdb_core::providers::arrow_json_conversion::record_batch_to_json_arrays;
 
 use super::super::models::QueryResult;
@@ -68,15 +70,19 @@ pub fn success_response_suffix(row_count: usize, as_user: &str, took: f64) -> St
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use arrow::array::RecordBatch;
-    use arrow::datatypes::{DataType, Field, Schema};
-    use kalamdb_commons::conversions::{
-        with_kalam_column_flags_metadata, with_kalam_data_type_metadata,
-    };
-    use kalamdb_commons::models::datatypes::KalamDataType;
-    use kalamdb_commons::schemas::{FieldFlag, FieldFlags};
     use std::sync::Arc;
+
+    use arrow::{
+        array::RecordBatch,
+        datatypes::{DataType, Field, Schema},
+    };
+    use kalamdb_commons::{
+        conversions::{with_kalam_column_flags_metadata, with_kalam_data_type_metadata},
+        models::datatypes::KalamDataType,
+        schemas::{FieldFlag, FieldFlags},
+    };
+
+    use super::*;
 
     #[test]
     fn test_record_batch_to_query_result_includes_flags_and_omits_empty() {

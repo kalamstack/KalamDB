@@ -38,10 +38,12 @@
 //! | `KEYCLOAK_TEST_USER`         | `kalamdb-user`                                |
 //! | `KEYCLOAK_TEST_PASSWORD`     | `kalamdb123`                                  |
 
-use crate::common::*;
+use std::time::Duration;
+
 use reqwest::Client;
 use serde_json::json;
-use std::time::Duration;
+
+use crate::common::*;
 
 // ---------------------------------------------------------------------------
 // Configuration helpers
@@ -159,8 +161,7 @@ async fn get_keycloak_token() -> Result<serde_json::Value, Box<dyn std::error::E
 /// Peek at the `sub` claim of a JWT without verifying the signature.
 /// Used in tests to determine the expected canonical user id.
 fn decode_jwt_sub(token: &str) -> Option<String> {
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-    use base64::Engine as _;
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 
     let payload_b64 = token.splitn(3, '.').nth(1)?;
     let payload_bytes = URL_SAFE_NO_PAD.decode(payload_b64).ok()?;
@@ -231,8 +232,7 @@ fn test_keycloak_realm_configured() {
 
             // Verify Keycloak uses asymmetric algorithm (not HS256)
             if let Some(access_token) = body.get("access_token").and_then(|v| v.as_str()) {
-                use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-                use base64::Engine as _;
+                use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
                 if let Some(header_b64) = access_token.splitn(3, '.').next() {
                     if let Ok(hdr_bytes) = URL_SAFE_NO_PAD.decode(header_b64) {
                         if let Ok(hdr) = serde_json::from_slice::<serde_json::Value>(&hdr_bytes) {
@@ -252,9 +252,8 @@ fn test_keycloak_realm_configured() {
         },
         Err(e) => {
             panic!(
-                "Failed to get token from Keycloak. \
-                 Ensure realm '{}' has client '{}' with Direct Access Grants enabled \
-                 and user '{}' exists: {}",
+                "Failed to get token from Keycloak. Ensure realm '{}' has client '{}' with Direct \
+                 Access Grants enabled and user '{}' exists: {}",
                 keycloak_realm(),
                 keycloak_client_id(),
                 keycloak_test_user(),
@@ -270,8 +269,8 @@ fn test_keycloak_realm_configured() {
 /// 1. Get a real RS256 token from Keycloak (signed with Keycloak's RSA private key).
 /// 2. Pre-create an OAuth user whose `user_id` exactly matches the token `sub`.
 /// 3. Send it to KalamDB as a Bearer token.
-/// 4. KalamDB reads `iss`, fetches Keycloak's JWKS, verifies the RS256 signature
-///    using Keycloak's *public* key. Only Keycloak can produce a valid signature.
+/// 4. KalamDB reads `iss`, fetches Keycloak's JWKS, verifies the RS256 signature using Keycloak's
+///    *public* key. Only Keycloak can produce a valid signature.
 /// 5. First request: resolve the pre-created OAuth user directly by canonical `sub`.
 /// 6. Second request: reuse the same canonical user via the user_id index.
 ///
@@ -335,10 +334,8 @@ fn test_preprovisioned_oauth_user_via_bearer() {
                 || err.contains("invalid_credentials")
             {
                 eprintln!(
-                    "Server not configured for Keycloak OIDC. Skipping.\n\
-                     Start server with:\n  \
-                     KALAMDB_JWT_TRUSTED_ISSUERS=\"kalamdb,{}\" \\\n  \
-                     cargo run",
+                    "Server not configured for Keycloak OIDC. Skipping.\nStart server with:\n  \
+                     KALAMDB_JWT_TRUSTED_ISSUERS=\"kalamdb,{}\" \\\n  cargo run",
                     keycloak_issuer()
                 );
                 return;
@@ -440,10 +437,9 @@ fn test_hs256_with_external_issuer_rejected() {
 
     assert!(
         status.as_u16() == 401 || status.as_u16() == 403,
-        "HS256 token with Keycloak issuer MUST be rejected (401/403), got {}.\n\
-         If this passed, it means the server accepted a forged HS256 token — \n\
-         anyone with the JWT secret can impersonate any OIDC provider!\n\
-         body={:?}",
+        "HS256 token with Keycloak issuer MUST be rejected (401/403), got {}.\nIf this passed, it \
+         means the server accepted a forged HS256 token — \nanyone with the JWT secret can \
+         impersonate any OIDC provider!\nbody={:?}",
         status,
         body
     );

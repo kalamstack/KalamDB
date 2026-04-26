@@ -1,17 +1,21 @@
-use crate::args::Cli;
+use std::{
+    io::{self, IsTerminal, Write},
+    net::IpAddr,
+    time::Duration,
+};
+
 use colored::Colorize;
 use kalam_cli::{
     CLIConfiguration, CLIError, CLISession, FileCredentialStore, OutputFormat, Result,
 };
-use kalam_client::credentials::{CredentialStore, Credentials};
 use kalam_client::{
+    credentials::{CredentialStore, Credentials},
     AuthProvider, KalamLinkClient, KalamLinkError, KalamLinkTimeouts, LoginResponse,
     ServerSetupRequest,
 };
-use std::io::{self, IsTerminal, Write};
-use std::net::IpAddr;
-use std::time::Duration;
 use url::Url;
+
+use crate::args::Cli;
 
 /// Build timeouts configuration from CLI arguments
 fn build_timeouts(cli: &Cli) -> KalamLinkTimeouts {
@@ -136,10 +140,7 @@ pub async fn create_session(
     let server_url = normalize_and_validate_server_url(&server_url)?;
 
     if cli.verbose {
-        eprintln!(
-            "Resolved server URL for instance '{}': {}",
-            cli.instance, server_url
-        );
+        eprintln!("Resolved server URL for instance '{}': {}", cli.instance, server_url);
     }
 
     fn simplify_login_error(err: &KalamLinkError) -> String {
@@ -198,12 +199,8 @@ pub async fn create_session(
                 if verbose {
                     eprintln!("Warning: Login failed: {}", e);
                 }
-                if matches!(&e, KalamLinkError::NetworkError(_) | KalamLinkError::TimeoutError(_))
-                {
-                    LoginResult::ConnectivityFailed(build_connectivity_diagnostics(
-                        server_url,
-                        &e,
-                    ))
+                if matches!(&e, KalamLinkError::NetworkError(_) | KalamLinkError::TimeoutError(_)) {
+                    LoginResult::ConnectivityFailed(build_connectivity_diagnostics(server_url, &e))
                 } else {
                     LoginResult::Failed(simplify_login_error(&e))
                 }
@@ -411,7 +408,8 @@ pub async fn create_session(
         if is_localhost_url(server_url) {
             println!("This server is already configured, so setup is not available here.");
             println!(
-                "If you started it with scripts/cluster.sh, sign in as 'root' with the configured root password"
+                "If you started it with scripts/cluster.sh, sign in as 'root' with the configured \
+                 root password"
             );
             println!("(default cluster password: kalamdb123).");
         }
@@ -477,10 +475,9 @@ pub async fn create_session(
             LoginResult::SetupRequired => {
                 setup_and_login(server_url, verbose, instance, credential_store, true).await
             },
-            LoginResult::Failed(error) => Err(CLIError::ConfigurationError(format!(
-                "Login failed: {}",
-                error
-            ))),
+            LoginResult::Failed(error) => {
+                Err(CLIError::ConfigurationError(format!("Login failed: {}", error)))
+            },
             LoginResult::ConnectivityFailed(error) => {
                 Err(CLIError::LinkError(KalamLinkError::NetworkError(error)))
             },
@@ -598,10 +595,7 @@ pub async fn create_session(
                 .await?
             },
             LoginResult::Failed(error) => {
-                return Err(CLIError::ConfigurationError(format!(
-                    "Login failed: {}",
-                    error
-                )));
+                return Err(CLIError::ConfigurationError(format!("Login failed: {}", error)));
             },
             LoginResult::ConnectivityFailed(error) => {
                 return Err(CLIError::LinkError(KalamLinkError::NetworkError(error)));
@@ -852,8 +846,10 @@ pub async fn create_session(
                                 },
                                 _ => {
                                     return Err(CLIError::SetupRequired(
-                                    "Setup completed but login failed. Please try logging in manually.".to_string()
-                                ));
+                                        "Setup completed but login failed. Please try logging in \
+                                         manually."
+                                            .to_string(),
+                                    ));
                                 },
                             }
                         },
@@ -872,7 +868,9 @@ pub async fn create_session(
         } else {
             // Non-interactive mode and not localhost - no auth available
             return Err(CLIError::ConfigurationError(
-                "No authentication credentials available. Use --user and --password, or run interactively.".to_string()
+                "No authentication credentials available. Use --user and --password, or run \
+                 interactively."
+                    .to_string(),
             ));
         }
     };

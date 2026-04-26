@@ -1,11 +1,12 @@
+use std::{collections::BTreeMap, ffi::CStr, str::FromStr};
+
 use kalam_pg_common::KalamPgError;
 use kalam_pg_fdw::TableOptions;
-use kalamdb_commons::models::{NamespaceId, TableName};
-use kalamdb_commons::{TableId, TableType};
+use kalamdb_commons::{
+    models::{NamespaceId, TableName},
+    TableId, TableType,
+};
 use pgrx::pg_sys;
-use std::collections::BTreeMap;
-use std::ffi::CStr;
-use std::str::FromStr;
 
 pub fn resolve_table_options_for_relation(
     relation: pg_sys::Relation,

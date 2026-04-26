@@ -15,9 +15,9 @@
 //! kalam-cli -u http://localhost:3000 --json -c "SELECT * FROM users"
 //! ```
 
-use clap::Parser;
 use std::io::IsTerminal;
 
+use clap::Parser;
 use kalam_cli::{CLIConfiguration, CLIError, FileCredentialStore, Result};
 
 mod args;
@@ -25,9 +25,11 @@ mod commands;
 mod connect;
 
 use args::Cli;
-use commands::credentials::{handle_credentials, login_and_store_credentials};
-use commands::init::handle_init_agent;
-use commands::subscriptions::handle_subscriptions;
+use commands::{
+    credentials::{handle_credentials, login_and_store_credentials},
+    init::handle_init_agent,
+    subscriptions::handle_subscriptions,
+};
 use connect::create_session;
 
 #[tokio::main]
@@ -49,7 +51,8 @@ async fn run() -> Result<()> {
     }
 
     // If the password is explicitly set to an empty string, only prompt in interactive mode.
-    // In non-interactive modes (--command/--file), an empty password may be valid (e.g. default root).
+    // In non-interactive modes (--command/--file), an empty password may be valid (e.g. default
+    // root).
     let is_interactive_mode = cli.command.is_none() && cli.file.is_none();
     if cli.password.as_deref() == Some("") && is_interactive_mode && std::io::stdin().is_terminal()
     {

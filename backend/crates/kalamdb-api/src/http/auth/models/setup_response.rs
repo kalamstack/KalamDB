@@ -1,7 +1,8 @@
 //! Server setup response model
 
-use super::UserInfo;
 use serde::Serialize;
+
+use super::UserInfo;
 
 /// Server setup response body
 #[derive(Debug, Serialize)]

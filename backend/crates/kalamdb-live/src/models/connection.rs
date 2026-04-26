@@ -2,23 +2,29 @@
 //!
 //! These models support both live query WebSocket subscriptions and topic consumer connections.
 
+use std::{
+    collections::{HashMap, VecDeque},
+    hash::{DefaultHasher, Hash, Hasher},
+    sync::{
+        atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
+        Arc, OnceLock, Weak,
+    },
+    time::{Instant, SystemTime, UNIX_EPOCH},
+};
+
 use datafusion::sql::sqlparser::ast::Expr;
-use kalamdb_commons::ids::SeqId;
-use kalamdb_commons::models::{ConnectionId, ConnectionInfo, LiveQueryId, TableId, UserId};
-use kalamdb_commons::websocket::WireNotification;
-use kalamdb_commons::websocket::{CompressionType, ProtocolOptions, SerializationType};
-use kalamdb_commons::Role;
+use kalamdb_commons::{
+    ids::SeqId,
+    models::{ConnectionId, ConnectionInfo, LiveQueryId, TableId, UserId},
+    websocket::{CompressionType, ProtocolOptions, SerializationType, WireNotification},
+    Role,
+};
 use parking_lot::{Mutex, RwLock};
-use std::collections::{HashMap, VecDeque};
-use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock, Weak};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
-/// Get current epoch time in milliseconds (for lock-free heartbeat tracking)
+/// Get current epoch time in milliseconds (for lock-free heartbeat and metadata tracking)
 #[inline]
-fn epoch_millis() -> u64 {
+pub(crate) fn epoch_millis() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
 }
 
@@ -70,12 +76,14 @@ fn intern_subscription_str(value: &str) -> Arc<str> {
     subscription_string_pool().lock().intern(value)
 }
 
+/// Maximum live-query subscriptions allowed on a single WebSocket connection.
+pub const MAX_SUBSCRIPTIONS_PER_CONNECTION: usize = 100;
+
 /// Maximum pending notifications per connection before dropping new ones.
-/// Keep this modest: large snapshot catch-up is handled by per-subscription
-/// flow control, while a smaller live buffer reduces worst-case memory per
-/// slow connection. At 100k concurrent idle connections this directly
-/// governs the per-connection memory floor.
-pub const NOTIFICATION_CHANNEL_CAPACITY: usize = 64;
+/// This must cover one full table fanout for a saturated shared WebSocket.
+/// The benchmark and backend contract allow 100 subscriptions per connection;
+/// 128 keeps a small cushion while staying tight for idle-connection memory.
+pub const NOTIFICATION_CHANNEL_CAPACITY: usize = 128;
 
 /// Maximum pending control events per connection.
 /// Only a few event kinds exist (auth timeout, heartbeat timeout, shutdown),
@@ -186,7 +194,12 @@ impl SubscriptionRuntimeMetadata {
 
     #[inline]
     pub fn record_delivery(&self) {
-        self.last_update_ms.store(epoch_millis() as i64, Ordering::Release);
+        self.record_delivery_at(epoch_millis());
+    }
+
+    #[inline]
+    pub fn record_delivery_at(&self, epoch_millis: u64) {
+        self.last_update_ms.store(epoch_millis as i64, Ordering::Release);
         self.changes.fetch_add(1, Ordering::AcqRel);
     }
 }
@@ -195,6 +208,7 @@ impl SubscriptionRuntimeMetadata {
 #[derive(Debug, Clone)]
 pub struct BufferedNotification {
     pub seq: Option<SeqId>,
+    pub commit_seq: Option<u64>,
     pub notification: Arc<WireNotification>,
 }
 
@@ -202,7 +216,9 @@ pub struct BufferedNotification {
 #[derive(Debug)]
 pub struct SubscriptionFlowControl {
     snapshot_end_seq: AtomicI64,
+    snapshot_end_commit_seq: AtomicU64,
     has_snapshot: AtomicBool,
+    has_commit_snapshot: AtomicBool,
     initial_complete: AtomicBool,
     buffer: Mutex<VecDeque<BufferedNotification>>,
 }
@@ -211,31 +227,63 @@ impl SubscriptionFlowControl {
     pub fn new() -> Self {
         Self {
             snapshot_end_seq: AtomicI64::new(0),
+            snapshot_end_commit_seq: AtomicU64::new(0),
             has_snapshot: AtomicBool::new(false),
+            has_commit_snapshot: AtomicBool::new(false),
             initial_complete: AtomicBool::new(false),
             buffer: Mutex::new(VecDeque::new()),
         }
     }
 
     pub fn set_snapshot_end_seq(&self, snapshot_end_seq: Option<SeqId>) {
+        self.set_snapshot_boundaries(snapshot_end_seq, None);
+    }
+
+    pub fn set_snapshot_boundaries(
+        &self,
+        snapshot_end_seq: Option<SeqId>,
+        snapshot_end_commit_seq: Option<u64>,
+    ) {
         if let Some(seq) = snapshot_end_seq {
             self.snapshot_end_seq.store(seq.as_i64(), Ordering::Release);
             self.has_snapshot.store(true, Ordering::Release);
-
-            let max_seq = seq.as_i64();
-            let mut buffer = self.buffer.lock();
-            buffer.retain(|item| match item.seq {
-                Some(item_seq) => item_seq.as_i64() > max_seq,
-                None => true,
-            });
         } else {
             self.has_snapshot.store(false, Ordering::Release);
+        }
+
+        if let Some(commit_seq) = snapshot_end_commit_seq {
+            self.snapshot_end_commit_seq.store(commit_seq, Ordering::Release);
+            self.has_commit_snapshot.store(true, Ordering::Release);
+        } else {
+            self.has_commit_snapshot.store(false, Ordering::Release);
+        }
+
+        if snapshot_end_seq.is_some() || snapshot_end_commit_seq.is_some() {
+            let max_seq = snapshot_end_seq.map(|seq| seq.as_i64());
+            let mut buffer = self.buffer.lock();
+            buffer.retain(|item| match item.seq {
+                Some(item_seq) if snapshot_end_commit_seq.is_none() => {
+                    max_seq.map(|seq| item_seq.as_i64() > seq).unwrap_or(true)
+                },
+                _ => match (snapshot_end_commit_seq, item.commit_seq) {
+                    (Some(max_commit), Some(item_commit)) => item_commit > max_commit,
+                    _ => true,
+                },
+            });
         }
     }
 
     pub fn snapshot_end_seq(&self) -> Option<i64> {
         if self.has_snapshot.load(Ordering::Acquire) {
             Some(self.snapshot_end_seq.load(Ordering::Acquire))
+        } else {
+            None
+        }
+    }
+
+    pub fn snapshot_end_commit_seq(&self) -> Option<u64> {
+        if self.has_commit_snapshot.load(Ordering::Acquire) {
+            Some(self.snapshot_end_commit_seq.load(Ordering::Acquire))
         } else {
             None
         }
@@ -249,23 +297,44 @@ impl SubscriptionFlowControl {
         self.initial_complete.store(true, Ordering::Release);
     }
 
-    pub fn buffer_notification(&self, notification: Arc<WireNotification>, seq: Option<SeqId>) {
+    pub fn buffer_notification(
+        &self,
+        notification: Arc<WireNotification>,
+        seq: Option<SeqId>,
+        commit_seq: Option<u64>,
+    ) {
         let mut buffer = self.buffer.lock();
         if buffer.len() >= MAX_BUFFERED_NOTIFICATIONS_PER_SUBSCRIPTION {
             buffer.pop_front();
         }
-        buffer.push_back(BufferedNotification { seq, notification });
+        buffer.push_back(BufferedNotification {
+            seq,
+            commit_seq,
+            notification,
+        });
     }
 
     pub fn drain_buffered_notifications(&self) -> Vec<BufferedNotification> {
         let mut buffer = self.buffer.lock();
         // Sort in-place via contiguous slice, then drain — avoids a second Vec allocation
         let slice = buffer.make_contiguous();
-        slice.sort_by(|a, b| match (a.seq, b.seq) {
-            (Some(a_seq), Some(b_seq)) => a_seq.as_i64().cmp(&b_seq.as_i64()),
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => std::cmp::Ordering::Equal,
+        slice.sort_by(|a, b| {
+            let commit_order = match (a.commit_seq, b.commit_seq) {
+                (Some(a_commit), Some(b_commit)) => a_commit.cmp(&b_commit),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            };
+            if commit_order != std::cmp::Ordering::Equal {
+                return commit_order;
+            }
+
+            match (a.seq, b.seq) {
+                (Some(a_seq), Some(b_seq)) => a_seq.as_i64().cmp(&b_seq.as_i64()),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
         });
         buffer.drain(..).collect()
     }
@@ -278,6 +347,8 @@ pub struct InitialLoadState {
     pub batch_size: usize,
     /// Snapshot boundary SeqId for consistent batch loading
     pub snapshot_end_seq: Option<SeqId>,
+    /// Deterministic snapshot boundary for reconnects across followers
+    pub snapshot_end_commit_seq: Option<u64>,
     /// Current batch number for pagination tracking (0-indexed)
     /// Incremented after each batch is sent
     pub current_batch_num: u32,
@@ -538,10 +609,23 @@ impl ConnectionState {
 
     /// Update snapshot_end_seq for a subscription.
     pub fn update_snapshot_end_seq(&self, subscription_id: &str, snapshot_end_seq: Option<SeqId>) {
+        self.update_snapshot_boundaries(subscription_id, snapshot_end_seq, None);
+    }
+
+    /// Update snapshot boundaries for a subscription.
+    pub fn update_snapshot_boundaries(
+        &self,
+        subscription_id: &str,
+        snapshot_end_seq: Option<SeqId>,
+        snapshot_end_commit_seq: Option<u64>,
+    ) {
         if let Some(sub) = self.subscriptions.write().get_mut(subscription_id) {
             if let Some(initial_load) = sub.initial_load.as_mut() {
                 initial_load.snapshot_end_seq = snapshot_end_seq;
-                initial_load.flow_control.set_snapshot_end_seq(snapshot_end_seq);
+                initial_load.snapshot_end_commit_seq = snapshot_end_commit_seq;
+                initial_load
+                    .flow_control
+                    .set_snapshot_boundaries(snapshot_end_seq, snapshot_end_commit_seq);
             }
         }
     }
@@ -572,6 +656,7 @@ impl ConnectionState {
         let buffered = flow_control.drain_buffered_notifications();
 
         let mut sent = 0usize;
+        let delivery_timestamp_ms = epoch_millis();
         for item in buffered {
             if let Err(e) = self.notification_tx.try_send(item.notification) {
                 if matches!(e, mpsc::error::TrySendError::Full(_)) {
@@ -582,7 +667,7 @@ impl ConnectionState {
                     break;
                 }
             } else {
-                runtime_metadata.record_delivery();
+                runtime_metadata.record_delivery_at(delivery_timestamp_ms);
                 sent += 1;
             }
         }
@@ -614,8 +699,9 @@ pub struct ConnectionRegistration {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kalamdb_commons::websocket::{ChangeType, SharedChangePayload};
+
+    use super::*;
 
     fn make_notification(subscription_id: &str) -> Arc<WireNotification> {
         Arc::new(WireNotification {
@@ -629,7 +715,11 @@ mod tests {
         let flow_control = SubscriptionFlowControl::new();
 
         for seq in 1..=2_048 {
-            flow_control.buffer_notification(make_notification("sub-1"), Some(SeqId::from(seq)));
+            flow_control.buffer_notification(
+                make_notification("sub-1"),
+                Some(SeqId::from(seq)),
+                None,
+            );
         }
 
         let buffered = flow_control.drain_buffered_notifications();
@@ -650,9 +740,21 @@ mod tests {
     fn test_subscription_flow_control_drains_in_seq_order() {
         let flow_control = SubscriptionFlowControl::new();
 
-        flow_control.buffer_notification(make_notification("sub-ordered"), Some(SeqId::from(9)));
-        flow_control.buffer_notification(make_notification("sub-ordered"), Some(SeqId::from(3)));
-        flow_control.buffer_notification(make_notification("sub-ordered"), Some(SeqId::from(6)));
+        flow_control.buffer_notification(
+            make_notification("sub-ordered"),
+            Some(SeqId::from(9)),
+            None,
+        );
+        flow_control.buffer_notification(
+            make_notification("sub-ordered"),
+            Some(SeqId::from(3)),
+            None,
+        );
+        flow_control.buffer_notification(
+            make_notification("sub-ordered"),
+            Some(SeqId::from(6)),
+            None,
+        );
 
         let buffered = flow_control.drain_buffered_notifications();
         let seqs: Vec<_> = buffered

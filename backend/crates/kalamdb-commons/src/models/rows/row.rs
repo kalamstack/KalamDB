@@ -1,11 +1,8 @@
+use std::{cmp::Ordering, collections::BTreeMap, sync::Arc};
+
 use arrow::array::{Array, FixedSizeListArray, Float32Array};
 use datafusion_common::ScalarValue;
-use serde::de;
-use serde::ser::SerializeMap;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::cmp::Ordering;
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use serde::{de, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 
 /// A unified Row representation that holds DataFusion ScalarValues

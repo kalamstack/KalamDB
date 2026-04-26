@@ -1,6 +1,5 @@
-use crate::error::Result;
-
 use super::{LiveRowsConfig, LiveRowsEvent, LiveRowsMaterializer, SubscriptionManager};
+use crate::error::Result;
 
 /// High-level subscription that yields materialized live-query row snapshots.
 pub struct LiveRowsSubscription {

@@ -1,9 +1,15 @@
-use crate::args::Cli;
+use std::{
+    io::{self, Write},
+    time::Duration,
+};
+
 use kalam_cli::{CLIError, FileCredentialStore, Result};
-use kalam_client::credentials::{CredentialStore, Credentials};
-use kalam_client::KalamLinkClient;
-use std::io::{self, Write};
-use std::time::Duration;
+use kalam_client::{
+    credentials::{CredentialStore, Credentials},
+    KalamLinkClient,
+};
+
+use crate::args::Cli;
 
 pub fn handle_credentials(cli: &Cli, credential_store: &mut FileCredentialStore) -> Result<bool> {
     if cli.list_instances {

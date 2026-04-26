@@ -1,42 +1,49 @@
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 use async_trait::async_trait;
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::datasource::TableProvider;
-use datafusion::execution::context::SessionContext;
-use datafusion::physical_plan::collect;
-use datafusion::scalar::ScalarValue;
-use kalamdb_commons::models::datatypes::KalamDataType;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::schemas::{ColumnDefinition, TableDefinition, TableOptions};
-use kalamdb_commons::models::{NamespaceId, ReadContext, Role, StorageId, TableId, TableName};
-use kalamdb_commons::schemas::ColumnDefault;
-use kalamdb_commons::websocket::ChangeNotification;
-use kalamdb_commons::{OperationKind, TableAccess, TableType, TransactionId, UserId};
+use datafusion::{
+    arrow::{datatypes::SchemaRef, record_batch::RecordBatch},
+    datasource::TableProvider,
+    execution::context::SessionContext,
+    physical_plan::collect,
+    scalar::ScalarValue,
+};
+use kalamdb_commons::{
+    models::{
+        datatypes::KalamDataType,
+        rows::Row,
+        schemas::{ColumnDefinition, TableDefinition, TableOptions},
+        NamespaceId, ReadContext, Role, StorageId, TableId, TableName,
+    },
+    schemas::ColumnDefault,
+    websocket::ChangeNotification,
+    OperationKind, TableAccess, TableType, TransactionId, UserId,
+};
 use kalamdb_datafusion_sources::exec::DeferredBatchExec;
 use kalamdb_filestore::StorageRegistry;
 use kalamdb_sharding::ShardRouter;
-use kalamdb_store::test_utils::InMemoryBackend;
-use kalamdb_store::{StorageBackend, StorageError};
+use kalamdb_store::{test_utils::InMemoryBackend, StorageBackend, StorageError};
 use kalamdb_system::{
     ClusterCoordinator, Manifest, ManifestCacheEntry, ManifestService, NotificationService,
     SchemaRegistry, SessionUserContext, Storage, StorageType, StoragesTableProvider,
     SystemColumnsService,
 };
-use kalamdb_tables::utils::TableServices;
 use kalamdb_tables::{
     new_indexed_shared_table_store, new_indexed_user_table_store, new_stream_table_store,
-    BaseTableProvider, SharedTableProvider, SharedTableRow, StreamTableProvider,
-    StreamTableStorageMode, StreamTableStoreConfig, TableProviderCore, UserTableProvider,
-    UserTableRow,
+    utils::TableServices, BaseTableProvider, SharedTableProvider, SharedTableRow,
+    StreamTableProvider, StreamTableStorageMode, StreamTableStoreConfig, TableProviderCore,
+    UserTableProvider, UserTableRow,
 };
 use kalamdb_transactions::{
-    CommitSequenceSource, TransactionAccessError, TransactionAccessValidator, TransactionMutationSink,
-    TransactionOverlay, TransactionOverlayEntry, TransactionOverlayExec, TransactionQueryContext,
-    TransactionQueryExtension,
+    CommitSequenceSource, TransactionAccessError, TransactionAccessValidator,
+    TransactionMutationSink, TransactionOverlay, TransactionOverlayEntry, TransactionOverlayExec,
+    TransactionQueryContext, TransactionQueryExtension,
 };
 use tempfile::TempDir;
 
@@ -45,12 +52,7 @@ fn total_rows(batches: &[RecordBatch]) -> usize {
 }
 
 fn row(values: Vec<(&str, ScalarValue)>) -> Row {
-    Row::from_vec(
-        values
-            .into_iter()
-            .map(|(name, value)| (name.to_string(), value))
-            .collect(),
-    )
+    Row::from_vec(values.into_iter().map(|(name, value)| (name.to_string(), value)).collect())
 }
 
 #[derive(Debug, Clone)]
@@ -77,8 +79,7 @@ impl SchemaRegistry for TestSchemaRegistry {
         if &TableId::from_strings(
             self.table_def.namespace_id.as_str(),
             self.table_def.table_name.as_str(),
-        )
-            == table_id
+        ) == table_id
         {
             Ok(Arc::clone(&self.schema))
         } else {
@@ -93,8 +94,7 @@ impl SchemaRegistry for TestSchemaRegistry {
         if &TableId::from_strings(
             self.table_def.namespace_id.as_str(),
             self.table_def.table_name.as_str(),
-        )
-            == table_id
+        ) == table_id
         {
             Ok(Some(Arc::clone(&self.table_def)))
         } else {
@@ -339,14 +339,13 @@ fn build_storage_registry(
         })
         .expect("seed local storage");
 
-    Arc::new(StorageRegistry::new(
-        storages_provider,
-        base_directory,
-        Default::default(),
-    ))
+    Arc::new(StorageRegistry::new(storages_provider, base_directory, Default::default()))
 }
 
-fn build_services(table_def: Arc<TableDefinition>, backend: Arc<dyn StorageBackend>) -> OwnedServices {
+fn build_services(
+    table_def: Arc<TableDefinition>,
+    backend: Arc<dyn StorageBackend>,
+) -> OwnedServices {
     let schema = table_def.to_arrow_schema().expect("build arrow schema");
     let temp_dir = tempfile::tempdir().expect("create temp dir");
     let storage_registry = build_storage_registry(backend, &temp_dir);
@@ -536,10 +535,7 @@ async fn stream_provider_scan_uses_deferred_batch_exec_and_returns_rows() {
 
     let ctx = session_with_user(&user_id);
     let state = ctx.state();
-    let plan = provider
-        .scan(&state, None, &[], None)
-        .await
-        .expect("build stream plan");
+    let plan = provider.scan(&state, None, &[], None).await.expect("build stream plan");
 
     assert!(plan.as_any().is::<DeferredBatchExec>());
 
@@ -585,10 +581,7 @@ async fn user_provider_scan_uses_deferred_batch_exec_and_returns_rows() {
 
     let ctx = session_with_user(&user_id);
     let state = ctx.state();
-    let plan = provider
-        .scan(&state, None, &[], None)
-        .await
-        .expect("build user plan");
+    let plan = provider.scan(&state, None, &[], None).await.expect("build user plan");
 
     assert!(plan.as_any().is::<DeferredBatchExec>());
 
@@ -646,10 +639,7 @@ async fn user_provider_scan_with_overlay_uses_transaction_overlay_exec() {
 
     let ctx = session_with_transaction(&user_id, tx_context);
     let state = ctx.state();
-    let plan = provider
-        .scan(&state, None, &[], None)
-        .await
-        .expect("build user plan");
+    let plan = provider.scan(&state, None, &[], None).await.expect("build user plan");
 
     assert!(plan.as_any().is::<TransactionOverlayExec>());
     let child = plan.children().into_iter().next().expect("overlay child plan");
@@ -696,10 +686,7 @@ async fn shared_provider_scan_uses_deferred_batch_exec_and_returns_rows() {
     let user_id = UserId::new("shared-reader");
     let ctx = session_with_user(&user_id);
     let state = ctx.state();
-    let plan = provider
-        .scan(&state, None, &[], None)
-        .await
-        .expect("build shared plan");
+    let plan = provider.scan(&state, None, &[], None).await.expect("build shared plan");
 
     assert!(plan.as_any().is::<DeferredBatchExec>());
 
@@ -756,10 +743,7 @@ async fn shared_provider_scan_with_overlay_uses_transaction_overlay_exec() {
 
     let ctx = session_with_transaction(&user_id, tx_context);
     let state = ctx.state();
-    let plan = provider
-        .scan(&state, None, &[], None)
-        .await
-        .expect("build shared plan");
+    let plan = provider.scan(&state, None, &[], None).await.expect("build shared plan");
 
     assert!(plan.as_any().is::<TransactionOverlayExec>());
     let child = plan.children().into_iter().next().expect("overlay child plan");

@@ -3,26 +3,29 @@
 //! This executor routes commands through Raft groups for consensus
 //! before applying them to the local state machine.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
-use std::time::Instant;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    time::Instant,
+};
 
 use async_trait::async_trait;
 use dashmap::DashMap;
+use kalamdb_commons::models::{NodeId, UserId};
 use kalamdb_observability::collect_runtime_metrics;
 use kalamdb_pg::KalamPgService;
+use kalamdb_sharding::ShardRouter;
 use openraft::ServerState;
 
-use kalamdb_commons::models::{NodeId, UserId};
-use kalamdb_sharding::ShardRouter;
-
-use crate::cluster_types::NodeStatus;
-use crate::network::cluster_client::ClusterClient;
-use crate::network::cluster_handler::ClusterMessageHandler;
-use crate::network::models::GetNodeInfoResponse;
 use crate::{
-    manager::RaftManager, ClusterInfo, ClusterNodeInfo, CommandExecutor, DataResponse, GroupId,
-    KalamNode, MetaCommand, MetaResponse, RaftError, SharedDataCommand, UserDataCommand,
+    cluster_types::NodeStatus,
+    manager::RaftManager,
+    network::{
+        cluster_client::ClusterClient, cluster_handler::ClusterMessageHandler,
+        models::GetNodeInfoResponse,
+    },
+    ClusterInfo, ClusterNodeInfo, CommandExecutor, DataResponse, GroupId, KalamNode, MetaCommand,
+    MetaResponse, RaftError, SharedDataCommand, UserDataCommand,
 };
 
 /// Result type for executor operations

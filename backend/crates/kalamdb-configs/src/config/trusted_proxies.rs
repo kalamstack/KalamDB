@@ -1,6 +1,7 @@
+use std::net::IpAddr;
+
 use anyhow::anyhow;
 use ipnet::IpNet;
-use std::net::IpAddr;
 
 /// Parse trusted proxy entries from configuration.
 ///
@@ -30,8 +31,9 @@ fn parse_trusted_proxy_entry(entry: &str) -> anyhow::Result<IpNet> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::net::IpAddr;
+
+    use super::*;
 
     #[test]
     fn parses_single_ip_and_cidr_entries() {

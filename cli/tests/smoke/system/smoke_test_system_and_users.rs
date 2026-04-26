@@ -70,7 +70,8 @@ fn smoke_system_tables_and_user_lifecycle() {
     let unique_tbl = generate_unique_table("test_flush_table");
     let test_table = format!("{}.{}", test_ns, unique_tbl);
     let create_table_sql = format!(
-        "CREATE TABLE {} (id INT PRIMARY KEY, value VARCHAR) WITH (TYPE = 'USER', FLUSH_POLICY = 'rows:100')",
+        "CREATE TABLE {} (id INT PRIMARY KEY, value VARCHAR) WITH (TYPE = 'USER', FLUSH_POLICY = \
+         'rows:100')",
         test_table
     );
     execute_sql_as_root_via_client(&create_table_sql).expect("create test table should succeed");

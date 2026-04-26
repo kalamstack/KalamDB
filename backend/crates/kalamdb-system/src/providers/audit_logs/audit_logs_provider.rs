@@ -3,22 +3,30 @@
 //! This module provides a DataFusion TableProvider implementation for the system.audit_log table.
 //! Uses the EntityStore architecture with type-safe keys (AuditLogId).
 
-use crate::error::{SystemError, SystemResultExt};
-use crate::providers::audit_logs::models::AuditLogEntry;
-use crate::providers::base::{
-    extract_filter_value, system_rows_to_batch, SimpleProviderDefinition,
-};
-use crate::system_row_mapper::{model_to_system_row, system_row_to_model};
-use datafusion::arrow::array::RecordBatch;
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::logical_expr::Expr;
-use kalamdb_commons::models::rows::SystemTableRow;
-use kalamdb_commons::models::AuditLogId;
-use kalamdb_commons::schemas::TableDefinition;
-use kalamdb_commons::SystemTable;
-use kalamdb_store::entity_store::{EntityStore, EntityStoreAsync};
-use kalamdb_store::{IndexedEntityStore, StorageBackend};
 use std::sync::{Arc, OnceLock};
+
+use datafusion::{
+    arrow::{array::RecordBatch, datatypes::SchemaRef},
+    logical_expr::Expr,
+};
+use kalamdb_commons::{
+    models::{rows::SystemTableRow, AuditLogId},
+    schemas::TableDefinition,
+    SystemTable,
+};
+use kalamdb_store::{
+    entity_store::{EntityStore, EntityStoreAsync},
+    IndexedEntityStore, StorageBackend,
+};
+
+use crate::{
+    error::{SystemError, SystemResultExt},
+    providers::{
+        audit_logs::models::AuditLogEntry,
+        base::{extract_filter_value, system_rows_to_batch, SimpleProviderDefinition},
+    },
+    system_row_mapper::{model_to_system_row, system_row_to_model},
+};
 
 /// System.audit_log table provider using EntityStore architecture
 #[derive(Clone)]
@@ -174,13 +182,13 @@ crate::impl_simple_system_table_provider!(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use arrow::array::Array;
-    use datafusion::arrow::array::TimestampMicrosecondArray;
-    use datafusion::datasource::TableProvider;
+    use datafusion::{arrow::array::TimestampMicrosecondArray, datasource::TableProvider};
     use kalamdb_commons::UserId;
     use kalamdb_store::test_utils::InMemoryBackend;
     use serde_json::json;
+
+    use super::*;
 
     fn create_test_provider() -> AuditLogsTableProvider {
         let backend: Arc<dyn StorageBackend> = Arc::new(InMemoryBackend::new());

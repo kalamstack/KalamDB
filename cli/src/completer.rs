@@ -7,9 +7,10 @@
 //! Provides intelligent autocompletion for SQL keywords, table names, column names,
 //! and backslash commands with context-aware suggestions and beautiful styling.
 
+use std::collections::HashMap;
+
 use colored::*;
 use rustyline::completion::{Completer, Pair};
-use std::collections::HashMap;
 
 pub(crate) const SQL_KEYWORDS: &[&str] = &[
     // DML
@@ -277,7 +278,8 @@ impl AutoCompleter {
                     before_dot.rfind(|c: char| c.is_whitespace() || c == '(' || c == ',')
                 {
                     let table_name = before_dot[word_start + 1..].trim().to_string();
-                    // If the token before dot matches a known namespace, assume namespace.table completion
+                    // If the token before dot matches a known namespace, assume namespace.table
+                    // completion
                     let ns_upper = table_name.to_ascii_uppercase();
                     if self.namespaces.iter().any(|ns| ns.to_ascii_uppercase() == ns_upper) {
                         return CompletionContext::NamespaceTable(table_name);

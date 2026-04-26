@@ -4,19 +4,21 @@
 //! This enables efficient point query filtering (WHERE id = X) by skipping batch files
 //! where the Bloom filter indicates "definitely not present".
 
-use crate::registry::StorageCached;
-use arrow::array::{Int64Array, StringArray};
-use arrow::datatypes::{DataType, Field, Schema};
-use arrow::record_batch::RecordBatch;
+use std::{env, fs, sync::Arc};
+
+use arrow::{
+    array::{Int64Array, StringArray},
+    datatypes::{DataType, Field, Schema},
+    record_batch::RecordBatch,
+};
 use datafusion::parquet::file::reader::{FileReader, SerializedFileReader};
-use kalamdb_commons::models::ids::StorageId;
-use kalamdb_commons::models::TableId;
-use kalamdb_commons::schemas::TableType;
-use kalamdb_system::providers::storages::models::StorageType;
-use kalamdb_system::Storage;
-use std::env;
-use std::fs;
-use std::sync::Arc;
+use kalamdb_commons::{
+    models::{ids::StorageId, TableId},
+    schemas::TableType,
+};
+use kalamdb_system::{providers::storages::models::StorageType, Storage};
+
+use crate::registry::StorageCached;
 
 fn create_test_storage(temp_dir: &std::path::Path) -> Storage {
     let now = chrono::Utc::now().timestamp_millis();

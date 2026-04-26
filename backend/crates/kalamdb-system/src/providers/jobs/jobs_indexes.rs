@@ -2,15 +2,15 @@
 //!
 //! This module defines secondary indexes for the system.jobs table.
 
-use crate::providers::jobs::models::Job;
-use crate::system_row_mapper::system_row_to_model;
-use crate::JobStatus;
-use crate::StoragePartition;
-use kalamdb_commons::models::rows::SystemTableRow;
-use kalamdb_commons::storage::Partition;
-use kalamdb_commons::JobId;
-use kalamdb_store::IndexDefinition;
 use std::sync::Arc;
+
+use kalamdb_commons::{models::rows::SystemTableRow, storage::Partition, JobId};
+use kalamdb_store::IndexDefinition;
+
+use crate::{
+    providers::jobs::models::Job, system_row_mapper::system_row_to_model, JobStatus,
+    StoragePartition,
+};
 
 /// Index for querying jobs by status + created_at (sorted).
 ///
@@ -89,7 +89,8 @@ impl IndexDefinition<JobId, SystemTableRow> for JobIdempotencyKeyIndex {
 
 /// Convert JobStatus to a u8 for index key ordering.
 ///
-/// Order: New(0) < Queued(1) < Running(2) < Retrying(3) < Completed(4) < Failed(5) < Cancelled(6) < Skipped(7)
+/// Order: New(0) < Queued(1) < Running(2) < Retrying(3) < Completed(4) < Failed(5) < Cancelled(6) <
+/// Skipped(7)
 pub fn status_to_u8(status: JobStatus) -> u8 {
     match status {
         JobStatus::New => 0,
@@ -128,10 +129,10 @@ pub fn create_jobs_indexes() -> Vec<Arc<dyn IndexDefinition<JobId, SystemTableRo
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::system_row_mapper::model_to_system_row;
-    use crate::JobType;
     use kalamdb_commons::NodeId;
+
+    use super::*;
+    use crate::{system_row_mapper::model_to_system_row, JobType};
 
     fn create_test_job(id: &str, status: JobStatus) -> Job {
         let now = chrono::Utc::now().timestamp_millis();

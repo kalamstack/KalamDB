@@ -1,9 +1,8 @@
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::error::RaftError;
 use crate::{
-    DataResponse, MetaCommand, MetaResponse, RaftCommand, RaftResponse, SharedDataCommand,
-    UserDataCommand,
+    error::RaftError, DataResponse, MetaCommand, MetaResponse, RaftCommand, RaftResponse,
+    SharedDataCommand, UserDataCommand,
 };
 
 const COMMAND_WIRE_VERSION: u16 = 1;
@@ -119,13 +118,16 @@ pub fn decode_raft_response(bytes: &[u8]) -> Result<RaftResponse, RaftError> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use kalamdb_commons::{
+        models::{rows::Row, NamespaceId, NodeId, TableName, UserId},
+        TableId, TableType,
+    };
+    use kalamdb_transactions::StagedMutation;
+
     use super::*;
     use crate::{DataResponse, MetaResponse};
-    use kalamdb_commons::models::rows::Row;
-    use kalamdb_commons::models::{NamespaceId, NodeId, TableName, UserId};
-    use kalamdb_commons::{TableId, TableType};
-    use kalamdb_transactions::StagedMutation;
-    use std::collections::BTreeMap;
 
     #[test]
     fn meta_response_roundtrip() {

@@ -1,9 +1,10 @@
 //! Scan and modify state structs stored as `fdw_state` in FDW callbacks.
 
+use std::sync::Arc;
+
 use arrow::record_batch::RecordBatch;
 use kalam_pg_api::KalamBackendExecutor;
 use kalam_pg_fdw::TableOptions;
-use std::sync::Arc;
 
 /// State stored in `ForeignScanState::fdw_state` during scan lifecycle.
 pub struct KalamScanState {

@@ -21,23 +21,29 @@
 //! }
 //! ```
 
-use crate::executors::{JobContext, JobDecision, JobExecutor, JobParams};
+use std::{
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
 use async_trait::async_trait;
-use kalamdb_commons::ids::{SeqId, SnowflakeGenerator};
-use kalamdb_commons::schemas::TableType;
-use kalamdb_commons::TableId;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::error_extensions::KalamDbResultExt;
-use kalamdb_core::providers::StreamTableProvider;
+use kalamdb_commons::{
+    ids::{SeqId, SnowflakeGenerator},
+    schemas::TableType,
+    TableId,
+};
 #[cfg(test)]
 use kalamdb_core::schema_registry::TablesSchemaRegistryAdapter;
+use kalamdb_core::{
+    app_context::AppContext, error::KalamDbError, error_extensions::KalamDbResultExt,
+    providers::StreamTableProvider,
+};
 #[cfg(test)]
 use kalamdb_sharding::ShardRouter;
 use kalamdb_system::JobType;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::executors::{JobContext, JobDecision, JobExecutor, JobParams};
 
 fn default_batch_size() -> u64 {
     10000
@@ -234,29 +240,33 @@ impl Default for StreamEvictionExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::{collections::HashMap, sync::Arc};
+
     use chrono::Utc;
     use datafusion::datasource::TableProvider;
-    use kalamdb_commons::models::datatypes::KalamDataType;
-    use kalamdb_commons::models::schemas::{
-        ColumnDefinition, TableDefinition, TableOptions, TableType,
+    use kalamdb_commons::{
+        models::{
+            datatypes::KalamDataType,
+            schemas::{ColumnDefinition, TableDefinition, TableOptions, TableType},
+            TableId, TableName, UserId,
+        },
+        ChangeNotification, JobId, NamespaceId, NodeId,
     };
-    use kalamdb_commons::models::{TableId, TableName, UserId};
-    use kalamdb_commons::{ChangeNotification, JobId, NamespaceId, NodeId};
-    use kalamdb_core::app_context::AppContext;
-    use kalamdb_core::providers::arrow_json_conversion::json_to_row;
-    use kalamdb_core::providers::base::{BaseTableProvider, TableProviderCore};
-    use kalamdb_core::providers::StreamTableProvider;
-    use kalamdb_core::test_helpers::test_app_context_simple;
-    use kalamdb_system::providers::jobs::models::Job;
-    use kalamdb_system::NotificationService;
-    use kalamdb_system::SchemaRegistry;
-    use kalamdb_tables::utils::TableServices;
-    use kalamdb_tables::StreamTableStoreConfig;
+    use kalamdb_core::{
+        app_context::AppContext,
+        providers::{
+            arrow_json_conversion::json_to_row,
+            base::{BaseTableProvider, TableProviderCore},
+            StreamTableProvider,
+        },
+        test_helpers::test_app_context_simple,
+    };
+    use kalamdb_system::{providers::jobs::models::Job, NotificationService, SchemaRegistry};
+    use kalamdb_tables::{utils::TableServices, StreamTableStoreConfig};
     use serde_json::json;
-    use std::collections::HashMap;
-    use std::sync::Arc;
     use tokio::time::{sleep, Duration};
+
+    use super::*;
 
     fn make_job(id: &str, job_type: JobType, _ns: &str) -> Job {
         let now = chrono::Utc::now().timestamp_millis();
@@ -439,15 +449,13 @@ mod tests {
         sleep(Duration::from_millis(1500)).await;
 
         let mut job = make_job("SE-evict", JobType::StreamEviction, harness.namespace.as_str());
-        job.parameters = Some(
-            serde_json::json!({
-                "namespace_id": harness.namespace.as_str(),
-                "table_name": harness.table_name_value.clone(),
-                "table_type": "Stream",
-                "ttl_seconds": 1,
-                "batch_size": 100
-            }),
-        );
+        job.parameters = Some(serde_json::json!({
+            "namespace_id": harness.namespace.as_str(),
+            "table_name": harness.table_name_value.clone(),
+            "table_type": "Stream",
+            "ttl_seconds": 1,
+            "batch_size": 100
+        }));
 
         let params = StreamEvictionParams {
             table_id: harness.table_id.clone(),

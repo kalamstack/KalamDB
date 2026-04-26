@@ -10,11 +10,13 @@
 //! Run with:
 //!   cargo nextest run --test smoke smoke_security_rpc_auth
 
-use crate::common::*;
+use std::time::Duration;
+
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::Client;
 use serde_json::json;
-use std::time::Duration;
+
+use crate::common::*;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -118,8 +120,8 @@ fn smoke_rpc_sql_forged_jwt_alg_none_returns_401() {
     }
 
     // header={"alg":"none"} payload={"sub":"attacker","role":"system","exp":9999999999}
-    let forged = "eyJhbGciOiJub25lIn0.\
-        eyJzdWIiOiJhdHRhY2tlciIsInJvbGUiOiJzeXN0ZW0iLCJleHAiOjk5OTk5OTk5OTl9.";
+    let forged =
+        "eyJhbGciOiJub25lIn0.eyJzdWIiOiJhdHRhY2tlciIsInJvbGUiOiJzeXN0ZW0iLCJleHAiOjk5OTk5OTk5OTl9.";
 
     let status = block(async {
         http_client()
@@ -266,7 +268,8 @@ fn smoke_rpc_health_is_public() {
 fn smoke_rpc_login_wrong_password_returns_401_generic_message() {
     if !is_server_running() {
         eprintln!(
-            "Skipping smoke_rpc_login_wrong_password_returns_401_generic_message: server not running"
+            "Skipping smoke_rpc_login_wrong_password_returns_401_generic_message: server not \
+             running"
         );
         return;
     }
@@ -315,7 +318,8 @@ fn smoke_rpc_login_wrong_password_returns_401_generic_message() {
 fn smoke_rpc_login_nonexistent_user_matches_wrong_password_response() {
     if !is_server_running() {
         eprintln!(
-            "Skipping smoke_rpc_login_nonexistent_user_matches_wrong_password_response: server not running"
+            "Skipping smoke_rpc_login_nonexistent_user_matches_wrong_password_response: server \
+             not running"
         );
         return;
     }
@@ -375,8 +379,8 @@ fn smoke_rpc_login_nonexistent_user_matches_wrong_password_response() {
     );
     assert_eq!(
         msg_real_user, msg_fake_user,
-        "Error messages for wrong-password vs non-existent user must be identical \
-        to prevent user enumeration. real_user='{}', fake_user='{}'",
+        "Error messages for wrong-password vs non-existent user must be identical to prevent user \
+         enumeration. real_user='{}', fake_user='{}'",
         msg_real_user, msg_fake_user
     );
 }

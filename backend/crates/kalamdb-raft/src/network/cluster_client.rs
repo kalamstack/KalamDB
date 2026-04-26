@@ -7,13 +7,14 @@ use std::sync::Arc;
 
 use kalamdb_commons::models::NodeId;
 
-use super::cluster_service::cluster_client::ClusterServiceClient;
-use super::models::{
-    ForwardSqlRequest, ForwardSqlResponse, GetNodeInfoRequest, GetNodeInfoResponse, PingRequest,
-    PingResponse,
+use super::{
+    cluster_service::cluster_client::ClusterServiceClient,
+    models::{
+        ForwardSqlRequest, ForwardSqlResponse, GetNodeInfoRequest, GetNodeInfoResponse,
+        PingRequest, PingResponse,
+    },
 };
-use crate::manager::RaftManager;
-use crate::{GroupId, RaftError};
+use crate::{manager::RaftManager, GroupId, RaftError};
 
 /// High-level cluster RPC client built on top of the shared Raft channel pool.
 #[derive(Clone)]
@@ -32,10 +33,19 @@ impl ClusterClient {
         &self,
         request: ForwardSqlRequest,
     ) -> Result<ForwardSqlResponse, RaftError> {
+        self.forward_sql_to_group_leader(GroupId::Meta, request).await
+    }
+
+    /// Forward SQL to the current leader of a specific Raft group.
+    pub async fn forward_sql_to_group_leader(
+        &self,
+        group_id: GroupId,
+        request: ForwardSqlRequest,
+    ) -> Result<ForwardSqlResponse, RaftError> {
         let leader_node_id = self
             .manager
-            .current_leader(GroupId::Meta)
-            .ok_or_else(|| RaftError::Network("No meta leader available".to_string()))?;
+            .current_leader(group_id)
+            .ok_or_else(|| RaftError::Network(format!("No leader available for {}", group_id)))?;
 
         self.forward_sql_to_node(leader_node_id, request).await
     }
@@ -124,6 +134,7 @@ impl ClusterClient {
         timeout_ms: u64,
     ) -> std::collections::HashMap<NodeId, GetNodeInfoResponse> {
         use std::time::Duration;
+
         use tokio::time::timeout;
 
         let self_id = self.manager.node_id();

@@ -3,9 +3,11 @@
 // - Falls back to version.toml if git is not available (e.g., Docker builds)
 // - Builds the Admin UI for kalamdb-api release builds (must run before rust-embed)
 
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 fn main() {
     let package_name = std::env::var("CARGO_PKG_NAME").unwrap_or_default();
@@ -129,7 +131,8 @@ fn build_ui_if_release(repo_root: &Path) {
         let index_file = dist_dir.join("index.html");
         if !index_file.exists() {
             panic!(
-                "SKIP_UI_BUILD is set but ui/dist/index.html does not exist! Build UI first or unset SKIP_UI_BUILD."
+                "SKIP_UI_BUILD is set but ui/dist/index.html does not exist! Build UI first or \
+                 unset SKIP_UI_BUILD."
             );
         }
         return;
@@ -156,7 +159,8 @@ fn build_ui_if_release(repo_root: &Path) {
 
     println!("cargo:warning=Building UI for release...");
 
-    // Use isolated cargo dirs for nested wasm-pack to avoid lock contention with the outer cargo build.
+    // Use isolated cargo dirs for nested wasm-pack to avoid lock contention with the outer cargo
+    // build.
     let isolated_target = repo_root.join("ui").join(".cargo-target");
     let isolated_home = repo_root.join("ui").join(".cargo-home");
 
@@ -184,13 +188,15 @@ fn build_ui_if_release(repo_root: &Path) {
             Ok(status) if status.success() => {},
             Ok(status) => {
                 panic!(
-                    "npm install failed with status: {} - UI dependencies are required for release builds!",
+                    "npm install failed with status: {} - UI dependencies are required for \
+                     release builds!",
                     status
                 );
             },
             Err(e) => {
                 panic!(
-                    "Failed to run npm install: {} - UI dependencies are required for release builds!",
+                    "Failed to run npm install: {} - UI dependencies are required for release \
+                     builds!",
                     e
                 );
             },

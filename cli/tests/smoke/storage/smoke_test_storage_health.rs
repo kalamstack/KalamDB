@@ -5,12 +5,16 @@
 // - Verifies authorization (DBA+ only)
 // - Tests non-existent storage returns proper error
 
-use crate::common::*;
+use std::{
+    collections::HashMap,
+    thread,
+    time::{Duration, Instant},
+};
+
 use chrono::{DateTime, Datelike, Utc};
 use serde_json::Value as JsonValue;
-use std::collections::HashMap;
-use std::thread;
-use std::time::{Duration, Instant};
+
+use crate::common::*;
 
 fn arrow_value_as_string(value: &JsonValue) -> Option<String> {
     extract_arrow_value(value)
@@ -143,7 +147,8 @@ fn smoke_storage_check_local_basic() {
         );
         assert!(
             age_seconds <= 60,
-            "tested_at should be within 60 seconds of now, but was {} seconds ago (tested_at: {}, now: {})",
+            "tested_at should be within 60 seconds of now, but was {} seconds ago (tested_at: {}, \
+             now: {})",
             age_seconds,
             tested_at,
             now

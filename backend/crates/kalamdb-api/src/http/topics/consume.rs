@@ -5,12 +5,13 @@
 //! Uses the standard topic_message_schema for consistent field structure
 //! across SQL CONSUME and HTTP API responses.
 
+use std::sync::Arc;
+
 use actix_web::{post, web, HttpResponse, Responder};
 use kalamdb_auth::AuthSessionExtractor;
 use kalamdb_commons::Role;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_session::AuthSession;
-use std::sync::Arc;
 
 use super::models::{
     ConsumeRequest, ConsumeResponse, StartPosition, TopicErrorResponse, TopicMessage,

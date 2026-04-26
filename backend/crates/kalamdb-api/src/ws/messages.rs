@@ -1,21 +1,25 @@
+use std::{io::Read, sync::Arc};
+
 use actix_ws::Session;
 use bytes::Bytes;
 use flate2::read::GzDecoder;
 use kalamdb_auth::UserRepository;
-use kalamdb_commons::models::ConnectionInfo;
-use kalamdb_commons::websocket::{ClientMessage, SerializationType};
-use kalamdb_live::{LiveQueryManager, SharedConnectionState};
-use std::io::Read;
-use std::sync::Arc;
-
-use super::events::{
-    auth::{handle_authenticate, send_current_auth_success},
-    batch::handle_next_batch,
-    send_error,
-    subscription::handle_subscribe,
-    unsubscribe::handle_unsubscribe,
+use kalamdb_commons::{
+    models::ConnectionInfo,
+    websocket::{ClientMessage, SerializationType},
 };
-use super::models::WsErrorCode;
+use kalamdb_live::{LiveQueryManager, SharedConnectionState};
+
+use super::{
+    events::{
+        auth::{handle_authenticate, send_current_auth_success},
+        batch::handle_next_batch,
+        send_error,
+        subscription::handle_subscribe,
+        unsubscribe::handle_unsubscribe,
+    },
+    models::WsErrorCode,
+};
 use crate::limiter::RateLimiter;
 
 #[allow(clippy::too_many_arguments)]

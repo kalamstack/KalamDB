@@ -1,11 +1,13 @@
-use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
+
 use super::batch::BatchControl;
-use crate::connection::models::ServerMessage;
-use crate::models::KalamCellValue;
-use crate::models::SchemaField;
+use crate::{
+    connection::models::ServerMessage,
+    models::{KalamCellValue, SchemaField},
+};
 
 /// Type of change that occurred in the database
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

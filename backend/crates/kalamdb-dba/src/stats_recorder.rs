@@ -1,15 +1,18 @@
-use crate::error::{DbaError, Result};
-use crate::mapping::model_to_row;
-use crate::models::StatsRow;
+use std::{sync::Arc, time::Duration};
+
 use chrono::Utc;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::providers::SharedTableProvider;
-use kalamdb_tables::utils::row_utils::system_user_id;
-use kalamdb_tables::BaseTableProvider;
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::task::JoinHandle;
-use tokio::time::{interval_at, Instant, MissedTickBehavior};
+use kalamdb_core::{app_context::AppContext, providers::SharedTableProvider};
+use kalamdb_tables::{utils::row_utils::system_user_id, BaseTableProvider};
+use tokio::{
+    task::JoinHandle,
+    time::{interval_at, Instant, MissedTickBehavior},
+};
+
+use crate::{
+    error::{DbaError, Result},
+    mapping::model_to_row,
+    models::StatsRow,
+};
 
 const DEFAULT_STATS_RECORD_INTERVAL: Duration = Duration::from_secs(30);
 const DBA_STATS_MAINTENANCE_INTERVAL: Duration = Duration::from_secs(12 * 60 * 60);

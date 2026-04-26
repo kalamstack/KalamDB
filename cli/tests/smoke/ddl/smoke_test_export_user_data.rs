@@ -2,21 +2,22 @@
 //! `GET /v1/exports/{user_id}/{export_id}` download endpoint.
 //!
 //! ## What is tested
-//! 1. `EXPORT USER DATA` triggers a `UserExport` job that completes, flushes all
-//!    user tables first, and writes a `.zip` file under the exports directory.
+//! 1. `EXPORT USER DATA` triggers a `UserExport` job that completes, flushes all user tables first,
+//!    and writes a `.zip` file under the exports directory.
 //! 2. `SHOW EXPORT` returns the job status and a download URL once the job is done.
 //! 3. The download endpoint serves a valid ZIP file to the owning user.
-//! 4. The download endpoint returns 403 Forbidden when a different user tries to
-//!    download another user's export.
+//! 4. The download endpoint returns 403 Forbidden when a different user tries to download another
+//!    user's export.
 //!
 //! ## Design notes
-//! - Each test creates its own isolated user so idempotency keys never collide
-//!   across parallel or repeated test runs.
-//! - The export executor flushes **all** user tables before copying Parquet files,
-//!   so the export job timeout is generous (10 min) to accommodate CI slowness.
+//! - Each test creates its own isolated user so idempotency keys never collide across parallel or
+//!   repeated test runs.
+//! - The export executor flushes **all** user tables before copying Parquet files, so the export
+//!   job timeout is generous (10 min) to accommodate CI slowness.
+
+use std::time::Duration;
 
 use crate::common::*;
-use std::time::Duration;
 
 /// Timeout for an export job (flush user's data + copy Parquet + zip).
 /// With the optimized executor that only flushes tables with user data,
@@ -313,7 +314,8 @@ fn smoke_export_download_zip_is_valid() {
     execute_sql_as_root_via_client(&format!("CREATE NAMESPACE {}", namespace))
         .expect("CREATE NAMESPACE failed");
     execute_sql_as_root_via_client(&format!(
-        "CREATE TABLE {} (id BIGINT AUTO_INCREMENT PRIMARY KEY, data TEXT) WITH (TYPE='USER', FLUSH_POLICY='rows:5')",
+        "CREATE TABLE {} (id BIGINT AUTO_INCREMENT PRIMARY KEY, data TEXT) WITH (TYPE='USER', \
+         FLUSH_POLICY='rows:5')",
         full_table
     ))
     .expect("CREATE TABLE failed");

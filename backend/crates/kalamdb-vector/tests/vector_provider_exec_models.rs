@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
-use datafusion::catalog::TableFunctionImpl;
-use datafusion::execution::context::SessionContext;
-use datafusion::logical_expr::Expr;
-use datafusion::physical_plan::collect;
-use datafusion::scalar::ScalarValue;
+use datafusion::{
+    catalog::TableFunctionImpl, execution::context::SessionContext, logical_expr::Expr,
+    physical_plan::collect, scalar::ScalarValue,
+};
 use kalamdb_commons::models::{ReadContext, Role, UserId};
 use kalamdb_datafusion_sources::exec::DeferredBatchExec;
 use kalamdb_session_datafusion::SessionUserContext;
@@ -51,10 +50,7 @@ async fn vector_search_scan_uses_deferred_batch_exec_and_keeps_empty_results_sta
 
     let ctx = session_with_user("vector-exec-model");
     let state = ctx.state();
-    let plan = provider
-        .scan(&state, None, &[], None)
-        .await
-        .expect("build vector plan");
+    let plan = provider.scan(&state, None, &[], None).await.expect("build vector plan");
 
     assert!(plan.as_any().is::<DeferredBatchExec>());
 

@@ -3,9 +3,10 @@
 //! Tests that the database creates a default system user on first startup
 //! with appropriate credentials and security settings.
 
-use super::test_support::TestServer;
 use kalam_client::models::ResponseStatus;
 use kalamdb_commons::constants::AuthConstants;
+
+use super::test_support::TestServer;
 
 #[tokio::test]
 async fn test_system_user_created_on_init() {

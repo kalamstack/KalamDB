@@ -1,9 +1,10 @@
-use crate::errors::error::AuthResult;
+use std::{sync::Arc, time::Duration};
+
 use kalamdb_commons::UserId;
 use kalamdb_system::{User, UsersTableProvider};
 use moka::sync::Cache;
-use std::sync::Arc;
-use std::time::Duration;
+
+use crate::errors::error::AuthResult;
 
 /// Abstraction over user persistence for authentication flows.
 ///

@@ -1,6 +1,5 @@
-use crate::models::{ChangeEvent, KalamCellValue, RowData};
-
 use super::{LiveRowsConfig, LiveRowsEvent};
+use crate::models::{ChangeEvent, KalamCellValue, RowData};
 
 /// Stateful reducer that materializes the current row set from change events.
 #[derive(Debug, Clone, Default)]
@@ -168,7 +167,6 @@ mod tests {
             has_more: false,
             status,
             last_seq_id: None,
-            snapshot_end_seq: None,
         }
     }
 

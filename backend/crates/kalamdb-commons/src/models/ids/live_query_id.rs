@@ -1,11 +1,15 @@
 // File: backend/crates/kalamdb-commons/src/models/live_query_id.rs
 // Type-safe composite identifier for live query subscriptions
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 
-use crate::models::{ConnectionId, UserId};
-use crate::{encode_prefix, StorageKey};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+use crate::{
+    encode_prefix,
+    models::{ConnectionId, UserId},
+    StorageKey,
+};
 
 /// Unique identifier for live query subscriptions.
 ///
@@ -111,7 +115,8 @@ impl LiveQueryId {
         let subscription = parts.next();
         if user.is_none() || connection.is_none() || subscription.is_none() {
             return Err(format!(
-                "Invalid live_query_id format: {}. Expected: {{user_id}}-{{connection_id}}-{{subscription_id}}",
+                "Invalid live_query_id format: {}. Expected: \
+                 {{user_id}}-{{connection_id}}-{{subscription_id}}",
                 s
             ));
         }

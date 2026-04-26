@@ -16,14 +16,19 @@
 //! - [x] Partial flush affects only intended partitions
 //! - [x] Post-flush reads correct
 
-use super::helpers::*;
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use futures_util::StreamExt;
 use kalam_client::models::ResponseStatus;
 use kalamdb_commons::Role;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
+
+use super::helpers::*;
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(90);
 
@@ -99,106 +104,116 @@ async fn test_scenario_03_shopping_cart_parallel() -> anyhow::Result<()> {
     }
 
     let handles: Vec<_> = clients
-                .into_iter()
-                .map(|(user_idx, client)| {
-                    let ns = ns.clone();
-                    let success = Arc::clone(&success_count);
+        .into_iter()
+        .map(|(user_idx, client)| {
+            let ns = ns.clone();
+            let success = Arc::clone(&success_count);
 
-                    tokio::spawn(async move {
+            tokio::spawn(async move {
+                // Create a cart
+                let cart_id = user_idx * 1000 + 1;
+                let resp = client
+                    .execute_query(
+                        &format!(
+                            "INSERT INTO {}.carts (id, name) VALUES ({}, 'Cart for user {}')",
+                            ns, cart_id, user_idx
+                        ),
+                        None,
+                        None,
+                        None,
+                    )
+                    .await?;
+                if !resp.success() {
+                    return Err(anyhow::anyhow!("Failed to create cart"));
+                }
 
-                        // Create a cart
-                        let cart_id = user_idx * 1000 + 1;
-                        let resp = client
-                            .execute_query(
-                                &format!(
-                                    "INSERT INTO {}.carts (id, name) VALUES ({}, 'Cart for user {}')",
-                                    ns, cart_id, user_idx
-                                ), None,
-                                None,
-                                None,
-                            )
-                            .await?;
-                        if !resp.success() {
-                            return Err(anyhow::anyhow!("Failed to create cart"));
-                        }
+                // Insert 50 cart items
+                for i in 0..50 {
+                    let item_id = user_idx * 10000 + i;
+                    let resp = client
+                        .execute_query(
+                            &format!(
+                                "INSERT INTO {}.cart_items (id, cart_id, product_name, quantity, \
+                                 price) VALUES ({}, {}, 'Product {}', {}, {})",
+                                ns,
+                                item_id,
+                                cart_id,
+                                i,
+                                (i % 5) + 1,
+                                (i as f64) * 9.99
+                            ),
+                            None,
+                            None,
+                            None,
+                        )
+                        .await?;
+                    if !resp.success() {
+                        return Err(anyhow::anyhow!("Failed to insert item {}", i));
+                    }
+                }
 
-                        // Insert 50 cart items
-                        for i in 0..50 {
-                            let item_id = user_idx * 10000 + i;
-                            let resp = client
-                                .execute_query(
-                                    &format!(
-                                        "INSERT INTO {}.cart_items (id, cart_id, product_name, quantity, price) VALUES ({}, {}, 'Product {}', {}, {})",
-                                        ns, item_id, cart_id, i, (i % 5) + 1, (i as f64) * 9.99
-                                    ), None,
-                                    None,
-                                    None,
-                                )
-                                .await?;
-                            if !resp.success() {
-                                return Err(anyhow::anyhow!("Failed to insert item {}", i));
-                            }
-                        }
+                // Update 20 quantities
+                for i in 0..20 {
+                    let item_id = user_idx * 10000 + i;
+                    let resp = client
+                        .execute_query(
+                            &format!(
+                                "UPDATE {}.cart_items SET quantity = quantity + 1 WHERE id = {}",
+                                ns, item_id
+                            ),
+                            None,
+                            None,
+                            None,
+                        )
+                        .await?;
+                    if !resp.success() {
+                        eprintln!("Warning: Update failed for item {}", item_id);
+                    }
+                }
 
-                        // Update 20 quantities
-                        for i in 0..20 {
-                            let item_id = user_idx * 10000 + i;
-                            let resp = client
-                                .execute_query(
-                                    &format!(
-                                        "UPDATE {}.cart_items SET quantity = quantity + 1 WHERE id = {}",
-                                        ns, item_id
-                                    ), None,
-                                    None,
-                                    None,
-                                )
-                                .await?;
-                            if !resp.success() {
-                                eprintln!("Warning: Update failed for item {}", item_id);
-                            }
-                        }
+                // Delete 5 items
+                for i in 45..50 {
+                    let item_id = user_idx * 10000 + i;
+                    let resp = client
+                        .execute_query(
+                            &format!("DELETE FROM {}.cart_items WHERE id = {}", ns, item_id),
+                            None,
+                            None,
+                            None,
+                        )
+                        .await?;
+                    if !resp.success() {
+                        eprintln!("Warning: Delete failed for item {}", item_id);
+                    }
+                }
 
-                        // Delete 5 items
-                        for i in 45..50 {
-                            let item_id = user_idx * 10000 + i;
-                            let resp = client
-                                .execute_query(
-                                    &format!("DELETE FROM {}.cart_items WHERE id = {}", ns, item_id), None,
-                                    None,
-                                    None,
-                                )
-                                .await?;
-                            if !resp.success() {
-                                eprintln!("Warning: Delete failed for item {}", item_id);
-                            }
-                        }
+                // Verify final count (should be 45)
+                let resp = client
+                    .execute_query(
+                        &format!(
+                            "SELECT COUNT(*) as cnt FROM {}.cart_items WHERE cart_id = {}",
+                            ns, cart_id
+                        ),
+                        None,
+                        None,
+                        None,
+                    )
+                    .await?;
+                let count: i64 = resp.get_i64("cnt").unwrap_or(0);
 
-                        // Verify final count (should be 45)
-                        let resp = client
-                            .execute_query(
-                                &format!(
-                                    "SELECT COUNT(*) as cnt FROM {}.cart_items WHERE cart_id = {}",
-                                    ns, cart_id
-                                ), None,
-                                None,
-                                None,
-                            )
-                            .await?;
-                        let count: i64 = resp.get_i64("cnt").unwrap_or(0);
-                        
-                        if count != 45 {
-                            return Err(anyhow::anyhow!(
-                                "User {} expected 45 items, got {}",
-                                user_idx,
-                                count
-                            ));
-                        }
+                if count != 45 {
+                    return Err(anyhow::anyhow!(
+                        "User {} expected 45 items, got {}",
+                        user_idx,
+                        count
+                    ));
+                }
 
-                        success.fetch_add(1, Ordering::SeqCst);
-                        Ok::<(), anyhow::Error>(())
-                    })
-                })
-                .collect();
+                success.fetch_add(1, Ordering::SeqCst);
+                Ok::<(), anyhow::Error>(())
+            })
+        })
+        .collect();
 
     // Wait for all users
     for handle in handles {
@@ -284,29 +299,33 @@ async fn test_scenario_03_filtered_subscription() -> anyhow::Result<()> {
     // Insert items for two carts
     for i in 1..=5 {
         let resp = client
-                    .execute_query(
-                        &format!(
-                            "INSERT INTO {}.cart_items (id, cart_id, product_name, quantity) VALUES ({}, 1, 'Cart1 Product {}', 1)",
-                            ns, i, i
-                        ), None,
-                        None,
-                        None,
-                    )
-                    .await?;
+            .execute_query(
+                &format!(
+                    "INSERT INTO {}.cart_items (id, cart_id, product_name, quantity) VALUES ({}, \
+                     1, 'Cart1 Product {}', 1)",
+                    ns, i, i
+                ),
+                None,
+                None,
+                None,
+            )
+            .await?;
         assert!(resp.success(), "Insert cart 1 item {}", i);
     }
 
     for i in 6..=10 {
         let resp = client
-                    .execute_query(
-                        &format!(
-                            "INSERT INTO {}.cart_items (id, cart_id, product_name, quantity) VALUES ({}, 2, 'Cart2 Product {}', 1)",
-                            ns, i, i
-                        ), None,
-                        None,
-                        None,
-                    )
-                    .await?;
+            .execute_query(
+                &format!(
+                    "INSERT INTO {}.cart_items (id, cart_id, product_name, quantity) VALUES ({}, \
+                     2, 'Cart2 Product {}', 1)",
+                    ns, i, i
+                ),
+                None,
+                None,
+                None,
+            )
+            .await?;
         assert!(resp.success(), "Insert cart 2 item {}", i);
     }
 
@@ -321,28 +340,32 @@ async fn test_scenario_03_filtered_subscription() -> anyhow::Result<()> {
     // Insert to cart 2 (should NOT appear in subscription)
     let client2 = client.clone();
     let resp = client2
-                .execute_query(
-                    &format!(
-                        "INSERT INTO {}.cart_items (id, cart_id, product_name, quantity) VALUES (11, 2, 'Cart2 New', 1)",
-                        ns
-                    ), None,
-                    None,
-                    None,
-                )
-                .await?;
+        .execute_query(
+            &format!(
+                "INSERT INTO {}.cart_items (id, cart_id, product_name, quantity) VALUES (11, 2, \
+                 'Cart2 New', 1)",
+                ns
+            ),
+            None,
+            None,
+            None,
+        )
+        .await?;
     assert!(resp.success(), "Insert to cart 2");
 
     // Insert to cart 1 (should appear in subscription)
     let resp = client2
-                .execute_query(
-                    &format!(
-                        "INSERT INTO {}.cart_items (id, cart_id, product_name, quantity) VALUES (12, 1, 'Cart1 New', 1)",
-                        ns
-                    ), None,
-                    None,
-                    None,
-                )
-                .await?;
+        .execute_query(
+            &format!(
+                "INSERT INTO {}.cart_items (id, cart_id, product_name, quantity) VALUES (12, 1, \
+                 'Cart1 New', 1)",
+                ns
+            ),
+            None,
+            None,
+            None,
+        )
+        .await?;
     assert!(resp.success(), "Insert to cart 1");
 
     // Wait for insert event (should only get cart 1 insert)
@@ -386,29 +409,33 @@ async fn test_scenario_03_partial_flush() -> anyhow::Result<()> {
 
     for i in 1..=20 {
         let resp = u1_client
-                    .execute_query(
-                        &format!(
-                            "INSERT INTO {}.cart_items (id, cart_id, product_name) VALUES ({}, 1, 'U1 Product {}')",
-                            ns, i, i
-                        ), None,
-                        None,
-                        None,
-                    )
-                    .await?;
+            .execute_query(
+                &format!(
+                    "INSERT INTO {}.cart_items (id, cart_id, product_name) VALUES ({}, 1, 'U1 \
+                     Product {}')",
+                    ns, i, i
+                ),
+                None,
+                None,
+                None,
+            )
+            .await?;
         assert!(resp.success(), "u1 insert {}", i);
     }
 
     for i in 101..=120 {
         let resp = u2_client
-                    .execute_query(
-                        &format!(
-                            "INSERT INTO {}.cart_items (id, cart_id, product_name) VALUES ({}, 2, 'U2 Product {}')",
-                            ns, i, i
-                        ), None,
-                        None,
-                        None,
-                    )
-                    .await?;
+            .execute_query(
+                &format!(
+                    "INSERT INTO {}.cart_items (id, cart_id, product_name) VALUES ({}, 2, 'U2 \
+                     Product {}')",
+                    ns, i, i
+                ),
+                None,
+                None,
+                None,
+            )
+            .await?;
         assert!(resp.success(), "u2 insert {}", i);
     }
 

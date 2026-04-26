@@ -25,12 +25,15 @@
 //! timestamp_format = "iso8601" # iso8601, iso8601-date, iso8601-datetime, unix-ms, unix-sec, relative, rfc2822, rfc3339
 //! ```
 
-use kalam_client::{ConnectionOptions, HttpVersion, TimestampFormat};
-use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-use crate::error::{CLIError, Result};
-use crate::history::get_cli_home_dir;
+use kalam_client::{ConnectionOptions, HttpVersion, TimestampFormat};
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    error::{CLIError, Result},
+    history::get_cli_home_dir,
+};
 
 /// CLI configuration loaded from TOML file
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -429,6 +432,7 @@ mod tests {
     #[test]
     fn test_config_file_auto_creation() {
         use std::fs;
+
         use tempfile::TempDir;
 
         // Create a temporary directory
@@ -459,6 +463,7 @@ mod tests {
     #[test]
     fn test_config_file_auto_creation_with_nested_dirs() {
         use std::fs;
+
         use tempfile::TempDir;
 
         // Create a temporary directory

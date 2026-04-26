@@ -40,7 +40,6 @@ mod storage;
 mod user;
 mod utils;
 
-use crate::app_context::AppContext;
 use std::sync::Arc;
 
 pub use ddl::DdlExecutor;
@@ -48,6 +47,8 @@ pub use dml::DmlExecutor;
 pub use namespace::NamespaceExecutor;
 pub use storage::StorageExecutor;
 pub use user::UserExecutor;
+
+use crate::app_context::AppContext;
 
 /// The unified command executor
 ///

@@ -11,10 +11,12 @@
 //! - T067: Nanosecond collision test → verify +1ns increment
 //! - T068: Performance regression test → query latency with multiple versions
 
-use super::test_support::{consolidated_helpers, fixtures, flush_helpers, TestServer};
-use kalam_client::models::ResponseStatus;
 use std::sync::Arc;
+
+use kalam_client::models::ResponseStatus;
 use tokio::task::JoinSet;
+
+use super::test_support::{consolidated_helpers, fixtures, flush_helpers, TestServer};
 
 /// T060: Unit test UPDATE in fast storage
 #[actix_web::test]
@@ -393,7 +395,8 @@ async fn test_delete_excludes_record() {
     println!("✅ T064: DELETE sets _deleted=true and query excludes record");
 }
 
-/// T065: Integration test - DELETE record in Parquet → new version with _deleted = true in fast storage
+/// T065: Integration test - DELETE record in Parquet → new version with _deleted = true in fast
+/// storage
 #[actix_web::test]
 #[ntest::timeout(60000)]
 async fn test_delete_in_parquet() {

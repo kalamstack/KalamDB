@@ -5,5 +5,4 @@
 pub mod config;
 pub mod file_helpers;
 
-pub use config::defaults;
-pub use config::*;
+pub use config::{defaults, *};

@@ -3,8 +3,9 @@
 //! This enum represents all supported data types in the system with deterministic
 //! wire format tags for efficient serialization.
 
-use serde::{Deserialize, Serialize};
 use std::fmt;
+
+use serde::{Deserialize, Serialize};
 
 /// Unified data type enum with wire format tags
 ///
@@ -213,7 +214,7 @@ mod tests {
         assert_eq!(
             KalamDataType::Decimal {
                 precision: 10,
-                scale: 2
+                scale: 2,
             }
             .tag(),
             0x0F
@@ -268,7 +269,7 @@ mod tests {
         assert_eq!(
             KalamDataType::Decimal {
                 precision: 10,
-                scale: 2
+                scale: 2,
             }
             .sql_name(),
             "DECIMAL(10, 2)"

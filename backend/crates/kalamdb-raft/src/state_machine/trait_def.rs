@@ -123,6 +123,17 @@ pub trait KalamStateMachine: Send + Sync {
     /// - Recovery (start applying from this index + 1)
     fn last_applied_index(&self) -> u64;
 
+    /// Subscribe to last-applied index changes when the implementation supports it.
+    fn subscribe_last_applied(&self) -> Option<tokio::sync::watch::Receiver<u64>> {
+        None
+    }
+
+    /// Mark a non-command Raft entry as applied in the state-machine watermark.
+    ///
+    /// Blank and membership entries do not call [`Self::apply`], but apply barriers still need the
+    /// state-machine watermark to advance past them.
+    fn mark_applied_index(&self, _index: u64, _term: u64) {}
+
     /// Get the last applied log term
     fn last_applied_term(&self) -> u64;
 

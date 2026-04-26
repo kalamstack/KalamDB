@@ -2,8 +2,7 @@
 // Sets environment variables for use in the binary at compile time
 // Falls back to version.toml if git is not available (e.g., Docker builds)
 
-use std::fs;
-use std::process::Command;
+use std::{fs, process::Command};
 
 fn main() {
     // Try to read from version.toml first (for Docker/CI builds)

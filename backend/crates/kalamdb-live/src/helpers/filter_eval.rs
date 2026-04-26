@@ -8,13 +8,18 @@
 //! and stored in SubscriptionState. This module provides evaluation functions
 //! to match row data against the expression.
 
-use crate::error::LiveError;
-use datafusion::scalar::ScalarValue;
-use datafusion::sql::sqlparser::ast::{BinaryOperator, Expr, Statement, Value};
-use datafusion::sql::sqlparser::dialect::PostgreSqlDialect;
-use datafusion::sql::sqlparser::parser::Parser;
+use datafusion::{
+    scalar::ScalarValue,
+    sql::sqlparser::{
+        ast::{BinaryOperator, Expr, Statement, Value},
+        dialect::PostgreSqlDialect,
+        parser::Parser,
+    },
+};
 use kalamdb_commons::models::rows::Row;
 use regex::RegexBuilder;
+
+use crate::error::LiveError;
 
 /// Parse a WHERE clause string into an Expr AST
 ///
@@ -411,9 +416,11 @@ fn lookup_column_value(row_data: &Row, column_name: &str) -> Option<ScalarValue>
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use serde_json::json;
     use std::collections::BTreeMap;
+
+    use serde_json::json;
+
+    use super::*;
 
     fn to_row(value: serde_json::Value) -> Row {
         let object = value.as_object().expect("test rows must be JSON objects").clone();

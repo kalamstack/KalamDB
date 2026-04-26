@@ -7,8 +7,9 @@
 //!
 //! Reference: README.md lines 58-67, docs/SQL.md flush section
 
-use crate::common::*;
 use std::time::Duration;
+
+use crate::common::*;
 
 /// Test manifest.json creation after flushing USER table
 ///

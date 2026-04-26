@@ -3,8 +3,9 @@
 //! [`SubscriptionInfo`] provides a read-only snapshot of an active
 //! subscription's state — useful for debugging, tests, and UI dashboards.
 
-use crate::seq_id::SeqId;
 use serde::{Deserialize, Serialize};
+
+use crate::seq_id::SeqId;
 
 /// Read-only snapshot of an active subscription's metadata.
 ///

@@ -6,15 +6,18 @@
 //! - Vector indexes + flush artifacts in cold storage
 //! - Similarity queries joined back to document rows
 
-use super::helpers::*;
 use kalam_client::KalamCellValue;
 use kalamdb_api::http::sql::models::{ResponseStatus as ApiResponseStatus, SqlResponse};
-use kalamdb_commons::models::{TableId, UserId};
-use kalamdb_commons::schemas::TableType;
-use kalamdb_commons::Role;
+use kalamdb_commons::{
+    models::{TableId, UserId},
+    schemas::TableType,
+    Role,
+};
 use kalamdb_system::FileRef;
 use reqwest::multipart;
 use serde_json::Value as JsonValue;
+
+use super::helpers::*;
 
 fn parse_file_ref(value: &JsonValue) -> anyhow::Result<FileRef> {
     if let Some(raw) = value.as_str() {
@@ -70,25 +73,17 @@ async fn test_scenario_14_rag_docs_with_files_and_vector_search() -> anyhow::Res
     assert_success(&resp, "CREATE NAMESPACE");
 
     let create_files_table_sql = format!(
-        "CREATE TABLE {}.{} (\
-            id BIGINT PRIMARY KEY, \
-            title TEXT NOT NULL, \
-            body TEXT NOT NULL, \
-            attachment_a FILE, \
-            attachment_b FILE\
-        ) WITH (TYPE='USER')",
+        "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, \
+         attachment_a FILE, attachment_b FILE) WITH (TYPE='USER')",
         ns, files_table
     );
     let resp = server.execute_sql(&create_files_table_sql).await?;
     assert_success(&resp, "CREATE documents file table");
 
     let create_vectors_table_sql = format!(
-        "CREATE TABLE {}.{} (\
-            id BIGINT PRIMARY KEY, \
-            doc_embedding EMBEDDING(3), \
-            attachment_a_embedding EMBEDDING(3), \
-            attachment_b_embedding EMBEDDING(3)\
-        ) WITH (TYPE='USER')",
+        "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, doc_embedding EMBEDDING(3), \
+         attachment_a_embedding EMBEDDING(3), attachment_b_embedding EMBEDDING(3)) WITH \
+         (TYPE='USER')",
         ns, vectors_table
     );
     let resp = server.execute_sql(&create_vectors_table_sql).await?;
@@ -146,8 +141,8 @@ async fn test_scenario_14_rag_docs_with_files_and_vector_search() -> anyhow::Res
 
     for (id, title, body, doc_vec, file_a_vec, file_b_vec, file_a_name, file_b_name) in docs {
         let insert_files_sql = format!(
-            "INSERT INTO {}.{} (id, title, body, attachment_a, attachment_b) \
-             VALUES ({}, '{}', '{}', FILE(\"file_a\"), FILE(\"file_b\"))",
+            "INSERT INTO {}.{} (id, title, body, attachment_a, attachment_b) VALUES ({}, '{}', \
+             '{}', FILE(\"file_a\"), FILE(\"file_b\"))",
             ns, files_table, id, title, body
         );
         let upload = execute_sql_multipart(
@@ -179,8 +174,8 @@ async fn test_scenario_14_rag_docs_with_files_and_vector_search() -> anyhow::Res
         );
 
         let insert_vectors_sql = format!(
-            "INSERT INTO {}.{} (id, doc_embedding, attachment_a_embedding, attachment_b_embedding) \
-             VALUES ({}, '{}', '{}', '{}')",
+            "INSERT INTO {}.{} (id, doc_embedding, attachment_a_embedding, \
+             attachment_b_embedding) VALUES ({}, '{}', '{}', '{}')",
             ns, vectors_table, id, doc_vec, file_a_vec, file_b_vec
         );
         let insert_vectors_resp =
@@ -277,7 +272,8 @@ async fn test_scenario_14_rag_docs_with_files_and_vector_search() -> anyhow::Res
     let doc_query_resp = user_client
         .execute_query(
             &format!(
-                "SELECT id FROM {}.{} ORDER BY COSINE_DISTANCE(doc_embedding, '[1.0,0.0,0.0]') LIMIT 2",
+                "SELECT id FROM {}.{} ORDER BY COSINE_DISTANCE(doc_embedding, '[1.0,0.0,0.0]') \
+                 LIMIT 2",
                 ns, vectors_table
             ),
             None,
@@ -296,7 +292,8 @@ async fn test_scenario_14_rag_docs_with_files_and_vector_search() -> anyhow::Res
     let attachment_query_resp = user_client
         .execute_query(
             &format!(
-                "SELECT id FROM {}.{} ORDER BY COSINE_DISTANCE(attachment_b_embedding, '[0.0,1.0,0.0]') LIMIT 2",
+                "SELECT id FROM {}.{} ORDER BY COSINE_DISTANCE(attachment_b_embedding, \
+                 '[0.0,1.0,0.0]') LIMIT 2",
                 ns, vectors_table
             ),
             None,
@@ -316,8 +313,8 @@ async fn test_scenario_14_rag_docs_with_files_and_vector_search() -> anyhow::Res
     );
 
     let insert_files_hot_sql = format!(
-        "INSERT INTO {}.{} (id, title, body, attachment_a, attachment_b) \
-         VALUES (4, 'Realtime Notes', 'Hot row before flush', FILE(\"file_a\"), FILE(\"file_b\"))",
+        "INSERT INTO {}.{} (id, title, body, attachment_a, attachment_b) VALUES (4, 'Realtime \
+         Notes', 'Hot row before flush', FILE(\"file_a\"), FILE(\"file_b\"))",
         ns, files_table
     );
     let upload_hot = execute_sql_multipart(
@@ -340,8 +337,9 @@ async fn test_scenario_14_rag_docs_with_files_and_vector_search() -> anyhow::Res
     let insert_hot_vector_resp = user_client
         .execute_query(
             &format!(
-                "INSERT INTO {}.{} (id, doc_embedding, attachment_a_embedding, attachment_b_embedding) \
-                 VALUES (4, '[0.999,0.001,0.0]', '[0.98,0.02,0.0]', '[0.97,0.03,0.0]')",
+                "INSERT INTO {}.{} (id, doc_embedding, attachment_a_embedding, \
+                 attachment_b_embedding) VALUES (4, '[0.999,0.001,0.0]', '[0.98,0.02,0.0]', \
+                 '[0.97,0.03,0.0]')",
                 ns, vectors_table
             ),
             None,
@@ -358,7 +356,8 @@ async fn test_scenario_14_rag_docs_with_files_and_vector_search() -> anyhow::Res
     let mixed_tier_resp = user_client
         .execute_query(
             &format!(
-                "SELECT id FROM {}.{} ORDER BY COSINE_DISTANCE(doc_embedding, '[1.0,0.0,0.0]') LIMIT 3",
+                "SELECT id FROM {}.{} ORDER BY COSINE_DISTANCE(doc_embedding, '[1.0,0.0,0.0]') \
+                 LIMIT 3",
                 ns, vectors_table
             ),
             None,
@@ -388,7 +387,8 @@ async fn test_scenario_14_rag_docs_with_files_and_vector_search() -> anyhow::Res
     let after_delete_resp = user_client
         .execute_query(
             &format!(
-                "SELECT id FROM {}.{} ORDER BY COSINE_DISTANCE(doc_embedding, '[1.0,0.0,0.0]') LIMIT 3",
+                "SELECT id FROM {}.{} ORDER BY COSINE_DISTANCE(doc_embedding, '[1.0,0.0,0.0]') \
+                 LIMIT 3",
                 ns, vectors_table
             ),
             None,

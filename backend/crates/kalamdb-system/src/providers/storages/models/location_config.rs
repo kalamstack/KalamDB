@@ -1,5 +1,6 @@
-use super::{AzureStorageConfig, GcsStorageConfig, LocalStorageConfig, S3StorageConfig};
 use serde::{Deserialize, Serialize};
+
+use super::{AzureStorageConfig, GcsStorageConfig, LocalStorageConfig, S3StorageConfig};
 
 /// Type-safe JSON configuration for `system.storages` locations.
 ///

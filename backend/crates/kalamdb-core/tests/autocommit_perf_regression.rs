@@ -1,24 +1,30 @@
 mod support;
 
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::future::Future;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
-use std::time::Instant;
+use std::{
+    alloc::{GlobalAlloc, Layout, System},
+    future::Future,
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+    },
+    time::Instant,
+};
 
-use kalamdb_commons::models::pg_operations::{InsertRequest, ScanRequest};
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::{NamespaceId, NodeId, StorageId, TableId, TableName};
-use kalamdb_commons::TableType;
+use kalamdb_commons::{
+    models::{
+        pg_operations::{InsertRequest, ScanRequest},
+        rows::Row,
+        NamespaceId, NodeId, StorageId, TableId, TableName,
+    },
+    TableType,
+};
 use kalamdb_configs::ServerConfig;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::operations::service::OperationService;
+use kalamdb_core::{app_context::AppContext, operations::service::OperationService};
 use kalamdb_pg::OperationExecutor;
-use kalamdb_store::test_utils::TestDb;
-use kalamdb_store::StorageBackend;
-use kalamdb_system::providers::storages::models::StorageType;
-use kalamdb_system::{Storage, StoragePartition, SystemTable};
-
+use kalamdb_store::{test_utils::TestDb, StorageBackend};
+use kalamdb_system::{
+    providers::storages::models::StorageType, Storage, StoragePartition, SystemTable,
+};
 use support::{create_cluster_app_context, create_shared_table, row, unique_namespace};
 
 const VALID_IDLE_SESSION_ID: &str = "pg-7101-deadbeef";
@@ -373,7 +379,8 @@ async fn idle_autocommit_transaction_checks_add_no_extra_allocations() {
     .await;
     assert_eq!(
         scan_with_idle_session, scan_without_session,
-        "idle transaction lookup changed scan allocations: without_session={scan_without_session:?} with_session={scan_with_idle_session:?}"
+        "idle transaction lookup changed scan allocations: \
+         without_session={scan_without_session:?} with_session={scan_with_idle_session:?}"
     );
 
     let write_without_session =
@@ -384,7 +391,8 @@ async fn idle_autocommit_transaction_checks_add_no_extra_allocations() {
     .await;
     assert_eq!(
         write_with_idle_session, write_without_session,
-        "idle transaction lookup changed write allocations: without_session={write_without_session:?} with_session={write_with_idle_session:?}"
+        "idle transaction lookup changed write allocations: \
+         without_session={write_without_session:?} with_session={write_with_idle_session:?}"
     );
 }
 
@@ -503,11 +511,9 @@ async fn autocommit_read_write_latency_regression_stays_within_five_percent() {
     let read_candidate_ns = median_nanos(&read_candidate_samples);
 
     println!(
-        "autocommit perf regression medians: write baseline={}ns candidate={}ns, read baseline={}ns candidate={}ns",
-        write_baseline_ns,
-        write_candidate_ns,
-        read_baseline_ns,
-        read_candidate_ns
+        "autocommit perf regression medians: write baseline={}ns candidate={}ns, read \
+         baseline={}ns candidate={}ns",
+        write_baseline_ns, write_candidate_ns, read_baseline_ns, read_candidate_ns
     );
 
     assert!(app_ctx.transaction_coordinator().active_metrics().is_empty());

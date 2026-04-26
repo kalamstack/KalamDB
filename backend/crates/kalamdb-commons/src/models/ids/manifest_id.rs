@@ -5,8 +5,10 @@ use std::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::storage_key::{decode_key, encode_key, encode_prefix};
-use crate::{StorageKey, TableId, UserId};
+use crate::{
+    storage_key::{decode_key, encode_key, encode_prefix},
+    StorageKey, TableId, UserId,
+};
 
 /// Type-safe wrapper for manifest cache identifiers.
 ///

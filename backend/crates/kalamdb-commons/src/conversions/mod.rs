@@ -45,8 +45,6 @@ pub mod scalar_bytes;
 #[cfg(feature = "conversions")]
 pub mod scalar_json;
 #[cfg(feature = "conversions")]
-pub mod serde_row;
-#[cfg(feature = "conversions")]
 pub mod scalar_numeric;
 #[cfg(feature = "conversions")]
 pub mod scalar_size;
@@ -54,6 +52,8 @@ pub mod scalar_size;
 pub mod scalar_string;
 #[cfg(feature = "schema-metadata")]
 pub mod schema_metadata;
+#[cfg(feature = "conversions")]
+pub mod serde_row;
 
 // Re-export commonly used functions at the module root for convenience
 #[cfg(feature = "conversions")]
@@ -62,8 +62,6 @@ pub use arrow_json_conversion::*;
 pub use scalar_bytes::scalar_value_to_bytes;
 #[cfg(feature = "conversions")]
 pub use scalar_json::{json_value_to_scalar_for_column, scalar_to_json_for_column};
-#[cfg(feature = "conversions")]
-pub use serde_row::{row_to_serde_model, serde_model_to_row};
 #[cfg(feature = "conversions")]
 pub use scalar_numeric::{as_f64, scalar_to_f64, scalar_to_i64};
 #[cfg(feature = "conversions")]
@@ -78,3 +76,5 @@ pub use schema_metadata::{
     with_kalam_column_flags_metadata, with_kalam_data_type_metadata,
     KALAM_COLUMN_FLAGS_METADATA_KEY, KALAM_DATA_TYPE_METADATA_KEY,
 };
+#[cfg(feature = "conversions")]
+pub use serde_row::{row_to_serde_model, serde_model_to_row};

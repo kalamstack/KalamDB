@@ -7,11 +7,11 @@ mod helpers;
 pub mod jobs;
 pub mod system;
 
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::sql::executor::handler_registry::HandlerRegistry;
+use std::sync::Arc;
+
+use kalamdb_core::{app_context::AppContext, sql::executor::handler_registry::HandlerRegistry};
 use kalamdb_handlers_support::{register_dynamic_handler, register_typed_handler};
 use kalamdb_sql::classifier::SqlStatementKind;
-use std::sync::Arc;
 
 pub fn register_admin_handlers(registry: &HandlerRegistry, app_context: Arc<AppContext>) {
     use kalamdb_commons::models::{LiveQueryId, NamespaceId, TableName};
@@ -85,6 +85,20 @@ pub fn register_admin_handlers(registry: &HandlerRegistry, app_context: Arc<AppC
         registry,
         SqlStatementKind::ClusterTransferLeader(0),
         cluster::ClusterTransferLeaderHandler::new(app_context.clone()),
+    );
+    register_dynamic_handler!(
+        registry,
+        SqlStatementKind::ClusterJoin {
+            node_id: 0,
+            rpc_addr: String::new(),
+            api_addr: String::new(),
+        },
+        cluster::ClusterJoinHandler::new(app_context.clone()),
+    );
+    register_dynamic_handler!(
+        registry,
+        SqlStatementKind::ClusterRebalance,
+        cluster::ClusterRebalanceHandler::new(app_context.clone()),
     );
     register_dynamic_handler!(
         registry,

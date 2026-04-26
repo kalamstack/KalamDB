@@ -1,17 +1,26 @@
 //! RocksDB implementation of the StorageBackend trait.
 //!
 //! This module provides a concrete implementation of `StorageBackend` using RocksDB
-//! as the underlying storage engine. It maps the generic partition concept to
-//! RocksDB column families.
+//! as the underlying storage engine. Logical partitions are encoded as key prefixes
+//! inside a small fixed set of physical RocksDB column families.
 
-use super::cf_tuning::apply_cf_settings;
-use super::init::create_block_options_with_cache;
+use std::sync::Arc;
+
+use kalamdb_configs::RocksDbSettings;
+use rocksdb::{BoundColumnFamily, Cache, IteratorMode, Options, PrefixRange, WriteOptions, DB};
+
+use super::{
+    cf_tuning::apply_cf_settings,
+    init::create_block_options_with_cache,
+    keyspace::{
+        decode_logical_partition_registry_key, logical_partition_registry_key,
+        logical_partition_registry_prefix, next_prefix_bound, partition_key_prefix,
+        physical_cf_for_partition, physical_key, SYSTEM_META_CF,
+    },
+};
 use crate::storage_trait::{
     Operation, Partition, Result, StorageBackend, StorageError, StorageStats,
 };
-use kalamdb_configs::RocksDbSettings;
-use rocksdb::{BoundColumnFamily, Cache, IteratorMode, Options, PrefixRange, WriteOptions, DB};
-use std::sync::Arc;
 
 const ESTIMATE_NUM_KEYS_PROPERTY: &str = "rocksdb.estimate-num-keys";
 const ESTIMATE_LIVE_DATA_SIZE_PROPERTY: &str = "rocksdb.estimate-live-data-size";
@@ -30,6 +39,7 @@ pub struct RocksDBBackend {
     settings: RocksDbSettings,
     block_cache: Cache,
     known_cf_names: std::sync::RwLock<Vec<String>>,
+    logical_partition_names: std::sync::RwLock<Vec<String>>,
 }
 
 impl RocksDBBackend {
@@ -44,13 +54,16 @@ impl RocksDBBackend {
         write_opts.disable_wal(disable_wal);
         let block_cache =
             Cache::new_lru_cache(std::cmp::min(settings.block_cache_size, 1024 * 1024));
-        Self {
+        let backend = Self {
             db,
             write_opts,
             settings,
             block_cache,
             known_cf_names: std::sync::RwLock::new(Vec::new()),
-        }
+            logical_partition_names: std::sync::RwLock::new(Vec::new()),
+        };
+        backend.load_logical_partitions();
+        backend
     }
 
     /// Creates a new RocksDB backend with the given database handle.
@@ -68,15 +81,107 @@ impl RocksDBBackend {
         Self::new_internal(db, sync_writes, disable_wal, settings)
     }
 
-    /// Set the known column family names.
+    /// Set the known physical column family names.
     pub fn set_known_cf_names(&self, names: Vec<String>) {
         *self.known_cf_names.write().unwrap() = names;
     }
 
     fn get_cf(&self, partition: &Partition) -> Result<Arc<BoundColumnFamily<'_>>> {
+        let cf_name = physical_cf_for_partition(partition.name());
         self.db
-            .cf_handle(partition.name())
-            .ok_or_else(|| StorageError::PartitionNotFound(partition.name().to_string()))
+            .cf_handle(cf_name)
+            .ok_or_else(|| StorageError::PartitionNotFound(cf_name.to_string()))
+    }
+
+    fn ensure_physical_cf(&self, cf_name: &str) -> Result<()> {
+        if self.db.cf_handle(cf_name).is_some() {
+            self.track_physical_cf(cf_name);
+            return Ok(());
+        }
+
+        let mut opts = Options::default();
+        apply_cf_settings(&mut opts, &self.settings, cf_name);
+        opts.set_block_based_table_factory(&create_block_options_with_cache(&self.block_cache));
+
+        match self.db.create_cf(cf_name, &opts) {
+            Ok(()) => {
+                self.track_physical_cf(cf_name);
+                Ok(())
+            },
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("Column family already exists")
+                    || msg.contains("column family already exists")
+                {
+                    self.track_physical_cf(cf_name);
+                    return Ok(());
+                }
+                Err(StorageError::IoError(msg))
+            },
+        }
+    }
+
+    fn track_physical_cf(&self, cf_name: &str) {
+        if let Ok(mut names) = self.known_cf_names.write() {
+            if !names.iter().any(|name| name == cf_name) {
+                names.push(cf_name.to_string());
+            }
+        }
+    }
+
+    fn track_logical_partition(&self, partition_name: &str) {
+        if let Ok(mut names) = self.logical_partition_names.write() {
+            if !names.iter().any(|name| name == partition_name) {
+                names.push(partition_name.to_string());
+            }
+        }
+    }
+
+    fn load_logical_partitions(&self) {
+        let Some(cf) = self.db.cf_handle(SYSTEM_META_CF) else {
+            return;
+        };
+        let prefix = logical_partition_registry_prefix();
+        let mut readopts = rocksdb::ReadOptions::default();
+        readopts.set_iterate_range(PrefixRange(prefix.clone()));
+
+        let names: Vec<String> = self
+            .db
+            .iterator_cf_opt(
+                &cf,
+                readopts,
+                IteratorMode::From(prefix.as_slice(), rocksdb::Direction::Forward),
+            )
+            .filter_map(|item| {
+                item.ok().and_then(|(key, _)| {
+                    decode_logical_partition_registry_key(&key).map(str::to_string)
+                })
+            })
+            .collect();
+
+        if let Ok(mut tracked) = self.logical_partition_names.write() {
+            *tracked = names;
+        }
+    }
+
+    fn persist_logical_partition(&self, partition_name: &str) -> Result<()> {
+        let cf = self
+            .db
+            .cf_handle(SYSTEM_META_CF)
+            .ok_or_else(|| StorageError::PartitionNotFound(SYSTEM_META_CF.to_string()))?;
+        self.db
+            .put_cf_opt(&cf, logical_partition_registry_key(partition_name), b"", &self.write_opts)
+            .map_err(|e| StorageError::IoError(e.to_string()))
+    }
+
+    fn remove_logical_partition(&self, partition_name: &str) -> Result<()> {
+        let cf = self
+            .db
+            .cf_handle(SYSTEM_META_CF)
+            .ok_or_else(|| StorageError::PartitionNotFound(SYSTEM_META_CF.to_string()))?;
+        self.db
+            .delete_cf_opt(&cf, logical_partition_registry_key(partition_name), &self.write_opts)
+            .map_err(|e| StorageError::IoError(e.to_string()))
     }
 
     fn tracked_cf_names(&self) -> Vec<String> {
@@ -88,7 +193,7 @@ impl RocksDBBackend {
     }
 
     fn tracked_partition_count(&self) -> usize {
-        match self.known_cf_names.read() {
+        match self.logical_partition_names.read() {
             Ok(names) => names.iter().filter(|name| name.as_str() != "default").count(),
             Err(_) => 0,
         }
@@ -105,24 +210,45 @@ impl RocksDBBackend {
 
 impl StorageBackend for RocksDBBackend {
     fn get(&self, partition: &Partition, key: &[u8]) -> Result<Option<Vec<u8>>> {
-        let _span = tracing::trace_span!("rocksdb.get", partition = %partition.name()).entered();
+        let _span = tracing::trace_span!(
+            "rocksdb.get",
+            partition = %partition.name(),
+            physical_cf = physical_cf_for_partition(partition.name())
+        )
+        .entered();
         let cf = self.get_cf(partition)?;
-        self.db.get_cf(&cf, key).map_err(|e| StorageError::IoError(e.to_string()))
+        let physical_key = physical_key(partition.name(), key);
+        self.db
+            .get_cf(&cf, physical_key)
+            .map_err(|e| StorageError::IoError(e.to_string()))
     }
 
     fn put(&self, partition: &Partition, key: &[u8], value: &[u8]) -> Result<()> {
-        let _span = tracing::trace_span!("rocksdb.put", partition = %partition.name(), value_len = value.len()).entered();
+        let _span = tracing::trace_span!(
+            "rocksdb.put",
+            partition = %partition.name(),
+            physical_cf = physical_cf_for_partition(partition.name()),
+            value_len = value.len()
+        )
+        .entered();
         let cf = self.get_cf(partition)?;
+        let physical_key = physical_key(partition.name(), key);
         self.db
-            .put_cf_opt(&cf, key, value, &self.write_opts)
+            .put_cf_opt(&cf, physical_key, value, &self.write_opts)
             .map_err(|e| StorageError::IoError(e.to_string()))
     }
 
     fn delete(&self, partition: &Partition, key: &[u8]) -> Result<()> {
-        let _span = tracing::trace_span!("rocksdb.delete", partition = %partition.name()).entered();
+        let _span = tracing::trace_span!(
+            "rocksdb.delete",
+            partition = %partition.name(),
+            physical_cf = physical_cf_for_partition(partition.name())
+        )
+        .entered();
         let cf = self.get_cf(partition)?;
+        let physical_key = physical_key(partition.name(), key);
         self.db
-            .delete_cf_opt(&cf, key, &self.write_opts)
+            .delete_cf_opt(&cf, physical_key, &self.write_opts)
             .map_err(|e| StorageError::IoError(e.to_string()))
     }
 
@@ -140,11 +266,11 @@ impl StorageBackend for RocksDBBackend {
                     value,
                 } => {
                     let cf = self.get_cf(&partition)?;
-                    batch.put_cf(&cf, key, value);
+                    batch.put_cf(&cf, physical_key(partition.name(), &key), value);
                 },
                 Operation::Delete { partition, key } => {
                     let cf = self.get_cf(&partition)?;
-                    batch.delete_cf(&cf, key);
+                    batch.delete_cf(&cf, physical_key(partition.name(), &key));
                 },
             }
         }
@@ -161,32 +287,50 @@ impl StorageBackend for RocksDBBackend {
         start_key: Option<&[u8]>,
         limit: Option<usize>,
     ) -> Result<Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + Send + '_>> {
-        let _span = tracing::trace_span!("rocksdb.scan", partition = %partition.name(), has_prefix = prefix.is_some(), limit = ?limit).entered();
+        let _span = tracing::trace_span!(
+            "rocksdb.scan",
+            partition = %partition.name(),
+            physical_cf = physical_cf_for_partition(partition.name()),
+            has_prefix = prefix.is_some(),
+            limit = ?limit
+        )
+        .entered();
         use rocksdb::Direction;
 
         let cf = self.get_cf(partition)?;
         let snapshot = self.db.snapshot();
-        let prefix_vec = prefix.map(|p| p.to_vec());
+        let partition_prefix = partition_key_prefix(partition.name());
+        let user_prefix = prefix.map(|p| p.to_vec());
+        let physical_prefix = user_prefix.as_ref().map_or_else(
+            || partition_prefix.clone(),
+            |prefix| {
+                let mut physical_prefix = partition_prefix.clone();
+                physical_prefix.extend_from_slice(prefix);
+                physical_prefix
+            },
+        );
+        let physical_start = start_key.map(|start| {
+            let mut physical_start = partition_prefix.clone();
+            physical_start.extend_from_slice(start);
+            physical_start
+        });
 
-        let iter_mode = if let Some(start) = start_key {
-            IteratorMode::From(start, Direction::Forward)
-        } else if let Some(p) = &prefix_vec {
-            IteratorMode::From(p.as_slice(), Direction::Forward)
+        let iter_mode = if let Some(start) = &physical_start {
+            IteratorMode::From(start.as_slice(), Direction::Forward)
         } else {
-            IteratorMode::Start
+            IteratorMode::From(physical_prefix.as_slice(), Direction::Forward)
         };
 
         let mut readopts = rocksdb::ReadOptions::default();
         readopts.set_snapshot(&snapshot);
-        if let Some(p) = &prefix_vec {
-            readopts.set_iterate_range(PrefixRange(p.clone()));
-        }
+        readopts.set_iterate_range(PrefixRange(physical_prefix.clone()));
         let inner = self.db.iterator_cf_opt(&cf, readopts, iter_mode);
 
         struct SnapshotScanIter<'a, D: rocksdb::DBAccess> {
             _snapshot: rocksdb::SnapshotWithThreadMode<'a, D>,
             inner: rocksdb::DBIteratorWithThreadMode<'a, D>,
-            prefix: Option<Vec<u8>>,
+            partition_prefix: Vec<u8>,
+            user_prefix: Option<Vec<u8>>,
             remaining: Option<usize>,
         }
 
@@ -200,8 +344,12 @@ impl StorageBackend for RocksDBBackend {
 
                 match self.inner.next()? {
                     Ok((k, v)) => {
-                        if let Some(ref p) = self.prefix {
-                            if !k.starts_with(p) {
+                        if !k.starts_with(&self.partition_prefix) {
+                            return None;
+                        }
+                        let logical_key = &k[self.partition_prefix.len()..];
+                        if let Some(ref prefix) = self.user_prefix {
+                            if !logical_key.starts_with(prefix) {
                                 return None;
                             }
                         }
@@ -210,7 +358,7 @@ impl StorageBackend for RocksDBBackend {
                                 *left -= 1;
                             }
                         }
-                        Some((k.to_vec(), v.to_vec()))
+                        Some((logical_key.to_vec(), v.to_vec()))
                     },
                     Err(_) => None,
                 }
@@ -220,7 +368,8 @@ impl StorageBackend for RocksDBBackend {
         let iter = SnapshotScanIter::<DB> {
             _snapshot: snapshot,
             inner,
-            prefix: prefix_vec,
+            partition_prefix,
+            user_prefix,
             remaining: limit,
         };
 
@@ -245,16 +394,28 @@ impl StorageBackend for RocksDBBackend {
 
         let cf = self.get_cf(partition)?;
         let snapshot = self.db.snapshot();
-        let prefix_vec = prefix.map(|p| p.to_vec());
+        let partition_prefix = partition_key_prefix(partition.name());
+        let user_prefix = prefix.map(|p| p.to_vec());
+        let physical_prefix = user_prefix.as_ref().map_or_else(
+            || partition_prefix.clone(),
+            |prefix| {
+                let mut physical_prefix = partition_prefix.clone();
+                physical_prefix.extend_from_slice(prefix);
+                physical_prefix
+            },
+        );
+        let physical_start = start_key.map(|start| {
+            let mut physical_start = partition_prefix.clone();
+            physical_start.extend_from_slice(start);
+            physical_start
+        });
 
         let mut readopts = rocksdb::ReadOptions::default();
         readopts.set_snapshot(&snapshot);
-        if let Some(p) = &prefix_vec {
-            readopts.set_iterate_range(PrefixRange(p.clone()));
-        }
+        readopts.set_iterate_range(PrefixRange(physical_prefix.clone()));
 
-        let iter_mode = if let Some(start) = start_key {
-            IteratorMode::From(start, Direction::Reverse)
+        let iter_mode = if let Some(start) = &physical_start {
+            IteratorMode::From(start.as_slice(), Direction::Reverse)
         } else {
             IteratorMode::End
         };
@@ -264,7 +425,8 @@ impl StorageBackend for RocksDBBackend {
         struct SnapshotReverseScanIter<'a, D: rocksdb::DBAccess> {
             _snapshot: rocksdb::SnapshotWithThreadMode<'a, D>,
             inner: rocksdb::DBIteratorWithThreadMode<'a, D>,
-            prefix: Option<Vec<u8>>,
+            partition_prefix: Vec<u8>,
+            user_prefix: Option<Vec<u8>>,
             remaining: Option<usize>,
         }
 
@@ -278,8 +440,12 @@ impl StorageBackend for RocksDBBackend {
 
                 match self.inner.next()? {
                     Ok((k, v)) => {
-                        if let Some(ref prefix) = self.prefix {
-                            if !k.starts_with(prefix) {
+                        if !k.starts_with(&self.partition_prefix) {
+                            return None;
+                        }
+                        let logical_key = &k[self.partition_prefix.len()..];
+                        if let Some(ref prefix) = self.user_prefix {
+                            if !logical_key.starts_with(prefix) {
                                 return None;
                             }
                         }
@@ -288,7 +454,7 @@ impl StorageBackend for RocksDBBackend {
                                 *left -= 1;
                             }
                         }
-                        Some((k.to_vec(), v.to_vec()))
+                        Some((logical_key.to_vec(), v.to_vec()))
                     },
                     Err(_) => None,
                 }
@@ -298,7 +464,8 @@ impl StorageBackend for RocksDBBackend {
         let iter = SnapshotReverseScanIter::<DB> {
             _snapshot: snapshot,
             inner,
-            prefix: prefix_vec,
+            partition_prefix,
+            user_prefix,
             remaining: limit,
         };
 
@@ -306,41 +473,21 @@ impl StorageBackend for RocksDBBackend {
     }
 
     fn partition_exists(&self, partition: &Partition) -> bool {
-        self.db.cf_handle(partition.name()).is_some()
+        self.logical_partition_names
+            .read()
+            .map(|names| names.iter().any(|name| name == partition.name()))
+            .unwrap_or(false)
     }
 
     fn create_partition(&self, partition: &Partition) -> Result<()> {
-        if self.partition_exists(partition) {
-            return Ok(());
-        }
-
-        let mut opts = Options::default();
-        apply_cf_settings(&mut opts, &self.settings, partition.name());
-        opts.set_block_based_table_factory(&create_block_options_with_cache(&self.block_cache));
-        match self.db.create_cf(partition.name(), &opts) {
-            Ok(()) => {
-                if let Ok(mut names) = self.known_cf_names.write() {
-                    let name = partition.name().to_string();
-                    if !names.contains(&name) {
-                        names.push(name);
-                    }
-                }
-                Ok(())
-            },
-            Err(e) => {
-                let msg = e.to_string();
-                if msg.contains("Column family already exists")
-                    || msg.contains("column family already exists")
-                {
-                    return Ok(());
-                }
-                Err(StorageError::IoError(msg))
-            },
-        }
+        self.ensure_physical_cf(physical_cf_for_partition(partition.name()))?;
+        self.persist_logical_partition(partition.name())?;
+        self.track_logical_partition(partition.name());
+        Ok(())
     }
 
     fn list_partitions(&self) -> Result<Vec<Partition>> {
-        let names = self.known_cf_names.read().unwrap();
+        let names = self.logical_partition_names.read().unwrap();
         let partitions = names
             .iter()
             .filter(|name| *name != "default")
@@ -350,24 +497,50 @@ impl StorageBackend for RocksDBBackend {
     }
 
     fn drop_partition(&self, partition: &Partition) -> Result<()> {
-        if !self.partition_exists(partition) {
-            return Ok(());
+        let cf = self.get_cf(partition)?;
+        let prefix = partition_key_prefix(partition.name());
+        let snapshot = self.db.snapshot();
+        let mut readopts = rocksdb::ReadOptions::default();
+        readopts.set_snapshot(&snapshot);
+        readopts.set_iterate_range(PrefixRange(prefix.clone()));
+
+        let keys: Vec<Vec<u8>> = self
+            .db
+            .iterator_cf_opt(
+                &cf,
+                readopts,
+                IteratorMode::From(prefix.as_slice(), rocksdb::Direction::Forward),
+            )
+            .filter_map(|item| item.ok().map(|(key, _)| key.to_vec()))
+            .take_while(|key| key.starts_with(&prefix))
+            .collect();
+
+        if !keys.is_empty() {
+            let mut batch = rocksdb::WriteBatch::default();
+            for key in keys {
+                batch.delete_cf(&cf, key);
+            }
+            self.db
+                .write_opt(batch, &self.write_opts)
+                .map_err(|e| StorageError::IoError(e.to_string()))?;
         }
 
-        self.db
-            .drop_cf(partition.name())
-            .map_err(|e| StorageError::IoError(e.to_string()))?;
-
-        if let Ok(mut names) = self.known_cf_names.write() {
+        if let Ok(mut names) = self.logical_partition_names.write() {
             names.retain(|n| n != partition.name());
         }
+        self.remove_logical_partition(partition.name())?;
 
         Ok(())
     }
 
     fn compact_partition(&self, partition: &Partition) -> Result<()> {
         let cf = self.get_cf(partition)?;
-        self.db.compact_range_cf(&cf, None::<&[u8]>, None::<&[u8]>);
+        let start = partition_key_prefix(partition.name());
+        if let Some(end) = next_prefix_bound(&start) {
+            self.db.compact_range_cf(&cf, Some(start.as_slice()), Some(end.as_slice()));
+        } else {
+            self.db.compact_range_cf(&cf, Some(start.as_slice()), None::<&[u8]>);
+        }
         Ok(())
     }
 
@@ -395,8 +568,10 @@ impl StorageBackend for RocksDBBackend {
     }
 
     fn backup_to(&self, backup_dir: &std::path::Path) -> crate::storage_trait::Result<()> {
-        use rocksdb::backup::{BackupEngine, BackupEngineOptions};
-        use rocksdb::Env;
+        use rocksdb::{
+            backup::{BackupEngine, BackupEngineOptions},
+            Env,
+        };
 
         std::fs::create_dir_all(backup_dir).map_err(|e| {
             crate::storage_trait::StorageError::Other(format!(
@@ -431,8 +606,10 @@ impl StorageBackend for RocksDBBackend {
     }
 
     fn restore_from(&self, backup_dir: &std::path::Path) -> crate::storage_trait::Result<()> {
-        use rocksdb::backup::{BackupEngine, BackupEngineOptions, RestoreOptions};
-        use rocksdb::Env;
+        use rocksdb::{
+            backup::{BackupEngine, BackupEngineOptions, RestoreOptions},
+            Env,
+        };
 
         let opts = BackupEngineOptions::new(backup_dir).map_err(|e| {
             crate::storage_trait::StorageError::Other(format!(
@@ -487,6 +664,10 @@ impl StorageBackend for RocksDBBackend {
                 self.tracked_partition_count().to_string(),
             ),
             (
+                "rocksdb_physical_cf_count".to_string(),
+                self.tracked_cf_names().len().to_string(),
+            ),
+            (
                 "rocksdb_estimate_num_keys".to_string(),
                 self.sum_cf_property(ESTIMATE_NUM_KEYS_PROPERTY).to_string(),
             ),
@@ -528,9 +709,12 @@ impl StorageBackend for RocksDBBackend {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kalamdb_commons::{encode_key, encode_prefix};
+    use kalamdb_configs::RocksDbSettings;
     use tempfile::TempDir;
+
+    use super::super::init::RocksDbInit;
+    use super::*;
 
     fn create_test_db() -> (Arc<DB>, TempDir) {
         let temp_dir = TempDir::new().unwrap();
@@ -705,6 +889,46 @@ mod tests {
 
         let partitions = backend.list_partitions().unwrap();
         let _ = partitions.len();
+    }
+
+    #[test]
+    fn test_logical_partitions_survive_reopen() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().to_string_lossy().into_owned();
+        let partition = Partition::new("shared_default:profiles");
+
+        {
+            let init = RocksDbInit::with_defaults(db_path.clone());
+            let (db, cf_names) = init.open_with_cf_names().unwrap();
+            let backend = RocksDBBackend::with_options_and_settings(
+                db,
+                false,
+                false,
+                RocksDbSettings::default(),
+            );
+            backend.set_known_cf_names(cf_names);
+
+            backend.create_partition(&partition).unwrap();
+            backend.put(&partition, b"key1", b"value1").unwrap();
+
+            assert!(backend.partition_exists(&partition));
+        }
+
+        {
+            let init = RocksDbInit::with_defaults(db_path);
+            let (db, cf_names) = init.open_with_cf_names().unwrap();
+            let backend = RocksDBBackend::with_options_and_settings(
+                db,
+                false,
+                false,
+                RocksDbSettings::default(),
+            );
+            backend.set_known_cf_names(cf_names);
+
+            assert!(backend.partition_exists(&partition));
+            assert_eq!(backend.get(&partition, b"key1").unwrap(), Some(b"value1".to_vec()));
+            assert_eq!(backend.list_partitions().unwrap(), vec![partition]);
+        }
     }
 
     #[test]

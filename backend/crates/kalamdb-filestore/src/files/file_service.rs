@@ -3,17 +3,21 @@
 //! Handles file finalization (staging → permanent) and cleanup operations.
 //! Uses StorageRegistry to get the correct storage per table.
 
-use crate::error::{FilestoreError, Result};
-use crate::files::staging::{StagedFile, StagingManager};
-use crate::registry::{StorageCached, StorageRegistry};
+use std::{fs, sync::Arc};
+
 use bytes::Bytes;
-use kalamdb_commons::ids::SnowflakeGenerator;
-use kalamdb_commons::models::ids::StorageId;
-use kalamdb_commons::models::{TableId, UserId};
-use kalamdb_commons::schemas::TableType;
+use kalamdb_commons::{
+    ids::SnowflakeGenerator,
+    models::{ids::StorageId, TableId, UserId},
+    schemas::TableType,
+};
 use kalamdb_system::{FileRef, FileSubfolderState};
-use std::fs;
-use std::sync::Arc;
+
+use crate::{
+    error::{FilestoreError, Result},
+    files::staging::{StagedFile, StagingManager},
+    registry::{StorageCached, StorageRegistry},
+};
 
 /// File storage service for managing FILE column uploads.
 ///

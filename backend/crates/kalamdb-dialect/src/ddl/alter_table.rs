@@ -5,21 +5,24 @@
 //! - ALTER TABLE messages DROP COLUMN age
 //! - ALTER TABLE messages MODIFY COLUMN age BIGINT
 
-use crate::ddl::DdlResult;
-use crate::parser::utils::parse_sql_statements;
-
-use crate::compatibility::map_sql_type_to_kalam;
-use kalamdb_commons::models::datatypes::KalamDataType;
-use kalamdb_commons::models::{NamespaceId, TableAccess, TableName};
-use kalamdb_commons::schemas::ColumnDefault;
+use kalamdb_commons::{
+    models::{datatypes::KalamDataType, NamespaceId, TableAccess, TableName},
+    schemas::ColumnDefault,
+};
 use kalamdb_system::VectorMetric;
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
-use sqlparser::ast::{
-    AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
-    DropBehavior, Expr, Ident, ObjectName, SqlOption, Statement, Value,
+use sqlparser::{
+    ast::{
+        AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
+        DropBehavior, Expr, Ident, ObjectName, SqlOption, Statement, Value,
+    },
+    dialect::GenericDialect,
 };
-use sqlparser::dialect::GenericDialect;
+
+use crate::{
+    compatibility::map_sql_type_to_kalam, ddl::DdlResult, parser::utils::parse_sql_statements,
+};
 
 /// Column alteration operation
 #[derive(Debug, Clone, PartialEq)]
@@ -517,9 +520,10 @@ fn extract_access_level(option: &SqlOption) -> DdlResult<Option<TableAccess>> {
                 "DBA" => TableAccess::Dba,
                 other => {
                     return Err(format!(
-                    "Invalid ACCESS_LEVEL '{}'. Supported values: PUBLIC, PRIVATE, RESTRICTED, DBA",
-                    other
-                ))
+                        "Invalid ACCESS_LEVEL '{}'. Supported values: PUBLIC, PRIVATE, \
+                         RESTRICTED, DBA",
+                        other
+                    ))
                 },
             };
             return Ok(Some(access_level));

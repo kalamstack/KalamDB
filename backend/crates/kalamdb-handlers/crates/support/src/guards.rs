@@ -4,8 +4,7 @@
 //! These helpers consolidate repeated validation patterns across handlers.
 
 use kalamdb_commons::models::NamespaceId;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::context::ExecutionContext;
+use kalamdb_core::{error::KalamDbError, sql::context::ExecutionContext};
 
 /// Block modifications (ALTER, DROP, CREATE) on system namespaces.
 ///
@@ -112,7 +111,9 @@ pub fn block_anonymous_write(
     if context.is_anonymous() {
         log::warn!("❌ {} blocked: Anonymous users cannot perform write operations", operation);
         return Err(KalamDbError::Unauthorized(
-            "Anonymous users can only SELECT from public tables. Please authenticate to perform write operations.".to_string()
+            "Anonymous users can only SELECT from public tables. Please authenticate to perform \
+             write operations."
+                .to_string(),
         ));
     }
     Ok(())
@@ -120,11 +121,12 @@ pub fn block_anonymous_write(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use kalamdb_commons::models::UserId;
-    use kalamdb_commons::Role;
-    use kalamdb_session::AuthSession;
     use std::sync::Arc;
+
+    use kalamdb_commons::{models::UserId, Role};
+    use kalamdb_session::AuthSession;
+
+    use super::*;
 
     fn create_context(role: Role) -> ExecutionContext {
         ExecutionContext::new(

@@ -10,8 +10,9 @@
 //! - Credential rotation and deletion
 //! - Admin operations with proper authentication
 
-use crate::common::*;
 use std::time::Duration;
+
+use crate::common::*;
 
 /// Test configuration constants
 const TEST_TIMEOUT: Duration = Duration::from_secs(10);

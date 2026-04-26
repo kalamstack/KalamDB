@@ -19,11 +19,13 @@
 //! 3. Results are ordered by seq (storekey preserves numeric ordering)
 
 use datafusion::scalar::ScalarValue;
-use kalamdb_commons::conversions::scalar_value_to_bytes;
-use kalamdb_commons::ids::UserTableRowId;
-use kalamdb_commons::models::rows::UserTableRow;
-use kalamdb_commons::storage::Partition;
-use kalamdb_commons::storage_key::{encode_key, encode_prefix};
+use kalamdb_commons::{
+    conversions::scalar_value_to_bytes,
+    ids::UserTableRowId,
+    models::rows::UserTableRow,
+    storage::Partition,
+    storage_key::{encode_key, encode_prefix},
+};
 use kalamdb_store::IndexDefinition;
 
 /// Index for querying user table rows by primary key value.
@@ -92,8 +94,7 @@ impl IndexDefinition<UserTableRowId, UserTableRow> for UserTablePkIndex {
     }
 
     fn filter_to_prefix(&self, filter: &datafusion::logical_expr::Expr) -> Option<Vec<u8>> {
-        use kalamdb_store::extract_i64_equality;
-        use kalamdb_store::extract_string_equality;
+        use kalamdb_store::{extract_i64_equality, extract_string_equality};
 
         // Try to extract equality filter on PK column
         // Note: User-scoped indexes require user_id to build a valid storekey prefix.
@@ -131,12 +132,15 @@ pub fn create_user_table_pk_index(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use datafusion::scalar::ScalarValue;
-    use kalamdb_commons::ids::SeqId;
-    use kalamdb_commons::models::rows::Row;
-    use kalamdb_commons::models::UserId;
     use std::collections::BTreeMap;
+
+    use datafusion::scalar::ScalarValue;
+    use kalamdb_commons::{
+        ids::SeqId,
+        models::{rows::Row, UserId},
+    };
+
+    use super::*;
 
     fn create_test_row(
         user_id: &UserId,

@@ -1,8 +1,9 @@
-use kalamdb_commons::conversions::{row_to_serde_model, serde_model_to_row};
-use kalamdb_commons::models::rows::SystemTableRow;
-use kalamdb_commons::schemas::TableDefinition;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
+use kalamdb_commons::{
+    conversions::{row_to_serde_model, serde_model_to_row},
+    models::rows::SystemTableRow,
+    schemas::TableDefinition,
+};
+use serde::{de::DeserializeOwned, Serialize};
 
 use crate::error::SystemError;
 
@@ -23,9 +24,9 @@ pub fn system_row_to_model<T: DeserializeOwned>(
 
 #[cfg(test)]
 mod tests {
-    use kalamdb_commons::models::rows::SystemTableRow;
-    use kalamdb_commons::schemas::TableDefinition;
-    use kalamdb_commons::{NamespaceId, TableName};
+    use kalamdb_commons::{
+        models::rows::SystemTableRow, schemas::TableDefinition, NamespaceId, TableName,
+    };
     use serde::{Deserialize, Serialize};
 
     use super::{model_to_system_row, system_row_to_model};

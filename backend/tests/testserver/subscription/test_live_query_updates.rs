@@ -1,9 +1,9 @@
 //! Integration test for Live Query UPDATE detection via WebSocket
 
-use super::test_support::consolidated_helpers::unique_namespace;
-use kalam_client::models::ChangeEvent;
-use kalam_client::models::ResponseStatus;
+use kalam_client::models::{ChangeEvent, ResponseStatus};
 use tokio::time::Duration;
+
+use super::test_support::consolidated_helpers::unique_namespace;
 
 /// Test UPDATE detection with old/new values
 #[tokio::test]
@@ -34,13 +34,12 @@ async fn test_live_query_detects_updates() -> anyhow::Result<()> {
 
     // Insert initial row
     let resp = server
-                .execute_sql(
-                    &format!(
-                        "INSERT INTO {}.{} (id, title, status, updated_at) VALUES ('task1', 'Test Task', 'pending', 1000)",
-                        ns, table
-                    )
-                )
-                .await?;
+        .execute_sql(&format!(
+            "INSERT INTO {}.{} (id, title, status, updated_at) VALUES ('task1', 'Test Task', \
+             'pending', 1000)",
+            ns, table
+        ))
+        .await?;
     assert_eq!(resp.status, ResponseStatus::Success);
 
     // Connect using the kalam-client SDK
@@ -156,7 +155,8 @@ async fn test_live_query_detects_updates_with_like_filter() -> anyhow::Result<()
 
     let resp = server
         .execute_sql(&format!(
-            "INSERT INTO {}.{} (id, metric_name, metric_value, updated_at) VALUES ('metric1', 'open_files_other', 10, 1000)",
+            "INSERT INTO {}.{} (id, metric_name, metric_value, updated_at) VALUES ('metric1', \
+             'open_files_other', 10, 1000)",
             ns, table
         ))
         .await?;

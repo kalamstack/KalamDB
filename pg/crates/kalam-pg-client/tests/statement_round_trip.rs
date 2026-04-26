@@ -4,13 +4,13 @@
 //! a `RemoteKalamClient`, and exercises a full round-trip:
 //!     client → gRPC → KalamPgService → OperationExecutor → response → client
 
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::Duration;
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-use arrow::array::{Array, Int64Array, StringArray};
-use arrow::datatypes::{DataType, Field, Schema};
-use arrow::record_batch::RecordBatch;
+use arrow::{
+    array::{Array, Int64Array, StringArray},
+    datatypes::{DataType, Field, Schema},
+    record_batch::RecordBatch,
+};
 use async_trait::async_trait;
 use kalam_pg_client::RemoteKalamClient;
 use kalam_pg_common::RemoteServerConfig;
@@ -381,5 +381,8 @@ async fn transaction_rollback() {
         .await
         .expect("insert in tx");
 
-    client.rollback_transaction(&session.session_id, &tx_id).await.expect("rollback tx");
+    client
+        .rollback_transaction(&session.session_id, &tx_id)
+        .await
+        .expect("rollback tx");
 }

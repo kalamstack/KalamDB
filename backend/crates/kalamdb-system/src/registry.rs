@@ -6,30 +6,27 @@
 //! **Phase 5 Completion**: Consolidates all 10 system table providers into
 //! a single struct for cleaner AppContext API.
 
-use super::providers::job_nodes::models::JobNode;
-use super::providers::jobs::models::Job;
-use super::providers::manifest::manifest_table_definition;
-use super::providers::namespaces::models::Namespace;
-use super::providers::storages::models::Storage;
-use super::providers::tables::schemas_table_definition;
-use super::providers::topic_offsets::models::TopicOffset;
-use super::providers::topics::models::Topic;
-use super::providers::users::models::User;
-use super::providers::{
-    AuditLogEntry, AuditLogsTableProvider, JobNodesTableProvider, JobsTableProvider,
-    ManifestTableProvider, NamespacesTableProvider, SchemasTableProvider, StoragesTableProvider,
-    TopicOffsetsTableProvider, TopicsTableProvider, UsersTableProvider,
-};
+use std::{collections::HashSet, sync::Arc};
+
 // SchemaRegistry will be passed as Arc parameter from kalamdb-core
 use datafusion::datasource::TableProvider;
-use kalamdb_commons::schemas::{TableDefinition, TableType};
-use kalamdb_commons::SystemTable;
+use kalamdb_commons::{
+    schemas::{TableDefinition, TableType},
+    SystemTable,
+};
 use kalamdb_session_datafusion::secure_provider;
 use kalamdb_store::StorageBackend;
 use once_cell::sync::OnceCell;
 use parking_lot::RwLock;
-use std::collections::HashSet;
-use std::sync::Arc;
+
+use super::providers::{
+    job_nodes::models::JobNode, jobs::models::Job, manifest::manifest_table_definition,
+    namespaces::models::Namespace, storages::models::Storage, tables::schemas_table_definition,
+    topic_offsets::models::TopicOffset, topics::models::Topic, users::models::User, AuditLogEntry,
+    AuditLogsTableProvider, JobNodesTableProvider, JobsTableProvider, ManifestTableProvider,
+    NamespacesTableProvider, SchemasTableProvider, StoragesTableProvider,
+    TopicOffsetsTableProvider, TopicsTableProvider, UsersTableProvider,
+};
 
 /// Registry of all system table providers
 ///
@@ -37,7 +34,8 @@ use std::sync::Arc;
 /// Used by AppContext to eliminate 10 individual provider fields.
 ///
 /// Note: information_schema.tables and information_schema.columns are provided
-/// by DataFusion's built-in information_schema support (enabled via .with_information_schema(true)).
+/// by DataFusion's built-in information_schema support (enabled via
+/// .with_information_schema(true)).
 #[derive(Debug)]
 pub struct SystemTablesRegistry {
     // ===== system.* tables (EntityStore-based) =====
@@ -76,8 +74,9 @@ impl SystemTablesRegistry {
     ///
     /// # Example
     /// ```no_run
-    /// use kalamdb_core::tables::system::SystemTablesRegistry;
     /// use std::sync::Arc;
+    ///
+    /// use kalamdb_core::tables::system::SystemTablesRegistry;
     /// # use kalamdb_store::StorageBackend;
     ///
     /// # let backend: Arc<dyn StorageBackend> = unimplemented!();

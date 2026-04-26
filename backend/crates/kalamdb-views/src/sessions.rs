@@ -5,19 +5,21 @@
 //! Provides the current set of active PostgreSQL gRPC sessions tracked by the
 //! server-side pg session registry.
 
-use crate::view_base::VirtualView;
-use datafusion::arrow::array::{
-    ArrayRef, BooleanBuilder, Int64Builder, StringBuilder, TimestampMicrosecondBuilder,
-};
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::RecordBatch;
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::schemas::{
-    ColumnDefault, ColumnDefinition, TableDefinition, TableOptions, TableType,
-};
-use kalamdb_commons::{NamespaceId, SystemTable, TableName};
-use parking_lot::RwLock;
 use std::sync::{Arc, OnceLock};
+
+use datafusion::arrow::{
+    array::{ArrayRef, BooleanBuilder, Int64Builder, StringBuilder, TimestampMicrosecondBuilder},
+    datatypes::SchemaRef,
+    record_batch::RecordBatch,
+};
+use kalamdb_commons::{
+    datatypes::KalamDataType,
+    schemas::{ColumnDefault, ColumnDefinition, TableDefinition, TableOptions, TableType},
+    NamespaceId, SystemTable, TableName,
+};
+use parking_lot::RwLock;
+
+use crate::view_base::VirtualView;
 
 /// Serializable snapshot of a live PostgreSQL gRPC session.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,7 +110,8 @@ impl SessionsView {
                 false,
                 ColumnDefault::None,
                 Some(
-                    "Parsed PostgreSQL backend PID when session_id follows pg-<pid> or pg-<pid>-<config-hash>"
+                    "Parsed PostgreSQL backend PID when session_id follows pg-<pid> or \
+                     pg-<pid>-<config-hash>"
                         .to_string(),
                 ),
             ),

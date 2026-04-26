@@ -37,25 +37,26 @@ pub(crate) use handler::websocket_handler;
 
 #[cfg(test)]
 mod tests {
-    use super::websocket_handler;
-    use crate::limiter::RateLimiter;
+    use std::{collections::HashMap, net::TcpListener, sync::Arc};
+
     use actix_web::{web, App, HttpServer};
     use futures_util::StreamExt;
     use kalamdb_auth::{create_and_sign_token, CoreUsersRepo, UserRepository};
-    use kalamdb_commons::models::{KalamCellValue, UserId};
-    use kalamdb_commons::websocket::{ChangeType, SharedChangePayload, WireNotification};
-    use kalamdb_commons::Role;
-    use kalamdb_core::app_context::AppContext;
-    use kalamdb_core::test_helpers::test_app_context_simple;
+    use kalamdb_commons::{
+        models::{KalamCellValue, UserId},
+        websocket::{ChangeType, SharedChangePayload, WireNotification},
+        Role,
+    };
+    use kalamdb_core::{app_context::AppContext, test_helpers::test_app_context_simple};
     use kalamdb_live::ConnectionsManager;
-    use kalamdb_system::providers::storages::models::StorageMode;
-    use kalamdb_system::{AuthType, User};
-    use std::collections::HashMap;
-    use std::net::TcpListener;
-    use std::sync::Arc;
-    use tokio_tungstenite::connect_async;
-    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-    use tokio_tungstenite::tungstenite::Message;
+    use kalamdb_system::{providers::storages::models::StorageMode, AuthType, User};
+    use tokio_tungstenite::{
+        connect_async,
+        tungstenite::{client::IntoClientRequest, Message},
+    };
+
+    use super::websocket_handler;
+    use crate::limiter::RateLimiter;
 
     struct WsTestContext {
         server: actix_web::dev::ServerHandle,

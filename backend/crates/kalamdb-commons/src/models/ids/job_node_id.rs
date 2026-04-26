@@ -1,9 +1,12 @@
-use serde::{Deserialize, Deserializer, Serialize};
 use std::fmt;
 
+use serde::{Deserialize, Deserializer, Serialize};
+
 use super::{JobId, NodeId};
-use crate::storage_key::{decode_key, encode_key, encode_prefix};
-use crate::StorageKey;
+use crate::{
+    storage_key::{decode_key, encode_key, encode_prefix},
+    StorageKey,
+};
 
 /// Unique identifier for a job run on a specific node.
 ///

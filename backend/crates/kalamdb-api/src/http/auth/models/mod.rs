@@ -14,5 +14,4 @@ pub use login_request::LoginRequest;
 pub use login_response::LoginResponse;
 pub use setup_request::ServerSetupRequest;
 pub use setup_response::ServerSetupResponse;
-pub use user_info::CurrentUserResponse;
-pub use user_info::UserInfo;
+pub use user_info::{CurrentUserResponse, UserInfo};

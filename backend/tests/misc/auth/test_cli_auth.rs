@@ -8,9 +8,9 @@
 //! - System user can authenticate from localhost
 //! - System user credentials are generated securely
 
+use kalamdb_commons::{constants::AuthConstants, AuthType, Role, UserId};
+
 use super::test_support::TestServer;
-use kalamdb_commons::constants::AuthConstants;
-use kalamdb_commons::{AuthType, Role, UserId};
 
 #[tokio::test]
 async fn test_init_creates_system_user() {

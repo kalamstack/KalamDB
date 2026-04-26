@@ -7,11 +7,12 @@
 //!
 //! Uses sqlparser-rs tokenizer for consistent identifier and string handling.
 
-use kalamdb_commons::AuthType;
-use kalamdb_commons::Role;
+use kalamdb_commons::{AuthType, Role};
 use serde::{Deserialize, Serialize};
-use sqlparser::dialect::GenericDialect;
-use sqlparser::tokenizer::{Token, Tokenizer};
+use sqlparser::{
+    dialect::GenericDialect,
+    tokenizer::{Token, Tokenizer},
+};
 
 /// Common error type for user command parsing
 #[derive(Debug, Clone, PartialEq)]
@@ -426,7 +427,8 @@ mod tests {
     // CREATE USER tests
     #[test]
     fn test_create_user_with_password_quoted() {
-        let sql = "CREATE USER 'alice' WITH PASSWORD 'secure123' ROLE developer EMAIL 'alice@example.com'";
+        let sql = "CREATE USER 'alice' WITH PASSWORD 'secure123' ROLE developer EMAIL \
+                   'alice@example.com'";
         let stmt = CreateUserStatement::parse(sql).unwrap();
         assert_eq!(stmt.username, "alice");
         assert_eq!(stmt.auth_type, AuthType::Password);

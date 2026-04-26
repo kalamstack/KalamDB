@@ -7,9 +7,9 @@
 //! - Batch control metadata is properly communicated
 //! - Row count integrity is maintained across batches
 
-use crate::common::*;
-
 use std::time::Duration;
+
+use crate::common::*;
 
 const TOTAL_ROWS: usize = 200;
 const BATCH_SIZE: usize = 50;
@@ -80,15 +80,16 @@ fn test_websocket_batch_streaming_rows() {
 
             // Create substantial data (~300 bytes per row) to exceed batch size
             let long_data = format!(
-                "Row {} with substantial text content that ensures each record is large enough \
-                 to force multiple batches during WebSocket streaming. This padding text helps \
-                 test the batch control mechanism by creating a dataset that cannot fit in a \
-                 single 8KB transmission. Additional padding to reach ~300 bytes total.",
+                "Row {} with substantial text content that ensures each record is large enough to \
+                 force multiple batches during WebSocket streaming. This padding text helps test \
+                 the batch control mechanism by creating a dataset that cannot fit in a single \
+                 8KB transmission. Additional padding to reach ~300 bytes total.",
                 row_id
             );
 
             let description = format!(
-                "Detailed description and metadata for record number {} in the batch streaming test",
+                "Detailed description and metadata for record number {} in the batch streaming \
+                 test",
                 row_id
             );
 

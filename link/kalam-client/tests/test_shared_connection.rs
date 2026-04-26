@@ -8,17 +8,22 @@
 //!
 //! **IMPORTANT**: These tests require a running KalamDB server (auto-started).
 
-use kalam_client::auth::AuthProvider;
-use kalam_client::seq_tracking::{extract_max_seq, row_seq};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
+
 use kalam_client::{
+    auth::AuthProvider,
+    seq_tracking::{extract_max_seq, row_seq},
     ChangeEvent, ConnectionOptions, EventHandlers, KalamCellValue, KalamLinkClient,
     KalamLinkTimeouts, LiveRowsConfig, LiveRowsEvent, SeqId, SubscriptionConfig,
     SubscriptionOptions,
 };
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
 use tokio::time::{sleep, timeout, Instant};
 
 mod common;

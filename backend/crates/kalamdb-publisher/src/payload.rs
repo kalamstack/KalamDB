@@ -145,8 +145,10 @@ pub(crate) fn hash_row(row: &Row) -> u64 {
         }
     }
 
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
+    use std::{
+        collections::hash_map::DefaultHasher,
+        hash::{Hash, Hasher},
+    };
     let mut hasher = DefaultHasher::new();
 
     // Fallback: hash column names only
@@ -159,8 +161,10 @@ pub(crate) fn hash_row(row: &Row) -> u64 {
 
 /// Hash a serialized topic key using the same stable hash as partition selection.
 pub(crate) fn hash_key(key: &str) -> u64 {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
+    use std::{
+        collections::hash_map::DefaultHasher,
+        hash::{Hash, Hasher},
+    };
 
     let mut hasher = DefaultHasher::new();
     key.hash(&mut hasher);

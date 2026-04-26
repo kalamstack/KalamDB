@@ -6,8 +6,9 @@
 //!
 //! This matches the behavior expected by both CLI and UI clients.
 
-use crate::common::*;
 use std::time::Duration;
+
+use crate::common::*;
 
 /// Test that subscription receives initial data batch for existing rows
 /// and then receives live INSERT events for new rows.
@@ -27,7 +28,8 @@ fn test_link_subscription_initial_batch_then_inserts() {
 
     // Create user table
     let create_result = execute_sql_as_root_via_client(&format!(
-        "CREATE TABLE {} (id INT PRIMARY KEY, content VARCHAR, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) WITH (TYPE='USER', FLUSH_POLICY='rows:100')",
+        "CREATE TABLE {} (id INT PRIMARY KEY, content VARCHAR, created_at TIMESTAMP DEFAULT \
+         CURRENT_TIMESTAMP) WITH (TYPE='USER', FLUSH_POLICY='rows:100')",
         table_full
     ));
     assert!(create_result.is_ok(), "Failed to create table: {:?}", create_result);
@@ -125,7 +127,8 @@ fn test_link_subscription_empty_table_then_inserts() {
 
     // Create user table (empty)
     let create_result = execute_sql_as_root_via_client(&format!(
-        "CREATE TABLE {} (id INT PRIMARY KEY, event_type VARCHAR) WITH (TYPE='USER', FLUSH_POLICY='rows:100')",
+        "CREATE TABLE {} (id INT PRIMARY KEY, event_type VARCHAR) WITH (TYPE='USER', \
+         FLUSH_POLICY='rows:100')",
         table_full
     ));
     assert!(create_result.is_ok(), "Failed to create table: {:?}", create_result);
@@ -199,7 +202,8 @@ fn test_link_subscription_batch_status_transition() {
     let _ = execute_sql_as_root_via_client(&format!("CREATE NAMESPACE {}", namespace));
 
     let _ = execute_sql_as_root_via_client(&format!(
-        "CREATE TABLE {} (id INT PRIMARY KEY, name VARCHAR) WITH (TYPE='USER', FLUSH_POLICY='rows:100')",
+        "CREATE TABLE {} (id INT PRIMARY KEY, name VARCHAR) WITH (TYPE='USER', \
+         FLUSH_POLICY='rows:100')",
         table_full
     ));
 

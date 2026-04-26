@@ -22,8 +22,7 @@
 //! // Context used for audit logging
 //! ```
 
-use kalamdb_commons::models::UserId;
-use kalamdb_commons::Role;
+use kalamdb_commons::{models::UserId, Role};
 
 /// Origin of the impersonation request
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -109,7 +109,8 @@ pub fn parse_string_as_scalar(
         other => {
             // For any other type, use string representation and let caller handle coercion
             log::warn!(
-                "Unsupported data type {:?} for string parsing, using Utf8 representation for value '{}'",
+                "Unsupported data type {:?} for string parsing, using Utf8 representation for \
+                 value '{}'",
                 other,
                 value_str
             );

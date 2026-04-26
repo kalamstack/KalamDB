@@ -1,9 +1,13 @@
-use crate::error::Result;
-use crate::models::{bootstrap_table_definitions, DBA_NAMESPACE};
+use std::sync::Arc;
+
 use kalamdb_commons::models::{NamespaceId, TableId};
 use kalamdb_core::app_context::AppContext;
 use kalamdb_system::Namespace;
-use std::sync::Arc;
+
+use crate::{
+    error::Result,
+    models::{bootstrap_table_definitions, DBA_NAMESPACE},
+};
 
 pub fn initialize_dba_namespace(app_context: Arc<AppContext>) -> Result<()> {
     ensure_namespace_exists(app_context.as_ref())?;

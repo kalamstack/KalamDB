@@ -9,8 +9,9 @@
 // This verifies the end-to-end delta update pipeline:
 //   Backend (notification.rs compute_json_update_delta) → WebSocket → kalam-client SDK
 
-use crate::common::*;
 use std::time::{Duration, Instant};
+
+use crate::common::*;
 
 #[ntest::timeout(120000)]
 #[test]
@@ -156,7 +157,8 @@ fn smoke_subscription_update_sends_delta_only() {
         // Both email and age should be represented in the update payload
         assert!(
             update2_joined.contains("email") && update2_joined.contains("age"),
-            "Multi-column UPDATE should include both 'email' and 'age' in the update payload; got: {}",
+            "Multi-column UPDATE should include both 'email' and 'age' in the update payload; \
+             got: {}",
             update2_joined
         );
 

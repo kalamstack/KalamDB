@@ -2,14 +2,16 @@
 //!
 //! Parses SQL statements like:
 //! - DROP USER TABLE messages
-//! - DROP SHARED TABLE conversations  
+//! - DROP SHARED TABLE conversations
 //! - DROP STREAM TABLE events
 //! - DROP TABLE IF EXISTS messages
 
-use crate::ddl::DdlResult;
+use kalamdb_commons::{
+    models::{NamespaceId, TableName},
+    schemas::TableType,
+};
 
-use kalamdb_commons::models::{NamespaceId, TableName};
-use kalamdb_commons::schemas::TableType;
+use crate::ddl::DdlResult;
 
 /// Table categories supported by DROP TABLE statements.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

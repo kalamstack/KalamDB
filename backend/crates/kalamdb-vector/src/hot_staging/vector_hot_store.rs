@@ -1,8 +1,12 @@
-use super::models::{SharedVectorHotOpId, UserVectorHotOpId, VectorHotOp};
-use super::pk_index::{SharedVectorPkIndex, UserVectorPkIndex};
+use std::sync::Arc;
+
 use kalamdb_commons::models::TableId;
 use kalamdb_store::{IndexedEntityStore, StorageBackend};
-use std::sync::Arc;
+
+use super::{
+    models::{SharedVectorHotOpId, UserVectorHotOpId, VectorHotOp},
+    pk_index::{SharedVectorPkIndex, UserVectorPkIndex},
+};
 
 /// Indexed store alias for user-scoped vector hot ops.
 pub type UserVectorHotStore = IndexedEntityStore<UserVectorHotOpId, VectorHotOp>;
@@ -62,8 +66,9 @@ pub fn new_indexed_shared_vector_hot_store(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kalamdb_commons::models::{NamespaceId, TableName};
+
+    use super::*;
 
     #[test]
     fn test_normalize_vector_column_name() {

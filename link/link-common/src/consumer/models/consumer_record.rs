@@ -56,8 +56,7 @@ impl ConsumerRecordWire {
 
 #[cfg(feature = "tokio-runtime")]
 mod base64_bytes {
-    use base64::engine::general_purpose::STANDARD;
-    use base64::Engine;
+    use base64::{engine::general_purpose::STANDARD, Engine};
     use serde::{de::Error, Deserialize, Deserializer, Serializer};
 
     #[allow(dead_code)]

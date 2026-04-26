@@ -1,12 +1,15 @@
 use std::sync::Arc;
 
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::{OperationKind, TableId, TransactionId, UserId};
-use kalamdb_commons::TableType;
+use kalamdb_commons::{
+    models::{rows::Row, OperationKind, TableId, TransactionId, UserId},
+    TableType,
+};
 
-use crate::access::{TransactionAccessError, TransactionAccessValidator};
-use crate::overlay::TransactionOverlay;
-use crate::staged_mutation::StagedMutation;
+use crate::{
+    access::{TransactionAccessError, TransactionAccessValidator},
+    overlay::TransactionOverlay,
+    staged_mutation::StagedMutation,
+};
 
 /// Lightweight view trait exposed to query providers for transaction-local reads.
 pub trait TransactionOverlayView: std::fmt::Debug + Send + Sync {

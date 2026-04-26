@@ -36,8 +36,8 @@
 //! - Are append-only (no updates, no version resolution needed)
 //! - Use TTL-based eviction instead of tombstones
 //! - Can return rows as they're scanned with early termination on LIMIT
-//! - They now use the provider-family-specific exec-backed path in
-//!   `stream_table_provider.rs` instead of sharing the MVCC-oriented flow below
+//! - They now use the provider-family-specific exec-backed path in `stream_table_provider.rs`
+//!   instead of sharing the MVCC-oriented flow below
 //!
 //! ## Architecture
 //!
@@ -65,59 +65,67 @@
 //! `stream_table_provider.rs` so the hot-store scan runs at execute time.
 //! ```
 
-use crate::error::KalamDbError;
-use crate::error_extensions::KalamDbResultExt;
-
-use crate::manifest::ManifestAccessPlanner;
-use crate::utils::unified_dml;
-use async_trait::async_trait;
-use datafusion::arrow::array::{Array, BooleanArray, Float32Array, Int64Array, UInt64Array};
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::catalog::Session;
-use datafusion::common::DFSchema;
-use datafusion::datasource::TableProvider;
-use datafusion::error::{DataFusionError, Result as DataFusionResult};
-use datafusion::logical_expr::{utils::expr_to_columns, Expr, TableProviderFilterPushDown};
-use datafusion::physical_expr::PhysicalExpr;
-use datafusion::physical_plan::{ExecutionPlan, Statistics};
-use datafusion::scalar::ScalarValue;
-use kalamdb_commons::constants::SystemColumnNames;
-use kalamdb_commons::conversions::arrow_json_conversion::coerce_rows;
-use kalamdb_commons::ids::SeqId;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::{NamespaceId, TableName, UserId};
-use kalamdb_commons::serialization::row_codec::RowMetadata;
-use kalamdb_commons::schemas::TableType;
-use kalamdb_commons::NotLeaderError;
-use kalamdb_commons::{StorageKey, TableId};
-use kalamdb_datafusion_sources::exec::{
-    count_resolved_from_metadata, finalize_deferred_batch, resolve_latest_kvs_from_cold_batch,
-    DeferredBatchExec, DeferredBatchSource, ParquetRowData, VersionedRow,
+use std::{
+    collections::{HashMap, HashSet},
+    future::Future,
+    sync::Arc,
 };
-use kalamdb_datafusion_sources::pruning::mvcc_filter_evaluation;
-use kalamdb_datafusion_sources::provider::{
-    combined_filter, pushdown_results_for_filters, remap_projection_indices, SourceProvider,
+
+use async_trait::async_trait;
+use datafusion::{
+    arrow::{
+        array::{Array, BooleanArray, Float32Array, Int64Array, UInt64Array},
+        datatypes::SchemaRef,
+        record_batch::RecordBatch,
+    },
+    catalog::Session,
+    common::DFSchema,
+    datasource::TableProvider,
+    error::{DataFusionError, Result as DataFusionResult},
+    logical_expr::{utils::expr_to_columns, Expr, TableProviderFilterPushDown},
+    physical_expr::PhysicalExpr,
+    physical_plan::{ExecutionPlan, Statistics},
+    scalar::ScalarValue,
+};
+use kalamdb_commons::{
+    constants::SystemColumnNames,
+    conversions::arrow_json_conversion::coerce_rows,
+    ids::SeqId,
+    models::{rows::Row, NamespaceId, TableName, UserId},
+    schemas::TableType,
+    serialization::row_codec::RowMetadata,
+    NotLeaderError, StorageKey, TableId,
+};
+use kalamdb_datafusion_sources::{
+    exec::{
+        count_resolved_from_metadata, finalize_deferred_batch, resolve_latest_kvs_from_cold_batch,
+        DeferredBatchExec, DeferredBatchSource, ParquetRowData, VersionedRow,
+    },
+    provider::{
+        combined_filter, pushdown_results_for_filters, remap_projection_indices, SourceProvider,
+    },
+    pruning::mvcc_filter_evaluation,
 };
 use kalamdb_filestore::registry::ListResult;
-use kalamdb_system::ClusterCoordinator as ClusterCoordinatorTrait;
-use kalamdb_system::Manifest;
-use kalamdb_system::SchemaRegistry as SchemaRegistryTrait;
+use kalamdb_system::{
+    ClusterCoordinator as ClusterCoordinatorTrait, Manifest, SchemaRegistry as SchemaRegistryTrait,
+};
 use kalamdb_transactions::{
     extract_transaction_query_context, TransactionAccessError, TransactionOverlay,
     TransactionOverlayExec,
 };
-use std::collections::{HashMap, HashSet};
-use std::future::Future;
-use std::sync::Arc;
 
 // Re-export types moved to submodules
 pub use crate::utils::core::TableProviderCore;
 pub(crate) use crate::utils::parquet::scan_parquet_files_as_batch_async;
 pub use crate::utils::row_utils::{
-    extract_full_user_context, extract_seq_bounds_from_filter, resolve_user_scope, system_user_id,
+    extract_full_user_context, extract_seq_bounds_from_filter, inject_system_columns,
+    resolve_user_scope, rows_to_arrow_batch, system_user_id, ScanRow,
 };
-pub use crate::utils::row_utils::{inject_system_columns, rows_to_arrow_batch, ScanRow};
+use crate::{
+    error::KalamDbError, error_extensions::KalamDbResultExt, manifest::ManifestAccessPlanner,
+    utils::unified_dml,
+};
 
 #[async_trait]
 pub trait DeferredMvccScanProvider<K: StorageKey, V>:
@@ -185,10 +193,7 @@ where
         let schema = self.schema_ref();
         let pk_name = self.primary_key_field_name();
         let _scope_label = self.scan_scope_label(scan_context);
-        let _subject_user = self
-            .scan_cold_scope(scan_context)
-            .map(UserId::as_str)
-            .unwrap_or("-");
+        let _subject_user = self.scan_cold_scope(scan_context).map(UserId::as_str).unwrap_or("-");
 
         if self.allow_pk_fast_path(scan_context) {
             if let Some(pk_scalar) = typed_pk_literal_from_filter(&schema, filter, pk_name) {
@@ -201,13 +206,18 @@ where
                     //     scope_label,
                     //     subject_user
                     // );
-                    return rows_to_arrow_batch(&schema, vec![(row_id, row)], projection, |_, _| {});
+                    return rows_to_arrow_batch(
+                        &schema,
+                        vec![(row_id, row)],
+                        projection,
+                        |_, _| {},
+                    );
                 }
 
                 if self.hot_pk_tombstoned(scan_context, &pk_scalar).await? {
                     // log::debug!(
-                    //     "[MvccScan] PK fast-path tombstone for {}={} (table={}; scope={}; subject={})",
-                    //     pk_name,
+                    //     "[MvccScan] PK fast-path tombstone for {}={} (table={}; scope={};
+                    // subject={})",     pk_name,
                     //     pk_scalar,
                     //     self.table_id(),
                     //     scope_label,
@@ -221,19 +231,27 @@ where
                     );
                 }
 
-                let cold_found =
-                    find_row_by_pk(self, self.scan_cold_scope(scan_context), &pk_scalar.to_string())
-                        .await?;
+                let cold_found = find_row_by_pk(
+                    self,
+                    self.scan_cold_scope(scan_context),
+                    &pk_scalar.to_string(),
+                )
+                .await?;
                 if let Some((row_id, row)) = cold_found {
                     // log::debug!(
-                    //     "[MvccScan] PK fast-path cold hit for {}={} (table={}; scope={}; subject={})",
-                    //     pk_name,
+                    //     "[MvccScan] PK fast-path cold hit for {}={} (table={}; scope={};
+                    // subject={})",     pk_name,
                     //     pk_scalar,
                     //     self.table_id(),
                     //     scope_label,
                     //     subject_user
                     // );
-                    return rows_to_arrow_batch(&schema, vec![(row_id, row)], projection, |_, _| {});
+                    return rows_to_arrow_batch(
+                        &schema,
+                        vec![(row_id, row)],
+                        projection,
+                        |_, _| {},
+                    );
                 }
 
                 // log::debug!(
@@ -343,11 +361,7 @@ where
             )
             .await
             .map_err(|error| {
-                DataFusionError::Execution(format!(
-                    "{} failed: {}",
-                    self.source_name(),
-                    error
-                ))
+                DataFusionError::Execution(format!("{} failed: {}", self.source_name(), error))
             })?;
 
         finalize_deferred_batch(
@@ -657,9 +671,7 @@ pub trait BaseTableProvider<K: StorageKey, V>: Send + Sync + TableProvider {
     where
         Self: SourceProvider,
     {
-        Ok(pushdown_results_for_filters(filters, |filter| {
-            self.filter_capability(filter)
-        }))
+        Ok(pushdown_results_for_filters(filters, |filter| self.filter_capability(filter)))
     }
 
     /// Default implementation for statistics
@@ -691,11 +703,8 @@ pub trait BaseTableProvider<K: StorageKey, V>: Send + Sync + TableProvider {
         let _ = pruning.limit.limit;
         let source_filter = combined_filter(filter_evaluation.inexact.filters.as_ref());
         let exact_filter = combined_filter(filter_evaluation.exact.filters.as_ref());
-        let effective_projection = pruning
-            .projection
-            .columns
-            .as_ref()
-            .map(|indices| indices.as_ref().to_vec());
+        let effective_projection =
+            pruning.projection.columns.as_ref().map(|indices| indices.as_ref().to_vec());
 
         let merged_schema = match effective_projection.as_ref() {
             Some(indices) => descriptor
@@ -708,8 +717,9 @@ pub trait BaseTableProvider<K: StorageKey, V>: Send + Sync + TableProvider {
         let output_projection = if pruning.filters.filters.is_empty() {
             None
         } else {
-            projection
-                .map(|indices| remap_projection_indices(&descriptor.schema, &merged_schema, indices))
+            projection.map(|indices| {
+                remap_projection_indices(&descriptor.schema, &merged_schema, indices)
+            })
         };
         let output_schema = match projection {
             Some(indices) => descriptor
@@ -765,12 +775,7 @@ pub trait BaseTableProvider<K: StorageKey, V>: Send + Sync + TableProvider {
             self.primary_key_field_name(),
         )?;
         let base_plan = self
-            .base_scan(
-                state,
-                overlay_projection.effective_projection.as_ref(),
-                filters,
-                limit,
-            )
+            .base_scan(state, overlay_projection.effective_projection.as_ref(), filters, limit)
             .await?;
 
         Ok(Arc::new(TransactionOverlayExec::try_new(
@@ -1027,8 +1032,9 @@ where
     P: BaseTableProvider<K, V>,
     K: StorageKey,
 {
-    use crate::utils::version_resolution::{parquet_batch_to_rows, ParquetRowData};
     use datafusion::prelude::{col, lit};
+
+    use crate::utils::version_resolution::{parquet_batch_to_rows, ParquetRowData};
 
     let pk_name = provider.primary_key_field_name();
     let user_scope = resolve_user_scope(scope);
@@ -1275,8 +1281,8 @@ pub async fn pk_exists_in_cold(
         let pruned_paths = planner.plan_by_pk_value(m, pk_column_id, pk_value);
         if pruned_paths.is_empty() {
             // log::trace!(
-            //     "[pk_exists_in_cold] Manifest pruning returned no candidate segments for PK {} on {}.{} {} - PK not in cold",
-            //     pk_value,
+            //     "[pk_exists_in_cold] Manifest pruning returned no candidate segments for PK {} on
+            // {}.{} {} - PK not in cold",     pk_value,
             //     namespace.as_str(),
             //     table.as_str(),
             //     scope_label
@@ -1284,8 +1290,8 @@ pub async fn pk_exists_in_cold(
             return Ok(false);
         } else {
             // log::trace!(
-            //     "[pk_exists_in_cold] Manifest pruning: {} of {} segments may contain PK {} for {}.{} {}",
-            //     pruned_paths.len(),
+            //     "[pk_exists_in_cold] Manifest pruning: {} of {} segments may contain PK {} for
+            // {}.{} {}",     pruned_paths.len(),
             //     m.segments.len(),
             //     pk_value,
             //     namespace.as_str(),
@@ -1459,8 +1465,8 @@ pub async fn pk_exists_batch_in_cold(
     if let Some(ref m) = manifest {
         if m.segments.is_empty() {
             // log::trace!(
-            //     "[pk_exists_batch_in_cold] Manifest has no segments for {}.{} {} - PK not in cold",
-            //     namespace.as_str(),
+            //     "[pk_exists_batch_in_cold] Manifest has no segments for {}.{} {} - PK not in
+            // cold",     namespace.as_str(),
             //     table.as_str(),
             //     scope_label
             // );
@@ -1479,7 +1485,8 @@ pub async fn pk_exists_batch_in_cold(
         }
         if relevant_files.is_empty() {
             log::trace!(
-                "[pk_exists_batch_in_cold] Manifest pruning returned no candidate segments for {}.{} {} - PKs not in cold",
+                "[pk_exists_batch_in_cold] Manifest pruning returned no candidate segments for \
+                 {}.{} {} - PKs not in cold",
                 namespace.as_str(),
                 table.as_str(),
                 scope_label
@@ -1487,7 +1494,8 @@ pub async fn pk_exists_batch_in_cold(
             return Ok(None);
         } else {
             log::trace!(
-                "[pk_exists_batch_in_cold] Manifest pruning: {} of {} segments may contain {} PKs for {}.{} {}",
+                "[pk_exists_batch_in_cold] Manifest pruning: {} of {} segments may contain {} PKs \
+                 for {}.{} {}",
                 relevant_files.len(),
                 m.segments.len(),
                 pk_values.len(),
@@ -1650,7 +1658,8 @@ async fn pk_exists_batch_in_parquet_via_storage_cache(
     Ok(None)
 }
 
-/// Check if a PK value exists in a single Parquet file via streaming (async, with MVCC version resolution).
+/// Check if a PK value exists in a single Parquet file via streaming (async, with MVCC version
+/// resolution).
 ///
 /// Uses column-projected streaming — only reads pk/_seq/_deleted column chunks,
 /// never loads the entire file into memory.
@@ -1787,7 +1796,7 @@ where
             let pk_str = unified_dml::extract_user_pk_value(row_data, pk_name)?;
             let user_scope = resolve_user_scope(scope);
 
-            //Step 1: Check hot storage (RocksDB) - fast PK index lookup
+            // Step 1: Check hot storage (RocksDB) - fast PK index lookup
             if provider.find_row_key_by_id_field(user_scope, &pk_str).await?.is_some() {
                 return Err(KalamDbError::AlreadyExists(format!(
                     "Primary key violation: value '{}' already exists in column '{}' (hot storage)",
@@ -1813,7 +1822,8 @@ where
 
             if let crate::utils::pk::PkCheckResult::FoundInCold { segment_path } = check_result {
                 return Err(KalamDbError::AlreadyExists(format!(
-                    "Primary key violation: value '{}' already exists in column '{}' (cold storage: {})",
+                    "Primary key violation: value '{}' already exists in column '{}' (cold \
+                     storage: {})",
                     pk_str, pk_name, segment_path
                 )));
             }
@@ -1840,8 +1850,8 @@ pub fn warn_if_unfiltered_scan(
 ) {
     // if filter.is_none() && limit.is_none() {
     //     log::warn!(
-    //         "⚠️  [UNFILTERED SCAN] table={} type={} | No filter or limit provided - scanning ALL rows. \
-    //          This may cause performance issues for large tables.",
+    //         "⚠️  [UNFILTERED SCAN] table={} type={} | No filter or limit provided - scanning ALL
+    // rows. \          This may cause performance issues for large tables.",
     //         table_id,
     //         table_type.as_str()
     //     );
@@ -1944,7 +1954,8 @@ where
 
     if provider.find_row_key_by_id_field(user_scope, &new_pk_str).await?.is_some() {
         return Err(KalamDbError::AlreadyExists(format!(
-            "Primary key violation: value '{}' already exists in column '{}' (UPDATE would create duplicate)",
+            "Primary key violation: value '{}' already exists in column '{}' (UPDATE would create \
+             duplicate)",
             new_pk_str, pk_name
         )));
     }
@@ -2072,8 +2083,9 @@ pub fn build_count_only_batch(count: usize) -> Result<RecordBatch, KalamDbError>
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use datafusion::arrow::datatypes::{DataType, Field, Schema};
+
+    use super::*;
 
     #[test]
     fn compute_metadata_only_cold_columns_returns_pk_and_mvcc_columns() {
@@ -2104,15 +2116,7 @@ mod tests {
         assert!(columns.iter().any(|column| column == "id"));
         assert!(columns.iter().any(|column| column == "name"));
         assert!(columns.iter().any(|column| column == SystemColumnNames::SEQ));
-        assert!(
-            columns
-                .iter()
-                .any(|column| column == SystemColumnNames::COMMIT_SEQ)
-        );
-        assert!(
-            columns
-                .iter()
-                .any(|column| column == SystemColumnNames::DELETED)
-        );
+        assert!(columns.iter().any(|column| column == SystemColumnNames::COMMIT_SEQ));
+        assert!(columns.iter().any(|column| column == SystemColumnNames::DELETED));
     }
 }

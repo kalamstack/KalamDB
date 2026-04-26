@@ -1,7 +1,6 @@
 mod support;
 
 use ntest::timeout;
-
 use support::{
     await_user_leader, begin_transaction, commit_transaction, insert_user_row,
     new_cluster_user_service_with_tables, open_session, parse_transaction_id,

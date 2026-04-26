@@ -1,22 +1,27 @@
-use crate::error::KalamDbError;
-use crate::error_extensions::KalamDbResultExt;
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::{RecordBatch, RecordBatchOptions};
-use datafusion::catalog::Session;
-use datafusion::logical_expr::{Expr, Operator};
-use datafusion::scalar::ScalarValue;
-use kalamdb_commons::constants::SystemColumnNames;
-use kalamdb_commons::conversions::arrow_json_conversion::json_rows_to_arrow_batch;
-use kalamdb_commons::ids::SeqId;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::{ReadContext, Role, UserId};
+use std::{collections::BTreeMap, sync::Arc};
+
+use datafusion::{
+    arrow::{
+        datatypes::SchemaRef,
+        record_batch::{RecordBatch, RecordBatchOptions},
+    },
+    catalog::Session,
+    logical_expr::{Expr, Operator},
+    scalar::ScalarValue,
+};
+use kalamdb_commons::{
+    constants::SystemColumnNames,
+    conversions::arrow_json_conversion::json_rows_to_arrow_batch,
+    ids::SeqId,
+    models::{rows::Row, ReadContext, Role, UserId},
+};
 use kalamdb_session_datafusion::{
     extract_full_user_context as extract_full_user_context_session,
     extract_user_context as extract_user_context_session,
 };
 use once_cell::sync::Lazy;
-use std::collections::BTreeMap;
-use std::sync::Arc;
+
+use crate::{error::KalamDbError, error_extensions::KalamDbResultExt};
 
 static SYSTEM_USER_ID: Lazy<UserId> = Lazy::new(|| UserId::from("_system"));
 
@@ -139,7 +144,8 @@ pub fn extract_user_context(state: &dyn Session) -> Result<(&UserId, Role), Kala
     })
 }
 
-/// Extract full session context (user_id, role, read_context) from DataFusion SessionState extensions.
+/// Extract full session context (user_id, role, read_context) from DataFusion SessionState
+/// extensions.
 ///
 /// Use this when you need to check read routing (leader-only reads in Raft cluster mode).
 pub fn extract_full_user_context(

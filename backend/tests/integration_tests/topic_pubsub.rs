@@ -13,15 +13,23 @@
 //! 2. Async notification verification helpers
 //! 3. Extended timeout handling for CDC workflows
 
-use crate::test_support::*;
-use kalam_client::{models::{QueryResponse, ResponseStatus}, parse_i64};
-use kalamdb_commons::{models::{ConsumerGroupId, TopicId}, Role};
+use std::sync::Arc;
+
+use kalam_client::{
+    models::{QueryResponse, ResponseStatus},
+    parse_i64,
+};
+use kalamdb_commons::{
+    models::{ConsumerGroupId, TopicId},
+    Role,
+};
 use kalamdb_core::app_context::AppContext;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use serial_test::serial;
-use std::sync::Arc;
+
+use crate::test_support::*;
 
 #[derive(Debug, Clone, Deserialize)]
 struct HttpConsumeMessage {
@@ -147,7 +155,8 @@ async fn wait_until_group_reads_at_least(
 
         if tokio::time::Instant::now() >= deadline {
             panic!(
-                "Timed out waiting for at least {} messages (got {}) for topic='{}' group='{}' start='{}' limit={}",
+                "Timed out waiting for at least {} messages (got {}) for topic='{}' group='{}' \
+                 start='{}' limit={}",
                 min_messages,
                 aggregated_messages.len(),
                 topic_id,
@@ -189,10 +198,7 @@ async fn setup_topic_source_fixture(server: &TestServer, fixture_name: &str) -> 
     );
 
     let create_table = server
-        .execute_sql(&format!(
-            "CREATE TABLE {} (id INT PRIMARY KEY, payload TEXT)",
-            source_table
-        ))
+        .execute_sql(&format!("CREATE TABLE {} (id INT PRIMARY KEY, payload TEXT)", source_table))
         .await;
     assert_eq!(
         create_table.status,
@@ -201,9 +207,7 @@ async fn setup_topic_source_fixture(server: &TestServer, fixture_name: &str) -> 
         create_table.error
     );
 
-    let create_topic = server
-        .execute_sql(&format!("CREATE TOPIC {} PARTITIONS 1", topic))
-        .await;
+    let create_topic = server.execute_sql(&format!("CREATE TOPIC {} PARTITIONS 1", topic)).await;
     assert_eq!(
         create_topic.status,
         ResponseStatus::Success,
@@ -244,7 +248,8 @@ async fn wait_until_sql_consume_row_count_at_least(
 
         if tokio::time::Instant::now() >= deadline {
             panic!(
-                "Timed out waiting for SQL consume to return at least {} row(s): sql='{}' response={:?}",
+                "Timed out waiting for SQL consume to return at least {} row(s): sql='{}' \
+                 response={:?}",
                 min_rows, sql, response.error
             );
         }
@@ -288,7 +293,8 @@ async fn assert_topic_offset_state(
         .expect("Failed to read topic offsets from provider");
 
     let sql = format!(
-        "SELECT topic_id, group_id, partition_id, last_acked_offset, updated_at FROM system.topic_offsets WHERE topic_id = '{}' AND group_id = '{}' ORDER BY partition_id",
+        "SELECT topic_id, group_id, partition_id, last_acked_offset, updated_at FROM \
+         system.topic_offsets WHERE topic_id = '{}' AND group_id = '{}' ORDER BY partition_id",
         topic, group
     );
     let response = server.execute_sql(&sql).await;
@@ -313,15 +319,11 @@ async fn assert_topic_offset_state(
             assert_eq!(rows.len(), 1, "Expected exactly one SQL offset row");
             let row = &rows[0];
             assert_eq!(
-                row.get("topic_id")
-                    .and_then(|value| json_string(value.inner()))
-                    .as_deref(),
+                row.get("topic_id").and_then(|value| json_string(value.inner())).as_deref(),
                 Some(topic)
             );
             assert_eq!(
-                row.get("group_id")
-                    .and_then(|value| json_string(value.inner()))
-                    .as_deref(),
+                row.get("group_id").and_then(|value| json_string(value.inner())).as_deref(),
                 Some(group)
             );
             assert_eq!(row.get("partition_id").map(parse_i64), Some(0));
@@ -503,19 +505,14 @@ async fn test_ack_offset() {
     let create_namespace = server.execute_sql(&format!("CREATE NAMESPACE {}", namespace)).await;
     assert_eq!(create_namespace.status, ResponseStatus::Success);
 
-    let create_topic = server
-        .execute_sql(&format!("CREATE TOPIC {} PARTITIONS 1", topic))
-        .await;
+    let create_topic = server.execute_sql(&format!("CREATE TOPIC {} PARTITIONS 1", topic)).await;
     assert_eq!(create_topic.status, ResponseStatus::Success);
 
     assert_topic_offset_state(&server, &topic, &group, None).await;
 
     // Empty consume should not persist an auto-ack row.
     let consume = server
-        .execute_sql(&format!(
-            "CONSUME FROM {} GROUP '{}' FROM EARLIEST LIMIT 10",
-            topic, group
-        ))
+        .execute_sql(&format!("CONSUME FROM {} GROUP '{}' FROM EARLIEST LIMIT 10", topic, group))
         .await;
     assert_eq!(consume.status, ResponseStatus::Success);
     assert_topic_offset_state(&server, &topic, &group, None).await;
@@ -697,8 +694,8 @@ async fn test_cdc_insert_to_consume_workflow() {
         .await;
 
     // 3. Insert data (should trigger CDC → topic)
-    let insert_1 =
-        "INSERT INTO test_cdc_ns.events (id, event_type, data) VALUES ('evt1', 'user_signup', 'John Doe')";
+    let insert_1 = "INSERT INTO test_cdc_ns.events (id, event_type, data) VALUES ('evt1', \
+                    'user_signup', 'John Doe')";
     let result_1 = server.execute_sql(insert_1).await;
     assert!(
         result_1.status == ResponseStatus::Success,
@@ -706,8 +703,8 @@ async fn test_cdc_insert_to_consume_workflow() {
         result_1.error
     );
 
-    let insert_2 =
-        "INSERT INTO test_cdc_ns.events (id, event_type, data) VALUES ('evt2', 'user_login', 'Jane Smith')";
+    let insert_2 = "INSERT INTO test_cdc_ns.events (id, event_type, data) VALUES ('evt2', \
+                    'user_login', 'Jane Smith')";
     let result_2 = server.execute_sql(insert_2).await;
     assert!(
         result_2.status == ResponseStatus::Success,
@@ -742,7 +739,8 @@ async fn test_cdc_insert_to_consume_workflow() {
         assert_eq!(
             first_batch.schema.len(),
             8,
-            "Should have 8 schema fields (topic_id, partition_id, offset, key, payload, timestamp_ms, user_id, op)"
+            "Should have 8 schema fields (topic_id, partition_id, offset, key, payload, \
+             timestamp_ms, user_id, op)"
         );
 
         // Verify column names match schema
@@ -762,7 +760,9 @@ async fn test_cdc_insert_to_consume_workflow() {
     }
 
     let http_server = http_server::get_global_server().await;
-    let auth_header = http_server.bearer_auth_header("root").expect("Failed to create root auth header");
+    let auth_header = http_server
+        .bearer_auth_header("root")
+        .expect("Failed to create root auth header");
     let group = format!("cdc-key-check-{}", consolidated_helpers::unique_table("group"));
     let http_consume = wait_until_group_reads_at_least(
         http_server,
@@ -775,11 +775,8 @@ async fn test_cdc_insert_to_consume_workflow() {
     )
     .await;
 
-    let consumed_keys: std::collections::HashSet<String> = http_consume
-        .messages
-        .iter()
-        .filter_map(|message| message.key.clone())
-        .collect();
+    let consumed_keys: std::collections::HashSet<String> =
+        http_consume.messages.iter().filter_map(|message| message.key.clone()).collect();
     assert!(consumed_keys.contains("evt1"), "Expected consumed key set to contain evt1");
     assert!(consumed_keys.contains("evt2"), "Expected consumed key set to contain evt2");
 }
@@ -861,10 +858,7 @@ async fn test_sql_group_consume_resumes_from_committed_offsets_after_cache_clear
     assert_topic_offset_state(&server, &topic, &group, None).await;
 
     let first_consume = server
-        .execute_sql(&format!(
-            "CONSUME FROM {} GROUP '{}' FROM EARLIEST LIMIT 1",
-            topic, group
-        ))
+        .execute_sql(&format!("CONSUME FROM {} GROUP '{}' FROM EARLIEST LIMIT 1", topic, group))
         .await;
     assert_eq!(first_consume.status, ResponseStatus::Success);
     assert_eq!(
@@ -879,10 +873,7 @@ async fn test_sql_group_consume_resumes_from_committed_offsets_after_cache_clear
     server.app_context.topic_publisher().clear_cache();
 
     let second_consume = server
-        .execute_sql(&format!(
-            "CONSUME FROM {} GROUP '{}' FROM EARLIEST LIMIT 10",
-            topic, group
-        ))
+        .execute_sql(&format!("CONSUME FROM {} GROUP '{}' FROM EARLIEST LIMIT 10", topic, group))
         .await;
     assert_eq!(second_consume.status, ResponseStatus::Success);
     assert_eq!(
@@ -913,10 +904,7 @@ async fn test_sql_group_consume_resumes_from_committed_offsets_after_cache_clear
     server.app_context.topic_publisher().clear_cache();
 
     let third_consume = server
-        .execute_sql(&format!(
-            "CONSUME FROM {} GROUP '{}' FROM EARLIEST LIMIT 10",
-            topic, group
-        ))
+        .execute_sql(&format!("CONSUME FROM {} GROUP '{}' FROM EARLIEST LIMIT 10", topic, group))
         .await;
     assert_eq!(third_consume.status, ResponseStatus::Success);
     assert_eq!(
@@ -963,11 +951,10 @@ async fn test_sql_group_offsets_are_isolated_per_group() {
     ];
 
     for (group, limit, expected_last_acked) in &group_specs {
-        let consume_sql = format!(
-            "CONSUME FROM {} GROUP '{}' FROM EARLIEST LIMIT {}",
-            topic, group, limit
-        );
-        let response = wait_until_sql_consume_row_count_at_least(&server, &consume_sql, *limit).await;
+        let consume_sql =
+            format!("CONSUME FROM {} GROUP '{}' FROM EARLIEST LIMIT {}", topic, group, limit);
+        let response =
+            wait_until_sql_consume_row_count_at_least(&server, &consume_sql, *limit).await;
         assert_eq!(
             response.row_count(),
             *limit,
@@ -1005,16 +992,14 @@ async fn test_sql_group_offsets_are_isolated_per_group() {
     expected_snapshot.sort();
     assert_eq!(
         provider_snapshot, expected_snapshot,
-        "Each group should persist its own last_acked_offset without leaking another group's cursor"
+        "Each group should persist its own last_acked_offset without leaking another group's \
+         cursor"
     );
 
     server.app_context.topic_publisher().clear_cache();
 
     for (group, _, expected_last_acked) in &group_specs {
-        let resume_sql = format!(
-            "CONSUME FROM {} GROUP '{}' FROM EARLIEST LIMIT 1",
-            topic, group
-        );
+        let resume_sql = format!("CONSUME FROM {} GROUP '{}' FROM EARLIEST LIMIT 1", topic, group);
         let resumed = wait_until_sql_consume_row_count_at_least(&server, &resume_sql, 1).await;
         let expected_next_offset = *expected_last_acked as i64 + 1;
         assert_eq!(
@@ -1075,10 +1060,7 @@ async fn test_sql_group_from_latest_tails_new_messages_and_then_persists_offset(
     assert_eq!(ready.row_count(), 5, "Expected stateless consume to observe the backlog");
 
     let latest_consume = server
-        .execute_sql(&format!(
-            "CONSUME FROM {} GROUP '{}' FROM LATEST LIMIT 10",
-            topic, group
-        ))
+        .execute_sql(&format!("CONSUME FROM {} GROUP '{}' FROM LATEST LIMIT 10", topic, group))
         .await;
     assert_eq!(latest_consume.status, ResponseStatus::Success);
     assert_eq!(latest_consume.row_count(), 0, "New latest group should not replay backlog");
@@ -1106,13 +1088,14 @@ async fn test_sql_group_from_latest_tails_new_messages_and_then_persists_offset(
     server.app_context.topic_publisher().clear_cache();
 
     let resumed = server
-        .execute_sql(&format!(
-            "CONSUME FROM {} GROUP '{}' FROM 0 LIMIT 10",
-            topic, group
-        ))
+        .execute_sql(&format!("CONSUME FROM {} GROUP '{}' FROM 0 LIMIT 10", topic, group))
         .await;
     assert_eq!(resumed.status, ResponseStatus::Success);
-    assert_eq!(resumed.row_count(), 0, "Committed latest-group cursor should prevent replay after cache clear");
+    assert_eq!(
+        resumed.row_count(),
+        0,
+        "Committed latest-group cursor should prevent replay after cache clear"
+    );
     assert_topic_offset_state(&server, &topic, &group, Some(6)).await;
 }
 
@@ -1621,7 +1604,10 @@ async fn test_clear_topic() {
 
     // Verify messages are cleared by consuming again
     let verify_result = server
-        .execute_sql("CONSUME FROM test_clear_ns.messages_topic GROUP 'verify_group' START EARLIEST LIMIT 10")
+        .execute_sql(
+            "CONSUME FROM test_clear_ns.messages_topic GROUP 'verify_group' START EARLIEST LIMIT \
+             10",
+        )
         .await;
     assert_eq!(
         verify_result.status,

@@ -24,12 +24,12 @@ pub use envelope::{encode_envelope_inline, CodecKind, EntityEnvelope};
 /// ## Example
 ///
 /// ```rust
-/// use serde::{Deserialize, Serialize};
 /// use kalamdb_commons::serialization::KSerializable;
+/// use serde::{Deserialize, Serialize};
 ///
-/// #[derive(Serialize, Deserialize, )]
+/// #[derive(Serialize, Deserialize)]
 /// struct MyEntity {
-///     id: String,
+///     id:    String,
 ///     value: i64,
 /// }
 ///

@@ -6,7 +6,8 @@
 //! ## Architecture
 //!
 //! - **standard.rs**: Wraps sqlparser-rs for ANSI SQL, PostgreSQL, and MySQL syntax
-//! - **extensions.rs**: Custom parsers for KalamDB-specific commands (CREATE STORAGE, STORAGE FLUSH, STORAGE COMPACT, etc.)
+//! - **extensions.rs**: Custom parsers for KalamDB-specific commands (CREATE STORAGE, STORAGE
+//!   FLUSH, STORAGE COMPACT, etc.)
 //! - **system.rs**: Parsers for system table queries
 //! - **utils.rs**: Common parsing utilities (keyword extraction, normalization, etc.)
 //! - **query_parser.rs**: Safe SQL query parsing for live queries and subscriptions

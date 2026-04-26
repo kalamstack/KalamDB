@@ -3,21 +3,15 @@
 //! Provides utilities to translate `Manifest` metadata into
 //! concrete file/row-group selections for efficient reads.
 
-use crate::error::KalamDbError;
-use crate::error_extensions::KalamDbResultExt;
-use datafusion::arrow::compute::cast;
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::RecordBatch;
-use futures_util::future::try_join_all;
-use futures_util::TryStreamExt;
-use kalamdb_commons::ids::SeqId;
-use kalamdb_commons::models::UserId;
-use kalamdb_commons::schemas::TableType;
-use kalamdb_commons::TableId;
-use kalamdb_filestore::StorageCached;
-use kalamdb_system::Manifest;
-use kalamdb_system::SchemaRegistry as SchemaRegistryTrait;
 use std::sync::Arc;
+
+use datafusion::arrow::{compute::cast, datatypes::SchemaRef, record_batch::RecordBatch};
+use futures_util::{future::try_join_all, TryStreamExt};
+use kalamdb_commons::{ids::SeqId, models::UserId, schemas::TableType, TableId};
+use kalamdb_filestore::StorageCached;
+use kalamdb_system::{Manifest, SchemaRegistry as SchemaRegistryTrait};
+
+use crate::{error::KalamDbError, error_extensions::KalamDbResultExt};
 
 /// Planned selection for a single Parquet file
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -291,7 +285,8 @@ impl ManifestAccessPlanner {
         //     table_id
         // );
 
-        // Build projection: for each field in current_schema, find it in old_schema or create NULL array
+        // Build projection: for each field in current_schema, find it in old_schema or create NULL
+        // array
         let mut projected_columns: Vec<Arc<dyn datafusion::arrow::array::Array>> = Vec::new();
 
         for current_field in current_schema.fields() {
@@ -415,9 +410,10 @@ impl ManifestAccessPlanner {
 mod tests {
     use std::collections::HashMap;
 
-    use super::*;
     use kalamdb_commons::models::rows::StoredScalarValue;
     use kalamdb_system::{ColumnStats, SegmentMetadata};
+
+    use super::*;
 
     fn numeric_stats(min: i64, max: i64) -> ColumnStats {
         ColumnStats::new(

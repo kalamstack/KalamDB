@@ -13,10 +13,11 @@
 //! Note: Full multi-node cluster tests require multiple server instances.
 //! These smoke tests focus on single-node behavior that must work in both modes.
 
-use crate::common::*;
+use std::{sync::OnceLock, time::Duration};
+
 use kalam_client::KalamLinkTimeouts;
-use std::sync::OnceLock;
-use std::time::Duration;
+
+use crate::common::*;
 
 fn cluster_runtime() -> &'static tokio::runtime::Runtime {
     static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
@@ -430,9 +431,11 @@ fn smoke_test_cluster_shared_table_consistency() {
 
     // Insert config as root
     execute_sql_as_root_via_client(&format!(
-        "INSERT INTO {}.global_config (config_key, config_value, updated_by) VALUES ('app_version', '1.0.0', 'root')",
+        "INSERT INTO {}.global_config (config_key, config_value, updated_by) VALUES \
+         ('app_version', '1.0.0', 'root')",
         namespace
-    )).expect("Failed to insert config");
+    ))
+    .expect("Failed to insert config");
     println!("  ✓ Config inserted by root");
 
     // Create a test user
@@ -670,8 +673,10 @@ fn smoke_test_cluster_job_tracking() {
 
     // Check system.jobs for flush jobs
     let result = execute_sql_as_root_via_client(
-        "SELECT job_id, job_type, status FROM system.jobs WHERE job_type = 'flush' ORDER BY created_at DESC LIMIT 5"
-    ).expect("Failed to query system.jobs");
+        "SELECT job_id, job_type, status FROM system.jobs WHERE job_type = 'flush' ORDER BY \
+         created_at DESC LIMIT 5",
+    )
+    .expect("Failed to query system.jobs");
 
     println!("  Recent flush jobs:\n{}", result);
 
@@ -737,9 +742,11 @@ fn smoke_test_cluster_storage_operations() {
 
     // Verify table references the storage
     let result = execute_sql_as_root_via_client(&format!(
-        "SELECT options FROM system.schemas WHERE namespace_id = '{}' AND table_name = 'stored_data'",
+        "SELECT options FROM system.schemas WHERE namespace_id = '{}' AND table_name = \
+         'stored_data'",
         namespace
-    )).expect("Failed to query table options");
+    ))
+    .expect("Failed to query table options");
 
     assert!(
         result.contains("local") || result.contains("STORAGE_ID"),

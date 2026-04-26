@@ -1,14 +1,20 @@
 use std::time::{Duration, Instant};
 
-use crate::auth::AuthProvider;
-use crate::client::KalamLinkClientBuilder;
-use crate::consumer::core::offset_manager::OffsetManager;
-use crate::consumer::core::poller::{AckRequest, ConsumeRequest, ConsumeResponse, ConsumerPoller};
-use crate::consumer::models::{AutoOffsetReset, CommitResult, ConsumerConfig, ConsumerRecord};
-use crate::error::{KalamLinkError, Result};
-use crate::models::ConnectionOptions;
-use crate::timeouts::KalamLinkTimeouts;
-use crate::KalamLinkClient;
+use crate::{
+    auth::AuthProvider,
+    client::KalamLinkClientBuilder,
+    consumer::{
+        core::{
+            offset_manager::OffsetManager,
+            poller::{AckRequest, ConsumeRequest, ConsumeResponse, ConsumerPoller},
+        },
+        models::{AutoOffsetReset, CommitResult, ConsumerConfig, ConsumerRecord},
+    },
+    error::{KalamLinkError, Result},
+    models::ConnectionOptions,
+    timeouts::KalamLinkTimeouts,
+    KalamLinkClient,
+};
 
 pub struct TopicConsumer {
     #[allow(dead_code)] // retained for lifetime — owns the reqwest::Client
@@ -422,8 +428,7 @@ impl ConsumerBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::consumer::core::poller::ConsumerPoller;
-    use crate::consumer::models::ConsumerConfig;
+    use crate::consumer::{core::poller::ConsumerPoller, models::ConsumerConfig};
 
     /// Build a minimal `TopicConsumer` without a real server so we can test
     /// state-flag behaviour purely in-memory.

@@ -18,16 +18,22 @@
 //! `true` in [`dart_create_client`], events are queued internally and
 //! retrieved via [`dart_next_connection_event`].
 
+use std::{
+    collections::VecDeque,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
+
+use flutter_rust_bridge::frb;
+use tokio::sync::{Mutex, Notify};
+
 use crate::models::{
     DartAuthProvider, DartChangeEvent, DartConnectionError, DartConnectionEvent,
     DartDisconnectReason, DartLiveRowsConfig, DartLiveRowsEvent, DartLoginResponse,
     DartQueryResponse, DartSubscriptionConfig,
 };
-use flutter_rust_bridge::frb;
-use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use tokio::sync::{Mutex, Notify};
 
 const DART_INITIAL_RECONNECT_DELAY_MS: u64 = 200;
 const DART_MAX_RECONNECT_DELAY_MS: u64 = 2_000;
@@ -63,18 +69,18 @@ pub struct DartKalamClient {
 /// * `auth` — authentication method (basic, JWT, or none).
 /// * `timeout_ms` — optional HTTP request timeout in milliseconds (default 30 000).
 /// * `max_retries` — optional retry count for idempotent queries (default 3).
-/// * `enable_connection_events` — when `true`, connection lifecycle events
-///   (connect, disconnect, error, receive, send) are queued internally and
-///   can be retrieved via [`dart_next_connection_event`].
-/// * `disable_compression` — when `true`, the WebSocket URL includes
-///   `?compress=false` so the server sends plain-text JSON frames instead of
-///   gzip-compressed binary frames. Useful during development.
-/// * `keepalive_interval_ms` — optional WebSocket keep-alive ping interval
-///   in milliseconds (default 10 000). Set to 0 to disable keep-alive pings.
-/// * `ws_lazy_connect` — controls when the WebSocket connection is established.
-///   When `true` (the default), the connection is deferred until the first
-///   `subscribe()` call. When `false`, the connection is established eagerly.
-///   Authentication uses the same provider configured for HTTP queries.
+/// * `enable_connection_events` — when `true`, connection lifecycle events (connect, disconnect,
+///   error, receive, send) are queued internally and can be retrieved via
+///   [`dart_next_connection_event`].
+/// * `disable_compression` — when `true`, the WebSocket URL includes `?compress=false` so the
+///   server sends plain-text JSON frames instead of gzip-compressed binary frames. Useful during
+///   development.
+/// * `keepalive_interval_ms` — optional WebSocket keep-alive ping interval in milliseconds (default
+///   10 000). Set to 0 to disable keep-alive pings.
+/// * `ws_lazy_connect` — controls when the WebSocket connection is established. When `true` (the
+///   default), the connection is deferred until the first `subscribe()` call. When `false`, the
+///   connection is established eagerly. Authentication uses the same provider configured for HTTP
+///   queries.
 ///
 /// **Note:** This function intentionally omits `#[frb(sync)]` so that FRB
 /// dispatches it to a worker thread via `executeNormal`. The client
@@ -206,9 +212,11 @@ pub fn dart_update_auth(client: &DartKalamClient, auth: DartAuthProvider) -> any
 
 #[cfg(test)]
 mod tests {
-    use super::build_dart_connection_options;
-    use super::{DART_INITIAL_RECONNECT_DELAY_MS, DART_MAX_RECONNECT_DELAY_MS};
     use kalam_client::models::SerializationType;
+
+    use super::{
+        build_dart_connection_options, DART_INITIAL_RECONNECT_DELAY_MS, DART_MAX_RECONNECT_DELAY_MS,
+    };
 
     #[test]
     fn dart_connection_options_default_to_msgpack() {
@@ -328,8 +336,8 @@ fn build_event_handlers(
 
 /// Execute a SQL query, optionally with parameters and namespace.
 ///
-/// * `params_json` — JSON-encoded array of parameter values, e.g. `'["val1", 42]'`.
-///   Pass `null` for no parameters.
+/// * `params_json` — JSON-encoded array of parameter values, e.g. `'["val1", 42]'`. Pass `null` for
+///   no parameters.
 /// * `namespace` — optional namespace context for unqualified table names.
 pub async fn dart_execute_query(
     client: &DartKalamClient,
@@ -500,8 +508,8 @@ pub async fn dart_is_connected(client: &DartKalamClient) -> anyhow::Result<bool>
 /// This sends an explicit unsubscribe command that:
 /// 1. Removes the subscription from the client-side map
 /// 2. Sends an unsubscribe message to the server
-/// 3. Drops the event channel, causing any blocking
-///    [`dart_subscription_next`] call to return `None`
+/// 3. Drops the event channel, causing any blocking [`dart_subscription_next`] call to return
+///    `None`
 ///
 /// Unlike [`dart_subscription_close`], this does **not** require the
 /// `DartSubscription` mutex, so it can be called safely even while

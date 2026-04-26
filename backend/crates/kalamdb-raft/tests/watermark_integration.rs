@@ -8,21 +8,23 @@
 //! NOTE: Tests that use the global MetadataCoordinator singleton are marked
 //! with `#[serial]` to avoid race conditions.
 
-use kalamdb_commons::models::rows::Row;
-use std::collections::BTreeMap;
-use std::sync::Arc;
-use tokio::time::{sleep, Duration};
+use std::{collections::BTreeMap, sync::Arc};
 
-use kalamdb_commons::models::{NamespaceId, UserId};
-use kalamdb_commons::TableId;
-use kalamdb_raft::codec::command_codec::{encode_shared_data_command, encode_user_data_command};
-use kalamdb_raft::commands::{SharedDataCommand, UserDataCommand};
-use kalamdb_raft::state_machine::{
-    get_coordinator, init_coordinator, MetadataCoordinator, PendingBuffer, PendingCommand,
-    SharedDataStateMachine, UserDataStateMachine,
+use kalamdb_commons::{
+    models::{rows::Row, NamespaceId, UserId},
+    TableId,
 };
-use kalamdb_raft::KalamStateMachine;
+use kalamdb_raft::{
+    codec::command_codec::{encode_shared_data_command, encode_user_data_command},
+    commands::{SharedDataCommand, UserDataCommand},
+    state_machine::{
+        get_coordinator, init_coordinator, MetadataCoordinator, PendingBuffer, PendingCommand,
+        SharedDataStateMachine, UserDataStateMachine,
+    },
+    KalamStateMachine,
+};
 use serial_test::serial;
+use tokio::time::{sleep, Duration};
 
 // =============================================================================
 // PendingBuffer Unit Tests

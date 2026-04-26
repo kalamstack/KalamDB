@@ -1,11 +1,14 @@
+use std::{collections::HashMap, sync::Arc};
+
+use serde_json::json;
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{TcpListener, TcpStream},
+    sync::Mutex,
+};
+
 use super::*;
 use crate::error::KalamLinkError;
-use serde_json::json;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Mutex;
 
 #[test]
 fn test_builder_pattern() {
@@ -139,7 +142,8 @@ async fn handle_test_request(
     };
 
     let response = format!(
-        "{status_line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+        "{status_line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: \
+         close\r\n\r\n{}",
         body.len(),
         body
     );

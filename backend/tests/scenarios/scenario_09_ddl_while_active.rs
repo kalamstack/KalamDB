@@ -7,14 +7,14 @@
 //! - [x] Reads remain correct
 //! - [x] Subscription continues (or fails gracefully with clear error)
 
-use super::helpers::*;
+use std::time::Duration;
 
 use futures_util::StreamExt;
-use kalam_client::models::ChangeEvent;
-use kalam_client::models::ResponseStatus;
+use kalam_client::models::{ChangeEvent, ResponseStatus};
 use kalamdb_commons::Role;
-use std::time::Duration;
 use tokio::time::sleep;
+
+use super::helpers::*;
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -93,15 +93,17 @@ async fn test_scenario_09_ddl_while_active() -> anyhow::Result<()> {
         // Step 5: Insert new rows with new column
         // =========================================================
         let resp = client
-                    .execute_query(
-                        &format!(
-                            "INSERT INTO {}.data (id, name, value, description) VALUES (100, 'new_item', 1000, 'has description')",
-                            ns
-                        ), None,
-                        None,
-                        None,
-                    )
-                    .await?;
+            .execute_query(
+                &format!(
+                    "INSERT INTO {}.data (id, name, value, description) VALUES (100, 'new_item', \
+                     1000, 'has description')",
+                    ns
+                ),
+                None,
+                None,
+                None,
+            )
+            .await?;
 
         if resp.success() {
             println!("Insert with new column succeeded");
@@ -221,15 +223,21 @@ async fn test_scenario_09_drop_column() -> anyhow::Result<()> {
     // Insert data with old_column
     for i in 1..=5 {
         let resp = client
-                    .execute_query(
-                        &format!(
-                            "INSERT INTO {}.data (id, name, old_column, value) VALUES ({}, 'item_{}', 'old_value_{}', {})",
-                            ns, i, i, i, i * 10
-                        ), None,
-                        None,
-                        None,
-                    )
-                    .await?;
+            .execute_query(
+                &format!(
+                    "INSERT INTO {}.data (id, name, old_column, value) VALUES ({}, 'item_{}', \
+                     'old_value_{}', {})",
+                    ns,
+                    i,
+                    i,
+                    i,
+                    i * 10
+                ),
+                None,
+                None,
+                None,
+            )
+            .await?;
         assert!(resp.success(), "Insert {}", i);
     }
 
@@ -257,7 +265,8 @@ async fn test_scenario_09_drop_column() -> anyhow::Result<()> {
         let resp = client
             .execute_query(
                 &format!(
-                    "INSERT INTO {}.data (id, name, old_column, value) VALUES (100, 'new', 'should_fail', 100)",
+                    "INSERT INTO {}.data (id, name, old_column, value) VALUES (100, 'new', \
+                     'should_fail', 100)",
                     ns
                 ),
                 None,

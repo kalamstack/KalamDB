@@ -2,9 +2,9 @@
 //!
 //! Ensures all nodes return identical data, not just row counts.
 
-use crate::cluster_common::*;
-use crate::common::*;
 use kalam_client::KalamCellValue;
+
+use crate::{cluster_common::*, common::*};
 
 fn normalize_rows(rows: &[Vec<KalamCellValue>]) -> Vec<String> {
     rows.iter()

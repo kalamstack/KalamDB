@@ -1,11 +1,10 @@
 // Smoke Tests: WebSocket Subscription Close & Cleanup
 //
 // Verifies that:
-//   1. Explicitly calling `close()` on a SubscriptionManager sends an Unsubscribe
-//      frame and removes the subscription from `system.live`.
-//   2. Dropping a SubscriptionManager without calling `close()` triggers the
-//      Drop impl, which spawns a background cleanup task that also removes
-//      the entry from `system.live`.
+//   1. Explicitly calling `close()` on a SubscriptionManager sends an Unsubscribe frame and removes
+//      the subscription from `system.live`.
+//   2. Dropping a SubscriptionManager without calling `close()` triggers the Drop impl, which
+//      spawns a background cleanup task that also removes the entry from `system.live`.
 //   3. `SubscriptionManager::is_closed()` returns the correct state.
 //
 // These tests use short `#[ntest::timeout]` values; individual WebSocket
@@ -14,9 +13,11 @@
 // Run with:
 //   cargo test --test smoke smoke_test_subscription_close
 
-use crate::common::*;
-use kalam_client::{ChangeEvent, KalamLinkClient, KalamLinkTimeouts, SubscriptionConfig};
 use std::time::Duration;
+
+use kalam_client::{ChangeEvent, KalamLinkClient, KalamLinkTimeouts, SubscriptionConfig};
+
+use crate::common::*;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 

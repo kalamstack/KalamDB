@@ -1,29 +1,30 @@
 #![allow(dead_code, unused_imports)]
 extern crate kalam_cli;
 #[cfg(unix)]
+use std::os::unix::io::AsRawFd;
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    fs::OpenOptions,
+    io::{BufRead, BufReader},
+    net::TcpListener,
+    path::{Path, PathBuf},
+    process::{Child, Command, Stdio},
+    sync::{mpsc as std_mpsc, Mutex, OnceLock},
+    thread,
+    time::{Duration, Instant},
+};
+
+#[cfg(unix)]
 use libc::{flock, LOCK_EX, LOCK_UN};
 use rand::{distr::Alphanumeric, RngExt};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::fs::OpenOptions;
-use std::io::{BufRead, BufReader};
-use std::net::TcpListener;
-#[cfg(unix)]
-use std::os::unix::io::AsRawFd;
-use std::path::Path;
-use std::path::PathBuf;
-use std::process::Command;
-use std::process::{Child, Stdio};
-use std::sync::mpsc as std_mpsc;
-use std::sync::{Mutex, OnceLock};
-use std::thread;
-use std::time::Duration;
-use std::time::Instant;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System};
-use tokio::runtime::{Handle, Runtime};
-use tokio::sync::Mutex as TokioMutex;
+use tokio::{
+    runtime::{Handle, Runtime},
+    sync::Mutex as TokioMutex,
+};
 
 // Load environment variables from .env file at test startup
 fn load_env_file() {
@@ -61,14 +62,16 @@ fn shared_token_cache_lock_path() -> PathBuf {
 }
 
 // Re-export commonly used types for credential tests
-pub use kalam_cli::FileCredentialStore;
-pub use kalam_client::client::KalamLinkClientBuilder;
-pub use kalam_client::credentials::{CredentialStore, Credentials};
-pub use kalam_client::{AuthProvider, KalamLinkClient, KalamLinkTimeouts};
-pub use tempfile::TempDir;
-
 #[cfg(unix)]
 pub use std::os::unix::fs::PermissionsExt;
+
+pub use kalam_cli::FileCredentialStore;
+pub use kalam_client::{
+    client::KalamLinkClientBuilder,
+    credentials::{CredentialStore, Credentials},
+    AuthProvider, KalamLinkClient, KalamLinkTimeouts,
+};
+pub use tempfile::TempDir;
 
 static SERVER_URL: OnceLock<String> = OnceLock::new();
 static ROOT_PASSWORD: OnceLock<String> = OnceLock::new();
@@ -725,8 +728,7 @@ fn with_auto_test_server_state_lock<R>(
     #[cfg(unix)]
     {
         let lock_path = auto_test_server_state_lock_path();
-        let lock_file =
-            OpenOptions::new().create(true).read(true).write(true).open(&lock_path)?;
+        let lock_file = OpenOptions::new().create(true).read(true).write(true).open(&lock_path)?;
 
         unsafe {
             if flock(lock_file.as_raw_fd(), LOCK_EX) != 0 {
@@ -756,9 +758,8 @@ fn read_auto_test_server_state_locked(
         return Ok(None);
     }
 
-    let state = serde_json::from_str::<SharedAutoTestServerState>(&std::fs::read_to_string(
-        &state_path,
-    )?)?;
+    let state =
+        serde_json::from_str::<SharedAutoTestServerState>(&std::fs::read_to_string(&state_path)?)?;
     Ok(Some(state))
 }
 
@@ -766,10 +767,7 @@ fn write_auto_test_server_state_locked(
     state: &SharedAutoTestServerState,
 ) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(auto_test_server_state_root())?;
-    std::fs::write(
-        auto_test_server_state_file_path(),
-        serde_json::to_vec(state)?,
-    )?;
+    std::fs::write(auto_test_server_state_file_path(), serde_json::to_vec(state)?)?;
     Ok(())
 }
 
@@ -791,8 +789,7 @@ fn pid_is_alive(pid: u32) -> bool {
     guard.process(pid).is_some()
 }
 
-fn remove_stale_auto_test_server_leases_locked(
-) -> Result<Vec<u32>, Box<dyn std::error::Error>> {
+fn remove_stale_auto_test_server_leases_locked() -> Result<Vec<u32>, Box<dyn std::error::Error>> {
     let leases_dir = auto_test_server_leases_dir();
     std::fs::create_dir_all(&leases_dir)?;
 
@@ -830,10 +827,7 @@ fn register_auto_test_server_lease_locked(pid: u32) -> Result<(), Box<dyn std::e
 fn take_local_auto_test_server(pid: u32) -> Option<AutoTestServer> {
     let server_mutex = AUTO_TEST_SERVER.get()?;
     let mut guard = server_mutex.lock().ok()?;
-    if guard
-        .as_ref()
-        .is_some_and(|server| server.pid == pid && server.child.is_some())
-    {
+    if guard.as_ref().is_some_and(|server| server.pid == pid && server.child.is_some()) {
         guard.take()
     } else {
         None
@@ -868,9 +862,7 @@ fn terminate_auto_test_server_process(pid: u32) {
 
     #[cfg(windows)]
     {
-        let _ = Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .status();
+        let _ = Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).status();
     }
 }
 
@@ -1056,9 +1048,10 @@ fn ensure_auto_test_server() -> Option<(String, PathBuf)> {
                         let (tx, rx) = std::sync::mpsc::channel();
                         std::thread::spawn(move || {
                             let runtime = AUTO_TEST_RUNTIME.get_or_init(|| {
-                                Box::leak(Box::new(Runtime::new().expect(
-                                    "Failed to create auto test server runtime",
-                                )))
+                                Box::leak(Box::new(
+                                    Runtime::new()
+                                        .expect("Failed to create auto test server runtime"),
+                                ))
                             });
                             let result = (*runtime)
                                 .block_on(start_local_test_server())
@@ -1148,7 +1141,8 @@ fn kalamdb_server_bin() -> Result<PathBuf, Box<dyn std::error::Error>> {
         Ok(path)
     } else {
         Err(format!(
-            "kalamdb-server binary not found at {}. Build it with `cargo build -p kalamdb-server --bin kalamdb-server`.",
+            "kalamdb-server binary not found at {}. Build it with `cargo build -p kalamdb-server \
+             --bin kalamdb-server`.",
             path.display()
         )
         .into())
@@ -1535,13 +1529,13 @@ pub fn test_context() -> &'static TestContext {
                     eprintln!("✅ [TEST] Auto-started fresh server at {}", server_url);
                 } else {
                     panic!(
-                        "\n\n\
-                        ╔══════════════════════════════════════════════════════════════════╗\n\
-                        ║          FAILED TO START FRESH TEST SERVER                       ║\n\
-                        ╠══════════════════════════════════════════════════════════════════╣\n\
-                        ║  KALAMDB_SERVER_TYPE=fresh but could not auto-start server.      ║\n\
-                        ║  Build the server: cd backend && cargo build                    ║\n\
-                        ╚══════════════════════════════════════════════════════════════════╝\n"
+                        "\n\n╔══════════════════════════════════════════════════════════════════╗\\
+                         \
+                         n║          FAILED TO START FRESH TEST SERVER                       \
+                         ║\n╠══════════════════════════════════════════════════════════════════╣\\
+                         n║  KALAMDB_SERVER_TYPE=fresh but could not auto-start server.      ║\n║  \
+                         Build the server: cd backend && cargo build                    \
+                         ║\n╚══════════════════════════════════════════════════════════════════╝\n"
                     );
                 }
             },
@@ -1672,13 +1666,15 @@ pub fn test_context() -> &'static TestContext {
                             );
                             server_url = auto_url.clone();
                             eprintln!(
-                                "[TEST] Cluster URLs configured but unreachable; falling back to fresh auto-started server at {}",
+                                "[TEST] Cluster URLs configured but unreachable; falling back to \
+                                 fresh auto-started server at {}",
                                 server_url
                             );
                             (false, vec![auto_url])
                         } else {
                             eprintln!(
-                                "[TEST] Cluster URLs configured but unreachable; falling back to single-node URL {}",
+                                "[TEST] Cluster URLs configured but unreachable; falling back to \
+                                 single-node URL {}",
                                 server_url
                             );
                             (false, vec![server_url.clone()])
@@ -2045,8 +2041,8 @@ pub fn extract_arrow_value(value: &serde_json::Value) -> Option<serde_json::Valu
 
 /// Convert array-based rows to HashMap-based rows using the schema.
 ///
-/// The new API format returns `schema: [{name, data_type, index}, ...]` and `rows: [[val1, val2], ...]`.
-/// This helper converts to the old format where each row is a `{col_name: value}` HashMap.
+/// The new API format returns `schema: [{name, data_type, index}, ...]` and `rows: [[val1, val2],
+/// ...]`. This helper converts to the old format where each row is a `{col_name: value}` HashMap.
 ///
 /// # Arguments
 /// * `result` - A single query result from the API (one element from the `results` array)
@@ -2056,8 +2052,9 @@ pub fn extract_arrow_value(value: &serde_json::Value) -> Option<serde_json::Valu
 pub fn rows_as_hashmaps(
     result: &serde_json::Value,
 ) -> Option<Vec<std::collections::HashMap<String, serde_json::Value>>> {
-    use serde_json::Value;
     use std::collections::HashMap;
+
+    use serde_json::Value;
 
     // Extract schema - array of {name, data_type, index}
     let schema = result.get("schema")?.as_array()?;
@@ -2834,6 +2831,7 @@ fn execute_sql_via_cli_as_with_args_and_urls(
     urls_override: Option<Vec<String>>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     use std::time::Instant;
+
     use wait_timeout::ChildExt;
 
     // test_context() already ensures server is started/reachable
@@ -3710,8 +3708,10 @@ pub fn extract_typed_value(value: &serde_json::Value) -> serde_json::Value {
 
 /// Helper to generate unique namespace name
 pub fn generate_unique_namespace(base_name: &str) -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{
+        sync::atomic::{AtomicU64, Ordering},
+        time::{SystemTime, UNIX_EPOCH},
+    };
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
     let count = COUNTER.fetch_add(1, Ordering::SeqCst);
@@ -3730,8 +3730,10 @@ pub fn generate_unique_namespace(base_name: &str) -> String {
 
 /// Helper to generate unique table name
 pub fn generate_unique_table(base_name: &str) -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{
+        sync::atomic::{AtomicU64, Ordering},
+        time::{SystemTime, UNIX_EPOCH},
+    };
     static COUNTER: AtomicU64 = AtomicU64::new(0);
 
     let count = COUNTER.fetch_add(1, Ordering::SeqCst);
@@ -4003,7 +4005,8 @@ pub fn parse_job_id_from_flush_output(output: &str) -> Result<String, Box<dyn st
 
 /// Parse job ID from JSON response message field
 ///
-/// Expected JSON format: {"status":"success","results":[{"message":"Flush started... Job ID: FL-xxx"}]}
+/// Expected JSON format: {"status":"success","results":[{"message":"Flush started... Job ID:
+/// FL-xxx"}]}
 pub fn parse_job_id_from_json_message(
     json_output: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
@@ -4742,11 +4745,9 @@ pub fn assert_flush_storage_files_exist(
 
         if result.is_valid() {
             println!(
-                "✅ [{}] Verified flush storage: manifest.json ({} bytes), {} parquet file(s) ({} bytes total)",
-                context,
-                result.manifest_size,
-                result.parquet_file_count,
-                result.parquet_total_size
+                "✅ [{}] Verified flush storage: manifest.json ({} bytes), {} parquet file(s) ({} \
+                 bytes total)",
+                context, result.manifest_size, result.parquet_file_count, result.parquet_total_size
             );
             return;
         }

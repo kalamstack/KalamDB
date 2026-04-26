@@ -315,16 +315,17 @@ pub mod kalamdb {
             ::flatbuffers::size_prefixed_root_with_opts::<EntityEnvelope<'b>>(opts, buf)
         }
         #[inline]
-        /// Assumes, without verification, that a buffer of bytes contains a EntityEnvelope and returns it.
-        /// # Safety
+        /// Assumes, without verification, that a buffer of bytes contains a EntityEnvelope and
+        /// returns it. # Safety
         /// Callers must trust the given bytes do indeed contain a valid `EntityEnvelope`.
         pub unsafe fn root_as_entity_envelope_unchecked(buf: &[u8]) -> EntityEnvelope<'_> {
             unsafe { ::flatbuffers::root_unchecked::<EntityEnvelope>(buf) }
         }
         #[inline]
-        /// Assumes, without verification, that a buffer of bytes contains a size prefixed EntityEnvelope and returns it.
-        /// # Safety
-        /// Callers must trust the given bytes do indeed contain a valid size prefixed `EntityEnvelope`.
+        /// Assumes, without verification, that a buffer of bytes contains a size prefixed
+        /// EntityEnvelope and returns it. # Safety
+        /// Callers must trust the given bytes do indeed contain a valid size prefixed
+        /// `EntityEnvelope`.
         pub unsafe fn size_prefixed_root_as_entity_envelope_unchecked(
             buf: &[u8],
         ) -> EntityEnvelope<'_> {

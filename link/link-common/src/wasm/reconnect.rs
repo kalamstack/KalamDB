@@ -1,21 +1,26 @@
-use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
-use std::rc::Rc;
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    rc::Rc,
+};
 
-use wasm_bindgen::prelude::{Closure, JsValue};
-use wasm_bindgen::JsCast;
+use wasm_bindgen::{
+    prelude::{Closure, JsValue},
+    JsCast,
+};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{ErrorEvent, MessageEvent, WebSocket};
 
+use super::{
+    auth::WasmAuthProvider,
+    helpers::{create_promise, send_ws_message, ws_url_from_http_opts},
+    state::SubscriptionState,
+    wasm_debug_log,
+};
 use crate::models::{
     ClientMessage, ConnectionOptions, ProtocolOptions, SerializationType, ServerMessage,
     SubscriptionRequest,
 };
-
-use super::auth::WasmAuthProvider;
-use super::helpers::{create_promise, send_ws_message, ws_url_from_http_opts};
-use super::state::SubscriptionState;
-use super::wasm_debug_log;
 
 /// Resolve a `WasmAuthProvider` from an optional JS async callback.
 ///
@@ -70,7 +75,8 @@ pub(crate) async fn reconnect_internal_with_auth(
 
     if matches!(resolved_auth, WasmAuthProvider::Basic { .. }) {
         return Err(JsValue::from_str(
-            "WebSocket authentication requires a JWT token. Use KalamClient.withJwt, login first, or set an authProvider.",
+            "WebSocket authentication requires a JWT token. Use KalamClient.withJwt, login first, \
+             or set an authProvider.",
         ));
     }
 

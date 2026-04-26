@@ -2,7 +2,7 @@
 //!
 //! Tests schema evolution and table modification:
 //! - ALTER TABLE ADD COLUMN
-//! - ALTER TABLE DROP COLUMN  
+//! - ALTER TABLE DROP COLUMN
 //! - ALTER TABLE MODIFY COLUMN
 //! - ALTER TABLE SET TBLPROPERTIES (for SHARED tables)
 //! - Error cases (adding NOT NULL without DEFAULT, modifying system columns)
@@ -83,7 +83,10 @@ fn smoke_test_alter_table_add_column() {
     let output_result = execute_sql_as_root_via_client_json(&select_sql);
 
     if output_result.is_err() {
-        println!("⚠️  Column 'age' not found in schema - ALTER TABLE may have succeeded syntactically but schema wasn't updated");
+        println!(
+            "⚠️  Column 'age' not found in schema - ALTER TABLE may have succeeded syntactically \
+             but schema wasn't updated"
+        );
         println!("   This indicates ALTER TABLE ADD COLUMN needs further implementation");
         return;
     }

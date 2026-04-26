@@ -1,7 +1,8 @@
-use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::{
+    collections::{hash_map::DefaultHasher, HashMap},
+    hash::{Hash, Hasher},
+    sync::{Arc, Mutex, OnceLock},
+};
 
 use kalam_pg_api::KalamBackendExecutor;
 use kalam_pg_client::RemoteKalamClient;
@@ -126,7 +127,8 @@ fn build_remote_extension_state(
 
     let client = runtime.block_on(async { RemoteKalamClient::connect(config.clone()).await })?;
     let session_id = pg_backend_session_id(config, current_backend_pid());
-    let session = runtime.block_on(async { client.open_session(Some(session_id.as_str()), None).await })?;
+    let session =
+        runtime.block_on(async { client.open_session(Some(session_id.as_str()), None).await })?;
 
     Ok(RemoteExtensionState {
         client,
@@ -207,13 +209,14 @@ unsafe extern "C-unwind" fn on_proc_exit_close_sessions(_code: i32, _arg: pg_sys
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    use std::net::SocketAddr;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::mpsc;
-    use std::sync::Mutex;
-    use std::time::Duration;
+    use std::{
+        net::SocketAddr,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            mpsc, Mutex,
+        },
+        time::Duration,
+    };
 
     use async_trait::async_trait;
     use bytes::Bytes;
@@ -229,6 +232,8 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio_stream::wrappers::TcpListenerStream;
     use tonic::{Request, Response, Status};
+
+    use super::*;
 
     #[derive(Default)]
     struct CountingState {

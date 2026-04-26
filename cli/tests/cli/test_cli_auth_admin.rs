@@ -11,11 +11,13 @@
 //! # Run tests in another terminal
 //! cargo test --test test_cli_auth_admin -- --test-threads=1
 //! ```
-//TODO: Remove this since we have most of the tests covered by the integration tests
+// TODO: Remove this since we have most of the tests covered by the integration tests
 #![allow(unused_imports)]
-use crate::common::*;
-use assert_cmd::Command;
 use std::time::Duration;
+
+use assert_cmd::Command;
+
+use crate::common::*;
 
 /// Test that root user can create namespaces
 #[tokio::test]
@@ -109,7 +111,8 @@ async fn test_root_can_create_drop_tables() {
 
     // Create table as root
     let result = execute_sql_via_http_as_root(&format!(
-        "CREATE TABLE {}.test_table (id INT PRIMARY KEY, name VARCHAR) WITH (TYPE='USER', FLUSH_POLICY='rows:10')",
+        "CREATE TABLE {}.test_table (id INT PRIMARY KEY, name VARCHAR) WITH (TYPE='USER', \
+         FLUSH_POLICY='rows:10')",
         namespace_name
     ))
     .await
@@ -269,7 +272,8 @@ async fn test_cli_admin_operations() {
 
     // Step 2: Create table
     let _ = execute_sql_via_http_as_root(&format!(
-        "CREATE TABLE IF NOT EXISTS {}.users (id TEXT PRIMARY KEY, name VARCHAR) WITH (TYPE='USER', FLUSH_POLICY='rows:10')",
+        "CREATE TABLE IF NOT EXISTS {}.users (id TEXT PRIMARY KEY, name VARCHAR) WITH \
+         (TYPE='USER', FLUSH_POLICY='rows:10')",
         namespace_name
     ))
     .await;
@@ -339,7 +343,8 @@ async fn test_cli_flush_table() {
 
     // Create a USER table with flush policy (SHARED tables cannot be flushed)
     let result = execute_sql_via_http_as_root(&format!(
-        "CREATE TABLE {}.metrics (timestamp BIGINT PRIMARY KEY, value DOUBLE) WITH (TYPE='USER', FLUSH_POLICY='rows:5')",
+        "CREATE TABLE {}.metrics (timestamp BIGINT PRIMARY KEY, value DOUBLE) WITH (TYPE='USER', \
+         FLUSH_POLICY='rows:5')",
         namespace_name
     ))
     .await
@@ -384,16 +389,16 @@ async fn test_cli_flush_table() {
     // Note: system.jobs stores namespace/table info inside the JSON `parameters` column.
     let jobs_query = if let Some(ref job_id) = job_id {
         format!(
-            "SELECT job_id, job_type, status, parameters, message FROM system.jobs \
-             WHERE job_id = '{}' LIMIT 1",
+            "SELECT job_id, job_type, status, parameters, message FROM system.jobs WHERE job_id = \
+             '{}' LIMIT 1",
             job_id
         )
     } else {
         // Fallback to querying by type and table name (from `parameters` JSON)
-        "SELECT job_id, job_type, status, parameters, message FROM system.jobs \
-         WHERE job_type = 'flush' AND parameters LIKE '%\"table_name\":\"metrics\"%' \
-         ORDER BY created_at DESC LIMIT 1"
-            .to_string()
+        "SELECT job_id, job_type, status, parameters, message FROM system.jobs WHERE job_type = \
+         'flush' AND parameters LIKE '%\"table_name\":\"metrics\"%' ORDER BY created_at DESC LIMIT \
+         1"
+        .to_string()
     };
 
     // In cluster mode, job creation/visibility can lag due to Raft replication.
@@ -549,13 +554,17 @@ async fn test_cli_flush_all_tables() {
     let _ = execute_sql_via_http_as_root(&format!("CREATE NAMESPACE {}", namespace_name)).await;
 
     // Create multiple USER tables (SHARED tables cannot be flushed)
-    let _ = execute_sql_via_http_as_root(
-        &format!("CREATE TABLE {}.table1 (id INT PRIMARY KEY, data VARCHAR) WITH (TYPE='USER', FLUSH_POLICY='rows:10')", namespace_name),
-    )
+    let _ = execute_sql_via_http_as_root(&format!(
+        "CREATE TABLE {}.table1 (id INT PRIMARY KEY, data VARCHAR) WITH (TYPE='USER', \
+         FLUSH_POLICY='rows:10')",
+        namespace_name
+    ))
     .await;
-    let _ = execute_sql_via_http_as_root(
-        &format!("CREATE TABLE {}.table2 (id INT PRIMARY KEY, value DOUBLE) WITH (TYPE='USER', FLUSH_POLICY='rows:10')", namespace_name),
-    )
+    let _ = execute_sql_via_http_as_root(&format!(
+        "CREATE TABLE {}.table2 (id INT PRIMARY KEY, value DOUBLE) WITH (TYPE='USER', \
+         FLUSH_POLICY='rows:10')",
+        namespace_name
+    ))
     .await;
 
     // Insert some data
@@ -614,17 +623,15 @@ async fn test_cli_flush_all_tables() {
         let job_id_list =
             job_ids.iter().map(|id| format!("'{}'", id)).collect::<Vec<_>>().join(", ");
         format!(
-            "SELECT job_id, job_type, status, parameters, message FROM system.jobs \
-             WHERE job_id IN ({}) \
-             ORDER BY created_at DESC",
+            "SELECT job_id, job_type, status, parameters, message FROM system.jobs WHERE job_id \
+             IN ({}) ORDER BY created_at DESC",
             job_id_list
         )
     } else {
         // Fallback to querying by namespace
         format!(
-            "SELECT job_id, job_type, status, parameters, message FROM system.jobs \
-         WHERE job_type = 'flush' AND parameters LIKE '%\"namespace_id\":\"{}\"%' \
-         ORDER BY created_at DESC",
+            "SELECT job_id, job_type, status, parameters, message FROM system.jobs WHERE job_type \
+             = 'flush' AND parameters LIKE '%\"namespace_id\":\"{}\"%' ORDER BY created_at DESC",
             namespace_name
         )
     };

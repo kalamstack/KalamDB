@@ -1,16 +1,19 @@
-use crate::app_context::AppContext;
-use crate::error::KalamDbError;
-use crate::error_extensions::KalamDbResultExt;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
+
 use datafusion::datasource::TableProvider;
-use kalamdb_commons::constants::SystemColumnNames;
-use kalamdb_commons::models::schemas::TableDefinition;
-use kalamdb_commons::models::{StorageId, TableId};
-use kalamdb_commons::schemas::{TableOptions, TableType};
-use kalamdb_commons::TableAccess;
+use kalamdb_commons::{
+    constants::SystemColumnNames,
+    models::{schemas::TableDefinition, StorageId, TableId},
+    schemas::{TableOptions, TableType},
+    TableAccess,
+};
 use kalamdb_filestore::StorageCached;
 use parking_lot::RwLock;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+
+use crate::{app_context::AppContext, error::KalamDbError, error_extensions::KalamDbResultExt};
 
 /// Lightweight table info for file operations
 #[derive(Debug, Clone)]
@@ -208,7 +211,8 @@ impl CachedTableData {
     /// with built-in path template resolution. ObjectStore instances are
     /// cached per-storage in StorageRegistry, not per-table.
     ///
-    /// **Performance**: First call builds store (~50-200μs for cloud), subsequent calls return cached Arc (~1μs)
+    /// **Performance**: First call builds store (~50-200μs for cloud), subsequent calls return
+    /// cached Arc (~1μs)
     ///
     /// # Returns
     /// Arc-wrapped StorageCached for zero-copy sharing across operations

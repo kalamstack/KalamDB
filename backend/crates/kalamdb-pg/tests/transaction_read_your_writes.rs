@@ -1,7 +1,6 @@
 mod support;
 
 use ntest::timeout;
-
 use support::{
     begin_transaction, insert_shared_row, new_service_with_tables, open_session,
     rollback_transaction, scan_shared_rows,

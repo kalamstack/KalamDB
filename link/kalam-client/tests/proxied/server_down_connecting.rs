@@ -1,8 +1,9 @@
+use std::{sync::atomic::Ordering, time::Duration};
+
+use tokio::time::sleep;
+
 use super::helpers::*;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
-use std::sync::atomic::Ordering;
-use std::time::Duration;
-use tokio::time::sleep;
 
 /// Server goes down before the client finishes connecting.
 /// The client should fail to connect (or auto-reconnect once the proxy resumes).

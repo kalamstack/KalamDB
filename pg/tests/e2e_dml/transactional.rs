@@ -1,21 +1,19 @@
+use std::time::{Duration, Instant};
+
+use serde_json::Value;
+
 use super::common::{
     await_user_shard_leader, count_rows, create_shared_kalam_table, create_user_kalam_table,
-    pg_backend_pid, postgres_error_text, retry_transient_user_leader_error,
-    same_user_shard_pair, set_user_id, unique_name, TestEnv,
+    pg_backend_pid, postgres_error_text, retry_transient_user_leader_error, same_user_shard_pair,
+    set_user_id, unique_name, TestEnv,
 };
-use serde_json::Value;
-use std::time::{Duration, Instant};
 
 fn sql_rows(result: &Value) -> Vec<Vec<Value>> {
     result["results"]
         .as_array()
         .and_then(|results| results.first())
         .and_then(|entry| entry["rows"].as_array())
-        .map(|rows| {
-            rows.iter()
-                .filter_map(|row| row.as_array().cloned())
-                .collect::<Vec<_>>()
-        })
+        .map(|rows| rows.iter().filter_map(|row| row.as_array().cloned()).collect::<Vec<_>>())
         .unwrap_or_default()
 }
 
@@ -39,10 +37,8 @@ fn i64_cell(row: &[Value], index: usize) -> Option<i64> {
 async fn fetch_session_rows(env: &TestEnv, backend_pid: u32) -> Vec<Vec<Value>> {
     sql_rows(
         &env.kalamdb_sql(&format!(
-            "SELECT session_id, state, transaction_id, transaction_state \
-             FROM system.sessions \
-             WHERE backend_pid = {backend_pid} \
-             ORDER BY last_seen_at DESC"
+            "SELECT session_id, state, transaction_id, transaction_state FROM system.sessions \
+             WHERE backend_pid = {backend_pid} ORDER BY last_seen_at DESC"
         ))
         .await,
     )
@@ -51,8 +47,7 @@ async fn fetch_session_rows(env: &TestEnv, backend_pid: u32) -> Vec<Vec<Value>> 
 async fn fetch_transaction_rows(env: &TestEnv, transaction_id: &str) -> Vec<Vec<Value>> {
     sql_rows(
         &env.kalamdb_sql(&format!(
-            "SELECT transaction_id, owner_id, origin, state, write_count \
-             FROM system.transactions \
+            "SELECT transaction_id, owner_id, origin, state, write_count FROM system.transactions \
              WHERE transaction_id = '{transaction_id}'"
         ))
         .await,
@@ -231,10 +226,9 @@ async fn e2e_transaction_mixed_native_and_kalamdb_rows_share_one_remote_transact
     let backend_pid = pg_backend_pid(&pg).await;
     let pre_foreign_rows = fetch_session_rows(env, backend_pid).await;
     assert!(
-        pre_foreign_rows
-            .iter()
-            .all(|row| string_cell(row, 2).is_none()),
-        "remote transaction should not exist before the first foreign statement: {pre_foreign_rows:?}"
+        pre_foreign_rows.iter().all(|row| string_cell(row, 2).is_none()),
+        "remote transaction should not exist before the first foreign statement: \
+         {pre_foreign_rows:?}"
     );
 
     let tx = pg.transaction().await.expect("begin mixed transaction");
@@ -254,10 +248,9 @@ async fn e2e_transaction_mixed_native_and_kalamdb_rows_share_one_remote_transact
 
     let still_no_remote_rows = fetch_session_rows(env, backend_pid).await;
     assert!(
-        still_no_remote_rows
-            .iter()
-            .all(|row| string_cell(row, 2).is_none()),
-        "native PostgreSQL work alone should not open a KalamDB transaction: {still_no_remote_rows:?}"
+        still_no_remote_rows.iter().all(|row| string_cell(row, 2).is_none()),
+        "native PostgreSQL work alone should not open a KalamDB transaction: \
+         {still_no_remote_rows:?}"
     );
 
     tx.execute(
@@ -292,7 +285,10 @@ async fn e2e_transaction_mixed_native_and_kalamdb_rows_share_one_remote_transact
 
     let repeated_transaction_rows = fetch_transaction_rows(env, &transaction_id).await;
     assert_eq!(repeated_transaction_rows.len(), 1);
-    assert_eq!(string_cell(&repeated_transaction_rows[0], 0).as_deref(), Some(transaction_id.as_str()));
+    assert_eq!(
+        string_cell(&repeated_transaction_rows[0], 0).as_deref(),
+        Some(transaction_id.as_str())
+    );
     assert_eq!(string_cell(&repeated_transaction_rows[0], 2).as_deref(), Some("PgRpc"));
     assert_eq!(string_cell(&repeated_transaction_rows[0], 3).as_deref(), Some("open_write"));
     assert_eq!(i64_cell(&repeated_transaction_rows[0], 4), Some(2));
@@ -303,12 +299,7 @@ async fn e2e_transaction_mixed_native_and_kalamdb_rows_share_one_remote_transact
 
     let pg_reader = env.pg_connect().await;
     let native_rows = pg_reader
-        .query(
-            &format!(
-                "SELECT id, note FROM {qualified_native_table} ORDER BY id"
-            ),
-            &[],
-        )
+        .query(&format!("SELECT id, note FROM {qualified_native_table} ORDER BY id"), &[])
         .await
         .expect("query committed native rows");
     let committed_native_rows = native_rows
@@ -324,10 +315,8 @@ async fn e2e_transaction_mixed_native_and_kalamdb_rows_share_one_remote_transact
     );
 
     let api_rows = sql_rows(
-        &env.kalamdb_sql(&format!(
-            "SELECT id, name FROM {qualified_foreign_table} ORDER BY id"
-        ))
-        .await,
+        &env.kalamdb_sql(&format!("SELECT id, name FROM {qualified_foreign_table} ORDER BY id"))
+            .await,
     );
     assert_eq!(api_rows.len(), 2);
     assert_eq!(string_cell(&api_rows[0], 0).as_deref(), Some("foreign-1"));

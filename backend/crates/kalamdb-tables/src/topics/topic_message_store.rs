@@ -9,11 +9,12 @@
 //! - Storage key format: composite encoding for efficient filtering
 //! - Efficient range scans for message fetching
 
-use crate::topics::topic_message_models::{TopicMessage, TopicMessageId};
-use kalamdb_commons::models::TopicId;
-use kalamdb_commons::storage::Partition;
-use kalamdb_store::{EntityStore, StorageBackend};
 use std::sync::Arc;
+
+use kalamdb_commons::{models::TopicId, storage::Partition};
+use kalamdb_store::{EntityStore, StorageBackend};
+
+use crate::topics::topic_message_models::{TopicMessage, TopicMessageId};
 
 /// Store for topic messages (append-only message log)
 ///
@@ -190,9 +191,10 @@ impl EntityStore<TopicMessageId, TopicMessage> for TopicMessageStore {
 
 #[cfg(test)]
 mod tests {
+    use kalamdb_commons::StorageKey;
+
     use super::*;
     use crate::utils::test_backend::RecordingBackend;
-    use kalamdb_commons::StorageKey;
 
     fn setup_test_store() -> TopicMessageStore {
         let backend = Arc::new(RecordingBackend::new());

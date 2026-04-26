@@ -3,16 +3,18 @@
 //! This module provides a user-defined function for DataFusion that returns the current user's role
 //! from the session context.
 
-use datafusion::arrow::array::{ArrayRef, StringArray};
-use datafusion::error::{DataFusionError, Result as DataFusionResult};
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
+use std::{any::Any, sync::Arc};
+
+use datafusion::{
+    arrow::array::{ArrayRef, StringArray},
+    error::{DataFusionError, Result as DataFusionResult},
+    logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility},
 };
-use kalamdb_commons::arrow_utils::{arrow_utf8, ArrowDataType};
-use kalamdb_commons::Role;
+use kalamdb_commons::{
+    arrow_utils::{arrow_utf8, ArrowDataType},
+    Role,
+};
 use kalamdb_session_datafusion::SessionUserContext;
-use std::any::Any;
-use std::sync::Arc;
 
 /// CURRENT_ROLE() scalar function implementation
 ///
@@ -50,11 +52,8 @@ impl ScalarUDFImpl for CurrentRoleFunction {
             return Err(DataFusionError::Plan("CURRENT_ROLE() takes no arguments".to_string()));
         }
 
-        let session_ctx = args
-            .config_options
-            .extensions
-            .get::<SessionUserContext>()
-            .ok_or_else(|| {
+        let session_ctx =
+            args.config_options.extensions.get::<SessionUserContext>().ok_or_else(|| {
                 DataFusionError::Execution(
                     "CURRENT_ROLE() failed: session user context not found".to_string(),
                 )
@@ -75,8 +74,9 @@ impl ScalarUDFImpl for CurrentRoleFunction {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use datafusion::logical_expr::ScalarUDF;
+
+    use super::*;
 
     #[test]
     fn test_current_role_function_creation() {

@@ -1,6 +1,7 @@
 // Snowflake ID generator
-use parking_lot::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use parking_lot::Mutex;
 
 /// Snowflake ID generator for time-ordered unique identifiers
 ///
@@ -224,8 +225,9 @@ impl Default for SnowflakeGenerator {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::HashSet;
+
+    use super::*;
 
     #[test]
     fn test_snowflake_generation() {
@@ -366,8 +368,7 @@ mod tests {
 
     #[test]
     fn test_concurrent_generation() {
-        use std::sync::Arc;
-        use std::thread;
+        use std::{sync::Arc, thread};
 
         let gen = Arc::new(SnowflakeGenerator::new(1));
         let mut handles = vec![];

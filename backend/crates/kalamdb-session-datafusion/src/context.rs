@@ -1,7 +1,8 @@
+use std::any::Any;
+
 use datafusion::common::config::{ConfigEntry, ConfigExtension, ExtensionOptions};
 use kalamdb_commons::models::{ReadContext, Role, UserId};
 use kalamdb_session::UserContext;
-use std::any::Any;
 
 /// Session-level user context stored in DataFusion config extensions.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

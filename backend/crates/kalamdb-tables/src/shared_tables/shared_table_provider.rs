@@ -1,7 +1,7 @@
 //! Shared table provider implementation without RLS
 //!
-//! This module provides SharedTableProvider implementing BaseTableProvider<SharedTableRowId, SharedTableRow>
-//! for cross-user shared tables (no Row-Level Security).
+//! This module provides SharedTableProvider implementing BaseTableProvider<SharedTableRowId,
+//! SharedTableRow> for cross-user shared tables (no Row-Level Security).
 //!
 //! **Key Features**:
 //! - Direct fields (no wrapper layer)
@@ -11,35 +11,29 @@
 //! - SessionState NOT extracted in scan_rows() (scans all rows)
 //! - PK Index: Uses SharedTableIndexedStore for efficient O(1) lookups by PK value
 
-use crate::error::KalamDbError;
-use crate::error_extensions::KalamDbResultExt;
-use crate::manifest::manifest_helpers::{ensure_manifest_ready, load_row_from_parquet_by_seq};
-use crate::shared_tables::{SharedTableIndexedStore, SharedTablePkIndex, SharedTableRow};
-use crate::utils::base::{
-    self, BaseTableProvider, DeferredMvccScanProvider, TableProviderCore,
+use std::{
+    any::Any,
+    collections::{HashMap, HashSet},
+    sync::Arc,
 };
-use crate::utils::row_utils::extract_full_user_context;
+
 use async_trait::async_trait;
-
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::catalog::Session;
-use datafusion::datasource::TableProvider;
-use datafusion::error::{DataFusionError, Result as DataFusionResult};
-use datafusion::logical_expr::dml::InsertOp;
-use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
-use datafusion::physical_plan::ExecutionPlan;
-use datafusion::scalar::ScalarValue;
-
-use kalamdb_commons::conversions::arrow_json_conversion::{coerce_rows, coerce_updates};
-use kalamdb_commons::ids::SharedTableRowId;
-use kalamdb_commons::models::datatypes::KalamDataType;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::OperationKind;
-use kalamdb_commons::models::UserId;
-use kalamdb_commons::websocket::ChangeNotification;
-use kalamdb_commons::NotLeaderError;
-use kalamdb_commons::TableType;
+use datafusion::{
+    arrow::{datatypes::SchemaRef, record_batch::RecordBatch},
+    catalog::Session,
+    datasource::TableProvider,
+    error::{DataFusionError, Result as DataFusionResult},
+    logical_expr::{dml::InsertOp, Expr, TableProviderFilterPushDown},
+    physical_plan::ExecutionPlan,
+    scalar::ScalarValue,
+};
+use kalamdb_commons::{
+    conversions::arrow_json_conversion::{coerce_rows, coerce_updates},
+    ids::SharedTableRowId,
+    models::{datatypes::KalamDataType, rows::Row, OperationKind, UserId},
+    websocket::ChangeNotification,
+    NotLeaderError, TableType,
+};
 use kalamdb_datafusion_sources::provider::{
     merged_projection_scan_descriptor, mvcc_filter_capability, FilterCapability, ScanDescriptor,
     SourceProvider,
@@ -52,17 +46,26 @@ use kalamdb_transactions::{extract_transaction_query_context, StagedMutation};
 use kalamdb_vector::{
     new_indexed_shared_vector_hot_store, SharedVectorHotOpId, SharedVectorHotStore,
 };
-use std::any::Any;
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use tracing::Instrument;
+
+use crate::{
+    error::KalamDbError,
+    error_extensions::KalamDbResultExt,
+    manifest::manifest_helpers::{ensure_manifest_ready, load_row_from_parquet_by_seq},
+    shared_tables::{SharedTableIndexedStore, SharedTablePkIndex, SharedTableRow},
+    utils::{
+        base::{self, BaseTableProvider, DeferredMvccScanProvider, TableProviderCore},
+        row_utils::extract_full_user_context,
+    },
+};
 
 /// Shared table provider without RLS
 ///
 /// **Architecture**:
 /// - Stateless provider (user context passed but ignored)
 /// - Direct fields (no wrapper layer)
-/// - Shared core via Arc<TableProviderCore> (holds schema, pk_name, column_defaults, non_null_columns, table_def)
+/// - Shared core via Arc<TableProviderCore> (holds schema, pk_name, column_defaults,
+///   non_null_columns, table_def)
 /// - NO RLS - user_id parameter ignored in all operations
 /// - Uses SharedTableIndexedStore for efficient PK lookups
 #[derive(Clone)]
@@ -180,7 +183,8 @@ impl SharedTableProvider {
         })?
     }
 
-    /// Build a complete Row for live query/topic notifications including system columns (_seq, _deleted)
+    /// Build a complete Row for live query/topic notifications including system columns (_seq,
+    /// _deleted)
     ///
     /// This ensures notifications include all columns, not just user-defined fields.
     fn build_notification_row(entity: &SharedTableRow) -> Row {
@@ -298,8 +302,8 @@ impl SharedTableProvider {
 
     /// Scan Parquet files from cold storage for shared table
     ///
-    /// Lists all *.parquet files in the table's storage directory and merges them into a single RecordBatch.
-    /// Returns an empty batch if no Parquet files exist.
+    /// Lists all *.parquet files in the table's storage directory and merges them into a single
+    /// RecordBatch. Returns an empty batch if no Parquet files exist.
     ///
     /// **Difference from user tables**: Shared tables have NO user_id partitioning,
     /// so all Parquet files are in the same directory (no subdirectories per user).
@@ -308,8 +312,8 @@ impl SharedTableProvider {
     /// Logs cache hits/misses and updates last_accessed timestamp. Full query optimization
     /// (batch file pruning based on manifest metadata) implemented in Phase 5 (US2, T119-T123).
     ///
-    /// **Manifest-Driven Pruning**: Uses ManifestAccessPlanner to select files based on filter predicates,
-    /// enabling row-group level pruning when row_group metadata is available.
+    /// **Manifest-Driven Pruning**: Uses ManifestAccessPlanner to select files based on filter
+    /// predicates, enabling row-group level pruning when row_group metadata is available.
     async fn scan_parquet_files_as_batch_async(
         &self,
         filter: Option<&Expr>,
@@ -515,14 +519,17 @@ fn finalize_primary_key_group(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use datafusion::scalar::ScalarValue;
+    use kalamdb_commons::{
+        ids::SeqId,
+        models::{NamespaceId, TableId, TableName},
+    };
+    use kalamdb_store::{test_utils::InMemoryBackend, StorageBackend};
+
     use super::*;
     use crate::shared_tables::{new_indexed_shared_table_store, SharedTableRow};
-    use datafusion::scalar::ScalarValue;
-    use kalamdb_commons::ids::SeqId;
-    use kalamdb_commons::models::{NamespaceId, TableId, TableName};
-    use kalamdb_store::test_utils::InMemoryBackend;
-    use kalamdb_store::StorageBackend;
-    use std::collections::BTreeMap;
 
     fn create_store(pk_field_name: &str) -> Arc<SharedTableIndexedStore> {
         let backend: Arc<dyn StorageBackend> = Arc::new(InMemoryBackend::new());
@@ -669,8 +676,7 @@ impl DeferredMvccScanProvider<SharedTableRowId, SharedTableRow> for SharedTableP
         &self,
         scan_context: &Self::ScanContext,
     ) -> Result<usize, KalamDbError> {
-        self.count_resolved_rows_async(scan_context.snapshot_commit_seq)
-            .await
+        self.count_resolved_rows_async(scan_context.snapshot_commit_seq).await
     }
 
     async fn scan_kvs_with_context(
@@ -1151,7 +1157,8 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
                     .map_err(KalamDbError::InvalidOperation)?;
 
             // Find latest resolved row for this PK
-            // First try hot storage (O(1) via PK index), then fall back to cold storage (Parquet scan)
+            // First try hot storage (O(1) via PK index), then fall back to cold storage (Parquet
+            // scan)
             let latest_row = if let Some((_key, row)) = self.find_by_pk(&pk_value_scalar).await? {
                 row
             } else if self.pk_tombstoned_in_hot(&pk_value_scalar).await? {
@@ -1254,8 +1261,7 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
         limit: Option<usize>,
     ) -> Result<RecordBatch, KalamDbError> {
         let scan_context = self.build_scan_context(state)?;
-        self.scan_rows_with_context(&scan_context, projection, filter, limit)
-            .await
+        self.scan_rows_with_context(&scan_context, projection, filter, limit).await
     }
 
     async fn scan_with_version_resolution_to_kvs_async(
@@ -1311,10 +1317,7 @@ impl BaseTableProvider<SharedTableRowId, SharedTableRow> for SharedTableProvider
         )
         .await?;
 
-        log::trace!(
-            "[SharedProvider] RocksDB scan returned {} rows",
-            resolved.hot_rows_scanned
-        );
+        log::trace!("[SharedProvider] RocksDB scan returned {} rows", resolved.hot_rows_scanned);
         log::trace!(
             "[SharedProvider] Cold scan returned {} Parquet rows",
             resolved.cold_rows_scanned
@@ -1376,7 +1379,8 @@ impl SharedTableProvider {
 
         // Cold storage: project only the PK + MVCC metadata needed for counting.
         let cold_columns = base::compute_metadata_only_cold_columns(&pk_name);
-        let cold_future = self.scan_parquet_files_as_batch_async(None, Some(cold_columns.as_slice()));
+        let cold_future =
+            self.scan_parquet_files_as_batch_async(None, Some(cold_columns.as_slice()));
 
         let hot_future = async {
             hot_future.await.map_err(|e| {
@@ -1512,7 +1516,8 @@ impl SharedTableProvider {
                             crate::utils::unified_dml::extract_user_pk_value(row_data, pk_name)?;
                         if !seen_batch_pks.insert(pk_str.clone()) {
                             return Err(KalamDbError::AlreadyExists(format!(
-                                "Primary key violation: value '{}' appears multiple times in the insert batch for column '{}'",
+                                "Primary key violation: value '{}' appears multiple times in the \
+                                 insert batch for column '{}'",
                                 pk_str, pk_name
                             )));
                         }
@@ -2257,6 +2262,13 @@ impl TableProvider for SharedTableProvider {
                 &row,
                 &assignments,
             )?;
+            if crate::utils::datafusion_dml::update_assignments_noop(
+                &schema,
+                &row,
+                &evaluated_updates,
+            )? {
+                continue;
+            }
 
             if let Some(staged_mutations) = staged_mutations.as_mut() {
                 staged_mutations.push(StagedMutation::new(

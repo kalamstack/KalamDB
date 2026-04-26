@@ -4,8 +4,8 @@
 //! - `close()` is idempotent and marks the subscription as closed.
 //! - `is_closed()` reflects the expected state.
 //! - Explicitly closing a subscription removes it from `system.live`.
-//! - Dropping without an explicit `close()` also sends a cleanup frame via
-//!   the `Drop` impl, removing the subscription server-side.
+//! - Dropping without an explicit `close()` also sends a cleanup frame via the `Drop` impl,
+//!   removing the subscription server-side.
 //!
 //! All per-operation timeouts are short so the suite runs well within 30s/test.
 //!
@@ -19,12 +19,15 @@
 //! cd link && cargo test --features e2e-tests --test test_subscription_cleanup -- --nocapture
 //! ```
 
+use std::{
+    sync::atomic::{AtomicU64, Ordering},
+    time::Duration,
+};
+
 use kalam_client::{
     AuthProvider, ChangeEvent, KalamLinkClient, KalamLinkError, KalamLinkTimeouts,
     SubscriptionConfig, SubscriptionManager,
 };
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
 use tokio::time::{sleep, timeout};
 
 mod common;
@@ -222,8 +225,8 @@ async fn test_explicit_close_removes_from_live() {
     if !appeared {
         // Some server configs may not expose this; soft-fail with a note
         eprintln!(
-            "WARN: subscription did not appear in system.live within 5s — \
-             server may not expose this table; skipping assertion"
+            "WARN: subscription did not appear in system.live within 5s — server may not expose \
+             this table; skipping assertion"
         );
     }
 

@@ -4,9 +4,12 @@
 //! to various human-readable formats. This module is exposed via WASM bindings
 //! for use in all language SDKs (TypeScript, Python, etc.).
 
+use std::{
+    fmt,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 const MILLIS_PER_SECOND: i64 = 1_000;
 const MILLIS_PER_MINUTE: i64 = 60 * MILLIS_PER_SECOND;
@@ -281,7 +284,7 @@ impl fmt::Display for TimestampFormat {
 /// # Examples
 ///
 /// ```rust
-/// use kalam_client::timestamp::{TimestampFormatter, TimestampFormat};
+/// use kalam_client::timestamp::{TimestampFormat, TimestampFormatter};
 ///
 /// let formatter = TimestampFormatter::new(TimestampFormat::Iso8601);
 /// let formatted = formatter.format(Some(1734211234567));

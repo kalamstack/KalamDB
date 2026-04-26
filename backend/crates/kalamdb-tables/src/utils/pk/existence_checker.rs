@@ -2,18 +2,17 @@
 //!
 //! Provides optimized PK uniqueness validation using manifest-based segment pruning.
 
-use kalamdb_commons::models::TableId;
-use kalamdb_commons::schemas::TableType;
-use kalamdb_commons::UserId;
-use kalamdb_system::Manifest;
 use std::sync::Arc;
 
-use crate::error::KalamDbError;
-use crate::error_extensions::KalamDbResultExt;
-use crate::manifest::ManifestAccessPlanner;
+use kalamdb_commons::{models::TableId, schemas::TableType, UserId};
 use kalamdb_filestore::StorageRegistry;
-use kalamdb_system::ManifestService as ManifestServiceTrait;
-use kalamdb_system::SchemaRegistry as SchemaRegistryTrait;
+use kalamdb_system::{
+    Manifest, ManifestService as ManifestServiceTrait, SchemaRegistry as SchemaRegistryTrait,
+};
+
+use crate::{
+    error::KalamDbError, error_extensions::KalamDbResultExt, manifest::ManifestAccessPlanner,
+};
 
 /// Result of a primary key existence check
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,8 +116,7 @@ impl PkExistenceChecker {
         let pk_column_id = core.primary_key_column_id();
 
         // Step 2-4: Use the optimized cold storage check
-        self
-            .check_cold_storage(table_id, table_type, user_id, pk_column, pk_column_id, pk_value)
+        self.check_cold_storage(table_id, table_type, user_id, pk_column, pk_column_id, pk_value)
             .await
     }
 
@@ -244,7 +242,8 @@ impl PkExistenceChecker {
             let pruned_paths = planner.plan_by_pk_value(m, pk_column_id, pk_value);
             if pruned_paths.is_empty() {
                 log::trace!(
-                    "[PkExistenceChecker] Manifest pruning returned no candidate segments for PK {} on {}.{} {} - PK not in cold",
+                    "[PkExistenceChecker] Manifest pruning returned no candidate segments for PK \
+                     {} on {}.{} {} - PK not in cold",
                     pk_value,
                     namespace.as_str(),
                     table.as_str(),
@@ -253,7 +252,8 @@ impl PkExistenceChecker {
                 return Ok(PkCheckResult::PrunedByManifest);
             } else {
                 log::trace!(
-                    "[PkExistenceChecker] Manifest pruning: {} of {} segments may contain PK {} for {}.{} {}",
+                    "[PkExistenceChecker] Manifest pruning: {} of {} segments may contain PK {} \
+                     for {}.{} {}",
                     pruned_paths.len(),
                     m.segments.len(),
                     pk_value,
@@ -441,28 +441,28 @@ impl PkExistenceChecker {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::collections::HashMap;
-    use std::fs;
-    use std::path::Path;
+    use std::{collections::HashMap, fs, path::Path};
 
     use async_trait::async_trait;
     use datafusion::arrow::datatypes::SchemaRef;
-    use kalamdb_commons::ids::SeqId;
-    use kalamdb_commons::models::datatypes::KalamDataType;
-    use kalamdb_commons::models::rows::StoredScalarValue;
-    use kalamdb_commons::models::schemas::{
-        ColumnDefault, ColumnDefinition, TableDefinition, TableType,
+    use kalamdb_commons::{
+        ids::SeqId,
+        models::{
+            datatypes::KalamDataType,
+            rows::StoredScalarValue,
+            schemas::{ColumnDefault, ColumnDefinition, TableDefinition, TableType},
+        },
+        NamespaceId, StorageId, TableId, TableName, UserId,
     };
-    use kalamdb_commons::{NamespaceId, StorageId, TableId, TableName, UserId};
     use kalamdb_filestore::StorageRegistry;
-    use kalamdb_store::test_utils::InMemoryBackend;
-    use kalamdb_store::{StorageBackend, StorageError};
+    use kalamdb_store::{test_utils::InMemoryBackend, StorageBackend, StorageError};
     use kalamdb_system::{
         ManifestCacheEntry, ManifestService, SegmentMetadata, Storage, StorageType,
         StoragesTableProvider, SyncState,
     };
     use tempfile::TempDir;
+
+    use super::*;
 
     #[derive(Debug, Clone)]
     struct TestSchemaRegistry {
@@ -605,11 +605,7 @@ mod tests {
             })
             .expect("seed local storage");
 
-        Arc::new(StorageRegistry::new(
-            storages_provider,
-            base_directory,
-            Default::default(),
-        ))
+        Arc::new(StorageRegistry::new(storages_provider, base_directory, Default::default()))
     }
 
     fn numeric_stats(min: i64, max: i64) -> kalamdb_system::ColumnStats {
@@ -666,7 +662,7 @@ mod tests {
         assert!(!PkCheckResult::PrunedByManifest.exists());
         assert!(PkCheckResult::FoundInHot.exists());
         assert!(PkCheckResult::FoundInCold {
-            segment_path: "batch-0.parquet".to_string()
+            segment_path: "batch-0.parquet".to_string(),
         }
         .exists());
     }
@@ -692,9 +688,7 @@ mod tests {
             "batch-0.parquet",
         );
         fs::create_dir_all(
-            Path::new(&parquet_path.full_path)
-                .parent()
-                .expect("parquet parent exists"),
+            Path::new(&parquet_path.full_path).parent().expect("parquet parent exists"),
         )
         .expect("create parquet dir");
         fs::write(&parquet_path.full_path, b"not a parquet file")

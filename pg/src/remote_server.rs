@@ -1,10 +1,13 @@
-use crate::fdw_options::parse_options;
-use crate::remote_state::{self, RemoteExtensionState};
+use std::{ffi::CString, sync::Arc};
+
 use kalam_pg_common::KalamPgError;
 use kalam_pg_fdw::ServerOptions;
 use pgrx::pg_sys;
-use std::ffi::CString;
-use std::sync::Arc;
+
+use crate::{
+    fdw_options::parse_options,
+    remote_state::{self, RemoteExtensionState},
+};
 
 unsafe fn remote_state_for_server(
     server: *mut pg_sys::ForeignServer,
@@ -38,10 +41,7 @@ pub unsafe fn remote_state_for_server_name(
     let c_name = CString::new(server_name).unwrap_or_default();
     let server = pg_sys::GetForeignServerByName(c_name.as_ptr(), true);
     if server.is_null() {
-        return Err(KalamPgError::Execution(format!(
-            "foreign server '{}' not found",
-            server_name
-        )));
+        return Err(KalamPgError::Execution(format!("foreign server '{}' not found", server_name)));
     }
 
     remote_state_for_server(server)

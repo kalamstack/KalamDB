@@ -1,7 +1,8 @@
-use super::common::{count_rows, create_shared_kalam_table, unique_name, TestEnv};
+use std::{future::Future, time::Instant};
+
 use serde_json::Value;
-use std::future::Future;
-use std::time::Instant;
+
+use super::common::{count_rows, create_shared_kalam_table, unique_name, TestEnv};
 
 const BENCH_ITERATIONS_PER_RUN: usize = 16;
 const BENCH_WARMUP_RUNS: usize = 1;
@@ -114,7 +115,8 @@ fn benchmark_payload(bytes: usize, seed: usize) -> String {
 
 fn log_benchmark(label: &str, payload_bytes: usize, stats: &BenchStats) {
     eprintln!(
-        "[PERF] {label}: payload={}B warmup_runs={} measured_runs={} iterations/run={} run_totals_ms=[{}] median_total={:.1}ms median_avg={:.2}ms/op range={:.1}..{:.1}ms",
+        "[PERF] {label}: payload={}B warmup_runs={} measured_runs={} iterations/run={} \
+         run_totals_ms=[{}] median_total={:.1}ms median_avg={:.2}ms/op range={:.1}..{:.1}ms",
         payload_bytes,
         BENCH_WARMUP_RUNS,
         BENCH_MEASURED_RUNS,
@@ -136,7 +138,12 @@ fn log_select_breakdown(label: &str, breakdown: &SelectBreakdownStats) {
         breakdown.pg_full_row_query_median_ms - breakdown.api_full_row_http_median_ms;
 
     eprintln!(
-        "[PERF] {label} breakdown: samples={} pg_id_only_query_median={:.2}ms pg_full_row_query_median={:.2}ms pg_decode_median={:.2}ms api_id_only_http_median={:.2}ms api_id_only_parse_median={:.2}ms api_full_row_http_median={:.2}ms api_full_row_parse_median={:.2}ms inferred_pg_payload_fetch={:.2}ms inferred_api_payload_http={:.2}ms inferred_pg_over_http={:.2}ms",
+        "[PERF] {label} breakdown: samples={} pg_id_only_query_median={:.2}ms \
+         pg_full_row_query_median={:.2}ms pg_decode_median={:.2}ms \
+         api_id_only_http_median={:.2}ms api_id_only_parse_median={:.2}ms \
+         api_full_row_http_median={:.2}ms api_full_row_parse_median={:.2}ms \
+         inferred_pg_payload_fetch={:.2}ms inferred_api_payload_http={:.2}ms \
+         inferred_pg_over_http={:.2}ms",
         SELECT_BREAKDOWN_SAMPLES,
         breakdown.pg_id_only_query_median_ms,
         breakdown.pg_full_row_query_median_ms,

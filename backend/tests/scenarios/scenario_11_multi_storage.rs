@@ -8,10 +8,11 @@
 //! - [x] Flush writes to correct destination
 //! - [x] Verify artifacts in expected storage folder
 
-use super::helpers::*;
+use std::time::Duration;
 
 use kalamdb_commons::Role;
-use std::time::Duration;
+
+use super::helpers::*;
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(60);
 

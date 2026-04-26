@@ -58,15 +58,10 @@ pub async fn serve_embedded_ui(req: HttpRequest) -> HttpResponse {
 
     // No UI built - show helpful message
     HttpResponse::NotFound().body(
-        "<html><body>\
-        <h1>Admin UI Not Built</h1>\
-        <p>The Admin UI assets were not found in the binary.</p>\
-        <p>To build the UI:</p>\
-        <ol>\
-        <li>Run <code>cd ui && npm install && npm run build</code></li>\
-        <li>Rebuild the server with <code>cargo build</code></li>\
-        </ol>\
-        </body></html>",
+        "<html><body><h1>Admin UI Not Built</h1><p>The Admin UI assets were not found in the \
+         binary.</p><p>To build the UI:</p><ol><li>Run <code>cd ui && npm install && npm run \
+         build</code></li><li>Rebuild the server with <code>cargo \
+         build</code></li></ol></body></html>",
     )
 }
 

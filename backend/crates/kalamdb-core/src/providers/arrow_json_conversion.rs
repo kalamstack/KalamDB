@@ -1,10 +1,13 @@
-use crate::error::KalamDbError;
-use datafusion::arrow::record_batch::RecordBatch;
-use kalamdb_commons::conversions::arrow_json_conversion as commons;
-use kalamdb_commons::errors::CommonError;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::KalamCellValue;
 use std::collections::HashMap;
+
+use datafusion::arrow::record_batch::RecordBatch;
+use kalamdb_commons::{
+    conversions::arrow_json_conversion as commons,
+    errors::CommonError,
+    models::{rows::Row, KalamCellValue},
+};
+
+use crate::error::KalamDbError;
 
 fn map_error(err: CommonError) -> KalamDbError {
     KalamDbError::InvalidOperation(err.to_string())

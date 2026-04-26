@@ -53,11 +53,14 @@
 //! let retrieved = store.get(&user_id).unwrap().unwrap();
 //! ```
 
-use crate::async_utils::run_blocking_result;
-use crate::storage_trait::{Partition, Result, StorageBackend, StorageError};
+use std::{collections::VecDeque, sync::Arc};
+
 use kalamdb_commons::{next_storage_key_bytes, KSerializable, StorageKey};
-use std::collections::VecDeque;
-use std::sync::Arc;
+
+use crate::{
+    async_utils::run_blocking_result,
+    storage_trait::{Partition, Result, StorageBackend, StorageError},
+};
 
 /// Directional scanning for entity stores
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,7 +118,7 @@ where
     /// **Rationale**: Direct backend access bypasses type safety and proper key serialization.
     /// All operations should go through EntityStore methods which ensure:
     /// - Proper key serialization via StorageKey trait
-    /// - Type-safe deserialization via KSerializable trait  
+    /// - Type-safe deserialization via KSerializable trait
     /// - Consistent error handling
     /// - Future optimizations (caching, batching, etc.)
     #[doc(hidden)]
@@ -823,7 +826,8 @@ where
         .await
     }
 
-    /// Async version of `scan_typed_with_prefix_and_start()` - scans entities with typed prefix and start key.
+    /// Async version of `scan_typed_with_prefix_and_start()` - scans entities with typed prefix and
+    /// start key.
     ///
     /// Uses `spawn_blocking` internally to prevent blocking the async runtime.
     async fn scan_typed_with_prefix_and_start_async(
@@ -933,10 +937,12 @@ use kalamdb_commons::models::{Role, TableAccess};
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::Arc;
+
     use kalamdb_commons::models::{Role, TableAccess, UserId};
     use serde_json::Value as JsonValue;
-    use std::sync::Arc;
+
+    use super::*;
 
     // Mock implementation for testing
     struct MockStore {

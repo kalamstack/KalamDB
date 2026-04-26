@@ -2,11 +2,13 @@
 //!
 //! This module defines the structure for SQL execution responses from the `/v1/api/sql` endpoint.
 
-use kalamdb_commons::models::datatypes::KalamDataType;
-use kalamdb_commons::models::KalamCellValue;
-use kalamdb_commons::schemas::SchemaField;
-use serde::{Deserialize, Serialize, Serializer};
 use std::fmt;
+
+use kalamdb_commons::{
+    models::{datatypes::KalamDataType, KalamCellValue},
+    schemas::SchemaField,
+};
+use serde::{Deserialize, Serialize, Serializer};
 
 /// Custom serializer to limit took field to 3 decimal places
 fn serialize_took<S>(took: &f64, serializer: S) -> Result<S::Ok, S::Error>
@@ -210,7 +212,8 @@ pub struct SqlResponse {
     /// Array of result sets, one per executed statement
     pub results: Vec<QueryResult>,
 
-    /// Total execution time in milliseconds (with fractional precision, limited to 3 decimal places)
+    /// Total execution time in milliseconds (with fractional precision, limited to 3 decimal
+    /// places)
     #[serde(serialize_with = "serialize_took")]
     pub took: f64,
 

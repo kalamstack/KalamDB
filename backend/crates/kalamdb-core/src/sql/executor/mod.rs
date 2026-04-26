@@ -15,13 +15,13 @@ pub mod request_transaction_state;
 mod sql_executor;
 mod transaction_batch_insert;
 
-use crate::sql::executor::handler_registry::HandlerRegistry;
-use crate::sql::plan_cache::SqlCacheRegistry;
-pub use datafusion::scalar::ScalarValue;
-use kalamdb_commons::models::TableId;
-use kalamdb_commons::schemas::TableType;
-use kalamdb_sql::classifier::SqlStatement;
 use std::sync::Arc;
+
+pub use datafusion::scalar::ScalarValue;
+use kalamdb_commons::{models::TableId, schemas::TableType};
+use kalamdb_sql::classifier::SqlStatement;
+
+use crate::sql::{executor::handler_registry::HandlerRegistry, plan_cache::SqlCacheRegistry};
 
 /// Public facade for SQL execution routing.
 pub struct SqlExecutor {

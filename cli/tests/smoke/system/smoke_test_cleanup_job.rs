@@ -1,5 +1,6 @@
-use crate::common::*;
 use std::time::Duration;
+
+use crate::common::*;
 
 fn wait_for_table_absent(
     namespace: &str,

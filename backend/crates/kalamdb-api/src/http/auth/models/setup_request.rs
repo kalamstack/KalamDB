@@ -1,7 +1,8 @@
 //! Server setup request model
 
-use super::login_request::{validate_password_length, validate_user_length};
 use serde::Deserialize;
+
+use super::login_request::{validate_password_length, validate_user_length};
 
 /// Server setup request body
 #[derive(Debug, Deserialize)]

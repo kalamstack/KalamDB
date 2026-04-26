@@ -7,24 +7,23 @@
 //!
 //! Key type: (TableId, Option<UserId>) for type-safe cache access.
 
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
+
 use bytes::Bytes;
-use kalamdb_commons::ids::SeqId;
-use kalamdb_commons::{ManifestId, TableId, UserId};
+use kalamdb_commons::{ids::SeqId, ManifestId, TableId, UserId};
 use kalamdb_configs::ManifestCacheSettings;
 use kalamdb_filestore::StorageRegistry;
 use kalamdb_store::{StorageBackend, StorageError};
-use kalamdb_system::providers::ManifestTableProvider;
 use kalamdb_system::{
-    FileSubfolderState, Manifest, ManifestCacheEntry, SegmentMetadata, SyncState,
-};
-use kalamdb_system::{
+    providers::ManifestTableProvider, FileSubfolderState, Manifest, ManifestCacheEntry,
     ManifestService as ManifestServiceTrait, SchemaRegistry as SchemaRegistryTrait,
+    SegmentMetadata, SyncState,
 };
 use kalamdb_tables::TableError;
 use log::{debug, info, warn};
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::sync::Arc;
 
 const MAX_MANIFEST_SCAN_LIMIT: usize = 100000;
 
@@ -983,10 +982,10 @@ impl ManifestServiceTrait for ManifestService {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kalamdb_commons::{NamespaceId, TableName};
-    use kalamdb_store::test_utils::InMemoryBackend;
-    use kalamdb_store::StorageBackend;
+    use kalamdb_store::{test_utils::InMemoryBackend, StorageBackend};
+
+    use super::*;
 
     fn create_test_service() -> ManifestService {
         let backend: Arc<dyn StorageBackend> = Arc::new(InMemoryBackend::new());

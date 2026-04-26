@@ -3,12 +3,16 @@
 //! Files are staged in a temp directory before being finalized to their
 //! permanent location. This enables atomic operations and cleanup on failure.
 
-use crate::error::{FilestoreError, Result};
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+};
+
 use bytes::Bytes;
 use sha2::{Digest, Sha256};
-use std::fs;
-use std::io::Write;
-use std::path::{Path, PathBuf};
+
+use crate::error::{FilestoreError, Result};
 
 /// A staged file with computed metadata.
 #[derive(Debug, Clone)]
@@ -273,8 +277,9 @@ fn detect_mime_type(filename: &str, data: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::env;
+
+    use super::*;
 
     #[test]
     fn test_sanitize_path_component() {

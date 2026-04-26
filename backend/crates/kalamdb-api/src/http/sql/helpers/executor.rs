@@ -1,14 +1,15 @@
 //! SQL execution helpers
 
-use kalamdb_commons::models::UserId;
-use kalamdb_commons::Role;
-use kalamdb_core::sql::context::ExecutionContext;
-use kalamdb_core::sql::executor::{PreparedExecutionStatement, ScalarValue, SqlExecutor};
-use kalamdb_core::sql::ExecutionResult;
 use std::sync::Arc;
 
-use super::super::models::QueryResult;
-use super::converter::record_batch_to_query_result;
+use kalamdb_commons::{models::UserId, Role};
+use kalamdb_core::sql::{
+    context::ExecutionContext,
+    executor::{PreparedExecutionStatement, ScalarValue, SqlExecutor},
+    ExecutionResult,
+};
+
+use super::{super::models::QueryResult, converter::record_batch_to_query_result};
 
 pub async fn execute_single_statement_raw(
     metadata: &PreparedExecutionStatement,

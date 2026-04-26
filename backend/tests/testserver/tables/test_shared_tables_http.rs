@@ -1,12 +1,13 @@
 //! Shared table lifecycle tests over the real HTTP SQL API.
 
-use super::test_support::consolidated_helpers::unique_namespace;
-use super::test_support::flush::{flush_table_and_wait, wait_for_parquet_files_for_table};
-use super::test_support::jobs::{
-    extract_cleanup_job_id, wait_for_job_completion, wait_for_path_absent,
-};
 use kalam_client::models::ResponseStatus;
 use tokio::time::Duration;
+
+use super::test_support::{
+    consolidated_helpers::unique_namespace,
+    flush::{flush_table_and_wait, wait_for_parquet_files_for_table},
+    jobs::{extract_cleanup_job_id, wait_for_job_completion, wait_for_path_absent},
+};
 
 #[tokio::test]
 async fn test_shared_tables_lifecycle_over_http() -> anyhow::Result<()> {
@@ -21,11 +22,12 @@ async fn test_shared_tables_lifecycle_over_http() -> anyhow::Result<()> {
     let _ = server.execute_sql(&format!("DROP TABLE {}.{}", ns, table)).await;
 
     let resp = server
-                .execute_sql(&format!(
-                    "CREATE TABLE {}.{} (id TEXT PRIMARY KEY, entry TEXT, level INT) WITH (TYPE='SHARED', STORAGE_ID='local', FLUSH_POLICY='rows:50')",
-                    ns, table
-                ))
-                .await?;
+        .execute_sql(&format!(
+            "CREATE TABLE {}.{} (id TEXT PRIMARY KEY, entry TEXT, level INT) WITH (TYPE='SHARED', \
+             STORAGE_ID='local', FLUSH_POLICY='rows:50')",
+            ns, table
+        ))
+        .await?;
     anyhow::ensure!(
         resp.status == ResponseStatus::Success,
         "CREATE TABLE failed: {:?}",

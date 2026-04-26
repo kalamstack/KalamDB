@@ -1,9 +1,10 @@
+use std::{sync::atomic::Ordering, time::Duration};
+
+use kalam_client::SubscriptionConfig;
+use tokio::time::{sleep, timeout, Instant};
+
 use super::helpers::*;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
-use kalam_client::SubscriptionConfig;
-use std::sync::atomic::Ordering;
-use std::time::Duration;
-use tokio::time::{sleep, timeout, Instant};
 
 /// Simulate a real network/socket drop by routing the client through a local
 /// TCP proxy, force-closing the active socket, then allowing the shared
@@ -104,7 +105,8 @@ async fn test_shared_connection_auto_reconnects_after_socket_drop_and_resumes() 
     assert_eq!(
         observed_seq,
         Some(resume_from),
-        "pre-drop live insert should expose _seq to the client before checking shared state; last event: {:?}",
+        "pre-drop live insert should expose _seq to the client before checking shared state; last \
+         event: {:?}",
         last_pre_event
     );
     let subs = client.subscriptions().await;

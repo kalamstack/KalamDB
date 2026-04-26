@@ -2,14 +2,15 @@
 //!
 //! Attempts to step down leaders for all Raft groups.
 
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::executor::handlers::{
-    ExecutionContext, ExecutionResult, ScalarValue, StatementHandler,
+use std::sync::Arc;
+
+use kalamdb_core::{
+    app_context::AppContext,
+    error::KalamDbError,
+    sql::executor::handlers::{ExecutionContext, ExecutionResult, ScalarValue, StatementHandler},
 };
 use kalamdb_raft::RaftExecutor;
 use kalamdb_sql::classifier::{SqlStatement, SqlStatementKind};
-use std::sync::Arc;
 
 pub struct ClusterStepdownHandler {
     app_context: Arc<AppContext>,

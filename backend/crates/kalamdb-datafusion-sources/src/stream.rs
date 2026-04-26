@@ -6,16 +6,19 @@
 //! preserved wherever possible: the adapters forward `RecordBatch` slices and
 //! never copy the underlying buffers.
 
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 use arrow::record_batch::RecordBatch;
 use arrow_schema::SchemaRef;
-use datafusion::error::DataFusionError;
-use datafusion::execution::RecordBatchStream;
-use datafusion::physical_plan::SendableRecordBatchStream;
-use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
+use datafusion::{
+    error::DataFusionError,
+    execution::RecordBatchStream,
+    physical_plan::{stream::RecordBatchStreamAdapter, SendableRecordBatchStream},
+};
 use futures_util::{stream, Stream};
 
 /// Wrap a one-shot async batch producer as a [`SendableRecordBatchStream`].
@@ -76,7 +79,7 @@ impl Stream for LimitedRecordBatchStream {
                     self.done = true;
                     Poll::Ready(Some(Ok(batch.slice(0, take))))
                 }
-            }
+            },
             other => other,
         }
     }

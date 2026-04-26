@@ -1,13 +1,19 @@
-use std::collections::HashMap;
-use std::io::ErrorKind;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    io::ErrorKind,
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+    },
+};
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Mutex as TokioMutex;
-use tokio::task::JoinHandle;
-use tokio::time::{sleep, Duration};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{TcpListener, TcpStream},
+    sync::Mutex as TokioMutex,
+    task::JoinHandle,
+    time::{sleep, Duration},
+};
 
 pub struct TcpDisconnectProxy {
     base_url: String,
@@ -56,10 +62,7 @@ impl TcpDisconnectProxy {
                 let task = tokio::spawn(async move {
                     if let Ok(mut outbound) = TcpStream::connect(&target_addr).await {
                         if let Ok(local_addr) = outbound.local_addr() {
-                            backend_addrs_for_task
-                                .lock()
-                                .await
-                                .insert(id, local_addr.to_string());
+                            backend_addrs_for_task.lock().await.insert(id, local_addr.to_string());
                         }
 
                         let (inbound_reader, inbound_writer) = inbound.split();

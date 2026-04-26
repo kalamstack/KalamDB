@@ -6,20 +6,20 @@
 //!
 //! Used by the Raft state machine to apply replicated commands on followers.
 
-use crate::app_context::AppContext;
-use crate::applier::executor::CommandExecutorImpl;
-use crate::applier::ApplierError;
-use async_trait::async_trait;
-use kalamdb_commons::models::schemas::TableDefinition;
-use kalamdb_commons::models::{JobId, NamespaceId, NodeId, StorageId, TableId, UserId};
-use kalamdb_commons::schemas::TableType;
-use kalamdb_raft::applier::MetaApplier;
-use kalamdb_raft::RaftError;
-use kalamdb_system::providers::jobs::models::Job;
-use kalamdb_system::JobStatus;
-use kalamdb_system::User;
-use kalamdb_system::{JobNode, Storage};
 use std::sync::Arc;
+
+use async_trait::async_trait;
+use kalamdb_commons::{
+    models::{schemas::TableDefinition, JobId, NamespaceId, NodeId, StorageId, TableId, UserId},
+    schemas::TableType,
+};
+use kalamdb_raft::{applier::MetaApplier, RaftError};
+use kalamdb_system::{providers::jobs::models::Job, JobNode, JobStatus, Storage, User};
+
+use crate::{
+    app_context::AppContext,
+    applier::{executor::CommandExecutorImpl, ApplierError},
+};
 
 /// Unified applier that persists all metadata operations to system tables
 ///

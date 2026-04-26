@@ -1,7 +1,7 @@
-use super::row::Row;
-use crate::ids::SeqId;
-use crate::models::UserId;
 use serde::{Deserialize, Serialize};
+
+use super::row::Row;
+use crate::{ids::SeqId, models::UserId};
 
 /// Unified table row model for User and Stream tables
 ///

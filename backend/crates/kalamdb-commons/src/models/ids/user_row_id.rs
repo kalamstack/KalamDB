@@ -1,12 +1,15 @@
 // File: backend/crates/kalamdb-commons/src/models/user_row_id.rs
 // Composite key for user-scoped table rows
 
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 use super::user_id::UserId;
-use crate::storage_key::{decode_key, encode_key, encode_prefix};
-use crate::StorageKey;
+use crate::{
+    storage_key::{decode_key, encode_key, encode_prefix},
+    StorageKey,
+};
 
 /// Composite key for user-scoped table rows: (user_id, row_id)
 ///

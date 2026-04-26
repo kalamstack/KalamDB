@@ -171,8 +171,7 @@ No unsubscribe acknowledgement message is currently emitted.
     "batch_num": 0,
     "has_more": true,
     "status": "loading",
-    "last_seq_id": 12345,
-    "snapshot_end_seq": 13000
+    "last_seq_id": 12345
   },
   "schema": [
     {"name": "id", "data_type": "BigInt", "index": 0},
@@ -200,11 +199,13 @@ Notes:
     "batch_num": 0,
     "has_more": true,
     "status": "loading",
-    "last_seq_id": 12346,
-    "snapshot_end_seq": 13000
+    "last_seq_id": 12346
   }
 }
 ```
+
+The client resume cursor is always `last_seq_id`; snapshot and commit
+boundaries are backend-owned and are not part of the WebSocket contract.
 
 `batch_control.status` values:
 

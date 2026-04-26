@@ -16,19 +16,25 @@
 //! - Request body size limits
 //! - Automatic IP banning for persistent abusers
 
-use crate::connection_guard::{ConnectionGuard, ConnectionGuardResult};
+use std::{
+    future::{ready, Ready},
+    net::IpAddr,
+    sync::Arc,
+};
+
 use actix_cors::Cors;
-use actix_web::body::{BoxBody, EitherBody};
-use actix_web::dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform};
-use actix_web::http::{header::HeaderName, Method, StatusCode};
-use actix_web::{Error, HttpResponse};
+use actix_web::{
+    body::{BoxBody, EitherBody},
+    dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
+    http::{header::HeaderName, Method, StatusCode},
+    Error, HttpResponse,
+};
 use futures_util::future::LocalBoxFuture;
 use kalamdb_auth::extract_client_ip_addr_secure;
 use kalamdb_configs::{RateLimitSettings, ServerConfig};
 use log::warn;
-use std::future::{ready, Ready};
-use std::net::IpAddr;
-use std::sync::Arc;
+
+use crate::connection_guard::{ConnectionGuard, ConnectionGuardResult};
 
 /// Build CORS middleware from server configuration using actix-cors.
 ///
@@ -88,9 +94,12 @@ pub fn build_cors_from_config(config: &ServerConfig) -> Cors {
 
 #[cfg(test)]
 mod tests {
+    use actix_web::{
+        http::{header, Method},
+        test, web, App, HttpResponse,
+    };
+
     use super::*;
-    use actix_web::http::{header, Method};
-    use actix_web::{test, web, App, HttpResponse};
 
     #[actix_web::test]
     async fn preflight_login_request_allows_vite_chat_origin() {

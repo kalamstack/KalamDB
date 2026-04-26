@@ -1,5 +1,7 @@
-use crate::models::NotificationRow;
-use crate::repository::{RepositoryModel, SharedTableRepository};
+use crate::{
+    models::NotificationRow,
+    repository::{RepositoryModel, SharedTableRepository},
+};
 
 pub type NotificationsRepository = SharedTableRepository<NotificationRow>;
 

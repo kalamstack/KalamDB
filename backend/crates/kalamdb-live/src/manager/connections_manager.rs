@@ -19,23 +19,30 @@
 //! - Dead TCP detected at the client (write failure) rather than waiting for timeout
 //! - O(N) atomic reads per tick — no mpsc events, no synchronised wakeups
 
+use std::{
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
+
+use dashmap::{mapref::entry::Entry, DashMap};
+#[cfg(any(test, feature = "test-helpers"))]
+use kalamdb_commons::WireNotification;
+use kalamdb_commons::{
+    models::{ConnectionId, ConnectionInfo, LiveQueryId, TableId, UserId},
+    NodeId,
+};
+use kalamdb_system::{LiveQuery, LiveQueryStatus};
+use log::{debug, info, warn};
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
+
 use super::super::models::{
     ConnectionEvent, ConnectionRegistration, ConnectionState, SharedConnectionState,
     SubscriptionHandle, EVENT_CHANNEL_CAPACITY, NOTIFICATION_CHANNEL_CAPACITY,
 };
-use dashmap::mapref::entry::Entry;
-use dashmap::DashMap;
-use kalamdb_commons::models::{ConnectionId, ConnectionInfo, LiveQueryId, TableId, UserId};
-use kalamdb_commons::NodeId;
-#[cfg(any(test, feature = "test-helpers"))]
-use kalamdb_commons::WireNotification;
-use kalamdb_system::{LiveQuery, LiveQueryStatus};
-use log::{debug, info, warn};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 
 /// Connections Manager
 ///
@@ -314,7 +321,8 @@ impl ConnectionsManager {
     // NOTE: Actual subscription storage is in ConnectionState.subscriptions
     // These methods maintain secondary indices for efficient notification routing
 
-    /// Add subscription to user_table_subscriptions index (called by LiveQueryManager after adding to ConnectionState)
+    /// Add subscription to user_table_subscriptions index (called by LiveQueryManager after adding
+    /// to ConnectionState)
     ///
     /// Uses lightweight SubscriptionHandle for the index instead of cloning full state.
     pub fn index_subscription(
@@ -381,7 +389,8 @@ impl ConnectionsManager {
         self.peak_subscriptions.fetch_max(count, Ordering::AcqRel);
     }
 
-    /// Remove subscription from indices (called by LiveQueryManager after removing from ConnectionState)
+    /// Remove subscription from indices (called by LiveQueryManager after removing from
+    /// ConnectionState)
     pub fn unindex_subscription(
         &self,
         user_id: &UserId,
@@ -503,7 +512,8 @@ impl ConnectionsManager {
                 Ok(_) => {},
                 Err(mpsc::error::TrySendError::Full(_))
                 | Err(mpsc::error::TrySendError::Closed(_)) => {
-                    // Handler is likely stalled or gone; unregister immediately so shutdown doesn't wait forever.
+                    // Handler is likely stalled or gone; unregister immediately so shutdown doesn't
+                    // wait forever.
                     force_unregister.push(conn_id);
                 },
             }
@@ -941,8 +951,9 @@ mod tests {
 
     // ==================== Shared Table Subscription Tests ====================
 
-    use super::super::super::models::{SubscriptionFlowControl, SubscriptionRuntimeMetadata};
     use kalamdb_commons::models::{NamespaceId, TableName};
+
+    use super::super::super::models::{SubscriptionFlowControl, SubscriptionRuntimeMetadata};
 
     /// Helper: create a SubscriptionHandle with pre-completed flow control
     fn create_test_handle(
@@ -1046,6 +1057,7 @@ mod tests {
                     initial_load: Some(super::super::super::models::InitialLoadState {
                         batch_size: 100,
                         snapshot_end_seq: None,
+                        snapshot_end_commit_seq: None,
                         current_batch_num: 0,
                         flow_control: Arc::new(SubscriptionFlowControl::new()),
                     }),

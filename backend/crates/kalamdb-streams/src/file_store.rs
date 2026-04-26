@@ -1,20 +1,28 @@
-use crate::config::StreamLogConfig;
-use crate::error::{Result, StreamLogError};
-use crate::record::StreamLogRecord;
-use crate::store_trait::StreamLogStore;
-use crate::time_bucket::StreamTimeBucket;
-use crate::utils::{cleanup_empty_dir, parse_log_window, read_dirs, read_files};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+    fs::{self, File, OpenOptions},
+    io::{BufReader, BufWriter, Read, Write},
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+    time::Instant,
+};
+
 use chrono::{Datelike, TimeZone, Timelike, Utc};
 use dashmap::{DashMap, DashSet};
-use kalamdb_commons::ids::StreamTableRowId;
-use kalamdb_commons::models::{StreamTableRow, TableId, UserId};
-use std::collections::{HashMap, HashSet};
-use std::fmt;
-use std::fs::{self, File, OpenOptions};
-use std::io::{BufReader, BufWriter, Read, Write};
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use kalamdb_commons::{
+    ids::StreamTableRowId,
+    models::{StreamTableRow, TableId, UserId},
+};
+
+use crate::{
+    config::StreamLogConfig,
+    error::{Result, StreamLogError},
+    record::StreamLogRecord,
+    store_trait::StreamLogStore,
+    time_bucket::StreamTimeBucket,
+    utils::{cleanup_empty_dir, parse_log_window, read_dirs, read_files},
+};
 
 /// Write buffer capacity per segment file handle (256 KB).
 ///
@@ -33,13 +41,13 @@ struct SegmentWriter {
 ///
 /// Optimised for high-throughput concurrent writes:
 ///
-/// * **Cached file handles** — open segment files are kept in a sharded
-///   `DashMap`, eliminating open / close syscall overhead per write.
-/// * **Sharded write buffers** — each segment has its own 256 KB `BufWriter`,
-///   reducing flush frequency while enabling per-user parallelism.
+/// * **Cached file handles** — open segment files are kept in a sharded `DashMap`, eliminating open
+///   / close syscall overhead per write.
+/// * **Sharded write buffers** — each segment has its own 256 KB `BufWriter`, reducing flush
+///   frequency while enabling per-user parallelism.
 /// * **Directory cache** — avoids repeated `create_dir_all` syscalls.
-/// * **Batch writes** — multiple records targeting the same segment share a
-///   single lock acquisition.
+/// * **Batch writes** — multiple records targeting the same segment share a single lock
+///   acquisition.
 pub struct FileStreamLogStore {
     config: StreamLogConfig,
     /// Cached open segment writers keyed by log-file path.
@@ -586,19 +594,24 @@ impl Drop for FileStreamLogStore {
 
 #[cfg(test)]
 mod tests {
-    use super::FileStreamLogStore;
-    use crate::config::StreamLogConfig;
-    use crate::store_trait::StreamLogStore;
-    use crate::time_bucket::StreamTimeBucket;
+    use std::{
+        collections::{BTreeMap, HashMap},
+        fs,
+        path::PathBuf,
+    };
+
     use chrono::{Datelike, TimeZone, Timelike};
     use datafusion::scalar::ScalarValue;
-    use kalamdb_commons::ids::{SeqId, SnowflakeGenerator, StreamTableRowId};
-    use kalamdb_commons::models::rows::Row;
-    use kalamdb_commons::models::{NamespaceId, StreamTableRow, TableId, TableName, UserId};
+    use kalamdb_commons::{
+        ids::{SeqId, SnowflakeGenerator, StreamTableRowId},
+        models::{rows::Row, NamespaceId, StreamTableRow, TableId, TableName, UserId},
+    };
     use kalamdb_sharding::ShardRouter;
-    use std::collections::{BTreeMap, HashMap};
-    use std::fs;
-    use std::path::PathBuf;
+
+    use super::FileStreamLogStore;
+    use crate::{
+        config::StreamLogConfig, store_trait::StreamLogStore, time_bucket::StreamTimeBucket,
+    };
 
     fn temp_base_dir(prefix: &str) -> PathBuf {
         let now = std::time::SystemTime::now()

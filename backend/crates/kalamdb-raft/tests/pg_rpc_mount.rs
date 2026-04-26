@@ -1,12 +1,13 @@
-use std::sync::Arc;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use kalam_pg_client::RemoteKalamClient;
 use kalam_pg_common::RemoteServerConfig;
 use kalamdb_commons::models::NodeId;
 use kalamdb_pg::KalamPgService;
-use kalamdb_raft::manager::{RaftManager, RaftManagerConfig};
-use kalamdb_raft::{network::cluster_handler::NoOpClusterHandler, network::start_rpc_server};
+use kalamdb_raft::{
+    manager::{RaftManager, RaftManagerConfig},
+    network::{cluster_handler::NoOpClusterHandler, start_rpc_server},
+};
 
 #[tokio::test]
 #[ntest::timeout(10000)]

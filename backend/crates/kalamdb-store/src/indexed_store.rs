@@ -96,16 +96,19 @@
 //! let running_jobs = store.scan_by_index(0, Some(&[JobStatus::Running as u8]), Some(10))?;
 //! ```
 
-use crate::async_utils::run_blocking_result;
-use crate::entity_store::{EntityIterator, EntityStore};
-use crate::storage_trait::{Operation, Partition, Result, StorageBackend, StorageError};
-use kalamdb_commons::{KSerializable, StorageKey};
 use std::sync::Arc;
 
 #[cfg(feature = "datafusion")]
 use datafusion::logical_expr::{Expr, Operator};
 #[cfg(feature = "datafusion")]
 use datafusion::scalar::ScalarValue;
+use kalamdb_commons::{KSerializable, StorageKey};
+
+use crate::{
+    async_utils::run_blocking_result,
+    entity_store::{EntityIterator, EntityStore},
+    storage_trait::{Operation, Partition, Result, StorageBackend, StorageError},
+};
 
 // ============================================================================
 // IndexDefinition Trait
@@ -326,7 +329,6 @@ where
         }
         None
     }
-
 
     /// Finds the "best" index for a set of DataFusion filters.
     ///
@@ -1067,11 +1069,11 @@ pub fn extract_i64_equality(filter: &Expr) -> Option<(&str, i64)> {
 
 #[cfg(test)]
 mod tests {
+    use kalamdb_commons::{JobId, NodeId};
+    use kalamdb_system::{providers::jobs::models::Job, JobStatus, JobType};
+
     use super::*;
     use crate::test_utils::InMemoryBackend;
-    use kalamdb_commons::{JobId, NodeId};
-    use kalamdb_system::providers::jobs::models::Job;
-    use kalamdb_system::{JobStatus, JobType};
 
     // Test index: Jobs by status
     struct TestStatusIndex;

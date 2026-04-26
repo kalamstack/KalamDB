@@ -4,25 +4,29 @@
 //! the complete file-operation API for KalamDB cold storage. All operations are
 //! async-first; thin `_sync` wrappers delegate via `run_blocking`.
 
+use std::sync::Arc;
+
+use arrow::{datatypes::SchemaRef, record_batch::RecordBatch};
+use bytes::Bytes;
+use futures_util::StreamExt;
+use kalamdb_commons::{
+    models::{TableId, UserId},
+    schemas::TableType,
+};
+use kalamdb_system::{providers::storages::models::StorageType, Storage};
+use object_store::{path::Path as ObjectPath, ObjectStore, ObjectStoreExt};
+use parking_lot::RwLock;
+
 use super::operations::{
     DeletePrefixResult, DeleteResult, ExistsResult, FileInfo, GetResult, ListResult, PathResult,
     PutResult, RenameResult,
 };
-use crate::core::runtime::run_blocking;
-use crate::error::{FilestoreError, Result};
-use crate::parquet::writer::{serialize_to_parquet, ParquetWriteResult};
-use crate::paths::{PathResolver, TemplateResolver};
-use arrow::datatypes::SchemaRef;
-use arrow::record_batch::RecordBatch;
-use bytes::Bytes;
-use futures_util::StreamExt;
-use kalamdb_commons::models::{TableId, UserId};
-use kalamdb_commons::schemas::TableType;
-use kalamdb_system::providers::storages::models::StorageType;
-use kalamdb_system::Storage;
-use object_store::{path::Path as ObjectPath, ObjectStore, ObjectStoreExt};
-use parking_lot::RwLock;
-use std::sync::Arc;
+use crate::{
+    core::runtime::run_blocking,
+    error::{FilestoreError, Result},
+    parquet::writer::{serialize_to_parquet, ParquetWriteResult},
+    paths::{PathResolver, TemplateResolver},
+};
 
 /// Unified storage interface with lazy `ObjectStore` and template resolution.
 ///
@@ -607,11 +611,12 @@ fn extract_parquet_filenames(list_result: &ListResult) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use kalamdb_commons::models::ids::StorageId;
-    use kalamdb_commons::{NamespaceId, TableName};
-    use kalamdb_system::providers::storages::models::StorageType;
     use std::env;
+
+    use kalamdb_commons::{models::ids::StorageId, NamespaceId, TableName};
+    use kalamdb_system::providers::storages::models::StorageType;
+
+    use super::*;
 
     fn create_test_storage() -> Storage {
         // Create a unique temp directory for each test invocation

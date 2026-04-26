@@ -1,9 +1,13 @@
-use crate::app_context::AppContext;
-use datafusion::common::{DataFusionError, Result};
-use kalamdb_commons::models::{TableId, UserId};
-use kalamdb_commons::schemas::TableType;
-use kalamdb_vector::{VectorSearchRuntime, VectorSearchScope};
 use std::sync::Weak;
+
+use datafusion::common::{DataFusionError, Result};
+use kalamdb_commons::{
+    models::{TableId, UserId},
+    schemas::TableType,
+};
+use kalamdb_vector::{VectorSearchRuntime, VectorSearchScope};
+
+use crate::app_context::AppContext;
 
 #[derive(Debug, Clone)]
 pub struct CoreVectorSearchRuntime {

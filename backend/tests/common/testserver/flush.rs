@@ -1,10 +1,15 @@
+use std::path::{Path, PathBuf};
+
 use anyhow::Result;
 use kalam_client::models::{QueryResponse, ResponseStatus};
 use kalamdb_commons::{NamespaceId, TableId, TableName};
-use kalamdb_jobs::executors::flush::{FlushExecutor, FlushParams};
-use kalamdb_jobs::executors::{JobContext, JobExecutor};
-use kalamdb_jobs::AppContextJobsExt;
-use std::path::{Path, PathBuf};
+use kalamdb_jobs::{
+    executors::{
+        flush::{FlushExecutor, FlushParams},
+        JobContext, JobExecutor,
+    },
+    AppContextJobsExt,
+};
 use tokio::time::{sleep, Duration, Instant};
 
 use super::http_server::HttpTestServer;
@@ -68,8 +73,7 @@ async fn wait_for_flush_job_by_id(
     loop {
         let resp = server
             .execute_sql(&format!(
-                "SELECT status, message FROM system.jobs \
-                 WHERE job_id = '{}' LIMIT 1",
+                "SELECT status, message FROM system.jobs WHERE job_id = '{}' LIMIT 1",
                 escaped_job_id
             ))
             .await?;
@@ -111,9 +115,8 @@ async fn wait_for_flush_job_by_idempotency_key(
     loop {
         let resp = server
             .execute_sql(&format!(
-                "SELECT job_id, status, message FROM system.jobs \
-                 WHERE job_type = 'flush' AND idempotency_key = '{}' \
-                 ORDER BY created_at DESC LIMIT 1",
+                "SELECT job_id, status, message FROM system.jobs WHERE job_type = 'flush' AND \
+                 idempotency_key = '{}' ORDER BY created_at DESC LIMIT 1",
                 escaped_key
             ))
             .await?;
@@ -161,9 +164,8 @@ pub async fn wait_for_flush_jobs_settled(
     loop {
         let resp = server
             .execute_sql(
-                "SELECT status, parameters \
-                 FROM system.jobs WHERE job_type = 'flush' \
-                 ORDER BY created_at DESC LIMIT 500",
+                "SELECT status, parameters FROM system.jobs WHERE job_type = 'flush' ORDER BY \
+                 created_at DESC LIMIT 500",
             )
             .await?;
 
@@ -219,17 +221,16 @@ pub async fn wait_for_flush_jobs_settled(
         if Instant::now() >= deadline {
             if matching_count > 0 {
                 println!(
-                    "Timed out waiting for flush jobs to settle for {}.{} (matching_count={}, statuses={:?}) - proceeding",
-                    ns,
-                    table,
-                    matching_count,
-                    status_samples
+                    "Timed out waiting for flush jobs to settle for {}.{} (matching_count={}, \
+                     statuses={:?}) - proceeding",
+                    ns, table, matching_count, status_samples
                 );
                 return Ok(());
             }
 
             anyhow::bail!(
-                "Timed out waiting for flush jobs to settle for {}.{} (matching_count={}, statuses={:?})",
+                "Timed out waiting for flush jobs to settle for {}.{} (matching_count={}, \
+                 statuses={:?})",
                 ns,
                 table,
                 matching_count,

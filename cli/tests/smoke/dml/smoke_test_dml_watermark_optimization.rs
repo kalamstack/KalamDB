@@ -6,8 +6,9 @@
 // The optimization removes unnecessary Meta group synchronization for DML operations
 // where the table schema has already been validated.
 
-use crate::common::*;
 use std::time::Instant;
+
+use crate::common::*;
 
 /// Test that INSERT operations complete in acceptable time (no Meta waiting)
 #[ntest::timeout(120000)]
@@ -110,7 +111,8 @@ fn smoke_test_watermark_dml_update() {
         .expect("CREATE NAMESPACE should succeed");
 
     let create_table_sql = format!(
-        "CREATE TABLE {} (id BIGINT PRIMARY KEY, status TEXT, counter INT) WITH (TYPE = 'USER', STORAGE_ID = 'local')",
+        "CREATE TABLE {} (id BIGINT PRIMARY KEY, status TEXT, counter INT) WITH (TYPE = 'USER', \
+         STORAGE_ID = 'local')",
         full_table_name
     );
     execute_sql_as_root_via_client(&create_table_sql).expect("CREATE TABLE should succeed");

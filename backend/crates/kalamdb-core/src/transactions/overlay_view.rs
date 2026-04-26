@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::{OperationKind, TableId, TransactionId, UserId};
-use kalamdb_commons::TableType;
+use kalamdb_commons::{
+    models::{rows::Row, OperationKind, TableId, TransactionId, UserId},
+    TableType,
+};
 use kalamdb_transactions::{
     TransactionAccessError, TransactionAccessValidator, TransactionMutationSink,
     TransactionOverlay, TransactionOverlayView,

@@ -1,13 +1,16 @@
-use crate::app_context::AppContext;
-use crate::error::KalamDbError;
+use std::sync::Arc;
+
 use chrono::Utc;
-use kalamdb_commons::models::{AuditLogId, UserId};
-use kalamdb_commons::Role;
+use kalamdb_commons::{
+    models::{AuditLogId, UserId},
+    Role,
+};
 use kalamdb_session::can_impersonate_role;
 use kalamdb_system::AuditLogEntry;
 use serde_json::json;
-use std::sync::Arc;
 use uuid::Uuid;
+
+use crate::{app_context::AppContext, error::KalamDbError};
 
 /// Core service for SQL "execute as user" resolution and authorization.
 pub struct SqlImpersonationService {

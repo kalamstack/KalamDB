@@ -26,6 +26,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { cn } from '@/lib/utils';
 import {
   Play,
@@ -395,7 +396,7 @@ export function SqlPreviewDialog({ open, options, onClose }: SqlPreviewDialogPro
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) handleCancel(); }}>
-      <DialogContent className="flex max-h-[90vh] max-w-5xl flex-col gap-0 overflow-hidden p-0">
+      <DialogContent className="flex h-[85vh] max-h-[90vh] max-w-5xl flex-col gap-0 overflow-hidden p-0">
         <DialogHeader className="border-b px-6 pb-4 pt-6">
           <DialogTitle className="text-lg">
             {options?.title ?? 'SQL Preview'}
@@ -461,156 +462,166 @@ export function SqlPreviewDialog({ open, options, onClose }: SqlPreviewDialogPro
           </div>
         </div>
 
-        <div className="px-6 pb-4">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium text-foreground">SQL Preview</p>
-              <p className="text-xs text-muted-foreground">
-                {isReadOnly ? 'Read-only Monaco preview for this commit.' : 'Edit the SQL before sending it.'}
-              </p>
-            </div>
-            <span className="rounded-full border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground">
-              {mutationStatementCount} change unit{mutationStatementCount === 1 ? '' : 's'}
-            </span>
-          </div>
+        <div className="min-h-0 flex-1 px-6 pb-4">
+          <ResizablePanelGroup orientation="vertical" className="min-h-0 flex-1">
+            <ResizablePanel defaultSize={50} minSize={20} className="min-h-0 overflow-hidden">
+              <section className="flex h-full min-h-0 flex-col">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">SQL Preview</p>
+                    <p className="text-xs text-muted-foreground">
+                      {isReadOnly ? 'Read-only Monaco preview for this commit.' : 'Edit the SQL before sending it.'}
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground">
+                    {mutationStatementCount} change unit{mutationStatementCount === 1 ? '' : 's'}
+                  </span>
+                </div>
 
-          <div className="h-[320px] overflow-hidden rounded-md border border-border">
-            {sql ? (
-              <Editor
-                height="100%"
-                language="sql"
-                theme="vs-light"
-                value={sql}
-                onChange={(value) => {
-                  if (!isReadOnly) {
-                    setSql(value ?? '');
-                  }
-                }}
-                onMount={(instance) => {
-                  editorRef.current = instance;
-                }}
-                options={{
-                  readOnly: isReadOnly,
-                  domReadOnly: isReadOnly,
-                  minimap: { enabled: false },
-                  fontSize: 13,
-                  lineNumbers: 'on',
-                  scrollBeyondLastLine: false,
-                  automaticLayout: true,
-                  tabSize: 2,
-                  wordWrap: 'on',
-                  padding: { top: 16, bottom: 16 },
-                  overviewRulerBorder: false,
-                  renderLineHighlight: 'gutter',
-                  scrollbar: {
-                    verticalScrollbarSize: 10,
-                    horizontalScrollbarSize: 10,
-                  },
-                }}
-              />
-            ) : (
-              <div className="flex h-full items-center justify-center text-muted-foreground">
-                <p>No SQL to display</p>
-              </div>
-            )}
-          </div>
-        </div>
+                <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-border bg-background">
+                  {sql ? (
+                    <Editor
+                      height="100%"
+                      language="sql"
+                      theme="vs-light"
+                      value={sql}
+                      onChange={(value) => {
+                        if (!isReadOnly) {
+                          setSql(value ?? '');
+                        }
+                      }}
+                      onMount={(instance) => {
+                        editorRef.current = instance;
+                      }}
+                      options={{
+                        readOnly: isReadOnly,
+                        domReadOnly: isReadOnly,
+                        minimap: { enabled: false },
+                        fontSize: 13,
+                        lineNumbers: 'on',
+                        scrollBeyondLastLine: false,
+                        automaticLayout: true,
+                        tabSize: 2,
+                        wordWrap: 'on',
+                        padding: { top: 16, bottom: 16 },
+                        overviewRulerBorder: false,
+                        renderLineHighlight: 'gutter',
+                        scrollbar: {
+                          verticalScrollbarSize: 10,
+                          horizontalScrollbarSize: 10,
+                        },
+                      }}
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-muted-foreground">
+                      <p>No SQL to display</p>
+                    </div>
+                  )}
+                </div>
+              </section>
+            </ResizablePanel>
 
-        <div className="min-h-0 px-6 pb-4">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium text-foreground">Execution Log</p>
-              <p className="text-xs text-muted-foreground">
-                {transactionBatch
-                  ? 'The full batch is sent once; the rows below show the statements included in that transaction.'
-                  : 'Statement audit for this execution.'}
-              </p>
-            </div>
-          </div>
+            <ResizableHandle withHandle className="my-3" />
 
-          <div className="overflow-hidden rounded-md border border-border">
-            <div className="max-h-[280px] overflow-y-auto">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-muted/50 text-left">
-                  <tr>
-                    <th className="w-14 px-3 py-2 font-medium text-muted-foreground">#</th>
-                    <th className="px-3 py-2 font-medium text-muted-foreground">Statement</th>
-                    <th className="w-44 px-3 py-2 font-medium text-muted-foreground">Status</th>
-                    <th className="w-24 px-3 py-2 text-right font-medium text-muted-foreground">Time</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {visibleAudit.map((item, index) => {
-                    const isAnimated = status === 'executing' && activeAuditIndex === index;
-                    const badgeStatus: StatementStatus = item.status === 'pending' && isAnimated ? 'running' : item.status;
+            <ResizablePanel defaultSize={50} minSize={20} className="min-h-0 overflow-hidden">
+              <section className="flex h-full min-h-0 flex-col">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Execution Log</p>
+                    <p className="text-xs text-muted-foreground">
+                      {transactionBatch
+                        ? 'The full batch is sent once; the rows below show the statements included in that transaction.'
+                        : 'Statement audit for this execution.'}
+                    </p>
+                  </div>
+                </div>
 
-                    return (
-                      <tr
-                        key={item.id}
-                        className={cn(
-                          'transition-colors',
-                          badgeStatus === 'running' && 'bg-sky-50/80',
-                          item.status === 'success' && 'bg-emerald-50/70',
-                          item.status === 'failed' && 'bg-rose-50/70',
-                        )}
-                      >
-                        <td className="px-3 py-3 align-top font-mono text-xs text-muted-foreground">
-                          #{item.id}
-                        </td>
-                        <td className="px-3 py-3 align-top">
-                          <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-foreground">
-                            {truncateStatement(item.statement, 180)}
-                          </pre>
-                          {item.error && (
-                            <div className="mt-2 rounded-md border border-rose-200 bg-rose-50 px-2 py-2">
-                              <div className="text-[11px] font-medium uppercase tracking-wide text-rose-700">
-                                Error
-                              </div>
-                              <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] leading-4 text-rose-700">
-                                {item.error}
-                              </pre>
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-3 py-3 align-top">
-                          <span
-                            className={cn(
-                              'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium',
-                              badgeStatus === 'pending' && 'bg-gray-100 text-gray-700',
-                              badgeStatus === 'running' && 'bg-sky-100 text-sky-700',
-                              item.status === 'success' && 'bg-emerald-100 text-emerald-700',
-                              item.status === 'failed' && 'bg-rose-100 text-rose-700',
-                            )}
-                          >
-                            {badgeStatus === 'running' && <Loader2 className="h-3 w-3 animate-spin" />}
-                            {item.status === 'success' && <CheckCircle2 className="h-3 w-3" />}
-                            {item.status === 'failed' && <AlertCircle className="h-3 w-3" />}
-                            {badgeStatus === 'pending' && 'Queued'}
-                            {badgeStatus === 'running' && 'Running'}
-                            {item.status === 'success' && (transactionBatch ? 'Committed' : 'Done')}
-                            {item.status === 'failed' && (transactionBatch ? 'Rolled back' : 'Failed')}
-                          </span>
-                          {isAnimated && (
-                            <div className="mt-2 flex items-center gap-2 text-[11px] text-sky-700">
-                              <ExecutionSparkline active />
-                              <span>Running</span>
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-3 py-3 text-right align-top font-mono text-xs text-muted-foreground">
-                          {item.timeTook !== undefined ? `${item.timeTook}ms` : '--'}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-border bg-background">
+                  <div className="h-full overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead className="sticky top-0 z-10 bg-muted/80 text-left backdrop-blur">
+                        <tr>
+                          <th className="w-14 px-3 py-2 font-medium text-muted-foreground">#</th>
+                          <th className="px-3 py-2 font-medium text-muted-foreground">Statement</th>
+                          <th className="w-44 px-3 py-2 font-medium text-muted-foreground">Status</th>
+                          <th className="w-24 px-3 py-2 text-right font-medium text-muted-foreground">Time</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {visibleAudit.map((item, index) => {
+                          const isAnimated = status === 'executing' && activeAuditIndex === index;
+                          const badgeStatus: StatementStatus = item.status === 'pending' && isAnimated ? 'running' : item.status;
+
+                          return (
+                            <tr
+                              key={item.id}
+                              className={cn(
+                                'transition-colors',
+                                badgeStatus === 'running' && 'bg-sky-50/80',
+                                item.status === 'success' && 'bg-emerald-50/70',
+                                item.status === 'failed' && 'bg-rose-50/70',
+                              )}
+                            >
+                              <td className="px-3 py-3 align-top font-mono text-xs text-muted-foreground">
+                                #{item.id}
+                              </td>
+                              <td className="px-3 py-3 align-top">
+                                <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-foreground">
+                                  {truncateStatement(item.statement, 180)}
+                                </pre>
+                                {item.error && (
+                                  <div className="mt-2 rounded-md border border-rose-200 bg-rose-50 px-2 py-2">
+                                    <div className="text-[11px] font-medium uppercase tracking-wide text-rose-700">
+                                      Error
+                                    </div>
+                                    <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] leading-4 text-rose-700">
+                                      {item.error}
+                                    </pre>
+                                  </div>
+                                )}
+                              </td>
+                              <td className="px-3 py-3 align-top">
+                                <span
+                                  className={cn(
+                                    'inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium',
+                                    badgeStatus === 'pending' && 'bg-gray-100 text-gray-700',
+                                    badgeStatus === 'running' && 'bg-sky-100 text-sky-700',
+                                    item.status === 'success' && 'bg-emerald-100 text-emerald-700',
+                                    item.status === 'failed' && 'bg-rose-100 text-rose-700',
+                                  )}
+                                >
+                                  {badgeStatus === 'running' && <Loader2 className="h-3 w-3 animate-spin" />}
+                                  {item.status === 'success' && <CheckCircle2 className="h-3 w-3" />}
+                                  {item.status === 'failed' && <AlertCircle className="h-3 w-3" />}
+                                  {badgeStatus === 'pending' && 'Queued'}
+                                  {badgeStatus === 'running' && 'Running'}
+                                  {item.status === 'success' && (transactionBatch ? 'Committed' : 'Done')}
+                                  {item.status === 'failed' && (transactionBatch ? 'Rolled back' : 'Failed')}
+                                </span>
+                                {isAnimated && (
+                                  <div className="mt-2 flex items-center gap-2 text-[11px] text-sky-700">
+                                    <ExecutionSparkline active />
+                                    <span>Running</span>
+                                  </div>
+                                )}
+                              </td>
+                              <td className="px-3 py-3 text-right align-top font-mono text-xs text-muted-foreground">
+                                {item.timeTook !== undefined ? `${item.timeTook}ms` : '--'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </section>
+            </ResizablePanel>
+          </ResizablePanelGroup>
         </div>
 
         {/* ── Footer: Status + Actions ───────────────────────────────── */}
-        <div className="flex items-center justify-between gap-4 border-t px-6 py-4">
+        <div className="flex shrink-0 items-center justify-between gap-4 border-t bg-background px-6 py-4">
           {/* Left: status indicator */}
           <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
             {status === 'idle' && (

@@ -4,8 +4,9 @@
 //! - SHOW TABLES
 //! - SHOW TABLES IN namespace
 
-use crate::ddl::{parsing, DdlResult};
 use kalamdb_commons::models::NamespaceId;
+
+use crate::ddl::{parsing, DdlResult};
 
 /// SHOW TABLES statement
 #[derive(Debug, Clone, PartialEq)]

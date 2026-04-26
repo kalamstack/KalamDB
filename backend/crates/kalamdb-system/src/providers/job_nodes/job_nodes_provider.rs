@@ -1,19 +1,24 @@
 //! System.job_nodes table provider
 
-use crate::error::{SystemError, SystemResultExt};
-use crate::providers::base::{system_rows_to_batch, IndexedProviderDefinition};
-use crate::providers::job_nodes::models::JobNode;
-use crate::system_row_mapper::{model_to_system_row, system_row_to_model};
-use crate::JobStatus;
-use chrono::Utc;
-use datafusion::arrow::array::RecordBatch;
-use datafusion::arrow::datatypes::SchemaRef;
-use kalamdb_commons::models::rows::SystemTableRow;
-use kalamdb_commons::models::JobNodeId;
-use kalamdb_commons::{JobId, NodeId, SystemTable};
-use kalamdb_store::entity_store::EntityStore;
-use kalamdb_store::{IndexedEntityStore, StorageBackend};
 use std::sync::{Arc, OnceLock};
+
+use chrono::Utc;
+use datafusion::arrow::{array::RecordBatch, datatypes::SchemaRef};
+use kalamdb_commons::{
+    models::{rows::SystemTableRow, JobNodeId},
+    JobId, NodeId, SystemTable,
+};
+use kalamdb_store::{entity_store::EntityStore, IndexedEntityStore, StorageBackend};
+
+use crate::{
+    error::{SystemError, SystemResultExt},
+    providers::{
+        base::{system_rows_to_batch, IndexedProviderDefinition},
+        job_nodes::models::JobNode,
+    },
+    system_row_mapper::{model_to_system_row, system_row_to_model},
+    JobStatus,
+};
 
 pub type JobNodesStore = IndexedEntityStore<JobNodeId, SystemTableRow>;
 

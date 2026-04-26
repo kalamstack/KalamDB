@@ -4,8 +4,10 @@
 //!
 //! Maintains command history across sessions for better user experience.
 
-use std::env;
-use std::path::{Path, PathBuf};
+use std::{
+    env,
+    path::{Path, PathBuf},
+};
 
 use crate::error::{CLIError, Result};
 
@@ -304,9 +306,9 @@ fn parse_history_entries(contents: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use tempfile::tempdir;
+
+    use super::*;
 
     #[test]
     fn test_history_persistence() {
@@ -399,7 +401,8 @@ mod tests {
         let history = CommandHistory::with_path(&path, 100);
 
         // Test command with special characters and newlines
-        let special_cmd = "INSERT INTO messages (content)\nVALUES ('Hello\nWorld!'),\n       ('Test\tmessage\nwith\\special chars');";
+        let special_cmd = "INSERT INTO messages (content)\nVALUES ('Hello\nWorld!'),\n       \
+                           ('Test\tmessage\nwith\\special chars');";
 
         history.append(special_cmd).unwrap();
 

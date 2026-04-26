@@ -10,14 +10,14 @@
 //! - Initial data in subscriptions
 //! - CRUD operations with live updates
 
-use crate::common::*;
-
 use std::{
     io::{BufRead, BufReader, Read},
     process::{Child, Command, Stdio},
     sync::mpsc::{self, Receiver},
     time::{Duration, Instant},
 };
+
+use crate::common::*;
 
 fn forward_process_output<R: Read + Send + 'static>(
     reader: R,
@@ -237,12 +237,11 @@ fn test_cli_live_query_with_filter() {
     let table_name = generate_unique_table("live_query_filter");
     let table = format!("{}.{}", namespace_name, table_name);
 
-    let _ = execute_sql_as_root_via_cli(&format!(
-        "CREATE NAMESPACE IF NOT EXISTS {}",
-        namespace_name
-    ));
+    let _ =
+        execute_sql_as_root_via_cli(&format!("CREATE NAMESPACE IF NOT EXISTS {}", namespace_name));
     execute_sql_as_root_via_cli(&format!(
-        "CREATE TABLE {} (id INT PRIMARY KEY, content VARCHAR NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) WITH (TYPE='USER', FLUSH_POLICY='rows:10')",
+        "CREATE TABLE {} (id INT PRIMARY KEY, content VARCHAR NOT NULL, created_at TIMESTAMP \
+         DEFAULT CURRENT_TIMESTAMP) WITH (TYPE='USER', FLUSH_POLICY='rows:10')",
         table
     ))
     .unwrap();
@@ -264,17 +263,10 @@ fn test_cli_live_query_with_filter() {
         } else {
             format!("high_{}", i)
         };
-        let insert_sql = format!(
-            "INSERT INTO {} (id, content) VALUES ({}, '{}')",
-            table, i, marker
-        );
+        let insert_sql =
+            format!("INSERT INTO {} (id, content) VALUES ({}, '{}')", table, i, marker);
         let insert_result = execute_sql_as_root_via_cli(&insert_sql);
-        assert!(
-            insert_result.is_ok(),
-            "Insert {} should succeed: {:?}",
-            i,
-            insert_result.err()
-        );
+        assert!(insert_result.is_ok(), "Insert {} should succeed: {:?}", i, insert_result.err());
     }
 
     let mut lines = Vec::new();
@@ -341,7 +333,8 @@ fn test_cli_subscription_with_initial_data() {
     let _ = execute_sql_as_root_via_cli(&format!("CREATE NAMESPACE {}", namespace_name));
 
     let create_table_sql = format!(
-        "CREATE TABLE {} (id INT PRIMARY KEY, event_type VARCHAR, timestamp BIGINT) WITH (TYPE='USER', FLUSH_POLICY='rows:10')",
+        "CREATE TABLE {} (id INT PRIMARY KEY, event_type VARCHAR, timestamp BIGINT) WITH \
+         (TYPE='USER', FLUSH_POLICY='rows:10')",
         table_name
     );
     let _ = execute_sql_as_root_via_cli(&create_table_sql);
@@ -410,12 +403,15 @@ fn test_cli_binary_projected_subscription_receives_live_changes() {
     execute_sql_as_root_via_client(&format!("CREATE NAMESPACE {}", namespace_name))
         .expect("namespace should be created");
     execute_sql_as_root_via_client(&format!(
-        "CREATE TABLE {} (id BIGINT PRIMARY KEY, role TEXT NOT NULL, author TEXT NOT NULL, content TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT NOW()) WITH (TYPE='USER', FLUSH_POLICY='rows:10')",
+        "CREATE TABLE {} (id BIGINT PRIMARY KEY, role TEXT NOT NULL, author TEXT NOT NULL, \
+         content TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT NOW()) WITH (TYPE='USER', \
+         FLUSH_POLICY='rows:10')",
         table_name
     ))
     .expect("table should be created");
     execute_sql_as_root_via_client(&format!(
-        "INSERT INTO {} (id, role, author, content) VALUES (1, 'assistant', 'KalamDB Copilot', '{}')",
+        "INSERT INTO {} (id, role, author, content) VALUES (1, 'assistant', 'KalamDB Copilot', \
+         '{}')",
         table_name, initial_content
     ))
     .expect("initial row should be inserted");
@@ -426,10 +422,7 @@ fn test_cli_binary_projected_subscription_receives_live_changes() {
     )
     .expect("initial row should be queryable before subscribing");
 
-    let query = format!(
-        "SELECT id, role, author, content, created_at FROM {}",
-        table_name
-    );
+    let query = format!("SELECT id, role, author, content, created_at FROM {}", table_name);
     let (child, rx, _cli_home) =
         spawn_cli_subscription_process(&query).expect("CLI subscription should spawn");
     let _child = ChildProcessGuard::new(child);
@@ -482,7 +475,8 @@ fn test_cli_subscription_comprehensive_crud() {
     let _ = execute_sql_as_root_via_cli(&format!("CREATE NAMESPACE {}", namespace_name));
 
     let create_table_sql = format!(
-        "CREATE TABLE {} (id INT PRIMARY KEY, event_type VARCHAR, data VARCHAR, timestamp BIGINT) WITH (TYPE='USER', FLUSH_POLICY='rows:10')",
+        "CREATE TABLE {} (id INT PRIMARY KEY, event_type VARCHAR, data VARCHAR, timestamp BIGINT) \
+         WITH (TYPE='USER', FLUSH_POLICY='rows:10')",
         table_name
     );
     let _ = execute_sql_as_root_via_cli(&create_table_sql);
@@ -506,7 +500,11 @@ fn test_cli_subscription_comprehensive_crud() {
     );
 
     // Test 2: Insert initial data via CLI
-    let insert_sql = format!("INSERT INTO {} (id, event_type, data, timestamp) VALUES (1, 'create', 'initial_data', 1000)", table_name);
+    let insert_sql = format!(
+        "INSERT INTO {} (id, event_type, data, timestamp) VALUES (1, 'create', 'initial_data', \
+         1000)",
+        table_name
+    );
     let _ = execute_sql_as_root_via_cli(&insert_sql);
 
     // Test 3: Verify data was inserted correctly via CLI

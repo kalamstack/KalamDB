@@ -2,11 +2,13 @@
 //!
 //! These tests cover utility functions and error scenarios in flush operations.
 
-use datafusion::arrow::datatypes::{DataType, Field, Schema};
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::manifest::flush::helpers;
-use kalamdb_core::manifest::{FlushJobResult, FlushMetadata, TableFlush};
 use std::sync::Arc;
+
+use datafusion::arrow::datatypes::{DataType, Field, Schema};
+use kalamdb_core::{
+    error::KalamDbError,
+    manifest::{flush::helpers, FlushJobResult, FlushMetadata, TableFlush},
+};
 
 #[test]
 fn test_extract_pk_field_name_with_non_system_column() {

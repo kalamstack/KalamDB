@@ -27,19 +27,24 @@
 //! }
 //! ```
 
-use crate::executors::shared_table_cleanup::cleanup_empty_shared_scope_if_needed;
-use crate::executors::{JobContext, JobDecision, JobExecutor, JobParams};
+use std::sync::Arc;
+
 use async_trait::async_trait;
-use kalamdb_commons::schemas::TableType;
-use kalamdb_commons::TableId;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::error_extensions::KalamDbResultExt;
-use kalamdb_core::manifest::flush::{SharedTableFlushJob, TableFlush, UserTableFlushJob};
+use kalamdb_commons::{schemas::TableType, TableId};
+use kalamdb_core::{
+    app_context::AppContext,
+    error::KalamDbError,
+    error_extensions::KalamDbResultExt,
+    manifest::flush::{SharedTableFlushJob, TableFlush, UserTableFlushJob},
+};
 use kalamdb_store::EntityStore;
 use kalamdb_system::JobType;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+
+use crate::executors::{
+    shared_table_cleanup::cleanup_empty_shared_scope_if_needed, JobContext, JobDecision,
+    JobExecutor, JobParams,
+};
 
 /// Typed parameters for flush operations (T189)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -438,8 +443,9 @@ impl Default for FlushExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kalamdb_commons::NamespaceId;
+
+    use super::*;
 
     #[test]
     fn test_executor_properties() {

@@ -1,9 +1,10 @@
+use std::{sync::atomic::Ordering, time::Duration};
+
+use kalam_client::{models::BatchStatus, ChangeEvent, SubscriptionConfig};
+use tokio::time::{sleep, timeout};
+
 use super::helpers::*;
 use crate::common::tcp_proxy::TcpDisconnectProxy;
-use kalam_client::{models::BatchStatus, ChangeEvent, SubscriptionConfig};
-use std::sync::atomic::Ordering;
-use std::time::Duration;
-use tokio::time::{sleep, timeout};
 
 /// Resume logic should work for update and delete events, not just inserts.
 /// Rows updated or deleted before the drop must not replay, while changes made

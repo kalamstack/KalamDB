@@ -8,12 +8,14 @@
 //! - INSERT duplicate PK fails (both hot and cold)
 //! - UPDATE works correctly post-flush
 
-use crate::common::*;
 use std::time::Duration;
+
+use crate::common::*;
 
 const JOB_TIMEOUT: Duration = Duration::from_secs(90);
 
-/// Test flush with PK integrity: insert, update, flush, re-query, duplicate PK check, post-flush update
+/// Test flush with PK integrity: insert, update, flush, re-query, duplicate PK check, post-flush
+/// update
 #[ntest::timeout(180_000)]
 #[test]
 fn smoke_test_flush_pk_integrity_user_table() {
@@ -332,7 +334,10 @@ fn smoke_test_flush_pk_integrity_shared_table() {
     ));
 
     if duplicate_result.is_ok() {
-        println!("⚠️  WARNING: Duplicate PK insert succeeded for SHARED table (known backend limitation)");
+        println!(
+            "⚠️  WARNING: Duplicate PK insert succeeded for SHARED table (known backend \
+             limitation)"
+        );
         println!("⚠️  TODO: Backend must implement PK uniqueness validation against cold storage");
     } else {
         println!("✅ Duplicate PK correctly rejected");

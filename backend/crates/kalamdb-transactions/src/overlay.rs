@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::{OperationKind, TableId, TransactionId, UserId};
-use kalamdb_commons::TableType;
+use kalamdb_commons::{
+    models::{rows::Row, OperationKind, TableId, TransactionId, UserId},
+    TableType,
+};
 
 use crate::query_context::TransactionOverlayView;
 
@@ -208,11 +209,12 @@ impl TransactionOverlayView for TransactionOverlay {
 
 #[cfg(test)]
 mod tests {
-    use datafusion::scalar::ScalarValue;
     use std::collections::BTreeMap;
 
-    use super::*;
+    use datafusion::scalar::ScalarValue;
     use kalamdb_commons::models::{NamespaceId, TableName};
+
+    use super::*;
 
     fn row(values: &[(&str, ScalarValue)]) -> Row {
         let mut fields = BTreeMap::new();

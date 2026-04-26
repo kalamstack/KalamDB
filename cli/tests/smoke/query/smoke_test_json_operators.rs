@@ -13,18 +13,19 @@
 //! - WHERE clause filtering on JSON fields
 //! - Multiple JSON columns in one table
 
-use crate::common::*;
 use std::time::{Duration, Instant};
 
-/// Helper: create a shared table with a JSON column, insert data, and return (namespace, full_table).
+use crate::common::*;
+
+/// Helper: create a shared table with a JSON column, insert data, and return (namespace,
+/// full_table).
 fn setup_json_table(prefix: &str, extra_cols: &str) -> (String, String) {
     let namespace = generate_unique_namespace(&format!("json_{prefix}"));
     let table = generate_unique_table(&format!("{prefix}_tbl"));
     let full_table = format!("{namespace}.{table}");
 
-    let _ = execute_sql_as_root_via_client(&format!(
-        "DROP NAMESPACE IF EXISTS {namespace} CASCADE"
-    ));
+    let _ =
+        execute_sql_as_root_via_client(&format!("DROP NAMESPACE IF EXISTS {namespace} CASCADE"));
     execute_sql_as_root_via_client(&format!("CREATE NAMESPACE {namespace}"))
         .expect("create namespace");
 
@@ -43,9 +44,8 @@ fn setup_json_table(prefix: &str, extra_cols: &str) -> (String, String) {
 }
 
 fn cleanup(namespace: &str) {
-    let _ = execute_sql_as_root_via_client(&format!(
-        "DROP NAMESPACE IF EXISTS {namespace} CASCADE"
-    ));
+    let _ =
+        execute_sql_as_root_via_client(&format!("DROP NAMESPACE IF EXISTS {namespace} CASCADE"));
 }
 
 // ── JSON round-trip: objects, arrays, nested, primitives ──────────────────
@@ -236,9 +236,7 @@ fn smoke_json_exists_operator_and_contains_function() {
     .expect("insert exists payload");
 
     let output = wait_for_query_contains_with(
-        &format!(
-            "SELECT doc->>'customer_id' AS customer_id FROM {tbl} WHERE doc ? 'customer_id'"
-        ),
+        &format!("SELECT doc->>'customer_id' AS customer_id FROM {tbl} WHERE doc ? 'customer_id'"),
         "cust_123",
         Duration::from_secs(5),
         execute_sql_as_root_via_client,
@@ -252,7 +250,8 @@ fn smoke_json_exists_operator_and_contains_function() {
 
     let output = wait_for_query_contains_with(
         &format!(
-            "SELECT json_as_text(doc, 'status') AS status FROM {tbl} WHERE json_contains(doc, 'customer_id')"
+            "SELECT json_as_text(doc, 'status') AS status FROM {tbl} WHERE json_contains(doc, \
+             'customer_id')"
         ),
         "paid",
         Duration::from_secs(5),
@@ -308,8 +307,10 @@ fn smoke_json_where_filter() {
     assert!(output.contains("1"), "should contain priority 1: {output}");
     assert!(output.contains("3"), "should contain priority 3: {output}");
     // Row with status=inactive should not appear
-    assert!(!output.contains("priority") || !output.contains("2") || output.contains("1"),
-        "should filter out inactive row");
+    assert!(
+        !output.contains("priority") || !output.contains("2") || output.contains("1"),
+        "should filter out inactive row"
+    );
 
     cleanup(&ns);
     println!("✅ smoke_json_where_filter passed");
@@ -334,7 +335,8 @@ fn smoke_json_helper_functions() {
 
     let output = wait_for_query_contains_with(
         &format!(
-            "SELECT json_length(doc, 'items') AS item_count, json_get_int(doc, 'count') AS count_value, json_get_bool(doc, 'flag') AS flag_value FROM {tbl}"
+            "SELECT json_length(doc, 'items') AS item_count, json_get_int(doc, 'count') AS \
+             count_value, json_get_bool(doc, 'flag') AS flag_value FROM {tbl}"
         ),
         "7",
         Duration::from_secs(5),
@@ -389,10 +391,7 @@ fn smoke_json_big_payload() {
     }
     let big_json = format!("{{{}}}", entries.join(","));
     let payload_size = big_json.len();
-    assert!(
-        payload_size > 64_000,
-        "payload should be >64KB, got {payload_size}"
-    );
+    assert!(payload_size > 64_000, "payload should be >64KB, got {payload_size}");
     println!("  Big JSON payload size: {payload_size} bytes");
 
     // Insert the big JSON
@@ -413,18 +412,17 @@ fn smoke_json_big_payload() {
     println!("  Big JSON insert+query took {:.2}s", elapsed.as_secs_f64());
 
     // Also verify last key
-    let output = execute_sql_as_root_via_client(&format!(
-        "SELECT doc->>'key_499' AS k499 FROM {tbl}"
-    ))
-    .expect("select big json key_499");
+    let output =
+        execute_sql_as_root_via_client(&format!("SELECT doc->>'key_499' AS k499 FROM {tbl}"))
+            .expect("select big json key_499");
 
-    assert!(
-        output.contains("value_499"),
-        "should extract key_499: {output}"
-    );
+    assert!(output.contains("value_499"), "should extract key_499: {output}");
 
     cleanup(&ns);
-    println!("✅ smoke_json_big_payload passed ({payload_size} bytes, {:.2}s)", elapsed.as_secs_f64());
+    println!(
+        "✅ smoke_json_big_payload passed ({payload_size} bytes, {:.2}s)",
+        elapsed.as_secs_f64()
+    );
 }
 
 // ── Multiple JSON columns ────────────────────────────────────────────────

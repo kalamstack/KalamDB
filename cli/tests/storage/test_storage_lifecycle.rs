@@ -3,10 +3,11 @@
 //! Covers CREATE STORAGE / DROP STORAGE flows to ensure tables block deletion
 //! until referencing tables are removed.
 
-use crate::common::*;
+use std::{fs, path::PathBuf};
+
 use serde_json::Value as JsonValue;
-use std::fs;
-use std::path::PathBuf;
+
+use crate::common::*;
 
 /// Ensure DROP STORAGE fails while tables still reference the storage
 #[test]
@@ -35,12 +36,9 @@ fn test_storage_drop_requires_detached_tables() {
         .expect("namespace creation");
 
     let create_storage_sql = format!(
-        "CREATE STORAGE {storage_id} \
-            TYPE filesystem \
-            NAME 'CLI Storage Test' \
-            PATH '{base_dir}' \
-            SHARED_TABLES_TEMPLATE 'ns_{{namespace}}/shared_{{tableName}}' \
-            USER_TABLES_TEMPLATE 'ns_{{namespace}}/user_{{tableName}}/user_{{userId}}'",
+        "CREATE STORAGE {storage_id} TYPE filesystem NAME 'CLI Storage Test' PATH '{base_dir}' \
+         SHARED_TABLES_TEMPLATE 'ns_{{namespace}}/shared_{{tableName}}' USER_TABLES_TEMPLATE \
+         'ns_{{namespace}}/user_{{tableName}}/user_{{userId}}'",
         base_dir = base_dir_sql
     );
     execute_sql_as_root_via_cli(&create_storage_sql).expect("storage creation");
@@ -61,11 +59,13 @@ fn test_storage_drop_requires_detached_tables() {
     );
 
     let create_user_table_sql = format!(
-        "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY AUTO_INCREMENT, body TEXT) WITH (TYPE='USER', STORAGE_ID='{}', FLUSH_POLICY='rows:5')",
+        "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY AUTO_INCREMENT, body TEXT) WITH (TYPE='USER', \
+         STORAGE_ID='{}', FLUSH_POLICY='rows:5')",
         namespace, user_table, storage_id
     );
     execute_sql_as_root_via_cli(&create_user_table_sql).expect("user table creation");
-    // Insert a row to ensure per-user directory is created (some backends may lazy-create user folder)
+    // Insert a row to ensure per-user directory is created (some backends may lazy-create user
+    // folder)
     let _ = execute_sql_as_root_via_cli(&format!(
         "INSERT INTO {}.{} (body) VALUES ('init')",
         namespace, user_table
@@ -97,7 +97,8 @@ fn test_storage_drop_requires_detached_tables() {
     }
 
     let create_shared_table_sql = format!(
-        "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY AUTO_INCREMENT, body TEXT) WITH (TYPE='SHARED', STORAGE_ID='{}', FLUSH_POLICY='rows:5')",
+        "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY AUTO_INCREMENT, body TEXT) WITH \
+         (TYPE='SHARED', STORAGE_ID='{}', FLUSH_POLICY='rows:5')",
         namespace, shared_table, storage_id
     );
     execute_sql_as_root_via_cli(&create_shared_table_sql).expect("shared table creation");

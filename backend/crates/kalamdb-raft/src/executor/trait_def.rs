@@ -1,16 +1,16 @@
 //! CommandExecutor trait definition
 
-use async_trait::async_trait;
 use std::fmt::Debug;
 
+use async_trait::async_trait;
 use kalamdb_commons::models::{NodeId, UserId};
 
-use crate::cluster_types::{NodeRole, NodeStatus};
-use crate::commands::{
-    DataResponse, MetaCommand, MetaResponse, SharedDataCommand, UserDataCommand,
+use crate::{
+    cluster_types::{NodeRole, NodeStatus},
+    commands::{DataResponse, MetaCommand, MetaResponse, SharedDataCommand, UserDataCommand},
+    error::Result,
+    GroupId,
 };
-use crate::error::Result;
-use crate::GroupId;
 
 /// Information about a cluster node
 #[derive(Debug, Clone)]

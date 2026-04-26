@@ -1,10 +1,13 @@
 //! Production-readiness observability checks over the real HTTP SQL API.
 
-use super::test_support::auth_helper::create_user_auth_header;
-use super::test_support::consolidated_helpers::{unique_namespace, unique_table};
 use kalam_client::models::ResponseStatus;
 use kalamdb_commons::Role;
 use tokio::time::{sleep, Duration, Instant};
+
+use super::test_support::{
+    auth_helper::create_user_auth_header,
+    consolidated_helpers::{unique_namespace, unique_table},
+};
 
 #[tokio::test]
 #[ntest::timeout(60000)] // 60 seconds - observability test with job polling
@@ -19,19 +22,21 @@ async fn test_observability_system_tables_and_jobs_over_http() -> anyhow::Result
     assert_eq!(resp.status, ResponseStatus::Success);
 
     let resp = server
-            .execute_sql(&format!(
-                "CREATE TABLE {}.messages (id TEXT PRIMARY KEY, content TEXT NOT NULL, timestamp BIGINT) WITH (TYPE = 'USER')",
-                ns_tables
-            ))
-            .await?;
+        .execute_sql(&format!(
+            "CREATE TABLE {}.messages (id TEXT PRIMARY KEY, content TEXT NOT NULL, timestamp \
+             BIGINT) WITH (TYPE = 'USER')",
+            ns_tables
+        ))
+        .await?;
     assert_eq!(resp.status, ResponseStatus::Success);
 
     let resp = server
-            .execute_sql(&format!(
-                "SELECT namespace_id, table_name, table_type FROM system.schemas WHERE namespace_id = '{}' AND table_name = 'messages' AND is_latest = true",
-                ns_tables
-            ))
-            .await?;
+        .execute_sql(&format!(
+            "SELECT namespace_id, table_name, table_type FROM system.schemas WHERE namespace_id = \
+             '{}' AND table_name = 'messages' AND is_latest = true",
+            ns_tables
+        ))
+        .await?;
     assert_eq!(resp.status, ResponseStatus::Success);
     let rows = resp.rows_as_maps();
     assert_eq!(rows.len(), 1);

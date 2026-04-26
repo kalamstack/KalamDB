@@ -3,21 +3,23 @@
 //! This module provides a DataFusion TableProvider implementation for the system.namespaces table.
 //! Uses the new EntityStore architecture with NamespaceId keys.
 
-use crate::error::{SystemError, SystemResultExt};
-use crate::providers::base::{
-    extract_filter_value, system_rows_to_batch, SimpleProviderDefinition,
-};
-use crate::providers::namespaces::models::Namespace;
-use crate::system_row_mapper::{model_to_system_row, system_row_to_model};
-use datafusion::arrow::array::RecordBatch;
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::logical_expr::Expr;
-use kalamdb_commons::models::rows::SystemTableRow;
-use kalamdb_commons::NamespaceId;
-use kalamdb_commons::SystemTable;
-use kalamdb_store::entity_store::EntityStore;
-use kalamdb_store::{IndexedEntityStore, StorageBackend};
 use std::sync::{Arc, OnceLock};
+
+use datafusion::{
+    arrow::{array::RecordBatch, datatypes::SchemaRef},
+    logical_expr::Expr,
+};
+use kalamdb_commons::{models::rows::SystemTableRow, NamespaceId, SystemTable};
+use kalamdb_store::{entity_store::EntityStore, IndexedEntityStore, StorageBackend};
+
+use crate::{
+    error::{SystemError, SystemResultExt},
+    providers::{
+        base::{extract_filter_value, system_rows_to_batch, SimpleProviderDefinition},
+        namespaces::models::Namespace,
+    },
+    system_row_mapper::{model_to_system_row, system_row_to_model},
+};
 
 /// System.namespaces table provider using EntityStore architecture
 #[derive(Clone)]
@@ -187,9 +189,10 @@ crate::impl_simple_system_table_provider!(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use datafusion::datasource::TableProvider;
     use kalamdb_store::test_utils::InMemoryBackend;
+
+    use super::*;
 
     fn create_test_provider() -> NamespacesTableProvider {
         let backend: Arc<dyn StorageBackend> = Arc::new(InMemoryBackend::new());

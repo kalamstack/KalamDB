@@ -40,13 +40,14 @@
 //! store.save_vote(&vote)?;
 //! ```
 
-use crate::storage_trait::{Operation, Partition, Result, StorageBackend};
-use kalamdb_commons::KSerializable;
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+use kalamdb_commons::KSerializable;
 // Re-export GroupId from kalamdb-sharding
 pub use kalamdb_sharding::GroupId;
+use serde::{Deserialize, Serialize};
+
+use crate::storage_trait::{Operation, Partition, Result, StorageBackend};
 
 /// The single partition name for all Raft data.
 pub const RAFT_PARTITION_NAME: &str = "raft_data";

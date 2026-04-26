@@ -3,7 +3,8 @@
 //! This crate provides the core storage functionality for KalamDB, a high-performance
 //! distributed database with:
 //!
-//! - **Namespace/Table Management**: Multi-tenant data isolation with user, shared, and stream tables
+//! - **Namespace/Table Management**: Multi-tenant data isolation with user, shared, and stream
+//!   tables
 //! - **Arrow Integration**: Native Apache Arrow columnar storage for efficient analytics
 //! - **RocksDB Backend**: Fast write path with sub-millisecond latency
 //! - **Parquet Storage**: Compressed columnar format for flushed segments

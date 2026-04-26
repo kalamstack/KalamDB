@@ -1,5 +1,6 @@
-use super::Row;
 use serde::{Deserialize, Serialize};
+
+use super::Row;
 
 /// Generic persisted row representation for system tables.
 ///

@@ -1,7 +1,9 @@
 //! Audit log entry for administrative actions.
 
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::models::ids::{AuditLogId, UserId};
+use kalamdb_commons::{
+    datatypes::KalamDataType,
+    models::ids::{AuditLogId, UserId},
+};
 use kalamdb_macros::table;
 use serde::{Deserialize, Serialize};
 

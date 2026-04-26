@@ -3,13 +3,11 @@
 //! Validates that the inter-node gRPC surface cannot be exploited by:
 //!
 //! - Unauthenticated callers issuing `ForwardSql` writes
-//! - Attackers supplying malformed, empty, or Basic-auth credentials
-//!   where only Bearer is accepted
+//! - Attackers supplying malformed, empty, or Basic-auth credentials where only Bearer is accepted
 //! - Forged/replayed Bearer tokens
 //! - SQL injection payloads in forwarded requests
 //! - Oversized / binary-garbage payloads
-//! - Calling `Ping` and `GetNodeInfo` from outside
-//!   the cluster (documents the mTLS trust boundary)
+//! - Calling `Ping` and `GetNodeInfo` from outside the cluster (documents the mTLS trust boundary)
 //!
 //! # Architecture security model
 //!
@@ -28,16 +26,21 @@
 //! cannot cause mutations.  Their protection is the mTLS layer alone.
 //! The tests below document this explicitly.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use async_trait::async_trait;
 use kalamdb_commons::models::NodeId;
 use kalamdb_raft::{
     manager::{RaftManager, RaftManagerConfig},
-    network::cluster_service::cluster_client::ClusterServiceClient,
-    network::cluster_service::{ForwardSqlRequest, GetNodeInfoRequest, PingRequest},
+    network::cluster_service::{
+        cluster_client::ClusterServiceClient, ForwardSqlRequest, GetNodeInfoRequest, PingRequest,
+    },
     ClusterMessageHandler, ForwardSqlResponsePayload, GetNodeInfoResponse, NoOpClusterHandler,
 };
 use tokio::time::sleep;
@@ -340,8 +343,8 @@ async fn test_forward_sql_forged_bearer_token_is_rejected() {
 
     // A real-looking but forged JWT (header.payload.sig, all base64url)
     let forged_jwt = "Bearer eyJhbGciOiJIUzI1NiJ9.\
-        eyJ1c2VyX2lkIjoiYWRtaW4iLCJyb2xlIjoic3lzdGVtIiwiZXhwIjo5OTk5OTk5OTk5fQ.\
-        FAKESIGNATURE_this_is_not_valid";
+                      eyJ1c2VyX2lkIjoiYWRtaW4iLCJyb2xlIjoic3lzdGVtIiwiZXhwIjo5OTk5OTk5OTk5fQ.\
+                      FAKESIGNATURE_this_is_not_valid";
 
     let request = ForwardSqlRequest {
         sql: "CREATE TABLE secret_exfil (data TEXT)".to_string(),

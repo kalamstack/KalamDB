@@ -1,7 +1,8 @@
 //! Login response model
 
-use super::UserInfo;
 use serde::Serialize;
+
+use super::UserInfo;
 
 /// Login response body
 #[derive(Debug, Serialize)]

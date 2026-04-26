@@ -22,10 +22,10 @@
 //! {"id":"..."}     // Object (e.g., FILE column)
 //! ```
 
+use std::{fmt, ops::Deref};
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use std::fmt;
-use std::ops::Deref;
 
 /// A single cell value in a query result row or subscription notification.
 ///

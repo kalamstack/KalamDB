@@ -1,13 +1,10 @@
 mod support;
 
-use std::sync::Arc;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
-use kalamdb_commons::models::pg_operations::InsertRequest;
-use kalamdb_commons::TableType;
+use kalamdb_commons::{models::pg_operations::InsertRequest, TableType};
 use kalamdb_configs::ServerConfig;
-use kalamdb_core::operations::service::OperationService;
-use kalamdb_core::transactions::ExecutionOwnerKey;
+use kalamdb_core::{operations::service::OperationService, transactions::ExecutionOwnerKey};
 use kalamdb_pg::OperationExecutor;
 use support::{
     create_cluster_app_context, create_cluster_app_context_with_config, create_executor,
@@ -61,7 +58,8 @@ async fn repeated_commit_vs_rollback_clears_coordinator_state() {
         let rollback_ok = rollback_result.is_ok();
         assert_ne!(
             commit_ok, rollback_ok,
-            "exactly one terminal path should win: commit={commit_result:?} rollback={rollback_result:?}"
+            "exactly one terminal path should win: commit={commit_result:?} \
+             rollback={rollback_result:?}"
         );
 
         assert!(app_ctx.transaction_coordinator().active_metrics().is_empty());

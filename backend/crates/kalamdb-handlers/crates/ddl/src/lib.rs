@@ -4,19 +4,22 @@ pub mod storage;
 pub mod table;
 pub mod view;
 
+use std::{collections::HashMap, sync::Arc};
+
 use datafusion::arrow::datatypes::Schema as ArrowSchema;
-use kalamdb_commons::models::{NamespaceId, StorageId, TableName};
-use kalamdb_commons::TableType;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::sql::executor::handler_registry::HandlerRegistry;
-use kalamdb_handlers_support::register_typed_handler;
-use kalamdb_sql::classifier::SqlStatementKind;
-use kalamdb_sql::ddl::{
-    AlterTableStatement, CreateTableStatement, CreateViewStatement, DescribeTableStatement,
-    DropTableStatement, ShowTableStatsStatement, ShowTablesStatement,
+use kalamdb_commons::{
+    models::{NamespaceId, StorageId, TableName},
+    TableType,
 };
-use std::collections::HashMap;
-use std::sync::Arc;
+use kalamdb_core::{app_context::AppContext, sql::executor::handler_registry::HandlerRegistry};
+use kalamdb_handlers_support::register_typed_handler;
+use kalamdb_sql::{
+    classifier::SqlStatementKind,
+    ddl::{
+        AlterTableStatement, CreateTableStatement, CreateViewStatement, DescribeTableStatement,
+        DropTableStatement, ShowTableStatsStatement, ShowTablesStatement,
+    },
+};
 
 pub fn register_ddl_handlers(registry: &HandlerRegistry, app_context: Arc<AppContext>) {
     register_typed_handler!(

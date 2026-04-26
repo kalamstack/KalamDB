@@ -30,22 +30,18 @@ pub use crate::auth::models::{
     LoginRequest, LoginResponse, LoginUserInfo, ServerSetupRequest, ServerSetupResponse,
     SetupStatusResponse, SetupUserInfo, WsAuthCredentials,
 };
-
 // ── Connection models ────────────────────────────────────────────────────────
 pub use crate::connection::models::{
     ClientMessage, ClusterHealthResponse, ClusterNodeHealth, CompressionType, ConnectionOptions,
     HealthCheckResponse, HttpVersion, ProtocolOptions, SerializationType, ServerMessage,
 };
-
 // ── Consumer models ──────────────────────────────────────────────────────────
 #[cfg(feature = "consumer")]
 pub use crate::consumer::models::{AckResponse, ConsumeMessage, ConsumeRequest, ConsumeResponse};
-
 // ── Query models ─────────────────────────────────────────────────────────────
 pub use crate::query::models::{
     ErrorDetail, QueryRequest, QueryResponse, QueryResult, ResponseStatus, UploadProgress,
 };
-
 // ── Subscription models ──────────────────────────────────────────────────────
 pub use crate::subscription::models::{
     BatchControl, BatchStatus, ChangeEvent, ChangeTypeRaw, SubscriptionConfig, SubscriptionInfo,

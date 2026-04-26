@@ -1,7 +1,8 @@
 // HTTP Basic Authentication parser
 
-use crate::errors::error::{AuthError, AuthResult};
 use base64::prelude::*;
+
+use crate::errors::error::{AuthError, AuthResult};
 
 /// Parse HTTP Basic Auth header and extract credentials.
 ///

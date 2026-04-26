@@ -10,10 +10,9 @@
 //! be applied before the corresponding CREATE TABLE if the data group catches up
 //! faster than the metadata group. This is being tracked for improvement.
 
-use crate::cluster_common::*;
-use crate::common::*;
-use std::process::Command;
-use std::time::Duration;
+use std::{process::Command, time::Duration};
+
+use crate::{cluster_common::*, common::*};
 
 /// Check if Docker is available and cluster is running in Docker mode
 fn is_docker_cluster() -> bool {
@@ -170,8 +169,13 @@ fn cluster_test_node_rejoin_system_metadata() {
     // Insert some data
     execute_on_node(
         leader_url,
-        &format!("INSERT INTO {}.metadata_test (id, data) VALUES (1, 'test1'), (2, 'test2'), (3, 'test3')", namespace),
-    ).expect("Failed to insert data");
+        &format!(
+            "INSERT INTO {}.metadata_test (id, data) VALUES (1, 'test1'), (2, 'test2'), (3, \
+             'test3')",
+            namespace
+        ),
+    )
+    .expect("Failed to insert data");
     println!("  ✓ Inserted 3 rows into metadata_test");
 
     // Wait for replication to node2 (verify cluster is working)
@@ -298,8 +302,13 @@ fn cluster_test_node_rejoin_dml_operations() {
     // Insert initial data
     execute_on_node(
         leader_url,
-        &format!("INSERT INTO {}.dml_test (id, name, counter) VALUES (1, 'Alice', 100), (2, 'Bob', 200), (3, 'Charlie', 300)", namespace),
-    ).expect("Failed to insert initial data");
+        &format!(
+            "INSERT INTO {}.dml_test (id, name, counter) VALUES (1, 'Alice', 100), (2, 'Bob', \
+             200), (3, 'Charlie', 300)",
+            namespace
+        ),
+    )
+    .expect("Failed to insert initial data");
 
     // Wait for initial sync
     std::thread::sleep(Duration::from_secs(2));

@@ -8,7 +8,8 @@ use crate::common::*;
 // 3) Create a new regular user
 // 4) Login via CLI as the regular user
 // 5) As regular user: insert multiple rows, update one, delete one, then SELECT all
-// 6) Verify: (a) regular user can insert, (b) login succeeds, (c) SELECT shows only this user's rows (no root rows)
+// 6) Verify: (a) regular user can insert, (b) login succeeds, (c) SELECT shows only this user's
+//    rows (no root rows)
 #[ntest::timeout(180000)]
 #[test]
 fn smoke_user_table_rls_isolation() {

@@ -1,5 +1,6 @@
-use crate::error::KalamDbError;
 use uuid::Uuid;
+
+use crate::error::KalamDbError;
 
 #[inline]
 fn invalid_pg_session_id(session_id: &str, reason: &str) -> KalamDbError {

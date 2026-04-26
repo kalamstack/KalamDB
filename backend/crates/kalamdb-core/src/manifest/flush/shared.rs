@@ -3,24 +3,28 @@
 //! Flushes shared table data from RocksDB to a single Parquet file.
 //! All rows are written to one file per flush operation.
 
-use super::base::{FlushJobResult, FlushMetadata, TableFlush};
-use crate::app_context::AppContext;
-use crate::error::KalamDbError;
-use crate::error_extensions::KalamDbResultExt;
-use crate::manifest::{FlushManifestHelper, ManifestService};
-use crate::schema_registry::SchemaRegistry;
-use crate::vector::flush_shared_scope_vectors;
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::RecordBatch;
-use kalamdb_commons::constants::SystemColumnNames;
-use kalamdb_commons::ids::SharedTableRowId;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::TableId;
-use kalamdb_commons::schemas::TableType;
-use kalamdb_commons::StorageKey;
+use std::sync::Arc;
+
+use datafusion::arrow::{datatypes::SchemaRef, record_batch::RecordBatch};
+use kalamdb_commons::{
+    constants::SystemColumnNames,
+    ids::SharedTableRowId,
+    models::{rows::Row, TableId},
+    schemas::TableType,
+    StorageKey,
+};
 use kalamdb_store::EntityStore;
 use kalamdb_tables::{SharedTableIndexedStore, SharedTableRow};
-use std::sync::Arc;
+
+use super::base::{FlushJobResult, FlushMetadata, TableFlush};
+use crate::{
+    app_context::AppContext,
+    error::KalamDbError,
+    error_extensions::KalamDbResultExt,
+    manifest::{FlushManifestHelper, ManifestService},
+    schema_registry::SchemaRegistry,
+    vector::flush_shared_scope_vectors,
+};
 
 /// Shared table flush job
 ///
@@ -136,8 +140,9 @@ impl TableFlush for SharedTableFlushJob {
     fn execute(&self) -> Result<FlushJobResult, KalamDbError> {
         log::debug!("🔄 Starting shared table flush: table={}", self.table_id);
 
-        use super::base::{config, helpers, FlushDedupStats};
         use std::collections::HashMap;
+
+        use super::base::{config, helpers, FlushDedupStats};
 
         // Get primary key field name from schema
         let pk_field = helpers::extract_pk_field_name(&self.schema);

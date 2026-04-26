@@ -1,11 +1,13 @@
-use crate::error::KalamDbError;
-use crate::schema_registry::SchemaRegistry;
+use std::sync::Arc;
+
 use datafusion::arrow::datatypes::SchemaRef;
-use kalamdb_commons::models::schemas::TableDefinition as CommonsTableDefinition;
-use kalamdb_commons::{StorageId, TableId};
+use kalamdb_commons::{
+    models::schemas::TableDefinition as CommonsTableDefinition, StorageId, TableId,
+};
 use kalamdb_system::SchemaRegistry as SchemaRegistryTrait;
 use kalamdb_tables::TableError;
-use std::sync::Arc;
+
+use crate::{error::KalamDbError, schema_registry::SchemaRegistry};
 
 /// Adapter to expose SchemaRegistry with TableError for kalamdb-tables providers.
 pub struct TablesSchemaRegistryAdapter {

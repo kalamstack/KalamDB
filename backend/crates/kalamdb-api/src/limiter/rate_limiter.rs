@@ -3,15 +3,21 @@
 //! Uses Moka cache for automatic TTL-based cleanup and high concurrency.
 //! Optimized for zero-copy access patterns where possible.
 
-use super::token_bucket::TokenBucket;
+use std::{
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
+
 use kalamdb_commons::models::{ConnectionInfo, UserId};
 use kalamdb_configs::RateLimitSettings;
 use kalamdb_live::ConnectionId;
 use moka::sync::Cache;
 use parking_lot::Mutex;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
+
+use super::token_bucket::TokenBucket;
 
 /// Rate limiter for users and connections
 ///
@@ -215,8 +221,9 @@ impl Default for RateLimiter {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::thread;
+
+    use super::*;
 
     fn test_config(max_queries: u32, max_subs: u32, max_msgs: u32) -> RateLimitSettings {
         RateLimitSettings {

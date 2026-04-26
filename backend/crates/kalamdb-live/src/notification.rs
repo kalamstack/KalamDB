@@ -9,22 +9,31 @@
 //! Used by:
 //! - WebSocket live query subscribers
 
-use super::helpers::filter_eval::matches as filter_matches;
-use super::manager::ConnectionsManager;
-use super::models::{ChangeNotification, ChangeType, SubscriptionHandle};
-use crate::error::LiveError;
-use crate::fanout::{CommitSideEffectPlan, FanoutOwnerScope};
-use kalamdb_commons::constants::SystemColumnNames;
-use kalamdb_commons::conversions::arrow_json_conversion::scalar_value_to_json;
-use kalamdb_commons::ids::SeqId;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::{LiveQueryId, TableId, UserId};
-use kalamdb_commons::websocket::{RowData, SharedChangePayload, WireNotification};
+use std::{
+    collections::HashMap,
+    hash::{Hash, Hasher},
+    sync::Arc,
+};
+
+use kalamdb_commons::{
+    constants::SystemColumnNames,
+    conversions::arrow_json_conversion::scalar_value_to_json,
+    ids::SeqId,
+    models::{rows::Row, LiveQueryId, TableId, UserId},
+    websocket::{RowData, SharedChangePayload, WireNotification},
+};
 use kalamdb_system::NotificationService as NotificationServiceTrait;
-use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
-use std::sync::Arc;
 use tokio::sync::mpsc;
+
+use super::{
+    helpers::filter_eval::matches as filter_matches,
+    manager::ConnectionsManager,
+    models::{epoch_millis, ChangeNotification, ChangeType, SubscriptionHandle},
+};
+use crate::{
+    error::LiveError,
+    fanout::{CommitSideEffectPlan, FanoutOwnerScope},
+};
 
 /// Number of sharded notification workers.
 /// Deterministic routing by owner scope preserves ordering for a shared table
@@ -37,8 +46,9 @@ use tokio::sync::mpsc;
 fn num_notify_workers() -> usize {
     // Cap at 16 to bound DashMap contention and worker overhead.
     // Minimum of 4 preserves previous baseline behavior on small machines.
-    let cpus =
-        std::thread::available_parallelism().map(std::num::NonZeroUsize::get).unwrap_or(4);
+    let cpus = std::thread::available_parallelism()
+        .map(std::num::NonZeroUsize::get)
+        .unwrap_or(4);
     cpus.clamp(4, 16)
 }
 
@@ -49,7 +59,7 @@ const NOTIFY_QUEUE_PER_WORKER: usize = 4_096;
 /// For single-table fan-out at high subscriber counts (e.g. 100K on one
 /// table all hashing to one worker), spawning per-chunk lets the tokio
 /// runtime parallelise delivery across its thread pool.
-const SHARED_NOTIFY_CHUNK_SIZE: usize = 512;
+const SHARED_NOTIFY_CHUNK_SIZE: usize = 2_048;
 
 struct NotificationTask {
     user_id: Option<UserId>,
@@ -87,11 +97,28 @@ fn extract_seq(change_notification: &ChangeNotification) -> Option<SeqId> {
         })
 }
 
+#[inline]
+fn extract_commit_seq(change_notification: &ChangeNotification) -> Option<u64> {
+    use datafusion::scalar::ScalarValue;
+    change_notification
+        .row_data
+        .values
+        .get(SystemColumnNames::COMMIT_SEQ)
+        .and_then(|value| match value {
+            ScalarValue::UInt64(Some(commit_seq)) => Some(*commit_seq),
+            ScalarValue::Int64(Some(commit_seq)) if *commit_seq >= 0 => Some(*commit_seq as u64),
+            _ => None,
+        })
+}
+
 /// Convert a Row to a projected RowData map (`HashMap<String, KalamCellValue>`).
 /// Includes `_seq` always. When `projections` is `None`, includes all columns.
 fn project_row(row: &Row, projections: &Option<Arc<Vec<String>>>) -> Result<RowData, LiveError> {
     let mut map = HashMap::new();
     for (col, sv) in &row.values {
+        if col == SystemColumnNames::COMMIT_SEQ {
+            continue;
+        }
         let include = match projections {
             None => true,
             Some(proj) => col == SystemColumnNames::SEQ || proj.iter().any(|p| p == col),
@@ -221,24 +248,32 @@ fn try_deliver(
     handle: &SubscriptionHandle,
     notification: Arc<WireNotification>,
     seq_value: Option<SeqId>,
+    commit_seq: Option<u64>,
+    delivery_timestamp_ms: u64,
 ) -> bool {
     if let Some(flow_control) = handle.flow_control.as_ref() {
         if !flow_control.is_initial_complete() {
-            if let Some(snapshot_seq) = flow_control.snapshot_end_seq() {
+            if let Some(snapshot_commit_seq) = flow_control.snapshot_end_commit_seq() {
+                if let Some(commit_seq) = commit_seq {
+                    if commit_seq <= snapshot_commit_seq {
+                        return false;
+                    }
+                }
+            } else if let Some(snapshot_seq) = flow_control.snapshot_end_seq() {
                 if let Some(seq) = seq_value {
                     if seq.as_i64() <= snapshot_seq {
                         return false;
                     }
                 }
             }
-            flow_control.buffer_notification(Arc::clone(&notification), seq_value);
+            flow_control.buffer_notification(Arc::clone(&notification), seq_value, commit_seq);
             return false;
         }
     }
 
     match handle.notification_tx.try_send(notification) {
         Ok(()) => {
-            handle.runtime_metadata.record_delivery();
+            handle.runtime_metadata.record_delivery_at(delivery_timestamp_ms);
             true
         },
         Err(e) => {
@@ -252,7 +287,8 @@ fn try_deliver(
                 },
                 TrySendError::Closed(_) => {
                     log::debug!(
-                        "Notification channel closed for subscription_id={}, connection likely disconnected",
+                        "Notification channel closed for subscription_id={}, connection likely \
+                         disconnected",
                         handle.subscription_id
                     );
                 },
@@ -390,7 +426,8 @@ impl NotificationService {
                     None => "shared".to_string(),
                 };
                 log::warn!(
-                    "Notification worker {} queue full for table={} owner_scope={}, dropping notification",
+                    "Notification worker {} queue full for table={} owner_scope={}, dropping \
+                     notification",
                     worker_idx,
                     task.table_id,
                     owner_scope,
@@ -432,6 +469,8 @@ impl NotificationService {
         all_handles: Arc<dashmap::DashMap<LiveQueryId, SubscriptionHandle>>,
     ) -> Result<usize, LiveError> {
         let seq_value = extract_seq(&change_notification);
+        let commit_seq = extract_commit_seq(&change_notification);
+        let delivery_timestamp_ms = epoch_millis();
         let change_type = change_notification.change_type.clone();
         let pk_columns = Arc::new(change_notification.pk_columns);
         let new_row = Arc::new(change_notification.row_data);
@@ -444,13 +483,16 @@ impl NotificationService {
 
         // Small fan-out: inline dispatch directly from DashMap refs (no clone/spawn overhead)
         if handle_count <= SHARED_NOTIFY_CHUNK_SIZE {
+            let chunk_handles = all_handles.iter().map(|entry| entry.value().clone()).collect();
             return dispatch_chunk(
-                all_handles.iter().map(|entry| entry.value().clone()),
+                chunk_handles,
                 &new_row,
                 old_row.as_deref(),
                 &change_type,
                 &pk_columns,
                 seq_value,
+                commit_seq,
+                delivery_timestamp_ms,
             );
         }
 
@@ -458,14 +500,19 @@ impl NotificationService {
         // parallelise delivery across its thread pool. When all subscribers
         // are on the same table they hash to one notification worker —
         // spawning is the only way to utilise multiple cores for the fan-out.
-        let handles_vec: Vec<SubscriptionHandle> =
-            all_handles.iter().map(|entry| entry.value().clone()).collect();
-
         let table_id = table_id.clone();
         let mut tasks = Vec::new();
+        let mut chunk_handles = Vec::with_capacity(SHARED_NOTIFY_CHUNK_SIZE);
 
-        for chunk in handles_vec.chunks(SHARED_NOTIFY_CHUNK_SIZE) {
-            let chunk_handles: Vec<SubscriptionHandle> = chunk.to_vec();
+        for entry in all_handles.iter() {
+            chunk_handles.push(entry.value().clone());
+
+            if chunk_handles.len() < SHARED_NOTIFY_CHUNK_SIZE {
+                continue;
+            }
+
+            let ready_handles =
+                std::mem::replace(&mut chunk_handles, Vec::with_capacity(SHARED_NOTIFY_CHUNK_SIZE));
             let new_row = Arc::clone(&new_row);
             let old_row = old_row.as_ref().map(Arc::clone);
             let change_type = change_type.clone();
@@ -474,12 +521,41 @@ impl NotificationService {
 
             tasks.push(tokio::spawn(async move {
                 match dispatch_chunk(
-                    chunk_handles.into_iter(),
+                    ready_handles,
                     &new_row,
                     old_row.as_deref(),
                     &change_type,
                     &pk_columns,
                     seq_value,
+                    commit_seq,
+                    delivery_timestamp_ms,
+                ) {
+                    Ok(count) => count,
+                    Err(e) => {
+                        log::error!("Notification dispatch error for table {}: {}", table_id, e);
+                        0
+                    },
+                }
+            }));
+        }
+
+        if !chunk_handles.is_empty() {
+            let new_row = Arc::clone(&new_row);
+            let old_row = old_row.as_ref().map(Arc::clone);
+            let change_type = change_type.clone();
+            let pk_columns = Arc::clone(&pk_columns);
+            let table_id = table_id.clone();
+
+            tasks.push(tokio::spawn(async move {
+                match dispatch_chunk(
+                    chunk_handles,
+                    &new_row,
+                    old_row.as_deref(),
+                    &change_type,
+                    &pk_columns,
+                    seq_value,
+                    commit_seq,
+                    delivery_timestamp_ms,
                 ) {
                     Ok(count) => count,
                     Err(e) => {
@@ -507,17 +583,38 @@ impl NotificationService {
 /// identical projections share a single `Arc<SharedChangePayload>`, avoiding
 /// redundant Row→RowData conversion. The shared payload then reuses cached JSON
 /// and MessagePack bytes across subscribers that serialize the same change.
-fn dispatch_chunk<I>(
-    handles: I,
+fn dispatch_chunk(
+    handles: Vec<SubscriptionHandle>,
     new_row: &Row,
     old_row: Option<&Row>,
     change_type: &ChangeType,
     pk_columns: &[String],
     seq_value: Option<SeqId>,
-) -> Result<usize, LiveError>
-where
-    I: IntoIterator<Item = SubscriptionHandle>,
-{
+    commit_seq: Option<u64>,
+    delivery_timestamp_ms: u64,
+) -> Result<usize, LiveError> {
+    if handles
+        .iter()
+        .all(|handle| handle.filter_expr.is_none() && handle.projections.is_none())
+    {
+        let payload =
+            Arc::new(build_shared_payload(change_type, new_row, old_row, pk_columns, &None)?);
+        let mut count = 0usize;
+
+        for handle in handles {
+            let notification = Arc::new(WireNotification {
+                subscription_id: Arc::clone(&handle.subscription_id),
+                payload: Arc::clone(&payload),
+            });
+
+            if try_deliver(&handle, notification, seq_value, commit_seq, delivery_timestamp_ms) {
+                count += 1;
+            }
+        }
+
+        return Ok(count);
+    }
+
     // Cache: projection requirements → shared payload (built once per projection group).
     let mut cache: HashMap<PayloadCacheKey, Arc<SharedChangePayload>> = HashMap::new();
     let mut count = 0usize;
@@ -561,7 +658,7 @@ where
             payload,
         });
 
-        if try_deliver(&handle, notification, seq_value) {
+        if try_deliver(&handle, notification, seq_value, commit_seq, delivery_timestamp_ms) {
             count += 1;
         }
     }
@@ -593,15 +690,22 @@ impl NotificationServiceTrait for NotificationService {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::helpers::filter_eval::parse_where_clause;
-    use crate::models::{SubscriptionFlowControl, SubscriptionHandle, SubscriptionRuntimeMetadata};
+    use std::{collections::BTreeMap, time::Duration};
+
     use datafusion::scalar::ScalarValue;
-    use kalamdb_commons::models::rows::Row;
-    use kalamdb_commons::models::{ConnectionId, NamespaceId, TableName};
-    use kalamdb_commons::NodeId;
-    use std::collections::BTreeMap;
-    use std::time::Duration;
+    use kalamdb_commons::{
+        models::{rows::Row, ConnectionId, NamespaceId, TableName},
+        NodeId,
+    };
+
+    use super::*;
+    use crate::{
+        helpers::filter_eval::parse_where_clause,
+        models::{
+            SubscriptionFlowControl, SubscriptionHandle, SubscriptionRuntimeMetadata,
+            MAX_SUBSCRIPTIONS_PER_CONNECTION, NOTIFICATION_CHANNEL_CAPACITY,
+        },
+    };
 
     fn make_table_id(ns: &str, table: &str) -> TableId {
         TableId::new(NamespaceId::from(ns), TableName::from(table))
@@ -706,6 +810,49 @@ mod tests {
         assert!(rows[0].get(SystemColumnNames::SEQ).is_some());
 
         assert!(rx_skip.try_recv().is_err(), "filtered subscriber should not receive");
+    }
+
+    #[tokio::test]
+    #[ntest::timeout(1000)]
+    async fn saturated_shared_connection_fanout_fits_notification_channel() {
+        assert!(NOTIFICATION_CHANNEL_CAPACITY >= MAX_SUBSCRIPTIONS_PER_CONNECTION);
+
+        let table_id = make_table_id("shared", "scale_sub");
+        let connection_id = ConnectionId::new("scale-conn");
+        let subscriptions = Arc::new(dashmap::DashMap::new());
+        let (tx, mut rx) = mpsc::channel(NOTIFICATION_CHANNEL_CAPACITY);
+
+        for index in 0..MAX_SUBSCRIPTIONS_PER_CONNECTION {
+            let subscription_id = format!("scale_{}", index);
+            let flow = Arc::new(SubscriptionFlowControl::new());
+            flow.mark_initial_complete();
+
+            subscriptions.insert(
+                LiveQueryId::new(
+                    UserId::new(format!("user_{}", index)),
+                    connection_id.clone(),
+                    subscription_id.clone(),
+                ),
+                make_shared_handle(&subscription_id, tx.clone(), flow, None, None),
+            );
+        }
+
+        let delivered = NotificationService::dispatch_to_subscribers(
+            &table_id,
+            ChangeNotification::insert(table_id.clone(), make_row(1, "probe", 1)),
+            subscriptions,
+        )
+        .await
+        .expect("fanout should succeed");
+
+        assert_eq!(delivered, MAX_SUBSCRIPTIONS_PER_CONNECTION);
+
+        let mut received = 0usize;
+        while rx.try_recv().is_ok() {
+            received += 1;
+        }
+
+        assert_eq!(received, MAX_SUBSCRIPTIONS_PER_CONNECTION);
     }
 
     #[tokio::test]
@@ -843,12 +990,14 @@ mod tests {
 
         let row = make_row(9, "shared", 9);
         let delivered = dispatch_chunk(
-            vec![handle_a, handle_b].into_iter(),
+            vec![handle_a, handle_b],
             &row,
             None,
             &ChangeType::Insert,
             &[],
             Some(SeqId::from(9)),
+            None,
+            epoch_millis(),
         )
         .expect("dispatch succeeds");
         assert_eq!(delivered, 2);
@@ -888,12 +1037,14 @@ mod tests {
 
         let row = make_row(17, "separate", 17);
         let delivered = dispatch_chunk(
-            vec![handle_id, handle_body].into_iter(),
+            vec![handle_id, handle_body],
             &row,
             None,
             &ChangeType::Insert,
             &[],
             Some(SeqId::from(17)),
+            None,
+            epoch_millis(),
         )
         .expect("dispatch succeeds");
         assert_eq!(delivered, 2);

@@ -16,10 +16,12 @@
 #[path = "../support/http_client.rs"]
 mod http_client;
 
-use std::ops::{Deref, DerefMut};
-use std::sync::OnceLock;
-use std::time::Duration;
-use std::{env, fmt};
+use std::{
+    env, fmt,
+    ops::{Deref, DerefMut},
+    sync::OnceLock,
+    time::Duration,
+};
 
 /// Reason DDL tests are being skipped (set once during init).
 static SKIP_REASON: OnceLock<Option<String>> = OnceLock::new();
@@ -136,10 +138,9 @@ async fn server_option_exists(
     option_name: &str,
 ) -> bool {
     pg.query_opt(
-        "SELECT 1 \
-         FROM pg_foreign_server AS server \
-         CROSS JOIN LATERAL pg_options_to_table(server.srvoptions) AS option_entry \
-         WHERE server.srvname = $1 AND option_entry.option_name = $2",
+        "SELECT 1 FROM pg_foreign_server AS server CROSS JOIN LATERAL \
+         pg_options_to_table(server.srvoptions) AS option_entry WHERE server.srvname = $1 AND \
+         option_entry.option_name = $2",
         &[&server_name, &option_name],
     )
     .await
@@ -325,7 +326,8 @@ impl DdlTestEnv {
         }
         let text = resp.body;
         let val: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
-        // Response format: { "results": [{ "schema": [{"name": "col1", ...}, ...], "rows": [...] }] }
+        // Response format: { "results": [{ "schema": [{"name": "col1", ...}, ...], "rows": [...] }]
+        // }
         val["results"][0]["schema"]
             .as_array()
             .map(|arr| arr.iter().filter_map(|v| v["name"].as_str().map(String::from)).collect())
@@ -360,7 +362,8 @@ impl DdlTestEnv {
 
             if std::time::Instant::now() >= deadline {
                 panic!(
-                    "KalamDB columns for {namespace}.{table} did not satisfy {description} within timeout: {columns:?}"
+                    "KalamDB columns for {namespace}.{table} did not satisfy {description} within \
+                     timeout: {columns:?}"
                 );
             }
 
@@ -497,20 +500,15 @@ impl DdlTestEnv {
             .map_err(|e| format!("create kalam_server foreign server: {e}"))?;
 
             pg.batch_execute(&format!(
-                "ALTER SERVER kalam_server OPTIONS (SET host '{grpc_host}', SET port '{grpc_port}');"
+                "ALTER SERVER kalam_server OPTIONS (SET host '{grpc_host}', SET port \
+                 '{grpc_port}');"
             ))
             .await
             .map_err(|e| format!("repoint kalam_server foreign server: {e}"))?;
 
             drop_server_option_if_present(&pg, "kalam_server", "auth_header").await;
             ensure_server_option(&pg, "kalam_server", "auth_mode", "account_login").await;
-            ensure_server_option(
-                &pg,
-                "kalam_server",
-                "login_user",
-                &auth_config.login_user,
-            )
-            .await;
+            ensure_server_option(&pg, "kalam_server", "login_user", &auth_config.login_user).await;
             ensure_server_option(
                 &pg,
                 "kalam_server",
@@ -546,8 +544,8 @@ impl DdlTestEnv {
             }
         }
         Err(format!(
-            "PostgreSQL not reachable at {PG_HOST}:{PG_PORT}. \
-             Start with: ./pg/scripts/pgrx-test-setup.sh --start"
+            "PostgreSQL not reachable at {PG_HOST}:{PG_PORT}. Start with: \
+             ./pg/scripts/pgrx-test-setup.sh --start"
         ))
     }
 
@@ -604,7 +602,8 @@ impl DdlTestEnv {
         }
 
         Err(format!(
-            "Failed to authenticate KalamDB test environment ({config}). Set KALAMDB_USER/KALAMDB_PASSWORD or KALAMDB_ROOT_PASSWORD."
+            "Failed to authenticate KalamDB test environment ({config}). Set \
+             KALAMDB_USER/KALAMDB_PASSWORD or KALAMDB_ROOT_PASSWORD."
         ))
     }
 }

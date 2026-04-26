@@ -1,10 +1,14 @@
-use crate::oidc::{OidcConfig, OidcError};
-use jsonwebtoken::jwk::{Jwk, JwkSet};
-use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
+use std::{collections::HashMap, sync::Arc};
+
+use jsonwebtoken::{
+    decode, decode_header,
+    jwk::{Jwk, JwkSet},
+    Algorithm, DecodingKey, Validation,
+};
 use serde::Deserialize;
-use std::collections::HashMap;
-use std::sync::Arc;
 use tokio::sync::RwLock;
+
+use crate::oidc::{OidcConfig, OidcError};
 
 /// OIDC JWT validator with per-issuer JWKS caching.
 #[derive(Clone)]

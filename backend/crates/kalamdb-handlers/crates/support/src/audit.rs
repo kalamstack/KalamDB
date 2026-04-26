@@ -5,8 +5,7 @@
 
 use chrono::Utc;
 use kalamdb_commons::models::AuditLogId;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::context::ExecutionContext;
+use kalamdb_core::{error::KalamDbError, sql::context::ExecutionContext};
 use kalamdb_system::AuditLogEntry;
 
 /// Create an audit log entry for a SQL operation
@@ -140,8 +139,9 @@ pub fn log_auth_event(
     }
 }
 
-use kalamdb_core::app_context::AppContext;
 use std::sync::Arc;
+
+use kalamdb_core::app_context::AppContext;
 
 /// Persist an audit entry to the system.audit_logs table
 ///
@@ -160,11 +160,13 @@ pub async fn persist_audit_entry(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::Arc;
+
     use datafusion::prelude::SessionContext;
     use kalamdb_commons::{Role, UserId};
     use kalamdb_session::AuthSession;
-    use std::sync::Arc;
+
+    use super::*;
 
     fn test_session() -> Arc<SessionContext> {
         Arc::new(SessionContext::new())

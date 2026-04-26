@@ -3,25 +3,28 @@
 //! Flushes user table data from RocksDB to Parquet files, grouping by UserId.
 //! Each user's data is written to a separate Parquet file for RLS isolation.
 
-use super::base::{config, helpers, FlushDedupStats, FlushJobResult, FlushMetadata, TableFlush};
-use crate::app_context::AppContext;
-use crate::error::KalamDbError;
-use crate::error_extensions::KalamDbResultExt;
-use crate::manifest::{FlushManifestHelper, ManifestService};
-use crate::schema_registry::SchemaRegistry;
-use crate::vector::flush_user_scope_vectors;
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::RecordBatch;
-use kalamdb_commons::constants::SystemColumnNames;
-use kalamdb_commons::ids::UserTableRowId;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::{TableId, UserId};
-use kalamdb_commons::schemas::TableType;
-use kalamdb_commons::StorageKey;
+use std::{collections::HashMap, sync::Arc};
+
+use datafusion::arrow::{datatypes::SchemaRef, record_batch::RecordBatch};
+use kalamdb_commons::{
+    constants::SystemColumnNames,
+    ids::UserTableRowId,
+    models::{rows::Row, TableId, UserId},
+    schemas::TableType,
+    StorageKey,
+};
 use kalamdb_store::entity_store::EntityStore;
 use kalamdb_tables::UserTableIndexedStore;
-use std::collections::HashMap;
-use std::sync::Arc;
+
+use super::base::{config, helpers, FlushDedupStats, FlushJobResult, FlushMetadata, TableFlush};
+use crate::{
+    app_context::AppContext,
+    error::KalamDbError,
+    error_extensions::KalamDbResultExt,
+    manifest::{FlushManifestHelper, ManifestService},
+    schema_registry::SchemaRegistry,
+    vector::flush_user_scope_vectors,
+};
 
 /// User table flush job
 ///
@@ -331,8 +334,15 @@ impl TableFlush for UserTableFlushJob {
                 match latest_versions.get(&group_key) {
                     Some((_existing_key, _existing_row, existing_seq)) => {
                         if seq_val > *existing_seq {
-                            log::trace!("[FLUSH DEDUP] Replacing user={}, pk={}: old_seq={}, new_seq={}, deleted={}",
-                                       user_id.as_str(), pk_value, existing_seq, seq_val, row._deleted);
+                            log::trace!(
+                                "[FLUSH DEDUP] Replacing user={}, pk={}: old_seq={}, new_seq={}, \
+                                 deleted={}",
+                                user_id.as_str(),
+                                pk_value,
+                                existing_seq,
+                                seq_val,
+                                row._deleted
+                            );
                             latest_versions.insert(group_key, (row_id.storage_key(), row, seq_val));
                         }
                     },
@@ -439,17 +449,24 @@ impl TableFlush for UserTableFlushJob {
         // If any user flush failed, treat entire job as failed
         if !error_messages.is_empty() {
             let summary = format!(
-                "One or more user partitions failed to flush ({} errors). Rows flushed before failure: {}. First error: {}",
-                error_messages.len(), total_rows_flushed,
+                "One or more user partitions failed to flush ({} errors). Rows flushed before \
+                 failure: {}. First error: {}",
+                error_messages.len(),
+                total_rows_flushed,
                 error_messages.first().cloned().unwrap_or_else(|| "unknown error".to_string())
             );
             log::error!("❌ User table flush failed: table={} — {}", self.table_id, summary);
             return Err(KalamDbError::Other(summary));
         }
 
-        log::debug!("✅ User table flush completed: table={}, rows_flushed={}, users_count={}, parquet_files={}",
-                  self.table_id,
-                  total_rows_flushed, rows_by_user.len(), parquet_files.len());
+        log::debug!(
+            "✅ User table flush completed: table={}, rows_flushed={}, users_count={}, \
+             parquet_files={}",
+            self.table_id,
+            total_rows_flushed,
+            rows_by_user.len(),
+            parquet_files.len()
+        );
 
         Ok(FlushJobResult {
             rows_flushed: total_rows_flushed,

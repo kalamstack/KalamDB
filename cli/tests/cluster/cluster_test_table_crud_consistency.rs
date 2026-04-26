@@ -2,9 +2,9 @@
 //!
 //! Verifies insert/update/delete results are identical across all nodes.
 
-use crate::cluster_common::*;
-use crate::common::*;
 use std::time::Duration;
+
+use crate::{cluster_common::*, common::*};
 
 fn assert_rows_on_all_nodes(urls: &[String], sql: &str, expected: &[String]) {
     let mut expected_rows = expected.to_vec();
@@ -132,7 +132,8 @@ fn cluster_test_table_crud_consistency() {
     execute_on_node(
         &urls[0],
         &format!(
-            "CREATE STREAM TABLE {}.stream_crud (id BIGINT PRIMARY KEY, value STRING) WITH (TTL_SECONDS = 3600)",
+            "CREATE STREAM TABLE {}.stream_crud (id BIGINT PRIMARY KEY, value STRING) WITH \
+             (TTL_SECONDS = 3600)",
             namespace
         ),
     )

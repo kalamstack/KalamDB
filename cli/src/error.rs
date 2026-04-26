@@ -4,8 +4,9 @@
 //!
 //! Provides user-friendly error messages and context for common CLI failures.
 
-use kalam_client::KalamLinkError;
 use std::fmt;
+
+use kalam_client::KalamLinkError;
 
 /// Result type for CLI operations
 pub type Result<T> = std::result::Result<T, CLIError>;

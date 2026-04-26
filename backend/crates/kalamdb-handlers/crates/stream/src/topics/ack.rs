@@ -1,11 +1,17 @@
-use crate::result_rows;
-use kalamdb_commons::models::{ConsumerGroupId, TopicId};
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
-use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
-use kalamdb_sql::ddl::AckStatement;
 use std::sync::Arc;
+
+use kalamdb_commons::models::{ConsumerGroupId, TopicId};
+use kalamdb_core::{
+    app_context::AppContext,
+    error::KalamDbError,
+    sql::{
+        context::{ExecutionContext, ExecutionResult, ScalarValue},
+        executor::handlers::TypedStatementHandler,
+    },
+};
+use kalamdb_sql::ddl::AckStatement;
+
+use crate::result_rows;
 
 pub struct AckHandler {
     app_context: Arc<AppContext>,

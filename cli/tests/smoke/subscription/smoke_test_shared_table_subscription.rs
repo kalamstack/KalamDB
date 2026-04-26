@@ -2,8 +2,9 @@
 // Covers: shared table creation, inserts, subscription receiving snapshot + change events
 // Uses kalam-client directly instead of CLI to avoid macOS TCP subprocess limits
 
-use crate::common::*;
 use kalam_client::models::ChangeEvent;
+
+use crate::common::*;
 
 /// Attempt to subscribe to a query as a given user and wait for ACK or error.
 /// Returns Ok(()) if subscription was accepted, Err(msg) if it was denied or failed.
@@ -216,7 +217,8 @@ fn smoke_shared_table_subscription_private_denied() {
     execute_sql_as_root_via_client(&format!("CREATE NAMESPACE IF NOT EXISTS {}", namespace))
         .expect("create namespace");
     execute_sql_as_root_via_client(&format!(
-        "CREATE TABLE {} (id BIGINT PRIMARY KEY, name TEXT) WITH (TYPE='SHARED', ACCESS_LEVEL='PRIVATE')",
+        "CREATE TABLE {} (id BIGINT PRIMARY KEY, name TEXT) WITH (TYPE='SHARED', \
+         ACCESS_LEVEL='PRIVATE')",
         full
     ))
     .expect("create private shared table");

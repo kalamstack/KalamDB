@@ -53,7 +53,10 @@ pub enum RaftError {
     Timeout(std::time::Duration),
 
     /// Replication timeout - command committed but not all nodes applied
-    #[error("Replication timeout for group {group}: committed at {committed_log_id} but not all nodes applied within {timeout_ms}ms")]
+    #[error(
+        "Replication timeout for group {group}: committed at {committed_log_id} but not all nodes \
+         applied within {timeout_ms}ms"
+    )]
     ReplicationTimeout {
         group: String,
         committed_log_id: String,
@@ -179,7 +182,7 @@ mod tests {
         assert!(RaftError::ReplicationTimeout {
             group: "g1".to_string(),
             committed_log_id: "1-100".to_string(),
-            timeout_ms: 5000
+            timeout_ms: 5000,
         }
         .is_retryable());
 

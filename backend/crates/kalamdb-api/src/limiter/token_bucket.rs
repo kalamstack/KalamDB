@@ -98,8 +98,9 @@ impl TokenBucket {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::thread;
+
+    use super::*;
 
     #[test]
     fn test_token_bucket_basic() {

@@ -49,29 +49,29 @@ pub mod storage;
 
 // Re-exports - Meta layer
 pub use applier::{MetaApplier, NoOpMetaApplier};
-pub use commands::{MetaCommand, MetaResponse, RaftCommand, RaftResponse};
-pub use state_machine::MetaStateMachine;
-
 // Re-exports - Data layer
 pub use applier::{NoOpSharedDataApplier, NoOpUserDataApplier, SharedDataApplier, UserDataApplier};
-pub use commands::{DataResponse, SharedDataCommand, TransactionApplyResult, UserDataCommand};
-pub use state_machine::{SharedDataStateMachine, UserDataStateMachine};
-
 // Re-exports - Core types
 pub use cluster_types::{NodeRole, NodeStatus, ServerStateExt};
+pub use commands::{
+    commit_seq_from_log_position, DataResponse, MetaCommand, MetaResponse, RaftCommand,
+    RaftResponse, SharedDataCommand, TransactionApplyResult, UserDataCommand,
+};
 pub use error::{RaftError, Result};
 pub use executor::{ClusterInfo, ClusterNodeInfo, CommandExecutor, RaftExecutor};
-pub use kalamdb_sharding::{ClusterConfig as RaftClusterConfig, PeerConfig};
-pub use kalamdb_sharding::{GroupId, ShardRouter};
+pub use kalamdb_sharding::{ClusterConfig as RaftClusterConfig, GroupId, PeerConfig, ShardRouter};
 pub use manager::{
     PeerNode, RaftGroup, RaftManager, RaftManagerConfig, SnapshotInfo, SnapshotsSummary,
     DEFAULT_SHARED_DATA_SHARDS, DEFAULT_USER_DATA_SHARDS,
 };
 pub use network::{
-    forward_sql_param, ClusterClient, ClusterMessageHandler, ClusterServiceImpl, ForwardSqlParam,
-    ForwardSqlRequest, ForwardSqlResponse, ForwardSqlResponsePayload, GetNodeInfoRequest,
-    GetNodeInfoResponse, NoOpClusterHandler, PingRequest, PingResponse,
+    forward_sql_param, start_rpc_server, ClusterClient, ClusterMessageHandler, ClusterServiceImpl,
+    ForwardSqlParam, ForwardSqlRequest, ForwardSqlResponse, ForwardSqlResponsePayload,
+    GetNodeInfoRequest, GetNodeInfoResponse, NoOpClusterHandler, PingRequest, PingResponse,
+    RaftNetwork, RaftNetworkFactory, RaftService,
 };
-pub use network::{start_rpc_server, RaftNetwork, RaftNetworkFactory, RaftService};
-pub use state_machine::{serde_helpers, ApplyResult, KalamStateMachine, StateMachineSnapshot};
+pub use state_machine::{
+    serde_helpers, ApplyResult, KalamStateMachine, MetaStateMachine, SharedDataStateMachine,
+    StateMachineSnapshot, UserDataStateMachine,
+};
 pub use storage::{KalamNode, KalamRaftStorage, KalamTypeConfig};

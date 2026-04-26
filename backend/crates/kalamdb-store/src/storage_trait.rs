@@ -10,12 +10,12 @@
 //! - get/put/delete for key-value access
 //! - batch for atomic multi-operation transactions
 //! - scan for range queries
-//! - partition management (maps to column families in RocksDB, trees in Sled, etc.)
+//! - partition management (mapped to backend-native keyspaces)
 //!
 //! ## Partition Model
 //!
 //! Since different backends have different concepts for data organization:
-//! - **RocksDB**: Partition = Column Family
+//! - **RocksDB**: Partition = key prefix inside a fixed physical column-family set
 //! - **Sled**: Partition = Tree
 //! - **Redis**: Partition = Key Prefix
 //! - **In-Memory**: Partition = HashMap namespace
@@ -25,7 +25,7 @@
 //! ## Example Usage
 //!
 //! ```rust
-//! use kalamdb_store::storage_trait::{StorageBackend, Partition, Operation};
+//! use kalamdb_store::storage_trait::{Operation, Partition, StorageBackend};
 //!
 //! fn store_user_data<S: StorageBackend>(backend: &S, user_id: &str, data: &[u8]) {
 //!     let partition = Partition::new(format!("user_{}", user_id));
@@ -59,8 +59,7 @@
 //! }
 //! ```
 
-use std::collections::BTreeMap;
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
 
 pub use kalamdb_commons::storage::{KvIterator, Operation, Partition, Result, StorageError};
 
@@ -113,7 +112,8 @@ pub trait StorageBackend: Send + Sync {
     ///
     /// ## Parameters
     /// - `prefix`: If Some, only return keys starting with this prefix
-    /// - `start_key`: If Some, start scanning from this key (inclusive). Must be >= prefix if both are set.
+    /// - `start_key`: If Some, start scanning from this key (inclusive). Must be >= prefix if both
+    ///   are set.
     /// - `limit`: If Some, return at most this many entries
     fn scan(
         &self,
@@ -186,11 +186,11 @@ pub trait StorageBackend: Send + Sync {
     /// compaction (no-op for backends without compaction).
     fn compact_partition(&self, partition: &Partition) -> Result<()>;
 
-    /// Flush all memtables across all partitions (column families) to SST files.
+    /// Flush all memtables across the backend to SST files.
     ///
     /// This allows RocksDB to reclaim WAL files that are pinned by unflushed
-    /// memtables in idle column families. Without periodic flushing, WAL files
-    /// accumulate indefinitely when only a subset of CFs receive writes.
+    /// memtables in idle physical keyspaces. Without periodic flushing, WAL files
+    /// can accumulate indefinitely when only a subset of physical stores receive writes.
     ///
     /// Default implementation is a no-op for backends without WAL.
     fn flush_all_memtables(&self) -> Result<()> {
@@ -210,7 +210,8 @@ pub trait StorageBackend: Send + Sync {
         ))
     }
 
-    /// Restores the storage engine from a backup directory created by [`StorageBackend::backup_to`].
+    /// Restores the storage engine from a backup directory created by
+    /// [`StorageBackend::backup_to`].
     ///
     /// For RocksDB this calls `BackupEngine::restore_from_latest_backup`, overwriting the
     /// current data directory. **The server must be restarted after this call** to reload
@@ -229,7 +230,6 @@ pub trait StorageBackend: Send + Sync {
     /// (for example `storage_backend` and `storage_partition_count`) and any
     /// engine-specific keys under a stable engine prefix such as `rocksdb_*`.
     fn stats(&self) -> StorageStats;
-
 }
 
 /// Extension trait providing async versions of StorageBackend methods.

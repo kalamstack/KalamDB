@@ -1,6 +1,8 @@
-use super::defaults::*;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
+
+use super::defaults::*;
 
 /// Main server configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -227,8 +229,8 @@ pub struct ServerSettings {
     #[serde(default = "default_api_version")]
     pub api_version: String,
     /// Enable HTTP/2 protocol support (default: true)
-    /// When true, server uses bind_auto_h2c() for automatic HTTP/1.1 and HTTP/2 cleartext negotiation
-    /// When false, server only supports HTTP/1.1
+    /// When true, server uses bind_auto_h2c() for automatic HTTP/1.1 and HTTP/2 cleartext
+    /// negotiation When false, server only supports HTTP/1.1
     #[serde(default = "default_enable_http2")]
     pub enable_http2: bool,
     /// Path to the Admin UI static files (e.g., "./ui/dist")

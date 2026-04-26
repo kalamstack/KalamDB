@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Defines the associated types used by OpenRaft:
 /// - `D`: Log entry data (serialized commands)
-/// - `R`: Response data (serialized responses)  
+/// - `R`: Response data (serialized responses)
 /// - `NodeId`: Unique identifier for nodes (u64)
 /// - `Node`: Node metadata for cluster membership
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]

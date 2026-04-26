@@ -85,7 +85,8 @@ fn smoke_test_system_tables_options_column() {
 
     // Query system.schemas for our namespace
     let query_sql = format!(
-        "SELECT table_name, table_type, options FROM system.schemas WHERE namespace_id = '{}' ORDER BY table_name",
+        "SELECT table_name, table_type, options FROM system.schemas WHERE namespace_id = '{}' \
+         ORDER BY table_name",
         namespace
     );
     let output =
@@ -296,7 +297,8 @@ fn smoke_test_dt_meta_command() {
     // Create two tables
     for table in &[&table1, &table2] {
         let create_sql = format!(
-            "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, name TEXT) WITH (TYPE = 'USER', FLUSH_POLICY = 'rows:1000')",
+            "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, name TEXT) WITH (TYPE = 'USER', \
+             FLUSH_POLICY = 'rows:1000')",
             namespace, table
         );
         execute_sql_as_root_via_client(&create_sql).expect("Failed to create table");
@@ -306,7 +308,8 @@ fn smoke_test_dt_meta_command() {
 
     // Query system.schemas directly (equivalent to \dt for our namespace)
     let query_sql = format!(
-        "SELECT table_name, table_type FROM system.schemas WHERE namespace_id = '{}' ORDER BY table_name",
+        "SELECT table_name, table_type FROM system.schemas WHERE namespace_id = '{}' ORDER BY \
+         table_name",
         namespace
     );
     let output =
@@ -365,7 +368,8 @@ fn smoke_test_describe_table_meta_command() {
 
     // Query system.schemas for schema (equivalent to \d <table>)
     let query_sql = format!(
-        "SELECT table_name, table_type, options FROM system.schemas WHERE namespace_id = '{}' AND table_name = '{}'",
+        "SELECT table_name, table_type, options FROM system.schemas WHERE namespace_id = '{}' AND \
+         table_name = '{}'",
         namespace, table
     );
     let output = execute_sql_as_root_via_client(&query_sql).expect("Failed to describe table");

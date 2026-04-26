@@ -1,7 +1,8 @@
 //! Parameter parsing helpers
 
-use kalamdb_core::providers::arrow_json_conversion::json_value_to_scalar_strict;
-use kalamdb_core::sql::executor::ScalarValue;
+use kalamdb_core::{
+    providers::arrow_json_conversion::json_value_to_scalar_strict, sql::executor::ScalarValue,
+};
 use kalamdb_raft::ForwardSqlParam;
 use serde_json::Value as JsonValue;
 
@@ -71,9 +72,10 @@ pub fn parse_forward_params(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kalamdb_raft::forward_sql_param;
     use serde_json::json;
+
+    use super::*;
 
     #[test]
     fn parse_forward_params_preserves_scalar_types() {

@@ -2,10 +2,11 @@
 // Covers: batch_num tracking, has_more flag, status transitions, data ordering
 // Tests subscription batch control correctness for initial data loading
 
-use crate::common::*;
 use std::time::Duration;
 
 use kalam_client::{SubscriptionConfig, SubscriptionOptions};
+
+use crate::common::*;
 
 /// Helper to create a subscription listener with custom configuration
 fn start_subscription_with_config(
@@ -47,7 +48,8 @@ pub enum ParsedEvent {
 impl ParsedEvent {
     /// Parse a debug-formatted ChangeEvent string into a structured event
     fn parse(event_str: &str) -> Self {
-        // Parse Ack event: "Ack { subscription_id: "...", total_rows: N, batch_control: BatchControl { batch_num: N, has_more: bool, status: Status, ... } }"
+        // Parse Ack event: "Ack { subscription_id: "...", total_rows: N, batch_control:
+        // BatchControl { batch_num: N, has_more: bool, status: Status, ... } }"
         if event_str.contains("Ack {") {
             if let Some(sub_id) = Self::extract_subscription_id(event_str) {
                 if let Some(bc) = Self::extract_batch_control(event_str) {
@@ -508,7 +510,8 @@ fn smoke_batch_control_multi_batch() {
 
     // Verify status transitions: first batch=loading, middle=loading_batch, last=ready
     if let Some(ParsedEvent::InitialDataBatch { batch_control, .. }) = batch_events.first() {
-        // First batch should have status=loading (or ready if single batch which shouldn't happen here)
+        // First batch should have status=loading (or ready if single batch which shouldn't happen
+        // here)
         assert!(
             batch_control.status == "loading" || batch_control.status == "ready",
             "First batch should have status=loading or ready"

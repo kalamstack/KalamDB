@@ -9,9 +9,11 @@
 //! Run with:
 //!   cargo test --test connection live_connection_tests -- --test-threads=1
 
-use crate::common::*;
-use kalam_client::{ConnectionOptions, HttpVersion, KalamLinkTimeouts, SubscriptionOptions};
 use std::time::Duration;
+
+use kalam_client::{ConnectionOptions, HttpVersion, KalamLinkTimeouts, SubscriptionOptions};
+
+use crate::common::*;
 
 fn start_subscription_with_retry(query: &str) -> SubscriptionListener {
     for attempt in 0..2 {

@@ -2,16 +2,21 @@
 //!
 //! Provides serialization helpers for Parquet writes managed by StorageCached.
 
-use crate::error::{FilestoreError, Result};
-use arrow::array::{Array, Int64Array};
-use arrow::datatypes::SchemaRef;
-use arrow::record_batch::RecordBatch;
+use arrow::{
+    array::{Array, Int64Array},
+    datatypes::SchemaRef,
+    record_batch::RecordBatch,
+};
 use bytes::Bytes;
 use datafusion::arrow::compute::{self, SortOptions};
 use kalamdb_commons::constants::SystemColumnNames;
-use parquet::arrow::ArrowWriter;
-use parquet::basic::{Compression, ZstdLevel};
-use parquet::file::properties::WriterProperties;
+use parquet::{
+    arrow::ArrowWriter,
+    basic::{Compression, ZstdLevel},
+    file::properties::WriterProperties,
+};
+
+use crate::error::{FilestoreError, Result};
 
 /// Result of a Parquet write operation.
 #[derive(Debug, Clone)]
@@ -155,10 +160,12 @@ fn is_sorted_by_seq(batch: &RecordBatch, seq_idx: usize) -> Result<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::Arc;
+
     use arrow::array::StringArray;
     use kalamdb_commons::arrow_utils::{field_utf8, schema};
-    use std::sync::Arc;
+
+    use super::*;
 
     fn make_test_batch() -> (SchemaRef, Vec<RecordBatch>) {
         let schema = schema(vec![field_utf8("name", false)]);

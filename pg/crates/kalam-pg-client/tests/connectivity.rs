@@ -1,7 +1,8 @@
+use std::time::Duration;
+
 use kalam_pg_client::RemoteKalamClient;
 use kalam_pg_common::{RemoteAuthMode, RemoteServerConfig};
 use kalamdb_pg::{KalamPgService, PgServiceServer};
-use std::time::Duration;
 use tokio::net::TcpListener;
 
 /// Helper: start a gRPC PgService on an ephemeral port and return a connected client.
@@ -30,18 +31,13 @@ async fn start_server_and_client() -> RemoteKalamClient {
     .expect("connect client")
 }
 
-
-
 #[tokio::test]
 #[ntest::timeout(10000)]
 async fn remote_client_connects_and_opens_session() {
     let client = start_server_and_client().await;
 
     client.ping().await.expect("ping");
-    let session = client
-        .open_session(None, Some("tenant_app"))
-        .await
-        .expect("open session");
+    let session = client.open_session(None, Some("tenant_app")).await.expect("open session");
 
     assert!(!session.session_id.is_empty(), "server should issue a session ID");
     assert_eq!(session.current_schema.as_deref(), Some("tenant_app"));
@@ -88,7 +84,10 @@ async fn stale_transaction_auto_rollback_on_new_begin() {
         .await
         .expect("begin tx2 should auto-rollback stale tx1");
 
-    client.commit_transaction(&session.session_id, &tx_id2).await.expect("commit tx2");
+    client
+        .commit_transaction(&session.session_id, &tx_id2)
+        .await
+        .expect("commit tx2");
 }
 
 /// Verify close_session removes the session from the server registry.
@@ -145,9 +144,7 @@ async fn connect_with_timeout_fails_on_unreachable_server() {
 async fn account_login_sends_basic_auth_on_open_session() {
     // With gRPC-only auth, account_login sends Basic credentials as gRPC metadata
     // on open_session. The server validates them and issues a session handle.
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind gRPC server");
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind gRPC server");
     let port = listener.local_addr().expect("gRPC local addr").port();
     let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
     // No expected static header — the server should accept Basic auth.

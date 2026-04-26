@@ -1,14 +1,15 @@
 //! User table lifecycle + isolation tests over the real HTTP SQL API.
 
-use super::test_support::auth_helper::create_user_auth_header_default;
-use super::test_support::consolidated_helpers::{unique_namespace, unique_table};
-use super::test_support::flush::{flush_table_and_wait, wait_for_parquet_files_for_user_table};
-use super::test_support::http_server::HttpTestServer;
-use super::test_support::jobs::{
-    extract_cleanup_job_id, wait_for_job_completion, wait_for_path_absent,
-};
 use kalam_client::models::ResponseStatus;
 use tokio::time::Duration;
+
+use super::test_support::{
+    auth_helper::create_user_auth_header_default,
+    consolidated_helpers::{unique_namespace, unique_table},
+    flush::{flush_table_and_wait, wait_for_parquet_files_for_user_table},
+    http_server::HttpTestServer,
+    jobs::{extract_cleanup_job_id, wait_for_job_completion, wait_for_path_absent},
+};
 
 async fn lookup_user_id(server: &HttpTestServer, username: &str) -> anyhow::Result<String> {
     let resp = server
@@ -53,14 +54,15 @@ async fn test_user_tables_lifecycle_and_isolation_over_http() -> anyhow::Result<
     // -----------------------------------------------------------------
     {
         let resp = server
-                    .execute_sql_with_auth(
-                        &format!(
-                            "CREATE TABLE {}.notes (id TEXT PRIMARY KEY, content TEXT, priority INT) WITH (TYPE='USER', STORAGE_ID='local', FLUSH_POLICY='rows:50')",
-                            ns
-                        ),
-                        &auth1,
-                    )
-                    .await?;
+            .execute_sql_with_auth(
+                &format!(
+                    "CREATE TABLE {}.notes (id TEXT PRIMARY KEY, content TEXT, priority INT) WITH \
+                     (TYPE='USER', STORAGE_ID='local', FLUSH_POLICY='rows:50')",
+                    ns
+                ),
+                &auth1,
+            )
+            .await?;
         anyhow::ensure!(
             resp.status == ResponseStatus::Success,
             "CREATE TABLE failed: {:?}",
@@ -165,14 +167,15 @@ async fn test_user_tables_lifecycle_and_isolation_over_http() -> anyhow::Result<
         let _ = server.execute_sql(&format!("DROP TABLE {}.{}", ns, table)).await;
 
         let resp = server
-                    .execute_sql_with_auth(
-                        &format!(
-                            "CREATE TABLE {}.{} (id TEXT PRIMARY KEY, content TEXT) WITH (TYPE='USER', STORAGE_ID='local', FLUSH_POLICY='rows:2')",
-                            ns, table
-                        ),
-                        &auth1,
-                    )
-                    .await?;
+            .execute_sql_with_auth(
+                &format!(
+                    "CREATE TABLE {}.{} (id TEXT PRIMARY KEY, content TEXT) WITH (TYPE='USER', \
+                     STORAGE_ID='local', FLUSH_POLICY='rows:2')",
+                    ns, table
+                ),
+                &auth1,
+            )
+            .await?;
         anyhow::ensure!(resp.status == ResponseStatus::Success);
 
         let resp = server

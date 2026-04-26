@@ -2,8 +2,7 @@
 //!
 //! Tests that verify cluster behavior during node failures
 
-use crate::cluster_common::*;
-use crate::common::*;
+use crate::{cluster_common::*, common::*};
 
 /// Test: Cluster remains operational when one node fails
 ///

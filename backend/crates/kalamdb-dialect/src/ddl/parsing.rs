@@ -243,7 +243,8 @@ pub fn parse_table_reference(table_ref: &str) -> DdlResult<(Option<String>, Stri
     for keyword in &sql_keywords {
         if upper_ref.contains(&format!(" {}", keyword)) || upper_ref.starts_with(keyword) {
             return Err(format!(
-                "Invalid table reference '{}'. Table references should be simple identifiers like 'table' or 'namespace.table', not SQL statements",
+                "Invalid table reference '{}'. Table references should be simple identifiers like \
+                 'table' or 'namespace.table', not SQL statements",
                 table_ref
             ));
         }

@@ -1,9 +1,11 @@
-use super::types::JobsManager;
 use kalamdb_commons::JobId;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::error_extensions::KalamDbResultExt;
-use kalamdb_system::providers::jobs::models::{Job, JobFilter};
-use kalamdb_system::JobStatus;
+use kalamdb_core::{error::KalamDbError, error_extensions::KalamDbResultExt};
+use kalamdb_system::{
+    providers::jobs::models::{Job, JobFilter},
+    JobStatus,
+};
+
+use super::types::JobsManager;
 
 impl JobsManager {
     /// Get job details

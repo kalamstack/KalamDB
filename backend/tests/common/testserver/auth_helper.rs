@@ -9,14 +9,11 @@
 
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use kalamdb_commons::{AuthType, Role, StorageId, UserId};
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::context::ExecutionContext;
-use kalamdb_system::providers::storages::models::StorageMode;
-use kalamdb_system::User;
+use kalamdb_core::{error::KalamDbError, sql::context::ExecutionContext};
+use kalamdb_system::{providers::storages::models::StorageMode, User};
 use serde::{Deserialize, Serialize};
 
-use super::consolidated_helpers::ensure_user_exists;
-use super::http_server::HttpTestServer;
+use super::{consolidated_helpers::ensure_user_exists, http_server::HttpTestServer};
 
 /// Create a test user with password authentication
 ///
@@ -69,8 +66,7 @@ pub async fn create_test_user(
 
     let users_provider = server.app_context.system_tables().users();
     if let Ok(Some(mut existing)) = users_provider.get_user_by_id(&user_id) {
-        existing.password_hash =
-            bcrypt::hash(password, 4).expect("Failed to hash password");
+        existing.password_hash = bcrypt::hash(password, 4).expect("Failed to hash password");
         existing.role = role;
         existing.email = Some(format!("{}@example.com", username));
         existing.auth_type = AuthType::Password;
@@ -89,8 +85,8 @@ pub async fn create_test_user(
         if let Err(e) = &result {
             if matches!(e, KalamDbError::AlreadyExists(_)) {
                 if let Ok(Some(mut existing)) = users_provider.get_user_by_id(&user_id) {
-                    existing.password_hash = bcrypt::hash(password, 4)
-                        .expect("Failed to hash password");
+                    existing.password_hash =
+                        bcrypt::hash(password, 4).expect("Failed to hash password");
                     existing.role = role;
                     existing.email = Some(format!("{}@example.com", username));
                     existing.auth_type = AuthType::Password;

@@ -1,7 +1,9 @@
 //! Topic offset models - entity definitions
 
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::models::{ConsumerGroupId, TopicId};
+use kalamdb_commons::{
+    datatypes::KalamDataType,
+    models::{ConsumerGroupId, TopicId},
+};
 use kalamdb_macros::table;
 use serde::{Deserialize, Serialize};
 

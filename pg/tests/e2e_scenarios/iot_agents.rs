@@ -60,7 +60,8 @@ async fn e2e_scenario_iot_agent_fleet_incident_flow() {
     let handle_a = tokio::spawn(async move {
         ingest_a
             .batch_execute(&format!(
-                "INSERT INTO {schema_a}.{telemetry_a} (id, device_id, temperature, battery_level, health) VALUES
+                "INSERT INTO {schema_a}.{telemetry_a} (id, device_id, temperature, battery_level, \
+                 health) VALUES
                  ('t-1', 'dev-1', 74, 58, 'healthy'),
                  ('t-2', 'dev-1', 88, 51, 'degraded'),
                  ('t-3', 'dev-2', 82, 17, 'critical');"
@@ -74,7 +75,8 @@ async fn e2e_scenario_iot_agent_fleet_incident_flow() {
     let handle_b = tokio::spawn(async move {
         ingest_b
             .batch_execute(&format!(
-                "INSERT INTO {schema_b}.{telemetry_b} (id, device_id, temperature, battery_level, health) VALUES
+                "INSERT INTO {schema_b}.{telemetry_b} (id, device_id, temperature, battery_level, \
+                 health) VALUES
                  ('t-4', 'dev-3', 66, 42, 'healthy'),
                  ('t-5', 'dev-3', 91, 39, 'degraded');"
             ))
@@ -118,15 +120,33 @@ async fn e2e_scenario_iot_agent_fleet_incident_flow() {
 
         agent_pg
             .execute(
-                &format!("INSERT INTO {schema}.{commands} (id, device_id, action, status, issued_by) VALUES ($1, $2, $3, $4, $5)"),
-                &[&format!("cmd-{device_id}"), &device_id, &action, &"queued", &"fleet-agent"],
+                &format!(
+                    "INSERT INTO {schema}.{commands} (id, device_id, action, status, issued_by) \
+                     VALUES ($1, $2, $3, $4, $5)"
+                ),
+                &[
+                    &format!("cmd-{device_id}"),
+                    &device_id,
+                    &action,
+                    &"queued",
+                    &"fleet-agent",
+                ],
             )
             .await
             .expect("insert remediation command");
         agent_pg
             .execute(
-                &format!("INSERT INTO {schema}.{alerts} (id, device_id, severity, summary, created_by) VALUES ($1, $2, $3, $4, $5)"),
-                &[&format!("alert-{device_id}"), &device_id, &severity, &format!("temp={max_temp}, battery={min_battery}"), &"fleet-agent"],
+                &format!(
+                    "INSERT INTO {schema}.{alerts} (id, device_id, severity, summary, created_by) \
+                     VALUES ($1, $2, $3, $4, $5)"
+                ),
+                &[
+                    &format!("alert-{device_id}"),
+                    &device_id,
+                    &severity,
+                    &format!("temp={max_temp}, battery={min_battery}"),
+                    &"fleet-agent",
+                ],
             )
             .await
             .expect("insert incident alert");

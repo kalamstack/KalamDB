@@ -57,7 +57,7 @@
 //! ## Examples
 //!
 //! ```rust
-//! use kalamdb_dialect::ddl::flush_commands::{FlushTableStatement, FlushAllTablesStatement};
+//! use kalamdb_dialect::ddl::flush_commands::{FlushAllTablesStatement, FlushTableStatement};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Parse STORAGE FLUSH TABLE
@@ -74,9 +74,9 @@
 
 //! Parsers for STORAGE FLUSH TABLE and STORAGE FLUSH ALL commands (US4).
 
-use crate::ddl::parsing;
-use crate::parser::utils::normalize_sql;
 use kalamdb_commons::{NamespaceId, TableName};
+
+use crate::{ddl::parsing, parser::utils::normalize_sql};
 
 const ERR_EXPECTED_NAMESPACE: &str = "Expected STORAGE FLUSH ALL IN namespace";
 

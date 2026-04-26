@@ -2,11 +2,12 @@
 // Covers: multi-batch initial data, seq_id resumption, high-volume changes
 // Tests subscription reliability under various edge cases
 
-use crate::common::*;
 use std::time::Duration;
 
 // Re-import subscription-related types for advanced tests
 use kalam_client::{SubscriptionConfig, SubscriptionOptions};
+
+use crate::common::*;
 
 fn is_ephemeral_port_error(message: &str) -> bool {
     message.contains("Can't assign requested address") || message.contains("os error 49")
@@ -241,7 +242,8 @@ fn smoke_subscription_multi_batch_initial_data() {
 
     // Create table
     let create_sql = format!(
-        "CREATE TABLE {} (id INT PRIMARY KEY, data VARCHAR, created_at TIMESTAMP) WITH (TYPE = 'USER')",
+        "CREATE TABLE {} (id INT PRIMARY KEY, data VARCHAR, created_at TIMESTAMP) WITH (TYPE = \
+         'USER')",
         full
     );
     execute_sql_as_root_via_client(&create_sql).expect("create user table should succeed");
@@ -389,7 +391,8 @@ fn smoke_subscription_resume_from_seq_id() {
             Ok(Some(line)) => {
                 println!("[FIRST_SUB] Event: {}...", &line[..std::cmp::min(200, line.len())]);
                 if line.contains(&test_value) || line.contains("Insert") {
-                    // Extract seq_id from the event (format: "_seq": Object {"Int64": String("123456789")})
+                    // Extract seq_id from the event (format: "_seq": Object {"Int64":
+                    // String("123456789")})
                     if let Some(start) = line.find("\"_seq\"") {
                         if let Some(seq_start) = line[start..].find("String(\"") {
                             let seq_portion = &line[start + seq_start + 8..];
@@ -505,7 +508,8 @@ fn smoke_subscription_high_volume_changes() {
 
     // Create table
     let create_sql = format!(
-        "CREATE TABLE {} (id INT PRIMARY KEY, counter INT, updated_at TIMESTAMP) WITH (TYPE = 'USER')",
+        "CREATE TABLE {} (id INT PRIMARY KEY, counter INT, updated_at TIMESTAMP) WITH (TYPE = \
+         'USER')",
         full
     );
     execute_sql_as_root_via_client(&create_sql).expect("create user table should succeed");
@@ -800,7 +804,8 @@ fn smoke_subscription_column_projection() {
     // Insert a row with all columns populated
     let test_username = format!("user_{}", std::process::id());
     let insert_sql = format!(
-        "INSERT INTO {} (id, username, email, age, status, bio, created_at) VALUES (1, '{}', 'test@example.com', 25, 'active', 'A long bio text here', 1730497770045)",
+        "INSERT INTO {} (id, username, email, age, status, bio, created_at) VALUES (1, '{}', \
+         'test@example.com', 25, 'active', 'A long bio text here', 1730497770045)",
         full, test_username
     );
     execute_sql_as_root_via_client(&insert_sql).expect("insert should succeed");
@@ -888,7 +893,8 @@ fn smoke_subscription_column_projection() {
         );
 
         // Should NOT contain email, age, status, bio (non-selected columns)
-        // Note: We check for the actual values to avoid false positives from field names in debug output
+        // Note: We check for the actual values to avoid false positives from field names in debug
+        // output
         assert!(
             !initial_str.contains("test@example.com"),
             "Initial data should NOT contain email value. Events: {}",
@@ -904,7 +910,8 @@ fn smoke_subscription_column_projection() {
     // Now perform an UPDATE and verify the change event also respects projection
     let updated_username = format!("updated_{}", std::process::id());
     let update_sql = format!(
-        "UPDATE {} SET username = '{}', email = 'newemail@example.com', status = 'inactive' WHERE id = 1",
+        "UPDATE {} SET username = '{}', email = 'newemail@example.com', status = 'inactive' WHERE \
+         id = 1",
         full, updated_username
     );
     execute_sql_as_root_via_client(&update_sql).expect("update should succeed");
@@ -978,7 +985,10 @@ fn smoke_subscription_column_projection() {
     );
 
     listener.stop().ok();
-    println!("[TEST] Column projection test passed! Only selected columns returned in subscription events.");
+    println!(
+        "[TEST] Column projection test passed! Only selected columns returned in subscription \
+         events."
+    );
 
     // Cleanup
     let _ = execute_sql_as_root_via_client(&format!("DROP NAMESPACE {} CASCADE", namespace));

@@ -14,9 +14,9 @@
 //! - Manifest-based file pruning by seq range
 //! - Fallback to directory scan when manifest missing
 
+use kalam_client::{models::ResponseStatus, parse_i64};
+
 use super::test_support::{fixtures, flush_helpers, TestServer};
-use kalam_client::models::ResponseStatus;
-use kalam_client::parse_i64;
 
 /// Test: User table cold storage query uses manifest cache
 ///
@@ -265,8 +265,10 @@ async fn test_manifest_tracks_multiple_flush_segments() {
         server
             .execute_sql_as_user(
                 &format!(
-                    "INSERT INTO multi_flush_ns.events (id, event_type, timestamp) VALUES ({}, 'batch1', {})",
-                    i, 1000 + i
+                    "INSERT INTO multi_flush_ns.events (id, event_type, timestamp) VALUES ({}, \
+                     'batch1', {})",
+                    i,
+                    1000 + i
                 ),
                 "multi_user",
             )
@@ -283,8 +285,10 @@ async fn test_manifest_tracks_multiple_flush_segments() {
         server
             .execute_sql_as_user(
                 &format!(
-                    "INSERT INTO multi_flush_ns.events (id, event_type, timestamp) VALUES ({}, 'batch2', {})",
-                    i, 2000 + i
+                    "INSERT INTO multi_flush_ns.events (id, event_type, timestamp) VALUES ({}, \
+                     'batch2', {})",
+                    i,
+                    2000 + i
                 ),
                 "multi_user",
             )
@@ -368,8 +372,10 @@ async fn test_cold_storage_version_resolution_after_update() {
         server
             .execute_sql_as_user(
                 &format!(
-                    "INSERT INTO version_res_ns.records (id, status, count) VALUES ({}, 'initial', {})",
-                    i, i * 5
+                    "INSERT INTO version_res_ns.records (id, status, count) VALUES ({}, \
+                     'initial', {})",
+                    i,
+                    i * 5
                 ),
                 "version_user",
             )

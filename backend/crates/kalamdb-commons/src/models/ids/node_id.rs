@@ -6,8 +6,9 @@
 //! - Live query routing
 //! - Distributed coordination
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
+
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Node identifier for cluster deployments
 ///

@@ -1,7 +1,7 @@
+use kalamdb_commons::UserId;
 use serde::{Deserialize, Serialize};
 
 use crate::models::RowData;
-use kalamdb_commons::UserId;
 
 /// A single consumed message from a topic.
 ///

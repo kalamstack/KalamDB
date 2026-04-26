@@ -3,22 +3,19 @@
 //! Provides access to all core resources with simplified 3-parameter initialization.
 //! Uses constants from kalamdb_commons for table prefixes.
 
-use crate::applier::UnifiedApplier;
-use crate::job_waker::JobWaker;
-use crate::live_adapters::SchemaRegistryLookup;
-use crate::schema_registry::SchemaRegistry;
-use crate::sql::datafusion_session::DataFusionSessionFactory;
-use crate::sql::executor::SqlExecutor;
-use crate::sql::table_functions::{CoreVectorSearchRuntime, VectorSearchTableFunction};
-use crate::transactions::{CommitSequenceTracker, TransactionCoordinator};
-use crate::views::system_schema_provider::SystemSchemaProvider;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
 use async_trait::async_trait;
-use datafusion::catalog::SchemaProvider;
-use datafusion::prelude::SessionContext;
+use datafusion::{catalog::SchemaProvider, prelude::SessionContext};
 use kalamdb_auth::{CoreUsersRepo, UserRepository};
-use kalamdb_commons::constants::SYSTEM_NAMESPACE;
-use kalamdb_commons::models::{NamespaceId, TransactionOrigin, UserId};
-use kalamdb_commons::{constants::ColumnFamilyNames, NodeId};
+use kalamdb_commons::{
+    constants::{ColumnFamilyNames, SYSTEM_NAMESPACE},
+    models::{NamespaceId, TransactionOrigin, UserId},
+    NodeId,
+};
 use kalamdb_configs::ServerConfig;
 use kalamdb_filestore::StorageRegistry;
 use kalamdb_live::{
@@ -31,14 +28,26 @@ use kalamdb_sharding::{GroupId, ShardRouter};
 use kalamdb_store::StorageBackend;
 use kalamdb_system::{ClusterCoordinator, Namespace, SystemTablesRegistry};
 use kalamdb_tables::{SharedTableStore, UserTableStore};
-use kalamdb_views::sessions::{PgSessionSnapshot, SessionsSnapshotCallback};
-use kalamdb_views::transactions::{TransactionSnapshot, TransactionsSnapshotCallback};
+use kalamdb_views::{
+    sessions::{PgSessionSnapshot, SessionsSnapshotCallback},
+    transactions::{TransactionSnapshot, TransactionsSnapshotCallback},
+};
 use once_cell::sync::OnceCell;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 
-use crate::metrics::runtime::collect_runtime_metrics;
-use crate::schema_registry::TablesSchemaRegistryAdapter;
+use crate::{
+    applier::UnifiedApplier,
+    job_waker::JobWaker,
+    live_adapters::SchemaRegistryLookup,
+    metrics::runtime::collect_runtime_metrics,
+    schema_registry::{SchemaRegistry, TablesSchemaRegistryAdapter},
+    sql::{
+        datafusion_session::DataFusionSessionFactory,
+        executor::SqlExecutor,
+        table_functions::{CoreVectorSearchRuntime, VectorSearchTableFunction},
+    },
+    transactions::{CommitSequenceTracker, TransactionCoordinator},
+    views::system_schema_provider::SystemSchemaProvider,
+};
 
 struct SchemaRegistryTopicPrimaryKeyLookup {
     schema_registry: Arc<SchemaRegistry>,
@@ -203,20 +212,15 @@ impl AppContext {
     ///
     /// # Example
     /// ```no_run
-    /// use kalamdb_core::app_context::AppContext;
     /// use kalamdb_commons::NodeId;
+    /// use kalamdb_core::app_context::AppContext;
     /// # use kalamdb_store::StorageBackend;
     /// # use std::sync::Arc;
     ///
     /// let backend: Arc<dyn StorageBackend> = todo!();
     /// let node_id = NodeId::new("prod-node-1".to_string()); // From server.toml
     /// let config = ServerConfig::from_file("server.toml").unwrap();
-    /// AppContext::init(
-    ///     backend,
-    ///     node_id,
-    ///     "data/storage".to_string(),
-    ///     config,
-    /// );
+    /// AppContext::init(backend, node_id, "data/storage".to_string(), config);
     /// ```
     pub fn init(
         storage_backend: Arc<dyn StorageBackend>,
@@ -280,7 +284,8 @@ impl AppContext {
                 ColumnFamilyNames::SHARED_TABLE_PREFIX.to_string(),
             ));
 
-            // Create system table providers registry FIRST (needed by StorageRegistry and information_schema)
+            // Create system table providers registry FIRST (needed by StorageRegistry and
+            // information_schema)
             let system_tables = Arc::new(SystemTablesRegistry::new(storage_backend.clone()));
 
             // Create storage registry (uses StoragesTableProvider from system_tables)
@@ -321,9 +326,10 @@ impl AppContext {
 
             // Register system schema with lazy loading
             // Use constant catalog name "kalam" - configured in DataFusionSessionFactory
-            let catalog = base_session_context
-                    .catalog("kalam")
-                    .expect("Catalog 'kalam' not found - ensure DataFusionSessionFactory is properly configured");
+            let catalog = base_session_context.catalog("kalam").expect(
+                "Catalog 'kalam' not found - ensure DataFusionSessionFactory is properly \
+                 configured",
+            );
 
             // Register the system schema provider with the catalog
             // Views are created on first access, not eagerly at startup
@@ -471,13 +477,12 @@ impl AppContext {
             let visibility_timeout = Duration::from_secs(config.topics.visibility_timeout_secs);
             let topic_primary_key_lookup: Arc<dyn TopicPrimaryKeyLookup> =
                 Arc::new(SchemaRegistryTopicPrimaryKeyLookup::new(schema_registry.clone()));
-            let topic_publisher = Arc::new(
-                TopicPublisherService::with_visibility_timeout_and_primary_key_lookup(
+            let topic_publisher =
+                Arc::new(TopicPublisherService::with_visibility_timeout_and_primary_key_lookup(
                     storage_backend.clone(),
                     visibility_timeout,
                     Some(topic_primary_key_lookup),
-                ),
-            );
+                ));
 
             // Create the shared committed snapshot tracker used by the transaction coordinator
             let commit_sequence_tracker = Arc::new(CommitSequenceTracker::new(0));
@@ -538,7 +543,8 @@ impl AppContext {
                     topic_publisher.refresh_topics_cache(topics);
                     topic_publisher.restore_offset_counters();
                     log::info!(
-                        "Restored {} topics into TopicPublisherService cache (routes={}, offsets ready)",
+                        "Restored {} topics into TopicPublisherService cache (routes={}, offsets \
+                         ready)",
                         count,
                         topic_publisher.cache_stats().total_routes,
                     );
@@ -748,8 +754,10 @@ impl AppContext {
     /// Maps node_id string to 10-bit integer (0-1023) using CRC32 hash.
     /// This ensures consistent worker_id across server restarts.
     fn extract_worker_id(node_id: &NodeId) -> u16 {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
+        use std::{
+            collections::hash_map::DefaultHasher,
+            hash::{Hash, Hasher},
+        };
 
         let mut hasher = DefaultHasher::new();
         node_id.as_u64().hash(&mut hasher);
@@ -769,8 +777,9 @@ impl AppContext {
     ///
     /// # Example
     /// ```no_run
-    /// use kalamdb_core::app_context::AppContext;
     /// use std::sync::Arc;
+    ///
+    /// use kalamdb_core::app_context::AppContext;
     ///
     /// let app_context = AppContext::new_test();
     /// let sys_cols = app_context.system_columns_service();
@@ -871,13 +880,12 @@ impl AppContext {
         let visibility_timeout = Duration::from_secs(config.topics.visibility_timeout_secs);
         let topic_primary_key_lookup: Arc<dyn TopicPrimaryKeyLookup> =
             Arc::new(SchemaRegistryTopicPrimaryKeyLookup::new(schema_registry.clone()));
-        let topic_publisher = Arc::new(
-            TopicPublisherService::with_visibility_timeout_and_primary_key_lookup(
+        let topic_publisher =
+            Arc::new(TopicPublisherService::with_visibility_timeout_and_primary_key_lookup(
                 storage_backend.clone(),
                 visibility_timeout,
                 Some(topic_primary_key_lookup),
-            ),
-        );
+            ));
 
         // Create transaction snapshot tracker for tests
         let commit_sequence_tracker = Arc::new(CommitSequenceTracker::new(0));
@@ -1237,7 +1245,7 @@ impl AppContext {
     }
 
     /// Register the shared SqlExecutor (called once during bootstrap)
-    pub fn set_sql_executor(&self, executor: Arc<SqlExecutor>) {
+    pub fn set_sql_executor(self: &Arc<Self>, executor: Arc<SqlExecutor>) {
         // Wire live query manager's InitialDataFetcher with the SQL executor adapter
         if let Some(lqm) = self.live_query_manager.get() {
             let adapter = Arc::new(crate::live_adapters::SqlExecutorAdapter::new(
@@ -1245,6 +1253,10 @@ impl AppContext {
                 Arc::clone(&self.base_session_context),
             ));
             lqm.set_sql_executor(adapter);
+
+            let barrier =
+                Arc::new(crate::live_adapters::RaftApplyBarrierAdapter::new(Arc::clone(self)));
+            lqm.set_apply_barrier(barrier);
         }
 
         if self.sql_executor.set(executor).is_err() {

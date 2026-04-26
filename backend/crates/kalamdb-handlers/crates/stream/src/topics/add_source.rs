@@ -1,11 +1,16 @@
+use std::sync::Arc;
+
 use kalamdb_commons::models::TopicId;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
-use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
+use kalamdb_core::{
+    app_context::AppContext,
+    error::KalamDbError,
+    sql::{
+        context::{ExecutionContext, ExecutionResult, ScalarValue},
+        executor::handlers::TypedStatementHandler,
+    },
+};
 use kalamdb_sql::ddl::AddTopicSourceStatement;
 use kalamdb_system::providers::topics::models::TopicRoute;
-use std::sync::Arc;
 
 pub struct AddTopicSourceHandler {
     app_context: Arc<AppContext>,

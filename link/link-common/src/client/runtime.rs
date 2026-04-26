@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::{KalamLinkClient, KalamLinkClientBuilder};
 #[cfg(feature = "consumer")]
 use crate::consumer::ConsumerBuilder;
@@ -10,7 +12,6 @@ use crate::{
     subscription::{LiveRowsConfig, LiveRowsSubscription, SubscriptionManager},
     timeouts::KalamLinkTimeouts,
 };
-use std::sync::Arc;
 
 impl KalamLinkClient {
     /// Create a new builder for configuring the client

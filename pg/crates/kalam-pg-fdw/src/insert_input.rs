@@ -1,6 +1,7 @@
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::UserId;
-use kalamdb_commons::{TableId, TableType};
+use kalamdb_commons::{
+    models::{rows::Row, UserId},
+    TableId, TableType,
+};
 
 /// Typed FDW insert input before it is converted into a backend request.
 #[derive(Debug, Clone)]

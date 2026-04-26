@@ -21,31 +21,34 @@
 //!
 //! **Schema**: TableDefinition provides consistent metadata for views
 
-use crate::error::RegistryError;
-use crate::view_base::VirtualView;
+use std::sync::{Arc, OnceLock};
+
 use async_trait::async_trait;
-use datafusion::arrow::array::{
-    ArrayRef, BooleanArray, Float32Array, Int16Array, Int32Array, Int64Array, StringArray,
+use datafusion::{
+    arrow::{
+        array::{
+            ArrayRef, BooleanArray, Float32Array, Int16Array, Int32Array, Int64Array, StringArray,
+        },
+        datatypes::SchemaRef,
+        record_batch::RecordBatch,
+    },
+    common::DFSchema,
+    logical_expr::{Expr, TableProviderFilterPushDown},
+    physical_expr::PhysicalExpr,
 };
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::common::DFSchema;
-use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
-use datafusion::physical_expr::PhysicalExpr;
-use kalamdb_datafusion_sources::exec::{
-    finalize_deferred_batch, DeferredBatchExec, DeferredBatchSource,
+use kalamdb_commons::{
+    datatypes::KalamDataType,
+    schemas::{ColumnDefault, ColumnDefinition, TableDefinition, TableOptions, TableType},
+    NamespaceId, TableName,
 };
-use kalamdb_datafusion_sources::provider::{
-    combined_filter, pushdown_results_for_filters, FilterCapability,
+use kalamdb_datafusion_sources::{
+    exec::{finalize_deferred_batch, DeferredBatchExec, DeferredBatchSource},
+    provider::{combined_filter, pushdown_results_for_filters, FilterCapability},
 };
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::schemas::{
-    ColumnDefault, ColumnDefinition, TableDefinition, TableOptions, TableType,
-};
-use kalamdb_commons::{NamespaceId, TableName};
 use kalamdb_raft::{ClusterInfo, CommandExecutor, RaftExecutor, ServerStateExt};
 use kalamdb_system::SystemTable;
-use std::sync::{Arc, OnceLock};
+
+use crate::{error::RegistryError, view_base::VirtualView};
 
 /// Get the cluster schema (memoized)
 fn cluster_schema() -> SchemaRef {
@@ -611,10 +614,9 @@ impl datafusion::datasource::TableProvider for ClusterTableProvider {
     ) -> datafusion::error::Result<Arc<dyn datafusion::physical_plan::ExecutionPlan>> {
         let base_schema = self.view.schema();
         let output_schema = match projection {
-            Some(indices) => base_schema
-                .project(indices)
-                .map(Arc::new)
-                .map_err(|error| datafusion::error::DataFusionError::ArrowError(Box::new(error), None))?,
+            Some(indices) => base_schema.project(indices).map(Arc::new).map_err(|error| {
+                datafusion::error::DataFusionError::ArrowError(Box::new(error), None)
+            })?,
             None => Arc::clone(&base_schema),
         };
         let physical_filter = if let Some(filter) = combined_filter(filters) {

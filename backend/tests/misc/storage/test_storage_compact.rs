@@ -5,14 +5,18 @@
 //! - STORAGE COMPACT ALL IN <namespace> creates jobs for user/shared tables only
 //! - Unsupported table types return validation errors
 
-use super::test_support::{fixtures, TestServer};
+use std::{
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+    time::{Duration, SystemTime},
+};
+
 use anyhow::Result;
 use kalam_client::models::ResponseStatus;
 use kalamdb_system::Manifest;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, SystemTime};
 use tokio::time::{sleep, Instant};
+
+use super::test_support::{fixtures, TestServer};
 
 fn unique_name(prefix: &str) -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -101,8 +105,8 @@ async fn wait_for_compact_jobs(
     loop {
         let resp = server
             .execute_sql(
-                "SELECT job_id, status, parameters, message FROM system.jobs \
-                 WHERE job_type = 'compact' ORDER BY created_at DESC LIMIT 50",
+                "SELECT job_id, status, parameters, message FROM system.jobs WHERE job_type = \
+                 'compact' ORDER BY created_at DESC LIMIT 50",
             )
             .await;
 
@@ -308,7 +312,8 @@ async fn test_storage_compact_rejects_stream_and_empty_namespace() -> Result<()>
     fixtures::create_namespace(&server, &namespace).await;
 
     let create_stream = format!(
-        "CREATE TABLE {}.{} (id INT PRIMARY KEY, value TEXT) WITH (TYPE = 'STREAM', TTL_SECONDS = 3600)",
+        "CREATE TABLE {}.{} (id INT PRIMARY KEY, value TEXT) WITH (TYPE = 'STREAM', TTL_SECONDS = \
+         3600)",
         namespace, stream_table
     );
     let resp = server.execute_sql(&create_stream).await;
@@ -343,7 +348,8 @@ async fn test_storage_compact_cleans_empty_shared_segments_and_parquet_files() -
     fixtures::create_namespace(&server, &namespace).await;
 
     let create_shared = format!(
-        "CREATE TABLE {}.{} (id INT PRIMARY KEY, value TEXT) WITH (TYPE = 'SHARED', FLUSH_POLICY = 'rows:5')",
+        "CREATE TABLE {}.{} (id INT PRIMARY KEY, value TEXT) WITH (TYPE = 'SHARED', FLUSH_POLICY \
+         = 'rows:5')",
         namespace, table
     );
     let resp = server.execute_sql(&create_shared).await;
@@ -418,7 +424,8 @@ async fn test_storage_compact_cleans_empty_shared_segments_and_parquet_files() -
 
         if Instant::now() >= cleanup_deadline {
             anyhow::bail!(
-                "Expected empty manifest and no parquet files after compaction cleanup for {}.{} (segments={}, files={:?})",
+                "Expected empty manifest and no parquet files after compaction cleanup for {}.{} \
+                 (segments={}, files={:?})",
                 namespace,
                 table,
                 manifest.segments.len(),

@@ -1,7 +1,8 @@
 //! Stream table DML checks over the real HTTP SQL API.
 
-use super::test_support::consolidated_helpers::unique_namespace;
 use kalam_client::models::ResponseStatus;
+
+use super::test_support::consolidated_helpers::unique_namespace;
 
 async fn create_stream_table(
     server: &super::test_support::http_server::HttpTestServer,

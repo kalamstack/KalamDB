@@ -4,10 +4,10 @@
 //! can be queried without schema mismatches or errors.
 //!
 //! Covers:
-//! - Persisted tables: users, namespaces, schemas, storages,
-//!   jobs, job_nodes, audit_log, manifest, topics, topic_offsets
-//! - Virtual views: live, stats, settings, server_logs, cluster,
-//!   cluster_groups, datatypes, tables, columns
+//! - Persisted tables: users, namespaces, schemas, storages, jobs, job_nodes, audit_log, manifest,
+//!   topics, topic_offsets
+//! - Virtual views: live, stats, settings, server_logs, cluster, cluster_groups, datatypes, tables,
+//!   columns
 //!
 //! This test prevents schema definition bugs like the topic_offsets
 //! updated_at column mismatch (BigInt vs Timestamp).
@@ -178,7 +178,8 @@ fn smoke_test_topic_offsets_schema_and_operations() {
     println!("🧪 Testing system.topic_offsets schema and timestamp operations");
 
     // Query topic_offsets (may be empty, but schema should work)
-    let query = "SELECT topic_id, group_id, partition_id, last_acked_offset, updated_at FROM system.topic_offsets LIMIT 5";
+    let query = "SELECT topic_id, group_id, partition_id, last_acked_offset, updated_at FROM \
+                 system.topic_offsets LIMIT 5";
     let output =
         execute_sql_as_root_via_client(query).expect("Failed to query system.topic_offsets");
 
@@ -196,8 +197,8 @@ fn smoke_test_topic_offsets_schema_and_operations() {
     );
 
     // Test timestamp filtering (should not error even if no rows)
-    let filter_query =
-        "SELECT COUNT(*) FROM system.topic_offsets WHERE updated_at > TIMESTAMP '1970-01-01 00:00:00'";
+    let filter_query = "SELECT COUNT(*) FROM system.topic_offsets WHERE updated_at > TIMESTAMP \
+                        '1970-01-01 00:00:00'";
     let filter_output = execute_sql_as_root_via_client(filter_query)
         .expect("Failed to filter topic_offsets by updated_at timestamp");
 

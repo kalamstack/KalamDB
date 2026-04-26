@@ -173,7 +173,9 @@ impl HealthMonitor {
 
         if let (Some(memory_mb), Some(cpu_usage)) = (metrics.memory_mb, metrics.cpu_usage) {
             log::debug!(
-                "Health metrics: Memory: {} MB | CPU: {:.2}% | Open Files: {} | Storage Partitions: {} | Namespaces: {} | Tables: {} | Subscriptions: {} ({} connections, {} ws sessions) | Jobs: {} running, {} queued, {} failed (total: {})",
+                "Health metrics: Memory: {} MB | CPU: {:.2}% | Open Files: {} | Storage \
+                 Partitions: {} | Namespaces: {} | Tables: {} | Subscriptions: {} ({} \
+                 connections, {} ws sessions) | Jobs: {} running, {} queued, {} failed (total: {})",
                 memory_mb,
                 cpu_usage,
                 open_files_text,
@@ -190,7 +192,9 @@ impl HealthMonitor {
             );
         } else {
             log::debug!(
-                "Health metrics: Open Files: {} | Storage Partitions: {} | Namespaces: {} | Tables: {} | Subscriptions: {} ({} connections, {} ws sessions) | Jobs: {} running, {} queued, {} failed (total: {})",
+                "Health metrics: Open Files: {} | Storage Partitions: {} | Namespaces: {} | \
+                 Tables: {} | Subscriptions: {} ({} connections, {} ws sessions) | Jobs: {} \
+                 running, {} queued, {} failed (total: {})",
                 open_files_text,
                 storage_partitions,
                 metrics.namespace_count,

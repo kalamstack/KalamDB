@@ -71,7 +71,8 @@ fn smoke_test_snowflake_id_default() {
     println!("Query output:\n{}", output);
 
     // Parse JSON to extract IDs (simple string parsing for smoke test)
-    // Expected format: {"columns":["id","content"],"rows":[[123,"Message 1"],[124,"Message 2"],...]}
+    // Expected format: {"columns":["id","content"],"rows":[[123,"Message 1"],[124,"Message
+    // 2"],...]}
 
     assert!(output.contains("\"rows\""), "Expected JSON rows in output");
     assert!(
@@ -221,7 +222,8 @@ fn smoke_test_ulid_default() {
     println!("📝 Inserting 3 events without specifying event_id...");
     for i in 1..=3 {
         let insert_sql = format!(
-            "INSERT INTO {} (event_type, user_id, payload) VALUES ('user_action', 'user_{}', '{{\"action\":\"click\"}}')",
+            "INSERT INTO {} (event_type, user_id, payload) VALUES ('user_action', 'user_{}', \
+             '{{\"action\":\"click\"}}')",
             full_table, i
         );
         execute_sql_as_root_via_client(&insert_sql)

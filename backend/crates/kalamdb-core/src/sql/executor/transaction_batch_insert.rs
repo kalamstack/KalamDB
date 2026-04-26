@@ -1,28 +1,35 @@
-use crate::app_context::AppContext;
-use crate::error::KalamDbError;
-use crate::schema_registry::CachedTableData;
-use crate::sql::plan_cache::{
-    FastInsertDefaultEntry, FastInsertDefaultTemplate, FastInsertMetadata, InsertMetadataCacheKey,
-    SqlCacheRegistry,
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, OnceLock},
 };
-use crate::sql::ExecutionContext;
+
 use chrono::Utc;
 use datafusion::scalar::ScalarValue;
-use kalamdb_commons::conversions::arrow_json_conversion::coerce_rows;
-use kalamdb_commons::conversions::json_value_to_scalar;
-use kalamdb_commons::ids::SnowflakeGenerator;
-use kalamdb_commons::models::rows::row::Row;
-use kalamdb_commons::models::{TransactionId, UserId};
-use kalamdb_commons::schemas::{ColumnDefault, TableType};
-use kalamdb_commons::TableId;
+use kalamdb_commons::{
+    conversions::{arrow_json_conversion::coerce_rows, json_value_to_scalar},
+    ids::SnowflakeGenerator,
+    models::{rows::row::Row, TransactionId, UserId},
+    schemas::{ColumnDefault, TableType},
+    TableId,
+};
 use kalamdb_transactions::build_insert_staged_mutations;
 use sqlparser::ast::{Expr, SetExpr, Statement};
-use std::collections::BTreeMap;
-use std::sync::{Arc, OnceLock};
 use ulid::Ulid;
 use uuid::Uuid;
 
 use super::helpers::ast_parsing;
+use crate::{
+    app_context::AppContext,
+    error::KalamDbError,
+    schema_registry::CachedTableData,
+    sql::{
+        plan_cache::{
+            FastInsertDefaultEntry, FastInsertDefaultTemplate, FastInsertMetadata,
+            InsertMetadataCacheKey, SqlCacheRegistry,
+        },
+        ExecutionContext,
+    },
+};
 
 static INSERT_DEFAULT_SNOWFLAKE_GENERATOR: OnceLock<SnowflakeGenerator> = OnceLock::new();
 
@@ -258,7 +265,8 @@ fn prepare_default_template(
         ColumnDefault::FunctionCall { name, args } => {
             if !args.is_empty() {
                 return Err(KalamDbError::InvalidOperation(format!(
-                    "Default function '{}' with arguments is not supported in transaction batch INSERT",
+                    "Default function '{}' with arguments is not supported in transaction batch \
+                     INSERT",
                     name
                 )));
             }

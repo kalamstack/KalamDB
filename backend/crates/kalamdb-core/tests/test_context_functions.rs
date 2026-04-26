@@ -1,11 +1,12 @@
-//! Integration tests for SQL context functions: KDB_CURRENT_USER(), KDB_CURRENT_USER(), KDB_CURRENT_ROLE()
+//! Integration tests for SQL context functions: KDB_CURRENT_USER(), KDB_CURRENT_USER(),
+//! KDB_CURRENT_ROLE()
+
+use std::sync::Arc;
 
 use datafusion::prelude::SessionContext;
 use kalamdb_commons::{Role, UserId};
-use kalamdb_core::sql::context::ExecutionContext;
-use kalamdb_core::sql::datafusion_session::DataFusionSessionFactory;
+use kalamdb_core::sql::{context::ExecutionContext, datafusion_session::DataFusionSessionFactory};
 use kalamdb_session::AuthSession;
-use std::sync::Arc;
 
 fn create_test_session() -> Arc<SessionContext> {
     let factory =
@@ -214,7 +215,10 @@ async fn test_all_three_functions_together() {
     let session = exec_ctx.create_session_with_user();
 
     let result = session
-        .sql("SELECT KDB_CURRENT_USER() AS current_user, KDB_CURRENT_USER() AS user_id, KDB_CURRENT_ROLE() AS role")
+        .sql(
+            "SELECT KDB_CURRENT_USER() AS current_user, KDB_CURRENT_USER() AS user_id, \
+             KDB_CURRENT_ROLE() AS role",
+        )
         .await;
     assert!(result.is_ok(), "Query failed: {:?}", result.err());
 
@@ -267,7 +271,8 @@ async fn test_context_function_execution_uses_rewritten_aliases() {
 
     let result = session
         .sql(
-            "SELECT KDB_CURRENT_USER() AS current_user, KDB_CURRENT_USER() AS user_id, KDB_CURRENT_ROLE() AS role",
+            "SELECT KDB_CURRENT_USER() AS current_user, KDB_CURRENT_USER() AS user_id, \
+             KDB_CURRENT_ROLE() AS role",
         )
         .await;
     assert!(result.is_ok(), "Query failed: {:?}", result.err());

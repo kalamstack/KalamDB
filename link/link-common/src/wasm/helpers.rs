@@ -1,15 +1,15 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{Hash, Hasher},
+};
 
 use serde::Serialize;
-use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsCast;
+use wasm_bindgen::{prelude::*, JsCast};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Headers, MessageEvent, Request, RequestInit, RequestMode, Response};
 
 use super::wasm_debug_log;
-use crate::compression;
-use crate::models::SerializationType;
+use crate::{compression, models::SerializationType};
 
 #[inline]
 pub(crate) fn ws_url_from_http_opts(
@@ -178,7 +178,8 @@ pub(crate) fn decode_ws_message(e: &MessageEvent) -> Option<String> {
     let data = e.data();
     if data.is_instance_of::<web_sys::Blob>() {
         wasm_debug_log!(
-            "KalamClient: Received Blob message - binary mode may be misconfigured. Attempting to read as text.",
+            "KalamClient: Received Blob message - binary mode may be misconfigured. Attempting to \
+             read as text.",
         );
         return data.as_string();
     }

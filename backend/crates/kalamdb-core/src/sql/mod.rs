@@ -36,12 +36,11 @@ pub mod plan_cache;
 pub mod table_functions;
 
 pub use context::{ExecutionContext, ScalarValue};
-pub use datafusion_session::DataFusionSessionFactory; // KalamSessionState removed in v3 refactor
-pub use executor::handlers::ExecutionResult;
-pub use executor::SqlExecutor;
+pub use datafusion_session::DataFusionSessionFactory; /* KalamSessionState removed in v3
+                                                       * refactor */
+pub use executor::{handlers::ExecutionResult, SqlExecutor};
 pub use functions::{CosineDistanceFunction, CurrentRoleFunction, CurrentUserFunction};
 pub use impersonation::SqlImpersonationService;
-pub use table_functions::VectorSearchTableFunction;
-
 pub use kalamdb_session::SessionError as TableAccessError;
 pub use kalamdb_session_datafusion::PermissionChecker;
+pub use table_functions::VectorSearchTableFunction;

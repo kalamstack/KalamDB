@@ -1,5 +1,4 @@
-use kalamdb_commons::ids::StreamTableRowId;
-use kalamdb_commons::models::StreamTableRow;
+use kalamdb_commons::{ids::StreamTableRowId, models::StreamTableRow};
 use serde::{Deserialize, Serialize};
 
 /// Log record stored in the commit log.

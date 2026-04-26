@@ -1,13 +1,18 @@
 // Topic throughput benchmark smoke test
 // Measures messages per second under various publisher/consumer configurations
 
+use std::{
+    collections::HashSet,
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
+
+use kalam_client::{consumer::AutoOffsetReset, KalamLinkTimeouts};
+
 use crate::common;
-use kalam_client::consumer::AutoOffsetReset;
-use kalam_client::KalamLinkTimeouts;
-use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 // Baseline thresholds (90% of current measured performance)
 // Single-publisher is bottlenecked by sequential HTTP round-trips (~385 inserts/s),
@@ -506,7 +511,8 @@ async fn smoke_test_topic_throughput_benchmark() {
 
     if !(pass1 && pass2 && pass3) {
         println!(
-            "⚠️ Throughput below advisory baseline under current load (1P→1C: {:.1}/{:.1}, 24P→1C: {:.1}/{:.1}, 40P→4C: {:.1}/{:.1})",
+            "⚠️ Throughput below advisory baseline under current load (1P→1C: {:.1}/{:.1}, \
+             24P→1C: {:.1}/{:.1}, 40P→4C: {:.1}/{:.1})",
             rate1, threshold1, rate2, threshold2, rate3, threshold3
         );
     }

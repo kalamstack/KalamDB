@@ -5,12 +5,12 @@
 //! - ID generation functions: SNOWFLAKE_ID(), UUID_V7(), ULID()
 //! - Function usage in SELECT, WHERE, INSERT, UPDATE, DELETE statements
 
+use std::sync::Arc;
+
 use datafusion::prelude::SessionContext;
 use kalamdb_commons::{Role, UserId};
-use kalamdb_core::sql::context::ExecutionContext;
-use kalamdb_core::sql::datafusion_session::DataFusionSessionFactory;
+use kalamdb_core::sql::{context::ExecutionContext, datafusion_session::DataFusionSessionFactory};
 use kalamdb_session::AuthSession;
-use std::sync::Arc;
 
 fn create_test_session() -> Arc<SessionContext> {
     let factory =
@@ -131,7 +131,10 @@ async fn test_all_context_functions_together() {
     let session = exec_ctx.create_session_with_user();
 
     let result = session
-        .sql("SELECT KDB_CURRENT_USER() AS current_user, KDB_CURRENT_USER() AS user_id, KDB_CURRENT_ROLE() AS role")
+        .sql(
+            "SELECT KDB_CURRENT_USER() AS current_user, KDB_CURRENT_USER() AS user_id, \
+             KDB_CURRENT_ROLE() AS role",
+        )
         .await
         .unwrap();
     let batches = result.collect().await.unwrap();
@@ -308,11 +311,8 @@ async fn test_context_and_id_functions_together() {
 
     let result = session
         .sql(
-            "SELECT KDB_CURRENT_USER() AS username, \
-                   KDB_CURRENT_ROLE() AS role, \
-                   SNOWFLAKE_ID() AS snowflake_id, \
-                   UUID_V7() AS uuid_v7, \
-                   ULID() AS ulid",
+            "SELECT KDB_CURRENT_USER() AS username, KDB_CURRENT_ROLE() AS role, SNOWFLAKE_ID() AS \
+             snowflake_id, UUID_V7() AS uuid_v7, ULID() AS ulid",
         )
         .await
         .unwrap();
@@ -370,9 +370,8 @@ async fn test_snowflake_id_generates_multiple_unique_ids() {
     // Query that generates multiple IDs
     let result = session
         .sql(
-            "SELECT SNOWFLAKE_ID() AS id1 UNION ALL \
-                   SELECT SNOWFLAKE_ID() UNION ALL \
-                   SELECT SNOWFLAKE_ID()",
+            "SELECT SNOWFLAKE_ID() AS id1 UNION ALL SELECT SNOWFLAKE_ID() UNION ALL SELECT \
+             SNOWFLAKE_ID()",
         )
         .await
         .unwrap();
@@ -394,11 +393,9 @@ async fn test_context_function_in_case_statement() {
 
     let result = session
         .sql(
-            "SELECT CASE \
-                   WHEN KDB_CURRENT_ROLE() = 'dba' THEN 'Administrator' \
-                   WHEN KDB_CURRENT_ROLE() = 'user' THEN 'Regular User' \
-                   ELSE 'Unknown' \
-                   END AS role_description",
+            "SELECT CASE WHEN KDB_CURRENT_ROLE() = 'dba' THEN 'Administrator' WHEN \
+             KDB_CURRENT_ROLE() = 'user' THEN 'Regular User' ELSE 'Unknown' END AS \
+             role_description",
         )
         .await
         .unwrap();
@@ -416,10 +413,7 @@ async fn test_id_function_in_case_statement() {
 
     let result = session
         .sql(
-            "SELECT CASE \
-                   WHEN SNOWFLAKE_ID() > 0 THEN 'Valid ID' \
-                   ELSE 'Invalid ID' \
-                   END AS id_check",
+            "SELECT CASE WHEN SNOWFLAKE_ID() > 0 THEN 'Valid ID' ELSE 'Invalid ID' END AS id_check",
         )
         .await
         .unwrap();
@@ -528,10 +522,8 @@ async fn test_example_all_context_functions() {
     // This example demonstrates all three context functions working together
     let result = session
         .sql(
-            "SELECT \
-                   KDB_CURRENT_USER() AS username, \
-                   KDB_CURRENT_USER() AS user_id, \
-                   KDB_CURRENT_ROLE() AS role",
+            "SELECT KDB_CURRENT_USER() AS username, KDB_CURRENT_USER() AS user_id, \
+             KDB_CURRENT_ROLE() AS role",
         )
         .await
         .unwrap();
@@ -548,12 +540,7 @@ async fn test_example_all_id_functions() {
 
     // This example demonstrates all three ID generation functions
     let result = session
-        .sql(
-            "SELECT \
-                   SNOWFLAKE_ID() AS snowflake_id, \
-                   UUID_V7() AS uuid_v7, \
-                   ULID() AS ulid",
-        )
+        .sql("SELECT SNOWFLAKE_ID() AS snowflake_id, UUID_V7() AS uuid_v7, ULID() AS ulid")
         .await
         .unwrap();
     let batches = result.collect().await.unwrap();
@@ -570,10 +557,8 @@ async fn test_example_mixed_functions() {
     // Mix context and ID functions
     let result = session
         .sql(
-            "SELECT \
-                   KDB_CURRENT_USER() AS current_user, \
-                   SNOWFLAKE_ID() AS new_record_id, \
-                   KDB_CURRENT_ROLE() AS admin_role",
+            "SELECT KDB_CURRENT_USER() AS current_user, SNOWFLAKE_ID() AS new_record_id, \
+             KDB_CURRENT_ROLE() AS admin_role",
         )
         .await
         .unwrap();

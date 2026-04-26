@@ -2,10 +2,11 @@
 //!
 //! Tests Raft snapshot creation and installation in cluster mode.
 
-use crate::cluster_common::*;
-use crate::common::*;
-use kalam_client::QueryResponse;
 use std::time::Duration;
+
+use kalam_client::QueryResponse;
+
+use crate::{cluster_common::*, common::*};
 
 async fn execute_query_with_retry(
     client: &kalam_client::KalamLinkClient,
@@ -148,16 +149,13 @@ fn test_snapshot_with_high_write_load() {
             .expect("create namespace");
         execute_query_with_retry(
             &client,
-            &format!(
-                "CREATE TABLE {}.{} (id INT, data TEXT, PRIMARY KEY (id))",
-                namespace, table
-            ),
+            &format!("CREATE TABLE {}.{} (id INT, data TEXT, PRIMARY KEY (id))", namespace, table),
         )
         .await
         .expect("create table");
-        
+
         println!("📝 High-load write test (1500 inserts)...");
-        
+
         // Insert 1500 rows with larger data
         for i in 0..1500 {
             let large_value = format!("data_{}_", i).repeat(10); // ~70 bytes per row
@@ -170,28 +168,29 @@ fn test_snapshot_with_high_write_load() {
             )
             .await
             .expect("insert row");
-            
+
             if i % 100 == 0 {
                 println!("  Inserted {} rows", i);
             }
         }
-        
+
         println!("✅ Inserted 1500 rows");
-        
+
         // Wait for snapshot
         tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-        
+
         // Check all nodes for snapshot status
         let result = execute_query_with_retry(
             &client,
-            "SELECT node_id, role, snapshot_index, last_applied_log FROM system.cluster ORDER BY node_id",
+            "SELECT node_id, role, snapshot_index, last_applied_log FROM system.cluster ORDER BY \
+             node_id",
         )
         .await
         .expect("query cluster");
-        
+
         println!("📊 Cluster snapshot status:");
         println!("{:?}", result);
-        
+
         // Verify data integrity after potential snapshot
         let count_result = execute_query_with_retry(
             &client,
@@ -199,14 +198,13 @@ fn test_snapshot_with_high_write_load() {
         )
         .await
         .expect("count rows");
-        
+
         println!("Count result: {:?}", count_result);
         println!("✅ Data integrity verified after snapshot");
-        
+
         // Cleanup
-        let _ =
-            execute_query_with_retry(&client, &format!("DROP NAMESPACE {} CASCADE", namespace))
-                .await;
+        let _ = execute_query_with_retry(&client, &format!("DROP NAMESPACE {} CASCADE", namespace))
+            .await;
     });
 }
 

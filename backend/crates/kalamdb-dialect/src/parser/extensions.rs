@@ -12,6 +12,16 @@
 //! These parsers complement the standard SQL parser and are invoked
 //! when the standard parser doesn't recognize the syntax.
 
+// Re-export SubscriptionOptions from kalamdb_commons
+pub use kalamdb_commons::websocket::SubscriptionOptions;
+
+// Re-export flush/compact commands
+pub use crate::ddl::compact_commands::{CompactAllTablesStatement, CompactTableStatement};
+pub use crate::ddl::flush_commands::{FlushAllTablesStatement, FlushTableStatement};
+// Job commands (KILL JOB)
+pub use crate::ddl::job_commands::{parse_job_command, JobCommand};
+// Manifest cache commands (SHOW MANIFEST CACHE)
+pub use crate::ddl::manifest_commands::ShowManifestStatement;
 /// Re-export existing KalamDB-specific parsers for convenience.
 ///
 /// These parsers handle commands that are unique to KalamDB and not part
@@ -21,32 +31,17 @@
 pub use crate::ddl::storage_commands::{
     AlterStorageStatement, CreateStorageStatement, DropStorageStatement, ShowStoragesStatement,
 };
-
-// Re-export flush/compact commands
-pub use crate::ddl::compact_commands::{CompactAllTablesStatement, CompactTableStatement};
-pub use crate::ddl::flush_commands::{FlushAllTablesStatement, FlushTableStatement};
-
-// Job commands (KILL JOB)
-pub use crate::ddl::job_commands::{parse_job_command, JobCommand};
-
 // Subscribe commands (SUBSCRIBE TO)
 pub use crate::ddl::subscribe_commands::SubscribeStatement;
-// Re-export SubscriptionOptions from kalamdb_commons
-pub use kalamdb_commons::websocket::SubscriptionOptions;
-
 // Topic pub/sub commands
 pub use crate::ddl::topic_commands::{
     AddTopicSourceStatement, ClearTopicStatement, ConsumePosition, ConsumeStatement,
     CreateTopicStatement, DropTopicStatement,
 };
-
 // User commands (CREATE USER, ALTER USER, DROP USER)
 pub use crate::ddl::user_commands::{
     AlterUserStatement, CreateUserStatement, DropUserStatement, UserModification,
 };
-
-// Manifest cache commands (SHOW MANIFEST CACHE)
-pub use crate::ddl::manifest_commands::ShowManifestStatement;
 
 /// Extension statement types that don't fit into standard SQL.
 ///
@@ -100,6 +95,14 @@ pub enum ExtensionStatement {
     ClusterTriggerElection,
     /// CLUSTER TRANSFER-LEADER command
     ClusterTransferLeader { node_id: u64 },
+    /// CLUSTER JOIN command
+    ClusterJoin {
+        node_id: u64,
+        rpc_addr: String,
+        api_addr: String,
+    },
+    /// CLUSTER REBALANCE command
+    ClusterRebalance,
     /// CLUSTER STEPDOWN command
     ClusterStepdown,
     /// CLUSTER CLEAR command
@@ -353,22 +356,20 @@ impl ExtensionStatement {
                                     .find(|p| p.parse::<u64>().is_ok())
                                     .and_then(|p| p.parse::<u64>().ok())
                             })
-                            .or_else(|| {
-                                original_parts
-                                    .get(2)
-                                    .and_then(|p| p.parse::<u64>().ok())
-                            });
+                            .or_else(|| original_parts.get(2).and_then(|p| p.parse::<u64>().ok()));
 
                         if let Some(upto) = upto {
                             return Ok(ExtensionStatement::ClusterPurge { upto });
                         }
-                        return Err("CLUSTER PURGE requires --upto <index> or a numeric index".to_string());
-                    }
+                        return Err(
+                            "CLUSTER PURGE requires --upto <index> or a numeric index".to_string()
+                        );
+                    },
                     "TRIGGER" => {
                         if parts.get(2) == Some(&"ELECTION") {
                             return Ok(ExtensionStatement::ClusterTriggerElection);
                         }
-                    }
+                    },
                     "TRIGGER-ELECTION" => return Ok(ExtensionStatement::ClusterTriggerElection),
                     "TRANSFER" => {
                         if parts.get(2) == Some(&"LEADER") {
@@ -378,26 +379,73 @@ impl ExtensionStatement {
                             }
                             return Err("CLUSTER TRANSFER LEADER requires a node id".to_string());
                         }
-                    }
+                    },
                     "TRANSFER-LEADER" => {
                         let node_id = parts.get(2).and_then(|id| id.parse::<u64>().ok());
                         if let Some(node_id) = node_id {
                             return Ok(ExtensionStatement::ClusterTransferLeader { node_id });
                         }
                         return Err("CLUSTER TRANSFER-LEADER requires a node id".to_string());
-                    }
+                    },
+                    "JOIN" => {
+                        let original_parts: Vec<&str> = sql.split_whitespace().collect();
+                        let node_id = original_parts
+                            .get(2)
+                            .and_then(|id| id.parse::<u64>().ok())
+                            .ok_or_else(|| {
+                            "CLUSTER JOIN requires a numeric node id".to_string()
+                        })?;
+                        let upper_parts: Vec<String> =
+                            original_parts.iter().map(|part| part.to_ascii_uppercase()).collect();
+                        let (rpc_addr, api_addr) =
+                            if upper_parts.get(3).map(String::as_str) == Some("RPC") {
+                                let rpc_addr = original_parts.get(4).ok_or_else(|| {
+                                    "CLUSTER JOIN requires RPC address".to_string()
+                                })?;
+                                if upper_parts.get(5).map(String::as_str) != Some("API") {
+                                    return Err("CLUSTER JOIN requires API address".to_string());
+                                }
+                                let api_addr = original_parts.get(6).ok_or_else(|| {
+                                    "CLUSTER JOIN requires API address".to_string()
+                                })?;
+                                ((*rpc_addr).to_string(), (*api_addr).to_string())
+                            } else {
+                                let rpc_addr = original_parts.get(3).ok_or_else(|| {
+                                    "CLUSTER JOIN requires RPC address".to_string()
+                                })?;
+                                let api_addr = original_parts.get(4).ok_or_else(|| {
+                                    "CLUSTER JOIN requires API address".to_string()
+                                })?;
+                                ((*rpc_addr).to_string(), (*api_addr).to_string())
+                            };
+
+                        return Ok(ExtensionStatement::ClusterJoin {
+                            node_id,
+                            rpc_addr,
+                            api_addr,
+                        });
+                    },
+                    "REBALANCE" => return Ok(ExtensionStatement::ClusterRebalance),
                     "STEPDOWN" | "STEP-DOWN" => return Ok(ExtensionStatement::ClusterStepdown),
                     "CLEAR" => return Ok(ExtensionStatement::ClusterClear),
                     "LIST" | "LS" | "STATUS" => return Ok(ExtensionStatement::ClusterList),
-                    "JOIN" | "LEAVE" => {
-                        return Err("CLUSTER JOIN/LEAVE commands were removed".to_string());
+                    "LEAVE" => {
+                        return Err("CLUSTER LEAVE is not supported yet".to_string());
                     },
-                    _ => return Err("Unknown CLUSTER subcommand. Supported: SNAPSHOT, PURGE, TRIGGER ELECTION, TRANSFER-LEADER, STEPDOWN, CLEAR, LIST".to_string()),
+                    _ => {
+                        return Err("Unknown CLUSTER subcommand. Supported: SNAPSHOT, PURGE, \
+                                    TRIGGER ELECTION, TRANSFER-LEADER, JOIN, REBALANCE, STEPDOWN, \
+                                    CLEAR, LIST"
+                            .to_string())
+                    },
                 }
             }
         }
 
-        Err("Unknown KalamDB extension command. Supported commands: CREATE/ALTER/DROP/SHOW STORAGE, STORAGE FLUSH, STORAGE COMPACT, KILL JOB, SUBSCRIBE TO, CREATE/ALTER/DROP USER, SHOW MANIFEST".to_string())
+        Err("Unknown KalamDB extension command. Supported commands: CREATE/ALTER/DROP/SHOW \
+             STORAGE, STORAGE FLUSH, STORAGE COMPACT, KILL JOB, SUBSCRIBE TO, CREATE/ALTER/DROP \
+             USER, SHOW MANIFEST"
+            .to_string())
     }
 }
 
@@ -407,12 +455,9 @@ mod tests {
 
     #[test]
     fn test_parse_create_storage() {
-        let sql = "CREATE STORAGE my_storage \
-                   TYPE filesystem \
-                   NAME 'My Storage' \
-                   BASE_DIRECTORY '/data' \
-                   SHARED_TABLES_TEMPLATE '{namespace}/{table}/' \
-                   USER_TABLES_TEMPLATE '{namespace}/{table}/{userId}/'";
+        let sql = "CREATE STORAGE my_storage TYPE filesystem NAME 'My Storage' BASE_DIRECTORY \
+                   '/data' SHARED_TABLES_TEMPLATE '{namespace}/{table}/' USER_TABLES_TEMPLATE \
+                   '{namespace}/{table}/{userId}/'";
         let result = ExtensionStatement::parse(sql);
         if let Err(ref e) = result {
             eprintln!("Parse error: {}", e);
@@ -471,11 +516,30 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_cluster_join_removed() {
-        let sql = "CLUSTER JOIN 10.0.0.2:9188";
+    fn test_parse_cluster_join() {
+        let sql = "CLUSTER JOIN 2 10.0.0.2:9188 http://10.0.0.2:8080";
         let result = ExtensionStatement::parse(sql);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("CLUSTER JOIN/LEAVE commands were removed"));
+
+        match result.unwrap() {
+            ExtensionStatement::ClusterJoin {
+                node_id,
+                rpc_addr,
+                api_addr,
+            } => {
+                assert_eq!(node_id, 2);
+                assert_eq!(rpc_addr, "10.0.0.2:9188");
+                assert_eq!(api_addr, "http://10.0.0.2:8080");
+            },
+            other => panic!("unexpected statement: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_cluster_rebalance() {
+        let sql = "CLUSTER REBALANCE";
+        let result = ExtensionStatement::parse(sql);
+
+        assert!(matches!(result.unwrap(), ExtensionStatement::ClusterRebalance));
     }
 
     #[test]
@@ -483,6 +547,6 @@ mod tests {
         let sql = "CLUSTER LEAVE";
         let result = ExtensionStatement::parse(sql);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("CLUSTER JOIN/LEAVE commands were removed"));
+        assert!(result.unwrap_err().contains("CLUSTER LEAVE is not supported yet"));
     }
 }

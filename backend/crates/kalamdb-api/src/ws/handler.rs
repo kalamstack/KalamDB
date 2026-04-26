@@ -11,16 +11,19 @@
 //! - Subscriptions stored in ConnectionState.subscriptions
 //! - No local tracking needed - everything is in ConnectionState
 
+use std::sync::Arc;
+
 use actix_web::{get, web, Error, HttpRequest, HttpResponse};
 use kalamdb_auth::UserRepository;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_live::{ConnectionId, ConnectionsManager, LiveQueryManager};
 use log::{debug, warn};
-use std::sync::Arc;
 
-use super::context::WsHandlerContext;
-use super::protocol::{compression_enabled_from_query, parse_upgrade_auth, validate_origin};
-use super::runtime::run_websocket;
+use super::{
+    context::WsHandlerContext,
+    protocol::{compression_enabled_from_query, parse_upgrade_auth, validate_origin},
+    runtime::run_websocket,
+};
 use crate::limiter::RateLimiter;
 
 /// GET /v1/ws - Establish WebSocket connection

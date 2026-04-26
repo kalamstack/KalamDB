@@ -7,8 +7,10 @@
 //! - Track consumer group offsets
 //! - Provide fast TableId → Topics lookup
 
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::{
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 use dashmap::DashMap;
 use kalamdb_commons::{
@@ -23,10 +25,7 @@ use kalamdb_system::providers::{
 };
 use kalamdb_tables::{TopicMessage, TopicMessageStore};
 
-use crate::models::TopicCacheStats;
-use crate::offset::OffsetAllocator;
-use crate::payload;
-use crate::routing::RouteCache;
+use crate::{models::TopicCacheStats, offset::OffsetAllocator, payload, routing::RouteCache};
 
 /// Lookup primary-key columns for a table so topic keys can be derived from
 /// stable row identity instead of the full row payload.
@@ -518,7 +517,11 @@ impl TopicPublisherService {
                     );
                     let msg_id = message.id();
 
-                    //TODO: Use the store to serialize the message directly to avoid redundant serialization in TopicMessage::new and TopicMessageStore::put. This would require refactoring TopicMessage to separate the in-memory model from the serialized form, or adding a method to get the pre-encoded bytes without going through the full struct construction.
+                    // TODO: Use the store to serialize the message directly to avoid redundant
+                    // serialization in TopicMessage::new and TopicMessageStore::put. This would
+                    // require refactoring TopicMessage to separate the in-memory model from the
+                    // serialized form, or adding a method to get the pre-encoded bytes without
+                    // going through the full struct construction.
                     let key_encoded = kalamdb_commons::StorageKey::storage_key(&msg_id);
                     let value_encoded =
                         kalamdb_commons::KSerializable::encode(&message).map_err(|e| {
@@ -560,10 +563,10 @@ impl TopicPublisherService {
     /// Fetch messages for a consumer group while claiming offsets in-memory.
     ///
     /// Guarantees:
-    /// - Concurrent consumers in the same group and partition never receive
-    ///   overlapping offset ranges (serialized via DashMap entry lock).
-    /// - If a consumer does not ack within [`VISIBILITY_TIMEOUT`], the
-    ///   claimed range expires and is re-delivered to the next consumer.
+    /// - Concurrent consumers in the same group and partition never receive overlapping offset
+    ///   ranges (serialized via DashMap entry lock).
+    /// - If a consumer does not ack within [`VISIBILITY_TIMEOUT`], the claimed range expires and is
+    ///   re-delivered to the next consumer.
     pub fn fetch_messages_for_group(
         &self,
         topic_id: &TopicId,
@@ -749,13 +752,14 @@ impl kalamdb_system::TopicPublisher for TopicPublisherService {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::HashSet;
 
     use datafusion::scalar::ScalarValue;
     use kalamdb_commons::models::{NamespaceId, PayloadMode, TableName};
     use kalamdb_store::test_utils::InMemoryBackend;
     use kalamdb_system::providers::topics::TopicRoute;
+
+    use super::*;
 
     struct FixedPrimaryKeyLookup {
         columns: Vec<String>,
@@ -931,8 +935,12 @@ mod tests {
         let topic_id = TopicId::new("pk_batch_topic");
         let partitions = 32;
 
-        let topic =
-            create_test_topic_with_partitions(topic_id.clone(), table_id.clone(), TopicOp::Insert, partitions);
+        let topic = create_test_topic_with_partitions(
+            topic_id.clone(),
+            table_id.clone(),
+            TopicOp::Insert,
+            partitions,
+        );
         service.add_topic(topic);
 
         let first = create_test_row(7, "alpha");

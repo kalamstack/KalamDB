@@ -11,16 +11,16 @@
 //! This allows storing executors with different parameter types in a single collection
 //! while preserving type safety at execution time through runtime deserialization.
 
-use super::executor_trait::{JobContext, JobDecision, JobExecutor, JobParams};
+use std::{collections::HashMap, sync::Arc};
+
 use async_trait::async_trait;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::error_extensions::SerdeJsonResultExt;
-use kalamdb_system::Job;
-use kalamdb_system::JobType;
+use kalamdb_core::{
+    app_context::AppContext, error::KalamDbError, error_extensions::SerdeJsonResultExt,
+};
+use kalamdb_system::{Job, JobType};
 use parking_lot::RwLock;
-use std::collections::HashMap;
-use std::sync::Arc;
+
+use super::executor_trait::{JobContext, JobDecision, JobExecutor, JobParams};
 
 /// Type-erased job executor trait for heterogeneous storage
 ///
@@ -205,8 +205,9 @@ where
 /// # Example
 ///
 /// ```no_run
-/// use kalamdb_core::jobs::executors::{JobRegistry, flush::FlushExecutor};
 /// use std::sync::Arc;
+///
+/// use kalamdb_core::jobs::executors::{flush::FlushExecutor, JobRegistry};
 ///
 /// let registry = JobRegistry::new();
 ///
@@ -466,12 +467,13 @@ impl Default for JobRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::executors::JobParams;
     use kalamdb_commons::models::{JobId, NodeId};
     use kalamdb_core::test_helpers::test_app_context_simple;
     use kalamdb_system::JobStatus;
     use serde::{Deserialize, Serialize};
+
+    use super::*;
+    use crate::executors::JobParams;
 
     #[derive(Clone, Serialize, Deserialize)]
     struct MockParams {

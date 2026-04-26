@@ -3,9 +3,10 @@
 //! Tests error message clarity, validation logic, and graceful failure modes.
 //! These tests ensure users get helpful feedback when things go wrong.
 
-use super::test_support::{consolidated_helpers, TestServer};
 use kalam_client::models::ResponseStatus;
 use kalamdb_commons::Role;
+
+use super::test_support::{consolidated_helpers, TestServer};
 
 /// Verify syntax errors return clear, helpful messages
 #[tokio::test]

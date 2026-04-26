@@ -7,10 +7,9 @@
 //! 3. Updates and deletes are properly propagated
 //! 4. Complex data types maintain fidelity across replication
 
-use crate::cluster_common::*;
-use crate::common::*;
-use std::collections::HashSet;
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
+
+use crate::{cluster_common::*, common::*};
 
 fn query_with_verification_limit(sql: &str, expected_rows: usize) -> String {
     let trimmed = sql.trim().trim_end_matches(';');
@@ -170,7 +169,8 @@ fn cluster_test_table_identity_updates() {
     execute_on_node(
         &urls[0],
         &format!(
-            "CREATE SHARED TABLE {}.update_test (id BIGINT PRIMARY KEY, value STRING, counter BIGINT)",
+            "CREATE SHARED TABLE {}.update_test (id BIGINT PRIMARY KEY, value STRING, counter \
+             BIGINT)",
             namespace
         ),
     )
@@ -193,7 +193,8 @@ fn cluster_test_table_identity_updates() {
         .expect("Failed to insert");
     }
 
-    // Update first 5 rows using individual PK-based updates (KalamDB doesn't support predicate-based updates on SHARED tables)
+    // Update first 5 rows using individual PK-based updates (KalamDB doesn't support
+    // predicate-based updates on SHARED tables)
     for i in 0..5 {
         execute_on_node(
             &urls[0],
@@ -336,7 +337,8 @@ fn cluster_test_table_identity_mixed_operations() {
     execute_on_node(
         &urls[0],
         &format!(
-            "CREATE SHARED TABLE {}.mixed_test (id BIGINT PRIMARY KEY, status STRING, version BIGINT)",
+            "CREATE SHARED TABLE {}.mixed_test (id BIGINT PRIMARY KEY, status STRING, version \
+             BIGINT)",
             namespace
         ),
     )
@@ -360,7 +362,8 @@ fn cluster_test_table_identity_mixed_operations() {
         .expect("Failed to insert");
     }
 
-    // Phase 2: Update first 25 rows using individual PK-based updates (KalamDB doesn't support predicate-based updates on SHARED tables)
+    // Phase 2: Update first 25 rows using individual PK-based updates (KalamDB doesn't support
+    // predicate-based updates on SHARED tables)
     println!("  Phase 2: Updating rows with id 0-24...");
     for i in 0..25 {
         execute_on_node(

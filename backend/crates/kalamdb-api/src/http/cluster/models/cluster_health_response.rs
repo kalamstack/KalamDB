@@ -1,7 +1,8 @@
 //! Cluster health response model
 
-use super::NodeHealth;
 use serde::Serialize;
+
+use super::NodeHealth;
 
 /// Response for cluster health endpoint
 #[derive(Serialize)]

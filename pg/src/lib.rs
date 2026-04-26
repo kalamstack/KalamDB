@@ -3,16 +3,19 @@
 #[cfg(any(not(test), feature = "pg_test"))]
 mod remote_executor;
 #[cfg(any(not(test), feature = "pg_test"))]
-mod remote_state;
-#[cfg(any(not(test), feature = "pg_test"))]
 mod remote_server;
+#[cfg(any(not(test), feature = "pg_test"))]
+mod remote_state;
 mod session_settings;
 
 #[cfg(any(feature = "pg_test", feature = "e2e"))]
 pub(crate) mod test_alloc {
+    use std::{
+        alloc::{GlobalAlloc, Layout, System},
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
     use serde::Serialize;
-    use std::alloc::{GlobalAlloc, Layout, System};
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     pub struct TrackingAllocator;
 
@@ -115,8 +118,9 @@ pub(crate) mod test_alloc {
 
 #[cfg(feature = "e2e")]
 pub(crate) mod conversion_test_stats {
-    use serde::Serialize;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use serde::Serialize;
 
     #[derive(Clone, Copy, Debug, Default, Serialize)]
     pub struct ConversionTestStats {

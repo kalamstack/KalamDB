@@ -8,19 +8,21 @@
 //! - StreamTableRow: Minimal structure with user_id, _seq, fields (JSON)
 //! - Ordering: (user_id, _seq) for deterministic scans
 
-use crate::common::partition_name;
-use kalamdb_commons::ids::{SeqId, StreamTableRowId};
-use kalamdb_commons::models::{StreamTableRow, UserId};
-use kalamdb_commons::storage::Partition;
-use kalamdb_commons::TableId;
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
+
+use kalamdb_commons::{
+    ids::{SeqId, StreamTableRowId},
+    models::{StreamTableRow, UserId},
+    storage::Partition,
+    TableId,
+};
 use kalamdb_sharding::ShardRouter;
 use kalamdb_store::storage_trait::{Result, StorageError};
 use kalamdb_streams::{
     bucket_for_ttl, FileStreamLogStore, MemoryStreamLogStore, StreamLogConfig, StreamLogStore,
 };
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
+
+use crate::common::partition_name;
 
 const MAX_SCAN_LIMIT: usize = 100000;
 
@@ -399,7 +401,6 @@ impl StreamTableStore {
         .await
         .map_err(|e| StorageError::Other(format!("spawn_blocking join error: {}", e)))?
     }
-
 }
 
 /// Helper function to create a new stream table store (in-memory backed).
@@ -423,11 +424,13 @@ pub fn new_stream_table_store(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::collections::BTreeMap;
+
     use datafusion::scalar::ScalarValue;
     use kalamdb_commons::models::{rows::Row, NamespaceId, TableName};
     use kalamdb_sharding::ShardRouter;
-    use std::collections::BTreeMap;
+
+    use super::*;
 
     fn create_test_store(_base_dir: &std::path::Path) -> StreamTableStore {
         let table_id = TableId::new(NamespaceId::new("test_ns"), TableName::new("test_stream"));

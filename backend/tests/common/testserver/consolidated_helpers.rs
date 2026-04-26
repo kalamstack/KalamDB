@@ -13,13 +13,18 @@
 //! - **Subscription Helpers**: WebSocket subscription utilities
 //! - **Parallel Testing**: Multi-user and concurrency helpers
 
+use std::{
+    collections::{HashMap, HashSet},
+    path::{Path, PathBuf},
+    time::Duration,
+};
+
 use anyhow::Result;
-use kalam_client::models::{ChangeEvent, QueryResponse, ResponseStatus};
-use kalam_client::{KalamCellValue, SubscriptionManager};
+use kalam_client::{
+    models::{ChangeEvent, QueryResponse, ResponseStatus},
+    KalamCellValue, SubscriptionManager,
+};
 use kalamdb_commons::Role;
-use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
-use std::time::Duration;
 use tokio::time::{timeout, Instant};
 
 use super::http_server::HttpTestServer;

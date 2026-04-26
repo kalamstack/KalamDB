@@ -1,7 +1,6 @@
 //! User info model
 
-use kalamdb_commons::models::UserId;
-use kalamdb_commons::Role;
+use kalamdb_commons::{models::UserId, Role};
 use serde::Serialize;
 
 /// User info returned in authentication responses

@@ -1,16 +1,20 @@
 //! SQL forwarding to leader node in cluster mode.
 
-use actix_web::{HttpRequest, HttpResponse};
-use kalamdb_commons::models::{NamespaceId, NodeId};
-use kalamdb_commons::Role;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_raft::{ClusterClient, ForwardSqlRequest, GroupId, RaftExecutor};
-use std::sync::Arc;
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 
-use super::helpers::parse_forward_params;
-use super::models::{ErrorCode, QueryRequest, SqlResponse};
+use actix_web::{HttpRequest, HttpResponse};
+use kalamdb_commons::{
+    models::{NamespaceId, NodeId, UserId},
+    schemas::TableType,
+    Role,
+};
+use kalamdb_core::{app_context::AppContext, error::KalamDbError};
+use kalamdb_raft::{ClusterClient, ForwardSqlRequest, GroupId, RaftExecutor, ShardRouter};
+
+use super::{
+    helpers::parse_forward_params,
+    models::{ErrorCode, QueryRequest, SqlResponse},
+};
 
 fn header_to_string(req: &HttpRequest, name: &str) -> Option<String> {
     req.headers().get(name).and_then(|v| v.to_str().ok()).map(|v| v.to_string())
@@ -49,7 +53,73 @@ fn cluster_client_for(app_context: &AppContext) -> Result<ClusterClient, HttpRes
 /// Forward target: either the Meta leader or a specific node.
 enum ForwardTarget {
     Leader,
+    GroupLeader(GroupId),
     Node(NodeId),
+}
+
+fn data_group_for_table(
+    app_context: &AppContext,
+    table_id: &kalamdb_commons::TableId,
+    user_id: &UserId,
+) -> Option<GroupId> {
+    let cached_table = app_context.schema_registry().get(table_id)?;
+    let table_type: TableType = cached_table.table.table_type.into();
+
+    let executor = app_context.executor();
+    let raft_executor = executor.as_any().downcast_ref::<RaftExecutor>()?;
+    let config = raft_executor.manager().config();
+    let router = ShardRouter::new(config.user_shards, config.shared_shards);
+
+    match table_type {
+        TableType::User | TableType::Stream => {
+            Some(GroupId::DataUserShard(router.user_shard_id(user_id)))
+        },
+        TableType::Shared => Some(GroupId::DataSharedShard(router.shared_shard_id())),
+        TableType::System => Some(GroupId::Meta),
+    }
+}
+
+fn write_statement_target_group(
+    sql: &str,
+    app_context: &AppContext,
+    default_namespace: &NamespaceId,
+    user_id: &UserId,
+) -> Option<GroupId> {
+    let classify_sql =
+        kalamdb_sql::execute_as::extract_inner_sql(sql).unwrap_or_else(|| sql.to_string());
+    let stmt = match kalamdb_sql::classifier::SqlStatement::classify_and_parse(
+        &classify_sql,
+        default_namespace,
+        Role::System,
+    ) {
+        Ok(stmt) => stmt,
+        Err(_) => return Some(GroupId::Meta),
+    };
+
+    if !stmt.is_write_operation() {
+        return None;
+    }
+
+    match stmt.kind() {
+        kalamdb_sql::classifier::SqlStatementKind::Insert(_)
+        | kalamdb_sql::classifier::SqlStatementKind::Update(_)
+        | kalamdb_sql::classifier::SqlStatementKind::Delete(_) => {
+            let Some(table_id) = kalamdb_sql::parser::utils::extract_dml_table_id_fast(
+                &classify_sql,
+                default_namespace.as_str(),
+            )
+            .or_else(|| {
+                kalamdb_sql::parser::utils::extract_dml_table_id(
+                    &classify_sql,
+                    default_namespace.as_str(),
+                )
+            }) else {
+                return Some(GroupId::Meta);
+            };
+            Some(data_group_for_table(app_context, &table_id, user_id).unwrap_or(GroupId::Meta))
+        },
+        _ => Some(GroupId::Meta),
+    }
 }
 
 async fn forward_sql_grpc(
@@ -87,6 +157,9 @@ async fn forward_sql_grpc(
 
     let response = match target {
         ForwardTarget::Leader => client.forward_sql_to_leader(grpc_req).await,
+        ForwardTarget::GroupLeader(group_id) => {
+            client.forward_sql_to_group_leader(group_id, grpc_req).await
+        },
         ForwardTarget::Node(node_id) => client.forward_sql_to_node(node_id, grpc_req).await,
     };
 
@@ -121,14 +194,11 @@ pub async fn forward_sql_if_follower(
     req: &QueryRequest,
     app_context: &Arc<AppContext>,
     default_namespace: &NamespaceId,
+    user_id: &UserId,
     request_id: Option<&str>,
 ) -> Option<HttpResponse> {
     let start_time = Instant::now();
     let executor = app_context.executor();
-
-    if executor.is_leader(GroupId::Meta).await {
-        return None;
-    }
 
     let statements = match kalamdb_sql::split_statements(&req.sql) {
         Ok(stmts) => stmts,
@@ -145,26 +215,26 @@ pub async fn forward_sql_if_follower(
         },
     };
 
-    let has_write = statements.iter().any(|sql| {
-        let classify_sql =
-            kalamdb_sql::execute_as::extract_inner_sql(sql).unwrap_or_else(|| sql.to_string());
-        let stmt = kalamdb_sql::classifier::SqlStatement::classify_and_parse(
-            &classify_sql,
-            default_namespace,
-            Role::System,
-        )
-        .unwrap_or_else(|_| {
-            kalamdb_sql::classifier::SqlStatement::new(
-                classify_sql,
-                kalamdb_sql::classifier::SqlStatementKind::Unknown,
-            )
-        });
-        stmt.is_write_operation()
-    });
+    let write_targets: Vec<GroupId> = statements
+        .iter()
+        .filter_map(|sql| {
+            write_statement_target_group(sql, app_context.as_ref(), default_namespace, user_id)
+        })
+        .collect();
 
-    if has_write {
+    if let Some(first_target) = write_targets.first().copied() {
+        let target_group = if write_targets.iter().all(|target| *target == first_target) {
+            first_target
+        } else {
+            GroupId::Meta
+        };
+
+        if executor.is_leader(target_group).await {
+            return None;
+        }
+
         return forward_sql_grpc(
-            ForwardTarget::Leader,
+            ForwardTarget::GroupLeader(target_group),
             http_req,
             req,
             app_context.as_ref(),

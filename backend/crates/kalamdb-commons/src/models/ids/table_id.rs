@@ -1,13 +1,16 @@
 // File: backend/crates/kalamdb-commons/src/models/table_id.rs
 // Composite key for system.tables entries
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
 use super::namespace_id::NamespaceId;
-use crate::models::schemas::TableName;
-use crate::storage_key::{decode_key, encode_key, encode_prefix};
-use crate::StorageKey;
+use crate::{
+    models::schemas::TableName,
+    storage_key::{decode_key, encode_key, encode_prefix},
+    StorageKey,
+};
 
 /// Composite key for system.tables entries: (namespace_id, table_name)
 ///
@@ -124,8 +127,9 @@ impl<'de> Deserialize<'de> for TableId {
     where
         D: Deserializer<'de>,
     {
-        use serde::de::{Error, Visitor};
         use std::fmt;
+
+        use serde::de::{Error, Visitor};
 
         struct TableIdVisitor;
 

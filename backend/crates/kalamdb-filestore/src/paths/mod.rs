@@ -3,8 +3,9 @@
 //! This module is intentionally scoped to StorageCached usage to avoid
 //! duplicate path logic elsewhere in the crate.
 
-use kalamdb_commons::models::{TableId, UserId};
 use std::borrow::Cow;
+
+use kalamdb_commons::models::{TableId, UserId};
 
 /// Template resolution utilities for storage path templates.
 pub(crate) struct TemplateResolver;
@@ -113,8 +114,9 @@ impl PathResolver {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kalamdb_commons::models::{NamespaceId, TableName};
+
+    use super::*;
 
     // ==================== TemplateResolver tests ====================
 

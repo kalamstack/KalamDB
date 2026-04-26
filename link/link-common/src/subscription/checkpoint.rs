@@ -8,11 +8,17 @@ use crate::{models::ChangeEvent, seq_id::SeqId, seq_tracking};
 
 #[cfg(any(feature = "tokio-runtime", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct EventProgress {
+    pub(crate) seq_id: SeqId,
+    pub(crate) advance_resume: bool,
+}
+
+#[cfg(any(feature = "tokio-runtime", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct BatchEnvelope {
     pub(crate) status: BatchStatus,
     pub(crate) has_more: bool,
     pub(crate) last_seq_id: Option<SeqId>,
-    pub(crate) snapshot_end_seq: Option<SeqId>,
 }
 
 #[cfg(any(feature = "tokio-runtime", test))]
@@ -23,7 +29,6 @@ pub(crate) fn batch_envelope(event: &ChangeEvent) -> Option<BatchEnvelope> {
             status: batch_control.status,
             has_more: batch_control.has_more,
             last_seq_id: batch_control.last_seq_id,
-            snapshot_end_seq: batch_control.snapshot_end_seq,
         }),
         _ => None,
     }
@@ -35,18 +40,28 @@ pub(crate) fn subscription_start_ready(event: &ChangeEvent) -> bool {
 }
 
 #[cfg(any(feature = "tokio-runtime", test))]
-pub(crate) fn event_progress(event: &ChangeEvent) -> Option<(SeqId, bool)> {
+pub(crate) fn event_progress(event: &ChangeEvent) -> Option<EventProgress> {
     match event {
         ChangeEvent::InitialDataBatch { rows, .. } if subscription_start_ready(event) => {
-            seq_tracking::extract_max_seq(rows)
-                .or_else(|| batch_envelope(event).and_then(|batch| batch.last_seq_id))
-                .map(|seq_id| (seq_id, false))
+            let batch = batch_envelope(event);
+            let seq_id = seq_tracking::extract_max_seq(rows)
+                .or_else(|| batch.and_then(|batch| batch.last_seq_id))?;
+            Some(EventProgress {
+                seq_id,
+                advance_resume: false,
+            })
         },
         ChangeEvent::Insert { rows, .. } | ChangeEvent::Update { rows, .. } => {
-            seq_tracking::extract_max_seq(rows).map(|seq_id| (seq_id, true))
+            seq_tracking::extract_max_seq(rows).map(|seq_id| EventProgress {
+                seq_id,
+                advance_resume: true,
+            })
         },
         ChangeEvent::Delete { old_rows, .. } => {
-            seq_tracking::extract_max_seq(old_rows).map(|seq_id| (seq_id, true))
+            seq_tracking::extract_max_seq(old_rows).map(|seq_id| EventProgress {
+                seq_id,
+                advance_resume: true,
+            })
         },
         _ => None,
     }
@@ -214,7 +229,6 @@ mod tests {
             has_more: false,
             status,
             last_seq_id: None,
-            snapshot_end_seq: None,
         }
     }
 
@@ -243,7 +257,13 @@ mod tests {
             batch_control: batch_control(BatchStatus::Ready),
         };
 
-        assert_eq!(event_progress(&event), Some((SeqId::from_i64(11), false)));
+        assert_eq!(
+            event_progress(&event),
+            Some(EventProgress {
+                seq_id: SeqId::from_i64(11),
+                advance_resume: false,
+            })
+        );
     }
 
     #[test]

@@ -1,22 +1,30 @@
-use super::{PreparedExecutionStatement, SqlExecutor};
-use crate::error::KalamDbError;
-use crate::sql::executor::handler_registry::HandlerRegistry;
-use crate::sql::executor::request_transaction_state::RequestTransactionState;
-use crate::sql::plan_cache::{PlanCacheKey, SqlCacheRegistry, SqlCacheRegistryConfig};
-use crate::sql::{ExecutionContext, ExecutionResult};
-use crate::transactions::CoordinatorAccessValidator;
+use std::{sync::Arc, time::Duration};
+
 use arrow::array::RecordBatch;
-use datafusion::prelude::SessionContext;
-use datafusion::scalar::ScalarValue;
-use kalamdb_commons::conversions::arrow_json_conversion::arrow_value_to_scalar;
-use kalamdb_commons::models::datatypes::KalamDataType;
-use kalamdb_commons::models::{NamespaceId, TableId, TransactionId};
-use kalamdb_commons::Role;
+use datafusion::{prelude::SessionContext, scalar::ScalarValue};
+use kalamdb_commons::{
+    conversions::arrow_json_conversion::arrow_value_to_scalar,
+    models::{NamespaceId, TableId, TransactionId},
+    schemas::TableType,
+    Role,
+};
 use kalamdb_sql::classifier::{SqlStatement, SqlStatementKind, StatementClassificationError};
 use kalamdb_transactions::{TransactionQueryContext, TransactionQueryExtension};
-use std::sync::Arc;
-use std::time::Duration;
 use tracing::Instrument;
+use uuid::Uuid;
+
+use super::{PreparedExecutionStatement, SqlExecutor};
+use crate::{
+    error::KalamDbError,
+    sql::{
+        executor::{
+            handler_registry::HandlerRegistry, request_transaction_state::RequestTransactionState,
+        },
+        plan_cache::{PlanCacheKey, SqlCacheRegistry, SqlCacheRegistryConfig},
+        ExecutionContext, ExecutionResult,
+    },
+    transactions::CoordinatorAccessValidator,
+};
 
 #[derive(Debug, Clone, Copy)]
 enum DmlKind {
@@ -26,7 +34,7 @@ enum DmlKind {
 }
 
 impl SqlExecutor {
-    async fn try_execute_embedding_literal_insert_via_applier(
+    async fn try_execute_literal_insert_via_applier(
         &self,
         sql: &str,
         metadata: &PreparedExecutionStatement,
@@ -43,18 +51,6 @@ impl SqlExecutor {
             if state.is_active() {
                 return Ok(None);
             }
-        }
-
-        let Some(cached_table) = self.app_context.schema_registry().get(table_id) else {
-            return Ok(None);
-        };
-        let has_embedding_columns = cached_table
-            .table
-            .columns
-            .iter()
-            .any(|column| matches!(column.data_type, KalamDataType::Embedding(_)));
-        if !has_embedding_columns {
-            return Ok(None);
         }
 
         let dialect = sqlparser::dialect::GenericDialect {};
@@ -628,7 +624,7 @@ impl SqlExecutor {
                 SqlStatementKind::Insert(_) => {
                     if params.is_empty() {
                         if let Some(result) = self
-                            .try_execute_embedding_literal_insert_via_applier(
+                            .try_execute_literal_insert_via_applier(
                                 classified.as_str(),
                                 metadata,
                                 exec_ctx,
@@ -718,6 +714,96 @@ impl SqlExecutor {
         .await
     }
 
+    fn should_stage_autocommit_dml(
+        &self,
+        metadata: &PreparedExecutionStatement,
+        exec_ctx: &ExecutionContext,
+    ) -> Result<bool, KalamDbError> {
+        if self.active_request_transaction_id(exec_ctx)?.is_some() {
+            return Ok(false);
+        }
+
+        let Some(table_id) = metadata.table_id.as_ref() else {
+            return Ok(false);
+        };
+
+        let Some(cached_table) = self.app_context.schema_registry().get(table_id) else {
+            return Ok(false);
+        };
+
+        let table_type: TableType = cached_table.table.table_type.into();
+        Ok(matches!(table_type, TableType::User | TableType::Shared))
+    }
+
+    async fn execute_autocommit_dml_via_transaction(
+        &self,
+        sql: &str,
+        metadata: &PreparedExecutionStatement,
+        params: Vec<ScalarValue>,
+        exec_ctx: &ExecutionContext,
+        dml_kind: DmlKind,
+    ) -> Result<ExecutionResult, KalamDbError> {
+        let owned_exec_ctx;
+        let dml_exec_ctx = if exec_ctx.request_id().is_some() {
+            exec_ctx
+        } else {
+            owned_exec_ctx =
+                exec_ctx.clone().with_request_id(format!("sql-autocommit-{}", Uuid::now_v7()));
+            &owned_exec_ctx
+        };
+
+        let mut request_state = RequestTransactionState::from_execution_context(dml_exec_ctx)?
+            .ok_or_else(|| {
+                KalamDbError::InvalidOperation(
+                    "autocommit DML requires a request-scoped execution context".to_string(),
+                )
+            })?;
+        request_state.sync_from_coordinator(&self.app_context);
+
+        if request_state.is_active() {
+            return self
+                .execute_dml_via_datafusion_inner(sql, metadata, params, dml_exec_ctx, dml_kind)
+                .await;
+        }
+
+        request_state.begin(&self.app_context)?;
+        let result = self
+            .execute_dml_via_datafusion_inner(sql, metadata, params, dml_exec_ctx, dml_kind)
+            .await;
+
+        match result {
+            Ok(result) => match request_state.commit(&self.app_context).await {
+                Ok(_) => Ok(result),
+                Err(error) => {
+                    let _ = request_state.rollback_if_active(&self.app_context);
+                    Err(error)
+                },
+            },
+            Err(error) => {
+                let _ = request_state.rollback_if_active(&self.app_context);
+                Err(error)
+            },
+        }
+    }
+
+    async fn execute_dml_via_datafusion(
+        &self,
+        sql: &str,
+        metadata: &PreparedExecutionStatement,
+        params: Vec<ScalarValue>,
+        exec_ctx: &ExecutionContext,
+        dml_kind: DmlKind,
+    ) -> Result<ExecutionResult, KalamDbError> {
+        if self.should_stage_autocommit_dml(metadata, exec_ctx)? {
+            return self
+                .execute_autocommit_dml_via_transaction(sql, metadata, params, exec_ctx, dml_kind)
+                .await;
+        }
+
+        self.execute_dml_via_datafusion_inner(sql, metadata, params, exec_ctx, dml_kind)
+            .await
+    }
+
     #[tracing::instrument(
         name = "sql.dml_datafusion",
         skip_all,
@@ -726,7 +812,7 @@ impl SqlExecutor {
             rows_affected = tracing::field::Empty,
         )
     )]
-    async fn execute_dml_via_datafusion(
+    async fn execute_dml_via_datafusion_inner(
         &self,
         sql: &str,
         metadata: &PreparedExecutionStatement,
@@ -918,9 +1004,9 @@ impl SqlExecutor {
     ) -> Result<ExecutionResult, KalamDbError> {
         let execution_sql = kalamdb_sql::rewrite_context_functions_for_datafusion(sql);
         let execution_sql: &str = &execution_sql;
-        use crate::sql::executor::default_ordering::apply_default_order_by;
-        use crate::sql::executor::parameter_binding::{
-            replace_placeholders_in_plan, validate_params,
+        use crate::sql::executor::{
+            default_ordering::apply_default_order_by,
+            parameter_binding::{replace_placeholders_in_plan, validate_params},
         };
 
         // Validate parameters if present
@@ -931,7 +1017,8 @@ impl SqlExecutor {
         let session = self.create_session_with_transaction_context(exec_ctx)?;
 
         // Try cached template plan first (works for both plain and parameterized SQL).
-        // Key excludes user_id because LogicalPlan is user-agnostic - filtering happens at scan time.
+        // Key excludes user_id because LogicalPlan is user-agnostic - filtering happens at scan
+        // time.
         let cache_key = PlanCacheKey::new(
             exec_ctx.default_namespace().clone(),
             exec_ctx.user_role(),
@@ -1310,7 +1397,7 @@ impl SqlExecutor {
     /// Called during server startup to restore table access after restart.
     /// Loads table definitions from the store and creates/registers:
     /// - UserTableShared instances for USER tables
-    /// - SharedTableProvider instances for SHARED tables  
+    /// - SharedTableProvider instances for SHARED tables
     /// - StreamTableProvider instances for STREAM tables
     ///
     /// # Returns

@@ -3,13 +3,12 @@
 //! Uses sqlparser-rs for safe SQL parsing to prevent SQL injection attacks
 //! and ensure proper handling of edge cases.
 
-use crate::parser::utils::parse_sql_statements;
 use kalamdb_commons::constants::SystemColumnNames;
 use sqlparser::ast::{
     Expr, GroupByExpr, Query, Select, SelectItem, SetExpr, Statement, TableFactor, TableWithJoins,
 };
 
-use crate::dialect::KalamDbDialect;
+use crate::{dialect::KalamDbDialect, parser::utils::parse_sql_statements};
 
 /// Error type for query parsing
 #[derive(Debug, Clone)]
@@ -283,13 +282,17 @@ impl QueryParser {
     fn validate_subscription_query_ast(query: &Query) -> Result<(), QueryParseError> {
         if query.with.is_some() {
             return Err(QueryParseError::InvalidSql(
-                "Subscription query does not support WITH clauses. Only SELECT ... FROM ... [WHERE ...] is supported.".to_string(),
+                "Subscription query does not support WITH clauses. Only SELECT ... FROM ... \
+                 [WHERE ...] is supported."
+                    .to_string(),
             ));
         }
 
         if query.order_by.is_some() {
             return Err(QueryParseError::InvalidSql(
-                "Subscription query does not support ORDER BY. Only SELECT ... FROM ... [WHERE ...] is supported.".to_string(),
+                "Subscription query does not support ORDER BY. Only SELECT ... FROM ... [WHERE \
+                 ...] is supported."
+                    .to_string(),
             ));
         }
 
@@ -338,7 +341,9 @@ impl QueryParser {
 
         if Self::has_group_by(&select.group_by) {
             return Err(QueryParseError::InvalidSql(
-                "Subscription query does not support GROUP BY. Only SELECT ... FROM ... [WHERE ...] is supported.".to_string(),
+                "Subscription query does not support GROUP BY. Only SELECT ... FROM ... [WHERE \
+                 ...] is supported."
+                    .to_string(),
             ));
         }
 
@@ -351,7 +356,9 @@ impl QueryParser {
         let table_with_joins = &select.from[0];
         if !table_with_joins.joins.is_empty() {
             return Err(QueryParseError::InvalidSql(
-                "Subscription query does not support JOIN clauses. Only SELECT ... FROM ... [WHERE ...] is supported.".to_string(),
+                "Subscription query does not support JOIN clauses. Only SELECT ... FROM ... \
+                 [WHERE ...] is supported."
+                    .to_string(),
             ));
         }
 

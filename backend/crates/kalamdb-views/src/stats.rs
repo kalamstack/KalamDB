@@ -12,18 +12,22 @@
 //!
 //! **Schema**: TableDefinition provides consistent metadata for views
 
-use crate::view_base::VirtualView;
-use datafusion::arrow::array::{ArrayRef, StringBuilder};
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::RecordBatch;
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::schemas::{
-    ColumnDefault, ColumnDefinition, TableDefinition, TableOptions, TableType,
+use std::sync::{Arc, OnceLock};
+
+use datafusion::arrow::{
+    array::{ArrayRef, StringBuilder},
+    datatypes::SchemaRef,
+    record_batch::RecordBatch,
 };
-use kalamdb_commons::{NamespaceId, TableName};
+use kalamdb_commons::{
+    datatypes::KalamDataType,
+    schemas::{ColumnDefault, ColumnDefinition, TableDefinition, TableOptions, TableType},
+    NamespaceId, TableName,
+};
 use kalamdb_system::SystemTable;
 use parking_lot::RwLock;
-use std::sync::{Arc, OnceLock};
+
+use crate::view_base::VirtualView;
 
 /// Metrics provider callback type
 /// Returns a vector of (metric_name, metric_value) tuples
@@ -224,8 +228,7 @@ mod tests {
     fn test_table_provider() {
         let view = Arc::new(StatsView::new());
         let provider = StatsTableProvider::new(view);
-        use datafusion::datasource::TableProvider;
-        use datafusion::datasource::TableType;
+        use datafusion::datasource::{TableProvider, TableType};
 
         assert_eq!(provider.table_type(), TableType::View);
         assert_eq!(provider.schema().fields().len(), 2);

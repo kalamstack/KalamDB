@@ -4,8 +4,10 @@
 //! `Meta` group's last applied index on the leader at proposal time. Followers
 //! buffer data commands until local `Meta` has applied at least that index.
 
-use kalamdb_commons::models::{TransactionId, UserId};
-use kalamdb_commons::TableId;
+use kalamdb_commons::{
+    models::{TransactionId, UserId},
+    TableId,
+};
 use serde::{Deserialize, Serialize};
 
 /// Commands for user data shards (32 shards by default)
@@ -116,8 +118,9 @@ impl UserDataCommand {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kalamdb_commons::models::{NamespaceId, TableName};
+
+    use super::*;
 
     #[test]
     fn test_user_data_command_watermark_get_set() {

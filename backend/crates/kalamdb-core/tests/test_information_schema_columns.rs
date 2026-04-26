@@ -3,11 +3,12 @@
 //! This test verifies that the information_schema.columns table is properly
 //! registered and can be queried via SQL.
 
+use std::sync::Arc;
+
 use kalamdb_commons::NodeId;
 use kalamdb_configs::ServerConfig;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_store::test_utils::TestDb;
-use std::sync::Arc;
 
 /// Helper to create AppContext with temporary RocksDB for testing
 async fn create_test_app_context() -> (Arc<AppContext>, TestDb) {
@@ -33,10 +34,8 @@ async fn test_information_schema_columns_query() {
     let session = app_ctx.base_session_context();
 
     // Query information_schema.columns
-    let sql = "SELECT table_catalog, table_schema, table_name, column_name \
-               FROM information_schema.columns \
-               WHERE table_name = 'jobs' \
-               ORDER BY ordinal_position \
+    let sql = "SELECT table_catalog, table_schema, table_name, column_name FROM \
+               information_schema.columns WHERE table_name = 'jobs' ORDER BY ordinal_position \
                LIMIT 5";
 
     let result = session.sql(sql).await;
@@ -63,10 +62,8 @@ async fn test_information_schema_columns_shows_system_jobs() {
     let session = app_ctx.base_session_context();
 
     // Query for system.jobs columns specifically
-    let sql = "SELECT column_name, data_type, is_nullable \
-               FROM information_schema.columns \
-               WHERE table_schema = 'system' AND table_name = 'jobs' \
-               ORDER BY ordinal_position";
+    let sql = "SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE \
+               table_schema = 'system' AND table_name = 'jobs' ORDER BY ordinal_position";
 
     let result = session.sql(sql).await;
     assert!(result.is_ok(), "Query failed: {:?}", result.err());

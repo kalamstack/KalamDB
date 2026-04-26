@@ -1,8 +1,11 @@
-use crate::models::DBA_NAMESPACE;
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::models::{NamespaceId, TableId, TableName, UserId};
+use kalamdb_commons::{
+    datatypes::KalamDataType,
+    models::{NamespaceId, TableId, TableName, UserId},
+};
 use kalamdb_macros::table;
 use serde::{Deserialize, Serialize};
+
+use crate::models::DBA_NAMESPACE;
 
 #[table(
     name = "notifications",

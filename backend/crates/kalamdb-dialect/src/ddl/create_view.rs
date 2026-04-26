@@ -3,11 +3,13 @@
 //! Produces a typed AST that mirrors sqlparser's semantics so kalamdb-core can
 //! route CREATE VIEW requests through a dedicated handler.
 
-use crate::ddl::DdlResult;
-use crate::parser::utils::parse_sql_statements;
 use kalamdb_commons::models::{NamespaceId, TableName};
-use sqlparser::ast::{ObjectName, Statement};
-use sqlparser::dialect::GenericDialect;
+use sqlparser::{
+    ast::{ObjectName, Statement},
+    dialect::GenericDialect,
+};
+
+use crate::{ddl::DdlResult, parser::utils::parse_sql_statements};
 
 /// Typed representation of a CREATE VIEW statement.
 #[derive(Debug, Clone, PartialEq, Eq)]

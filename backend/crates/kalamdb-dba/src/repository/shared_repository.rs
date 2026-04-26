@@ -1,11 +1,15 @@
-use crate::error::{DbaError, Result};
-use crate::mapping::model_to_row;
-use crate::repository::{current_definition, RepositoryModel};
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::providers::base::find_row_by_pk;
-use kalamdb_core::providers::SharedTableProvider;
-use std::marker::PhantomData;
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
+
+use kalamdb_core::{
+    app_context::AppContext,
+    providers::{base::find_row_by_pk, SharedTableProvider},
+};
+
+use crate::{
+    error::{DbaError, Result},
+    mapping::model_to_row,
+    repository::{current_definition, RepositoryModel},
+};
 
 #[derive(Clone)]
 pub struct SharedTableRepository<M> {

@@ -59,8 +59,9 @@ impl SchemaVersion {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use chrono::TimeZone;
+
+    use super::*;
 
     #[test]
     fn test_new_schema_version() {

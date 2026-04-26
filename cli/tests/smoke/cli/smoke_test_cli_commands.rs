@@ -10,8 +10,9 @@
 //! - \help / \? - Help text
 //! - SQL execution
 
-use crate::common::*;
 use std::time::Duration;
+
+use crate::common::*;
 
 /// Smoke Test: \stats command works correctly
 #[ntest::timeout(60000)]
@@ -65,7 +66,8 @@ fn smoke_cli_list_tables_command() {
 
     // Query system.tables with a narrow filter (this is what \dt uses internally).
     let result = execute_sql_as_root_via_client(&format!(
-        "SELECT namespace_id AS namespace, table_name, table_type FROM system.tables WHERE namespace_id = '{}' AND table_name = '{}'",
+        "SELECT namespace_id AS namespace, table_name, table_type FROM system.tables WHERE \
+         namespace_id = '{}' AND table_name = '{}'",
         namespace, table
     ))
     .expect("Failed to list tables");
@@ -114,9 +116,11 @@ fn smoke_cli_describe_table_command() {
 
     // Query information_schema.columns (this is what \describe does)
     let result = execute_sql_as_root_via_client(&format!(
-        "SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = '{}' AND table_name = '{}' ORDER BY ordinal_position",
+        "SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE \
+         table_schema = '{}' AND table_name = '{}' ORDER BY ordinal_position",
         namespace, table
-    )).expect("Failed to describe table");
+    ))
+    .expect("Failed to describe table");
 
     // Verify columns are shown
     assert!(result.contains("id"), "Should show id column: {}", result);
@@ -397,8 +401,8 @@ fn smoke_cli_user_management() {
     let result = execute_sql_as_root_via_client(&format!("DROP USER IF EXISTS {}", user_id));
     assert!(result.is_ok(), "DROP USER should succeed: {:?}", result);
 
-    // Note: Users are soft-deleted (deleted_at timestamp set), so they may still appear in system.users
-    // Verify user is soft-deleted by checking deleted_at is not null
+    // Note: Users are soft-deleted (deleted_at timestamp set), so they may still appear in
+    // system.users Verify user is soft-deleted by checking deleted_at is not null
     let _result = execute_sql_as_root_via_client(&format!(
         "SELECT deleted_at FROM system.users WHERE user_id = '{}'",
         user_id
@@ -504,7 +508,8 @@ fn smoke_cli_alter_table() {
     // Verify column added
     wait_for_sql_output_contains(
         &format!(
-            "SELECT column_name FROM information_schema.columns WHERE table_schema = '{}' AND table_name = '{}'",
+            "SELECT column_name FROM information_schema.columns WHERE table_schema = '{}' AND \
+             table_name = '{}'",
             namespace, table
         ),
         "email",

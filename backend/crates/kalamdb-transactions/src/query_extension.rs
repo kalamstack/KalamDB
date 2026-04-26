@@ -1,8 +1,10 @@
 use std::any::Any;
 
-use datafusion::catalog::Session;
-use datafusion::common::config::{ConfigEntry, ConfigExtension, ExtensionOptions};
-use datafusion::execution::context::SessionState;
+use datafusion::{
+    catalog::Session,
+    common::config::{ConfigEntry, ConfigExtension, ExtensionOptions},
+    execution::context::SessionState,
+};
 
 use crate::query_context::TransactionQueryContext;
 

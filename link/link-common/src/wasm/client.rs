@@ -1,31 +1,33 @@
-use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
-use std::rc::Rc;
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    rc::Rc,
+};
 
-use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsCast;
+use wasm_bindgen::{prelude::*, JsCast};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{CloseEvent, ErrorEvent, MessageEvent, WebSocket};
 
+use super::{
+    auth::WasmAuthProvider,
+    helpers::{
+        create_promise, decode_ws_binary_payload, decode_ws_message, send_ws_message,
+        serialize_json_to_js_value, subscription_hash,
+    },
+    reconnect::{self, reconnect_internal_with_auth, resubscribe_all},
+    state::{
+        callback_payload, filter_subscription_event, track_subscription_checkpoint,
+        SubscriptionCallbackMode, SubscriptionState, WasmLiveRowsOptions,
+    },
+    validation::{
+        quote_table_name, validate_column_name, validate_row_id, validate_sql_identifier,
+    },
+    wasm_debug_log,
+};
 use crate::models::{
     ClientMessage, ConnectionOptions, QueryRequest, SerializationType, ServerMessage,
     SubscriptionOptions, SubscriptionRequest,
 };
-
-use super::auth::WasmAuthProvider;
-use super::helpers::{
-    create_promise, decode_ws_binary_payload, decode_ws_message, send_ws_message,
-    serialize_json_to_js_value, subscription_hash,
-};
-use super::reconnect::{self, reconnect_internal_with_auth, resubscribe_all};
-use super::state::{
-    callback_payload, filter_subscription_event, track_subscription_checkpoint,
-    SubscriptionCallbackMode, SubscriptionState, WasmLiveRowsOptions,
-};
-use super::validation::{
-    quote_table_name, validate_column_name, validate_row_id, validate_sql_identifier,
-};
-use super::wasm_debug_log;
 
 /// WASM-compatible KalamDB client with auto-reconnection support
 ///
@@ -33,7 +35,8 @@ use super::wasm_debug_log;
 /// - Basic Auth: `new KalamClient(url, username, password)`
 /// - JWT Token: `KalamClient.withJwt(url, token)`
 /// - Anonymous: `KalamClient.anonymous(url)`
-/// - Dynamic Auth: `KalamClient.anonymous(url)` + `setAuthProvider(async () => ({ jwt: { token } }))`
+/// - Dynamic Auth: `KalamClient.anonymous(url)` + `setAuthProvider(async () => ({ jwt: { token }
+///   }))`
 ///
 /// # Example (JavaScript)
 /// ```js
@@ -1015,7 +1018,6 @@ impl KalamClient {
         self.connection_options.borrow_mut().ws_lazy_connect = lazy;
     }
 
-    ///
     /// # Returns
     /// Promise that resolves when connection is established and authenticated
     pub async fn connect(&mut self) -> Result<(), JsValue> {
@@ -1064,7 +1066,8 @@ impl KalamClient {
 
         if matches!(resolved_auth, WasmAuthProvider::Basic { .. }) {
             return Err(JsValue::from_str(
-                "WebSocket authentication requires a JWT token. Use KalamClient.withJwt, login first, or set an authProvider.",
+                "WebSocket authentication requires a JWT token. Use KalamClient.withJwt, login \
+                 first, or set an authProvider.",
             ));
         }
 
@@ -1221,7 +1224,8 @@ impl KalamClient {
         // Set up auto-reconnect onclose handler
         self.setup_auto_reconnect(&ws);
 
-        // T063K: Implement WebSocket onmessage handler to parse events and invoke registered callbacks
+        // T063K: Implement WebSocket onmessage handler to parse events and invoke registered
+        // callbacks
         let subscriptions = Rc::clone(&self.subscription_state);
         let auth_resolve_clone = auth_resolve.clone();
         let auth_reject_clone2 = auth_reject.clone();
@@ -1522,7 +1526,8 @@ impl KalamClient {
         validate_row_id(&row_id)?;
 
         // T063H: Implement using fetch API to execute DELETE statement via /v1/api/sql
-        // Security: Quote table name (handling namespace.table format) and use parameterized-style value
+        // Security: Quote table name (handling namespace.table format) and use parameterized-style
+        // value
         let sql = format!(
             "DELETE FROM {} WHERE id = '{}'",
             quote_table_name(&table_name),
@@ -1759,7 +1764,8 @@ impl KalamClient {
             WasmAuthProvider::Basic { username, password } => (username.clone(), password.clone()),
             _ => {
                 return Err(JsValue::from_str(
-                    "login() requires user/password credentials. Create client with new KalamClient(url, user, password)",
+                    "login() requires user/password credentials. Create client with new \
+                     KalamClient(url, user, password)",
                 ))
             },
         };
@@ -1854,7 +1860,8 @@ impl KalamClient {
                 {
                     if query_resp.is_token_expired() {
                         wasm_debug_log!(
-                            "KalamClient: TOKEN_EXPIRED detected — reauthenticating and retrying query",
+                            "KalamClient: TOKEN_EXPIRED detected — reauthenticating and retrying \
+                             query",
                         );
                         self.reauthenticate_for_http().await?;
                         return self.execute_sql_http(sql, &params).await;
@@ -1870,7 +1877,8 @@ impl KalamClient {
                     {
                         if query_resp.is_token_expired() {
                             wasm_debug_log!(
-                                "KalamClient: TOKEN_EXPIRED detected in HTTP error — reauthenticating and retrying query",
+                                "KalamClient: TOKEN_EXPIRED detected in HTTP error — \
+                                 reauthenticating and retrying query",
                             );
                             self.reauthenticate_for_http().await?;
                             return self.execute_sql_http(sql, &params).await;

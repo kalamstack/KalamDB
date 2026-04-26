@@ -1,10 +1,14 @@
-use super::common::{count_rows, create_shared_kalam_table, unique_name, TestEnv};
+use std::{
+    collections::BTreeMap,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
 use futures_util::future::join_all;
 use serde_json::Value;
-use std::collections::BTreeMap;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 use tokio::sync::Barrier;
+
+use super::common::{count_rows, create_shared_kalam_table, unique_name, TestEnv};
 
 type SqlRow = BTreeMap<String, Value>;
 
@@ -107,7 +111,10 @@ async fn wait_for_api_sql_rows(sql: &str, expected_count: usize, timeout: Durati
         }
 
         if Instant::now() >= deadline {
-            panic!("API rows for SQL did not reach expected count {expected_count}: {sql}; rows={rows:?}");
+            panic!(
+                "API rows for SQL did not reach expected count {expected_count}: {sql}; \
+                 rows={rows:?}"
+            );
         }
 
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -130,7 +137,8 @@ async fn wait_for_pg_count(
 
         if Instant::now() >= deadline {
             panic!(
-                "row count for {qualified_table} did not become {expected_count}; last count={count}"
+                "row count for {qualified_table} did not become {expected_count}; last \
+                 count={count}"
             );
         }
 
@@ -149,21 +157,23 @@ async fn e2e_bidirectional_typed_roundtrip_between_pg_and_api() {
     create_shared_kalam_table(
         &pg,
         &table,
-        "id TEXT, label VARCHAR, attempts SMALLINT, qty INTEGER, total BIGINT, ratio REAL, score DOUBLE PRECISION, active BOOLEAN, notes TEXT",
+        "id TEXT, label VARCHAR, attempts SMALLINT, qty INTEGER, total BIGINT, ratio REAL, score \
+         DOUBLE PRECISION, active BOOLEAN, notes TEXT",
     )
     .await;
 
     pg.batch_execute(&format!(
-        "INSERT INTO {qualified_table} (id, label, attempts, qty, total, ratio, score, active, notes) VALUES \
-            ('pg-typed-1', 'alpha', 3, 25, 7000000, 1.5, 9.875, true, 'leader''s note'), \
-            ('pg-typed-2', 'beta', 0, -5, 42, -3.25, 0.125, false, NULL);"
+        "INSERT INTO {qualified_table} (id, label, attempts, qty, total, ratio, score, active, \
+         notes) VALUES ('pg-typed-1', 'alpha', 3, 25, 7000000, 1.5, 9.875, true, 'leader''s \
+         note'), ('pg-typed-2', 'beta', 0, -5, 42, -3.25, 0.125, false, NULL);"
     ))
     .await
     .expect("insert typed rows through PostgreSQL");
 
     let api_rows = wait_for_api_sql_rows(
         &format!(
-            "SELECT id, label, attempts, qty, total, ratio, score, active, notes FROM {qualified_table} WHERE id IN ('pg-typed-1', 'pg-typed-2') ORDER BY id"
+            "SELECT id, label, attempts, qty, total, ratio, score, active, notes FROM \
+             {qualified_table} WHERE id IN ('pg-typed-1', 'pg-typed-2') ORDER BY id"
         ),
         2,
         Duration::from_secs(5),
@@ -190,15 +200,16 @@ async fn e2e_bidirectional_typed_roundtrip_between_pg_and_api() {
     assert!(second.get("notes").is_some_and(Value::is_null));
 
     env.kalamdb_sql(&format!(
-        "INSERT INTO {qualified_table} (id, label, attempts, qty, total, ratio, score, active, notes) VALUES \
-            ('api-typed-1', 'from-api', 7, 11, 123456, 2.5, 4.25, true, 'api inserted')"
+        "INSERT INTO {qualified_table} (id, label, attempts, qty, total, ratio, score, active, \
+         notes) VALUES ('api-typed-1', 'from-api', 7, 11, 123456, 2.5, 4.25, true, 'api inserted')"
     ))
     .await;
 
     let api_inserted = pg
         .query_one(
             &format!(
-                "SELECT label, attempts, qty, total, ratio, score, active, notes FROM {qualified_table} WHERE id = $1"
+                "SELECT label, attempts, qty, total, ratio, score, active, notes FROM \
+                 {qualified_table} WHERE id = $1"
             ),
             &[&"api-typed-1"],
         )
@@ -214,7 +225,8 @@ async fn e2e_bidirectional_typed_roundtrip_between_pg_and_api() {
     assert_eq!(api_inserted.get::<_, Option<String>>(7), Some("api inserted".to_string()));
 
     env.kalamdb_sql(&format!(
-        "UPDATE {qualified_table} SET label = 'updated-from-api', qty = 30, active = false, notes = 'api edit' WHERE id = 'pg-typed-1'"
+        "UPDATE {qualified_table} SET label = 'updated-from-api', qty = 30, active = false, notes \
+         = 'api edit' WHERE id = 'pg-typed-1'"
     ))
     .await;
 
@@ -232,9 +244,16 @@ async fn e2e_bidirectional_typed_roundtrip_between_pg_and_api() {
 
     pg.execute(
         &format!(
-            "UPDATE {qualified_table} SET label = $1, total = $2, score = $3, notes = $4 WHERE id = $5"
+            "UPDATE {qualified_table} SET label = $1, total = $2, score = $3, notes = $4 WHERE id \
+             = $5"
         ),
-        &[&"updated-from-pg", &654_321_i64, &5.5_f64, &"pg edit", &"api-typed-1"],
+        &[
+            &"updated-from-pg",
+            &654_321_i64,
+            &5.5_f64,
+            &"pg edit",
+            &"api-typed-1",
+        ],
     )
     .await
     .expect("update API-created row through PostgreSQL");
@@ -295,7 +314,8 @@ async fn e2e_parallel_transactional_inserts_and_updates_stay_consistent() {
         coordinator
             .execute(
                 &format!(
-                    "INSERT INTO {qualified_table} (id, worker, ordinal, status, amount) VALUES ($1, $2, $3, $4, $5)"
+                    "INSERT INTO {qualified_table} (id, worker, ordinal, status, amount) VALUES \
+                     ($1, $2, $3, $4, $5)"
                 ),
                 &[
                     &format!("seed-{worker}"),
@@ -330,7 +350,8 @@ async fn e2e_parallel_transactional_inserts_and_updates_stay_consistent() {
                 .collect::<Vec<_>>()
                 .join(", ");
             tx.batch_execute(&format!(
-                "INSERT INTO {qualified_table} (id, worker, ordinal, status, amount) VALUES {values};"
+                "INSERT INTO {qualified_table} (id, worker, ordinal, status, amount) VALUES \
+                 {values};"
             ))
             .await
             .expect("insert worker batch");
@@ -360,7 +381,10 @@ async fn e2e_parallel_transactional_inserts_and_updates_stay_consistent() {
 
     let pg_rows = coordinator
         .query(
-            &format!("SELECT id, status, amount FROM {qualified_table} WHERE id LIKE 'seed-%' ORDER BY id"),
+            &format!(
+                "SELECT id, status, amount FROM {qualified_table} WHERE id LIKE 'seed-%' ORDER BY \
+                 id"
+            ),
             &[],
         )
         .await
@@ -391,7 +415,11 @@ async fn e2e_parallel_transactional_inserts_and_updates_stay_consistent() {
     assert_eq!(row_i64(&api_inserted[0], "inserted_rows"), (WORKERS * ROWS_PER_WORKER) as i64);
 
     let api_seed_rows = wait_for_api_sql_rows(
-        &format!("SELECT id, status, amount FROM {qualified_table} WHERE id LIKE 'seed-%' ORDER BY id LIMIT {}", WORKERS + 1),
+        &format!(
+            "SELECT id, status, amount FROM {qualified_table} WHERE id LIKE 'seed-%' ORDER BY id \
+             LIMIT {}",
+            WORKERS + 1
+        ),
         WORKERS,
         Duration::from_secs(5),
     )
@@ -406,8 +434,8 @@ async fn e2e_parallel_transactional_inserts_and_updates_stay_consistent() {
 
     let api_sample_rows = wait_for_api_sql_rows(
         &format!(
-            "SELECT id, worker, ordinal, status, amount FROM {qualified_table} \
-             WHERE id IN ('wrk-0-0', 'wrk-3-7', 'wrk-5-14') ORDER BY id LIMIT 4"
+            "SELECT id, worker, ordinal, status, amount FROM {qualified_table} WHERE id IN \
+             ('wrk-0-0', 'wrk-3-7', 'wrk-5-14') ORDER BY id LIMIT 4"
         ),
         3,
         Duration::from_secs(5),
@@ -446,18 +474,18 @@ async fn e2e_transaction_rollback_discards_insert_update_delete_in_pg_and_api() 
         .await;
 
     pg.batch_execute(&format!(
-        "INSERT INTO {qualified_table} (id, title, value, active) VALUES \
-            ('keep-1', 'baseline one', 10, true), \
-            ('keep-2', 'baseline two', 20, false);"
+        "INSERT INTO {qualified_table} (id, title, value, active) VALUES ('keep-1', 'baseline \
+         one', 10, true), ('keep-2', 'baseline two', 20, false);"
     ))
     .await
     .expect("seed rollback test rows");
 
     let tx = pg.transaction().await.expect("begin rollback transaction");
     tx.batch_execute(&format!(
-        "INSERT INTO {qualified_table} (id, title, value, active) VALUES ('temp-insert', 'rollback me', 999, true); \
-         UPDATE {qualified_table} SET title = 'changed in tx', value = 111, active = false WHERE id = 'keep-1'; \
-         DELETE FROM {qualified_table} WHERE id = 'keep-2';"
+        "INSERT INTO {qualified_table} (id, title, value, active) VALUES ('temp-insert', \
+         'rollback me', 999, true); UPDATE {qualified_table} SET title = 'changed in tx', value = \
+         111, active = false WHERE id = 'keep-1'; DELETE FROM {qualified_table} WHERE id = \
+         'keep-2';"
     ))
     .await
     .expect("apply transactional insert/update/delete");
@@ -521,9 +549,8 @@ async fn e2e_disconnect_abort_discards_uncommitted_changes_in_pg_and_api() {
 
     coordinator
         .batch_execute(&format!(
-            "INSERT INTO {qualified_table} (id, title, value) VALUES \
-                ('base-1', 'before disconnect', 10), \
-                ('base-2', 'should survive', 20);"
+            "INSERT INTO {qualified_table} (id, title, value) VALUES ('base-1', 'before \
+             disconnect', 10), ('base-2', 'should survive', 20);"
         ))
         .await
         .expect("seed disconnect-abort rows");
@@ -533,9 +560,9 @@ async fn e2e_disconnect_abort_discards_uncommitted_changes_in_pg_and_api() {
         .await
         .expect("begin SQL transaction before disconnect");
     pg.batch_execute(&format!(
-        "INSERT INTO {qualified_table} (id, title, value) VALUES ('temp-drop', 'should vanish', 999); \
-         UPDATE {qualified_table} SET title = 'mutated before disconnect', value = 77 WHERE id = 'base-1'; \
-         DELETE FROM {qualified_table} WHERE id = 'base-2';"
+        "INSERT INTO {qualified_table} (id, title, value) VALUES ('temp-drop', 'should vanish', \
+         999); UPDATE {qualified_table} SET title = 'mutated before disconnect', value = 77 WHERE \
+         id = 'base-1'; DELETE FROM {qualified_table} WHERE id = 'base-2';"
     ))
     .await
     .expect("apply uncommitted mutations before disconnect");

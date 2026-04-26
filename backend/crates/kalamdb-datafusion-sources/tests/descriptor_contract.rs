@@ -54,14 +54,8 @@ fn scan_descriptor_exposes_pruning_requests() {
 #[test]
 fn filter_capability_maps_to_datafusion() {
     use datafusion::logical_expr::TableProviderFilterPushDown as DfPushDown;
-    assert!(matches!(
-        DfPushDown::from(FilterCapability::Exact),
-        DfPushDown::Exact
-    ));
-    assert!(matches!(
-        DfPushDown::from(FilterCapability::Inexact),
-        DfPushDown::Inexact
-    ));
+    assert!(matches!(DfPushDown::from(FilterCapability::Exact), DfPushDown::Exact));
+    assert!(matches!(DfPushDown::from(FilterCapability::Inexact), DfPushDown::Inexact));
     assert!(matches!(
         DfPushDown::from(FilterCapability::Unsupported),
         DfPushDown::Unsupported
@@ -73,10 +67,7 @@ struct StubSource {
 }
 
 impl SourceProvider for StubSource {
-    fn filter_capability(
-        &self,
-        filter: &datafusion::logical_expr::Expr,
-    ) -> FilterCapability {
+    fn filter_capability(&self, filter: &datafusion::logical_expr::Expr) -> FilterCapability {
         use datafusion::logical_expr::Expr;
         match filter {
             Expr::BinaryExpr(_) => FilterCapability::Exact,
@@ -99,7 +90,9 @@ impl SourceProvider for StubSource {
 
 #[test]
 fn source_provider_trait_reports_and_builds_descriptor() {
-    let src = StubSource { schema: test_schema() };
+    let src = StubSource {
+        schema: test_schema(),
+    };
     let filter = col("id").eq(lit(1i64));
     assert_eq!(src.filter_capability(&filter), FilterCapability::Exact);
     let desc = src.scan_descriptor(Some(&vec![0]), &[filter], Some(5));

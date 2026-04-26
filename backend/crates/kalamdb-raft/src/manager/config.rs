@@ -6,7 +6,6 @@
 use std::time::Duration;
 
 use kalamdb_commons::models::NodeId;
-
 pub use kalamdb_configs::RpcTlsConfig;
 
 /// Default number of user data shards

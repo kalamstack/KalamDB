@@ -14,7 +14,7 @@
 use crate::constants::ColumnFamilyNames;
 use crate::models::TableId;
 
-/// Memory/performance profile applied to a RocksDB column family.
+/// Memory/performance profile applied to a storage partition or physical RocksDB CF.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ColumnFamilyProfile {
     /// System metadata tables and compatibility partitions.
@@ -70,7 +70,8 @@ pub enum SystemTable {
     ServerLogs,
     /// system.cluster - Raft cluster status and metrics (computed on-demand)
     Cluster,
-    /// system.cluster_groups - Per-Raft-group membership and replication status (computed on-demand)
+    /// system.cluster_groups - Per-Raft-group membership and replication status (computed
+    /// on-demand)
     ClusterGroups,
     /// system.datatypes - Supported data type mappings (computed on-demand)
     Datatypes,
@@ -137,8 +138,8 @@ impl SystemTable {
         )
     }
 
-    /// Get the column family name in RocksDB (e.g., "system_users")
-    /// Returns None for views (they have no storage backing)
+    /// Get the logical storage partition name (e.g., "system_users").
+    /// Returns None for views because they have no storage backing.
     pub fn column_family_name(&self) -> Option<&'static str> {
         match self {
             SystemTable::Users => Some("system_users"),
@@ -285,8 +286,9 @@ impl SystemTable {
     /// Allocates each Partition once and returns a reference,
     /// avoiding repeated String allocations across the codebase.
     pub fn partition(&self) -> Option<&'static crate::storage::Partition> {
-        use crate::storage::Partition;
         use once_cell::sync::Lazy;
+
+        use crate::storage::Partition;
 
         static USERS: Lazy<Partition> = Lazy::new(|| Partition::new("system_users"));
         static NAMESPACES: Lazy<Partition> = Lazy::new(|| Partition::new("system_namespaces"));
@@ -400,8 +402,9 @@ impl StoragePartition {
 
     /// Returns a shared Partition reference for this named partition.
     pub fn partition(&self) -> &'static crate::storage::Partition {
-        use crate::storage::Partition;
         use once_cell::sync::Lazy;
+
+        use crate::storage::Partition;
 
         static INFO: Lazy<Partition> =
             Lazy::new(|| Partition::new(StoragePartition::InformationSchemaTables.name()));
@@ -433,9 +436,18 @@ impl StoragePartition {
     }
 }
 
-/// Classify an arbitrary RocksDB column-family name into a typed tuning profile.
+/// Classify a storage partition or physical RocksDB CF name into a typed tuning profile.
 #[must_use]
 pub fn classify_column_family_name(name: &str) -> ColumnFamilyProfile {
+    match name {
+        "system_meta" => return ColumnFamilyProfile::SystemMeta,
+        "system_index" => return ColumnFamilyProfile::SystemIndex,
+        "hot_data" => return ColumnFamilyProfile::HotData,
+        "hot_index" => return ColumnFamilyProfile::HotIndex,
+        "raft_data" => return ColumnFamilyProfile::Raft,
+        _ => {},
+    }
+
     if let Ok(table) = SystemTable::from_name(name) {
         if table.column_family_name().is_some() {
             return table.column_family_profile();
@@ -444,10 +456,6 @@ pub fn classify_column_family_name(name: &str) -> ColumnFamilyProfile {
 
     if let Some(partition) = StoragePartition::from_partition_name(name) {
         return partition.column_family_profile();
-    }
-
-    if name == "raft_data" {
-        return ColumnFamilyProfile::Raft;
     }
 
     if name == "topic_messages" {

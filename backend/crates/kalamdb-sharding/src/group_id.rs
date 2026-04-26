@@ -1,12 +1,11 @@
 //! Raft Group ID definitions
 //!
-//! KalamDB uses Multi-Raft with 34 groups:
+//! KalamDB uses Multi-Raft with independently configured groups:
 //! - 1 unified metadata group (Meta)
-//! - 32 user data shards (user tables)
-//! - 1 shared data shard (shared tables)
+//! - N user data shards (user tables)
+//! - M shared data shards (shared tables)
 
-use std::fmt;
-use std::str::FromStr;
+use std::{fmt, str::FromStr};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -24,8 +23,8 @@ pub const DEFAULT_SHARED_SHARDS: u32 = 1;
 /// ## Structure
 ///
 /// - **Meta**: Unified metadata group (namespaces, tables, storages, users, jobs)
-/// - **DataUserShard(0..31)**: User table data shards
-/// - **DataSharedShard(0)**: Shared table data shard
+/// - **DataUserShard(N)**: User table data shards
+/// - **DataSharedShard(N)**: Shared table data shards
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum GroupId {
@@ -34,11 +33,10 @@ pub enum GroupId {
     Meta,
 
     // === Data Groups (33) ===
-    /// User table data shard (0..31)
+    /// User table data shard
     /// Routes by: user_id % num_user_shards
     DataUserShard(u32),
-    /// Shared table data shard (0 for Phase 1)
-    /// Future: shard by table_id or row key
+    /// Shared table data shard
     DataSharedShard(u32),
 }
 
@@ -89,8 +87,8 @@ impl GroupId {
     pub fn from_u64(id: u64) -> Option<Self> {
         match id {
             10 => Some(GroupId::Meta),
-            100..=131 => Some(GroupId::DataUserShard((id - 100) as u32)),
-            200..=231 => Some(GroupId::DataSharedShard((id - 200) as u32)),
+            100..=199 => Some(GroupId::DataUserShard((id - 100) as u32)),
+            200.. => u32::try_from(id - 200).ok().map(GroupId::DataSharedShard),
             _ => None,
         }
     }

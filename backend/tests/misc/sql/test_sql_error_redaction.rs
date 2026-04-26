@@ -1,9 +1,10 @@
 //! Integration tests for public SQL error redaction.
 
-use super::test_support::TestServer;
 use kalam_client::models::ResponseStatus;
 use kalamdb_commons::Role;
 use uuid::Uuid;
+
+use super::test_support::TestServer;
 
 #[actix_web::test]
 #[ntest::timeout(45000)]

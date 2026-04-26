@@ -1,9 +1,14 @@
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicI64, Ordering},
+        Arc,
+    },
+    time::{SystemTime, UNIX_EPOCH},
+};
+
 use dashmap::DashMap;
 use kalamdb_commons::models::{TransactionId, TransactionState};
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 const STALE_IDLE_SESSION_TTL_MS: i64 = 5_000;
@@ -185,7 +190,8 @@ impl RemotePgSession {
     }
 
     fn with_live_transaction(mut self, live_transaction: Option<&LivePgTransaction>) -> Self {
-        self.transaction_id = live_transaction.map(|transaction| transaction.transaction_id().clone());
+        self.transaction_id =
+            live_transaction.map(|transaction| transaction.transaction_id().clone());
         self.transaction_state = live_transaction.map(LivePgTransaction::transaction_state);
         self.transaction_has_writes =
             live_transaction.map(LivePgTransaction::transaction_has_writes).unwrap_or(false);
@@ -332,7 +338,8 @@ impl SessionRegistry {
         client_addr: Option<&str>,
         bridge_auth: BridgeAuth,
     ) -> RemotePgSession {
-        let session_id = normalize_optional(session_id).unwrap_or_else(|| Uuid::now_v7().to_string());
+        let session_id =
+            normalize_optional(session_id).unwrap_or_else(|| Uuid::now_v7().to_string());
         let now_ms = current_timestamp_ms();
 
         self.maybe_prune_stale_local_idle_sessions(now_ms);
@@ -443,11 +450,7 @@ impl SessionRegistry {
             log::warn!(
                 "PG session '{}': auto-rolling back stale transaction '{}' before starting new one",
                 session_id,
-                session
-                    .transaction_id
-                    .as_ref()
-                    .map(TransactionId::as_str)
-                    .unwrap_or("?")
+                session.transaction_id.as_ref().map(TransactionId::as_str).unwrap_or("?")
             );
             session.transaction_id = None;
             session.transaction_state = None;
@@ -500,11 +503,8 @@ impl SessionRegistry {
         }
 
         if session.transaction_id.as_ref() != Some(transaction_id) {
-            let current_tx = session
-                .transaction_id
-                .as_ref()
-                .map(TransactionId::as_str)
-                .unwrap_or("");
+            let current_tx =
+                session.transaction_id.as_ref().map(TransactionId::as_str).unwrap_or("");
             return Err(format!(
                 "transaction ID mismatch: expected '{}', got '{}'",
                 current_tx, transaction_id
@@ -557,11 +557,8 @@ impl SessionRegistry {
         }
 
         if session.transaction_id.as_ref() != Some(transaction_id) {
-            let current_tx = session
-                .transaction_id
-                .as_ref()
-                .map(TransactionId::as_str)
-                .unwrap_or("");
+            let current_tx =
+                session.transaction_id.as_ref().map(TransactionId::as_str).unwrap_or("");
             return Err(format!(
                 "transaction ID mismatch: expected '{}', got '{}'",
                 current_tx, transaction_id
@@ -668,8 +665,9 @@ impl SessionRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use uuid::Uuid;
+
+    use super::*;
 
     #[test]
     fn open_or_get_creates_session() {

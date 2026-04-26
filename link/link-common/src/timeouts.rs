@@ -12,8 +12,9 @@ use std::time::Duration;
 /// # Examples
 ///
 /// ```rust
-/// use kalam_client::KalamLinkTimeouts;
 /// use std::time::Duration;
+///
+/// use kalam_client::KalamLinkTimeouts;
 ///
 /// // Use defaults (recommended for most cases)
 /// let timeouts = KalamLinkTimeouts::default();

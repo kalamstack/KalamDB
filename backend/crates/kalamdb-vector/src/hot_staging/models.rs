@@ -1,7 +1,9 @@
-use kalamdb_commons::ids::SeqId;
-use kalamdb_commons::models::{TableId, UserId};
-use kalamdb_commons::storage_key::{decode_key, encode_key, encode_prefix};
-use kalamdb_commons::{KSerializable, StorageKey};
+use kalamdb_commons::{
+    ids::SeqId,
+    models::{TableId, UserId},
+    storage_key::{decode_key, encode_key, encode_prefix},
+    KSerializable, StorageKey,
+};
 use kalamdb_system::VectorMetric;
 use serde::{Deserialize, Serialize};
 

@@ -2,8 +2,7 @@
 //!
 //! Represents a durable pub/sub topic backed by RocksDB.
 
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::models::TopicId;
+use kalamdb_commons::{datatypes::KalamDataType, models::TopicId};
 use kalamdb_macros::table;
 use serde::{Deserialize, Serialize};
 
@@ -212,8 +211,9 @@ impl Topic {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kalamdb_commons::models::{NamespaceId, TableId, TableName, TopicOp};
+
+    use super::*;
 
     #[test]
     fn test_topic_creation() {

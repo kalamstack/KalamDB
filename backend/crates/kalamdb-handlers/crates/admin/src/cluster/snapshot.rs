@@ -2,14 +2,15 @@
 //!
 //! Forces all Raft logs to be written to snapshots across the cluster
 
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::executor::handlers::{
-    ExecutionContext, ExecutionResult, ScalarValue, StatementHandler,
+use std::sync::Arc;
+
+use kalamdb_core::{
+    app_context::AppContext,
+    error::KalamDbError,
+    sql::executor::handlers::{ExecutionContext, ExecutionResult, ScalarValue, StatementHandler},
 };
 use kalamdb_raft::RaftExecutor;
 use kalamdb_sql::classifier::{SqlStatement, SqlStatementKind};
-use std::sync::Arc;
 
 pub struct ClusterSnapshotHandler {
     app_context: Arc<AppContext>,
@@ -63,8 +64,8 @@ impl StatementHandler for ClusterSnapshotHandler {
 
         // Build detailed message
         let mut message = format!(
-            "Cluster snapshot completed: {}/{} snapshots triggered successfully\n\
-             Snapshots directory: {}",
+            "Cluster snapshot completed: {}/{} snapshots triggered successfully\nSnapshots \
+             directory: {}",
             success_count,
             total_count,
             snapshots_dir.display()

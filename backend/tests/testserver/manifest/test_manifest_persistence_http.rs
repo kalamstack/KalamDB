@@ -1,11 +1,14 @@
 //! Manifest persistence behavior over the real HTTP SQL API.
 
-use super::test_support::auth_helper::create_user_auth_header;
-use super::test_support::consolidated_helpers::{unique_namespace, unique_table};
-use super::test_support::flush::flush_table_and_wait;
 use kalam_client::models::ResponseStatus;
 use kalamdb_commons::Role;
 use tokio::time::{sleep, Duration, Instant};
+
+use super::test_support::{
+    auth_helper::create_user_auth_header,
+    consolidated_helpers::{unique_namespace, unique_table},
+    flush::flush_table_and_wait,
+};
 
 fn find_manifest_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
     fn recurse(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
@@ -44,14 +47,15 @@ async fn test_user_table_manifest_persistence_over_http() -> anyhow::Result<()> 
         assert_eq!(resp.status, ResponseStatus::Success, "resp.error={:?}", resp.error);
 
         let resp = server
-                .execute_sql_with_auth(
-                    &format!(
-                        "CREATE TABLE {}.{} (id TEXT PRIMARY KEY, event_type TEXT, ts INT) WITH (TYPE = 'USER', STORAGE_ID = 'local')",
-                        ns, table
-                    ),
-                    &user_auth,
-                )
-                .await?;
+            .execute_sql_with_auth(
+                &format!(
+                    "CREATE TABLE {}.{} (id TEXT PRIMARY KEY, event_type TEXT, ts INT) WITH (TYPE \
+                     = 'USER', STORAGE_ID = 'local')",
+                    ns, table
+                ),
+                &user_auth,
+            )
+            .await?;
         assert_eq!(resp.status, ResponseStatus::Success);
 
         let resp = server
@@ -132,14 +136,15 @@ async fn test_user_table_manifest_persistence_over_http() -> anyhow::Result<()> 
         assert_eq!(resp.status, ResponseStatus::Success, "resp.error={:?}", resp.error);
 
         let resp = server
-                .execute_sql_with_auth(
-                    &format!(
-                        "CREATE TABLE {}.{} (id TEXT PRIMARY KEY, metric_name TEXT, value DOUBLE) WITH (TYPE = 'USER', STORAGE_ID = 'local')",
-                        ns, table
-                    ),
-                    &user_auth,
-                )
-                .await?;
+            .execute_sql_with_auth(
+                &format!(
+                    "CREATE TABLE {}.{} (id TEXT PRIMARY KEY, metric_name TEXT, value DOUBLE) \
+                     WITH (TYPE = 'USER', STORAGE_ID = 'local')",
+                    ns, table
+                ),
+                &user_auth,
+            )
+            .await?;
         assert_eq!(resp.status, ResponseStatus::Success, "resp.error={:?}", resp.error);
 
         let resp = server

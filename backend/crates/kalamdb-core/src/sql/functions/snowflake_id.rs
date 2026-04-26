@@ -8,16 +8,21 @@
 //!
 //! This ensures time-ordered, unique IDs suitable for PRIMARY KEY columns.
 
-use datafusion::arrow::array::{ArrayRef, Int64Array};
-use datafusion::error::{DataFusionError, Result as DataFusionResult};
-use datafusion::logical_expr::{
-    ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility,
+use std::{
+    any::Any,
+    sync::{
+        atomic::{AtomicU16, Ordering},
+        Arc,
+    },
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use datafusion::{
+    arrow::array::{ArrayRef, Int64Array},
+    error::{DataFusionError, Result as DataFusionResult},
+    logical_expr::{ColumnarValue, ScalarFunctionArgs, ScalarUDFImpl, Signature, Volatility},
 };
 use kalamdb_commons::arrow_utils::{arrow_int64, ArrowDataType};
-use std::any::Any;
-use std::sync::atomic::{AtomicU16, Ordering};
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 // Snowflake ID format constants
 const TIMESTAMP_BITS: u64 = 41;
@@ -132,9 +137,11 @@ impl ScalarUDFImpl for SnowflakeIdFunction {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use datafusion::logical_expr::ScalarUDF;
     use std::collections::HashSet;
+
+    use datafusion::logical_expr::ScalarUDF;
+
+    use super::*;
 
     #[test]
     fn test_snowflake_id_function_creation() {

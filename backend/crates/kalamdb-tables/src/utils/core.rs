@@ -1,9 +1,14 @@
-use crate::error::KalamDbError;
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::logical_expr::Expr;
-use kalamdb_commons::schemas::{TableDefinition, TableType};
-use kalamdb_commons::websocket::ChangeNotification;
-use kalamdb_commons::TableId;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
+
+use datafusion::{arrow::datatypes::SchemaRef, logical_expr::Expr};
+use kalamdb_commons::{
+    schemas::{TableDefinition, TableType},
+    websocket::ChangeNotification,
+    TableId,
+};
 use kalamdb_filestore::StorageRegistry;
 use kalamdb_system::{
     ClusterCoordinator as ClusterCoordinatorTrait, ManifestService as ManifestServiceTrait,
@@ -11,8 +16,8 @@ use kalamdb_system::{
     TopicPublisher as TopicPublisherTrait,
 };
 use kalamdb_transactions::CommitSequenceSource;
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+
+use crate::error::KalamDbError;
 
 /// Combined services struct shared across all table providers.
 ///
@@ -41,7 +46,8 @@ pub struct TableServices {
     /// Commit-sequence source for stamping direct DML writes that bypass the applier fast path.
     pub commit_sequence_source: Arc<dyn CommitSequenceSource>,
 
-    /// Topic publisher for synchronous CDC publishing (optional, None when topics are not configured)
+    /// Topic publisher for synchronous CDC publishing (optional, None when topics are not
+    /// configured)
     pub topic_publisher: Option<Arc<dyn TopicPublisherTrait>>,
 }
 
@@ -117,8 +123,7 @@ impl TableProviderCore {
         schema: SchemaRef,
         column_defaults: HashMap<String, Expr>,
     ) -> Self {
-        use kalamdb_commons::constants::SystemColumnNames;
-        use kalamdb_commons::schemas::ColumnDefault;
+        use kalamdb_commons::{constants::SystemColumnNames, schemas::ColumnDefault};
 
         // Precompute non-nullable columns from the schema.
         // Exclude system columns (_seq, _deleted) because they are auto-generated

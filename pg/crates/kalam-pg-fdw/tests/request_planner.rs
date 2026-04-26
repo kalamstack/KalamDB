@@ -4,9 +4,10 @@ use kalam_pg_common::{DELETED_COLUMN, SEQ_COLUMN, USER_ID_COLUMN};
 use kalam_pg_fdw::{
     DeleteInput, InsertInput, RequestPlanner, ScanInput, UpdateInput, VirtualColumn,
 };
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::{NamespaceId, TableName, UserId};
-use kalamdb_commons::{TableId, TableType};
+use kalamdb_commons::{
+    models::{rows::Row, NamespaceId, TableName, UserId},
+    TableId, TableType,
+};
 
 fn table_id() -> TableId {
     TableId::new(NamespaceId::new("pg_fdw"), TableName::new("messages"))

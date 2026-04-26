@@ -1,9 +1,11 @@
-use crate::classifier::types::{SqlStatement, SqlStatementKind, StatementClassificationError};
-use crate::ddl::*;
-use crate::parser::utils::{collect_non_whitespace_tokens, parse_sql_statements, tokens_to_words};
-use kalamdb_commons::models::NamespaceId;
-use kalamdb_commons::Role;
+use kalamdb_commons::{models::NamespaceId, Role};
 use kalamdb_session::is_admin_role;
+
+use crate::{
+    classifier::types::{SqlStatement, SqlStatementKind, StatementClassificationError},
+    ddl::*,
+    parser::utils::{collect_non_whitespace_tokens, parse_sql_statements, tokens_to_words},
+};
 
 impl SqlStatement {
     /// Wrap a parsed statement into SqlStatement with sql_text
@@ -410,6 +412,78 @@ impl SqlStatement {
                 })?;
                 Ok(Self::new(sql.to_string(), SqlStatementKind::ClusterTransferLeader(node_id)))
             },
+            ["CLUSTER", "JOIN", node_id, ..] => {
+                if !is_admin {
+                    return Err(StatementClassificationError::Unauthorized(
+                        "Admin privileges (DBA or System role) required for cluster operations"
+                            .to_string(),
+                    ));
+                }
+
+                let node_id = node_id.parse::<u64>().map_err(|_| {
+                    StatementClassificationError::InvalidSql {
+                        sql: sql.to_string(),
+                        message: "CLUSTER JOIN requires a numeric node id".to_string(),
+                    }
+                })?;
+                let original_parts: Vec<&str> = sql.split_whitespace().collect();
+                let upper_parts: Vec<String> =
+                    original_parts.iter().map(|part| part.to_ascii_uppercase()).collect();
+                let (rpc_addr, api_addr) = if upper_parts.get(3).map(String::as_str) == Some("RPC")
+                {
+                    let rpc_addr = original_parts.get(4).ok_or_else(|| {
+                        StatementClassificationError::InvalidSql {
+                            sql: sql.to_string(),
+                            message: "CLUSTER JOIN requires RPC address".to_string(),
+                        }
+                    })?;
+                    if upper_parts.get(5).map(String::as_str) != Some("API") {
+                        return Err(StatementClassificationError::InvalidSql {
+                            sql: sql.to_string(),
+                            message: "CLUSTER JOIN requires API address".to_string(),
+                        });
+                    }
+                    let api_addr = original_parts.get(6).ok_or_else(|| {
+                        StatementClassificationError::InvalidSql {
+                            sql: sql.to_string(),
+                            message: "CLUSTER JOIN requires API address".to_string(),
+                        }
+                    })?;
+                    ((*rpc_addr).to_string(), (*api_addr).to_string())
+                } else {
+                    let rpc_addr = original_parts.get(3).ok_or_else(|| {
+                        StatementClassificationError::InvalidSql {
+                            sql: sql.to_string(),
+                            message: "CLUSTER JOIN requires RPC address".to_string(),
+                        }
+                    })?;
+                    let api_addr = original_parts.get(4).ok_or_else(|| {
+                        StatementClassificationError::InvalidSql {
+                            sql: sql.to_string(),
+                            message: "CLUSTER JOIN requires API address".to_string(),
+                        }
+                    })?;
+                    ((*rpc_addr).to_string(), (*api_addr).to_string())
+                };
+
+                Ok(Self::new(
+                    sql.to_string(),
+                    SqlStatementKind::ClusterJoin {
+                        node_id,
+                        rpc_addr,
+                        api_addr,
+                    },
+                ))
+            },
+            ["CLUSTER", "REBALANCE", ..] => {
+                if !is_admin {
+                    return Err(StatementClassificationError::Unauthorized(
+                        "Admin privileges (DBA or System role) required for cluster operations"
+                            .to_string(),
+                    ));
+                }
+                Ok(Self::new(sql.to_string(), SqlStatementKind::ClusterRebalance))
+            },
             ["CLUSTER", "STEPDOWN", ..] | ["CLUSTER", "STEP-DOWN", ..] => {
                 if !is_admin {
                     return Err(StatementClassificationError::Unauthorized(
@@ -436,12 +510,10 @@ impl SqlStatement {
                 // Read-only, allowed for all users
                 Ok(Self::new(sql.to_string(), SqlStatementKind::ClusterList))
             },
-            ["CLUSTER", "JOIN", ..] | ["CLUSTER", "LEAVE", ..] => {
-                Err(StatementClassificationError::InvalidSql {
-                    sql: sql.to_string(),
-                    message: "CLUSTER JOIN/LEAVE commands were removed".to_string(),
-                })
-            },
+            ["CLUSTER", "LEAVE", ..] => Err(StatementClassificationError::InvalidSql {
+                sql: sql.to_string(),
+                message: "CLUSTER LEAVE is not supported yet".to_string(),
+            }),
 
             // Transaction control (no parsing needed - just markers)
             ["BEGIN", ..] | ["START", "TRANSACTION", ..] => {
@@ -696,14 +768,16 @@ impl SqlStatement {
             | SqlStatementKind::ClusterPurge(_)
             | SqlStatementKind::ClusterTriggerElection
             | SqlStatementKind::ClusterTransferLeader(_)
+            | SqlStatementKind::ClusterJoin { .. }
+            | SqlStatementKind::ClusterRebalance
             | SqlStatementKind::ClusterStepdown
             | SqlStatementKind::ClusterClear
-            | SqlStatementKind::ClusterList => Err(
-                "Admin privileges (DBA or System role) required for storage and cluster operations"
-                    .to_string(),
-            ),
+            | SqlStatementKind::ClusterList => Err("Admin privileges (DBA or System role) \
+                                                    required for storage and cluster operations"
+                .to_string()),
 
-            // User management requires admin privileges (except for self-modification in ALTER USER)
+            // User management requires admin privileges (except for self-modification in ALTER
+            // USER)
             SqlStatementKind::CreateUser(_) | SqlStatementKind::DropUser(_) => {
                 Err("Admin privileges (DBA or System role) required for user management"
                     .to_string())
@@ -716,10 +790,9 @@ impl SqlStatement {
             // Namespace DDL requires admin privileges
             SqlStatementKind::CreateNamespace(_)
             | SqlStatementKind::AlterNamespace(_)
-            | SqlStatementKind::DropNamespace(_) => {
-                Err("Admin privileges (DBA or System role) required for namespace operations"
-                    .to_string())
-            },
+            | SqlStatementKind::DropNamespace(_) => Err("Admin privileges (DBA or System role) \
+                                                         required for namespace operations"
+                .to_string()),
 
             // Read-only operations on system tables are allowed for all authenticated users
             SqlStatementKind::ShowNamespaces(_)
@@ -731,7 +804,8 @@ impl SqlStatement {
             | SqlStatementKind::DescribeTable(_)
             | SqlStatementKind::UseNamespace(_) => Ok(()),
 
-            // CREATE TABLE/VIEW, DROP TABLE, STORAGE FLUSH/COMPACT, ALTER TABLE - defer to ownership checks
+            // CREATE TABLE/VIEW, DROP TABLE, STORAGE FLUSH/COMPACT, ALTER TABLE - defer to
+            // ownership checks
             SqlStatementKind::CreateTable(_)
             | SqlStatementKind::CreateView(_)
             | SqlStatementKind::AlterTable(_)
@@ -772,10 +846,9 @@ impl SqlStatement {
             SqlStatementKind::CreateTopic(_)
             | SqlStatementKind::DropTopic(_)
             | SqlStatementKind::ClearTopic(_)
-            | SqlStatementKind::AddTopicSource(_) => {
-                Err("Admin privileges (DBA or System role) required for topic management"
-                    .to_string())
-            },
+            | SqlStatementKind::AddTopicSource(_) => Err("Admin privileges (DBA or System role) \
+                                                          required for topic management"
+                .to_string()),
 
             // Backup/Restore requires admin
             SqlStatementKind::BackupDatabase(_) | SqlStatementKind::RestoreDatabase(_) => {

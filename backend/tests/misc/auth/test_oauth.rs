@@ -7,11 +7,12 @@
 //! - OAuth subject matching
 //! - Auto-provisioning disabled by default
 
-use super::test_support::TestServer;
-use kalam_client::models::ResponseStatus;
-use kalamdb_commons::models::ConnectionInfo;
-use kalamdb_commons::{AuthType, OAuthProvider, Role, UserId};
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+use kalam_client::models::ResponseStatus;
+use kalamdb_commons::{models::ConnectionInfo, AuthType, OAuthProvider, Role, UserId};
+
+use super::test_support::TestServer;
 
 static UNIQUE_USER_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -32,9 +33,9 @@ async fn test_oauth_google_success() {
 
     // Create OAuth user with Google provider
     let create_sql = format!(
-        "CREATE USER {} WITH OAUTH '{{\"provider\": \"google\", \"subject\": \"google_123456\"}}' ROLE user EMAIL '{}@gmail.com'",
-        oauth_username,
-        oauth_username
+        "CREATE USER {} WITH OAUTH '{{\"provider\": \"google\", \"subject\": \"google_123456\"}}' \
+         ROLE user EMAIL '{}@gmail.com'",
+        oauth_username, oauth_username
     );
 
     let result = server.execute_sql_as_user(&create_sql, admin_id_str).await;
@@ -73,7 +74,8 @@ async fn test_oauth_user_password_rejected() {
 
     // Create OAuth user
     let create_sql = format!(
-        "CREATE USER {} WITH OAUTH '{{\"provider\": \"github\", \"subject\": \"github_789\"}}' ROLE user",
+        "CREATE USER {} WITH OAUTH '{{\"provider\": \"github\", \"subject\": \"github_789\"}}' \
+         ROLE user",
         oauth_username
     );
     let res = server.execute_sql_as_user(&create_sql, admin_id_str).await;
@@ -119,11 +121,13 @@ async fn test_oauth_subject_matching() {
 
     // Create two OAuth users with different subjects
     let create_sql1 = format!(
-        "CREATE USER {} WITH OAUTH '{{\"provider\": \"google\", \"subject\": \"google_111\"}}' ROLE user",
+        "CREATE USER {} WITH OAUTH '{{\"provider\": \"google\", \"subject\": \"google_111\"}}' \
+         ROLE user",
         user1_name
     );
     let create_sql2 = format!(
-        "CREATE USER {} WITH OAUTH '{{\"provider\": \"google\", \"subject\": \"google_222\"}}' ROLE user",
+        "CREATE USER {} WITH OAUTH '{{\"provider\": \"google\", \"subject\": \"google_222\"}}' \
+         ROLE user",
         user2_name
     );
 
@@ -218,9 +222,9 @@ async fn test_oauth_azure_provider() {
 
     // Create OAuth user with Azure provider
     let create_sql = format!(
-        "CREATE USER {} WITH OAUTH '{{\"provider\": \"azure\", \"subject\": \"azure_tenant_user\"}}' ROLE service EMAIL '{}@microsoft.com'",
-        oauth_username,
-        oauth_username
+        "CREATE USER {} WITH OAUTH '{{\"provider\": \"azure\", \"subject\": \
+         \"azure_tenant_user\"}}' ROLE service EMAIL '{}@microsoft.com'",
+        oauth_username, oauth_username
     );
 
     let result = server.execute_sql_as_user(&create_sql, admin_id_str).await;

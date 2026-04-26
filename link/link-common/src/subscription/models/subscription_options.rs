@@ -6,7 +6,7 @@ use crate::seq_id::SeqId;
 ///
 /// These options control individual subscription behavior including:
 /// - Initial data loading (batch_size, last_rows)
-/// - Data resumption after reconnection (from)
+/// - Data resumption after reconnection (`from`)
 ///
 /// Aligned with backend's SubscriptionOptions in kalamdb-commons/websocket.rs.
 ///
@@ -16,14 +16,11 @@ use crate::seq_id::SeqId;
 /// use kalam_client::{SeqId, SubscriptionOptions};
 ///
 /// // Fetch last 100 rows with batch size of 50
-/// let options = SubscriptionOptions::default()
-///     .with_batch_size(50)
-///     .with_last_rows(100);
+/// let options = SubscriptionOptions::default().with_batch_size(50).with_last_rows(100);
 ///
 /// // Resume from a specific sequence ID after reconnection
 /// let some_seq_id = SeqId::new(123);
-/// let options = SubscriptionOptions::default()
-///     .with_from(some_seq_id);
+/// let options = SubscriptionOptions::default().with_from(some_seq_id);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SubscriptionOptions {
@@ -43,10 +40,6 @@ pub struct SubscriptionOptions {
     #[serde(skip_serializing_if = "Option::is_none", alias = "from_seq_id")]
     pub from: Option<SeqId>,
 
-    /// Preserve the original snapshot boundary across reconnects while the
-    /// initial load is still in progress.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub snapshot_end_seq: Option<SeqId>,
 }
 
 impl SubscriptionOptions {
@@ -71,12 +64,6 @@ impl SubscriptionOptions {
     /// Used during reconnection to continue from where we left off.
     pub fn with_from(mut self, seq_id: SeqId) -> Self {
         self.from = Some(seq_id);
-        self
-    }
-
-    /// Preserve the original snapshot boundary across reconnects.
-    pub fn with_snapshot_end_seq(mut self, seq_id: SeqId) -> Self {
-        self.snapshot_end_seq = Some(seq_id);
         self
     }
 

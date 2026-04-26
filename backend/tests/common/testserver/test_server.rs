@@ -3,16 +3,16 @@
 //! Provides a TestServer API similar to the legacy in-process test server,
 //! but backed by the shared HttpTestServer instance.
 
-use super::http_server::{self, HttpTestServer};
+use std::sync::Arc;
+
 use datafusion::prelude::SessionContext;
 use kalam_client::models::{ErrorDetail, QueryResponse, ResponseStatus};
 use kalamdb_auth::{CoreUsersRepo, UserRepository};
-use kalamdb_commons::constants::AuthConstants;
-use kalamdb_commons::{AuthType, Role, StorageId, UserId};
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::sql::executor::SqlExecutor;
+use kalamdb_commons::{constants::AuthConstants, AuthType, Role, StorageId, UserId};
+use kalamdb_core::{app_context::AppContext, sql::executor::SqlExecutor};
 use kalamdb_system::providers::storages::models::StorageMode;
-use std::sync::Arc;
+
+use super::http_server::{self, HttpTestServer};
 
 /// Test server instance backed by the shared HTTP server.
 #[derive(Clone)]
@@ -49,8 +49,7 @@ impl TestServer {
             app_context.system_tables().users().get_user_by_id(&system_user_id)
         {
             if user.password_hash.is_empty() {
-                user.password_hash =
-                    bcrypt::hash("admin", 4).unwrap_or_default();
+                user.password_hash = bcrypt::hash("admin", 4).unwrap_or_default();
                 user.updated_at = chrono::Utc::now().timestamp_millis();
                 let _ = app_context.system_tables().users().update_user(user);
             }
@@ -80,8 +79,7 @@ impl TestServer {
             app_context.system_tables().users().get_user_by_id(&system_user_id)
         {
             if user.password_hash.is_empty() {
-                user.password_hash =
-                    bcrypt::hash("admin", 4).unwrap_or_default();
+                user.password_hash = bcrypt::hash("admin", 4).unwrap_or_default();
                 user.updated_at = chrono::Utc::now().timestamp_millis();
                 let _ = app_context.system_tables().users().update_user(user);
             }
@@ -144,8 +142,7 @@ impl TestServer {
             }
             user.role
         } else {
-            let password_hash =
-                bcrypt::hash("test123", 4).unwrap_or_else(|_| String::new());
+            let password_hash = bcrypt::hash("test123", 4).unwrap_or_else(|_| String::new());
             let user = kalamdb_system::User {
                 user_id: user_id_obj.clone(),
                 password_hash,
@@ -188,8 +185,7 @@ impl TestServer {
     /// Helper to create a test user with explicit role and password.
     pub async fn create_user(&self, username: &str, password: &str, role: Role) -> UserId {
         let user_id = UserId::new(username);
-        let password_hash =
-            bcrypt::hash(password, 4).expect("Failed to hash password");
+        let password_hash = bcrypt::hash(password, 4).expect("Failed to hash password");
         let users_provider = self.app_context.system_tables().users();
 
         if let Ok(Some(mut existing)) = users_provider.get_user_by_id(&user_id) {

@@ -2,8 +2,9 @@
 // Covers: current README schema (USER messages + STREAM agent_events),
 // topic wiring, insert/query operations, and live subscription to streamed agent events
 
-use crate::common::*;
 use std::time::Duration;
+
+use crate::common::*;
 
 fn sql_literal(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
@@ -36,7 +37,8 @@ fn smoke_chat_ai_example_from_readme() {
             .as_micros()
     );
     let assistant_reply = format!(
-        "AI reply: KalamDB stored \"{}\" in {}, streamed the drafting state through {}, and committed the final assistant row.",
+        "AI reply: KalamDB stored \"{}\" in {}, streamed the drafting state through {}, and \
+         committed the final assistant row.",
         user_message, messages_table, agent_events_table
     );
     let typing_preview = assistant_reply.chars().take(48).collect::<String>();
@@ -89,7 +91,8 @@ fn smoke_chat_ai_example_from_readme() {
 
     // 2. Insert a user message, as the browser app would.
     let insert_user_message_sql = format!(
-        "INSERT INTO {} (room, role, author, sender_username, content) VALUES ({}, 'user', {}, {}, {})",
+        "INSERT INTO {} (room, role, author, sender_username, content) VALUES ({}, 'user', {}, \
+         {}, {})",
         messages_table,
         sql_literal(room),
         sql_literal(sender_username),
@@ -133,7 +136,8 @@ fn smoke_chat_ai_example_from_readme() {
 
     for (stage, preview, message) in &events {
         let insert_event_sql = format!(
-            "INSERT INTO {} (response_id, room, sender_username, stage, preview, message) VALUES ({}, {}, {}, {}, {}, {})",
+            "INSERT INTO {} (response_id, room, sender_username, stage, preview, message) VALUES \
+             ({}, {}, {}, {}, {}, {})",
             agent_events_table,
             sql_literal(&response_id),
             sql_literal(room),
@@ -147,7 +151,8 @@ fn smoke_chat_ai_example_from_readme() {
     }
 
     let insert_assistant_message_sql = format!(
-        "INSERT INTO {} (room, role, author, sender_username, content) VALUES ({}, 'assistant', 'KalamDB Copilot', {}, {})",
+        "INSERT INTO {} (room, role, author, sender_username, content) VALUES ({}, 'assistant', \
+         'KalamDB Copilot', {}, {})",
         messages_table,
         sql_literal(room),
         sql_literal(sender_username),
@@ -178,7 +183,8 @@ fn smoke_chat_ai_example_from_readme() {
         }
 
         let retry_event_sql = format!(
-            "INSERT INTO {} (response_id, room, sender_username, stage, preview, message) VALUES ({}, {}, {}, 'typing', {}, {})",
+            "INSERT INTO {} (response_id, room, sender_username, stage, preview, message) VALUES \
+             ({}, {}, {}, 'typing', {}, {})",
             agent_events_table,
             sql_literal(&format!("{}-retry-{}", response_id, retry_count)),
             sql_literal(room),
@@ -192,7 +198,8 @@ fn smoke_chat_ai_example_from_readme() {
 
     if !received_event {
         eprintln!(
-            "⚠️  Did not receive a live agent event in the README smoke test window; continuing with persisted stream verification"
+            "⚠️  Did not receive a live agent event in the README smoke test window; continuing \
+             with persisted stream verification"
         );
     }
 

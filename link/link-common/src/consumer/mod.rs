@@ -10,6 +10,7 @@ pub mod utils;
 
 #[cfg(all(feature = "tokio-runtime", feature = "consumer"))]
 pub use core::{ConsumerBuilder, TopicConsumer};
+
 pub use models::{
     AckResponse, AutoOffsetReset, CommitMode, CommitResult, ConsumeMessage, ConsumeRequest,
     ConsumeResponse, ConsumerConfig, ConsumerOffsets, ConsumerRecord, PayloadMode, TopicOp,

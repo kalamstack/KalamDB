@@ -4,12 +4,16 @@
 //! - UserTableRowId: Composite key with user_id and _seq for user-scoped tables
 //! - SharedTableRowId: Alias to SeqId for shared tables (no user scoping)
 
-use crate::ids::SeqId;
-use crate::models::UserId;
-use crate::storage_key::{decode_key, encode_key, encode_prefix};
-use crate::StorageKey;
-use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    ids::SeqId,
+    models::UserId,
+    storage_key::{decode_key, encode_key, encode_prefix},
+    StorageKey,
+};
 
 /// Composite key for user table rows: {user_id}:{_seq}
 ///

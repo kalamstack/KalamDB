@@ -14,8 +14,7 @@ use crate::timestamp::{TimestampFormat, TimestampFormatter};
 /// ```rust
 /// use kalam_client::{ConnectionOptions, HttpVersion};
 ///
-/// let options = ConnectionOptions::new()
-///     .with_http_version(HttpVersion::Http2);
+/// let options = ConnectionOptions::new().with_http_version(HttpVersion::Http2);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]

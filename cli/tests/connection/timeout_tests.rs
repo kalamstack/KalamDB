@@ -7,8 +7,9 @@
 //! NOTE: These are integration tests that test actual network behavior.
 //! They do NOT require a running server (they test timeout behavior).
 
-use crate::common::{client_for_url_no_auth, KalamLinkTimeouts};
 use std::time::{Duration, Instant};
+
+use crate::common::{client_for_url_no_auth, KalamLinkTimeouts};
 
 /// Test that connection timeout is properly enforced when server is unreachable
 ///

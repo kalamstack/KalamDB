@@ -2,15 +2,18 @@
 //!
 //! Provides unified logic for creating all table types (USER/SHARED/STREAM)
 
-use kalamdb_commons::models::{NamespaceId, StorageId, TableAccess, TableId, UserId};
-use kalamdb_commons::schemas::TableType;
-use kalamdb_commons::Role;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::error_extensions::KalamDbResultExt;
+use std::sync::Arc;
+
+use kalamdb_commons::{
+    models::{NamespaceId, StorageId, TableAccess, TableId, UserId},
+    schemas::TableType,
+    Role,
+};
+use kalamdb_core::{
+    app_context::AppContext, error::KalamDbError, error_extensions::KalamDbResultExt,
+};
 use kalamdb_sql::ddl::CreateTableStatement;
 use kalamdb_system::providers::storages::models::StorageType;
-use std::sync::Arc;
 
 /// Unified CREATE TABLE handler for all table types (USER/SHARED/STREAM)
 ///
@@ -143,7 +146,8 @@ fn log_table_created(
     match &table_def.table_options {
         TableOptions::User(opts) => {
             log::info!(
-                "✅ USER TABLE created: {} | storage: {} | columns: {} | pk: {} | system_columns: [_seq, _deleted]",
+                "✅ USER TABLE created: {} | storage: {} | columns: {} | pk: {} | system_columns: \
+                 [_seq, _deleted]",
                 table_id,
                 opts.storage_id.as_str(),
                 table_def.columns.len(),
@@ -152,7 +156,8 @@ fn log_table_created(
         },
         TableOptions::Shared(opts) => {
             log::info!(
-                "✅ SHARED TABLE created: {} | storage: {} | columns: {} | pk: {} | access_level: {:?} | system_columns: [_seq, _deleted]",
+                "✅ SHARED TABLE created: {} | storage: {} | columns: {} | pk: {} | access_level: \
+                 {:?} | system_columns: [_seq, _deleted]",
                 table_id,
                 opts.storage_id.as_str(),
                 table_def.columns.len(),
@@ -198,9 +203,11 @@ pub fn build_table_definition(
     user_id: &UserId,
     user_role: Role,
 ) -> Result<kalamdb_commons::models::schemas::TableDefinition, KalamDbError> {
-    use kalamdb_commons::datatypes::{FromArrowType, KalamDataType};
-    use kalamdb_commons::models::schemas::{ColumnDefinition, TableDefinition, TableOptions};
-    use kalamdb_commons::schemas::ColumnDefault;
+    use kalamdb_commons::{
+        datatypes::{FromArrowType, KalamDataType},
+        models::schemas::{ColumnDefinition, TableDefinition, TableOptions},
+        schemas::ColumnDefault,
+    };
 
     let table_id_str = format!("{}.{}", stmt.namespace_id.as_str(), stmt.table_name.as_str());
 
@@ -380,7 +387,8 @@ pub fn build_table_definition(
         },
         (TableOptions::Shared(opts), TableType::Shared) => {
             opts.storage_id = storage_id.clone();
-            // Only override access_level if explicitly specified in SQL; otherwise keep the default (Private)
+            // Only override access_level if explicitly specified in SQL; otherwise keep the default
+            // (Private)
             if let Some(access) = stmt.access_level {
                 opts.access_level = Some(access);
             }

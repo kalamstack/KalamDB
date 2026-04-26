@@ -4,8 +4,9 @@
 //! - CREATE NAMESPACE app
 //! - CREATE NAMESPACE IF NOT EXISTS app
 
-use crate::ddl::{parsing, DdlResult};
 use kalamdb_commons::models::NamespaceId;
+
+use crate::ddl::{parsing, DdlResult};
 
 /// CREATE NAMESPACE statement
 #[derive(Debug, Clone, PartialEq)]

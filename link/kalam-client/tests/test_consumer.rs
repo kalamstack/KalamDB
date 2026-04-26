@@ -5,12 +5,12 @@
 //!
 //! Run with: cargo test --test test_consumer -- --nocapture
 
+use std::{collections::HashMap, time::Duration};
+
 use kalam_client::{
     consumer::{AutoOffsetReset, TopicConsumer},
     AuthProvider, KalamLinkClient,
 };
-use std::collections::HashMap;
-use std::time::Duration;
 
 fn get_server_url() -> String {
     std::env::var("KALAMDB_SERVER_URL").unwrap_or_else(|_| "http://localhost:3000".to_string())
@@ -50,7 +50,8 @@ async fn setup_topic_and_table(client: &KalamLinkClient, topic_name: &str, table
 
     // Create table
     let create_table = format!(
-        "CREATE TABLE IF NOT EXISTS {} (id INT PRIMARY KEY, message TEXT, created_at TIMESTAMP DEFAULT NOW())",
+        "CREATE TABLE IF NOT EXISTS {} (id INT PRIMARY KEY, message TEXT, created_at TIMESTAMP \
+         DEFAULT NOW())",
         table_name
     );
     let _ = client.execute_query(&create_table, None, None, None).await;

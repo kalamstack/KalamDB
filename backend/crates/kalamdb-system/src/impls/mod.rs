@@ -1,9 +1,10 @@
-use crate::{Manifest, ManifestCacheEntry};
-use datafusion::arrow::datatypes::SchemaRef;
-use kalamdb_commons::models::schemas::TableDefinition;
-use kalamdb_commons::{StorageId, TableId, UserId};
-use kalamdb_store::StorageError;
 use std::sync::Arc;
+
+use datafusion::arrow::datatypes::SchemaRef;
+use kalamdb_commons::{models::schemas::TableDefinition, StorageId, TableId, UserId};
+use kalamdb_store::StorageError;
+
+use crate::{Manifest, ManifestCacheEntry};
 
 // Notification service trait for data change notifications
 mod notification_service;

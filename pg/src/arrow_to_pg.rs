@@ -1,15 +1,17 @@
 //! Arrow record batch value → PostgreSQL Datum conversion.
 
-use arrow::array::{
-    Array, BinaryArray, BooleanArray, Date32Array, Float32Array, Float64Array, Int16Array,
-    Int32Array, Int64Array, LargeStringArray, StringArray, TimestampMicrosecondArray,
-    TimestampMillisecondArray,
-};
-use arrow::datatypes::{DataType, TimeUnit};
-use datafusion_common::ScalarValue;
-use pgrx::pg_sys;
-use pgrx::{rust_str_to_text_p, IntoDatum};
 use std::ffi::CString;
+
+use arrow::{
+    array::{
+        Array, BinaryArray, BooleanArray, Date32Array, Float32Array, Float64Array, Int16Array,
+        Int32Array, Int64Array, LargeStringArray, StringArray, TimestampMicrosecondArray,
+        TimestampMillisecondArray,
+    },
+    datatypes::{DataType, TimeUnit},
+};
+use datafusion_common::ScalarValue;
+use pgrx::{pg_sys, rust_str_to_text_p, IntoDatum};
 
 /// Days between Unix epoch (1970-01-01) and PostgreSQL epoch (2000-01-01).
 const UNIX_TO_PG_EPOCH_DAYS: i32 = 10_957;

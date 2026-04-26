@@ -1,6 +1,5 @@
 use kalam_pg_types::{foreign_column_definition, pg_type_name_for};
-use kalamdb_commons::models::datatypes::KalamDataType;
-use kalamdb_commons::models::schemas::ColumnDefinition;
+use kalamdb_commons::models::{datatypes::KalamDataType, schemas::ColumnDefinition};
 
 #[test]
 fn maps_embedding_to_pgvector_type_name() {

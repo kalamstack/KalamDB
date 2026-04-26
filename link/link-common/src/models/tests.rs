@@ -1,8 +1,9 @@
-use crate::seq_id::SeqId;
-use serde_json::json;
 use std::collections::BTreeSet;
 
+use serde_json::json;
+
 use super::*;
+use crate::seq_id::SeqId;
 
 // ==================== ConnectionOptions Tests ====================
 
@@ -357,7 +358,6 @@ fn test_batch_control_with_seq_id() {
         has_more: true,
         status: BatchStatus::Loading,
         last_seq_id: Some(seq_id),
-        snapshot_end_seq: Some(SeqId::from(1000i64)),
     };
 
     let json = serde_json::to_string(&batch_control).unwrap();
@@ -365,7 +365,6 @@ fn test_batch_control_with_seq_id() {
     assert!(json.contains("\"has_more\":true"));
     assert!(json.contains("\"status\":\"loading\""));
     assert!(json.contains("last_seq_id"));
-    assert!(json.contains("snapshot_end_seq"));
 }
 
 #[test]
@@ -375,7 +374,6 @@ fn test_batch_control_ready_status() {
         has_more: false,
         status: BatchStatus::Ready,
         last_seq_id: Some(SeqId::from(1000i64)),
-        snapshot_end_seq: Some(SeqId::from(1000i64)),
     };
 
     let json = serde_json::to_string(&batch_control).unwrap();
@@ -544,7 +542,6 @@ fn test_change_event_helpers() {
             has_more: false,
             status: BatchStatus::Ready,
             last_seq_id: None,
-            snapshot_end_seq: None,
         },
         schema: vec![SchemaField {
             name: "id".to_string(),

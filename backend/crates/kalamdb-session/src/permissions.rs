@@ -4,10 +4,13 @@
 //! DataFusion session extraction and provider wrappers live in
 //! `kalamdb-session-datafusion`.
 
+use kalamdb_commons::{
+    models::{NamespaceId, Role, TableName},
+    schemas::{TableDefinition, TableOptions, TableType},
+    TableAccess,
+};
+
 use crate::error::SessionError;
-use kalamdb_commons::models::{NamespaceId, Role, TableName};
-use kalamdb_commons::schemas::{TableDefinition, TableOptions, TableType};
-use kalamdb_commons::TableAccess;
 
 /// Check if a role can access system tables.
 ///

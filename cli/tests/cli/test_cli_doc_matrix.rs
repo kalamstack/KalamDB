@@ -5,9 +5,11 @@
 //! 2) non-server clap parsing tests for previously uncovered flags
 //! 3) server-backed runtime tests for subscribe/consume/timeout-related flags
 
-use crate::common::*;
-use clap::Parser;
 use std::time::{Duration, Instant};
+
+use clap::Parser;
+
+use crate::common::*;
 
 #[path = "../../src/args.rs"]
 mod cli_args;

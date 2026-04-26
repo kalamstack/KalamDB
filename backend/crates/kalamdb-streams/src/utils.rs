@@ -1,6 +1,9 @@
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
 use crate::error::{Result, StreamLogError};
-use std::fs;
-use std::path::{Path, PathBuf};
 
 pub(crate) fn parse_log_window(path: &Path) -> Option<u64> {
     let file_name = path.file_name()?.to_string_lossy();

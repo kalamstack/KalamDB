@@ -3,14 +3,16 @@
 //! This module provides secure extraction of client IP addresses from HTTP requests,
 //! with protection against header spoofing attacks that attempt to bypass localhost checks.
 
-use actix_web::http::header::{HeaderMap, HeaderValue};
-use actix_web::HttpRequest;
+use std::{net::IpAddr, sync::RwLock};
+
+use actix_web::{
+    http::header::{HeaderMap, HeaderValue},
+    HttpRequest,
+};
 use ipnet::IpNet;
 use kalamdb_commons::models::ConnectionInfo;
 use log::warn;
 use once_cell::sync::Lazy;
-use std::net::IpAddr;
-use std::sync::RwLock;
 
 static TRUSTED_PROXY_RANGES: Lazy<RwLock<Vec<IpNet>>> = Lazy::new(|| RwLock::new(Vec::new()));
 
@@ -106,9 +108,9 @@ fn extract_proxy_header_ip(
 
     if is_localhost_address(candidate) {
         warn!(
-            "Security: Rejected localhost value in trusted {} header: '{}'. Using peer_addr instead.",
-            header_name,
-            candidate
+            "Security: Rejected localhost value in trusted {} header: '{}'. Using peer_addr \
+             instead.",
+            header_name, candidate
         );
         return None;
     }
@@ -143,8 +145,9 @@ pub fn is_localhost_address(ip: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use actix_web::http::header::{HeaderMap, HeaderName, HeaderValue};
+
+    use super::*;
 
     #[test]
     fn test_is_localhost_address() {

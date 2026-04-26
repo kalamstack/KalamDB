@@ -1,8 +1,9 @@
 //! Flush-related SQL tests over the real HTTP SQL API.
 
-use super::test_support::consolidated_helpers::unique_namespace;
 use kalam_client::models::ResponseStatus;
 use tokio::time::{sleep, Duration, Instant};
+
+use super::test_support::consolidated_helpers::unique_namespace;
 
 #[tokio::test]
 #[ntest::timeout(120000)] // 120 seconds - allow for server startup + job persistence

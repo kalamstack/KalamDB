@@ -1,17 +1,24 @@
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
-use arrow::array::{Array, FixedSizeListArray, Float32Array};
-use arrow::datatypes::Float32Type;
+use arrow::{
+    array::{Array, FixedSizeListArray, Float32Array},
+    datatypes::Float32Type,
+};
 use datafusion_common::ScalarValue;
 
-use crate::ids::SeqId;
-use crate::models::rows::{Row, UserTableRow};
-use crate::models::UserId;
-use crate::serialization::generated::row_models_generated::kalamdb::serialization::row as fb_row;
-use crate::serialization::schema::ROW_SCHEMA_VERSION;
-use crate::serialization::{decode_enveloped, encode_envelope_inline, CodecKind};
-use crate::storage::StorageError;
+use crate::{
+    ids::SeqId,
+    models::{
+        rows::{Row, UserTableRow},
+        UserId,
+    },
+    serialization::{
+        decode_enveloped, encode_envelope_inline,
+        generated::row_models_generated::kalamdb::serialization::row as fb_row,
+        schema::ROW_SCHEMA_VERSION, CodecKind,
+    },
+    storage::StorageError,
+};
 
 type Result<T> = std::result::Result<T, StorageError>;
 

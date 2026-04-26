@@ -1,7 +1,7 @@
 //! User table provider implementation with RLS
 //!
-//! This module provides UserTableProvider implementing BaseTableProvider<UserTableRowId, UserTableRow>
-//! with Row-Level Security (RLS) enforced via user_id parameter.
+//! This module provides UserTableProvider implementing BaseTableProvider<UserTableRowId,
+//! UserTableRow> with Row-Level Security (RLS) enforced via user_id parameter.
 //!
 //! **Key Features**:
 //! - Direct fields (no UserTableShared wrapper)
@@ -11,62 +11,63 @@
 //! - SessionState extraction for scan_rows()
 //! - PK Index for efficient row lookup (Phase 14)
 
-use crate::error::KalamDbError;
-use crate::error_extensions::KalamDbResultExt;
-use crate::manifest::manifest_helpers::{ensure_manifest_ready, load_row_from_parquet_by_seq};
-use crate::user_tables::{UserTableIndexedStore, UserTablePkIndex, UserTableRow};
-use crate::utils::base::{
-    self, BaseTableProvider, DeferredMvccScanProvider, TableProviderCore,
+use std::{
+    any::Any,
+    collections::{HashMap, HashSet},
+    sync::Arc,
 };
-use crate::utils::row_utils::extract_user_context;
+
 use async_trait::async_trait;
-
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::catalog::Session;
-use datafusion::datasource::TableProvider;
-use datafusion::error::{DataFusionError, Result as DataFusionResult};
-use datafusion::logical_expr::dml::InsertOp;
-use datafusion::logical_expr::{Expr, TableProviderFilterPushDown};
-use datafusion::physical_plan::{ExecutionPlan, Statistics};
-use datafusion::scalar::ScalarValue;
-
-use kalamdb_commons::conversions::arrow_json_conversion::{coerce_rows, coerce_updates};
-use kalamdb_commons::ids::{SeqId, UserTableRowId};
-use kalamdb_commons::models::datatypes::KalamDataType;
-use kalamdb_commons::models::OperationKind;
-use kalamdb_commons::models::UserId;
-use kalamdb_commons::StorageKey;
-use kalamdb_commons::TableType;
+use datafusion::{
+    arrow::{datatypes::SchemaRef, record_batch::RecordBatch},
+    catalog::Session,
+    datasource::TableProvider,
+    error::{DataFusionError, Result as DataFusionResult},
+    logical_expr::{dml::InsertOp, Expr, TableProviderFilterPushDown},
+    physical_plan::{ExecutionPlan, Statistics},
+    scalar::ScalarValue,
+};
+use kalamdb_commons::{
+    conversions::arrow_json_conversion::{coerce_rows, coerce_updates},
+    ids::{SeqId, UserTableRowId},
+    models::{datatypes::KalamDataType, rows::Row, OperationKind, UserId},
+    websocket::ChangeNotification,
+    StorageKey, TableType,
+};
+use kalamdb_datafusion_sources::{
+    exec::{resolve_latest_kvs_from_cold_batch, VersionedRow},
+    provider::{
+        merged_projection_scan_descriptor, mvcc_filter_capability, FilterCapability,
+        ScanDescriptor, SourceProvider,
+    },
+};
 use kalamdb_session::can_read_all_users;
 use kalamdb_session_datafusion::{
     check_user_table_access, check_user_table_write_access, session_error_to_datafusion,
 };
-use kalamdb_datafusion_sources::exec::{
-    resolve_latest_kvs_from_cold_batch, VersionedRow,
-};
-use kalamdb_datafusion_sources::provider::{
-    merged_projection_scan_descriptor, mvcc_filter_capability, FilterCapability, ScanDescriptor,
-    SourceProvider,
-};
 use kalamdb_store::EntityStore;
 use kalamdb_transactions::{extract_transaction_query_context, StagedMutation};
 use kalamdb_vector::{new_indexed_user_vector_hot_store, UserVectorHotOpId, UserVectorHotStore};
-use std::any::Any;
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use tracing::Instrument;
 
-use kalamdb_commons::models::rows::Row;
-
-use kalamdb_commons::websocket::ChangeNotification;
+use crate::{
+    error::KalamDbError,
+    error_extensions::KalamDbResultExt,
+    manifest::manifest_helpers::{ensure_manifest_ready, load_row_from_parquet_by_seq},
+    user_tables::{UserTableIndexedStore, UserTablePkIndex, UserTableRow},
+    utils::{
+        base::{self, BaseTableProvider, DeferredMvccScanProvider, TableProviderCore},
+        row_utils::extract_user_context,
+    },
+};
 
 /// User table provider with RLS
 ///
 /// **Architecture**:
 /// - Stateless provider (user context passed per-operation)
 /// - Direct fields (no wrapper layer)
-/// - Shared core via Arc<TableProviderCore> (holds schema, pk_name, column_defaults, non_null_columns)
+/// - Shared core via Arc<TableProviderCore> (holds schema, pk_name, column_defaults,
+///   non_null_columns)
 /// - RLS enforced via user_id parameter
 /// - PK Index for efficient row lookup (Phase 14)
 #[derive(Clone)]
@@ -306,7 +307,8 @@ impl UserTableProvider {
                         crate::utils::unified_dml::extract_user_pk_value(row_data, pk_name)?;
                     if !seen_batch_pks.insert(pk_str.clone()) {
                         return Err(KalamDbError::AlreadyExists(format!(
-                            "Primary key violation: value '{}' appears multiple times in the insert batch for column '{}'",
+                            "Primary key violation: value '{}' appears multiple times in the \
+                             insert batch for column '{}'",
                             pk_str, pk_name
                         )));
                     }
@@ -600,8 +602,8 @@ impl UserTableProvider {
 
     /// Scan Parquet files from cold storage for a specific user (async version).
     ///
-    /// Lists all *.parquet files in the user's storage directory and merges them into a single RecordBatch.
-    /// Returns an empty batch if no Parquet files exist.
+    /// Lists all *.parquet files in the user's storage directory and merges them into a single
+    /// RecordBatch. Returns an empty batch if no Parquet files exist.
     ///
     /// **Phase 4 (US6, T082-T084)**: Integrated with ManifestService for manifest caching.
     /// Logs cache hits/misses and updates last_accessed timestamp. Full query optimization
@@ -787,11 +789,8 @@ impl DeferredMvccScanProvider<UserTableRowId, UserTableRow> for UserTableProvide
         &self,
         scan_context: &Self::ScanContext,
     ) -> Result<usize, KalamDbError> {
-        self.count_resolved_rows_async(
-            &scan_context.user_id,
-            scan_context.snapshot_commit_seq,
-        )
-        .await
+        self.count_resolved_rows_async(&scan_context.user_id, scan_context.snapshot_commit_seq)
+            .await
     }
 
     async fn scan_kvs_with_context(
@@ -871,8 +870,9 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
     /// For hot storage (RocksDB), uses fast existence check. If not found in hot storage,
     /// falls back to checking cold storage using manifest-based pruning.
     ///
-    /// OPTIMIZED: Uses `pk_exists_in_hot` for fast hot-path check (single index lookup + 1 entity fetch max).
-    /// OPTIMIZED: Uses `pk_exists_in_cold` with manifest-based segment pruning for cold storage.
+    /// OPTIMIZED: Uses `pk_exists_in_hot` for fast hot-path check (single index lookup + 1 entity
+    /// fetch max). OPTIMIZED: Uses `pk_exists_in_cold` with manifest-based segment pruning for
+    /// cold storage.
     async fn find_row_key_by_id_field(
         &self,
         user_id: &UserId,
@@ -1086,7 +1086,8 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
             KalamDbError::InvalidOperation(format!("Prior row missing PK {}", pk_name))
         })?;
 
-        // Validate PK update (check if new PK value already exists) — only needed when updating by key
+        // Validate PK update (check if new PK value already exists) — only needed when updating by
+        // key
         base::validate_pk_update(self, Some(user_id), &updates, &pk_value_scalar).await?;
 
         // Delegate to the canonical implementation
@@ -1125,7 +1126,8 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
             let pk_value_scalar = parse_string_as_scalar(pk_value, pk_column_type)
                 .map_err(|e| KalamDbError::InvalidOperation(e))?;
             // Find latest resolved row for this PK under same user
-            // First try hot storage (O(1) via PK index), then fall back to cold storage (Parquet scan)
+            // First try hot storage (O(1) via PK index), then fall back to cold storage (Parquet
+            // scan)
             let (_latest_key, latest_row) =
                 if let Some(result) = self.find_by_pk(user_id, &pk_value_scalar).await? {
                     result
@@ -1138,7 +1140,8 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
                     // Not in hot storage, check cold storage
                     if log::log_enabled!(log::Level::Debug) {
                         log::debug!(
-                            "[UPDATE] PK {} not found in hot storage, querying cold storage for user={}, pk={}",
+                            "[UPDATE] PK {} not found in hot storage, querying cold storage for \
+                             user={}, pk={}",
                             pk_name,
                             user_id.as_str(),
                             pk_value
@@ -1325,7 +1328,8 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
                     .map_err(KalamDbError::InvalidOperation)?;
 
             // Find latest resolved row for this PK under same user
-            // First try hot storage (O(1) via PK index), then fall back to cold storage (Parquet scan)
+            // First try hot storage (O(1) via PK index), then fall back to cold storage (Parquet
+            // scan)
             let latest_row =
                 if let Some((_key, row)) = self.find_by_pk(user_id, &pk_value_scalar).await? {
                     row
@@ -1439,8 +1443,7 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         limit: Option<usize>,
     ) -> Result<RecordBatch, KalamDbError> {
         let scan_context = self.build_scan_context(state)?;
-        self.scan_rows_with_context(&scan_context, projection, filter, limit)
-            .await
+        self.scan_rows_with_context(&scan_context, projection, filter, limit).await
     }
 
     async fn scan_with_version_resolution_to_kvs_async(
@@ -1524,15 +1527,13 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
         //     );
         // }
 
-        let result: Vec<(UserTableRowId, UserTableRow)> = resolved
-            .rows
-            .into_iter()
-            .map(|(row_id, row)| (row_id, row.0))
-            .collect();
+        let result: Vec<(UserTableRowId, UserTableRow)> =
+            resolved.rows.into_iter().map(|(row_id, row)| (row_id, row.0)).collect();
 
         if log::log_enabled!(log::Level::Trace) {
             log::trace!(
-                "[UserProvider] Final version-resolved (post-tombstone): {} rows (table={}; user={})",
+                "[UserProvider] Final version-resolved (post-tombstone): {} rows (table={}; \
+                 user={})",
                 result.len(),
                 table_id,
                 user_id.as_str()
@@ -2293,6 +2294,13 @@ impl TableProvider for UserTableProvider {
                 &row,
                 &assignments,
             )?;
+            if crate::utils::datafusion_dml::update_assignments_noop(
+                &schema,
+                &row,
+                &evaluated_updates,
+            )? {
+                continue;
+            }
 
             if let Some(staged_mutations) = staged_mutations.as_mut() {
                 staged_mutations.push(StagedMutation::new(

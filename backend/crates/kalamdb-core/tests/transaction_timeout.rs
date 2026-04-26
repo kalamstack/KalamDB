@@ -1,10 +1,8 @@
 mod support;
 
-use std::sync::Arc;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
-use kalamdb_commons::models::pg_operations::InsertRequest;
-use kalamdb_commons::TableType;
+use kalamdb_commons::{models::pg_operations::InsertRequest, TableType};
 use kalamdb_configs::ServerConfig;
 use kalamdb_core::operations::service::OperationService;
 use kalamdb_pg::OperationExecutor;

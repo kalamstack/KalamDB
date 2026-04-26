@@ -15,26 +15,30 @@
 //! #[actix_web::test]
 //! async fn test_example() {
 //!     let server = TestServer::new_shared().await;
-//!     
+//!
 //!     // Create namespace
 //!     fixtures::create_namespace(&server, "app").await;
-//!     
+//!
 //!     // Create user table with sample data
 //!     fixtures::create_messages_table(&server, "app").await;
 //!     fixtures::insert_sample_messages(&server, "app", "user123", 10).await;
-//!     
+//!
 //!     // Run your test...
 //! }
 //! ```
 
-use super::TestServer;
+use std::{
+    sync::atomic::{AtomicUsize, Ordering},
+    time::{Duration, Instant},
+};
+
 use anyhow::Result;
 use kalam_client::models::{QueryResponse, QueryResult, ResponseStatus};
 use kalamdb_commons::models::NamespaceId;
 use serde_json::json;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
 use tokio::time::sleep;
+
+use super::TestServer;
 
 static UNIQUE_NS_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -59,7 +63,9 @@ fn unique_namespace(prefix: &str) -> String {
 /// # Example
 ///
 /// ```no_run
-/// fixtures::execute_sql(&server, "CREATE TABLE test.messages (...)", "user1").await.unwrap();
+/// fixtures::execute_sql(&server, "CREATE TABLE test.messages (...)", "user1")
+///     .await
+///     .unwrap();
 /// ```
 pub async fn execute_sql(server: &TestServer, sql: &str, user_id: &str) -> Result<QueryResponse> {
     Ok(server.execute_sql_as_user(sql, user_id).await)
@@ -565,7 +571,8 @@ mod tests {
 
         let response = create_messages_table(&server, "app", Some("user123")).await;
         if response.status != ResponseStatus::Success {
-            // In shared TestServer runs, provider may already be registered; accept idempotent already-exists
+            // In shared TestServer runs, provider may already be registered; accept idempotent
+            // already-exists
             let msg = response.error.as_ref().map(|e| e.message.clone()).unwrap_or_default();
             assert!(
                 msg.contains("already exists"),

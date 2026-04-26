@@ -1,11 +1,13 @@
 use kalam_pg_common::{DELETED_COLUMN, SEQ_COLUMN, USER_ID_COLUMN};
 use kalam_pg_fdw::create_foreign_table_sql;
-use kalamdb_commons::models::datatypes::KalamDataType;
-use kalamdb_commons::models::schemas::{
-    ColumnDefinition, SharedTableOptions, TableDefinition, TableOptions,
+use kalamdb_commons::{
+    models::{
+        datatypes::KalamDataType,
+        schemas::{ColumnDefinition, SharedTableOptions, TableDefinition, TableOptions},
+        NamespaceId, TableName,
+    },
+    TableAccess, TableType,
 };
-use kalamdb_commons::models::{NamespaceId, TableName};
-use kalamdb_commons::{TableAccess, TableType};
 
 #[test]
 fn import_sql_includes_virtual_columns_for_user_tables() {

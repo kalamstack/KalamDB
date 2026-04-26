@@ -1,6 +1,6 @@
+use std::{fmt, str::FromStr};
+
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::str::FromStr;
 
 /// Enum representing storage mode preferences for users.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

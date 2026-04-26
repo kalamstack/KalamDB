@@ -18,7 +18,8 @@ fn smoke_test_stream_explain_planning() {
     execute_sql_as_root_via_client(&format!("CREATE NAMESPACE IF NOT EXISTS {}", namespace))
         .expect("CREATE NAMESPACE should succeed");
     execute_sql_as_root_via_client(&format!(
-        "CREATE TABLE {} (event_id TEXT PRIMARY KEY, payload TEXT) WITH (TYPE = 'STREAM', TTL_SECONDS = 60)",
+        "CREATE TABLE {} (event_id TEXT PRIMARY KEY, payload TEXT) WITH (TYPE = 'STREAM', \
+         TTL_SECONDS = 60)",
         full_stream_table
     ))
     .expect("CREATE STREAM TABLE should succeed");

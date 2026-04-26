@@ -7,8 +7,10 @@
 //! The implementation lives in kalamdb-core using provider infrastructure.
 
 use async_trait::async_trait;
-use kalamdb_commons::models::{TransactionId, UserId};
-use kalamdb_commons::TableId;
+use kalamdb_commons::{
+    models::{TransactionId, UserId},
+    TableId,
+};
 use kalamdb_transactions::StagedMutation;
 
 use crate::{RaftError, TransactionApplyResult};
@@ -39,6 +41,7 @@ pub trait UserDataApplier: Send + Sync {
         table_id: &TableId,
         user_id: &UserId,
         rows: &[kalamdb_commons::models::rows::Row],
+        commit_seq: u64,
     ) -> Result<usize, RaftError>;
 
     /// Update rows in a user table
@@ -57,6 +60,7 @@ pub trait UserDataApplier: Send + Sync {
         user_id: &UserId,
         updates: &[kalamdb_commons::models::rows::Row],
         filter: Option<&str>,
+        commit_seq: u64,
     ) -> Result<usize, RaftError>;
 
     /// Delete rows from a user table
@@ -73,6 +77,7 @@ pub trait UserDataApplier: Send + Sync {
         table_id: &TableId,
         user_id: &UserId,
         pk_values: Option<&[String]>,
+        commit_seq: u64,
     ) -> Result<usize, RaftError>;
 
     /// Apply an explicit-transaction write set inside one state-machine cycle.
@@ -80,6 +85,7 @@ pub trait UserDataApplier: Send + Sync {
         &self,
         transaction_id: &TransactionId,
         mutations: &[StagedMutation],
+        commit_seq: u64,
     ) -> Result<TransactionApplyResult, RaftError>;
 }
 
@@ -93,6 +99,7 @@ impl UserDataApplier for NoOpUserDataApplier {
         _table_id: &TableId,
         _user_id: &UserId,
         _rows: &[kalamdb_commons::models::rows::Row],
+        _commit_seq: u64,
     ) -> Result<usize, RaftError> {
         Ok(0)
     }
@@ -103,6 +110,7 @@ impl UserDataApplier for NoOpUserDataApplier {
         _user_id: &UserId,
         _updates: &[kalamdb_commons::models::rows::Row],
         _filter: Option<&str>,
+        _commit_seq: u64,
     ) -> Result<usize, RaftError> {
         Ok(0)
     }
@@ -112,6 +120,7 @@ impl UserDataApplier for NoOpUserDataApplier {
         _table_id: &TableId,
         _user_id: &UserId,
         _pk_values: Option<&[String]>,
+        _commit_seq: u64,
     ) -> Result<usize, RaftError> {
         Ok(0)
     }
@@ -120,6 +129,7 @@ impl UserDataApplier for NoOpUserDataApplier {
         &self,
         _transaction_id: &TransactionId,
         _mutations: &[StagedMutation],
+        _commit_seq: u64,
     ) -> Result<TransactionApplyResult, RaftError> {
         Ok(TransactionApplyResult::default())
     }
@@ -127,10 +137,14 @@ impl UserDataApplier for NoOpUserDataApplier {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
     use kalamdb_commons::models::{NamespaceId, TableName};
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
+
+    use super::*;
 
     /// Mock applier that tracks calls for testing
     struct MockUserDataApplier {
@@ -164,6 +178,7 @@ mod tests {
             _table_id: &TableId,
             _user_id: &UserId,
             rows: &[kalamdb_commons::models::rows::Row],
+            _commit_seq: u64,
         ) -> Result<usize, RaftError> {
             self.insert_count.fetch_add(1, Ordering::SeqCst);
             Ok(rows.len())
@@ -175,6 +190,7 @@ mod tests {
             _user_id: &UserId,
             _updates: &[kalamdb_commons::models::rows::Row],
             _filter: Option<&str>,
+            _commit_seq: u64,
         ) -> Result<usize, RaftError> {
             self.update_count.fetch_add(1, Ordering::SeqCst);
             Ok(1)
@@ -185,6 +201,7 @@ mod tests {
             _table_id: &TableId,
             _user_id: &UserId,
             _pk_values: Option<&[String]>,
+            _commit_seq: u64,
         ) -> Result<usize, RaftError> {
             self.delete_count.fetch_add(1, Ordering::SeqCst);
             Ok(1)
@@ -194,6 +211,7 @@ mod tests {
             &self,
             _transaction_id: &TransactionId,
             mutations: &[StagedMutation],
+            _commit_seq: u64,
         ) -> Result<TransactionApplyResult, RaftError> {
             Ok(TransactionApplyResult {
                 rows_affected: mutations.len(),
@@ -211,7 +229,7 @@ mod tests {
         let table_id = TableId::new(NamespaceId::from("test_ns"), TableName::from("test_table"));
         let user_id = UserId::from("user_123");
 
-        let result = applier.insert(&table_id, &user_id, &[]).await;
+        let result = applier.insert(&table_id, &user_id, &[], 1).await;
         assert!(result.is_ok());
         assert_eq!(applier.get_counts(), (1, 0, 0));
     }
@@ -222,7 +240,7 @@ mod tests {
         let table_id = TableId::new(NamespaceId::from("test_ns"), TableName::from("test_table"));
         let user_id = UserId::from("user_123");
 
-        let result = applier.update(&table_id, &user_id, &[], None).await;
+        let result = applier.update(&table_id, &user_id, &[], None, 1).await;
         assert!(result.is_ok());
         assert_eq!(applier.get_counts(), (0, 1, 0));
     }
@@ -233,7 +251,7 @@ mod tests {
         let table_id = TableId::new(NamespaceId::from("test_ns"), TableName::from("test_table"));
         let user_id = UserId::from("user_123");
 
-        let result = applier.delete(&table_id, &user_id, None).await;
+        let result = applier.delete(&table_id, &user_id, None, 1).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 1);
         assert_eq!(applier.get_counts(), (0, 0, 1));
@@ -245,9 +263,9 @@ mod tests {
         let table_id = TableId::new(NamespaceId::from("test_ns"), TableName::from("test_table"));
         let user_id = UserId::from("user_123");
 
-        assert_eq!(applier.insert(&table_id, &user_id, &[]).await.unwrap(), 0);
-        assert_eq!(applier.update(&table_id, &user_id, &[], None).await.unwrap(), 0);
-        assert_eq!(applier.delete(&table_id, &user_id, None).await.unwrap(), 0);
+        assert_eq!(applier.insert(&table_id, &user_id, &[], 1).await.unwrap(), 0);
+        assert_eq!(applier.update(&table_id, &user_id, &[], None, 1).await.unwrap(), 0);
+        assert_eq!(applier.delete(&table_id, &user_id, None, 1).await.unwrap(), 0);
     }
 
     #[tokio::test]
@@ -257,11 +275,11 @@ mod tests {
         let user_id = UserId::from("user_123");
 
         // Update with filter
-        let result = applier.update(&table_id, &user_id, &[], Some("filter_value")).await;
+        let result = applier.update(&table_id, &user_id, &[], Some("filter_value"), 1).await;
         assert!(result.is_ok());
 
         // Delete with filter
-        let result = applier.delete(&table_id, &user_id, Some(&["pk_1".to_string()])).await;
+        let result = applier.delete(&table_id, &user_id, Some(&["pk_1".to_string()]), 1).await;
         assert!(result.is_ok());
 
         assert_eq!(applier.get_counts(), (0, 1, 1));
@@ -273,10 +291,10 @@ mod tests {
         let table_id = TableId::new(NamespaceId::from("test_ns"), TableName::from("test_table"));
         let user_id = UserId::from("user_123");
 
-        applier.insert(&table_id, &user_id, &[]).await.unwrap();
-        applier.insert(&table_id, &user_id, &[]).await.unwrap();
-        applier.update(&table_id, &user_id, &[], None).await.unwrap();
-        applier.delete(&table_id, &user_id, None).await.unwrap();
+        applier.insert(&table_id, &user_id, &[], 1).await.unwrap();
+        applier.insert(&table_id, &user_id, &[], 2).await.unwrap();
+        applier.update(&table_id, &user_id, &[], None, 3).await.unwrap();
+        applier.delete(&table_id, &user_id, None, 4).await.unwrap();
 
         assert_eq!(applier.get_counts(), (2, 1, 1));
     }

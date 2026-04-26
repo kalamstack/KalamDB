@@ -5,9 +5,9 @@
 //! - Data is readable after flush on all nodes
 //! - Flush metadata (manifest) is consistent across nodes
 
-use crate::cluster_common::*;
-use crate::common::*;
 use std::time::Duration;
+
+use crate::{cluster_common::*, common::*};
 
 /// Test: Flush table in cluster and verify data on all nodes
 ///
@@ -118,7 +118,8 @@ fn cluster_test_flush_data_consistency() {
     // Step 7: Verify manifest exists (check system.schemas for latest version)
     println!("  8. Verifying flush metadata...");
     let metadata_sql = format!(
-        "SELECT table_name, schema_version FROM system.schemas WHERE namespace_id = '{}' AND table_name = '{}'",
+        "SELECT table_name, schema_version FROM system.schemas WHERE namespace_id = '{}' AND \
+         table_name = '{}'",
         namespace, table_name
     );
 

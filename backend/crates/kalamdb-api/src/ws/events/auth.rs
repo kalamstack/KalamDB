@@ -7,15 +7,18 @@
 //! Only JWT token authentication is accepted for WebSocket connections.
 //! This keeps user/password auth limited to the login endpoint.
 
+use std::sync::Arc;
+
 use actix_ws::Session;
 use kalamdb_auth::{authenticate, extract_user_id_for_audit, AuthRequest, UserRepository};
-use kalamdb_commons::models::{ConnectionInfo, UserId};
-use kalamdb_commons::websocket::{ProtocolOptions, WsAuthCredentials};
-use kalamdb_commons::{Role, WebSocketMessage};
+use kalamdb_commons::{
+    models::{ConnectionInfo, UserId},
+    websocket::{ProtocolOptions, WsAuthCredentials},
+    Role, WebSocketMessage,
+};
 use kalamdb_core::app_context::AppContext;
 use kalamdb_live::SharedConnectionState;
 use log::debug;
-use std::sync::Arc;
 use tracing::Instrument;
 
 use super::{send_auth_error, send_json};

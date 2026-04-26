@@ -18,10 +18,12 @@
 //! 3. Results are ordered by seq (storekey preserves numeric ordering)
 
 use datafusion::scalar::ScalarValue;
-use kalamdb_commons::conversions::scalar_value_to_bytes;
-use kalamdb_commons::ids::SharedTableRowId;
-use kalamdb_commons::storage::Partition;
-use kalamdb_commons::storage_key::{encode_key, encode_prefix};
+use kalamdb_commons::{
+    conversions::scalar_value_to_bytes,
+    ids::SharedTableRowId,
+    storage::Partition,
+    storage_key::{encode_key, encode_prefix},
+};
 use kalamdb_store::IndexDefinition;
 
 use super::SharedTableRow;
@@ -55,7 +57,6 @@ impl SharedTablePkIndex {
     }
 
     /// Build a prefix for scanning all versions of a PK.
-    ///
     pub fn build_prefix_for_pk(&self, pk_value: &ScalarValue) -> Vec<u8> {
         let pk_bytes = scalar_value_to_bytes(pk_value);
         encode_prefix(&(pk_bytes,))
@@ -95,8 +96,7 @@ impl IndexDefinition<SharedTableRowId, SharedTableRow> for SharedTablePkIndex {
     }
 
     fn filter_to_prefix(&self, filter: &datafusion::logical_expr::Expr) -> Option<Vec<u8>> {
-        use kalamdb_store::extract_i64_equality;
-        use kalamdb_store::extract_string_equality;
+        use kalamdb_store::{extract_i64_equality, extract_string_equality};
 
         // Try to extract equality filter on PK column
         if let Some((col, val)) = extract_string_equality(filter) {
@@ -133,11 +133,12 @@ pub fn create_shared_table_pk_index(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use datafusion::scalar::ScalarValue;
-    use kalamdb_commons::ids::SeqId;
-    use kalamdb_commons::models::rows::Row;
     use std::collections::BTreeMap;
+
+    use datafusion::scalar::ScalarValue;
+    use kalamdb_commons::{ids::SeqId, models::rows::Row};
+
+    use super::*;
 
     fn create_test_row(seq: i64, id_value: i64) -> (SharedTableRowId, SharedTableRow) {
         let mut values = BTreeMap::new();

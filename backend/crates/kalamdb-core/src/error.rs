@@ -135,7 +135,10 @@ pub enum KalamDbError {
     #[error("Parameter count exceeded: maximum {max} parameters allowed, got {actual}")]
     ParamCountExceeded { max: usize, actual: usize },
 
-    #[error("Parameter size exceeded: parameter at index {index} is {actual_bytes} bytes (max {max_bytes} bytes)")]
+    #[error(
+        "Parameter size exceeded: parameter at index {index} is {actual_bytes} bytes (max \
+         {max_bytes} bytes)"
+    )]
     ParamSizeExceeded {
         index: usize,
         max_bytes: usize,

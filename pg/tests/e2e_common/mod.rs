@@ -9,17 +9,19 @@ pub mod tcp_proxy;
 #[path = "../support/http_client.rs"]
 mod http_client;
 
-use std::hash::{Hash, Hasher};
-use std::ops::{Deref, DerefMut};
-use std::process::Command;
-use std::sync::OnceLock;
-use std::time::Duration;
-use std::{env, fmt, future::Future};
+use std::{
+    env, fmt,
+    future::Future,
+    hash::{Hash, Hasher},
+    ops::{Deref, DerefMut},
+    process::Command,
+    sync::OnceLock,
+    time::Duration,
+};
 
 use http_client::TestHttpClient;
 use serde_json::Value;
-use tokio_postgres::error::SqlState;
-use tokio_postgres::{Config, NoTls};
+use tokio_postgres::{error::SqlState, Config, NoTls};
 
 pub fn unique_name(prefix: &str) -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -184,10 +186,9 @@ async fn server_option_exists(
     option_name: &str,
 ) -> bool {
     pg.query_opt(
-        "SELECT 1 \
-         FROM pg_foreign_server AS server \
-         CROSS JOIN LATERAL pg_options_to_table(server.srvoptions) AS option_entry \
-         WHERE server.srvname = $1 AND option_entry.option_name = $2",
+        "SELECT 1 FROM pg_foreign_server AS server CROSS JOIN LATERAL \
+         pg_options_to_table(server.srvoptions) AS option_entry WHERE server.srvname = $1 AND \
+         option_entry.option_name = $2",
         &[&server_name, &option_name],
     )
     .await
@@ -447,8 +448,7 @@ impl TestEnv {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
         panic!(
-            "KalamDB not reachable at {}\n\
-             Start with: cd backend && cargo run",
+            "KalamDB not reachable at {}\nStart with: cd backend && cargo run",
             config.base_url
         );
     }
@@ -492,7 +492,8 @@ impl TestEnv {
         }
 
         panic!(
-            "Failed to authenticate KalamDB test environment ({config}). Set KALAMDB_USER/KALAMDB_PASSWORD or KALAMDB_ROOT_PASSWORD to match the running server."
+            "Failed to authenticate KalamDB test environment ({config}). Set \
+             KALAMDB_USER/KALAMDB_PASSWORD or KALAMDB_ROOT_PASSWORD to match the running server."
         );
     }
 
@@ -541,20 +542,16 @@ impl TestEnv {
             .expect("create kalam_server foreign server");
 
             pg.batch_execute(&format!(
-                "ALTER SERVER kalam_server OPTIONS (SET host '{grpc_host}', SET port '{grpc_port}');"
+                "ALTER SERVER kalam_server OPTIONS (SET host '{grpc_host}', SET port \
+                 '{grpc_port}');"
             ))
             .await
             .expect("repoint kalam_server foreign server");
 
             drop_server_option_if_present(&pg, "kalam_server", "auth_header").await;
             ensure_server_option(&pg, "kalam_server", "auth_mode", "account_login").await;
-            ensure_server_option(
-                &pg,
-                "kalam_server",
-                "login_user",
-                &auth_config.login_username,
-            )
-            .await;
+            ensure_server_option(&pg, "kalam_server", "login_user", &auth_config.login_username)
+                .await;
             ensure_server_option(
                 &pg,
                 "kalam_server",
@@ -591,8 +588,8 @@ impl TestEnv {
             }
         }
         panic!(
-            "PostgreSQL not reachable at {pg_host}:{pg_port}\n\
-             Start with: ./pg/scripts/pgrx-test-setup.sh --start"
+            "PostgreSQL not reachable at {pg_host}:{pg_port}\nStart with: \
+             ./pg/scripts/pgrx-test-setup.sh --start"
         );
     }
 
@@ -665,8 +662,15 @@ pub async fn create_shared_kalam_table_in_schema(
     table: &str,
     columns: &str,
 ) {
-    create_kalam_table_in_schema(client, schema, table, columns, "shared", "create shared Kalam table")
-        .await;
+    create_kalam_table_in_schema(
+        client,
+        schema,
+        table,
+        columns,
+        "shared",
+        "create shared Kalam table",
+    )
+    .await;
 }
 
 pub async fn create_user_kalam_table_in_schema(
@@ -728,7 +732,8 @@ pub async fn wait_for_remote_pg_session_cleanup(backend_pid: u32, timeout: Durat
     loop {
         let result = env
             .kalamdb_sql(&format!(
-                "SELECT COUNT(*) AS session_count FROM system.sessions WHERE backend_pid = {backend_pid} LIMIT 1"
+                "SELECT COUNT(*) AS session_count FROM system.sessions WHERE backend_pid = \
+                 {backend_pid} LIMIT 1"
             ))
             .await;
         let count = sql_first_cell_i64(&result).unwrap_or_default();
@@ -738,7 +743,8 @@ pub async fn wait_for_remote_pg_session_cleanup(backend_pid: u32, timeout: Durat
 
         if std::time::Instant::now() >= deadline {
             panic!(
-                "remote pg session for backend_pid {backend_pid} remained visible in system.sessions past timeout"
+                "remote pg session for backend_pid {backend_pid} remained visible in \
+                 system.sessions past timeout"
             );
         }
 
@@ -774,7 +780,8 @@ pub async fn await_user_shard_leader(user_id: &str) {
     loop {
         let result = env
             .kalamdb_sql(&format!(
-                "SELECT group_id FROM system.cluster_groups WHERE group_id = {group_id} AND current_leader IS NOT NULL"
+                "SELECT group_id FROM system.cluster_groups WHERE group_id = {group_id} AND \
+                 current_leader IS NOT NULL"
             ))
             .await;
 
@@ -810,7 +817,8 @@ pub async fn same_user_shard_pair(first_user_id: &str, second_prefix: &str) -> (
     }
 
     panic!(
-        "failed to find a user id with prefix '{second_prefix}' on the same shard as '{first_user_id}'"
+        "failed to find a user id with prefix '{second_prefix}' on the same shard as \
+         '{first_user_id}'"
     );
 }
 

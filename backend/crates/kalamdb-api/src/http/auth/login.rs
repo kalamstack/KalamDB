@@ -2,23 +2,25 @@
 //!
 //! POST /v1/api/auth/login - Authenticates a user and returns JWT tokens
 
+use std::sync::Arc;
+
 use actix_web::{web, HttpRequest, HttpResponse};
 use chrono::{Duration, Utc};
-use kalamdb_auth::providers::jwt_auth::create_and_sign_refresh_token;
 use kalamdb_auth::{
     authenticate, create_and_sign_token, create_auth_cookie, create_refresh_cookie,
-    extract_client_ip_secure, AuthRequest, CookieConfig, UserRepository,
+    extract_client_ip_secure, providers::jwt_auth::create_and_sign_refresh_token, AuthRequest,
+    CookieConfig, UserRepository,
 };
 use kalamdb_commons::Role;
 use kalamdb_configs::AuthSettings;
 use kalamdb_core::app_context::AppContext;
-use std::sync::Arc;
-
-use super::audit;
-use super::map_auth_error_to_response;
-use super::models::{AuthErrorResponse, LoginRequest, LoginResponse, UserInfo};
-use crate::limiter::RateLimiter;
 use kalamdb_jobs::health_monitor::record_activity_now;
+
+use super::{
+    audit, map_auth_error_to_response,
+    models::{AuthErrorResponse, LoginRequest, LoginResponse, UserInfo},
+};
+use crate::limiter::RateLimiter;
 
 /// POST /v1/api/auth/login
 ///

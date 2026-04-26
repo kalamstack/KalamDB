@@ -1,13 +1,17 @@
 //! Type-safe wrapper for namespace identifiers.
 
-use std::fmt;
-use std::sync::{Arc, OnceLock};
+use std::{
+    fmt,
+    sync::{Arc, OnceLock},
+};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::constants::{RESERVED_NAMESPACE_NAMES, SYSTEM_NAMESPACE};
-use crate::StorageKey;
+use crate::{
+    constants::{RESERVED_NAMESPACE_NAMES, SYSTEM_NAMESPACE},
+    StorageKey,
+};
 
 /// Error returned when a namespace ID fails validation.
 #[derive(Debug, Clone, PartialEq, Eq)]

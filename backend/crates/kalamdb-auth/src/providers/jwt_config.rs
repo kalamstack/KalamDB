@@ -1,11 +1,15 @@
 // JWT configuration cache, trusted issuer parsing, and OIDC validator registry.
 
-use crate::errors::error::{AuthError, AuthResult};
-use crate::oidc::{OidcConfig, OidcValidator};
-use crate::providers::jwt_auth;
-use once_cell::sync::OnceCell;
 use std::collections::HashMap;
+
+use once_cell::sync::OnceCell;
 use tokio::sync::RwLock;
+
+use crate::{
+    errors::error::{AuthError, AuthResult},
+    oidc::{OidcConfig, OidcValidator},
+    providers::jwt_auth,
+};
 
 /// Cached JWT configuration for performance.
 ///

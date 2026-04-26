@@ -1,13 +1,18 @@
 //! Tests for password complexity enforcement.
 
-use super::test_support::TestServer;
-use kalamdb_commons::{AuthType, Role, StorageId, UserId};
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::executor::handler_registry::HandlerRegistry;
-use kalamdb_core::sql::{ExecutionContext, ExecutionResult, SqlExecutor};
-use kalamdb_system::providers::storages::models::StorageMode;
 use std::sync::Arc;
+
+use kalamdb_commons::{AuthType, Role, StorageId, UserId};
+use kalamdb_core::{
+    app_context::AppContext,
+    error::KalamDbError,
+    sql::{
+        executor::handler_registry::HandlerRegistry, ExecutionContext, ExecutionResult, SqlExecutor,
+    },
+};
+use kalamdb_system::providers::storages::models::StorageMode;
+
+use super::test_support::TestServer;
 
 async fn setup_executor(
     enforce_complexity: bool,

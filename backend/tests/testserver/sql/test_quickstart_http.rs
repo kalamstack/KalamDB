@@ -1,8 +1,11 @@
 //! Quickstart end-to-end smoke over the real HTTP SQL API.
 
-use super::test_support::auth_helper::create_user_auth_header_default;
-use super::test_support::consolidated_helpers::{unique_namespace, unique_table};
 use kalam_client::models::ResponseStatus;
+
+use super::test_support::{
+    auth_helper::create_user_auth_header_default,
+    consolidated_helpers::{unique_namespace, unique_table},
+};
 
 #[tokio::test]
 #[ntest::timeout(60000)] // 60 seconds - comprehensive quickstart test
@@ -18,14 +21,15 @@ async fn test_quickstart_workflow_over_http() -> anyhow::Result<()> {
     // USER table: messages
     {
         let resp = server
-                    .execute_sql_with_auth(
-                        &format!(
-                            "CREATE TABLE {}.messages (id BIGINT PRIMARY KEY, content TEXT, created_at BIGINT) WITH (TYPE='USER', STORAGE_ID='local')",
-                            ns
-                        ),
-                        &auth,
-                    )
-                    .await?;
+            .execute_sql_with_auth(
+                &format!(
+                    "CREATE TABLE {}.messages (id BIGINT PRIMARY KEY, content TEXT, created_at \
+                     BIGINT) WITH (TYPE='USER', STORAGE_ID='local')",
+                    ns
+                ),
+                &auth,
+            )
+            .await?;
         anyhow::ensure!(
             resp.status == ResponseStatus::Success,
             "CREATE USER table failed: {:?}",
@@ -34,17 +38,18 @@ async fn test_quickstart_workflow_over_http() -> anyhow::Result<()> {
 
         for i in 0..5 {
             let resp = server
-                        .execute_sql_with_auth(
-                            &format!(
-                                "INSERT INTO {}.messages (id, content, created_at) VALUES ({}, 'msg-{}', {})",
-                                ns,
-                                i,
-                                i,
-                                1000 + i
-                            ),
-                            &auth,
-                        )
-                        .await?;
+                .execute_sql_with_auth(
+                    &format!(
+                        "INSERT INTO {}.messages (id, content, created_at) VALUES ({}, 'msg-{}', \
+                         {})",
+                        ns,
+                        i,
+                        i,
+                        1000 + i
+                    ),
+                    &auth,
+                )
+                .await?;
             anyhow::ensure!(resp.status == ResponseStatus::Success);
         }
 
@@ -78,11 +83,12 @@ async fn test_quickstart_workflow_over_http() -> anyhow::Result<()> {
     // SHARED table: config
     {
         let resp = server
-                    .execute_sql(&format!(
-                        "CREATE TABLE {}.config (name TEXT PRIMARY KEY, value TEXT) WITH (TYPE='SHARED', STORAGE_ID='local')",
-                        ns
-                    ))
-                    .await?;
+            .execute_sql(&format!(
+                "CREATE TABLE {}.config (name TEXT PRIMARY KEY, value TEXT) WITH (TYPE='SHARED', \
+                 STORAGE_ID='local')",
+                ns
+            ))
+            .await?;
         anyhow::ensure!(resp.status == ResponseStatus::Success);
 
         let resp = server
@@ -109,14 +115,15 @@ async fn test_quickstart_workflow_over_http() -> anyhow::Result<()> {
     // Note: STREAM table type is not yet implemented.
     {
         let resp = server
-                    .execute_sql_with_auth(
-                        &format!(
-                            "CREATE TABLE {}.events (id BIGINT PRIMARY KEY, kind TEXT, created_at BIGINT) WITH (TYPE='USER', STORAGE_ID='local')",
-                            ns
-                        ),
-                        &auth,
-                    )
-                    .await?;
+            .execute_sql_with_auth(
+                &format!(
+                    "CREATE TABLE {}.events (id BIGINT PRIMARY KEY, kind TEXT, created_at BIGINT) \
+                     WITH (TYPE='USER', STORAGE_ID='local')",
+                    ns
+                ),
+                &auth,
+            )
+            .await?;
         anyhow::ensure!(
             resp.status == ResponseStatus::Success,
             "CREATE events table failed: {:?}",

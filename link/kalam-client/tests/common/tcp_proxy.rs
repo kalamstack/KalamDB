@@ -1,13 +1,20 @@
-use std::collections::HashMap;
-use std::io::ErrorKind;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Mutex as TokioMutex;
-use tokio::task::JoinHandle;
-use tokio::time::sleep;
+use std::{
+    collections::HashMap,
+    io::ErrorKind,
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
+
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{TcpListener, TcpStream},
+    sync::Mutex as TokioMutex,
+    task::JoinHandle,
+    time::sleep,
+};
 
 /// A TCP proxy that sits between a client and a real server, allowing tests to
 /// simulate network failures by pausing new connections and/or forcibly dropping

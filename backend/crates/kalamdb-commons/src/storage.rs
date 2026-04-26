@@ -10,12 +10,12 @@
 //! - get/put/delete for key-value access
 //! - batch for atomic multi-operation transactions
 //! - scan for range queries
-//! - partition management (maps to column families in RocksDB, trees in Sled, etc.)
+//! - partition management (mapped to backend-native keyspaces)
 //!
 //! ## Partition Model
 //!
 //! Since different backends have different concepts for data organization:
-//! - **RocksDB**: Partition = Column Family
+//! - **RocksDB**: Partition = key prefix inside a fixed physical column-family set
 //! - **Sled**: Partition = Tree
 //! - **Redis**: Partition = Key Prefix
 //! - **In-Memory**: Partition = HashMap namespace
@@ -25,7 +25,7 @@
 //! ## Example Usage
 //!
 //! ```rust
-//! use kalamdb_commons::storage::{StorageBackend, Partition, Operation};
+//! use kalamdb_commons::storage::{Operation, Partition, StorageBackend};
 //!
 //! fn store_user_data<S: StorageBackend>(backend: &S, user_id: &str, data: &[u8]) {
 //!     let partition = Partition::new(format!("user_{}", user_id));
@@ -59,8 +59,7 @@
 //! }
 //! ```
 
-use std::any::Any;
-use std::fmt;
+use std::{any::Any, fmt};
 
 /// Type alias for a boxed key-value iterator to simplify function signatures
 pub type KvIterator<'a> = Box<dyn Iterator<Item = (Vec<u8>, Vec<u8>)> + Send + 'a>;
@@ -71,7 +70,7 @@ pub type Result<T> = std::result::Result<T, StorageError>;
 /// Errors that can occur during storage operations.
 #[derive(Debug, Clone)]
 pub enum StorageError {
-    /// Partition (column family, tree, namespace) not found
+    /// Partition (backend-native keyspace) not found
     PartitionNotFound(String),
 
     /// Generic I/O error from underlying storage
@@ -115,7 +114,7 @@ impl std::error::Error for StorageError {}
 ///
 /// Partitions provide a way to organize data into separate namespaces.
 /// Different backends map partitions to their native concepts:
-/// - RocksDB: Column Family
+/// - RocksDB: prefixed logical keyspace inside a fixed physical column family
 /// - Sled: Tree
 /// - Redis: Key prefix
 /// - In-memory: HashMap namespace

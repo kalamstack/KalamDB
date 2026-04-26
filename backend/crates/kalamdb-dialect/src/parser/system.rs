@@ -2,12 +2,11 @@
 //!
 //! Parses SQL statements targeting system tables using sqlparser-rs.
 
-use crate::parser::utils::parse_sql_statements;
 use anyhow::{anyhow, Result};
 pub use kalamdb_system::SystemTable;
 use sqlparser::ast::Statement;
 
-use crate::dialect::KalamDbDialect;
+use crate::{dialect::KalamDbDialect, parser::utils::parse_sql_statements};
 
 /// SQL statement types supported for system tables
 #[derive(Debug, Clone)]

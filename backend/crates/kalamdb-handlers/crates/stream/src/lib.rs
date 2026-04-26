@@ -1,15 +1,17 @@
 pub mod result_rows;
 pub mod topics;
 
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::sql::executor::handler_registry::HandlerRegistry;
-use kalamdb_handlers_support::register_typed_handler;
-use kalamdb_sql::classifier::SqlStatementKind;
-use kalamdb_sql::ddl::{
-    AckStatement, AddTopicSourceStatement, ClearTopicStatement, ConsumePosition, ConsumeStatement,
-    CreateTopicStatement, DropTopicStatement,
-};
 use std::sync::Arc;
+
+use kalamdb_core::{app_context::AppContext, sql::executor::handler_registry::HandlerRegistry};
+use kalamdb_handlers_support::register_typed_handler;
+use kalamdb_sql::{
+    classifier::SqlStatementKind,
+    ddl::{
+        AckStatement, AddTopicSourceStatement, ClearTopicStatement, ConsumePosition,
+        ConsumeStatement, CreateTopicStatement, DropTopicStatement,
+    },
+};
 
 pub fn register_stream_handlers(registry: &HandlerRegistry, app_context: Arc<AppContext>) {
     use kalamdb_commons::models::{PayloadMode, TableId, TopicId};

@@ -2,13 +2,14 @@
 //!
 //! Verifies that privileged operations write entries to `system.audit_log`.
 
-use super::test_support::TestServer;
 use kalam_client::models::ResponseStatus;
 use kalamdb_commons::models::{AuthType, Role, UserId};
 use kalamdb_system::providers::storages::models::StorageMode;
 use reqwest::StatusCode;
 use serde_json::json;
 use uuid::Uuid;
+
+use super::test_support::TestServer;
 
 async fn create_system_user(server: &TestServer, username: &str) -> UserId {
     let user_id = UserId::new(username);
@@ -163,8 +164,8 @@ async fn test_audit_log_for_table_access_change() {
     // Let's try to create a shared table with a unique name
     let table_name = format!("analytics.events_{}", chrono::Utc::now().timestamp_millis());
 
-    // Note: If this fails due to missing column families, we might need to skip this part of the test
-    // or update TestServer to support shared tables.
+    // Note: If this fails due to missing column families, we might need to skip this part of the
+    // test or update TestServer to support shared tables.
     // For now, let's try to proceed and see if unique name helps (unlikely if it's a CF issue).
 
     let sql =

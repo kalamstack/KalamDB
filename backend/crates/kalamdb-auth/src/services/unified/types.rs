@@ -1,5 +1,6 @@
-use crate::models::context::AuthenticatedUser;
 pub use kalamdb_session::AuthMethod;
+
+use crate::models::context::AuthenticatedUser;
 
 /// Authentication request that can come from HTTP or WebSocket.
 #[derive(Debug, Clone)]

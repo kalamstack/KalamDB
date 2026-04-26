@@ -1,12 +1,17 @@
 //! IP-based connection guard for DoS protection.
 
+use std::{
+    net::IpAddr,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
+
 use kalamdb_configs::RateLimitSettings;
 use moka::sync::Cache;
 use parking_lot::Mutex;
-use std::net::IpAddr;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 #[derive(Debug)]
 struct TokenBucket {
@@ -328,8 +333,9 @@ pub struct ConnectionGuardStats {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::thread;
+
+    use super::*;
 
     fn test_config(
         max_conn: u32,

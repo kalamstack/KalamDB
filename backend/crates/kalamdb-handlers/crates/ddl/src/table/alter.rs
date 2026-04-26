@@ -1,15 +1,24 @@
 //! Typed DDL handler for ALTER TABLE statements
 
-use crate::helpers::guards::block_system_namespace_modification;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
+use std::sync::Arc;
+
 // Note: table_registration moved to unified applier commands
 use kalamdb_commons::constants::SystemColumnNames;
-use kalamdb_commons::models::schemas::{ColumnDefinition, TableDefinition};
-use kalamdb_commons::models::{NamespaceId, TableId, UserId};
-use kalamdb_commons::schemas::{ColumnDefault, TableType};
-use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
+use kalamdb_commons::{
+    models::{
+        schemas::{ColumnDefinition, TableDefinition},
+        NamespaceId, TableId, UserId,
+    },
+    schemas::{ColumnDefault, TableType},
+};
+use kalamdb_core::{
+    app_context::AppContext,
+    error::KalamDbError,
+    sql::{
+        context::{ExecutionContext, ExecutionResult, ScalarValue},
+        executor::handlers::TypedStatementHandler,
+    },
+};
 use kalamdb_sql::ddl::{AlterTableStatement, ColumnOperation};
 use kalamdb_store::Partition;
 use kalamdb_system::{VectorEngine, VectorIndexState, VectorMetric};
@@ -18,7 +27,8 @@ use kalamdb_vector::{
     shared_vector_pk_index_partition_name, user_vector_ops_partition_name,
     user_vector_pk_index_partition_name,
 };
-use std::sync::Arc;
+
+use crate::helpers::guards::block_system_namespace_modification;
 
 /// Typed handler for ALTER TABLE statements
 pub struct AlterTableHandler {
@@ -495,7 +505,8 @@ impl TypedStatementHandler<AlterTableStatement> for AlterTableHandler {
             audit::persist_audit_entry(&self.app_context, &audit_entry).await?;
 
             log::info!(
-                "✅ ALTER TABLE succeeded: {}.{} | operation: {} | new_version: {} | table_type: {:?}",
+                "✅ ALTER TABLE succeeded: {}.{} | operation: {} | new_version: {} | table_type: \
+                 {:?}",
                 namespace_id.as_str(),
                 statement.table_name.as_str(),
                 change_desc,
@@ -830,7 +841,11 @@ fn apply_alter_operation(
                 )));
             }
             if is_system_column(new_column_name) {
-                log::error!("❌ ALTER TABLE failed: Cannot rename column to reserved system column name '{}'", new_column_name);
+                log::error!(
+                    "❌ ALTER TABLE failed: Cannot rename column to reserved system column name \
+                     '{}'",
+                    new_column_name
+                );
                 return Err(KalamDbError::InvalidOperation(format!(
                     "Cannot rename column to '{}': reserved system column name",
                     new_column_name

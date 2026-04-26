@@ -4,9 +4,13 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{schemas::policy::FlushPolicy, StorageId, TableAccess};
 
-/// **Q: How does per-user storage assignment work with use_user_storage option?** → A: Lookup chain: table.use_user_storage=true → check user.storage_mode → if "region" use user.storage_id, if "table" use table.storage_id fallback
+/// **Q: How does per-user storage assignment work with use_user_storage option?** → A: Lookup
+/// chain: table.use_user_storage=true → check user.storage_mode → if "region" use user.storage_id,
+/// if "table" use table.storage_id fallback
 /// - *Impact*: User Story 2, User Story 10 (user management), new storage assignment logic
-/// - *Rationale*: Enables data sovereignty (users in EU region → EU S3 bucket). Flexible fallback prevents orphaned data. user.storage_mode="table" allows per-table override when needed. Supports multi-tenant SaaS scenarios with region-specific compliance.
+/// - *Rationale*: Enables data sovereignty (users in EU region → EU S3 bucket). Flexible fallback
+///   prevents orphaned data. user.storage_mode="table" allows per-table override when needed.
+///   Supports multi-tenant SaaS scenarios with region-specific compliance.
 ///
 /// Table options for USER tables
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -382,7 +386,8 @@ mod tests {
         assert_eq!(TableOptions::user().cache_ttl_seconds(), None);
         assert_eq!(TableOptions::shared().cache_ttl_seconds(), None); // Shared tables no longer have caching
         assert_eq!(TableOptions::stream(3600).cache_ttl_seconds(), None);
-        assert_eq!(TableOptions::system().cache_ttl_seconds(), None); // Updated to return None per implementation
+        assert_eq!(TableOptions::system().cache_ttl_seconds(), None); // Updated to return None per
+                                                                      // implementation
     }
 
     #[test]

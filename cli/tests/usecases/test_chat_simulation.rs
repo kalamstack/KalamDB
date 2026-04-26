@@ -9,13 +9,13 @@
 //! 4. User subscribes to messages and stream events, and sends messages.
 //! 5. Validates system stability under load.
 
-use crate::common::*;
-
 use std::{
     sync::{Arc, Barrier},
     thread,
     time::{Duration, Instant},
 };
+
+use crate::common::*;
 
 const DEFAULT_NUM_USERS: usize = 4;
 const DEFAULT_MESSAGES_PER_USER: usize = 5;
@@ -106,7 +106,8 @@ fn test_chat_simulation_memory_leak() {
 
             // Create Conversation (AI task)
             let create_conv_sql = format!(
-                "INSERT INTO {}.conversations (id, title, created_by) VALUES ('{}', 'Chat {}', '{}')",
+                "INSERT INTO {}.conversations (id, title, created_by) VALUES ('{}', 'Chat {}', \
+                 '{}')",
                 ns_ref, conv_id_ref, user_idx, username
             );
             if let Err(e) = execute_sql_via_client_as(&ai_creds.0, &ai_creds.1, &create_conv_sql) {
@@ -119,16 +120,25 @@ fn test_chat_simulation_memory_leak() {
                     // AI sends message
                     let msg_id = format!("msg_ai_{}_{}", m, random_string(5));
                     let msg_sql = format!(
-                        "INSERT INTO {}.messages (id, conversation_id, sender, content, timestamp) VALUES ('{}', '{}', 'AI_AGENT', 'AI Message {}', {})",
-                        ns_ref, msg_id, conv_id_ref, m, chrono::Utc::now().timestamp_millis()
+                        "INSERT INTO {}.messages (id, conversation_id, sender, content, \
+                         timestamp) VALUES ('{}', '{}', 'AI_AGENT', 'AI Message {}', {})",
+                        ns_ref,
+                        msg_id,
+                        conv_id_ref,
+                        m,
+                        chrono::Utc::now().timestamp_millis()
                     );
                     let _ = execute_sql_via_client_as(&ai_creds.0, &ai_creds.1, &msg_sql);
 
                     // AI sends stream event (typing)
                     let event_id = format!("evt_ai_{}_{}", m, random_string(5));
                     let event_sql = format!(
-                        "INSERT INTO {}.stream_events (id, conversation_id, event_type, payload, timestamp) VALUES ('{}', '{}', 'typing', 'AI is typing...', {})",
-                        ns_ref, event_id, conv_id_ref, chrono::Utc::now().timestamp_millis()
+                        "INSERT INTO {}.stream_events (id, conversation_id, event_type, payload, \
+                         timestamp) VALUES ('{}', '{}', 'typing', 'AI is typing...', {})",
+                        ns_ref,
+                        event_id,
+                        conv_id_ref,
+                        chrono::Utc::now().timestamp_millis()
                     );
                     let _ = execute_sql_via_client_as(&ai_creds.0, &ai_creds.1, &event_sql);
 
@@ -168,12 +178,19 @@ fn test_chat_simulation_memory_leak() {
                 for m in 0..messages_per_user {
                     let msg_id = format!("msg_usr_{}_{}", m, random_string(5));
                     let msg_sql = format!(
-                        "INSERT INTO {}.messages (id, conversation_id, sender, content, timestamp) VALUES ('{}', '{}', '{}', 'User Message {}', {})",
-                        namespace, msg_id, conversation_id, user_creds.0, m, chrono::Utc::now().timestamp_millis()
+                        "INSERT INTO {}.messages (id, conversation_id, sender, content, \
+                         timestamp) VALUES ('{}', '{}', '{}', 'User Message {}', {})",
+                        namespace,
+                        msg_id,
+                        conversation_id,
+                        user_creds.0,
+                        m,
+                        chrono::Utc::now().timestamp_millis()
                     );
                     let _ = execute_sql_via_client_as(&user_creds.0, &user_creds.1, &msg_sql);
 
-                    // Read from subscriptions to prevent buffer filling (and simulate active listening)
+                    // Read from subscriptions to prevent buffer filling (and simulate active
+                    // listening)
                     let _ = msg_sub.try_read_line(Duration::from_millis(5));
                     let _ = stream_sub.try_read_line(Duration::from_millis(5));
 

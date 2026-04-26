@@ -15,22 +15,27 @@
 //! - Enables O(1) row lookup by PK value instead of full scan
 //! - Used by UPDATE/DELETE to find target rows
 
-use crate::common::{ensure_partition, new_indexed_store_with_pk, partition_name};
-use kalamdb_commons::ids::{SeqId, SharedTableRowId};
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::storage::Partition;
-use kalamdb_commons::{KSerializable, TableId};
-use kalamdb_store::{EntityStore, IndexedEntityStore, StorageBackend};
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+use kalamdb_commons::{
+    ids::{SeqId, SharedTableRowId},
+    models::rows::Row,
+    storage::Partition,
+    KSerializable, TableId,
+};
+use kalamdb_store::{EntityStore, IndexedEntityStore, StorageBackend};
+use serde::{Deserialize, Serialize};
+
 use super::pk_index::create_shared_table_pk_index;
+use crate::common::{ensure_partition, new_indexed_store_with_pk, partition_name};
 
 /// Shared table row data
 ///
 /// **MVCC Architecture (Phase 12, User Story 5)**:
-/// - Removed: row_id (redundant with _seq), _updated (timestamp embedded in _seq Snowflake ID), access_level (moved to schema definition)
-/// - Kept: _seq (version identifier with embedded timestamp), `_commit_seq` (commit-order visibility), _deleted (tombstone), fields (all shared table columns including PK)
+/// - Removed: row_id (redundant with _seq), _updated (timestamp embedded in _seq Snowflake ID),
+///   access_level (moved to schema definition)
+/// - Kept: _seq (version identifier with embedded timestamp), `_commit_seq` (commit-order
+///   visibility), _deleted (tombstone), fields (all shared table columns including PK)
 ///
 /// **Note on System Column Naming**:
 /// The underscore prefix (`_seq`, `_deleted`) follows SQL convention for system-managed columns.
@@ -166,12 +171,16 @@ pub fn new_indexed_shared_table_store(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use datafusion::scalar::ScalarValue;
+    use kalamdb_commons::{
+        models::{NamespaceId, TableId, TableName},
+        StorageKey,
+    };
+
     use super::*;
     use crate::utils::test_backend::RecordingBackend;
-    use datafusion::scalar::ScalarValue;
-    use kalamdb_commons::models::{NamespaceId, TableId, TableName};
-    use kalamdb_commons::StorageKey;
-    use std::collections::BTreeMap;
 
     fn create_test_store() -> SharedTableStore {
         let backend: Arc<dyn StorageBackend> = Arc::new(RecordingBackend::new());

@@ -19,12 +19,13 @@
 //! - [x] Storage artifacts exist and parquet is non-empty
 //! - [x] No duplicates by primary key
 
-use super::helpers::*;
+use std::time::Duration;
 
 use kalam_client::models::ResponseStatus;
 use kalamdb_commons::Role;
-use std::time::Duration;
 use tokio::time::{sleep, Instant};
+
+use super::helpers::*;
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -103,7 +104,8 @@ async fn test_scenario_01_chat_app_core() -> anyhow::Result<()> {
     // Step 3: Create users and get clients
     // =========================================================
     // Use unique usernames based on namespace to avoid interference when tests run in parallel.
-    // USER tables partition by user_id, so shared usernames between tests can cause data collisions.
+    // USER tables partition by user_id, so shared usernames between tests can cause data
+    // collisions.
     let u1_name = format!("{}_u1", ns);
     let u2_name = format!("{}_u2", ns);
     let u1_client = create_user_and_client(server, &u1_name, &Role::User).await?;
@@ -127,9 +129,10 @@ async fn test_scenario_01_chat_app_core() -> anyhow::Result<()> {
         let conv_id = if i <= 25 { 1 } else { 2 };
         let role = if i % 2 == 0 { "user" } else { "assistant" };
         let sql = format!(
-                    "INSERT INTO {}.messages (id, conversation_id, role_id, content) VALUES ({}, {}, '{}', 'Message {} from u1')",
-                    ns, i, conv_id, role, i
-                );
+            "INSERT INTO {}.messages (id, conversation_id, role_id, content) VALUES ({}, {}, \
+             '{}', 'Message {} from u1')",
+            ns, i, conv_id, role, i
+        );
         let resp = u1_client.execute_query(&sql, None, None, None).await?;
         assert!(resp.success(), "u1 insert message {}", i);
     }
@@ -141,9 +144,10 @@ async fn test_scenario_01_chat_app_core() -> anyhow::Result<()> {
 
     for i in 101..=120 {
         let sql = format!(
-                    "INSERT INTO {}.messages (id, conversation_id, role_id, content) VALUES ({}, 100, 'user', 'Message {} from u2')",
-                    ns, i, i
-                );
+            "INSERT INTO {}.messages (id, conversation_id, role_id, content) VALUES ({}, 100, \
+             'user', 'Message {} from u2')",
+            ns, i, i
+        );
         let resp = u2_client.execute_query(&sql, None, None, None).await?;
         assert!(resp.success(), "u2 insert message {}", i);
     }
@@ -222,9 +226,10 @@ async fn test_scenario_01_chat_app_core() -> anyhow::Result<()> {
         let mut attempt = 0;
         loop {
             let sql = format!(
-                        "INSERT INTO {}.messages (id, conversation_id, role_id, content) VALUES ({}, 1, 'user', 'New message during flush {}')",
-                        ns, i, i
-                    );
+                "INSERT INTO {}.messages (id, conversation_id, role_id, content) VALUES ({}, 1, \
+                 'user', 'New message during flush {}')",
+                ns, i, i
+            );
             let resp = u1_client.execute_query(&sql, None, None, None).await?;
             if resp.success() {
                 break;
@@ -359,12 +364,17 @@ async fn test_scenario_01_service_writes_as_user() -> anyhow::Result<()> {
 
     // Insert as service (this goes to service's own partition by default)
     let _resp = service_client
-                .execute_query(
-                    &format!("INSERT INTO {}.messages (id, role_id, content) VALUES (2, 'assistant', 'AI Response')", ns), None,
-                    None,
-                    None,
-                )
-                .await?;
+        .execute_query(
+            &format!(
+                "INSERT INTO {}.messages (id, role_id, content) VALUES (2, 'assistant', 'AI \
+                 Response')",
+                ns
+            ),
+            None,
+            None,
+            None,
+        )
+        .await?;
     // This might succeed or fail depending on AS USER support
 
     // Verify u1 can see their own message

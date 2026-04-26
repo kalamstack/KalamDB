@@ -1,10 +1,12 @@
 //! File cleanup helpers
 
-use kalamdb_commons::models::ids::StorageId;
-use kalamdb_commons::models::{TableId, UserId};
-use kalamdb_commons::schemas::TableType;
-use kalamdb_system::FileRef;
 use std::collections::HashMap;
+
+use kalamdb_commons::{
+    models::{ids::StorageId, TableId, UserId},
+    schemas::TableType,
+};
+use kalamdb_system::FileRef;
 
 /// Cleanup files after SQL error
 pub async fn cleanup_files(

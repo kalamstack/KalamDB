@@ -1,7 +1,8 @@
-use crate::allocator_metrics::{collect_allocator_metrics, AllocatorMetrics};
-use std::sync::Mutex;
-use std::time::Instant;
+use std::{sync::Mutex, time::Instant};
+
 use sysinfo::{MemoryRefreshKind, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System};
+
+use crate::allocator_metrics::{collect_allocator_metrics, AllocatorMetrics};
 
 /// Reusable System instance to avoid repeated allocation/deallocation.
 /// sysinfo docs explicitly recommend reusing the same System instance.
@@ -97,7 +98,8 @@ impl RuntimeMetrics {
     /// Render a concise log line for the console.
     pub fn to_log_string(&self) -> String {
         format!(
-            "uptime={} mem={}MB source={} rss={}MB gap={}MB used={}MB cpu={} pid={} threads={} sys_mem={}MB/{}MB",
+            "uptime={} mem={}MB source={} rss={}MB gap={}MB used={}MB cpu={} pid={} threads={} \
+             sys_mem={}MB/{}MB",
             self.uptime_human,
             self.memory_mb.unwrap_or(0),
             self.memory_usage_source,

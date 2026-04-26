@@ -1,16 +1,19 @@
-use crate::KalamPgError;
 use serde::{Deserialize, Serialize};
+
+use crate::KalamPgError;
 
 /// Remote authentication mode for the PostgreSQL extension.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteAuthMode {
-    /// No application-level auth header. Use only for unsecured local development or mTLS-only deployments.
+    /// No application-level auth header. Use only for unsecured local development or mTLS-only
+    /// deployments.
     #[default]
     None,
     /// Send a pre-shared value in the gRPC `authorization` metadata header on `open_session`.
     StaticHeader,
-    /// Send Basic credentials (login_user/login_password) in the gRPC `authorization` metadata on `open_session`.
+    /// Send Basic credentials (login_user/login_password) in the gRPC `authorization` metadata on
+    /// `open_session`.
     AccountLogin,
 }
 
@@ -98,7 +101,8 @@ impl RemoteServerConfig {
             RemoteAuthMode::None => {
                 if self.login_user.is_some() || self.login_password.is_some() {
                     return Err(KalamPgError::Validation(
-                        "server options 'login_user' and 'login_password' require auth_mode 'account_login'"
+                        "server options 'login_user' and 'login_password' require auth_mode \
+                         'account_login'"
                             .to_string(),
                     ));
                 }
@@ -112,7 +116,8 @@ impl RemoteServerConfig {
                 }
                 if self.login_user.is_some() || self.login_password.is_some() {
                     return Err(KalamPgError::Validation(
-                        "server options 'login_user' and 'login_password' are only valid with auth_mode 'account_login'"
+                        "server options 'login_user' and 'login_password' are only valid with \
+                         auth_mode 'account_login'"
                             .to_string(),
                     ));
                 }
@@ -120,7 +125,8 @@ impl RemoteServerConfig {
             RemoteAuthMode::AccountLogin => {
                 if self.auth_header.is_some() {
                     return Err(KalamPgError::Validation(
-                        "server option 'auth_header' cannot be used when auth_mode is 'account_login'"
+                        "server option 'auth_header' cannot be used when auth_mode is \
+                         'account_login'"
                             .to_string(),
                     ));
                 }
@@ -130,15 +136,10 @@ impl RemoteServerConfig {
                             .to_string(),
                     ));
                 }
-                if self
-                    .login_password
-                    .as_deref()
-                    .map(str::trim)
-                    .unwrap_or("")
-                    .is_empty()
-                {
+                if self.login_password.as_deref().map(str::trim).unwrap_or("").is_empty() {
                     return Err(KalamPgError::Validation(
-                        "server option 'login_password' is required when auth_mode is 'account_login'"
+                        "server option 'login_password' is required when auth_mode is \
+                         'account_login'"
                             .to_string(),
                     ));
                 }

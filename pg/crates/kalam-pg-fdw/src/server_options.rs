@@ -1,5 +1,6 @@
-use kalam_pg_common::{KalamPgError, RemoteAuthMode, RemoteServerConfig};
 use std::collections::BTreeMap;
+
+use kalam_pg_common::{KalamPgError, RemoteAuthMode, RemoteServerConfig};
 
 /// Parsed foreign-server options for the PostgreSQL extension.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,7 +50,8 @@ impl ServerOptions {
                 "static_header" => Ok(RemoteAuthMode::StaticHeader),
                 "account_login" => Ok(RemoteAuthMode::AccountLogin),
                 _ => Err(KalamPgError::Validation(format!(
-                    "server option 'auth_mode' must be one of: none, static_header, account_login (got '{}')",
+                    "server option 'auth_mode' must be one of: none, static_header, account_login \
+                     (got '{}')",
                     value
                 ))),
             })

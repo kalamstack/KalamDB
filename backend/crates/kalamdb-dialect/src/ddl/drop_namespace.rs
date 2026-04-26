@@ -6,8 +6,9 @@
 //! - DROP NAMESPACE app CASCADE
 //! - DROP NAMESPACE IF EXISTS app CASCADE
 
-use crate::ddl::{parsing, DdlResult};
 use kalamdb_commons::models::NamespaceId;
+
+use crate::ddl::{parsing, DdlResult};
 
 /// DROP NAMESPACE statement
 #[derive(Debug, Clone, PartialEq)]

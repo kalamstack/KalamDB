@@ -17,21 +17,22 @@
 //!
 //! Note: namespace_id and table_name are now stored in the parameters JSON field
 
-use super::jobs_indexes::{create_jobs_indexes, status_to_u8};
-use crate::error::{SystemError, SystemResultExt};
-use crate::providers::base::{system_rows_to_batch, IndexedProviderDefinition};
-use crate::system_row_mapper::{model_to_system_row, system_row_to_model};
-use crate::JobStatus;
-use datafusion::arrow::array::RecordBatch;
-use datafusion::arrow::datatypes::SchemaRef;
-use kalamdb_commons::models::rows::SystemTableRow;
-use kalamdb_commons::JobId;
-use kalamdb_commons::SystemTable;
-use kalamdb_store::entity_store::EntityStore;
-use kalamdb_store::{IndexedEntityStore, StorageBackend};
 use std::sync::{Arc, OnceLock};
 
-use super::models::{Job, JobFilter, JobSortField, SortOrder};
+use datafusion::arrow::{array::RecordBatch, datatypes::SchemaRef};
+use kalamdb_commons::{models::rows::SystemTableRow, JobId, SystemTable};
+use kalamdb_store::{entity_store::EntityStore, IndexedEntityStore, StorageBackend};
+
+use super::{
+    jobs_indexes::{create_jobs_indexes, status_to_u8},
+    models::{Job, JobFilter, JobSortField, SortOrder},
+};
+use crate::{
+    error::{SystemError, SystemResultExt},
+    providers::base::{system_rows_to_batch, IndexedProviderDefinition},
+    system_row_mapper::{model_to_system_row, system_row_to_model},
+    JobStatus,
+};
 
 /// Type alias for the indexed jobs store
 pub type JobsStore = IndexedEntityStore<JobId, SystemTableRow>;
@@ -178,7 +179,8 @@ impl JobsTableProvider {
     /// Optimized: When filtering by status and sorting by CreatedAt ASC, uses
     /// the `JobStatusCreatedAtIndex` for efficient prefix scanning.
     pub fn list_jobs_filtered(&self, filter: &JobFilter) -> Result<Vec<Job>, SystemError> {
-        // Optimization: If filtering by status(es) and sorting by CreatedAt ASC, use the status index
+        // Optimization: If filtering by status(es) and sorting by CreatedAt ASC, use the status
+        // index
         let use_index = filter.sort_by == Some(JobSortField::CreatedAt)
             && filter.sort_order == Some(SortOrder::Asc)
             && (filter.status.is_some() || filter.statuses.is_some());
@@ -270,7 +272,8 @@ impl JobsTableProvider {
         &self,
         filter: JobFilter,
     ) -> Result<Vec<Job>, SystemError> {
-        // Optimization: If filtering by status(es) and sorting by CreatedAt ASC, use the status index
+        // Optimization: If filtering by status(es) and sorting by CreatedAt ASC, use the status
+        // index
         let use_index = filter.sort_by == Some(JobSortField::CreatedAt)
             && filter.sort_order == Some(SortOrder::Asc)
             && (filter.status.is_some() || filter.statuses.is_some());
@@ -612,11 +615,12 @@ crate::impl_indexed_system_table_provider!(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{JobStatus, JobType};
     use datafusion::datasource::TableProvider;
     use kalamdb_commons::NodeId;
     use kalamdb_store::test_utils::InMemoryBackend;
+
+    use super::*;
+    use crate::{JobStatus, JobType};
 
     fn create_test_provider() -> JobsTableProvider {
         let backend: Arc<dyn StorageBackend> = Arc::new(InMemoryBackend::new());

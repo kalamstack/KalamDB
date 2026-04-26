@@ -1,10 +1,10 @@
+use std::sync::Arc;
+
 use datafusion::prelude::SessionContext;
-use kalamdb_commons::models::ReadContext;
-use kalamdb_commons::{NamespaceId, Role, UserId};
+use kalamdb_commons::{models::ReadContext, NamespaceId, Role, UserId};
 use kalamdb_session::AuthSession;
 use kalamdb_session_datafusion::SessionUserContext;
 use once_cell::sync::OnceCell;
-use std::sync::Arc;
 
 /// Unified execution context for SQL queries
 ///
@@ -212,8 +212,9 @@ impl ExecutionContext {
 
     /// Create a per-request SessionContext with current user_id and role injected
     ///
-    /// Clones the base SessionState and injects the current user_id and role into config.extensions.
-    /// The clone is relatively cheap (~1-2μs) because most fields are Arc-wrapped.
+    /// Clones the base SessionState and injects the current user_id and role into
+    /// config.extensions. The clone is relatively cheap (~1-2μs) because most fields are
+    /// Arc-wrapped.
     ///
     /// # What Gets Cloned
     /// - session_id: String (~50 bytes)
@@ -262,7 +263,7 @@ impl ExecutionContext {
     /// This reads `datafusion.catalog.default_schema` from the session configuration.
     /// The default schema is set to "default" initially and can be changed using:
     /// - `USE namespace`
-    /// - `USE NAMESPACE namespace`  
+    /// - `USE NAMESPACE namespace`
     /// - `SET NAMESPACE namespace`
     ///
     /// # Returns

@@ -1,43 +1,38 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::datasource::TableProvider;
-use datafusion::execution::context::SessionContext;
-use datafusion::physical_plan::collect;
-use datafusion::scalar::ScalarValue;
-use kalamdb_commons::models::datatypes::KalamDataType;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::schemas::{ColumnDefinition, TableDefinition, TableOptions};
-use kalamdb_commons::models::{NamespaceId, ReadContext, Role, StorageId, TableId, TableName};
-use kalamdb_commons::schemas::ColumnDefault;
-use kalamdb_commons::websocket::ChangeNotification;
+use datafusion::{
+    arrow::datatypes::SchemaRef, datasource::TableProvider, execution::context::SessionContext,
+    physical_plan::collect, scalar::ScalarValue,
+};
+use kalamdb_commons::{
+    models::{
+        datatypes::KalamDataType,
+        rows::Row,
+        schemas::{ColumnDefinition, TableDefinition, TableOptions},
+        NamespaceId, ReadContext, Role, StorageId, TableId, TableName,
+    },
+    schemas::ColumnDefault,
+    websocket::ChangeNotification,
+};
 use kalamdb_datafusion_sources::exec::DeferredBatchExec;
 use kalamdb_filestore::StorageRegistry;
 use kalamdb_sharding::ShardRouter;
-use kalamdb_store::test_utils::InMemoryBackend;
-use kalamdb_store::{StorageBackend, StorageError};
+use kalamdb_store::{test_utils::InMemoryBackend, StorageBackend, StorageError};
 use kalamdb_system::{
     ClusterCoordinator, Manifest, ManifestCacheEntry, ManifestService, NotificationService,
     SchemaRegistry, SessionUserContext, Storage, StorageType, StoragesTableProvider,
     SystemColumnsService,
 };
-use kalamdb_tables::utils::TableServices;
 use kalamdb_tables::{
-    new_stream_table_store, BaseTableProvider, StreamTableProvider, StreamTableStorageMode,
-    StreamTableStoreConfig, TableProviderCore,
+    new_stream_table_store, utils::TableServices, BaseTableProvider, StreamTableProvider,
+    StreamTableStorageMode, StreamTableStoreConfig, TableProviderCore,
 };
 use kalamdb_transactions::CommitSequenceSource;
 use tempfile::TempDir;
 
 fn row(values: Vec<(&str, ScalarValue)>) -> Row {
-    Row::from_vec(
-        values
-            .into_iter()
-            .map(|(name, value)| (name.to_string(), value))
-            .collect(),
-    )
+    Row::from_vec(values.into_iter().map(|(name, value)| (name.to_string(), value)).collect())
 }
 
 #[derive(Debug, Clone)]
@@ -166,7 +161,10 @@ impl ManifestService for NoopManifestService {
         panic!("stage_before_flush is unused in stream planning tests")
     }
 
-    fn get_manifest_user_ids(&self, _table_id: &TableId) -> Result<Vec<kalamdb_commons::UserId>, StorageError> {
+    fn get_manifest_user_ids(
+        &self,
+        _table_id: &TableId,
+    ) -> Result<Vec<kalamdb_commons::UserId>, StorageError> {
         Ok(Vec::new())
     }
 }
@@ -177,7 +175,11 @@ struct NoopNotificationService;
 impl NotificationService for NoopNotificationService {
     type Notification = ChangeNotification;
 
-    fn has_subscribers(&self, _user_id: Option<&kalamdb_commons::UserId>, _table_id: &TableId) -> bool {
+    fn has_subscribers(
+        &self,
+        _user_id: Option<&kalamdb_commons::UserId>,
+        _table_id: &TableId,
+    ) -> bool {
         false
     }
 
@@ -275,14 +277,13 @@ fn build_storage_registry(
         })
         .expect("seed local storage");
 
-    Arc::new(StorageRegistry::new(
-        storages_provider,
-        base_directory,
-        Default::default(),
-    ))
+    Arc::new(StorageRegistry::new(storages_provider, base_directory, Default::default()))
 }
 
-fn build_services(table_def: Arc<TableDefinition>, backend: Arc<dyn StorageBackend>) -> OwnedServices {
+fn build_services(
+    table_def: Arc<TableDefinition>,
+    backend: Arc<dyn StorageBackend>,
+) -> OwnedServices {
     let schema = table_def.to_arrow_schema().expect("build arrow schema");
     let temp_dir = tempfile::tempdir().expect("create temp dir");
     let storage_registry = build_storage_registry(backend, &temp_dir);
@@ -369,10 +370,7 @@ async fn stream_provider_planning_stays_lightweight_until_execution() {
     let user_id = kalamdb_commons::UserId::new("stream-owner");
     let ctx = session_with_user(&user_id);
     let state = ctx.state();
-    let plan = provider
-        .scan(&state, None, &[], None)
-        .await
-        .expect("build stream plan");
+    let plan = provider.scan(&state, None, &[], None).await.expect("build stream plan");
 
     assert!(plan.as_any().is::<DeferredBatchExec>());
 
@@ -387,9 +385,7 @@ async fn stream_provider_planning_stays_lightweight_until_execution() {
         .await
         .expect("insert row after planning");
 
-    let batches = collect(plan, state.task_ctx())
-        .await
-        .expect("collect stream plan after insert");
+    let batches = collect(plan, state.task_ctx()).await.expect("collect stream plan after insert");
 
     let total_rows: usize = batches.iter().map(|batch| batch.num_rows()).sum();
     assert_eq!(total_rows, 1, "execution should see rows inserted after planning");

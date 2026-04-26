@@ -5,17 +5,21 @@
 //! Provides the current set of active explicit transactions tracked by the
 //! in-memory transaction coordinator.
 
-use crate::view_base::VirtualView;
-use datafusion::arrow::array::{ArrayRef, Int64Builder, StringBuilder};
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::RecordBatch;
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::schemas::{
-    ColumnDefault, ColumnDefinition, TableDefinition, TableOptions, TableType,
-};
-use kalamdb_commons::{NamespaceId, SystemTable, TableName};
-use parking_lot::RwLock;
 use std::sync::{Arc, OnceLock};
+
+use datafusion::arrow::{
+    array::{ArrayRef, Int64Builder, StringBuilder},
+    datatypes::SchemaRef,
+    record_batch::RecordBatch,
+};
+use kalamdb_commons::{
+    datatypes::KalamDataType,
+    schemas::{ColumnDefault, ColumnDefinition, TableDefinition, TableOptions, TableType},
+    NamespaceId, SystemTable, TableName,
+};
+use parking_lot::RwLock;
+
+use crate::view_base::VirtualView;
 
 /// Serializable snapshot of an active explicit transaction.
 #[derive(Debug, Clone, PartialEq, Eq)]

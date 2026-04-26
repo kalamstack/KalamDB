@@ -13,17 +13,20 @@ pub mod kalamdb {
 
             #[deprecated(
                 since = "2.0.0",
-                note = "Use associated constants instead. This will no longer be generated in 2021."
+                note = "Use associated constants instead. This will no longer be generated in \
+                        2021."
             )]
             pub const ENUM_MIN_SCALAR_TAG: u16 = 0;
             #[deprecated(
                 since = "2.0.0",
-                note = "Use associated constants instead. This will no longer be generated in 2021."
+                note = "Use associated constants instead. This will no longer be generated in \
+                        2021."
             )]
             pub const ENUM_MAX_SCALAR_TAG: u16 = 24;
             #[deprecated(
                 since = "2.0.0",
-                note = "Use associated constants instead. This will no longer be generated in 2021."
+                note = "Use associated constants instead. This will no longer be generated in \
+                        2021."
             )]
             #[allow(non_camel_case_types)]
             pub const ENUM_VALUES_SCALAR_TAG: [ScalarTag; 25] = [
@@ -1612,16 +1615,17 @@ pub mod kalamdb {
                 ::flatbuffers::size_prefixed_root_with_opts::<RowPayload<'b>>(opts, buf)
             }
             #[inline]
-            /// Assumes, without verification, that a buffer of bytes contains a RowPayload and returns it.
-            /// # Safety
+            /// Assumes, without verification, that a buffer of bytes contains a RowPayload and
+            /// returns it. # Safety
             /// Callers must trust the given bytes do indeed contain a valid `RowPayload`.
             pub unsafe fn root_as_row_payload_unchecked(buf: &[u8]) -> RowPayload<'_> {
                 unsafe { ::flatbuffers::root_unchecked::<RowPayload>(buf) }
             }
             #[inline]
-            /// Assumes, without verification, that a buffer of bytes contains a size prefixed RowPayload and returns it.
-            /// # Safety
-            /// Callers must trust the given bytes do indeed contain a valid size prefixed `RowPayload`.
+            /// Assumes, without verification, that a buffer of bytes contains a size prefixed
+            /// RowPayload and returns it. # Safety
+            /// Callers must trust the given bytes do indeed contain a valid size prefixed
+            /// `RowPayload`.
             pub unsafe fn size_prefixed_root_as_row_payload_unchecked(
                 buf: &[u8],
             ) -> RowPayload<'_> {

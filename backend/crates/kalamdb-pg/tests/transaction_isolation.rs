@@ -1,7 +1,6 @@
 mod support;
 
 use ntest::timeout;
-
 use support::{
     await_shared_leader, begin_transaction, commit_transaction, insert_shared_row,
     new_cluster_service_with_tables, open_session, scan_shared_rows,

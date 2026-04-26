@@ -11,19 +11,27 @@
 //! - `max_partitions`: Maximum partitions per query (enables parallel execution)
 //! - `batch_size`: Arrow batch size for record processing (default: 8192)
 
-use crate::sql::functions::{
-    CosineDistanceFunction, CurrentRoleFunction, CurrentUserFunction, SnowflakeIdFunction,
-    UlidFunction, UuidV7Function,
-};
-use crate::sql::table_functions::VectorSearchTableFunction;
-use datafusion::error::Result as DataFusionResult;
-use datafusion::execution::context::{SessionContext, SessionState};
-use datafusion::execution::memory_pool::GreedyMemoryPool;
-use datafusion::execution::runtime_env::RuntimeEnvBuilder;
-use datafusion::logical_expr::ScalarUDF;
-use datafusion::prelude::SessionConfig;
-use kalamdb_configs::DataFusionSettings;
 use std::sync::Arc;
+
+use datafusion::{
+    error::Result as DataFusionResult,
+    execution::{
+        context::{SessionContext, SessionState},
+        memory_pool::GreedyMemoryPool,
+        runtime_env::RuntimeEnvBuilder,
+    },
+    logical_expr::ScalarUDF,
+    prelude::SessionConfig,
+};
+use kalamdb_configs::DataFusionSettings;
+
+use crate::sql::{
+    functions::{
+        CosineDistanceFunction, CurrentRoleFunction, CurrentUserFunction, SnowflakeIdFunction,
+        UlidFunction, UuidV7Function,
+    },
+    table_functions::VectorSearchTableFunction,
+};
 
 // KalamSessionState removed (ExecutionContext used at higher layer)
 
@@ -154,8 +162,7 @@ impl DataFusionSessionFactory {
         // This replaces the former custom json_extract_scalar UDF and the PG-side
         // SQL rewrite layer with the community-maintained datafusion-functions-json
         // crate which handles operator planning natively inside DataFusion.
-        datafusion_functions_json::register_all(ctx)
-            .expect("failed to register JSON functions");
+        datafusion_functions_json::register_all(ctx).expect("failed to register JSON functions");
 
         // Register COSINE_DISTANCE(vector, query_vector) for ORDER BY similarity search syntax.
         ctx.register_udf(ScalarUDF::from(CosineDistanceFunction::new()));

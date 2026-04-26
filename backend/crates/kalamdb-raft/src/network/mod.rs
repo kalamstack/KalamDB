@@ -29,14 +29,15 @@ pub mod cluster_handler;
 pub mod cluster_service;
 pub mod models;
 
-pub use network::{RaftNetwork, RaftNetworkFactory};
-pub use service::raft_client::RaftClient;
-pub use service::{start_rpc_server, ClientProposalRequest, ClientProposalResponse, RaftService};
-
 // Cluster messaging re-exports
 pub use cluster_client::ClusterClient;
 pub use cluster_handler::{ClusterMessageHandler, ClusterServiceImpl, NoOpClusterHandler};
 pub use models::{
     forward_sql_param, ForwardSqlParam, ForwardSqlRequest, ForwardSqlResponse,
     ForwardSqlResponsePayload, GetNodeInfoRequest, GetNodeInfoResponse, PingRequest, PingResponse,
+};
+pub use network::{RaftNetwork, RaftNetworkFactory};
+pub use service::{
+    raft_client::RaftClient, start_rpc_server, ClientProposalRequest, ClientProposalResponse,
+    RaftService,
 };

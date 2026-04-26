@@ -54,7 +54,8 @@ fn smoke_test_schema_history_in_system_tables() {
 
     // Check system.schemas - should have 1 row for this table
     let query_v1 = format!(
-        "SELECT schema_version, is_latest FROM system.schemas WHERE namespace_id = '{}' AND table_name = '{}' ORDER BY schema_version",
+        "SELECT schema_version, is_latest FROM system.schemas WHERE namespace_id = '{}' AND \
+         table_name = '{}' ORDER BY schema_version",
         namespace, table
     );
     let output_v1 = execute_sql_as_root_via_client_json(&query_v1)
@@ -102,7 +103,8 @@ fn smoke_test_schema_history_in_system_tables() {
 
     // Check system.schemas - should now have 2 rows
     let query_v2 = format!(
-        "SELECT schema_version, is_latest FROM system.schemas WHERE namespace_id = '{}' AND table_name = '{}' ORDER BY schema_version",
+        "SELECT schema_version, is_latest FROM system.schemas WHERE namespace_id = '{}' AND \
+         table_name = '{}' ORDER BY schema_version",
         namespace, table
     );
     let output_v2 = execute_sql_as_root_via_client_json(&query_v2)
@@ -142,7 +144,8 @@ fn smoke_test_schema_history_in_system_tables() {
     println!("✅ Added column 'age' (should create version 3)");
 
     let query_v3 = format!(
-        "SELECT schema_version, is_latest FROM system.schemas WHERE namespace_id = '{}' AND table_name = '{}' ORDER BY schema_version",
+        "SELECT schema_version, is_latest FROM system.schemas WHERE namespace_id = '{}' AND \
+         table_name = '{}' ORDER BY schema_version",
         namespace, table
     );
     let output_v3 = execute_sql_as_root_via_client_json(&query_v3)
@@ -174,7 +177,8 @@ fn smoke_test_schema_history_in_system_tables() {
     println!("✅ Added {} more columns", num_additional_alters);
 
     let query_final = format!(
-        "SELECT schema_version, is_latest FROM system.schemas WHERE namespace_id = '{}' AND table_name = '{}' ORDER BY schema_version",
+        "SELECT schema_version, is_latest FROM system.schemas WHERE namespace_id = '{}' AND \
+         table_name = '{}' ORDER BY schema_version",
         namespace, table
     );
     let output_final = execute_sql_as_root_via_client_json(&query_final)
@@ -188,7 +192,8 @@ fn smoke_test_schema_history_in_system_tables() {
     assert_eq!(
         final_rows.len(),
         expected_rows,
-        "Expected {} rows (1 CREATE + 2 + {} ALTERs), got {}. Schema history is NOT being preserved!",
+        "Expected {} rows (1 CREATE + 2 + {} ALTERs), got {}. Schema history is NOT being \
+         preserved!",
         expected_rows,
         num_additional_alters,
         final_rows.len()
@@ -229,8 +234,8 @@ fn smoke_test_schema_history_in_system_tables() {
 // ============================================================================
 
 /// Extract rows from CLI JSON response
-/// The response format is: {"status": "success", "results": [{"schema": [...], "rows": [[...], ...]}]}
-/// Returns rows as objects with column names as keys
+/// The response format is: {"status": "success", "results": [{"schema": [...], "rows": [[...],
+/// ...]}]} Returns rows as objects with column names as keys
 fn extract_rows_from_response(json_str: &str) -> Vec<serde_json::Value> {
     let json: serde_json::Value = serde_json::from_str(json_str).expect("Failed to parse JSON");
 
@@ -341,7 +346,8 @@ fn smoke_test_drop_table_removes_schema_history() {
 
     // Verify we have multiple versions
     let query_before = format!(
-        "SELECT COUNT(*) as cnt FROM system.schemas WHERE namespace_id = '{}' AND table_name = '{}'",
+        "SELECT COUNT(*) as cnt FROM system.schemas WHERE namespace_id = '{}' AND table_name = \
+         '{}'",
         namespace, table
     );
     let before_output = execute_sql_as_root_via_client_json(&query_before)
@@ -355,7 +361,8 @@ fn smoke_test_drop_table_removes_schema_history() {
 
     // Verify all versions removed
     let query_after = format!(
-        "SELECT COUNT(*) as cnt FROM system.schemas WHERE namespace_id = '{}' AND table_name = '{}'",
+        "SELECT COUNT(*) as cnt FROM system.schemas WHERE namespace_id = '{}' AND table_name = \
+         '{}'",
         namespace, table
     );
     let after_output = execute_sql_as_root_via_client_json(&query_after)

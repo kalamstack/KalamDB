@@ -13,42 +13,43 @@
 //!
 //! ## Performance notes
 //!
-//! - `extract_file_placeholders` is called **once** in the handler; the result
-//!   is passed into `execute_file_upload_path` to avoid rescanning.
-//! - `req_for_forward` (clones `sql` + `params`) is built lazily — only when
-//!   forwarding is actually needed.
-//! - In the batch loop, `params` is **moved** on the last iteration instead of
-//!   cloned, eliminating one allocation per single-statement request (>90% of
-//!   traffic).
-//! - Content-type detection uses ASCII-case-insensitive comparison without
-//!   allocating a lowercase copy.
-//! - `EXECUTE AS USER` prefix detection uses a fixed-length slice comparison
-//!   instead of uppercasing the entire input string.
+//! - `extract_file_placeholders` is called **once** in the handler; the result is passed into
+//!   `execute_file_upload_path` to avoid rescanning.
+//! - `req_for_forward` (clones `sql` + `params`) is built lazily — only when forwarding is actually
+//!   needed.
+//! - In the batch loop, `params` is **moved** on the last iteration instead of cloned, eliminating
+//!   one allocation per single-statement request (>90% of traffic).
+//! - Content-type detection uses ASCII-case-insensitive comparison without allocating a lowercase
+//!   copy.
+//! - `EXECUTE AS USER` prefix detection uses a fixed-length slice comparison instead of uppercasing
+//!   the entire input string.
+
+use std::{sync::Arc, time::Instant};
 
 use actix_web::{post, web, HttpRequest, HttpResponse, Responder};
 use kalamdb_auth::AuthSessionExtractor;
 use kalamdb_commons::models::NamespaceId;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::sql::context::ExecutionContext;
-use kalamdb_core::sql::executor::SqlExecutor;
-use kalamdb_core::sql::SqlImpersonationService;
+use kalamdb_core::{
+    app_context::AppContext,
+    sql::{context::ExecutionContext, executor::SqlExecutor, SqlImpersonationService},
+};
+use kalamdb_jobs::health_monitor::record_activity_now;
 use kalamdb_raft::GroupId;
 use kalamdb_session::AuthSession;
-use std::sync::Arc;
-use std::time::Instant;
 use uuid::Uuid;
 
-use super::execution_paths::{execute_batch_path, execute_file_upload_path};
-use super::file_utils::extract_file_placeholders;
-use super::forward::forward_sql_if_follower;
-use super::helpers::parse_scalar_params;
-use super::models::{ErrorCode, QueryRequest, SqlResponse};
-use super::request::{parse_incoming_payload, took_ms, validate_sql_length};
-use super::statements::{
-    authorized_username, split_and_prepare_statements, PreparedApiExecutionStatement,
+use super::{
+    execution_paths::{execute_batch_path, execute_file_upload_path},
+    file_utils::extract_file_placeholders,
+    forward::forward_sql_if_follower,
+    helpers::parse_scalar_params,
+    models::{ErrorCode, QueryRequest, SqlResponse},
+    request::{parse_incoming_payload, took_ms, validate_sql_length},
+    statements::{
+        authorized_username, split_and_prepare_statements, PreparedApiExecutionStatement,
+    },
 };
 use crate::limiter::RateLimiter;
-use kalamdb_jobs::health_monitor::record_activity_now;
 
 #[inline]
 fn batch_requires_request_id(prepared_statements: &[PreparedApiExecutionStatement]) -> bool {
@@ -77,8 +78,8 @@ fn batch_requires_request_id(prepared_statements: &[PreparedApiExecutionStatemen
 /// Accepts either JSON or multipart/form-data payloads.
 ///
 /// - JSON: `sql` plus optional `params` and `namespace_id`.
-/// - Multipart: `sql`, optional `params` (JSON array), optional `namespace_id`,
-///   and file parts named `file:<placeholder>` for FILE("name") placeholders.
+/// - Multipart: `sql`, optional `params` (JSON array), optional `namespace_id`, and file parts
+///   named `file:<placeholder>` for FILE("name") placeholders.
 ///
 /// Multiple statements can be separated by semicolons and will be executed sequentially.
 /// File uploads require a single SQL statement.
@@ -165,6 +166,7 @@ pub async fn execute_sql_v1(
             &req_for_forward,
             app_context.get_ref(),
             &default_namespace,
+            exec_ctx.user_id(),
             exec_ctx.request_id(),
         )
         .await

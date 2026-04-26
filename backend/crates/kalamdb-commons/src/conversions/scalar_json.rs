@@ -260,10 +260,10 @@ fn extract_string(scalar: &ScalarValue) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{json_value_to_scalar_for_column, scalar_to_json_for_column};
     use datafusion_common::ScalarValue;
     use serde_json::json;
 
+    use super::{json_value_to_scalar_for_column, scalar_to_json_for_column};
     use crate::models::datatypes::KalamDataType;
 
     #[test]

@@ -1,6 +1,6 @@
 // Smoke Test 1 (revised): User table with subscription lifecycle
-// Covers: namespace creation, user table creation, inserts, subscription receiving events, flush job visibility
-// Uses kalam-client directly instead of CLI to avoid macOS TCP subprocess limits
+// Covers: namespace creation, user table creation, inserts, subscription receiving events, flush
+// job visibility Uses kalam-client directly instead of CLI to avoid macOS TCP subprocess limits
 
 use crate::common::*;
 
@@ -55,7 +55,8 @@ fn smoke_user_table_subscription_lifecycle() {
     let query = format!("SELECT * FROM {}", full);
     let mut listener = SubscriptionListener::start(&query).expect("subscription should start");
 
-    // 4a) Collect snapshot rows with extended timeout; if none captured, fallback to direct SELECT snapshot
+    // 4a) Collect snapshot rows with extended timeout; if none captured, fallback to direct SELECT
+    // snapshot
     let mut snapshot_lines: Vec<String> = Vec::new();
     let snapshot_deadline = std::time::Instant::now() + std::time::Duration::from_secs(6);
     while std::time::Instant::now() < snapshot_deadline {

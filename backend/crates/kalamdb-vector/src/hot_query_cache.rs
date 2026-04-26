@@ -1,20 +1,28 @@
-use crate::hot_staging::{
-    new_indexed_shared_vector_hot_store, new_indexed_user_vector_hot_store, SharedVectorHotOpId,
-    UserVectorHotOpId, VectorHotOp, VectorHotOpType,
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
 };
-use crate::usearch_engine::{add_vector, create_index, search_index};
+
 use dashmap::DashMap;
 use datafusion::common::DataFusionError;
-use kalamdb_commons::ids::SeqId;
-use kalamdb_commons::models::{TableId, UserId};
-use kalamdb_commons::schemas::TableType;
-use kalamdb_commons::StorageKey;
+use kalamdb_commons::{
+    ids::SeqId,
+    models::{TableId, UserId},
+    schemas::TableType,
+    StorageKey,
+};
 use kalamdb_store::{EntityStore, StorageBackend};
 use kalamdb_system::VectorMetric;
 use once_cell::sync::Lazy;
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use usearch::Index;
+
+use crate::{
+    hot_staging::{
+        new_indexed_shared_vector_hot_store, new_indexed_user_vector_hot_store,
+        SharedVectorHotOpId, UserVectorHotOpId, VectorHotOp, VectorHotOpType,
+    },
+    usearch_engine::{add_vector, create_index, search_index},
+};
 
 const HOT_INCREMENTAL_SCAN_LIMIT: usize = 100_000;
 const HOT_RESERVE_STEP: usize = 1024;
@@ -308,13 +316,14 @@ pub(crate) fn clear_hot_query_cache_for_tests() {
 
 #[cfg(test)]
 mod tests {
+    use kalamdb_commons::ids::SeqId;
+    use kalamdb_store::test_utils::TestDb;
+
     use super::*;
     use crate::hot_staging::{
         new_indexed_shared_vector_hot_store, new_indexed_user_vector_hot_store,
         SharedVectorHotOpId, UserVectorHotOpId, VectorHotOp, VectorHotOpType,
     };
-    use kalamdb_commons::ids::SeqId;
-    use kalamdb_store::test_utils::TestDb;
 
     fn shared_op(
         table_id: &TableId,

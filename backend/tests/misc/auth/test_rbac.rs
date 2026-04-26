@@ -2,9 +2,10 @@
 //!
 //! Verifies role-based access control behavior using SQL executor paths.
 
-use super::test_support::{fixtures, TestServer};
 use kalam_client::models::ResponseStatus;
 use kalamdb_commons::models::{Role, UserId};
+
+use super::test_support::{fixtures, TestServer};
 
 async fn insert_user(server: &TestServer, username: &str, role: Role) -> UserId {
     server.create_user(username, "TestPass123!", role).await

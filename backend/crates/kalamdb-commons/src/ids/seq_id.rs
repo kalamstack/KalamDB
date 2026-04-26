@@ -3,11 +3,14 @@
 //! This module provides a wrapper around Snowflake IDs for use as sequence identifiers
 //! in the MVCC architecture. Each SeqId represents a unique version of a row.
 
-use crate::ids::SnowflakeGenerator;
-use crate::StorageKey;
+use std::{
+    fmt,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::{ids::SnowflakeGenerator, StorageKey};
 
 /// Sequence ID for MVCC versioning
 ///
@@ -107,7 +110,7 @@ impl SeqId {
     /// so the returned SeqId encompasses every Snowflake generated at or before
     /// `timestamp_millis`.
     pub fn max_id_for_timestamp(timestamp_millis: u64) -> Result<Self, String> {
-        //let normalized = timestamp_millis.max(Self::EPOCH);
+        // let normalized = timestamp_millis.max(Self::EPOCH);
         let id = SnowflakeGenerator::max_id_for_timestamp(timestamp_millis)?;
         Ok(Self::new(id))
     }

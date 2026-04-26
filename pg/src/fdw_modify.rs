@@ -2,18 +2,17 @@
 //! PlanForeignModify, BeginForeignModify, ExecForeignInsert/Update/Delete,
 //! EndForeignModify.
 
-use crate::fdw_options::parse_options;
-use crate::fdw_state::KalamModifyState;
-use crate::pg_to_kalam::datum_to_scalar;
-use crate::relation_table_options::resolve_table_options_for_relation;
+use std::{collections::BTreeMap, ffi::CStr};
+
 use kalam_pg_api::{DeleteRequest, InsertRequest, TenantContext, UpdateRequest};
 use kalam_pg_common::{KalamPgError, DELETED_COLUMN, SEQ_COLUMN, USER_ID_COLUMN};
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::UserId;
-use pgrx::pg_guard;
-use pgrx::pg_sys;
-use std::collections::BTreeMap;
-use std::ffi::CStr;
+use kalamdb_commons::models::{rows::Row, UserId};
+use pgrx::{pg_guard, pg_sys};
+
+use crate::{
+    fdw_options::parse_options, fdw_state::KalamModifyState, pg_to_kalam::datum_to_scalar,
+    relation_table_options::resolve_table_options_for_relation,
+};
 
 /// `IsForeignRelUpdatable` callback: report supported DML operations.
 #[pg_guard]

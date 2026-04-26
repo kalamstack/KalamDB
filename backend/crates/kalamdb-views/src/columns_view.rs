@@ -10,18 +10,21 @@
 //!
 //! **DataFusion Pattern**: Implements VirtualView trait for consistent view behavior
 
-use crate::error::RegistryError;
-use crate::view_base::VirtualView;
-use datafusion::arrow::array::{ArrayRef, BooleanBuilder, Int64Builder, StringBuilder};
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::RecordBatch;
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::schemas::{
-    ColumnDefault, ColumnDefinition, TableDefinition, TableOptions, TableType,
-};
-use kalamdb_commons::{NamespaceId, SystemTable, TableName};
-use kalamdb_system::SystemTablesRegistry;
 use std::sync::{Arc, OnceLock};
+
+use datafusion::arrow::{
+    array::{ArrayRef, BooleanBuilder, Int64Builder, StringBuilder},
+    datatypes::SchemaRef,
+    record_batch::RecordBatch,
+};
+use kalamdb_commons::{
+    datatypes::KalamDataType,
+    schemas::{ColumnDefault, ColumnDefinition, TableDefinition, TableOptions, TableType},
+    NamespaceId, SystemTable, TableName,
+};
+use kalamdb_system::SystemTablesRegistry;
+
+use crate::{error::RegistryError, view_base::VirtualView};
 
 /// Get the columns view schema (memoized)
 fn columns_schema() -> SchemaRef {

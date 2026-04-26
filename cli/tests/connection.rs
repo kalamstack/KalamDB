@@ -10,7 +10,8 @@
 //   cargo test --test connection timeout
 //   cargo test --test connection concurrent_ws
 //
-// Note: subscription_options_tests and live_connection_tests have been moved to the subscription category
+// Note: subscription_options_tests and live_connection_tests have been moved to the subscription
+// category
 //
 // Unit tests (no server required):
 mod common;

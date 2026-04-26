@@ -4,13 +4,18 @@
 
 use std::sync::Arc;
 
-use kalamdb_commons::models::schemas::TableDefinition;
-use kalamdb_commons::models::TableId;
-use kalamdb_commons::schemas::TableType;
+use kalamdb_commons::{
+    models::{schemas::TableDefinition, TableId},
+    schemas::TableType,
+};
 
-use crate::app_context::AppContext;
-use crate::applier::executor::utils::{run_blocking_applier, with_plan_cache_invalidation};
-use crate::applier::ApplierError;
+use crate::{
+    app_context::AppContext,
+    applier::{
+        executor::utils::{run_blocking_applier, with_plan_cache_invalidation},
+        ApplierError,
+    },
+};
 
 /// Executor for DDL (Data Definition Language) operations
 pub struct DdlExecutor {
@@ -74,12 +79,9 @@ impl DdlExecutor {
         let table_def = table_def.clone();
         with_plan_cache_invalidation(app_context, move |app_context: Arc<AppContext>| async move {
             run_blocking_applier(move || {
-                app_context
-                    .schema_registry()
-                    .register_table(table_def.clone())
-                    .map_err(|e| {
-                        ApplierError::Execution(format!("Failed to register altered table: {}", e))
-                    })?;
+                app_context.schema_registry().register_table(table_def.clone()).map_err(|e| {
+                    ApplierError::Execution(format!("Failed to register altered table: {}", e))
+                })?;
 
                 log::debug!(
                     "CommandExecutorImpl: Updated schema cache and provider for {}",
@@ -89,7 +91,8 @@ impl DdlExecutor {
                 if let Some(cached) = app_context.schema_registry().get(&table_id) {
                     if let Ok(schema) = cached.arrow_schema() {
                         log::debug!(
-                            "CommandExecutorImpl: ALTER TABLE {} complete - Arrow schema now has {} fields: {:?}",
+                            "CommandExecutorImpl: ALTER TABLE {} complete - Arrow schema now has \
+                             {} fields: {:?}",
                             table_id.full_name(),
                             schema.fields().len(),
                             schema.fields().iter().map(|f| f.name()).collect::<Vec<_>>()
@@ -132,16 +135,23 @@ impl DdlExecutor {
 
 #[cfg(test)]
 mod tests {
-    use super::DdlExecutor;
-    use crate::sql::context::ExecutionContext;
-    use crate::sql::executor::SqlExecutor;
-    use crate::test_helpers::test_app_context_simple;
-    use kalamdb_commons::models::datatypes::KalamDataType;
-    use kalamdb_commons::models::schemas::{ColumnDefinition, TableDefinition, TableOptions};
-    use kalamdb_commons::models::{NamespaceId, TableId, TableName};
-    use kalamdb_commons::schemas::{ColumnDefault, TableType};
-    use kalamdb_commons::{Role, UserId};
     use std::sync::Arc;
+
+    use kalamdb_commons::{
+        models::{
+            datatypes::KalamDataType,
+            schemas::{ColumnDefinition, TableDefinition, TableOptions},
+            NamespaceId, TableId, TableName,
+        },
+        schemas::{ColumnDefault, TableType},
+        Role, UserId,
+    };
+
+    use super::DdlExecutor;
+    use crate::{
+        sql::{context::ExecutionContext, executor::SqlExecutor},
+        test_helpers::test_app_context_simple,
+    };
 
     #[tokio::test]
     async fn ddl_applied_via_applier_clears_plan_cache() {

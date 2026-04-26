@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
-use kalamdb_auth::AuthRequest;
-use kalamdb_auth::UserRepository;
+use kalamdb_auth::{AuthRequest, UserRepository};
 use kalamdb_commons::websocket::ProtocolOptions;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_live::{ConnectionsManager, LiveQueryManager};

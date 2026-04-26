@@ -1,9 +1,11 @@
 use actix_web::{error::ErrorInternalServerError, HttpResponse};
 use bytes::Bytes;
 use futures_util::stream;
-use kalamdb_commons::conversions::{mask_sensitive_rows_for_role, schema_fields_from_arrow_schema};
-use kalamdb_commons::models::{KalamCellValue, Role};
-use kalamdb_commons::schemas::SchemaField;
+use kalamdb_commons::{
+    conversions::{mask_sensitive_rows_for_role, schema_fields_from_arrow_schema},
+    models::{KalamCellValue, Role},
+    schemas::SchemaField,
+};
 use kalamdb_core::providers::arrow_json_conversion::record_batch_to_json_arrays;
 
 use super::converter::{resolve_arrow_schema, row_result_prefix, success_response_suffix};

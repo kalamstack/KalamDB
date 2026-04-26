@@ -3,23 +3,28 @@
 //! This module provides a DataFusion TableProvider implementation for the system.manifest table.
 //! Exposes manifest cache entries as a queryable system table.
 
+use std::sync::{Arc, OnceLock, RwLock};
+
+use datafusion::{
+    arrow::{array::RecordBatch, datatypes::SchemaRef},
+    logical_expr::Expr,
+};
+use kalamdb_commons::{models::rows::SystemTableRow, ManifestId, StorageKey, TableId};
+use kalamdb_store::{entity_store::EntityStore, IndexedEntityStore, StorageBackend, StorageError};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
 use super::{
     create_manifest_indexes, manifest_arrow_schema, manifest_table_definition, Manifest, SyncState,
 };
-use crate::error::{SystemError, SystemResultExt};
-use crate::providers::base::{extract_filter_value, SimpleProviderDefinition};
-use crate::providers::manifest::ManifestCacheEntry;
-use crate::system_row_mapper::{model_to_system_row, system_row_to_model};
-use datafusion::arrow::array::RecordBatch;
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::logical_expr::Expr;
-use kalamdb_commons::models::rows::SystemTableRow;
-use kalamdb_commons::{ManifestId, StorageKey, TableId};
-use kalamdb_store::entity_store::EntityStore;
-use kalamdb_store::{IndexedEntityStore, StorageBackend, StorageError};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::sync::{Arc, OnceLock, RwLock};
+use crate::{
+    error::{SystemError, SystemResultExt},
+    providers::{
+        base::{extract_filter_value, SimpleProviderDefinition},
+        manifest::ManifestCacheEntry,
+    },
+    system_row_mapper::{model_to_system_row, system_row_to_model},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ManifestStorageRow {
@@ -423,11 +428,11 @@ crate::impl_simple_system_table_provider!(
 
 #[cfg(test)]
 mod tests {
+    use kalamdb_commons::{NamespaceId, TableId, TableName};
+    use kalamdb_store::{entity_store::EntityStore, test_utils::InMemoryBackend};
+
     use super::*;
     use crate::providers::manifest::{Manifest, ManifestCacheEntry, SyncState};
-    use kalamdb_commons::{NamespaceId, TableId, TableName};
-    use kalamdb_store::entity_store::EntityStore;
-    use kalamdb_store::test_utils::InMemoryBackend;
 
     #[tokio::test]
     async fn test_empty_manifest_table() {

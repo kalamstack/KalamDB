@@ -4,10 +4,11 @@
 //! The schema is derived from `TopicMessage::definition()` so the model and
 //! Arrow projection stay in sync.
 
-use datafusion::arrow::datatypes::SchemaRef;
+use std::sync::OnceLock;
+
 #[cfg(test)]
 use datafusion::arrow::datatypes::DataType;
-use std::sync::OnceLock;
+use datafusion::arrow::datatypes::SchemaRef;
 
 use super::topic_message_models::TopicMessage;
 

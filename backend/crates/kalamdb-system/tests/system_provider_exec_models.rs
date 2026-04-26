@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
-use datafusion::datasource::TableProvider;
-use datafusion::execution::context::SessionContext;
-use datafusion::physical_plan::collect;
+use datafusion::{
+    datasource::TableProvider, execution::context::SessionContext, physical_plan::collect,
+};
 use kalamdb_commons::{StorageId, UserId};
 use kalamdb_datafusion_sources::exec::DeferredBatchExec;
-use kalamdb_store::test_utils::InMemoryBackend;
-use kalamdb_store::StorageBackend;
-use kalamdb_system::providers::storages::models::StorageMode;
-use kalamdb_system::{AuthType, Role, User, UsersTableProvider};
+use kalamdb_store::{test_utils::InMemoryBackend, StorageBackend};
+use kalamdb_system::{
+    providers::storages::models::StorageMode, AuthType, Role, User, UsersTableProvider,
+};
 
 fn total_rows(batches: &[datafusion::arrow::record_batch::RecordBatch]) -> usize {
     batches.iter().map(|batch| batch.num_rows()).sum()
@@ -41,10 +41,7 @@ async fn users_provider_scan_uses_deferred_batch_exec_and_returns_rows() {
 
     let ctx = SessionContext::new();
     let state = ctx.state();
-    let plan = provider
-        .scan(&state, None, &[], None)
-        .await
-        .expect("build users plan");
+    let plan = provider.scan(&state, None, &[], None).await.expect("build users plan");
 
     assert!(plan.as_any().is::<DeferredBatchExec>());
 

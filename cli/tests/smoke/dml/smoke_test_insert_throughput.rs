@@ -4,10 +4,15 @@
 // - Batched inserts (multi-row VALUES)
 // - Parallel inserts
 
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Instant,
+};
+
 use crate::common::*;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::Instant;
 
 // Test configuration
 const SINGLE_INSERT_COUNT: usize = 100; // Single-row inserts to test
@@ -38,7 +43,8 @@ fn smoke_test_insert_throughput_single() {
         .expect("CREATE NAMESPACE should succeed");
 
     let create_table_sql = format!(
-        "CREATE TABLE {} (id BIGINT PRIMARY KEY, value TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW())",
+        "CREATE TABLE {} (id BIGINT PRIMARY KEY, value TEXT NOT NULL, created_at TIMESTAMP \
+         DEFAULT NOW())",
         full_table_name
     );
     execute_sql_as_root_via_client(&create_table_sql).expect("CREATE TABLE should succeed");
@@ -218,7 +224,8 @@ fn smoke_test_insert_throughput_parallel() {
 
     // Use AUTO_INCREMENT to avoid PK conflicts between parallel workers
     let create_table_sql = format!(
-        "CREATE TABLE {} (id BIGINT PRIMARY KEY AUTO_INCREMENT, worker_id INT, seq INT, value TEXT)",
+        "CREATE TABLE {} (id BIGINT PRIMARY KEY AUTO_INCREMENT, worker_id INT, seq INT, value \
+         TEXT)",
         full_table_name
     );
     execute_sql_as_root_via_client(&create_table_sql).expect("CREATE TABLE should succeed");

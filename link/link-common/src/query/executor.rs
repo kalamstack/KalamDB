@@ -1,10 +1,12 @@
 //! SQL query execution via HTTP.
 
-use crate::{
-    auth::AuthProvider,
-    error::{KalamLinkError, Result},
-    models::{QueryRequest, QueryResponse, UploadProgress},
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::{Arc, Mutex},
+    time::Instant,
 };
+
 #[cfg(feature = "file-uploads")]
 use bytes::Bytes;
 #[cfg(feature = "file-uploads")]
@@ -14,11 +16,11 @@ use http_body_util::StreamBody;
 use log::{debug, warn};
 #[cfg(feature = "file-uploads")]
 use reqwest::multipart::{Form, Part};
-use std::{
-    future::Future,
-    pin::Pin,
-    sync::{Arc, Mutex},
-    time::Instant,
+
+use crate::{
+    auth::AuthProvider,
+    error::{KalamLinkError, Result},
+    models::{QueryRequest, QueryResponse, UploadProgress},
 };
 
 /// Async callback that resolves fresh [`AuthProvider`] credentials.
@@ -113,7 +115,9 @@ impl QueryExecutor {
     fn validate_request_auth(auth: &AuthProvider) -> Result<()> {
         if matches!(auth, AuthProvider::BasicAuth(_, _)) {
             return Err(KalamLinkError::AuthenticationError(
-                "User/password credentials can only be used with /v1/api/auth/login; exchange them for a JWT before executing SQL requests.".to_string(),
+                "User/password credentials can only be used with /v1/api/auth/login; exchange \
+                 them for a JWT before executing SQL requests."
+                    .to_string(),
             ));
         }
 
@@ -220,7 +224,9 @@ impl QueryExecutor {
         #[cfg(not(feature = "file-uploads"))]
         if has_files {
             return Err(KalamLinkError::ConfigurationError(
-                "This SDK build does not include file upload support. Rebuild with the `file-uploads` feature.".to_string(),
+                "This SDK build does not include file upload support. Rebuild with the \
+                 `file-uploads` feature."
+                    .to_string(),
             ));
         }
 
@@ -296,7 +302,10 @@ impl QueryExecutor {
             // we still refresh the token so the *next* request succeeds.
             if result.is_token_expired() {
                 if let Some(refresher) = &self.auth_refresher {
-                    warn!("[LINK_HTTP] TOKEN_EXPIRED on multipart request — refreshing auth for subsequent requests");
+                    warn!(
+                        "[LINK_HTTP] TOKEN_EXPIRED on multipart request — refreshing auth for \
+                         subsequent requests"
+                    );
                     if let Ok(new_auth) = refresher().await {
                         if Self::validate_request_auth(&new_auth).is_ok() {
                             *self.auth.lock().unwrap() = new_auth;
@@ -479,11 +488,13 @@ impl QueryExecutor {
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "file-uploads")]
-    use super::{build_progress_stream, UploadProgress, UploadProgressCallback};
+    use std::sync::{Arc, Mutex};
+
     #[cfg(feature = "file-uploads")]
     use futures_util::StreamExt;
+
     #[cfg(feature = "file-uploads")]
-    use std::sync::{Arc, Mutex};
+    use super::{build_progress_stream, UploadProgress, UploadProgressCallback};
 
     #[cfg(feature = "file-uploads")]
     #[tokio::test]

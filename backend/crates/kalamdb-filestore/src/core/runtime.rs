@@ -1,16 +1,16 @@
+use std::{future::Future, sync::OnceLock};
+
 use crate::error::{FilestoreError, Result};
-use std::future::Future;
-use std::sync::OnceLock;
 
 /// Run an async operation in a synchronous context.
 ///
 /// This function handles the tricky case of needing to call async code from sync context.
 ///
 /// **Strategy**:
-/// - If we're in a tokio multi-thread runtime context, use `block_in_place` which allows
-///   blocking while letting other tasks run on other threads
-/// - If we're in a tokio current-thread runtime (common in tests), spawn the work on a
-///   background thread that uses a shared runtime to avoid nested block_on calls
+/// - If we're in a tokio multi-thread runtime context, use `block_in_place` which allows blocking
+///   while letting other tasks run on other threads
+/// - If we're in a tokio current-thread runtime (common in tests), spawn the work on a background
+///   thread that uses a shared runtime to avoid nested block_on calls
 /// - If no runtime exists, use the shared runtime's block_on
 ///
 /// **Why this matters for object_store**:

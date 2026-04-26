@@ -10,29 +10,35 @@
 //! - Unified: Same code path for standalone and cluster modes
 //! - Provider-agnostic: Handles User, Stream, and Shared table types
 
-use std::collections::HashSet;
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
-use kalamdb_commons::ids::StreamTableRowId;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::{OperationKind, TopicOp, TransactionId, UserId};
-use kalamdb_commons::schemas::TableType;
-use kalamdb_commons::websocket::{ChangeNotification, ChangeType};
-use kalamdb_commons::TableId;
+use kalamdb_commons::{
+    ids::StreamTableRowId,
+    models::{rows::Row, OperationKind, TopicOp, TransactionId, UserId},
+    schemas::TableType,
+    websocket::{ChangeNotification, ChangeType},
+    TableId,
+};
 use kalamdb_raft::TransactionApplyResult;
 use kalamdb_system::{NotificationService as NotificationServiceTrait, TopicPublisher};
+use kalamdb_tables::{utils::base as table_base, StreamTableRow};
 use kalamdb_transactions::StagedMutation;
 
-use crate::app_context::AppContext;
-use crate::applier::error::ApplierError;
-use crate::applier::executor::utils::fileref_util::{
-    collect_file_refs_from_row, collect_replaced_file_refs_for_update, delete_file_refs_best_effort,
+use crate::{
+    app_context::AppContext,
+    applier::{
+        error::ApplierError,
+        executor::utils::fileref_util::{
+            collect_file_refs_from_row, collect_replaced_file_refs_for_update,
+            delete_file_refs_best_effort,
+        },
+    },
+    providers::{
+        base::{find_row_by_pk, BaseTableProvider},
+        SharedTableProvider, StreamTableProvider, UserTableProvider,
+    },
+    transactions::{CommitSideEffectPlan, FanoutOwnerScope},
 };
-use crate::providers::base::{find_row_by_pk, BaseTableProvider};
-use crate::providers::{SharedTableProvider, StreamTableProvider, UserTableProvider};
-use crate::transactions::{CommitSideEffectPlan, FanoutOwnerScope};
-use kalamdb_tables::utils::base as table_base;
-use kalamdb_tables::StreamTableRow;
 
 /// Executor for DML operations (Data Plane)
 ///
@@ -47,6 +53,11 @@ impl DmlExecutor {
     /// Create a new DmlExecutor
     pub fn new(app_context: Arc<AppContext>) -> Self {
         Self { app_context }
+    }
+
+    #[inline]
+    fn observe_commit_seq(&self, commit_seq: u64) {
+        self.app_context.commit_sequence_tracker().observe_committed(commit_seq);
     }
 
     async fn load_provider(
@@ -147,12 +158,14 @@ impl DmlExecutor {
                 .insert_batch_with_commit_seq(user_id, rows.to_vec(), commit_seq)
                 .await
                 .map_err(|e| ApplierError::Execution(format!("Failed to insert batch: {}", e)))?;
+            self.observe_commit_seq(commit_seq);
             log::debug!("DmlExecutor: Inserted {} rows into {}", row_ids.len(), table_id);
             Ok(row_ids.len())
         } else if let Some(provider) = provider_arc.as_any().downcast_ref::<StreamTableProvider>() {
             let row_ids = provider.insert_batch(user_id, rows.to_vec()).await.map_err(|e| {
                 ApplierError::Execution(format!("Failed to insert stream batch: {}", e))
             })?;
+            self.observe_commit_seq(commit_seq);
             log::debug!("DmlExecutor: Inserted {} stream rows into {}", row_ids.len(), table_id);
             Ok(row_ids.len())
         } else {
@@ -228,6 +241,7 @@ impl DmlExecutor {
                     &replaced_refs,
                 )
                 .await;
+                self.observe_commit_seq(commit_seq);
                 Ok(1)
             } else {
                 Ok(0)
@@ -305,6 +319,9 @@ impl DmlExecutor {
                 }
             }
             log::debug!("DmlExecutor: Deleted {} rows from {}", deleted_count, table_id);
+            if deleted_count > 0 {
+                self.observe_commit_seq(commit_seq);
+            }
             Ok(deleted_count)
         } else if let Some(provider) = provider_arc.as_any().downcast_ref::<StreamTableProvider>() {
             let mut deleted_count = 0;
@@ -358,6 +375,7 @@ impl DmlExecutor {
                 .insert_batch_with_commit_seq(rows.to_vec(), commit_seq)
                 .await
                 .map_err(|e| ApplierError::Execution(format!("Failed to insert batch: {}", e)))?;
+            self.observe_commit_seq(commit_seq);
             log::debug!("DmlExecutor: Inserted {} shared rows into {}", row_ids.len(), table_id);
             Ok(row_ids.len())
         } else {
@@ -434,6 +452,7 @@ impl DmlExecutor {
                     &replaced_refs,
                 )
                 .await;
+                self.observe_commit_seq(commit_seq);
             }
 
             log::debug!(
@@ -512,6 +531,9 @@ impl DmlExecutor {
             }
 
             log::debug!("DmlExecutor: Deleted {} shared rows from {}", deleted_count, table_id);
+            if deleted_count > 0 {
+                self.observe_commit_seq(commit_seq);
+            }
             Ok(deleted_count)
         } else {
             Err(ApplierError::Execution(format!(
@@ -613,7 +635,8 @@ impl DmlExecutor {
                 format!("{}|{}|{}", mutation.table_id, user_id.as_str(), mutation.primary_key);
             if !seen_insert_keys.insert(batch_key) {
                 return Err(ApplierError::Execution(format!(
-                    "Failed to insert batch row: Already exists: Primary key violation: value '{}' appears multiple times in the transaction batch for column '{}'",
+                    "Failed to insert batch row: Already exists: Primary key violation: value \
+                     '{}' appears multiple times in the transaction batch for column '{}'",
                     mutation.primary_key,
                     provider.primary_key_field_name()
                 )));
@@ -675,7 +698,8 @@ impl DmlExecutor {
             let batch_key = format!("{}|{}", mutation.table_id, mutation.primary_key);
             if !seen_insert_keys.insert(batch_key) {
                 return Err(ApplierError::Execution(format!(
-                    "Failed to insert batch row: Already exists: Primary key violation: value '{}' appears multiple times in the transaction batch for column '{}'",
+                    "Failed to insert batch row: Already exists: Primary key violation: value \
+                     '{}' appears multiple times in the transaction batch for column '{}'",
                     mutation.primary_key,
                     provider.primary_key_field_name()
                 )));
@@ -696,9 +720,19 @@ impl DmlExecutor {
         transaction_id: &TransactionId,
         mutations: &[StagedMutation],
     ) -> Result<TransactionApplyResult, ApplierError> {
+        let commit_seq = self.app_context.commit_sequence_tracker().allocate_next();
+        self.apply_user_transaction_batch_with_commit_seq(transaction_id, mutations, commit_seq)
+            .await
+    }
+
+    pub async fn apply_user_transaction_batch_with_commit_seq(
+        &self,
+        transaction_id: &TransactionId,
+        mutations: &[StagedMutation],
+        commit_seq: u64,
+    ) -> Result<TransactionApplyResult, ApplierError> {
         self.prevalidate_user_transaction_batch(transaction_id, mutations).await?;
 
-        let commit_seq = self.app_context.commit_sequence_tracker().allocate_next();
         let mut affected_rows = 0;
         let mut side_effect_plan = CommitSideEffectPlan::new(transaction_id.clone());
 
@@ -774,6 +808,7 @@ impl DmlExecutor {
                         .app_context
                         .notification_service()
                         .dispatch_commit_plan(&side_effect_plan);
+                    self.observe_commit_seq(commit_seq);
 
                     return Ok(TransactionApplyResult {
                         rows_affected: affected_rows,
@@ -881,6 +916,7 @@ impl DmlExecutor {
 
         let notifications_sent =
             self.app_context.notification_service().dispatch_commit_plan(&side_effect_plan);
+        self.observe_commit_seq(commit_seq);
 
         Ok(TransactionApplyResult {
             rows_affected: affected_rows,
@@ -896,9 +932,19 @@ impl DmlExecutor {
         transaction_id: &TransactionId,
         mutations: &[StagedMutation],
     ) -> Result<TransactionApplyResult, ApplierError> {
+        let commit_seq = self.app_context.commit_sequence_tracker().allocate_next();
+        self.apply_shared_transaction_batch_with_commit_seq(transaction_id, mutations, commit_seq)
+            .await
+    }
+
+    pub async fn apply_shared_transaction_batch_with_commit_seq(
+        &self,
+        transaction_id: &TransactionId,
+        mutations: &[StagedMutation],
+        commit_seq: u64,
+    ) -> Result<TransactionApplyResult, ApplierError> {
         self.prevalidate_shared_transaction_batch(transaction_id, mutations).await?;
 
-        let commit_seq = self.app_context.commit_sequence_tracker().allocate_next();
         let mut affected_rows = 0;
         let mut side_effect_plan = CommitSideEffectPlan::new(transaction_id.clone());
 
@@ -964,6 +1010,7 @@ impl DmlExecutor {
 
                 let notifications_sent =
                     self.app_context.notification_service().dispatch_commit_plan(&side_effect_plan);
+                self.observe_commit_seq(commit_seq);
 
                 return Ok(TransactionApplyResult {
                     rows_affected: affected_rows,
@@ -1059,6 +1106,7 @@ impl DmlExecutor {
 
         let notifications_sent =
             self.app_context.notification_service().dispatch_commit_plan(&side_effect_plan);
+        self.observe_commit_seq(commit_seq);
 
         Ok(TransactionApplyResult {
             rows_affected: affected_rows,

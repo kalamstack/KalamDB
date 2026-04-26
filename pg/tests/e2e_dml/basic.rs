@@ -47,12 +47,8 @@ async fn e2e_insert_update_shared_table() {
     delete_all(&pg, &qualified_table, "id").await;
 
     pg.batch_execute(&format!(
-        "INSERT INTO {qualified_table} (id, title, value) VALUES \
-             ('u1', 'Alpha', 10), \
-             ('u2', 'Beta',  20), \
-             ('u3', 'Gamma', 30), \
-             ('u4', 'Delta', 40), \
-             ('u5', 'Epsilon', 50);"
+        "INSERT INTO {qualified_table} (id, title, value) VALUES ('u1', 'Alpha', 10), ('u2', \
+         'Beta',  20), ('u3', 'Gamma', 30), ('u4', 'Delta', 40), ('u5', 'Epsilon', 50);"
     ))
     .await
     .expect("insert 5 rows");
@@ -117,14 +113,14 @@ async fn e2e_user_table_isolation() {
     await_user_shard_leader("user-b").await;
 
     let user_a_insert = format!(
-        "INSERT INTO {qualified_table} (id, name, age) VALUES \
-            ('a1', 'Alice', 30), ('a2', 'Ada', 25);"
+        "INSERT INTO {qualified_table} (id, name, age) VALUES ('a1', 'Alice', 30), ('a2', 'Ada', \
+         25);"
     );
     retry_transient_user_leader_error("user-a insert", || pg_a.batch_execute(&user_a_insert)).await;
 
     let user_b_insert = format!(
-        "INSERT INTO {qualified_table} (id, name, age) VALUES \
-            ('b1', 'Bob', 40), ('b2', 'Blake', 35), ('b3', 'Bea', 28);"
+        "INSERT INTO {qualified_table} (id, name, age) VALUES ('b1', 'Bob', 40), ('b2', 'Blake', \
+         35), ('b3', 'Bea', 28);"
     );
     retry_transient_user_leader_error("user-b insert", || pg_b.batch_execute(&user_b_insert)).await;
 

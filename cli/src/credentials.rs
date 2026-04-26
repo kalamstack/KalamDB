@@ -30,15 +30,19 @@
 //! server_url = "https://db.example.com"
 //! ```
 
-use crate::history::get_kalam_config_dir;
-use kalam_client::credentials::{CredentialStore, Credentials};
-use kalam_client::Result;
-use kalam_client::UserId;
+use std::{
+    collections::HashMap,
+    env, fs,
+    path::{Path, PathBuf},
+};
+
+use kalam_client::{
+    credentials::{CredentialStore, Credentials},
+    Result, UserId,
+};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::env;
-use std::fs;
-use std::path::{Path, PathBuf};
+
+use crate::history::get_kalam_config_dir;
 
 /// File-based credential storage
 ///
@@ -122,18 +126,10 @@ impl FileCredentialStore {
 
         let contents = fs::read_to_string(&self.file_path).map_err(|e| {
             let msg = format!(
-                "\n╭─ Cannot Read Credentials File\n\
-                 │\n\
-                 │  📁 Location: {}\n\
-                 │  ⚠️  Problem: {}\n\
-                 │\n\
-                 ╰─ How to Fix:\n\
-                 \n\
-                    Option 1: Check file permissions\n\
-                    Option 2: Delete and re-authenticate\n\
-                    ───────────────────────────────────\n\
-                    del \"{}\"\n\
-                    kalamcli connect\n",
+                "\n╭─ Cannot Read Credentials File\n│\n│  📁 Location: {}\n│  ⚠️  Problem: \
+                 {}\n│\n╰─ How to Fix:\n\nOption 1: Check file permissions\nOption 2: Delete and \
+                 re-authenticate\n───────────────────────────────────\ndel \"{}\"\nkalamcli \
+                 connect\n",
                 self.file_path.display(),
                 e,
                 self.file_path.display()
@@ -155,20 +151,10 @@ impl FileCredentialStore {
             };
 
             let msg = format!(
-                "\n╭─ Corrupted Credentials File\n\
-                 │\n\
-                 │  📁 Location: {}\n\
-                 │  ⚠️  Problem: {}\n\
-                 │\n\
-                 ╰─ How to Fix:\n\
-                 \n\
-                    Step 1: Delete the corrupted file\n\
-                    ───────────────────────────────\n\
-                    del \"{}\"\n\
-                 \n\
-                    Step 2: Re-authenticate\n\
-                    ───────────────────────\n\
-                    kalamcli connect\n",
+                "\n╭─ Corrupted Credentials File\n│\n│  📁 Location: {}\n│  ⚠️  Problem: \
+                 {}\n│\n╰─ How to Fix:\n\nStep 1: Delete the corrupted \
+                 file\n───────────────────────────────\ndel \"{}\"\n\nStep 2: \
+                 Re-authenticate\n───────────────────────\nkalamcli connect\n",
                 self.file_path.display(),
                 simple_error,
                 self.file_path.display()
@@ -287,8 +273,9 @@ impl CredentialStore for FileCredentialStore {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tempfile::TempDir;
+
+    use super::*;
 
     fn create_temp_store() -> (FileCredentialStore, TempDir) {
         let temp_dir = TempDir::new().unwrap();

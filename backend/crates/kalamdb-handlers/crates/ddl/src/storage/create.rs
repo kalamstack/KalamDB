@@ -1,17 +1,22 @@
 //! Typed DDL handler for CREATE STORAGE statements
 
-use crate::helpers::guards::require_admin;
-use crate::helpers::storage::ensure_filesystem_directory;
+use std::sync::Arc;
+
 use kalamdb_commons::models::StorageId;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::error_extensions::KalamDbResultExt;
-use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
-use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
+use kalamdb_core::{
+    app_context::AppContext,
+    error::KalamDbError,
+    error_extensions::KalamDbResultExt,
+    sql::{
+        context::{ExecutionContext, ExecutionResult, ScalarValue},
+        executor::handlers::TypedStatementHandler,
+    },
+};
 use kalamdb_filestore::StorageHealthService;
 use kalamdb_sql::ddl::CreateStorageStatement;
 use kalamdb_system::StorageType;
-use std::sync::Arc;
+
+use crate::helpers::{guards::require_admin, storage::ensure_filesystem_directory};
 
 /// Typed handler for CREATE STORAGE statements
 pub struct CreateStorageHandler {
@@ -133,7 +138,8 @@ impl TypedStatementHandler<CreateStorageStatement> for CreateStorageHandler {
                 .error
                 .unwrap_or_else(|| "Unknown storage health error".to_string());
             return Err(KalamDbError::InvalidOperation(format!(
-                "Storage health check failed (status {}, readable={}, writable={}, listable={}, deletable={}, latency {} ms): {}",
+                "Storage health check failed (status {}, readable={}, writable={}, listable={}, \
+                 deletable={}, latency {} ms): {}",
                 health_result.status,
                 health_result.readable,
                 health_result.writable,
@@ -167,11 +173,12 @@ impl TypedStatementHandler<CreateStorageStatement> for CreateStorageHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use kalamdb_commons::models::UserId;
-    use kalamdb_commons::{Role, StorageId};
-    use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
     use std::sync::Arc;
+
+    use kalamdb_commons::{models::UserId, Role, StorageId};
+    use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
+
+    use super::*;
 
     fn init_app_context() -> Arc<AppContext> {
         test_app_context_simple()

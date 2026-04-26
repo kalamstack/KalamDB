@@ -1,7 +1,11 @@
-use crate::error::Result;
-use kalamdb_commons::ids::StreamTableRowId;
-use kalamdb_commons::models::{StreamTableRow, TableId, UserId};
 use std::collections::HashMap;
+
+use kalamdb_commons::{
+    ids::StreamTableRowId,
+    models::{StreamTableRow, TableId, UserId},
+};
+
+use crate::error::Result;
 
 /// Stream log storage trait.
 pub trait StreamLogStore: Send + Sync {

@@ -3,6 +3,22 @@
 //! Shared response type for both user and shared data operations.
 use serde::{Deserialize, Serialize};
 
+use crate::GroupId;
+
+const COMMIT_SEQ_GROUP_BITS: u32 = 16;
+const COMMIT_SEQ_GROUP_MASK: u64 = (1u64 << COMMIT_SEQ_GROUP_BITS) - 1;
+
+/// Build a deterministic commit marker from a committed Raft position.
+///
+/// This is stable across replicas for the same group/log entry. It preserves
+/// ordering within a Raft group without letting followers allocate their own
+/// local `_commit_seq` values.
+pub fn commit_seq_from_log_position(group_id: GroupId, log_index: u64) -> u64 {
+    log_index
+        .saturating_mul(1u64 << COMMIT_SEQ_GROUP_BITS)
+        .saturating_add(group_id.as_u64() & COMMIT_SEQ_GROUP_MASK)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct TransactionApplyResult {
     pub rows_affected: usize,
@@ -87,11 +103,11 @@ mod tests {
         })
         .is_ok());
         assert!(DataResponse::Subscribed {
-            subscription_id: "sub_1".to_string()
+            subscription_id: "sub_1".to_string(),
         }
         .is_ok());
         assert!(!DataResponse::Error {
-            message: "error".to_string()
+            message: "error".to_string(),
         }
         .is_ok());
     }
@@ -113,7 +129,7 @@ mod tests {
         );
         assert_eq!(
             DataResponse::Error {
-                message: "err".to_string()
+                message: "err".to_string(),
             }
             .rows_affected(),
             0

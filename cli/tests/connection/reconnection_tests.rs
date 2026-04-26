@@ -7,8 +7,9 @@
 //!
 //! NOTE: These are unit tests that don't require a running server.
 
-use kalam_client::{ConnectionOptions, SeqId, SubscriptionOptions};
 use std::collections::HashMap;
+
+use kalam_client::{ConnectionOptions, SeqId, SubscriptionOptions};
 
 /// Simulates the subscription state tracking done by the WASM client
 #[allow(dead_code)]

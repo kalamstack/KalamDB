@@ -9,20 +9,26 @@
 //! Active subscriptions are tracked in node-local memory and surfaced through
 //! `system.live`. Table mutations still replicate through Raft separately.
 
-use super::manager::ConnectionsManager;
-use super::models::{
-    InitialLoadState, SharedConnectionState, SubscriptionFlowControl, SubscriptionHandle,
-    SubscriptionRuntimeMetadata, SubscriptionState,
-};
-use crate::error::{LiveError, LiveResultExt};
+use std::sync::Arc;
+
 use chrono::Utc;
 use datafusion::sql::sqlparser::ast::Expr;
-use kalamdb_commons::ids::SeqId;
-use kalamdb_commons::models::{ConnectionId, LiveQueryId, TableId, UserId};
-use kalamdb_commons::websocket::SubscriptionRequest;
-use kalamdb_commons::TableType;
+use kalamdb_commons::{
+    ids::SeqId,
+    models::{ConnectionId, LiveQueryId, TableId, UserId},
+    websocket::SubscriptionRequest,
+    TableType,
+};
 use log::debug;
-use std::sync::Arc;
+
+use super::{
+    manager::ConnectionsManager,
+    models::{
+        InitialLoadState, SharedConnectionState, SubscriptionFlowControl, SubscriptionHandle,
+        SubscriptionRuntimeMetadata, SubscriptionState, MAX_SUBSCRIPTIONS_PER_CONNECTION,
+    },
+};
+use crate::error::{LiveError, LiveResultExt};
 
 /// Service for managing subscriptions
 ///
@@ -70,7 +76,6 @@ impl SubscriptionService {
             })?;
 
             // Prevent DoS via excessive subscriptions per connection
-            const MAX_SUBSCRIPTIONS_PER_CONNECTION: usize = 100;
             if connection_state.subscription_count() >= MAX_SUBSCRIPTIONS_PER_CONNECTION {
                 return Err(LiveError::InvalidOperation(format!(
                     "Maximum subscriptions ({}) per connection exceeded",
@@ -119,6 +124,7 @@ impl SubscriptionService {
             initial_load: flow_control.as_ref().map(|flow_control| InitialLoadState {
                 batch_size,
                 snapshot_end_seq: None,
+                snapshot_end_commit_seq: None,
                 current_batch_num: 0,
                 flow_control: Arc::clone(flow_control),
             }),
@@ -179,6 +185,21 @@ impl SubscriptionService {
     }
 
     /// Unregister a single live query subscription
+
+    /// Update sequence and commit snapshot boundaries after initial data planning.
+    pub fn update_snapshot_boundaries(
+        &self,
+        connection_state: &SharedConnectionState,
+        subscription_id: &str,
+        snapshot_end_seq: Option<SeqId>,
+        snapshot_end_commit_seq: Option<u64>,
+    ) {
+        connection_state.update_snapshot_boundaries(
+            subscription_id,
+            snapshot_end_seq,
+            snapshot_end_commit_seq,
+        );
+    }
     pub async fn unregister_subscription(
         &self,
         connection_state: &SharedConnectionState,

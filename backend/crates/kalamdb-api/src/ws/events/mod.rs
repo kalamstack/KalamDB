@@ -19,11 +19,12 @@ pub mod subscription;
 pub mod unsubscribe;
 
 use actix_ws::{CloseCode, CloseReason, Session};
-use kalamdb_commons::websocket::SerializationType;
-use kalamdb_commons::WebSocketMessage;
+use kalamdb_commons::{websocket::SerializationType, WebSocketMessage};
 
-use crate::ws::compression::{is_gzip, maybe_compress};
-use crate::ws::models::{Notification, WsErrorCode};
+use crate::ws::{
+    compression::{is_gzip, maybe_compress},
+    models::{Notification, WsErrorCode},
+};
 
 /// Send auth error and close (takes ownership of session to close it)
 pub async fn send_auth_error(mut session: Session, message: &str) -> Result<(), ()> {

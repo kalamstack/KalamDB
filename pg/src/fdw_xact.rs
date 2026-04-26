@@ -5,27 +5,26 @@
 //! (commit or rollback) when the PostgreSQL transaction ends.
 //!
 //! Current contract:
-//! - Native PostgreSQL work can happen before the first foreign statement.
-//!   No KalamDB transaction is opened until the first FDW scan/modify path
-//!   needs one.
-//! - The canonical transaction id is the one returned by KalamDB
-//!   `begin_transaction`; all later foreign work in the same PostgreSQL
-//!   transaction appends to that same remote transaction.
-//! - Foreign work inside an explicit PostgreSQL transaction is staged into the
-//!   matching KalamDB transaction as each FDW statement runs.
-//! - Autocommit insert batching still flushes at PostgreSQL
-//!   `XACT_EVENT_PRE_COMMIT` when a transaction-scoped buffer is active, before
-//!   PostgreSQL reaches its final COMMIT record.
-//! - On PostgreSQL abort, or on a remote PRE_COMMIT failure, buffered writes are
-//!   discarded and the remote transaction is rolled back.
+//! - Native PostgreSQL work can happen before the first foreign statement. No KalamDB transaction
+//!   is opened until the first FDW scan/modify path needs one.
+//! - The canonical transaction id is the one returned by KalamDB `begin_transaction`; all later
+//!   foreign work in the same PostgreSQL transaction appends to that same remote transaction.
+//! - Foreign work inside an explicit PostgreSQL transaction is staged into the matching KalamDB
+//!   transaction as each FDW statement runs.
+//! - Autocommit insert batching still flushes at PostgreSQL `XACT_EVENT_PRE_COMMIT` when a
+//!   transaction-scoped buffer is active, before PostgreSQL reaches its final COMMIT record.
+//! - On PostgreSQL abort, or on a remote PRE_COMMIT failure, buffered writes are discarded and the
+//!   remote transaction is rolled back.
 //!
 //! This gives one native explicit-transaction flow for PostgreSQL + KalamDB
 //! foreign tables without a separate custom write path. It is still not full
 //! distributed 2PC/XA: crash-safe atomicity across PostgreSQL local storage and
 //! KalamDB storage is not guaranteed.
 
-use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
+use std::{
+    collections::HashMap,
+    sync::{LazyLock, Mutex},
+};
 
 use pgrx::pg_sys;
 

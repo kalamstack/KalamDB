@@ -7,6 +7,8 @@ ROOT_PASSWORD="${KALAMDB_ROOT_PASSWORD:-kalamdb123}"
 SQL_FILE="$SCRIPT_DIR/chat-app.sql"
 ENV_FILE="$SCRIPT_DIR/.env.local"
 ACCESS_TOKEN=""
+ADMIN_USER="admin"
+ADMIN_PASSWORD="kalamdb123"
 
 log() {
   echo "[setup] $*"
@@ -53,12 +55,76 @@ done
 require_cmd curl
 require_cmd jq
 
+try_login() {
+  local user="$1"
+  local password="$2"
+  local response
+  local http_code
+  local body
+  local payload
+
+  payload="$(jq -cn --arg user "$user" --arg password "$password" '{user: $user, password: $password}')"
+  response="$(curl -sS -w "\n%{http_code}" -X POST "$KALAMDB_URL/v1/api/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "$payload")"
+
+  http_code="$(echo "$response" | tail -1)"
+  body="$(echo "$response" | sed '$d')"
+
+  if [[ "$http_code" -lt 200 || "$http_code" -ge 300 ]]; then
+    return 1
+  fi
+
+  ACCESS_TOKEN="$(echo "$body" | jq -r '.access_token // empty')"
+  [[ -n "$ACCESS_TOKEN" ]]
+}
+
+server_needs_setup() {
+  local response
+  response="$(curl -fsS "$KALAMDB_URL/v1/api/auth/status")"
+  [[ "$(echo "$response" | jq -r '.needs_setup // false')" == "true" ]]
+}
+
+run_initial_setup() {
+  local payload
+  local response
+  local http_code
+  local body
+
+  log "Server requires initial setup - creating bootstrap DBA user '$ADMIN_USER'"
+
+  payload="$(jq -cn \
+    --arg user "$ADMIN_USER" \
+    --arg password "$ADMIN_PASSWORD" \
+    --arg root_password "$ROOT_PASSWORD" \
+    '{user: $user, password: $password, root_password: $root_password}')"
+  response="$(curl -sS -w "\n%{http_code}" -X POST "$KALAMDB_URL/v1/api/auth/setup" \
+    -H "Content-Type: application/json" \
+    -d "$payload")"
+
+  http_code="$(echo "$response" | tail -1)"
+  body="$(echo "$response" | sed '$d')"
+
+  if [[ "$http_code" -lt 200 || "$http_code" -ge 300 ]]; then
+    fail "Initial server setup failed: $body"
+  fi
+}
+
+ensure_access_token() {
+  if server_needs_setup; then
+    run_initial_setup
+  fi
+
+  if try_login "$ADMIN_USER" "$ADMIN_PASSWORD"; then
+    return 0
+  fi
+
+  try_login root "$ROOT_PASSWORD" || fail "Failed to obtain admin or root access token"
+}
+
 curl -fsS "$KALAMDB_URL/health" >/dev/null || fail "KalamDB is not reachable at $KALAMDB_URL"
 
-ACCESS_TOKEN="$(curl -fsS -X POST "$KALAMDB_URL/v1/api/auth/login" \
-  -H "Content-Type: application/json" \
-  -d "{\"user\":\"root\",\"password\":\"$ROOT_PASSWORD\"}" | jq -r '.access_token // empty')"
-[[ -n "$ACCESS_TOKEN" ]] || fail "Failed to obtain root access token"
+ensure_access_token
 
 execute_sql() {
   local sql="$1"
@@ -129,7 +195,7 @@ execute_sql_allow_exists "CREATE TOPIC chat_demo.ai_inbox"
 execute_sql_allow_exists "ALTER TOPIC chat_demo.ai_inbox ADD SOURCE chat_demo.messages ON INSERT"
 
 log "Ensuring demo admin user exists"
-execute_sql_allow_exists "CREATE USER 'admin' WITH PASSWORD 'kalamdb123' ROLE dba"
+execute_sql_allow_exists "CREATE USER '$ADMIN_USER' WITH PASSWORD '$ADMIN_PASSWORD' ROLE dba"
 
 count_result="$(curl -fsS -X POST "$KALAMDB_URL/v1/api/sql" \
   -H "Content-Type: application/json" \
@@ -143,12 +209,12 @@ fi
 
 cat > "$ENV_FILE" <<EOF
 VITE_KALAMDB_URL=$KALAMDB_URL
-VITE_KALAMDB_USER=admin
-VITE_KALAMDB_PASSWORD=kalamdb123
+VITE_KALAMDB_USER=$ADMIN_USER
+VITE_KALAMDB_PASSWORD=$ADMIN_PASSWORD
 
 KALAMDB_URL=$KALAMDB_URL
-KALAMDB_USER=admin
-KALAMDB_PASSWORD=kalamdb123
+KALAMDB_USER=$ADMIN_USER
+KALAMDB_PASSWORD=$ADMIN_PASSWORD
 EOF
 
 log "Chat demo is ready"

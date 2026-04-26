@@ -8,8 +8,8 @@
 //! RocksDB stores keys in lexicographic (byte-by-byte) order. Naive encoding
 //! strategies like `{len:1byte}{string_bytes}` break ordering:
 //!
-//! - "bob" → [3, b, o, b] sorts BEFORE "alice" → [5, a, l, i, c, e]
-//!   because 3 < 5, even though "alice" < "bob" lexicographically
+//! - "bob" → [3, b, o, b] sorts BEFORE "alice" → [5, a, l, i, c, e] because 3 < 5, even though
+//!   "alice" < "bob" lexicographically
 //!
 //! The `storekey` crate uses escape-sequence encoding that preserves the
 //! natural lexicographic order of strings and tuples.

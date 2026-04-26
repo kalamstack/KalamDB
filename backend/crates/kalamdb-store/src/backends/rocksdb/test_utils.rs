@@ -1,14 +1,16 @@
 //! RocksDB-backed test helpers for kalamdb-store.
 
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+
 use anyhow::Result;
 use rocksdb::{Options, DB};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use tempfile::TempDir;
 
-use crate::storage_trait::StorageBackend;
-
 use super::{RocksDBBackend, RocksDbInit};
+use crate::storage_trait::StorageBackend;
 
 /// Test database wrapper that automatically cleans up on drop.
 pub struct TestDb {

@@ -1,5 +1,7 @@
-use crate::models::StatsRow;
-use crate::repository::{RepositoryModel, SharedTableRepository};
+use crate::{
+    models::StatsRow,
+    repository::{RepositoryModel, SharedTableRepository},
+};
 
 pub type StatsRepository = SharedTableRepository<StatsRow>;
 

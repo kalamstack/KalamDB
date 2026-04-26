@@ -2,26 +2,31 @@
 //!
 //! Shows how the executor classifies SQL, parses once, and dispatches to typed handlers.
 
-use chrono::Utc;
-use kalamdb_commons::models::StorageId;
-use kalamdb_commons::models::UserId;
-use kalamdb_commons::NodeId;
-use kalamdb_commons::Role;
-use kalamdb_configs::ServerConfig;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::sql::context::ExecutionContext;
-use kalamdb_core::sql::context::ExecutionResult;
-use kalamdb_core::sql::executor::handler_registry::HandlerRegistry;
-use kalamdb_core::sql::executor::SqlExecutor;
-use kalamdb_jobs::executors::{
-    BackupExecutor, CleanupExecutor, CompactExecutor, FlushExecutor, JobRegistry, RestoreExecutor,
-    RetentionExecutor, StreamEvictionExecutor, UserCleanupExecutor, VectorIndexExecutor,
-};
-use kalamdb_jobs::JobsManager;
-use kalamdb_store::test_utils::TestDb;
-use kalamdb_system::providers::storages::models::StorageType;
-use kalamdb_system::Storage;
 use std::sync::Arc;
+
+use chrono::Utc;
+use kalamdb_commons::{
+    models::{StorageId, UserId},
+    NodeId, Role,
+};
+use kalamdb_configs::ServerConfig;
+use kalamdb_core::{
+    app_context::AppContext,
+    sql::{
+        context::{ExecutionContext, ExecutionResult},
+        executor::{handler_registry::HandlerRegistry, SqlExecutor},
+    },
+};
+use kalamdb_jobs::{
+    executors::{
+        BackupExecutor, CleanupExecutor, CompactExecutor, FlushExecutor, JobRegistry,
+        RestoreExecutor, RetentionExecutor, StreamEvictionExecutor, UserCleanupExecutor,
+        VectorIndexExecutor,
+    },
+    JobsManager,
+};
+use kalamdb_store::test_utils::TestDb;
+use kalamdb_system::{providers::storages::models::StorageType, Storage};
 
 fn create_executor(app_context: Arc<AppContext>) -> SqlExecutor {
     let registry = Arc::new(HandlerRegistry::new());
@@ -229,7 +234,10 @@ async fn test_storage_flush_table_returns_noop_when_flush_already_in_progress() 
         .expect("second flush should be treated as no-op success");
     match second_flush {
         ExecutionResult::Success { message } => {
-            assert!(message.contains("Storage flush skipped: a flush is already queued or running for table 'flush_busy.docs'"));
+            assert!(message.contains(
+                "Storage flush skipped: a flush is already queued or running for table \
+                 'flush_busy.docs'"
+            ));
         },
         other => panic!("Expected success result for second flush, got {:?}", other),
     }

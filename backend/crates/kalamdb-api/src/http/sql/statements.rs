@@ -1,13 +1,20 @@
-use actix_web::HttpResponse;
-use kalamdb_commons::models::{NamespaceId, UserId};
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::context::ExecutionContext;
-use kalamdb_core::sql::executor::{PreparedExecutionStatement, SqlExecutor};
-use kalamdb_core::sql::SqlImpersonationService;
 use std::time::Instant;
 
-use super::models::{ErrorCode, SqlResponse};
-use super::request::took_ms;
+use actix_web::HttpResponse;
+use kalamdb_commons::models::{NamespaceId, UserId};
+use kalamdb_core::{
+    error::KalamDbError,
+    sql::{
+        context::ExecutionContext,
+        executor::{PreparedExecutionStatement, SqlExecutor},
+        SqlImpersonationService,
+    },
+};
+
+use super::{
+    models::{ErrorCode, SqlResponse},
+    request::took_ms,
+};
 
 #[derive(Debug)]
 pub(super) struct ParsedExecutionStatement {
@@ -42,11 +49,7 @@ pub(super) async fn resolve_execute_as_user(
 ) -> Result<Option<UserId>, KalamDbError> {
     match statement.execute_as_username.as_ref() {
         Some(target_username) => impersonation_service
-            .resolve_execute_as_user(
-                exec_ctx.user_id(),
-                exec_ctx.user_role(),
-                target_username,
-            )
+            .resolve_execute_as_user(exec_ctx.user_id(), exec_ctx.user_role(), target_username)
             .await
             .map(Some),
         None => Ok(None),

@@ -5,7 +5,7 @@
 //!
 //! The traits are defined in kalamdb-raft:
 //! - `MetaApplier`: For namespace, table, storage, user, job operations
-//! - `UserDataApplier`: For user table data operations  
+//! - `UserDataApplier`: For user table data operations
 //! - `SharedDataApplier`: For shared table data operations
 
 mod provider_meta_applier;

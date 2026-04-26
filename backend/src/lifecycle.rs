@@ -4,26 +4,30 @@
 //! in `main.rs`: bootstrapping databases and services, wiring the HTTP
 //! server, and coordinating graceful shutdown.
 
-use crate::{middleware, routes};
+use std::{
+    net::{SocketAddr, TcpListener},
+    sync::Arc,
+};
+
 use actix_web::{web, App, HttpServer};
 use anyhow::Result;
 use kalamdb_api::limiter::RateLimiter;
 use kalamdb_auth::CachedUsersRepo;
 use kalamdb_commons::{AuthType, Role, StorageId, UserId};
 use kalamdb_configs::ServerConfig;
-use kalamdb_core::sql::datafusion_session::DataFusionSessionFactory;
-use kalamdb_core::sql::executor::handler_registry::HandlerRegistry;
-use kalamdb_core::sql::executor::SqlExecutor;
+use kalamdb_core::sql::{
+    datafusion_session::DataFusionSessionFactory,
+    executor::{handler_registry::HandlerRegistry, SqlExecutor},
+};
 use kalamdb_dba::{initialize_dba_namespace, start_stats_recorder};
 use kalamdb_jobs::AppContextJobsExt;
 use kalamdb_live::{ConnectionsManager, LiveQueryManager};
 use kalamdb_store::open_storage_backend;
 use kalamdb_system::providers::storages::models::StorageMode;
-use log::debug;
-use log::{info, warn};
-use std::net::{SocketAddr, TcpListener};
-use std::sync::Arc;
+use log::{debug, info, warn};
 use tracing_actix_web::{RootSpanBuilder, TracingLogger};
+
+use crate::{middleware, routes};
 
 /// Resolve the effective number of actix-web worker threads.
 ///
@@ -298,7 +302,8 @@ pub async fn bootstrap(
 
     // Ensure Raft appliers are registered after Raft has started.
     // Some Raft initialization flows may recreate state machines; re-wiring here keeps
-    // metadata/data replication applying into local providers (system tables, schema registry, etc.).
+    // metadata/data replication applying into local providers (system tables, schema registry,
+    // etc.).
     app_context.wire_raft_appliers();
 
     // NOTE: restore_raft_state_machines() is called LATER after system tables, storages,
@@ -315,7 +320,7 @@ pub async fn bootstrap(
     let existing_storages = storages_provider.scan_all_storages()?;
     let storage_count = existing_storages.num_rows();
 
-    //TODO: Extract as a separate function create_default_storage_if_needed
+    // TODO: Extract as a separate function create_default_storage_if_needed
     if storage_count == 0 {
         info!("No storages found, creating default 'local' storage");
         let now = chrono::Utc::now().timestamp_millis();
@@ -327,8 +332,12 @@ pub async fn bootstrap(
             base_directory: config.storage.storage_dir().to_string_lossy().into_owned(),
             credentials: None,
             config_json: None,
-            shared_tables_template: config.storage.shared_tables_template.clone(), // Need clone for Storage struct
-            user_tables_template: config.storage.user_tables_template.clone(), // Need clone for Storage struct
+            shared_tables_template: config.storage.shared_tables_template.clone(), /* Need clone
+                                                                                    * for Storage
+                                                                                    * struct */
+            user_tables_template: config.storage.user_tables_template.clone(), /* Need clone
+                                                                                * for Storage
+                                                                                * struct */
             created_at: now,
             updated_at: now,
         };
@@ -470,7 +479,8 @@ pub async fn run(
 
     // Log server configuration for debugging
     debug!(
-        "Server config: workers={}, max_connections={}, backlog={}, blocking_threads={}, body_limit={}MB",
+        "Server config: workers={}, max_connections={}, backlog={}, blocking_threads={}, \
+         body_limit={}MB",
         effective_workers(config.server.workers),
         config.performance.max_connections,
         config.performance.backlog,
@@ -480,7 +490,8 @@ pub async fn run(
 
     if config.rate_limit.enable_connection_protection {
         debug!(
-            "Connection protection: max_conn_per_ip={}, max_req_per_ip_per_sec={}, ban_duration={}s",
+            "Connection protection: max_conn_per_ip={}, max_req_per_ip_per_sec={}, \
+             ban_duration={}s",
             config.rate_limit.max_connections_per_ip,
             config.rate_limit.max_requests_per_ip_per_sec,
             config.rate_limit.ban_duration_seconds
@@ -1006,7 +1017,8 @@ async fn create_default_system_user(
             let created_at = chrono::Utc::now().timestamp_millis();
 
             // Check for root password from environment variable or config file.
-            // Priority: KALAMDB_ROOT_PASSWORD env var > config auth.root_password > empty (localhost-only)
+            // Priority: KALAMDB_ROOT_PASSWORD env var > config auth.root_password > empty
+            // (localhost-only)
             let root_password_from_env = if use_root_password_env {
                 std::env::var("KALAMDB_ROOT_PASSWORD").ok().filter(|p| !p.is_empty())
             } else {
@@ -1088,24 +1100,24 @@ async fn create_default_system_user(
 //         users_provider.get_user_by_username(AuthConstants::DEFAULT_SYSTEM_USERNAME)
 //     {
 //         if user.password_hash.is_empty() {
-//             // Root user has no password - this is secure for localhost-only but warn about limitations
-//             warn!("╔═══════════════════════════════════════════════════════════════════╗");
-//             warn!("║                    ⚠️  SECURITY NOTICE ⚠️                           ║");
-//             warn!("╠═══════════════════════════════════════════════════════════════════╣");
-//             warn!("║                                                                   ║");
-//             warn!("║  Root user has NO PASSWORD (localhost-only access enabled)       ║");
-//             warn!("║                                                                   ║");
-//             warn!("║  SECURITY ENFORCEMENT:                                           ║");
-//             warn!("║  • Remote authentication is BLOCKED for users with no password   ║");
-//             warn!("║  • Root can only connect from localhost (127.0.0.1)              ║");
-//             warn!("║  • This configuration is secure by design                        ║");
-//             warn!("║                                                                   ║");
-//             warn!("║  TO ENABLE REMOTE ACCESS:                                        ║");
-//             warn!("║  Set a strong password for the root user:                        ║");
-//             warn!("║     ALTER USER root SET PASSWORD 'strong-password-here';         ║");
-//             warn!("║                                                                   ║");
-//             warn!(
-//                 "║  Note: allow_remote_access config is currently: {}               ║",
+//             // Root user has no password - this is secure for localhost-only but warn about
+// limitations
+// warn!("╔═══════════════════════════════════════════════════════════════════╗");
+// warn!("║                    ⚠️  SECURITY NOTICE ⚠️                           ║");
+// warn!("╠═══════════════════════════════════════════════════════════════════╣");
+// warn!("║                                                                   ║");
+// warn!("║  Root user has NO PASSWORD (localhost-only access enabled)       ║");
+// warn!("║                                                                   ║");
+// warn!("║  SECURITY ENFORCEMENT:                                           ║");
+// warn!("║  • Remote authentication is BLOCKED for users with no password   ║");
+// warn!("║  • Root can only connect from localhost (127.0.0.1)              ║");
+// warn!("║  • This configuration is secure by design                        ║");
+// warn!("║                                                                   ║");
+// warn!("║  TO ENABLE REMOTE ACCESS:                                        ║");
+// warn!("║  Set a strong password for the root user:                        ║");
+// warn!("║     ALTER USER root SET PASSWORD 'strong-password-here';         ║");
+// warn!("║                                                                   ║");
+// warn!(                 "║  Note: allow_remote_access config is currently: {}               ║",
 //                 if config.auth.allow_remote_access {
 //                     "ENABLED "
 //                 } else {

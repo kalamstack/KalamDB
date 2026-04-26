@@ -1,6 +1,7 @@
-use super::test_support::TestServer;
 use kalam_client::models::ResponseStatus;
 use serial_test::serial;
+
+use super::test_support::TestServer;
 
 #[tokio::test]
 #[ntest::timeout(10000)] // local runs are fast, but shared-server startup can spike under CI load
@@ -10,15 +11,9 @@ async fn test_system_stats_expose_memory_breakdown_and_allocator_metrics() {
 
     let response = server
         .execute_sql(
-            "SELECT metric_name, metric_value FROM system.stats \
-             WHERE metric_name IN (\
-                'memory_usage_mb',\
-                'memory_usage_source',\
-                'memory_rss_mb',\
-                'memory_virtual_mb',\
-                'memory_rss_gap_mb',\
-                     'allocator_name'\
-             ) ORDER BY metric_name",
+            "SELECT metric_name, metric_value FROM system.stats WHERE metric_name IN \
+             ('memory_usage_mb','memory_usage_source','memory_rss_mb','memory_virtual_mb','\
+             memory_rss_gap_mb','allocator_name') ORDER BY metric_name",
         )
         .await;
 

@@ -1,9 +1,10 @@
+use std::{collections::HashMap, sync::Arc};
+
 use arrow::datatypes::Schema;
-use kalamdb_commons::models::{NamespaceId, StorageId, TableAccess, TableName};
-use kalamdb_commons::schemas::policy::FlushPolicy;
-use kalamdb_commons::schemas::{ColumnDefault, TableType};
-use std::collections::HashMap;
-use std::sync::Arc;
+use kalamdb_commons::{
+    models::{NamespaceId, StorageId, TableAccess, TableName},
+    schemas::{policy::FlushPolicy, ColumnDefault, TableType},
+};
 
 /// Unified CREATE TABLE statement that works for USER, SHARED, and STREAM tables
 #[derive(Debug, Clone, PartialEq)]

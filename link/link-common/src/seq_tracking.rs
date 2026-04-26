@@ -10,8 +10,7 @@
 
 use std::collections::HashMap;
 
-use crate::models::KalamCellValue;
-use crate::seq_id::SeqId;
+use crate::{models::KalamCellValue, seq_id::SeqId};
 
 /// Name of the system sequence column in every subscription row.
 pub const SEQ_COLUMN: &str = "_seq";
@@ -196,4 +195,5 @@ mod tests {
         assert!(!track_rows(&mut current, &rows));
         assert_eq!(current, Some(SeqId::from_i64(100)));
     }
+
 }

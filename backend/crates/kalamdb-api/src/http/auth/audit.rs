@@ -1,9 +1,12 @@
+use std::sync::Arc;
+
 use chrono::Utc;
-use kalamdb_commons::models::{AuditLogId, ConnectionInfo};
-use kalamdb_commons::UserId;
+use kalamdb_commons::{
+    models::{AuditLogId, ConnectionInfo},
+    UserId,
+};
 use kalamdb_core::app_context::AppContext;
 use kalamdb_system::AuditLogEntry;
-use std::sync::Arc;
 use uuid::Uuid;
 
 pub(crate) async fn record_admin_login(

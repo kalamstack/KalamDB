@@ -7,10 +7,11 @@
 //! - [x] Shared table access correct
 //! - [x] No subscription data leakage
 
-use super::helpers::*;
+use std::time::Duration;
 
 use kalamdb_commons::Role;
-use std::time::Duration;
+
+use super::helpers::*;
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -84,15 +85,17 @@ async fn test_scenario_10_multi_tenant_isolation() -> anyhow::Result<()> {
         ("analytics", true),
     ] {
         let resp = admin_client
-                    .execute_query(
-                        &format!(
-                            "INSERT INTO {}.feature_flags (flag_name, enabled, description) VALUES ('{}', {}, 'Flag: {}')",
-                            global, flag, enabled, flag
-                        ), None,
-                        None,
-                        None,
-                    )
-                    .await?;
+            .execute_query(
+                &format!(
+                    "INSERT INTO {}.feature_flags (flag_name, enabled, description) VALUES ('{}', \
+                     {}, 'Flag: {}')",
+                    global, flag, enabled, flag
+                ),
+                None,
+                None,
+                None,
+            )
+            .await?;
         assert!(resp.success(), "Insert flag {}", flag);
     }
 
@@ -104,15 +107,20 @@ async fn test_scenario_10_multi_tenant_isolation() -> anyhow::Result<()> {
     let tenant_a_client = create_user_and_client(server, &tenant_a_user, &Role::User).await?;
     for i in 1..=5 {
         let resp = tenant_a_client
-                    .execute_query(
-                        &format!(
-                            "INSERT INTO {}.orders (id, customer_name, amount) VALUES ({}, 'A Customer {}', {})",
-                            tenant_a, i, i, (i as f64) * 100.0
-                        ), None,
-                        None,
-                        None,
-                    )
-                    .await?;
+            .execute_query(
+                &format!(
+                    "INSERT INTO {}.orders (id, customer_name, amount) VALUES ({}, 'A Customer \
+                     {}', {})",
+                    tenant_a,
+                    i,
+                    i,
+                    (i as f64) * 100.0
+                ),
+                None,
+                None,
+                None,
+            )
+            .await?;
         assert!(resp.success(), "Tenant A insert order {}", i);
     }
 
@@ -122,15 +130,20 @@ async fn test_scenario_10_multi_tenant_isolation() -> anyhow::Result<()> {
     let tenant_b_client = create_user_and_client(server, &tenant_b_user, &Role::User).await?;
     for i in 101..=105 {
         let resp = tenant_b_client
-                    .execute_query(
-                        &format!(
-                            "INSERT INTO {}.orders (id, customer_name, amount) VALUES ({}, 'B Customer {}', {})",
-                            tenant_b, i, i, (i as f64) * 50.0
-                        ), None,
-                        None,
-                        None,
-                    )
-                    .await?;
+            .execute_query(
+                &format!(
+                    "INSERT INTO {}.orders (id, customer_name, amount) VALUES ({}, 'B Customer \
+                     {}', {})",
+                    tenant_b,
+                    i,
+                    i,
+                    (i as f64) * 50.0
+                ),
+                None,
+                None,
+                None,
+            )
+            .await?;
         assert!(resp.success(), "Tenant B insert order {}", i);
     }
 

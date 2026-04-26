@@ -12,8 +12,8 @@
 //! ## Examples
 //!
 //! ```rust
-//! use kalamdb_commons::models::{UserId, NamespaceId, TableName};
-//! use kalamdb_system::{User, Job, LiveQuery};
+//! use kalamdb_commons::models::{NamespaceId, TableName, UserId};
+//! use kalamdb_system::{Job, LiveQuery, User};
 //!
 //! let user_id = UserId::new("user_123");
 //! let namespace_id = NamespaceId::default();
@@ -55,20 +55,18 @@ pub mod pg_operations;
 
 // Re-export all types from submodules for convenience
 pub use auth_type::AuthType;
+pub use connection::ConnectionInfo;
 pub use ids::*;
 pub use kalam_cell_value::KalamCellValue;
 pub use oauth_provider::OAuthProvider;
 pub use payload_mode::PayloadMode;
 pub use read_context::ReadContext;
 pub use role::Role;
+#[cfg(feature = "rows")]
+pub use rows::{KTableRow, StreamTableRow, SystemTableRow, UserTableRow};
 pub use schemas::{TableAccess, TableName};
 pub use topic_op::TopicOp;
 pub use transaction::{OperationKind, TransactionOrigin, TransactionState};
-
-#[cfg(feature = "rows")]
-pub use rows::{KTableRow, StreamTableRow, SystemTableRow, UserTableRow};
-
-pub use connection::ConnectionInfo;
 
 #[cfg(test)]
 mod tests {

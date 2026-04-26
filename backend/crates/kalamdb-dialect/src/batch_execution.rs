@@ -4,13 +4,16 @@
 //! Handles quoted strings, comments, and whitespace to avoid breaking on
 //! semicolons that appear inside literals or comment blocks.
 
-use crate::dialect::KalamDbDialect;
-use crate::execute_as::parse_execute_as;
-use crate::parser::utils::parse_single_statement;
-use crate::parser::utils::parse_sql_statements;
-use sqlparser::ast::Spanned;
-use sqlparser::ast::Statement;
-use sqlparser::tokenizer::{Location, Span};
+use sqlparser::{
+    ast::{Spanned, Statement},
+    tokenizer::{Location, Span},
+};
+
+use crate::{
+    dialect::KalamDbDialect,
+    execute_as::parse_execute_as,
+    parser::utils::{parse_single_statement, parse_sql_statements},
+};
 
 /// Error produced when parsing a batch SQL string fails.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -524,12 +527,14 @@ mod tests {
 
     #[test]
     fn parse_batch_statements_preserves_create_table_prefix_when_spans_are_partial() {
-        let sql = "CREATE TABLE demo.notes (id BIGINT PRIMARY KEY, content TEXT) WITH (TYPE='USER', STORAGE_ID='local'); SELECT 1;";
+        let sql = "CREATE TABLE demo.notes (id BIGINT PRIMARY KEY, content TEXT) WITH \
+                   (TYPE='USER', STORAGE_ID='local'); SELECT 1;";
         let statements = parse_batch_statements(sql).unwrap();
         assert_eq!(statements.len(), 2);
         assert_eq!(
             statements[0],
-            "CREATE TABLE demo.notes (id BIGINT PRIMARY KEY, content TEXT) WITH (TYPE='USER', STORAGE_ID='local')"
+            "CREATE TABLE demo.notes (id BIGINT PRIMARY KEY, content TEXT) WITH (TYPE='USER', \
+             STORAGE_ID='local')"
         );
         assert_eq!(statements[1], "SELECT 1");
     }

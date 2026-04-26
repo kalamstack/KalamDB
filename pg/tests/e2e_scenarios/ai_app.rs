@@ -23,14 +23,16 @@ async fn e2e_scenario_ai_app_rag_and_agent_run_flow() {
         &pg,
         &schema,
         &chunks,
-        "id TEXT, document_id TEXT, chunk_no INTEGER, token_count INTEGER, chunk_text TEXT, embedding_model TEXT",
+        "id TEXT, document_id TEXT, chunk_no INTEGER, token_count INTEGER, chunk_text TEXT, \
+         embedding_model TEXT",
     )
     .await;
     create_shared_kalam_table_in_schema(
         &pg,
         &schema,
         &runs,
-        "id TEXT, user_id TEXT, prompt TEXT, status TEXT, retrieved_chunks INTEGER, answer_tokens INTEGER",
+        "id TEXT, user_id TEXT, prompt TEXT, status TEXT, retrieved_chunks INTEGER, answer_tokens \
+         INTEGER",
     )
     .await;
     create_shared_kalam_table_in_schema(
@@ -45,13 +47,20 @@ async fn e2e_scenario_ai_app_rag_and_agent_run_flow() {
         "INSERT INTO {schema}.{documents} (id, title, source_uri, owner_team) VALUES
          ('doc-1', 'Billing playbook', 'kb://billing/playbook', 'support-ai'),
          ('doc-2', 'Retention handbook', 'kb://retention/handbook', 'growth-ai');
-         INSERT INTO {schema}.{chunks} (id, document_id, chunk_no, token_count, chunk_text, embedding_model) VALUES
-         ('chunk-1', 'doc-1', 0, 120, 'Refund escalation requires invoice verification and account review.', 'text-embed-3-large'),
-         ('chunk-2', 'doc-1', 1, 88, 'High-priority tickets must capture billing entity and renewal date.', 'text-embed-3-large'),
-         ('chunk-3', 'doc-2', 0, 95, 'Retention outreach should include discount guardrails and contract term.', 'text-embed-3-large');
-         INSERT INTO {schema}.{runs} (id, user_id, prompt, status, retrieved_chunks, answer_tokens) VALUES
-         ('run-1', 'agent-user-42', 'How should I handle a refund request before renewal?', 'running', 0, 0);
-         INSERT INTO {schema}.{steps} (id, run_id, agent_name, tool_name, duration_ms, outcome) VALUES
+         INSERT INTO {schema}.{chunks} (id, document_id, chunk_no, token_count, chunk_text, \
+         embedding_model) VALUES
+         ('chunk-1', 'doc-1', 0, 120, 'Refund escalation requires invoice verification and account \
+         review.', 'text-embed-3-large'),
+         ('chunk-2', 'doc-1', 1, 88, 'High-priority tickets must capture billing entity and \
+         renewal date.', 'text-embed-3-large'),
+         ('chunk-3', 'doc-2', 0, 95, 'Retention outreach should include discount guardrails and \
+         contract term.', 'text-embed-3-large');
+         INSERT INTO {schema}.{runs} (id, user_id, prompt, status, retrieved_chunks, \
+         answer_tokens) VALUES
+         ('run-1', 'agent-user-42', 'How should I handle a refund request before renewal?', \
+         'running', 0, 0);
+         INSERT INTO {schema}.{steps} (id, run_id, agent_name, tool_name, duration_ms, outcome) \
+         VALUES
          ('step-1', 'run-1', 'retriever', 'vector_search', 42, 'matched billing playbook'),
          ('step-2', 'run-1', 'planner', 'policy_check', 18, 'passed retention guardrails');"
     ))
@@ -101,7 +110,8 @@ async fn e2e_scenario_ai_app_rag_and_agent_run_flow() {
         "UPDATE {schema}.{runs}
          SET status = 'completed', retrieved_chunks = 2, answer_tokens = 186
          WHERE id = 'run-1';
-         INSERT INTO {schema}.{steps} (id, run_id, agent_name, tool_name, duration_ms, outcome) VALUES
+         INSERT INTO {schema}.{steps} (id, run_id, agent_name, tool_name, duration_ms, outcome) \
+         VALUES
          ('step-3', 'run-1', 'writer', 'answer_synthesis', 64, 'generated final response');"
     ))
     .await
@@ -133,7 +143,8 @@ async fn e2e_scenario_ai_app_rag_and_agent_run_flow() {
 
     let remote_run = env
         .kalamdb_sql(&format!(
-            "SELECT status, retrieved_chunks, answer_tokens FROM {schema}.{runs} WHERE id = 'run-1'"
+            "SELECT status, retrieved_chunks, answer_tokens FROM {schema}.{runs} WHERE id = \
+             'run-1'"
         ))
         .await;
     let remote_run_text = serde_json::to_string(&remote_run).unwrap_or_default();

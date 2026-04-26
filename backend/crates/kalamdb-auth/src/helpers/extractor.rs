@@ -32,16 +32,16 @@
 //!
 //! ```
 
-use actix_web::{dev::Payload, http::StatusCode, FromRequest, HttpRequest, ResponseError};
-use std::fmt;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::{fmt, future::Future, pin::Pin, sync::Arc};
 
-use crate::errors::error::AuthError;
-use crate::helpers::ip_extractor::extract_client_ip_secure;
-use crate::repository::user_repo::UserRepository;
-use crate::services::unified::{authenticate, AuthRequest};
+use actix_web::{dev::Payload, http::StatusCode, FromRequest, HttpRequest, ResponseError};
+
+use crate::{
+    errors::error::AuthError,
+    helpers::ip_extractor::extract_client_ip_secure,
+    repository::user_repo::UserRepository,
+    services::unified::{authenticate, AuthRequest},
+};
 
 /// Error type for authentication extraction.
 ///
@@ -184,9 +184,10 @@ impl From<AuthError> for AuthExtractError {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use actix_web::body::to_bytes;
     use serde_json::Value;
+
+    use super::*;
 
     #[test]
     fn test_auth_extract_error_codes() {
@@ -313,7 +314,9 @@ impl FromRequest for AuthSessionExtractor {
                 let took = start_time.elapsed().as_secs_f64() * 1000.0;
                 return Err(AuthExtractError::new(
                     AuthError::DatabaseError(
-                        "User repository not configured. Ensure Arc<dyn UserRepository> is registered as app data.".to_string(),
+                        "User repository not configured. Ensure Arc<dyn UserRepository> is \
+                         registered as app data."
+                            .to_string(),
                     ),
                     took,
                 ));
@@ -350,7 +353,8 @@ impl FromRequest for AuthSessionExtractor {
                 let took = start_time.elapsed().as_secs_f64() * 1000.0;
                 return Err(AuthExtractError::new(
                     AuthError::InvalidCredentials(
-                        "This endpoint requires a Bearer token. Basic authentication is not supported."
+                        "This endpoint requires a Bearer token. Basic authentication is not \
+                         supported."
                             .to_string(),
                     ),
                     took,

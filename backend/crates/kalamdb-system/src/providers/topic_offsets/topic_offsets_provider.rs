@@ -1,24 +1,26 @@
 //! System.topic_offsets table provider
 //!
-//! This module provides a DataFusion TableProvider implementation for the system.topic_offsets table.
-//! Uses `IndexedEntityStore` with composite primary key (topic_id, group_id, partition_id).
+//! This module provides a DataFusion TableProvider implementation for the system.topic_offsets
+//! table. Uses `IndexedEntityStore` with composite primary key (topic_id, group_id, partition_id).
 
-use crate::error::{SystemError, SystemResultExt};
-use crate::providers::base::{
-    extract_filter_value, system_rows_to_batch, SimpleProviderDefinition,
-};
-use crate::system_row_mapper::{model_to_system_row, system_row_to_model};
-use datafusion::arrow::array::RecordBatch;
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::logical_expr::Expr;
-use kalamdb_commons::models::rows::SystemTableRow;
-use kalamdb_commons::models::{ConsumerGroupId, TopicId};
-use kalamdb_commons::SystemTable;
-use kalamdb_store::entity_store::EntityStore;
-use kalamdb_store::{IndexedEntityStore, StorageBackend};
 use std::sync::{Arc, OnceLock};
 
+use datafusion::{
+    arrow::{array::RecordBatch, datatypes::SchemaRef},
+    logical_expr::Expr,
+};
+use kalamdb_commons::{
+    models::{rows::SystemTableRow, ConsumerGroupId, TopicId},
+    SystemTable,
+};
+use kalamdb_store::{entity_store::EntityStore, IndexedEntityStore, StorageBackend};
+
 use super::models::TopicOffset;
+use crate::{
+    error::{SystemError, SystemResultExt},
+    providers::base::{extract_filter_value, system_rows_to_batch, SimpleProviderDefinition},
+    system_row_mapper::{model_to_system_row, system_row_to_model},
+};
 
 /// Composite key for topic offsets as a String: "topic_id:group_id:partition_id"
 pub type TopicOffsetKey = String;
@@ -269,8 +271,9 @@ crate::impl_simple_system_table_provider!(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kalamdb_store::test_utils::InMemoryBackend;
+
+    use super::*;
 
     #[test]
     fn test_topic_offsets_provider_creation() {

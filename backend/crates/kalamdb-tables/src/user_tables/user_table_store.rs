@@ -13,15 +13,15 @@
 //! - IndexedEntityStore variant maintains a secondary index on the PK field
 //! - Enables O(1) lookup of row by PK value instead of O(n) scan
 
+use std::sync::Arc;
+
+use kalamdb_commons::{
+    ids::UserTableRowId, models::rows::UserTableRow, storage::Partition, TableId,
+};
+use kalamdb_store::{entity_store::EntityStore, IndexedEntityStore, StorageBackend};
+
 use super::pk_index::create_user_table_pk_index;
 use crate::common::{ensure_partition, new_indexed_store_with_pk, partition_name};
-use kalamdb_commons::ids::UserTableRowId;
-use kalamdb_commons::models::rows::UserTableRow;
-use kalamdb_commons::storage::Partition;
-use kalamdb_commons::TableId;
-use kalamdb_store::entity_store::EntityStore;
-use kalamdb_store::{IndexedEntityStore, StorageBackend};
-use std::sync::Arc;
 
 // KSerializable for UserTableRow is implemented in kalamdb-store
 // impl KSerializable for UserTableRow {}
@@ -111,15 +111,17 @@ pub fn new_indexed_user_table_store(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::utils::test_backend::RecordingBackend;
+    use std::collections::BTreeMap;
+
     use datafusion::scalar::ScalarValue;
     use kalamdb_commons::{
         ids::SeqId,
         models::{rows::Row, NamespaceId, TableId, TableName},
         StorageKey, UserId,
     };
-    use std::collections::BTreeMap;
+
+    use super::*;
+    use crate::utils::test_backend::RecordingBackend;
 
     fn create_test_store() -> UserTableStore {
         let backend: Arc<dyn StorageBackend> = Arc::new(RecordingBackend::new());

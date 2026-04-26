@@ -1,12 +1,12 @@
 use datafusion::logical_expr::{col, lit, Expr, TableProviderFilterPushDown};
-use kalamdb_datafusion_sources::provider::{mvcc_filter_capability, pushdown_results_for_filters};
-use kalamdb_datafusion_sources::pruning::mvcc_filter_evaluation;
+use kalamdb_datafusion_sources::{
+    provider::{mvcc_filter_capability, pushdown_results_for_filters},
+    pruning::mvcc_filter_evaluation,
+};
 
 fn classify_mvcc_filters(filters: Vec<Expr>) -> Vec<TableProviderFilterPushDown> {
     let filter_refs: Vec<&Expr> = filters.iter().collect();
-    pushdown_results_for_filters(&filter_refs, |filter| {
-        mvcc_filter_capability(filter, "id")
-    })
+    pushdown_results_for_filters(&filter_refs, |filter| mvcc_filter_capability(filter, "id"))
 }
 
 #[test]
@@ -40,10 +40,7 @@ fn mvcc_filter_evaluation_preserves_inexact_source_pruning_subset() {
     ];
     let evaluation = mvcc_filter_evaluation(&filters, "id");
 
-    assert_eq!(
-        evaluation.exact.filters.as_ref(),
-        filters.as_slice(),
-    );
+    assert_eq!(evaluation.exact.filters.as_ref(), filters.as_slice(),);
     assert_eq!(
         evaluation.inexact.filters.as_ref(),
         vec![

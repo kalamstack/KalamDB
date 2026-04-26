@@ -1,6 +1,7 @@
 //! Integration tests for user table operations
 //!
-//! **Implements T037-T040, T064-T068**: User table CRUD operations, output formatting, and query features
+//! **Implements T037-T040, T064-T068**: User table CRUD operations, output formatting, and query
+//! features
 //!
 //! These tests validate:
 //! - Basic query execution on user tables
@@ -9,8 +10,7 @@
 //! - Empty queries and result pagination
 //! - Query result display and formatting
 
-use crate::common;
-use crate::common::*;
+use crate::{common, common::*};
 
 /// T037: Test basic query execution
 #[test]

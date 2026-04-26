@@ -1,7 +1,7 @@
 //! Centralized datatype and value conversion utilities
 //!
-//! This module provides unified conversion functions for mapping between different data representations
-//! (ScalarValue, bytes, Arrow types, etc.) used throughout the KalamDB codebase.
+//! This module provides unified conversion functions for mapping between different data
+//! representations (ScalarValue, bytes, Arrow types, etc.) used throughout the KalamDB codebase.
 //!
 //! The goal is to eliminate duplication of similar conversion logic scattered across multiple files
 //! and provide a single source of truth for all datatype conversions.

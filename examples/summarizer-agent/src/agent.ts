@@ -3,20 +3,32 @@ import { fileURLToPath } from 'node:url';
 import { Auth } from '@kalamdb/client';
 import { createConsumerClient, runAgent } from '@kalamdb/consumer';
 
-loadEnv({ path: '.env.local', quiet: true });
-loadEnv({ quiet: true });
-
-const KALAMDB_URL = process.env.KALAMDB_URL ?? 'http://127.0.0.1:8080';
-const KALAMDB_USER = process.env.KALAMDB_USER ?? 'root';
-const KALAMDB_PASSWORD = process.env.KALAMDB_PASSWORD ?? 'kalamdb123';
-const TOPIC = process.env.KALAMDB_TOPIC ?? 'blog.summarizer';
-const GROUP = process.env.KALAMDB_GROUP ?? 'blog-summarizer-agent';
-
 type StartAgentOptions = {
   stopSignal?: AbortSignal;
   groupId?: string;
   start?: 'latest' | 'earliest';
 };
+
+type AgentConfig = {
+  url: string;
+  user: string;
+  password: string;
+  topic: string;
+  group: string;
+};
+
+function readConfig(): AgentConfig {
+  loadEnv({ path: '.env.local', quiet: true });
+  loadEnv({ quiet: true });
+
+  return {
+    url: process.env.KALAMDB_URL ?? 'http://127.0.0.1:8080',
+    user: process.env.KALAMDB_USER ?? 'root',
+    password: process.env.KALAMDB_PASSWORD ?? 'kalamdb123',
+    topic: process.env.KALAMDB_TOPIC ?? 'blog.summarizer',
+    group: process.env.KALAMDB_GROUP ?? 'blog-summarizer-agent',
+  };
+}
 
 export function buildSummary(content: string): string {
   const compact = content.replace(/\s+/g, ' ').trim();
@@ -26,21 +38,22 @@ export function buildSummary(content: string): string {
 }
 
 export async function startSummarizerAgent(options: StartAgentOptions = {}): Promise<void> {
+  const config = readConfig();
   const client = createConsumerClient({
-    url: KALAMDB_URL,
-    authProvider: async () => Auth.basic(KALAMDB_USER, KALAMDB_PASSWORD),
+    url: config.url,
+    authProvider: async () => Auth.basic(config.user, config.password),
   });
 
-  const groupId = options.groupId ?? GROUP;
+  const groupId = options.groupId ?? config.group;
   const start = options.start ?? 'latest';
 
-  console.log(`summarizer-agent ready (topic=${TOPIC}, group=${groupId})`);
+  console.log(`summarizer-agent ready (topic=${config.topic}, group=${groupId})`);
 
   try {
     await runAgent<Record<string, unknown>>({
       client,
       name: 'summarizer-agent',
-      topic: TOPIC,
+      topic: config.topic,
       groupId,
       start,
       stopSignal: options.stopSignal,

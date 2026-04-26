@@ -1,6 +1,7 @@
+use std::collections::BTreeMap;
+
 use kalam_pg_common::RemoteAuthMode;
 use kalam_pg_fdw::ServerOptions;
-use std::collections::BTreeMap;
 
 #[test]
 fn parses_remote_server_options() {
@@ -13,10 +14,7 @@ fn parses_remote_server_options() {
 
     assert_eq!(parsed.remote.as_ref().expect("remote config").host, "127.0.0.1");
     assert_eq!(parsed.remote.as_ref().expect("remote config").port, 50051);
-    assert_eq!(
-        parsed.remote.as_ref().expect("remote config").auth_mode,
-        RemoteAuthMode::None
-    );
+    assert_eq!(parsed.remote.as_ref().expect("remote config").auth_mode, RemoteAuthMode::None);
 }
 
 #[test]
@@ -150,7 +148,8 @@ fn account_login_requires_login_user() {
         ("login_password".to_string(), "super-secret".to_string()),
     ]);
 
-    let err = ServerOptions::parse(&options).expect_err("account_login without login_user should fail");
+    let err =
+        ServerOptions::parse(&options).expect_err("account_login without login_user should fail");
     assert!(err.to_string().contains("login_user"));
 }
 
@@ -164,6 +163,7 @@ fn static_header_rejects_account_login_fields() {
         ("login_user".to_string(), "pg_dba".to_string()),
     ]);
 
-    let err = ServerOptions::parse(&options).expect_err("static_header with login fields should fail");
+    let err =
+        ServerOptions::parse(&options).expect_err("static_header with login fields should fail");
     assert!(err.to_string().contains("account_login"));
 }

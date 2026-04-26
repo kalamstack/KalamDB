@@ -4,13 +4,14 @@ use std::sync::Arc;
 #[cfg(feature = "server")]
 use async_trait::async_trait;
 #[cfg(feature = "server")]
-use kalamdb_auth::{authenticate, helpers::basic_auth, AuthRequest, AuthenticationResult, UserRepository};
+use kalamdb_auth::{
+    authenticate, helpers::basic_auth, AuthRequest, AuthenticationResult, UserRepository,
+};
 #[cfg(feature = "server")]
 use kalamdb_commons::models::{ConnectionInfo, TransactionId};
-use tonic::codegen::*;
 #[cfg(feature = "server")]
 use tonic::Request;
-use tonic::{Response, Status};
+use tonic::{codegen::*, Response, Status};
 use tonic_prost::ProstCodec;
 
 #[cfg(feature = "server")]
@@ -925,7 +926,8 @@ impl KalamPgService {
             && self.bearer_user_repo.is_none()
         {
             log::warn!(
-                "PG RPC service is running without mTLS, pg_auth_token, or bearer auth; requests are unauthenticated"
+                "PG RPC service is running without mTLS, pg_auth_token, or bearer auth; requests \
+                 are unauthenticated"
             );
         }
     }
@@ -967,14 +969,15 @@ impl KalamPgService {
             return Ok(());
         }
 
-        self.session_registry
-            .validate_session(session_id)
-            .map(|_| ())
-            .map_err(|reason| match reason {
-                "session lease expired" => Status::unauthenticated("session lease expired – re-authenticate via open_session"),
+        self.session_registry.validate_session(session_id).map(|_| ()).map_err(
+            |reason| match reason {
+                "session lease expired" => Status::unauthenticated(
+                    "session lease expired – re-authenticate via open_session",
+                ),
                 "session not authenticated" => Status::unauthenticated("session not authenticated"),
                 _ => Status::unauthenticated("invalid or expired session"),
-            })
+            },
+        )
     }
 
     async fn authenticate_admin_metadata<T>(
@@ -991,27 +994,29 @@ impl KalamPgService {
             return Err(Status::unauthenticated(missing_header_message));
         }
 
-        let connection_info = ConnectionInfo::new(request.remote_addr().map(|addr| addr.to_string()));
+        let connection_info =
+            ConnectionInfo::new(request.remote_addr().map(|addr| addr.to_string()));
         let auth_request = if provided
             .get(..6)
             .map(|prefix| prefix.eq_ignore_ascii_case("Basic "))
             .unwrap_or(false)
         {
-            let (user, password) = basic_auth::parse_basic_auth_header(provided)
-                .map_err(|error| Status::unauthenticated(format!("authentication failed: {}", error)))?;
+            let (user, password) =
+                basic_auth::parse_basic_auth_header(provided).map_err(|error| {
+                    Status::unauthenticated(format!("authentication failed: {}", error))
+                })?;
             AuthRequest::Credentials { user, password }
         } else {
             AuthRequest::Header(provided.to_string())
         };
 
-        let auth_result = authenticate(auth_request, &connection_info, repo)
-            .await
-            .map_err(|error| Status::unauthenticated(format!("authentication failed: {}", error)))?;
+        let auth_result =
+            authenticate(auth_request, &connection_info, repo).await.map_err(|error| {
+                Status::unauthenticated(format!("authentication failed: {}", error))
+            })?;
 
         if !auth_result.user.is_admin() {
-            return Err(Status::permission_denied(
-                "pg rpc requires a DBA or system account",
-            ));
+            return Err(Status::permission_denied("pg rpc requires a DBA or system account"));
         }
 
         Ok(Some(auth_result))
@@ -1143,7 +1148,8 @@ impl KalamPgService {
                 Ok(None) => {},
                 Err(status) => {
                     log::debug!(
-                        "PG tracked_transaction_id: authoritative lookup failed for session '{}' with {}: {}; falling back to pinned session state",
+                        "PG tracked_transaction_id: authoritative lookup failed for session '{}' \
+                         with {}: {}; falling back to pinned session state",
                         session_id,
                         status.code(),
                         status.message()
@@ -1167,7 +1173,8 @@ impl KalamPgService {
         self.session_registry
             .clear_transaction_state_if_matches(session_id, Some(transaction_id));
         log::debug!(
-            "PG {}: cleared local transaction bookkeeping for session '{}' tx '{}' after executor returned {}: {}",
+            "PG {}: cleared local transaction bookkeeping for session '{}' tx '{}' after executor \
+             returned {}: {}",
             rpc_name,
             session_id,
             transaction_id,
@@ -1187,7 +1194,8 @@ impl KalamPgService {
             match executor.rollback_transaction(session_id, transaction_id).await {
                 Ok(_) => {
                     log::debug!(
-                        "PG {}: finalized terminal transaction cleanup for session '{}' tx '{}' via rollback",
+                        "PG {}: finalized terminal transaction cleanup for session '{}' tx '{}' \
+                         via rollback",
                         rpc_name,
                         session_id,
                         transaction_id
@@ -1197,7 +1205,8 @@ impl KalamPgService {
                     if Self::should_reconcile_local_transaction_state(&rollback_status) =>
                 {
                     log::debug!(
-                        "PG {}: rollback cleanup for session '{}' tx '{}' also returned terminal state {}: {}",
+                        "PG {}: rollback cleanup for session '{}' tx '{}' also returned terminal \
+                         state {}: {}",
                         rpc_name,
                         session_id,
                         transaction_id,
@@ -1207,7 +1216,8 @@ impl KalamPgService {
                 },
                 Err(rollback_status) => {
                     log::warn!(
-                        "PG {}: rollback cleanup for session '{}' tx '{}' failed after terminal error {}: {}",
+                        "PG {}: rollback cleanup for session '{}' tx '{}' failed after terminal \
+                         error {}: {}",
                         rpc_name,
                         session_id,
                         transaction_id,
@@ -1343,7 +1353,11 @@ impl PgService for KalamPgService {
                 .to_string();
             if provided != expected.as_str() {
                 if self
-                    .authenticate_admin_metadata(&request, &provided, "missing authorization header")
+                    .authenticate_admin_metadata(
+                        &request,
+                        &provided,
+                        "missing authorization header",
+                    )
                     .await?
                     .is_none()
                 {
@@ -1421,7 +1435,8 @@ impl PgService for KalamPgService {
                     },
                     Err(status) => {
                         log::warn!(
-                            "PG close_session: proceeding after remote rollback error for session '{}' tx '{}': {}",
+                            "PG close_session: proceeding after remote rollback error for session \
+                             '{}' tx '{}': {}",
                             session_id,
                             transaction_id,
                             status

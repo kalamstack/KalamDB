@@ -1,8 +1,9 @@
 // File: backend/crates/kalamdb-commons/src/models/row_id.rs
 // Type-safe row identifier for shared and stream tables
 
-use serde::{Deserialize, Serialize};
 use std::fmt;
+
+use serde::{Deserialize, Serialize};
 
 /// Type-safe row identifier for shared and stream tables.
 ///

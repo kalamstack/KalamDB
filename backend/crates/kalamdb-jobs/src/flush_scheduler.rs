@@ -1,10 +1,10 @@
-use crate::executors::flush::FlushParams;
-use crate::JobsManager;
-use kalamdb_commons::TableType;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_system::JobType;
 use std::sync::Arc;
+
+use kalamdb_commons::TableType;
+use kalamdb_core::{app_context::AppContext, error::KalamDbError};
+use kalamdb_system::JobType;
+
+use crate::{executors::flush::FlushParams, JobsManager};
 
 /// Periodic scheduler that checks for tables with pending (unflushed) writes
 /// and creates flush jobs for them.

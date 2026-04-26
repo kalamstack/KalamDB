@@ -1,7 +1,6 @@
 //! `ImportForeignSchema` callback: generate foreign table SQL from Kalam metadata.
 
-use pgrx::pg_guard;
-use pgrx::pg_sys;
+use pgrx::{pg_guard, pg_sys};
 
 /// `ImportForeignSchema` callback: return a list of SQL statements to create foreign tables.
 #[pg_guard]

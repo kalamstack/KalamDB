@@ -1,9 +1,9 @@
 //! Integration test for Live Query DELETE detection via WebSocket
 
-use super::test_support::consolidated_helpers::unique_namespace;
-use kalam_client::models::ChangeEvent;
-use kalam_client::models::ResponseStatus;
+use kalam_client::models::{ChangeEvent, ResponseStatus};
 use tokio::time::Duration;
+
+use super::test_support::consolidated_helpers::unique_namespace;
 
 /// Test DELETE detection
 #[tokio::test]

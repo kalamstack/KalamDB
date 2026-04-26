@@ -1,8 +1,5 @@
 use chrono::{DateTime, Utc};
-
-use kalamdb_commons::models::TransactionId;
-use kalamdb_commons::TableType;
-
+use kalamdb_commons::{models::TransactionId, TableType};
 // Re-export fanout types from kalamdb-live (canonical source)
 pub use kalamdb_live::fanout::{
     CommitSideEffectPlan, FanoutDispatchPlan, FanoutOwnerScope, TransactionSideEffects,

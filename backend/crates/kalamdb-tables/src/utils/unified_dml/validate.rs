@@ -3,9 +3,10 @@
 //! This module implements `validate_primary_key()` and `extract_user_pk_value()`
 //! using the internal `Row` representation (`BTreeMap<String, ScalarValue>`).
 
-use crate::error::KalamDbError;
 use datafusion::scalar::ScalarValue;
 use kalamdb_commons::models::rows::Row;
+
+use crate::error::KalamDbError;
 
 /// Extract primary key value from a `Row`
 pub fn extract_user_pk_value(fields: &Row, pk_column: &str) -> Result<String, KalamDbError> {
@@ -60,8 +61,9 @@ fn scalar_pk_to_string(value: &ScalarValue, column: &str) -> Result<String, Kala
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::{BTreeMap, HashSet};
+
+    use super::*;
 
     #[test]
     fn test_extract_user_pk_value_string() {

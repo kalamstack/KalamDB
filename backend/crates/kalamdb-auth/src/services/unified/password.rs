@@ -1,15 +1,17 @@
-use crate::errors::error::{AuthError, AuthResult};
-use crate::helpers::basic_auth;
-use crate::models::context::AuthenticatedUser;
-use crate::repository::user_repo::UserRepository;
-use crate::security::password;
-use kalamdb_commons::models::ConnectionInfo;
-use kalamdb_commons::{AuthType, Role, UserId};
-use log::debug;
 use std::sync::Arc;
+
+use kalamdb_commons::{models::ConnectionInfo, AuthType, Role, UserId};
+use log::debug;
 use tracing::Instrument;
 
 use super::LOGIN_TRACKER;
+use crate::{
+    errors::error::{AuthError, AuthResult},
+    helpers::basic_auth,
+    models::context::AuthenticatedUser,
+    repository::user_repo::UserRepository,
+    security::password,
+};
 
 /// Authenticate using Basic Auth header.
 ///

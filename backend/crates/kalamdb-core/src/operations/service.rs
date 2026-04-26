@@ -1,28 +1,31 @@
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use async_trait::async_trait;
 use datafusion::prelude::SessionContext;
-use kalamdb_commons::models::pg_operations::{
-    DeleteRequest, InsertRequest, MutationResult, ScanRequest, ScanResult, UpdateRequest,
+use kalamdb_commons::{
+    models::{
+        pg_operations::{
+            DeleteRequest, InsertRequest, MutationResult, ScanRequest, ScanResult, UpdateRequest,
+        },
+        rows::Row,
+        OperationKind, ReadContext, Role, TransactionId, TransactionOrigin, UserId,
+    },
+    NamespaceId, TableType,
 };
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::{
-    OperationKind, ReadContext, Role, TransactionId, TransactionOrigin, UserId,
-};
-use kalamdb_commons::{NamespaceId, TableType};
 use kalamdb_pg::{LivePgTransaction, OperationExecutor};
 use kalamdb_session_datafusion::SessionUserContext;
 use kalamdb_transactions::{
     build_insert_staged_mutations, TransactionQueryContext, TransactionQueryExtension,
 };
-use std::collections::BTreeMap;
 use tonic::Status;
 
 use super::scan;
-use crate::app_context::AppContext;
-use crate::sql::ExecutionContext;
-use crate::transactions::{
-    CoordinatorAccessValidator, CoordinatorOverlayView, ExecutionOwnerKey, StagedMutation,
+use crate::{
+    app_context::AppContext,
+    sql::ExecutionContext,
+    transactions::{
+        CoordinatorAccessValidator, CoordinatorOverlayView, ExecutionOwnerKey, StagedMutation,
+    },
 };
 
 /// Domain-typed operation executor for Tier-2 (typed) callers.
@@ -225,7 +228,10 @@ impl OperationService {
 
 #[async_trait]
 impl OperationExecutor for OperationService {
-    async fn active_transaction(&self, session_id: &str) -> Result<Option<LivePgTransaction>, Status> {
+    async fn active_transaction(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<LivePgTransaction>, Status> {
         let Some((transaction_id, handle)) =
             self.active_transaction_handle_for_session(Some(session_id))?
         else {
@@ -467,22 +473,30 @@ fn require_user_id(user_id: Option<UserId>, operation: &str) -> Result<UserId, S
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::schema_registry::cached_table_data::CachedTableData;
-    use crate::test_helpers::test_app_context_simple;
-    use arrow::array::{Int64Array, StringArray};
-    use arrow::datatypes::{DataType, Field, Schema};
-    use arrow::record_batch::RecordBatch;
+    use std::{collections::BTreeMap, sync::Arc};
+
+    use arrow::{
+        array::{Int64Array, StringArray},
+        datatypes::{DataType, Field, Schema},
+        record_batch::RecordBatch,
+    };
     use datafusion::datasource::MemTable;
     use datafusion_common::ScalarValue;
-    use kalamdb_commons::datatypes::KalamDataType;
-    use kalamdb_commons::models::rows::Row;
-    use kalamdb_commons::models::schemas::{ColumnDefinition, TableDefinition, TableOptions};
-    use kalamdb_commons::models::{NamespaceId, TableId, TableName};
-    use kalamdb_commons::TableType;
+    use kalamdb_commons::{
+        datatypes::KalamDataType,
+        models::{
+            rows::Row,
+            schemas::{ColumnDefinition, TableDefinition, TableOptions},
+            NamespaceId, TableId, TableName,
+        },
+        TableType,
+    };
     use kalamdb_pg::OperationExecutor;
-    use std::collections::BTreeMap;
-    use std::sync::Arc;
+
+    use super::*;
+    use crate::{
+        schema_registry::cached_table_data::CachedTableData, test_helpers::test_app_context_simple,
+    };
 
     fn empty_row() -> Row {
         Row {

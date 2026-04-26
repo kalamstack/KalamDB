@@ -6,10 +6,12 @@
 //! 3. RENAME COLUMN - column_id stays the same
 //! 4. Flushed data - column statistics use column_id keys
 
-use super::test_support::{consolidated_helpers, fixtures, flush_helpers, TestServer};
+use std::collections::HashMap;
+
 use kalam_client::models::ResponseStatus;
 use serde_json::Value;
-use std::collections::HashMap;
+
+use super::test_support::{consolidated_helpers, fixtures, flush_helpers, TestServer};
 
 /// Test that column_id is stable across ADD, DROP, RENAME operations
 #[actix_web::test]
@@ -464,7 +466,8 @@ async fn get_table_schema(
     table_name: &str,
 ) -> Vec<HashMap<String, Value>> {
     let query = format!(
-        "SELECT columns FROM system.schemas WHERE namespace_id = '{}' AND table_name = '{}' AND is_latest = true",
+        "SELECT columns FROM system.schemas WHERE namespace_id = '{}' AND table_name = '{}' AND \
+         is_latest = true",
         namespace, table_name
     );
 

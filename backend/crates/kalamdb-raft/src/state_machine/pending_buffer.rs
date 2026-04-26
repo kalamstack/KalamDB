@@ -6,9 +6,10 @@
 //! This ensures correct ordering: data commands are not applied until all
 //! dependent metadata (tables, users, storages) has been applied locally.
 
+use std::collections::BTreeMap;
+
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 /// A command waiting to be applied once Meta catches up
 #[derive(Clone, Debug, Serialize, Deserialize)]

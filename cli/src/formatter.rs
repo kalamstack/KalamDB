@@ -519,8 +519,9 @@ impl OutputFormatter {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kalam_client::TimestampFormat;
+
+    use super::*;
 
     #[test]
     fn test_format_json_value() {

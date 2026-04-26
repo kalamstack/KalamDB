@@ -3,8 +3,9 @@
 // - Validates all expected columns are present
 // - Checks data types and non-empty values for required fields
 
-use crate::common::*;
 use serde_json::Value as JsonValue;
+
+use crate::common::*;
 
 fn arrow_value_as_string(value: &JsonValue) -> Option<String> {
     extract_arrow_value(value)
@@ -78,7 +79,8 @@ fn smoke_show_storages_basic() {
 fn smoke_show_storages_cli_timestamps_are_not_epoch_shifted() {
     if !is_server_running() {
         println!(
-            "Skipping smoke_show_storages_cli_timestamps_are_not_epoch_shifted: server not running at {}",
+            "Skipping smoke_show_storages_cli_timestamps_are_not_epoch_shifted: server not \
+             running at {}",
             server_url()
         );
         return;

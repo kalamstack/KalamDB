@@ -9,12 +9,16 @@
 //! This ensures that all RecordBatches returned from Parquet files match the current
 //! table schema, regardless of when the file was written.
 
-use super::RegistryError;
-use arrow::array::{ArrayRef, NullArray};
-use arrow::compute::cast;
-use arrow::datatypes::{DataType, Schema, SchemaRef};
-use arrow::record_batch::RecordBatch;
 use std::sync::Arc;
+
+use arrow::{
+    array::{ArrayRef, NullArray},
+    compute::cast,
+    datatypes::{DataType, Schema, SchemaRef},
+    record_batch::RecordBatch,
+};
+
+use super::RegistryError;
 
 /// Project a RecordBatch from an old schema to a new schema
 ///
@@ -189,9 +193,12 @@ fn types_compatible(old_type: &DataType, new_type: &DataType) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use arrow::{
+        array::{Int32Array, Int64Array, StringArray},
+        datatypes::Field,
+    };
+
     use super::*;
-    use arrow::array::{Int32Array, Int64Array, StringArray};
-    use arrow::datatypes::Field;
 
     #[test]
     fn test_project_batch_same_schema() {

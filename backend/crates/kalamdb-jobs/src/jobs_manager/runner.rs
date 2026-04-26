@@ -1,23 +1,25 @@
-use super::types::JobsManager;
-use super::utils::log_job;
-use crate::executors::JobDecision;
-use crate::AppContextJobsExt;
-use crate::{FlushScheduler, HealthMonitor, StreamEvictionScheduler};
-use kalamdb_commons::{JobId, NodeId};
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::error_extensions::KalamDbResultExt;
-use kalamdb_raft::commands::MetaCommand;
-use kalamdb_raft::GroupId;
-use kalamdb_system::providers::jobs::models::{Job, JobFilter};
-use kalamdb_system::JobNode;
-use kalamdb_system::JobStatus;
-use log::Level;
 use std::sync::Arc;
-use tokio::sync::mpsc;
-use tokio::sync::Semaphore;
-use tokio::task::JoinSet;
-use tokio::time::{sleep, Duration, Instant};
+
+use kalamdb_commons::{JobId, NodeId};
+use kalamdb_core::{error::KalamDbError, error_extensions::KalamDbResultExt};
+use kalamdb_raft::{commands::MetaCommand, GroupId};
+use kalamdb_system::{
+    providers::jobs::models::{Job, JobFilter},
+    JobNode, JobStatus,
+};
+use log::Level;
+use tokio::{
+    sync::{mpsc, Semaphore},
+    task::JoinSet,
+    time::{sleep, Duration, Instant},
+};
 use tracing::Instrument;
+
+use super::{types::JobsManager, utils::log_job};
+use crate::{
+    executors::JobDecision, AppContextJobsExt, FlushScheduler, HealthMonitor,
+    StreamEvictionScheduler,
+};
 
 const JOB_NODE_QUORUM_POLL_MS: u64 = 250;
 const JOB_NODE_QUORUM_TIMEOUT_SECS: u64 = 10;
@@ -772,7 +774,8 @@ impl JobsManager {
                                 &job_id,
                                 &Level::Warn,
                                 &format!(
-                                    "Quorum timeout (completed {}/{}); proceeding with leader actions",
+                                    "Quorum timeout (completed {}/{}); proceeding with leader \
+                                     actions",
                                     completed, total
                                 ),
                             );

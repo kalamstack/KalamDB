@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use super::registry::{
     cache_entry_seq, clear_startup_deadline, effective_entry_seq, now_ms, refresh_startup_deadline,
     resolve_subscription_key, SubEntry,
@@ -12,7 +14,6 @@ use crate::{
     subscription::{batch_envelope, filter_replayed_event, subscription_start_ready},
     timeouts::KalamLinkTimeouts,
 };
-use std::collections::HashMap;
 
 pub(super) async fn send_subscribe(
     ws: &mut WebSocketStream,
@@ -57,25 +58,23 @@ pub(super) async fn route_event(
     let matched_key = resolve_subscription_key(&incoming_sub_id, subs);
     let resume_from = matched_key
         .as_ref()
-        .and_then(|key| subs.get(key.as_str()))
+        .and_then(|key| subs.get(key.as_str(&incoming_sub_id)))
         .and_then(effective_entry_seq);
     let Some(event) = filter_replayed_event(event, resume_from) else {
         return;
     };
+    let event_time_ms = now_ms();
 
     let auto_request_next_batch = matches!(event, ChangeEvent::InitialDataBatch { .. });
 
     if let Some(batch) = batch_envelope(&event) {
         if let Some(key) = matched_key.as_ref() {
-            if let Some(entry) = subs.get_mut(key) {
+            if let Some(entry) = subs.get_mut(key.as_str(&incoming_sub_id)) {
                 if let Some(seq_id) = batch.last_seq_id {
                     entry.batch_seq_id = Some(seq_id);
                 }
-                if let Some(snapshot_end_seq) = batch.snapshot_end_seq {
-                    entry.snapshot_end_seq = Some(snapshot_end_seq);
-                }
                 entry.is_loading = batch.status != crate::models::BatchStatus::Ready;
-                entry.last_event_time_ms = Some(now_ms());
+                entry.last_event_time_ms = Some(event_time_ms);
                 if entry.is_loading {
                     refresh_startup_deadline(entry, timeouts);
                 }
@@ -84,7 +83,7 @@ pub(super) async fn route_event(
         if auto_request_next_batch && batch.has_more {
             let last_seq = matched_key
                 .as_ref()
-                .and_then(|key| subs.get(key))
+                .and_then(|key| subs.get(key.as_str(&incoming_sub_id)))
                 .and_then(|entry| entry.batch_seq_id.or(entry.last_seq_id));
             if let Err(error) =
                 send_next_batch_request_with_format(ws, &incoming_sub_id, last_seq, serialization)
@@ -95,26 +94,16 @@ pub(super) async fn route_event(
         }
     }
 
-    match &event {
-        ChangeEvent::Insert { .. } | ChangeEvent::Update { .. } | ChangeEvent::Delete { .. } => {
-            if let Some(key) = matched_key.as_ref() {
-                if let Some(entry) = subs.get_mut(key) {
-                    entry.last_event_time_ms = Some(now_ms());
-                }
-            }
-        },
-        ChangeEvent::InitialDataBatch { .. } => {},
-        _ => {},
-    }
-
     if let Some(key) = matched_key {
         let mut remove_after_send = false;
+        let key_str = key.as_str(&incoming_sub_id);
 
-        if let Some(entry) = subs.get_mut(&key) {
-            entry.last_event_time_ms = Some(now_ms());
+        if let Some(entry) = subs.get_mut(key_str) {
+            entry.last_event_time_ms = Some(event_time_ms);
+            let is_start_ready = subscription_start_ready(&event);
 
             match &event {
-                _ if subscription_start_ready(&event) => {
+                _ if is_start_ready => {
                     clear_startup_deadline(entry);
                     if let Some(result_tx) = entry.pending_result_tx.take() {
                         let _ = result_tx.send(Ok((entry.generation, entry.options.from)));
@@ -133,7 +122,7 @@ pub(super) async fn route_event(
                 _ => {},
             }
 
-            if !subscription_start_ready(&event) {
+            if !is_start_ready {
                 if entry.is_loading {
                     refresh_startup_deadline(entry, timeouts);
                 } else if entry.reconnect_resubscribe_pending {
@@ -147,8 +136,8 @@ pub(super) async fn route_event(
         }
 
         if remove_after_send {
-            if let Some(entry) = subs.remove(&key) {
-                cache_entry_seq(seq_id_cache, key, &entry);
+            if let Some(entry) = subs.remove(key_str) {
+                cache_entry_seq(seq_id_cache, key_str, &entry);
             }
         }
     } else {

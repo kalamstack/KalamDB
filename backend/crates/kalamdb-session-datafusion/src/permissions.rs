@@ -1,13 +1,18 @@
-use crate::context::SessionUserContext;
-use datafusion::catalog::Session;
-use datafusion::error::{DataFusionError, Result as DataFusionResult};
-use datafusion::execution::context::SessionState;
-use kalamdb_commons::models::{NamespaceId, ReadContext, Role, TableId, TableName, UserId};
-use kalamdb_commons::schemas::TableDefinition;
+use datafusion::{
+    catalog::Session,
+    error::{DataFusionError, Result as DataFusionResult},
+    execution::context::SessionState,
+};
+use kalamdb_commons::{
+    models::{NamespaceId, ReadContext, Role, TableId, TableName, UserId},
+    schemas::TableDefinition,
+};
 use kalamdb_session::{
     can_access_shared_table, can_access_system_table, can_access_user_table,
     can_write_shared_table, can_write_user_table, shared_table_access_level, SessionError,
 };
+
+use crate::context::SessionUserContext;
 
 #[inline]
 pub fn session_error_to_datafusion(err: SessionError) -> DataFusionError {

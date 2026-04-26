@@ -7,8 +7,17 @@
 //! Manages the connection to KalamDB server and execution state throughout
 //! the CLI session lifetime.
 
-use crate::history_menu::{HistoryMenu, HistoryMenuResult};
-use crate::CLI_VERSION;
+#[cfg(unix)]
+use std::io::IsTerminal;
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    fs,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
+
 use clap::ValueEnum;
 use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -18,25 +27,18 @@ use kalam_client::{
     KalamLinkClient, KalamLinkError, KalamLinkTimeouts, SubscriptionConfig, SubscriptionOptions,
     TimestampFormatter, UploadProgress, UploadProgressCallback,
 };
-use rustyline::completion::Completer;
-use rustyline::error::ReadlineError;
-use rustyline::highlight::Highlighter;
-use rustyline::hint::Hinter;
-use rustyline::history::DefaultHistory;
-use rustyline::validate::Validator;
-use rustyline::{Cmd, CompletionType, Config, EditMode, Editor, Helper, KeyEvent};
-use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-
-#[cfg(unix)]
-use std::io::IsTerminal;
-
+use rustyline::{
+    completion::Completer, error::ReadlineError, highlight::Highlighter, hint::Hinter,
+    history::DefaultHistory, validate::Validator, Cmd, CompletionType, Config, EditMode, Editor,
+    Helper, KeyEvent,
+};
 #[cfg(unix)]
 use tokio::io::AsyncReadExt;
+
+use crate::{
+    history_menu::{HistoryMenu, HistoryMenuResult},
+    CLI_VERSION,
+};
 
 // Fallback system tables for autocomplete when the server does not return them
 const SYSTEM_TABLES: &[&str] = &[
@@ -1410,11 +1412,14 @@ impl CLISession {
             }
         }
 
-        // Also fetch system/information_schema tables from information_schema.tables for autocomplete
+        // Also fetch system/information_schema tables from information_schema.tables for
+        // autocomplete
         let sys_tables_res = self
             .client
             .execute_query(
-                "SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema IN ('system', 'information_schema') ORDER BY table_schema, table_name",
+                "SELECT table_schema, table_name FROM information_schema.tables WHERE \
+                 table_schema IN ('system', 'information_schema') ORDER BY table_schema, \
+                 table_name",
                 None,
                 None,
                 None,
@@ -1491,7 +1496,8 @@ impl CLISession {
             let resp = self
                 .client
                 .execute_query(
-                    "SELECT table_name, column_name FROM information_schema.columns ORDER BY table_name, ordinal_position",
+                    "SELECT table_name, column_name FROM information_schema.columns ORDER BY \
+                     table_name, ordinal_position",
                     None,
                     None,
                     None,
@@ -1502,7 +1508,8 @@ impl CLISession {
         } else {
             self.client
                 .execute_query(
-                    "SELECT table_name, column_name FROM information_schema.columns ORDER BY table_name, ordinal_position",
+                    "SELECT table_name, column_name FROM information_schema.columns ORDER BY \
+                     table_name, ordinal_position",
                     None,
                     None,
                     None,
@@ -1838,7 +1845,10 @@ impl CLISession {
                                 )
                                 .await;
                                 if let Err(_) = close_res {
-                                    eprintln!("Warning: Timed out while closing subscription; exiting anyway");
+                                    eprintln!(
+                                        "Warning: Timed out while closing subscription; exiting \
+                                         anyway"
+                                    );
                                 } else if let Ok(Err(e)) = close_res {
                                     eprintln!(
                                         "Warning: Failed to close subscription cleanly: {}",
@@ -2059,7 +2069,8 @@ impl CLISession {
             } => {
                 if self.color {
                     println!(
-                        "\x1b[36m[{}] ✓ SUBSCRIBED\x1b[0m [{}] {} total rows, batch {} {}, {} columns",
+                        "\x1b[36m[{}] ✓ SUBSCRIBED\x1b[0m [{}] {} total rows, batch {} {}, {} \
+                         columns",
                         timestamp,
                         subscription_id,
                         total_rows,
@@ -2407,7 +2418,9 @@ impl CLISession {
         let result = self
             .client
             .execute_query(
-                "SELECT cluster_id, node_id, role, status, api_addr, is_self, is_leader, hostname, memory_usage_mb, cpu_usage_percent, uptime_human FROM system.cluster ORDER BY is_leader DESC, node_id ASC",
+                "SELECT cluster_id, node_id, role, status, api_addr, is_self, is_leader, \
+                 hostname, memory_usage_mb, cpu_usage_percent, uptime_human FROM system.cluster \
+                 ORDER BY is_leader DESC, node_id ASC",
                 None,
                 None,
                 None,
@@ -3079,17 +3092,20 @@ impl Helper for CLIHelper {}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::credentials::FileCredentialStore;
+    use std::{collections::HashMap, sync::Arc};
+
     use kalam_client::credentials::{CredentialStore, Credentials};
     use ntest::timeout;
     use serde_json::json;
-    use std::collections::HashMap;
-    use std::sync::Arc;
     use tempfile::TempDir;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::{TcpListener, TcpStream};
-    use tokio::sync::Mutex as AsyncMutex;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::{TcpListener, TcpStream},
+        sync::Mutex as AsyncMutex,
+    };
+
+    use super::*;
+    use crate::credentials::FileCredentialStore;
 
     #[derive(Debug, Default)]
     struct TestServerState {
@@ -3226,7 +3242,8 @@ mod tests {
         };
 
         let response = format!(
-            "{status_line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            "{status_line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: \
+             close\r\n\r\n{}",
             body.len(),
             body
         );

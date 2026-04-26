@@ -1,32 +1,36 @@
-use async_trait::async_trait;
-use datafusion::arrow::array::{ArrayRef, UInt64Array};
-use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::catalog::Session;
-use datafusion::common::DFSchema;
-use datafusion::datasource::source::DataSourceExec;
-use datafusion::datasource::TableProvider;
-use datafusion::error::{DataFusionError, Result as DataFusionResult};
-use datafusion::logical_expr::{utils::expr_to_columns, Expr};
-use datafusion::physical_plan::filter::FilterExec;
-use datafusion::physical_plan::projection::ProjectionExec;
-use datafusion::physical_plan::{collect, ExecutionPlan};
-use datafusion::scalar::ScalarValue;
-use datafusion_datasource::memory::MemorySourceConfig;
-use kalamdb_datafusion_sources::exec::{DeferredBatchExec, DeferredBatchSource};
-use kalamdb_commons::conversions::arrow_json_conversion::{
-    arrow_value_to_scalar, json_rows_to_arrow_batch,
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::Arc,
 };
-use kalamdb_commons::conversions::scalar_to_pk_string;
-use kalamdb_commons::models::rows::Row;
-use kalamdb_commons::models::UserId;
-use kalamdb_commons::NotLeaderError;
-use kalamdb_commons::{TableId, TableType};
+
+use async_trait::async_trait;
+use datafusion::{
+    arrow::{
+        array::{ArrayRef, UInt64Array},
+        datatypes::{DataType, Field, Schema, SchemaRef},
+        record_batch::RecordBatch,
+    },
+    catalog::Session,
+    common::DFSchema,
+    datasource::{source::DataSourceExec, TableProvider},
+    error::{DataFusionError, Result as DataFusionResult},
+    logical_expr::{utils::expr_to_columns, Expr},
+    physical_plan::{collect, filter::FilterExec, projection::ProjectionExec, ExecutionPlan},
+    scalar::ScalarValue,
+};
+use datafusion_datasource::memory::MemorySourceConfig;
+use kalamdb_commons::{
+    conversions::{
+        arrow_json_conversion::{arrow_value_to_scalar, coerce_updates, json_rows_to_arrow_batch},
+        scalar_to_pk_string,
+    },
+    models::{rows::Row, UserId},
+    NotLeaderError, TableId, TableType,
+};
+use kalamdb_datafusion_sources::exec::{DeferredBatchExec, DeferredBatchSource};
 use kalamdb_transactions::{
     build_insert_staged_mutations, StagedMutation, TransactionAccessError, TransactionQueryContext,
 };
-use std::collections::{BTreeMap, HashSet};
-use std::sync::Arc;
 
 pub struct OverlayScanProjection {
     pub effective_projection: Option<Vec<usize>>,
@@ -68,9 +72,7 @@ pub async fn rows_affected_plan(
         vec![Arc::new(UInt64Array::from(vec![rows_affected])) as ArrayRef],
     )?;
 
-    Ok(Arc::new(DeferredBatchExec::new(Arc::new(
-        RowsAffectedSource { batch },
-    ))))
+    Ok(Arc::new(DeferredBatchExec::new(Arc::new(RowsAffectedSource { batch }))))
 }
 
 pub fn prepare_overlay_scan_projection(
@@ -299,6 +301,7 @@ pub fn dml_scan_projection(
     for (_, expr) in assignments {
         collect_expr_columns(expr, &mut referenced_columns)?;
     }
+    referenced_columns.extend(assignments.iter().map(|(column, _)| column.clone()));
     referenced_columns.extend(required_columns.iter().copied().map(str::to_owned));
 
     let projection: Vec<usize> = schema
@@ -400,6 +403,23 @@ pub fn evaluate_assignment_values(
     }
 
     Ok(Row::new(values))
+}
+
+pub fn update_assignments_noop(
+    schema: &SchemaRef,
+    row: &Row,
+    updates: &Row,
+) -> DataFusionResult<bool> {
+    let updates = coerce_updates(updates.clone(), schema).map_err(DataFusionError::Execution)?;
+
+    for (column, value) in updates.values {
+        match row.values.get(&column) {
+            Some(existing) if existing == &value => {},
+            _ => return Ok(false),
+        }
+    }
+
+    Ok(true)
 }
 
 fn build_row_batch(schema: &SchemaRef, row: &Row) -> DataFusionResult<RecordBatch> {
@@ -505,14 +525,16 @@ pub fn validate_not_null_constraints(schema: &SchemaRef, rows: &[Row]) -> DataFu
             match row.values.get(column_name) {
                 None => {
                     return Err(DataFusionError::Execution(format!(
-                        "NOT NULL constraint violation: column '{}' is missing in row {} (row index {})",
+                        "NOT NULL constraint violation: column '{}' is missing in row {} (row \
+                         index {})",
                         column_name,
                         row_idx + 1,
                         row_idx
                     )));
                 },
                 Some(value) if value.is_null() => {
-                    // Use is_null() to catch both ScalarValue::Null and typed NULLs like Utf8(None), Int32(None), etc.
+                    // Use is_null() to catch both ScalarValue::Null and typed NULLs like
+                    // Utf8(None), Int32(None), etc.
                     return Err(DataFusionError::Execution(format!(
                         "NOT NULL constraint violation: column '{}' cannot be NULL (row {})",
                         column_name,
@@ -548,7 +570,8 @@ pub fn validate_not_null_with_set(
             match row.values.get(column_name) {
                 None => {
                     return Err(DataFusionError::Execution(format!(
-                        "NOT NULL constraint violation: column '{}' is missing in row {} (row index {})",
+                        "NOT NULL constraint violation: column '{}' is missing in row {} (row \
+                         index {})",
                         column_name,
                         row_idx + 1,
                         row_idx
@@ -571,13 +594,17 @@ pub fn validate_not_null_with_set(
 
 #[cfg(test)]
 mod tests {
-    use super::{dml_scan_projection, evaluate_assignment_values, row_matches_filters};
-    use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-    use datafusion::logical_expr::{col, lit};
-    use datafusion::prelude::SessionContext;
-    use datafusion::scalar::ScalarValue;
-    use kalamdb_commons::models::rows::Row;
     use std::sync::Arc;
+
+    use datafusion::{
+        arrow::datatypes::{DataType, Field, Schema, SchemaRef},
+        logical_expr::{col, lit},
+        prelude::SessionContext,
+        scalar::ScalarValue,
+    };
+    use kalamdb_commons::models::rows::Row;
+
+    use super::{dml_scan_projection, evaluate_assignment_values, row_matches_filters};
 
     fn test_schema() -> SchemaRef {
         Arc::new(Schema::new(vec![
@@ -634,7 +661,7 @@ mod tests {
     }
 
     #[test]
-    fn dml_scan_projection_includes_assignment_source_columns_but_not_targets() {
+    fn dml_scan_projection_includes_assignment_source_and_target_columns() {
         let schema = Arc::new(Schema::new(vec![
             Field::new("id", DataType::Utf8, false),
             Field::new("value", DataType::Int64, false),
@@ -646,6 +673,6 @@ mod tests {
 
         let projection = dml_scan_projection(&schema, &filters, &assignments, &["id"]).unwrap();
 
-        assert_eq!(projection, Some(vec![0, 1, 2]));
+        assert_eq!(projection, None);
     }
 }

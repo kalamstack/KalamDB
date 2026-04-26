@@ -1,16 +1,21 @@
-use crate::auth::AuthProvider;
-use crate::consumer::models::consumer_record::ConsumerRecordWire;
-use crate::consumer::models::AckResponse;
-use crate::consumer::models::AutoOffsetReset;
-use crate::consumer::models::CommitResult;
-use crate::consumer::utils::backoff::jittered_exponential_backoff;
-use crate::error::{KalamLinkError, Result};
-use crate::models::LoginResponse;
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+
 use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use serde_json;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+
+use crate::{
+    auth::AuthProvider,
+    consumer::{
+        models::{consumer_record::ConsumerRecordWire, AckResponse, AutoOffsetReset, CommitResult},
+        utils::backoff::jittered_exponential_backoff,
+    },
+    error::{KalamLinkError, Result},
+    models::LoginResponse,
+};
 
 #[derive(Clone)]
 pub struct ConsumerPoller {
@@ -159,7 +164,8 @@ impl ConsumerPoller {
                             Duration::from_secs(10),
                         );
                         warn!(
-                            "[LINK_CONSUMER] Retriable consume error: status={} delay_ms={} duration_ms={}",
+                            "[LINK_CONSUMER] Retriable consume error: status={} delay_ms={} \
+                             duration_ms={}",
                             status,
                             delay.as_millis(),
                             attempt_start.elapsed().as_millis()

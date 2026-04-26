@@ -8,10 +8,12 @@
 //! - Job status is replicated across all nodes
 //! - System.jobs table shows node_id of the executor
 
-use crate::cluster_common::*;
-use crate::common::*;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
+
+use crate::{cluster_common::*, common::*};
 
 /// Test: Only leader executes flush jobs
 ///
@@ -170,7 +172,8 @@ fn cluster_test_jobs_table_consistency() {
     }
 
     // Query recent jobs and verify node_id field is populated
-    let recent_jobs_sql = "SELECT job_id, job_type, node_id, status FROM system.jobs ORDER BY created_at DESC LIMIT 3";
+    let recent_jobs_sql = "SELECT job_id, job_type, node_id, status FROM system.jobs ORDER BY \
+                           created_at DESC LIMIT 3";
 
     println!("\n  Recent jobs (from leader):");
     let leader_url = find_leader_url(&urls);

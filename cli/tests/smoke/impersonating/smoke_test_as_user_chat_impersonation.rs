@@ -1,8 +1,12 @@
-use crate::common::*;
+use std::{
+    sync::mpsc as std_mpsc,
+    thread,
+    time::{Duration, Instant},
+};
+
 use kalam_client::KalamLinkTimeouts;
-use std::sync::mpsc as std_mpsc;
-use std::thread;
-use std::time::{Duration, Instant};
+
+use crate::common::*;
 
 struct AuthSubscriptionListener {
     event_receiver: std_mpsc::Receiver<String>,
@@ -248,13 +252,15 @@ fn setup_chat_fixture(suffix: &str) -> ChatFixture {
     .expect("Failed to create conversations table");
 
     execute_sql_as_root_via_client(&format!(
-        "CREATE TABLE {} (id BIGINT PRIMARY KEY, conversation_id BIGINT, sender TEXT, role TEXT, content TEXT, status TEXT) WITH (TYPE='USER')",
+        "CREATE TABLE {} (id BIGINT PRIMARY KEY, conversation_id BIGINT, sender TEXT, role TEXT, \
+         content TEXT, status TEXT) WITH (TYPE='USER')",
         messages_table
     ))
     .expect("Failed to create messages table");
 
     execute_sql_as_root_via_client(&format!(
-        "CREATE TABLE {} (id BIGINT PRIMARY KEY, conversation_id BIGINT, user_name TEXT, is_typing BOOLEAN, state TEXT) WITH (TYPE='STREAM', TTL_SECONDS=3600)",
+        "CREATE TABLE {} (id BIGINT PRIMARY KEY, conversation_id BIGINT, user_name TEXT, \
+         is_typing BOOLEAN, state TEXT) WITH (TYPE='STREAM', TTL_SECONDS=3600)",
         typing_table
     ))
     .expect("Failed to create typing table");
@@ -305,7 +311,8 @@ fn run_base_chat_flow_with_impersonation(fixture: &ChatFixture) -> BaseFlow {
         &fixture.regular_user,
         &fixture.password,
         &format!(
-            "INSERT INTO {} (id, conversation_id, sender, role, content, status) VALUES ({}, {}, '{}', 'user', 'Hello from regular user', 'sent')",
+            "INSERT INTO {} (id, conversation_id, sender, role, content, status) VALUES ({}, {}, \
+             '{}', 'user', 'Hello from regular user', 'sent')",
             fixture.messages_table, user_message_id, conversation_id, fixture.regular_user
         ),
     )
@@ -325,9 +332,9 @@ fn run_base_chat_flow_with_impersonation(fixture: &ChatFixture) -> BaseFlow {
         &fixture.service_user,
         &fixture.password,
         &format!(
-            "EXECUTE AS USER '{}' (INSERT INTO {} (id, conversation_id, user_name, is_typing, state) VALUES (3001, {}, 'AI Assistant', true, 'thinking'))",
-            fixture.regular_user,
-            fixture.typing_table, conversation_id
+            "EXECUTE AS USER '{}' (INSERT INTO {} (id, conversation_id, user_name, is_typing, \
+             state) VALUES (3001, {}, 'AI Assistant', true, 'thinking'))",
+            fixture.regular_user, fixture.typing_table, conversation_id
         ),
     )
     .expect("Service should insert typing event AS USER");
@@ -336,9 +343,9 @@ fn run_base_chat_flow_with_impersonation(fixture: &ChatFixture) -> BaseFlow {
         &fixture.service_user,
         &fixture.password,
         &format!(
-            "EXECUTE AS USER '{}' (INSERT INTO {} (id, conversation_id, user_name, is_typing, state) VALUES (3002, {}, 'AI Assistant', true, 'typing'))",
-            fixture.regular_user,
-            fixture.typing_table, conversation_id
+            "EXECUTE AS USER '{}' (INSERT INTO {} (id, conversation_id, user_name, is_typing, \
+             state) VALUES (3002, {}, 'AI Assistant', true, 'typing'))",
+            fixture.regular_user, fixture.typing_table, conversation_id
         ),
     )
     .expect("Service should insert second typing event AS USER");
@@ -368,9 +375,9 @@ fn run_base_chat_flow_with_impersonation(fixture: &ChatFixture) -> BaseFlow {
         })
         .unwrap_or_else(|fallback_error| {
             panic!(
-                "Regular user should receive typing signal via subscription or persisted rows: subscription error: {}; fallback error: {}",
-                error,
-                fallback_error
+                "Regular user should receive typing signal via subscription or persisted rows: \
+                 subscription error: {}; fallback error: {}",
+                error, fallback_error
             )
         });
         assert!(
@@ -418,7 +425,8 @@ fn run_base_chat_flow_with_impersonation(fixture: &ChatFixture) -> BaseFlow {
         &fixture.service_user,
         &fixture.password,
         &format!(
-            "EXECUTE AS USER '{}' (INSERT INTO {} (id, conversation_id, sender, role, content, status) VALUES ({}, {}, 'AI Assistant', 'assistant', '{}', 'sent'))",
+            "EXECUTE AS USER '{}' (INSERT INTO {} (id, conversation_id, sender, role, content, \
+             status) VALUES ({}, {}, 'AI Assistant', 'assistant', '{}', 'sent'))",
             fixture.regular_user_id,
             fixture.messages_table,
             assistant_message_id,
@@ -465,7 +473,8 @@ fn run_base_chat_flow_with_impersonation(fixture: &ChatFixture) -> BaseFlow {
         assert!(
             fallback.contains(&assistant_message_id.to_string())
                 || fallback.to_lowercase().contains("service response via as user"),
-            "Regular user should receive inserted assistant message in subscription: {}. Fallback result: {}",
+            "Regular user should receive inserted assistant message in subscription: {}. Fallback \
+             result: {}",
             error,
             fallback
         );
@@ -532,9 +541,9 @@ fn smoke_as_user_chat_insert_and_select_flow() {
         &fixture.service_user,
         &fixture.password,
         &format!(
-            "EXECUTE AS USER '{}' (SELECT role, content FROM {} WHERE conversation_id = {} ORDER BY id)",
-            fixture.regular_user_id,
-            fixture.messages_table, flow.conversation_id
+            "EXECUTE AS USER '{}' (SELECT role, content FROM {} WHERE conversation_id = {} ORDER \
+             BY id)",
+            fixture.regular_user_id, fixture.messages_table, flow.conversation_id
         ),
     )
     .expect("Service SELECT AS USER should succeed");
@@ -566,9 +575,9 @@ fn smoke_as_user_chat_select_scope_for_different_user() {
         &fixture.service_user,
         &fixture.password,
         &format!(
-            "EXECUTE AS USER '{}' (SELECT role, content FROM {} WHERE conversation_id = {} ORDER BY id)",
-            fixture.other_user_id,
-            fixture.messages_table, flow.conversation_id
+            "EXECUTE AS USER '{}' (SELECT role, content FROM {} WHERE conversation_id = {} ORDER \
+             BY id)",
+            fixture.other_user_id, fixture.messages_table, flow.conversation_id
         ),
     )
     .expect("Service SELECT AS USER for other user should succeed");
@@ -636,7 +645,8 @@ fn smoke_as_user_chat_update_flow() {
         assert!(
             fallback.contains(&flow.assistant_message_id.to_string())
                 || fallback.contains("service response via as user"),
-            "Regular user update listener should receive initial message snapshot before update: {}. Fallback result: {}",
+            "Regular user update listener should receive initial message snapshot before update: \
+             {}. Fallback result: {}",
             error,
             fallback
         );
@@ -646,9 +656,9 @@ fn smoke_as_user_chat_update_flow() {
         &fixture.service_user,
         &fixture.password,
         &format!(
-            "EXECUTE AS USER '{}' (UPDATE {} SET content = 'Service response updated', status = 'delivered' WHERE id = {})",
-            fixture.regular_user_id,
-            fixture.messages_table, flow.assistant_message_id
+            "EXECUTE AS USER '{}' (UPDATE {} SET content = 'Service response updated', status = \
+             'delivered' WHERE id = {})",
+            fixture.regular_user_id, fixture.messages_table, flow.assistant_message_id
         ),
     )
     .expect("Service UPDATE AS USER should succeed");
@@ -738,9 +748,9 @@ fn smoke_as_user_chat_delete_flow() {
         &fixture.service_user,
         &fixture.password,
         &format!(
-            "EXECUTE AS USER '{}' (SELECT role, content FROM {} WHERE conversation_id = {} ORDER BY id)",
-            fixture.regular_user_id,
-            fixture.messages_table, flow.conversation_id
+            "EXECUTE AS USER '{}' (SELECT role, content FROM {} WHERE conversation_id = {} ORDER \
+             BY id)",
+            fixture.regular_user_id, fixture.messages_table, flow.conversation_id
         ),
     )
     .expect("Service SELECT AS USER after delete should succeed");

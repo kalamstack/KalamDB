@@ -2,15 +2,16 @@
 //!
 //! Attempts to transfer leadership for all Raft groups to the specified node.
 
+use std::sync::Arc;
+
 use kalamdb_commons::models::NodeId;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::executor::handlers::{
-    ExecutionContext, ExecutionResult, ScalarValue, StatementHandler,
+use kalamdb_core::{
+    app_context::AppContext,
+    error::KalamDbError,
+    sql::executor::handlers::{ExecutionContext, ExecutionResult, ScalarValue, StatementHandler},
 };
 use kalamdb_raft::RaftExecutor;
 use kalamdb_sql::classifier::{SqlStatement, SqlStatementKind};
-use std::sync::Arc;
 
 pub struct ClusterTransferLeaderHandler {
     app_context: Arc<AppContext>,
@@ -62,7 +63,8 @@ impl StatementHandler for ClusterTransferLeaderHandler {
 
         let mut message = if success_count == 0 && failed_count == total_count {
             format!(
-                "CLUSTER TRANSFER-LEADER is unsupported in the current OpenRaft version (target={}).",
+                "CLUSTER TRANSFER-LEADER is unsupported in the current OpenRaft version \
+                 (target={}).",
                 node_id
             )
         } else {

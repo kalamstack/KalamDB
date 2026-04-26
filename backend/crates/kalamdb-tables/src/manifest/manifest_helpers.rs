@@ -1,14 +1,22 @@
-use crate::error::KalamDbError;
-use crate::utils::core::TableProviderCore;
-use crate::utils::parquet::scan_parquet_files_as_batch_async;
-use crate::utils::version_resolution::{parquet_batch_to_rows, ParquetRowData};
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::logical_expr::Expr;
-use datafusion::prelude::{col, lit};
-use kalamdb_commons::constants::SystemColumnNames;
-use kalamdb_commons::ids::SeqId;
-use kalamdb_commons::models::schemas::TableType;
-use kalamdb_commons::models::UserId;
+use datafusion::{
+    arrow::datatypes::SchemaRef,
+    logical_expr::Expr,
+    prelude::{col, lit},
+};
+use kalamdb_commons::{
+    constants::SystemColumnNames,
+    ids::SeqId,
+    models::{schemas::TableType, UserId},
+};
+
+use crate::{
+    error::KalamDbError,
+    utils::{
+        core::TableProviderCore,
+        parquet::scan_parquet_files_as_batch_async,
+        version_resolution::{parquet_batch_to_rows, ParquetRowData},
+    },
+};
 
 /// Ensure manifest.json exists (and is cached) for the current scope before hot writes.
 pub fn ensure_manifest_ready(

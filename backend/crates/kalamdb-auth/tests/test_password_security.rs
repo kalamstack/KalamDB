@@ -65,8 +65,8 @@ async fn test_concurrent_bcrypt_non_blocking() {
     // We allow up to 100ms for CI variability
     assert!(
         duration.as_millis() < 100,
-        "Concurrent operations took too long: {:?}ms (expected <100ms). \
-         This suggests operations are blocking the async runtime.",
+        "Concurrent operations took too long: {:?}ms (expected <100ms). This suggests operations \
+         are blocking the async runtime.",
         duration.as_millis()
     );
 

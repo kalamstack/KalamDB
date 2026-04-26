@@ -8,8 +8,9 @@
 //! - DELETE AS USER removes records as impersonated user
 //! - AS USER rejected on SHARED tables
 
-use crate::common::*;
 use std::time::Duration;
+
+use crate::common::*;
 
 /// Helper to create a unique namespace for this test
 fn create_test_namespace(suffix: &str) -> String {
@@ -369,7 +370,8 @@ fn smoke_as_user_rejected_on_shared_table() {
 
     // Create SHARED table (not USER table)
     execute_sql_as_root_via_client(&format!(
-        "CREATE TABLE {} (config_key VARCHAR PRIMARY KEY, config_value VARCHAR) WITH (TYPE='SHARED')",
+        "CREATE TABLE {} (config_key VARCHAR PRIMARY KEY, config_value VARCHAR) WITH \
+         (TYPE='SHARED')",
         full_table
     ))
     .expect("Failed to create SHARED table");
@@ -450,7 +452,8 @@ fn smoke_as_user_full_workflow() {
         &service_user,
         password,
         &format!(
-            "EXECUTE AS USER '{}' (INSERT INTO {} (id, title, done) VALUES (1, 'Alice Task 1', false))",
+            "EXECUTE AS USER '{}' (INSERT INTO {} (id, title, done) VALUES (1, 'Alice Task 1', \
+             false))",
             alice_user_id, full_table
         ),
     )
@@ -460,7 +463,8 @@ fn smoke_as_user_full_workflow() {
         &service_user,
         password,
         &format!(
-            "EXECUTE AS USER '{}' (INSERT INTO {} (id, title, done) VALUES (2, 'Alice Task 2', false))",
+            "EXECUTE AS USER '{}' (INSERT INTO {} (id, title, done) VALUES (2, 'Alice Task 2', \
+             false))",
             alice_user_id, full_table
         ),
     )
@@ -471,7 +475,8 @@ fn smoke_as_user_full_workflow() {
         &service_user,
         password,
         &format!(
-            "EXECUTE AS USER '{}' (INSERT INTO {} (id, title, done) VALUES (10, 'Bob Task 1', false))",
+            "EXECUTE AS USER '{}' (INSERT INTO {} (id, title, done) VALUES (10, 'Bob Task 1', \
+             false))",
             bob_user_id, full_table
         ),
     )
@@ -681,7 +686,8 @@ fn smoke_as_user_stream_table_isolation() {
         .expect("Failed to create namespace");
 
     execute_sql_as_root_via_client(&format!(
-        "CREATE TABLE {} (id BIGINT PRIMARY KEY, payload VARCHAR) WITH (TYPE='STREAM', TTL_SECONDS=3600)",
+        "CREATE TABLE {} (id BIGINT PRIMARY KEY, payload VARCHAR) WITH (TYPE='STREAM', \
+         TTL_SECONDS=3600)",
         full_table
     ))
     .expect("Failed to create stream table");

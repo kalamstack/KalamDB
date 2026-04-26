@@ -3,17 +3,26 @@
 //! Phase 16: Consolidated provider using single store with TableVersionId keys.
 //! Exposes all table versions with is_latest flag for schema history queries.
 
-use super::{new_schemas_store, schemas_arrow_schema, SchemasStore};
-use crate::error::{SystemError, SystemResultExt};
-use crate::providers::base::{extract_filter_value, SimpleProviderDefinition};
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::array::RecordBatch;
-use datafusion::logical_expr::Expr;
-use kalamdb_commons::models::TableId;
-use kalamdb_commons::schemas::{TableDefinition, TableOptions};
+use std::{
+    collections::HashMap,
+    sync::{Arc, OnceLock},
+};
+
+use datafusion::{
+    arrow::{array::RecordBatch, datatypes::SchemaRef},
+    logical_expr::Expr,
+};
+use kalamdb_commons::{
+    models::TableId,
+    schemas::{TableDefinition, TableOptions},
+};
 use kalamdb_store::StorageBackend;
-use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
+
+use super::{new_schemas_store, schemas_arrow_schema, SchemasStore};
+use crate::{
+    error::{SystemError, SystemResultExt},
+    providers::base::{extract_filter_value, SimpleProviderDefinition},
+};
 
 /// System.tables table provider using consolidated store with versioning
 #[derive(Clone)]
@@ -150,7 +159,8 @@ impl SchemasTableProvider {
     /// The `is_latest` column indicates which version is the current active schema.
     pub fn scan_all_tables(&self) -> Result<RecordBatch, SystemError> {
         // Return ALL versions including historical ones for schema evolution support.
-        // The store contains both `<lat>` pointers and `<ver>N` rows; we expose only versioned rows.
+        // The store contains both `<lat>` pointers and `<ver>N` rows; we expose only versioned
+        // rows.
         let entries = self.store.scan_all_with_versions()?;
 
         // First pass: find max version for each table.
@@ -233,11 +243,9 @@ impl SchemasTableProvider {
             versions
                 .into_iter()
                 .map(|(table_id, def)| {
-                    let is_latest = max_versions
-                        .get(&table_id)
-                        .copied()
-                        .unwrap_or(def.schema_version)
-                        == def.schema_version;
+                    let is_latest =
+                        max_versions.get(&table_id).copied().unwrap_or(def.schema_version)
+                            == def.schema_version;
                     (def, is_latest)
                 })
                 .collect(),
@@ -350,15 +358,18 @@ crate::impl_simple_system_table_provider!(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use datafusion::datasource::TableProvider;
-    use datafusion::logical_expr::{col, lit};
-    use kalamdb_commons::datatypes::KalamDataType;
-    use kalamdb_commons::schemas::{
-        ColumnDefinition, TableDefinition, TableOptions, TableType as KalamTableType,
+    use datafusion::{
+        datasource::TableProvider,
+        logical_expr::{col, lit},
     };
-    use kalamdb_commons::{NamespaceId, TableId, TableName};
+    use kalamdb_commons::{
+        datatypes::KalamDataType,
+        schemas::{ColumnDefinition, TableDefinition, TableOptions, TableType as KalamTableType},
+        NamespaceId, TableId, TableName,
+    };
     use kalamdb_store::test_utils::InMemoryBackend;
+
+    use super::*;
 
     fn create_test_provider() -> SchemasTableProvider {
         let backend: Arc<dyn StorageBackend> = Arc::new(InMemoryBackend::new());
@@ -514,9 +525,7 @@ mod tests {
         table_def.schema_version = 2;
         provider.update_table(&table_id, &table_def).unwrap();
 
-        let batch = provider
-            .build_versions_batch_for_namespace(table_id.namespace_id())
-            .unwrap();
+        let batch = provider.build_versions_batch_for_namespace(table_id.namespace_id()).unwrap();
 
         assert_eq!(batch.num_rows(), 2);
 

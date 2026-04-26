@@ -1,8 +1,8 @@
 //! Column definition for table schemas
 
-use crate::models::datatypes::KalamDataType;
-use crate::models::schemas::column_default::ColumnDefault;
 use serde::{Deserialize, Serialize};
+
+use crate::models::{datatypes::KalamDataType, schemas::column_default::ColumnDefault};
 
 /// Complete definition of a table column.
 /// Fields ordered for optimal memory alignment (8-byte types first).
@@ -157,8 +157,9 @@ impl ColumnDefinition {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::json;
+
+    use super::*;
 
     #[test]
     fn test_simple_column() {

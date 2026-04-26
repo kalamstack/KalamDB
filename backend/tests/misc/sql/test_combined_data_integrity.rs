@@ -16,11 +16,11 @@
 //! - Query and verify ALL rows are returned correctly
 //! - Test various SQL operations (COUNT, SUM, AVG, WHERE, ORDER BY, etc.)
 
+use std::{collections::HashMap, path::PathBuf};
+
+use kalam_client::{models::ResponseStatus, parse_i64};
+
 use super::test_support::{fixtures, flush_helpers, query_helpers, TestServer};
-use kalam_client::models::ResponseStatus;
-use kalam_client::parse_i64;
-use std::collections::HashMap;
-use std::path::PathBuf;
 
 // ============================================================================
 // Test 1: Basic Combined Query - Count and Simple Select
@@ -457,7 +457,8 @@ async fn test_03_combined_data_filtering() {
     let compound_response = server
         .execute_sql_as_user(
             &format!(
-                "SELECT product_id, name, price FROM {}.{} WHERE category = 'books' AND price < 35.0 ORDER BY product_id",
+                "SELECT product_id, name, price FROM {}.{} WHERE category = 'books' AND price < \
+                 35.0 ORDER BY product_id",
                 namespace, table_name
             ),
             user_id,

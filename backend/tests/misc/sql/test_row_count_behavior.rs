@@ -5,8 +5,9 @@
 //! - DELETE returns count of rows that were soft-deleted
 //! - Row counts are accurate and match expectations
 
-use super::test_support::{consolidated_helpers, fixtures, TestServer};
 use kalam_client::models::{QueryResponse, ResponseStatus};
+
+use super::test_support::{consolidated_helpers, fixtures, TestServer};
 
 fn assert_row_count(response: &QueryResponse, expected: usize, verbs: &[&str]) {
     assert_eq!(
@@ -49,8 +50,7 @@ async fn test_update_returns_correct_row_count() {
     server
         .execute_sql_as_user(
             &format!(
-                "CREATE TABLE {}.users (\
-                id TEXT PRIMARY KEY,
+                "CREATE TABLE {}.users (id TEXT PRIMARY KEY,
                 name TEXT,
                 email TEXT
             ) WITH (
@@ -67,7 +67,8 @@ async fn test_update_returns_correct_row_count() {
     server
         .execute_sql_as_user(
             &format!(
-                "INSERT INTO {}.users (id, name, email) VALUES ('user1', 'Alice', 'alice@example.com')",
+                "INSERT INTO {}.users (id, name, email) VALUES ('user1', 'Alice', \
+                 'alice@example.com')",
                 ns
             ),
             "user1",
@@ -117,8 +118,7 @@ async fn test_update_same_values_returns_zero() {
     server
         .execute_sql_as_user(
             &format!(
-                "CREATE TABLE {}.users (\
-                id TEXT PRIMARY KEY,
+                "CREATE TABLE {}.users (id TEXT PRIMARY KEY,
                 name TEXT
             ) WITH (
                 TYPE = 'USER',
@@ -161,8 +161,7 @@ async fn test_delete_returns_correct_row_count() {
     server
         .execute_sql_as_user(
             &format!(
-                "CREATE TABLE {}.tasks (\
-                id TEXT PRIMARY KEY,
+                "CREATE TABLE {}.tasks (id TEXT PRIMARY KEY,
                 title TEXT
             ) WITH (
                 TYPE = 'USER',
@@ -221,8 +220,7 @@ async fn test_delete_already_deleted_returns_zero() {
     server
         .execute_sql_as_user(
             &format!(
-                "CREATE TABLE {}.tasks (\
-                id TEXT PRIMARY KEY,
+                "CREATE TABLE {}.tasks (id TEXT PRIMARY KEY,
                 title TEXT
             ) WITH (
                 TYPE = 'USER',
@@ -313,8 +311,7 @@ async fn test_delete_multiple_rows_count() {
     server
         .execute_sql_as_user(
             &format!(
-                "CREATE TABLE {}.tasks (\
-                id TEXT PRIMARY KEY,
+                "CREATE TABLE {}.tasks (id TEXT PRIMARY KEY,
                 priority INT
             ) WITH (
                 TYPE = 'USER',

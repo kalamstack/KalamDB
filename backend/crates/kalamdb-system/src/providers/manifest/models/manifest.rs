@@ -11,14 +11,16 @@
 //! `ColumnStats.min/max` use `StoredScalarValue` for typed scalar stats and
 //! proper JSON output for manifest.json files.
 
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use kalamdb_commons::{
+    ids::SeqId,
+    models::{rows::StoredScalarValue, TableId},
+    UserId,
+};
+use serde::{Deserialize, Serialize};
+
 use super::FileSubfolderState;
-use kalamdb_commons::ids::SeqId;
-use kalamdb_commons::models::rows::StoredScalarValue;
-use kalamdb_commons::models::TableId;
-use kalamdb_commons::UserId;
 
 /// Synchronization state of a cached manifest entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -549,7 +551,7 @@ pub struct Manifest {
     /// This is embedded in manifest.json so index artifacts can be managed with
     /// the same atomic flush lifecycle used for segment metadata.
     #[serde(default)]
-    //TODO: Dont include in json if empty
+    // TODO: Dont include in json if empty
     pub vector_indexes: HashMap<String, VectorIndexMetadata>,
 }
 
@@ -685,8 +687,9 @@ impl Manifest {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kalamdb_commons::{NamespaceId, TableName};
+
+    use super::*;
 
     #[test]
     fn test_manifest_cache_entry_json_roundtrip() {

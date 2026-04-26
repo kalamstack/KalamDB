@@ -25,17 +25,13 @@ mod trait_def;
 mod user_data;
 
 // Re-export serialization helpers for convenience
-pub use serde_helpers::{decode, encode};
-
-pub use trait_def::{ApplyResult, KalamStateMachine, StateMachineSnapshot};
-
 // Unified Meta state machine
 pub use meta::MetaStateMachine;
-
-// Data state machines
-pub use shared_data::SharedDataStateMachine;
-pub use user_data::UserDataStateMachine;
-
 // Watermark coordination
 pub use meta_coordinator::{get_coordinator, init_coordinator, MetadataCoordinator};
 pub use pending_buffer::{PendingBuffer, PendingCommand};
+pub use serde_helpers::{decode, encode};
+// Data state machines
+pub use shared_data::SharedDataStateMachine;
+pub use trait_def::{ApplyResult, KalamStateMachine, StateMachineSnapshot};
+pub use user_data::UserDataStateMachine;

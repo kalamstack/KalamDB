@@ -3,19 +3,21 @@
 //! This module provides a DataFusion TableProvider implementation for the system.topics table.
 //! Uses `IndexedEntityStore` for automatic secondary index management.
 
-use crate::error::{SystemError, SystemResultExt};
-use crate::providers::base::{system_rows_to_batch, IndexedProviderDefinition};
-use crate::system_row_mapper::{model_to_system_row, system_row_to_model};
-use datafusion::arrow::array::RecordBatch;
-use datafusion::arrow::datatypes::SchemaRef;
-use kalamdb_commons::models::rows::SystemTableRow;
-use kalamdb_commons::models::TopicId;
-use kalamdb_commons::SystemTable;
-use kalamdb_store::entity_store::EntityStore;
-use kalamdb_store::{IndexedEntityStore, StorageBackend};
 use std::sync::{Arc, OnceLock};
 
+use datafusion::arrow::{array::RecordBatch, datatypes::SchemaRef};
+use kalamdb_commons::{
+    models::{rows::SystemTableRow, TopicId},
+    SystemTable,
+};
+use kalamdb_store::{entity_store::EntityStore, IndexedEntityStore, StorageBackend};
+
 use super::models::Topic;
+use crate::{
+    error::{SystemError, SystemResultExt},
+    providers::base::{system_rows_to_batch, IndexedProviderDefinition},
+    system_row_mapper::{model_to_system_row, system_row_to_model},
+};
 
 /// Type alias for the indexed topics store
 pub type TopicsStore = IndexedEntityStore<TopicId, SystemTableRow>;
@@ -180,8 +182,9 @@ crate::impl_indexed_system_table_provider!(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kalamdb_store::test_utils::InMemoryBackend;
+
+    use super::*;
 
     #[test]
     fn test_topics_provider_creation() {

@@ -12,19 +12,19 @@
 //! - Remote-enabled system users MUST have a password set
 //! - Localhost connections can skip password for internal users
 
-use super::test_support::{auth_helper, TestServer};
+use std::{net::SocketAddr, sync::Arc};
+
 use actix_web::{test, web, App};
 use kalamdb_auth::{CoreUsersRepo, UserRepository};
 use kalamdb_commons::{AuthType, Role, StorageId, UserId};
-use kalamdb_system::providers::storages::models::StorageMode;
-use kalamdb_system::User;
-use std::net::SocketAddr;
-use std::sync::Arc;
+use kalamdb_system::{providers::storages::models::StorageMode, User};
+
+use super::test_support::{auth_helper, TestServer};
 
 /// Helper function to create a system user with specific settings
 async fn create_system_user(
     server: &TestServer,
-    username: &str, //TODO: Use UserName type
+    username: &str, // TODO: Use UserName type
     password_hash: String,
     _allow_remote: bool,
 ) -> User {

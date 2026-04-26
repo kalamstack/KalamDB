@@ -24,7 +24,8 @@ pub(crate) fn validate_sql_identifier(name: &str, context: &str) -> Result<(), J
     for c in name.chars() {
         if !c.is_ascii_alphanumeric() && c != '_' && c != '.' {
             return Err(JsValue::from_str(&format!(
-                "{} contains invalid character '{}'. Only letters, numbers, underscores, and dots allowed",
+                "{} contains invalid character '{}'. Only letters, numbers, underscores, and dots \
+                 allowed",
                 context, c
             )));
         }

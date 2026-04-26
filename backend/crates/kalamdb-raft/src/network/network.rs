@@ -2,29 +2,34 @@
 //!
 //! Provides the network transport for Raft RPCs using gRPC (tonic).
 
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
+};
 
-use openraft::error::{
-    InstallSnapshotError, NetworkError, RPCError, RaftError, RemoteError, Unreachable,
-};
-use openraft::network::{
-    RPCOption, RaftNetwork as OpenRaftNetwork, RaftNetworkFactory as OpenRaftNetworkFactory,
-};
-use openraft::raft::{
-    AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest, InstallSnapshotResponse,
-    VoteRequest, VoteResponse,
+use kalamdb_commons::models::NodeId;
+use openraft::{
+    error::{InstallSnapshotError, NetworkError, RPCError, RaftError, RemoteError, Unreachable},
+    network::{
+        RPCOption, RaftNetwork as OpenRaftNetwork, RaftNetworkFactory as OpenRaftNetworkFactory,
+    },
+    raft::{
+        AppendEntriesRequest, AppendEntriesResponse, InstallSnapshotRequest,
+        InstallSnapshotResponse, VoteRequest, VoteResponse,
+    },
 };
 use parking_lot::RwLock;
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Identity};
 
-use kalamdb_commons::models::NodeId;
-
-use crate::manager::{PeerNode, RpcTlsConfig};
-use crate::storage::{KalamNode, KalamTypeConfig};
-use crate::GroupId;
+use crate::{
+    manager::{PeerNode, RpcTlsConfig},
+    storage::{KalamNode, KalamTypeConfig},
+    GroupId,
+};
 
 /// Simple connection error wrapper for openraft compatibility
 #[derive(Debug)]
@@ -131,7 +136,8 @@ impl ConnectionTracker {
         if now.duration_since(entry.last_log) >= retry_interval {
             entry.last_log = now;
             log::warn!(
-                "Raft node {} in group {} left the cluster - trying to reconnect #{} (interval={}ms): {}",
+                "Raft node {} in group {} left the cluster - trying to reconnect #{} \
+                 (interval={}ms): {}",
                 target,
                 self.group_id,
                 entry.retry_count,
@@ -639,8 +645,8 @@ impl OpenRaftNetworkFactory<KalamTypeConfig> for RaftNetworkFactory {
         } else {
             let ch = self.build_channel(target_node_id, node).unwrap_or_else(|e| {
                 log::error!(
-                    "[group {}] Cannot build gRPC channel to node {}: {}. \
-                        Check network configuration and peer addresses.",
+                    "[group {}] Cannot build gRPC channel to node {}: {}. Check network \
+                     configuration and peer addresses.",
                     self.group_id,
                     target_node_id,
                     e
@@ -656,8 +662,8 @@ impl OpenRaftNetworkFactory<KalamTypeConfig> for RaftNetworkFactory {
 
         let auth_identity = self.auth_identity.read().clone().unwrap_or_else(|| {
             log::error!(
-                "[group {}] RPC auth identity is not configured. \
-                Ensure configure_rpc_auth_identity() is called before the Raft node starts.",
+                "[group {}] RPC auth identity is not configured. Ensure \
+                 configure_rpc_auth_identity() is called before the Raft node starts.",
                 self.group_id
             );
             panic!("RPC auth identity is not configured for group {}", self.group_id)

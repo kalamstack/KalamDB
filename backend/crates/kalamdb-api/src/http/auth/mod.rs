@@ -19,16 +19,14 @@ mod me;
 mod refresh;
 mod setup;
 
+use actix_web::{HttpRequest, HttpResponse};
+use kalamdb_auth::{extract_auth_token, extract_refresh_token, AuthError};
 pub(crate) use login::login_handler;
 pub(crate) use logout::logout_handler;
 pub(crate) use me::me_handler;
+use models::AuthErrorResponse;
 pub(crate) use refresh::refresh_handler;
 pub(crate) use setup::{server_setup_handler, setup_status_handler};
-
-use actix_web::HttpRequest;
-use actix_web::HttpResponse;
-use kalamdb_auth::{extract_auth_token, extract_refresh_token, AuthError};
-use models::AuthErrorResponse;
 
 /// Map authentication errors to HTTP responses
 ///
@@ -141,10 +139,11 @@ pub(crate) fn extract_refresh_or_bearer_token(req: &HttpRequest) -> Result<Strin
 
 #[cfg(test)]
 mod tests {
-    use super::map_auth_error_to_response;
     use actix_web::{body::to_bytes, http::StatusCode, HttpResponse};
     use kalamdb_auth::AuthError;
     use serde_json::Value;
+
+    use super::map_auth_error_to_response;
 
     async fn response_json(response: HttpResponse) -> Value {
         let body = to_bytes(response.into_body())

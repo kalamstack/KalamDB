@@ -2,12 +2,13 @@
 //!
 //! POST /v1/api/topics/ack - Acknowledge offset for consumer group
 
+use std::sync::Arc;
+
 use actix_web::{post, web, HttpResponse, Responder};
 use kalamdb_auth::AuthSessionExtractor;
 use kalamdb_commons::Role;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_session::AuthSession;
-use std::sync::Arc;
 
 use super::models::{AckRequest, AckResponse, TopicErrorResponse};
 

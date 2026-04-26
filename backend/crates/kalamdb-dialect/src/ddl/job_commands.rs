@@ -20,14 +20,14 @@
 //! ## Examples
 //!
 //! ```rust,no_run
-//! use kalamdb_dialect::ddl::job_commands::{JobCommand, parse_job_command};
+//! use kalamdb_dialect::ddl::job_commands::{parse_job_command, JobCommand};
 //!
 //! // Parse KILL JOB command
 //! let cmd = parse_job_command("KILL JOB 'flush-001'").unwrap();
 //! match cmd {
 //!     JobCommand::Kill { job_id } => {
 //!         println!("Cancelling job: {}", job_id);
-//!     }
+//!     },
 //! }
 //! ```
 
@@ -39,7 +39,7 @@ pub enum JobCommand {
     /// Kill (cancel) a running job
     Kill {
         /// Job ID to cancel
-        job_id: String, //TODO: use JobId type?
+        job_id: String, // TODO: use JobId type?
     },
 }
 
@@ -124,7 +124,7 @@ mod tests {
         assert_eq!(
             cmd,
             JobCommand::Kill {
-                job_id: "flush-001".to_string()
+                job_id: "flush-001".to_string(),
             }
         );
     }
@@ -135,7 +135,7 @@ mod tests {
         assert_eq!(
             cmd,
             JobCommand::Kill {
-                job_id: "flush-001".to_string()
+                job_id: "flush-001".to_string(),
             }
         );
     }
@@ -146,7 +146,7 @@ mod tests {
         assert_eq!(
             cmd,
             JobCommand::Kill {
-                job_id: "flush-001".to_string()
+                job_id: "flush-001".to_string(),
             }
         );
     }
@@ -157,7 +157,7 @@ mod tests {
         assert_eq!(
             cmd,
             JobCommand::Kill {
-                job_id: "flush-001".to_string()
+                job_id: "flush-001".to_string(),
             }
         );
     }
@@ -168,7 +168,7 @@ mod tests {
         assert_eq!(
             cmd,
             JobCommand::Kill {
-                job_id: "flush-001".to_string()
+                job_id: "flush-001".to_string(),
             }
         );
     }
@@ -179,7 +179,7 @@ mod tests {
         assert_eq!(
             cmd,
             JobCommand::Kill {
-                job_id: "flush-001".to_string()
+                job_id: "flush-001".to_string(),
             }
         );
     }

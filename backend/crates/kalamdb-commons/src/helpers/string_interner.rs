@@ -21,11 +21,12 @@
 //! let updated_col = SYSTEM_COLUMNS.updated;
 //! ```
 
-use crate::constants::SystemColumnNames;
-use dashmap::mapref::entry::Entry;
-use dashmap::DashMap;
-use once_cell::sync::Lazy;
 use std::sync::Arc;
+
+use dashmap::{mapref::entry::Entry, DashMap};
+use once_cell::sync::Lazy;
+
+use crate::constants::SystemColumnNames;
 
 /// Global string interner
 static INTERNER: Lazy<DashMap<Arc<str>, ()>> = Lazy::new(DashMap::new);
@@ -133,8 +134,9 @@ pub fn clear() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::thread;
+
+    use super::*;
 
     #[test]
     fn test_intern_same_string_returns_same_arc() {

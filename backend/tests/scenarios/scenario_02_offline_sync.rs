@@ -14,16 +14,21 @@
 //! - [x] No duplicates across batches
 //! - [x] Live changes during snapshot are not lost
 
-use super::helpers::*;
+use std::{
+    collections::HashSet,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use futures_util::StreamExt;
 use kalam_client::models::ChangeEvent;
 use kalamdb_commons::Role;
-use std::collections::HashSet;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
 use tokio::time::sleep;
+
+use super::helpers::*;
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -82,9 +87,16 @@ async fn test_scenario_02_offline_sync_parallel() -> anyhow::Result<()> {
                 _ => "message",
             };
             let sql = format!(
-                        "INSERT INTO {}.items (id, kind, title, body, priority, device_id) VALUES ({}, '{}', 'Item {}', 'Body {}', {}, 'device_{}')",
-                        ns, item_id, kind, i, i, i % 5, user_idx
-                    );
+                "INSERT INTO {}.items (id, kind, title, body, priority, device_id) VALUES ({}, \
+                 '{}', 'Item {}', 'Body {}', {}, 'device_{}')",
+                ns,
+                item_id,
+                kind,
+                i,
+                i,
+                i % 5,
+                user_idx
+            );
             let resp = client.execute_query(&sql, None, None, None).await?;
             if !resp.success() {
                 // Log but continue - some inserts might fail due to concurrent access

@@ -9,8 +9,9 @@
 //! Note: Default values for new columns are only applied to newly inserted rows,
 //! not retroactively to existing rows (standard SQL behavior).
 
-use crate::common::*;
 use std::time::{Duration, Instant};
+
+use crate::common::*;
 
 /// Test ALTER TABLE ADD/DROP COLUMN with actual data verification
 ///

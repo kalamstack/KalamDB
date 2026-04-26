@@ -4,14 +4,34 @@
 //! system (schema registry, SQL executor). Implementations are provided by
 //! kalamdb-core during wiring.
 
-use crate::error::LiveError;
+use std::sync::Arc;
+
 use arrow::datatypes::Schema as ArrowSchema;
 use async_trait::async_trait;
 use datafusion::arrow::record_batch::RecordBatch;
-use kalamdb_commons::models::{ReadContext, TableId, UserId};
-use kalamdb_commons::schemas::TableDefinition;
-use kalamdb_commons::Role;
-use std::sync::Arc;
+use kalamdb_commons::{
+    models::{ReadContext, TableId, UserId},
+    schemas::TableDefinition,
+    Role, TableType,
+};
+
+use crate::error::LiveError;
+
+/// Optional cluster apply barrier used before live snapshots on follower nodes.
+///
+/// Implementations should wait until the local replica has applied every log
+/// entry it already knows for the target table's Raft group. This keeps the
+/// initial snapshot boundary aligned with local storage before notifications are
+/// buffered and replayed.
+#[async_trait]
+pub trait LiveApplyBarrier: Send + Sync {
+    async fn wait_for_table_apply_barrier(
+        &self,
+        table_id: &TableId,
+        table_type: TableType,
+        user_id: &UserId,
+    ) -> Result<(), LiveError>;
+}
 
 /// Schema operations needed by the live subsystem.
 ///

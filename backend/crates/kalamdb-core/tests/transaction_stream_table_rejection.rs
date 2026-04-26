@@ -2,9 +2,10 @@ mod support;
 
 use std::sync::Arc;
 
-use kalamdb_commons::models::pg_operations::InsertRequest;
-use kalamdb_commons::models::{TableId, TableName};
-use kalamdb_commons::TableType;
+use kalamdb_commons::{
+    models::{pg_operations::InsertRequest, TableId, TableName},
+    TableType,
+};
 use kalamdb_core::operations::service::OperationService;
 use kalamdb_pg::OperationExecutor;
 use support::{create_cluster_app_context, row, unique_namespace};

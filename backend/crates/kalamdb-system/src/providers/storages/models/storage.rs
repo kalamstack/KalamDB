@@ -1,11 +1,11 @@
 //! Storage configuration entity for system.storages table.
 
-use super::{StorageLocationConfig, StorageLocationConfigError, StorageType};
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::models::ids::StorageId;
+use kalamdb_commons::{datatypes::KalamDataType, models::ids::StorageId};
 use kalamdb_macros::table;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+use super::{StorageLocationConfig, StorageLocationConfigError, StorageType};
 
 /// Storage configuration in system_storages table
 #[table(
@@ -72,7 +72,8 @@ pub struct Storage {
         nullable = true,
         primary_key = false,
         default = "None",
-        comment = "Storage credentials JSON (WARNING: stored as plaintext - use environment variables for sensitive credentials)"
+        comment = "Storage credentials JSON (WARNING: stored as plaintext - use environment \
+                   variables for sensitive credentials)"
     )]
     pub credentials: Option<Value>,
     /// Storage backend parameters encoded as JSON.
@@ -137,10 +138,7 @@ pub struct Storage {
 impl Storage {
     /// Decode `config_json` into a type-safe `StorageLocationConfig`.
     pub fn location_config(&self) -> Result<StorageLocationConfig, StorageLocationConfigError> {
-        let raw = self
-            .config_json
-            .as_ref()
-            .ok_or(StorageLocationConfigError::MissingConfigJson)?;
+        let raw = self.config_json.as_ref().ok_or(StorageLocationConfigError::MissingConfigJson)?;
 
         serde_json::from_value::<StorageLocationConfig>(raw.clone())
             .map_err(|e| StorageLocationConfigError::InvalidJson(e.to_string()))

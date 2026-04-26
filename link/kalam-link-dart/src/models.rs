@@ -3,11 +3,13 @@
 //! All types here are simple structs/enums with only primitive fields
 //! and `Vec`/`Option` wrappers — fully compatible with flutter_rust_bridge codegen.
 
-use kalam_client::models::{
-    BatchStatus, ChangeEvent, ErrorDetail, LoginResponse, LoginUserInfo, QueryResponse,
-    QueryResult, ResponseStatus, SchemaField,
+use kalam_client::{
+    models::{
+        BatchStatus, ChangeEvent, ErrorDetail, LoginResponse, LoginUserInfo, QueryResponse,
+        QueryResult, ResponseStatus, SchemaField,
+    },
+    LiveRowsConfig, LiveRowsEvent, Role,
 };
-use kalam_client::{LiveRowsConfig, LiveRowsEvent, Role};
 
 // ---------------------------------------------------------------------------
 // Connection lifecycle events (mirrors kalam_client::event_handlers)
@@ -33,7 +35,8 @@ pub struct DartConnectionError {
     pub recoverable: bool,
 }
 
-/// A connection lifecycle event pulled via [`dart_next_connection_event`](crate::api::dart_next_connection_event).
+/// A connection lifecycle event pulled via
+/// [`dart_next_connection_event`](crate::api::dart_next_connection_event).
 ///
 /// Follows the same async-pull model used for subscription events.
 /// On the Dart side, poll in a loop (or wrap in a `Stream`):
@@ -478,7 +481,6 @@ impl DartSubscriptionConfig {
                 batch_size: self.batch_size.map(|v| v as usize),
                 last_rows: self.last_rows.map(|v| v as u32),
                 from: self.from.map(kalam_client::SeqId::new),
-                snapshot_end_seq: None,
             }),
             ws_url: None,
         }

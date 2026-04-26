@@ -1,6 +1,7 @@
 //! Error types for the unified applier
 
 use std::fmt;
+
 use thiserror::Error;
 
 /// Errors that can occur during command application

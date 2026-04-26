@@ -1,11 +1,16 @@
 //! Typed DDL handler for SHOW NAMESPACES statements
 
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
-use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
-use kalamdb_sql::ddl::ShowNamespacesStatement;
 use std::sync::Arc;
+
+use kalamdb_core::{
+    app_context::AppContext,
+    error::KalamDbError,
+    sql::{
+        context::{ExecutionContext, ExecutionResult, ScalarValue},
+        executor::handlers::TypedStatementHandler,
+    },
+};
+use kalamdb_sql::ddl::ShowNamespacesStatement;
 
 /// Typed handler for SHOW NAMESPACES statements
 pub struct ShowNamespacesHandler {
@@ -62,11 +67,12 @@ impl TypedStatementHandler<ShowNamespacesStatement> for ShowNamespacesHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use kalamdb_commons::models::UserId;
-    use kalamdb_commons::Role;
-    use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
     use std::sync::Arc;
+
+    use kalamdb_commons::{models::UserId, Role};
+    use kalamdb_core::test_helpers::{create_test_session_simple, test_app_context_simple};
+
+    use super::*;
 
     fn init_app_context() -> Arc<AppContext> {
         test_app_context_simple()

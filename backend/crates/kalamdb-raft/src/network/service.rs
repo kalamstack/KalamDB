@@ -6,13 +6,14 @@
 //! - Raft consensus RPCs (vote, append_entries, install_snapshot)
 //! - Client proposal forwarding (forward proposals from followers to leader)
 
+use std::{io::ErrorKind, time::Duration};
+
 use kalamdb_pg::{KalamPgService, PgServiceServer};
-use std::io::ErrorKind;
-use std::time::Duration;
-use tokio::sync::oneshot;
-use tokio::time::sleep;
-use tonic::transport::{Certificate, Identity, ServerTlsConfig};
-use tonic::{Request, Response, Status};
+use tokio::{sync::oneshot, time::sleep};
+use tonic::{
+    transport::{Certificate, Identity, ServerTlsConfig},
+    Request, Response, Status,
+};
 use tonic_prost::ProstCodec;
 
 /// Raft RPC request message
@@ -83,8 +84,9 @@ pub struct ClientProposalResponse {
 
 /// Generated gRPC client module
 pub mod raft_client {
-    use super::*;
     use tonic::codegen::*;
+
+    use super::*;
 
     /// Raft RPC client
     #[derive(Debug, Clone)]
@@ -144,8 +146,9 @@ pub mod raft_client {
 
 /// Generated gRPC server module
 pub mod raft_server {
-    use super::*;
     use tonic::codegen::*;
+
+    use super::*;
 
     /// Raft service trait
     #[async_trait::async_trait]
@@ -260,8 +263,9 @@ pub mod raft_server {
     }
 }
 
-use crate::manager::RaftManager;
 use std::sync::Arc;
+
+use crate::manager::RaftManager;
 
 /// Raft gRPC service implementation
 #[derive(Clone)]

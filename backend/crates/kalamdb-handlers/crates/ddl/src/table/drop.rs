@@ -3,20 +3,29 @@
 //! This module provides both the DROP TABLE handler and reusable cleanup functions
 //! for table deletion operations (used by both DDL handler and CleanupExecutor).
 
-use crate::helpers::audit;
-use crate::helpers::guards::{block_anonymous_write, block_system_namespace_modification};
-use kalamdb_commons::models::TableId;
-use kalamdb_commons::schemas::TableType;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::operations::table_cleanup::cleanup_table_data_internal;
-use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
-use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
-use kalamdb_jobs::executors::cleanup::{CleanupOperation, CleanupParams, StorageCleanupDetails};
-use kalamdb_jobs::AppContextJobsExt;
+use std::sync::Arc;
+
+use kalamdb_commons::{models::TableId, schemas::TableType};
+use kalamdb_core::{
+    app_context::AppContext,
+    error::KalamDbError,
+    operations::table_cleanup::cleanup_table_data_internal,
+    sql::{
+        context::{ExecutionContext, ExecutionResult, ScalarValue},
+        executor::handlers::TypedStatementHandler,
+    },
+};
+use kalamdb_jobs::{
+    executors::cleanup::{CleanupOperation, CleanupParams, StorageCleanupDetails},
+    AppContextJobsExt,
+};
 use kalamdb_sql::ddl::DropTableStatement;
 use kalamdb_system::JobType;
-use std::sync::Arc;
+
+use crate::helpers::{
+    audit,
+    guards::{block_anonymous_write, block_system_namespace_modification},
+};
 
 /// Typed handler for DROP TABLE statements
 pub struct DropTableHandler {
@@ -155,7 +164,8 @@ impl TypedStatementHandler<DropTableStatement> for DropTableHandler {
         let is_owner = false;
         if !kalamdb_session::can_delete_table(context.user_role(), actual_type, is_owner) {
             log::error!(
-                "❌ DROP TABLE {}.{}: Insufficient privileges (user: {}, role: {:?}, table_type: {:?})",
+                "❌ DROP TABLE {}.{}: Insufficient privileges (user: {}, role: {:?}, table_type: \
+                 {:?})",
                 statement.namespace_id.as_str(),
                 statement.table_name.as_str(),
                 context.user_id().as_str(),
@@ -352,21 +362,26 @@ impl TypedStatementHandler<DropTableStatement> for DropTableHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::{cleanup_table_data_internal, DropTableHandler};
-    use crate::table::create::CreateTableHandler;
+    use std::{collections::HashMap, sync::Arc};
+
     use arrow::datatypes::{DataType, Field, Schema};
-    use kalamdb_commons::models::{NamespaceId, TableName, UserId};
-    use kalamdb_commons::schemas::TableType;
-    use kalamdb_commons::Role;
-    use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult};
-    use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
-    use kalamdb_core::test_helpers::{
-        create_test_session_simple, test_app_context, test_app_context_simple,
+    use kalamdb_commons::{
+        models::{NamespaceId, TableName, UserId},
+        schemas::TableType,
+        Role,
+    };
+    use kalamdb_core::{
+        sql::{
+            context::{ExecutionContext, ExecutionResult},
+            executor::handlers::TypedStatementHandler,
+        },
+        test_helpers::{create_test_session_simple, test_app_context, test_app_context_simple},
     };
     use kalamdb_sql::ddl::{CreateTableStatement, DropTableStatement, TableKind};
     use kalamdb_store::EntityStore;
-    use std::collections::HashMap;
-    use std::sync::Arc;
+
+    use super::{cleanup_table_data_internal, DropTableHandler};
+    use crate::table::create::CreateTableHandler;
 
     fn create_test_context(role: Role) -> ExecutionContext {
         ExecutionContext::new(UserId::new("test_user"), role, create_test_session_simple())

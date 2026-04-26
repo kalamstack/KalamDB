@@ -1,31 +1,39 @@
+use std::sync::Arc;
+
 use chrono::Utc;
-use datafusion::arrow::array::{Array, Int32Array, Int64Array};
-use datafusion::arrow::record_batch::RecordBatch;
-use kalamdb_commons::ids::SeqId;
-use kalamdb_commons::models::{StorageId, TableId};
-use kalamdb_commons::schemas::TableType;
-use kalamdb_commons::{NodeId, Role, UserId};
-use kalamdb_configs::ServerConfig;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult};
-use kalamdb_core::sql::executor::handler_registry::HandlerRegistry;
-use kalamdb_core::sql::executor::SqlExecutor;
-use kalamdb_core::vector::flush_shared_scope_vectors;
-use kalamdb_jobs::executors::{
-    BackupExecutor, CleanupExecutor, CompactExecutor, FlushExecutor, JobRegistry, RestoreExecutor,
-    RetentionExecutor, StreamEvictionExecutor, UserCleanupExecutor, VectorIndexExecutor,
+use datafusion::arrow::{
+    array::{Array, Int32Array, Int64Array},
+    record_batch::RecordBatch,
 };
-use kalamdb_jobs::JobsManager;
-use kalamdb_store::test_utils::TestDb;
-use kalamdb_store::EntityStore;
-use kalamdb_store::Partition;
-use kalamdb_system::providers::storages::models::StorageType;
-use kalamdb_system::{Storage, VectorMetric};
+use kalamdb_commons::{
+    ids::SeqId,
+    models::{StorageId, TableId},
+    schemas::TableType,
+    NodeId, Role, UserId,
+};
+use kalamdb_configs::ServerConfig;
+use kalamdb_core::{
+    app_context::AppContext,
+    sql::{
+        context::{ExecutionContext, ExecutionResult},
+        executor::{handler_registry::HandlerRegistry, SqlExecutor},
+    },
+    vector::flush_shared_scope_vectors,
+};
+use kalamdb_jobs::{
+    executors::{
+        BackupExecutor, CleanupExecutor, CompactExecutor, FlushExecutor, JobRegistry,
+        RestoreExecutor, RetentionExecutor, StreamEvictionExecutor, UserCleanupExecutor,
+        VectorIndexExecutor,
+    },
+    JobsManager,
+};
+use kalamdb_store::{test_utils::TestDb, EntityStore, Partition};
+use kalamdb_system::{providers::storages::models::StorageType, Storage, VectorMetric};
 use kalamdb_vector::{
     new_indexed_shared_vector_hot_store, shared_vector_ops_partition_name,
     shared_vector_pk_index_partition_name, SharedVectorHotOpId, VectorHotOp, VectorHotOpType,
 };
-use std::sync::Arc;
 
 fn create_executor(app_context: Arc<AppContext>) -> SqlExecutor {
     let registry = Arc::new(HandlerRegistry::new());
@@ -186,14 +194,18 @@ async fn setup_vector_table(executor: &SqlExecutor, exec_ctx: &ExecutionContext)
     execute_sql(
         executor,
         exec_ctx,
-        "CREATE SHARED TABLE test_ns.documents (id INT PRIMARY KEY, title TEXT, embedding EMBEDDING(3), embedding_alt EMBEDDING(3))",
+        "CREATE SHARED TABLE test_ns.documents (id INT PRIMARY KEY, title TEXT, embedding \
+         EMBEDDING(3), embedding_alt EMBEDDING(3))",
     )
     .await;
 
     let inserts = [
-        "INSERT INTO test_ns.documents (id, title, embedding, embedding_alt) VALUES (1, 'Doc A', '[1.0,0.0,0.0]', '[0.0,1.0,0.0]')",
-        "INSERT INTO test_ns.documents (id, title, embedding, embedding_alt) VALUES (2, 'Doc B', '[0.9,0.1,0.0]', '[0.2,0.8,0.0]')",
-        "INSERT INTO test_ns.documents (id, title, embedding, embedding_alt) VALUES (3, 'Doc C', '[0.0,1.0,0.0]', '[1.0,0.0,0.0]')",
+        "INSERT INTO test_ns.documents (id, title, embedding, embedding_alt) VALUES (1, 'Doc A', \
+         '[1.0,0.0,0.0]', '[0.0,1.0,0.0]')",
+        "INSERT INTO test_ns.documents (id, title, embedding, embedding_alt) VALUES (2, 'Doc B', \
+         '[0.9,0.1,0.0]', '[0.2,0.8,0.0]')",
+        "INSERT INTO test_ns.documents (id, title, embedding, embedding_alt) VALUES (3, 'Doc C', \
+         '[0.0,1.0,0.0]', '[1.0,0.0,0.0]')",
     ];
 
     for sql in inserts {
@@ -213,7 +225,8 @@ async fn test_cosine_distance_order_by_syntax_on_table() {
     let result = execute_sql(
         &executor,
         &exec_ctx,
-        "SELECT id FROM test_ns.documents ORDER BY COSINE_DISTANCE(embedding, '[1.0,0.0,0.0]') LIMIT 2",
+        "SELECT id FROM test_ns.documents ORDER BY COSINE_DISTANCE(embedding, '[1.0,0.0,0.0]') \
+         LIMIT 2",
     )
     .await;
 
@@ -452,7 +465,8 @@ async fn test_multiple_vector_indexes_flush_and_selection() {
     let nearest_embedding = execute_sql(
         &executor,
         &exec_ctx,
-        "SELECT id FROM test_ns.documents ORDER BY COSINE_DISTANCE(embedding, '[1.0,0.0,0.0]') LIMIT 1",
+        "SELECT id FROM test_ns.documents ORDER BY COSINE_DISTANCE(embedding, '[1.0,0.0,0.0]') \
+         LIMIT 1",
     )
     .await;
     match nearest_embedding {
@@ -468,7 +482,8 @@ async fn test_multiple_vector_indexes_flush_and_selection() {
     let nearest_alt = execute_sql(
         &executor,
         &exec_ctx,
-        "SELECT id FROM test_ns.documents ORDER BY COSINE_DISTANCE(embedding_alt, '[1.0,0.0,0.0]') LIMIT 1",
+        "SELECT id FROM test_ns.documents ORDER BY COSINE_DISTANCE(embedding_alt, \
+         '[1.0,0.0,0.0]') LIMIT 1",
     )
     .await;
     match nearest_alt {
@@ -686,7 +701,8 @@ async fn test_cosine_distance_query_combines_hot_and_cold_rows_after_index_flush
     let result = execute_sql(
         &executor,
         &exec_ctx,
-        "SELECT id FROM test_ns.docs_overlay ORDER BY COSINE_DISTANCE(embedding, '[1.0,0.0,0.0]') LIMIT 3",
+        "SELECT id FROM test_ns.docs_overlay ORDER BY COSINE_DISTANCE(embedding, '[1.0,0.0,0.0]') \
+         LIMIT 3",
     )
     .await;
 
@@ -886,7 +902,8 @@ async fn test_cosine_distance_query_combines_hot_and_cold_rows() {
     let result = execute_sql(
         &executor,
         &exec_ctx,
-        "SELECT id FROM test_ns.docs_tiered ORDER BY COSINE_DISTANCE(embedding, '[1.0,0.0,0.0]') LIMIT 2",
+        "SELECT id FROM test_ns.docs_tiered ORDER BY COSINE_DISTANCE(embedding, '[1.0,0.0,0.0]') \
+         LIMIT 2",
     )
     .await;
 
@@ -913,7 +930,8 @@ async fn test_vector_delete_stages_hot_tombstone_and_flushes_cleanup() {
     execute_sql(
         &executor,
         &exec_ctx,
-        "CREATE SHARED TABLE test_ns.docs_delete_cleanup (id INT PRIMARY KEY, title TEXT, embedding EMBEDDING(3))",
+        "CREATE SHARED TABLE test_ns.docs_delete_cleanup (id INT PRIMARY KEY, title TEXT, \
+         embedding EMBEDDING(3))",
     )
     .await;
     execute_sql(
@@ -926,19 +944,22 @@ async fn test_vector_delete_stages_hot_tombstone_and_flushes_cleanup() {
     execute_sql(
         &executor,
         &exec_ctx,
-        "INSERT INTO test_ns.docs_delete_cleanup (id, title, embedding) VALUES (1, 'base', '[1.0,0.0,0.0]')",
+        "INSERT INTO test_ns.docs_delete_cleanup (id, title, embedding) VALUES (1, 'base', \
+         '[1.0,0.0,0.0]')",
     )
     .await;
     execute_sql(
         &executor,
         &exec_ctx,
-        "INSERT INTO test_ns.docs_delete_cleanup (id, title, embedding) VALUES (2, 'near', '[0.95,0.05,0.0]')",
+        "INSERT INTO test_ns.docs_delete_cleanup (id, title, embedding) VALUES (2, 'near', \
+         '[0.95,0.05,0.0]')",
     )
     .await;
     execute_sql(
         &executor,
         &exec_ctx,
-        "INSERT INTO test_ns.docs_delete_cleanup (id, title, embedding) VALUES (3, 'far', '[0.0,1.0,0.0]')",
+        "INSERT INTO test_ns.docs_delete_cleanup (id, title, embedding) VALUES (3, 'far', \
+         '[0.0,1.0,0.0]')",
     )
     .await;
 
@@ -992,7 +1013,8 @@ async fn test_vector_delete_stages_hot_tombstone_and_flushes_cleanup() {
     let hot_query = execute_sql(
         &executor,
         &exec_ctx,
-        "SELECT id FROM test_ns.docs_delete_cleanup ORDER BY COSINE_DISTANCE(embedding, '[1.0,0.0,0.0]') LIMIT 3",
+        "SELECT id FROM test_ns.docs_delete_cleanup ORDER BY COSINE_DISTANCE(embedding, \
+         '[1.0,0.0,0.0]') LIMIT 3",
     )
     .await;
     match hot_query {
@@ -1037,7 +1059,8 @@ async fn test_vector_delete_stages_hot_tombstone_and_flushes_cleanup() {
     let cold_query = execute_sql(
         &executor,
         &exec_ctx,
-        "SELECT id FROM test_ns.docs_delete_cleanup ORDER BY COSINE_DISTANCE(embedding, '[1.0,0.0,0.0]') LIMIT 3",
+        "SELECT id FROM test_ns.docs_delete_cleanup ORDER BY COSINE_DISTANCE(embedding, \
+         '[1.0,0.0,0.0]') LIMIT 3",
     )
     .await;
     match cold_query {
@@ -1063,7 +1086,8 @@ async fn test_multiple_vector_indexes_with_mixed_rows_and_null_embeddings() {
     execute_sql(
         &executor,
         &exec_ctx,
-        "CREATE SHARED TABLE test_ns.docs_mixed_vectors (id INT PRIMARY KEY, title TEXT, category TEXT, score DOUBLE, embedding EMBEDDING(3), embedding_alt EMBEDDING(3))",
+        "CREATE SHARED TABLE test_ns.docs_mixed_vectors (id INT PRIMARY KEY, title TEXT, category \
+         TEXT, score DOUBLE, embedding EMBEDDING(3), embedding_alt EMBEDDING(3))",
     )
     .await;
     execute_sql(
@@ -1080,10 +1104,14 @@ async fn test_multiple_vector_indexes_with_mixed_rows_and_null_embeddings() {
     .await;
 
     let rows = [
-        "INSERT INTO test_ns.docs_mixed_vectors (id, title, category, score, embedding, embedding_alt) VALUES (1, 'alpha', 'a', 10.5, '[1.0,0.0,0.0]', '[0.0,1.0,0.0]')",
-        "INSERT INTO test_ns.docs_mixed_vectors (id, title, category, score, embedding, embedding_alt) VALUES (2, 'beta', 'b', 9.0, NULL, '[0.02,0.98,0.0]')",
-        "INSERT INTO test_ns.docs_mixed_vectors (id, title, category, score, embedding, embedding_alt) VALUES (3, 'gamma', 'c', 8.5, '[0.8,0.2,0.0]', NULL)",
-        "INSERT INTO test_ns.docs_mixed_vectors (id, title, category, score, embedding, embedding_alt) VALUES (4, 'delta', 'd', 7.5, '[0.0,1.0,0.0]', '[1.0,0.0,0.0]')",
+        "INSERT INTO test_ns.docs_mixed_vectors (id, title, category, score, embedding, \
+         embedding_alt) VALUES (1, 'alpha', 'a', 10.5, '[1.0,0.0,0.0]', '[0.0,1.0,0.0]')",
+        "INSERT INTO test_ns.docs_mixed_vectors (id, title, category, score, embedding, \
+         embedding_alt) VALUES (2, 'beta', 'b', 9.0, NULL, '[0.02,0.98,0.0]')",
+        "INSERT INTO test_ns.docs_mixed_vectors (id, title, category, score, embedding, \
+         embedding_alt) VALUES (3, 'gamma', 'c', 8.5, '[0.8,0.2,0.0]', NULL)",
+        "INSERT INTO test_ns.docs_mixed_vectors (id, title, category, score, embedding, \
+         embedding_alt) VALUES (4, 'delta', 'd', 7.5, '[0.0,1.0,0.0]', '[1.0,0.0,0.0]')",
     ];
     for sql in rows {
         execute_sql(&executor, &exec_ctx, sql).await;
@@ -1129,7 +1157,8 @@ async fn test_multiple_vector_indexes_with_mixed_rows_and_null_embeddings() {
     let result_primary = execute_sql(
         &executor,
         &exec_ctx,
-        "SELECT id FROM test_ns.docs_mixed_vectors ORDER BY COSINE_DISTANCE(embedding, '[1.0,0.0,0.0]') LIMIT 3",
+        "SELECT id FROM test_ns.docs_mixed_vectors ORDER BY COSINE_DISTANCE(embedding, \
+         '[1.0,0.0,0.0]') LIMIT 3",
     )
     .await;
     match result_primary {
@@ -1147,7 +1176,8 @@ async fn test_multiple_vector_indexes_with_mixed_rows_and_null_embeddings() {
     let result_alt = execute_sql(
         &executor,
         &exec_ctx,
-        "SELECT id FROM test_ns.docs_mixed_vectors ORDER BY COSINE_DISTANCE(embedding_alt, '[0.0,1.0,0.0]') LIMIT 3",
+        "SELECT id FROM test_ns.docs_mixed_vectors ORDER BY COSINE_DISTANCE(embedding_alt, \
+         '[0.0,1.0,0.0]') LIMIT 3",
     )
     .await;
     match result_alt {

@@ -300,7 +300,8 @@ fn validate_advertised_address(
     if let Ok(addr) = trimmed.parse::<std::net::SocketAddr>() {
         if addr.ip().is_unspecified() && has_peers {
             return Err(format!(
-                "{} must not use an unspecified/wildcard address ({}) when peers are configured. Use a reachable hostname or IP instead",
+                "{} must not use an unspecified/wildcard address ({}) when peers are configured. \
+                 Use a reachable hostname or IP instead",
                 field_name, value
             ));
         }

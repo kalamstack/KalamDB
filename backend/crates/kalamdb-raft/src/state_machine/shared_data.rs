@@ -12,30 +12,34 @@
 //! to catch up before applying. This ensures data operations don't run before
 //! their dependent metadata (tables) is applied locally.
 
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
+
 use async_trait::async_trait;
+use kalamdb_commons::{
+    models::{OperationKind, TransactionId},
+    TableId, TableType,
+};
+use kalamdb_transactions::StagedMutation;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-
-use crate::applier::SharedDataApplier;
-use crate::{DataResponse, GroupId, RaftCommand, RaftError, SharedDataCommand};
-use kalamdb_commons::models::TransactionId;
-use kalamdb_commons::TableType;
-use kalamdb_transactions::StagedMutation;
 
 use super::{
-    decode as bincode_decode, encode as bincode_encode, ApplyResult, KalamStateMachine,
-    StateMachineSnapshot,
+    decode as bincode_decode, encode as bincode_encode, get_coordinator, ApplyResult,
+    KalamStateMachine, PendingBuffer, PendingCommand, StateMachineSnapshot,
 };
-use super::{get_coordinator, PendingBuffer, PendingCommand};
+use crate::{
+    applier::SharedDataApplier, commit_seq_from_log_position, DataResponse, GroupId, RaftCommand,
+    RaftError, SharedDataCommand,
+};
 
 /// Row operation tracking (for metrics)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SharedOperation {
-    table_namespace: String,
-    table_name: String,
-    operation: String, // "insert", "update", "delete"
+    table_id: TableId,
+    operation: OperationKind,
     row_count: u64,
 }
 
@@ -88,6 +92,8 @@ pub struct SharedDataStateMachine {
     last_applied_index: AtomicU64,
     /// Last applied log term
     last_applied_term: AtomicU64,
+    /// Notifies waiters when the applied index advances.
+    last_applied_tx: tokio::sync::watch::Sender<u64>,
     /// Approximate data size in bytes
     approximate_size: AtomicU64,
     /// Total operations processed
@@ -114,10 +120,12 @@ impl std::fmt::Debug for SharedDataStateMachine {
 impl SharedDataStateMachine {
     /// Create a new SharedDataStateMachine
     pub fn new(shard: u32) -> Self {
+        let (last_applied_tx, _) = tokio::sync::watch::channel(0);
         Self {
             shard,
             last_applied_index: AtomicU64::new(0),
             last_applied_term: AtomicU64::new(0),
+            last_applied_tx,
             approximate_size: AtomicU64::new(0),
             total_operations: AtomicU64::new(0),
             recent_operations: RwLock::new(Vec::new()),
@@ -128,10 +136,12 @@ impl SharedDataStateMachine {
 
     /// Create a new SharedDataStateMachine with an applier
     pub fn with_applier(shard: u32, applier: Arc<dyn SharedDataApplier>) -> Self {
+        let (last_applied_tx, _) = tokio::sync::watch::channel(0);
         Self {
             shard,
             last_applied_index: AtomicU64::new(0),
             last_applied_term: AtomicU64::new(0),
+            last_applied_tx,
             approximate_size: AtomicU64::new(0),
             total_operations: AtomicU64::new(0),
             recent_operations: RwLock::new(Vec::new()),
@@ -173,7 +183,8 @@ impl SharedDataStateMachine {
 
         for pending in drained {
             let cmd = Self::decode_apply_command(&pending.command_bytes)?;
-            let _ = self.apply_decoded_command(cmd).await?;
+            let commit_seq = commit_seq_from_log_position(self.group_id(), pending.log_index);
+            let _ = self.apply_decoded_command(cmd, commit_seq).await?;
             log::debug!(
                 "SharedDataStateMachine[{}]: Applied buffered command log_index={}",
                 self.shard,
@@ -189,8 +200,28 @@ impl SharedDataStateMachine {
         self.pending_buffer.len()
     }
 
+    fn publish_last_applied(&self, index: u64) {
+        self.last_applied_tx.send_replace(index);
+    }
+
+    fn record_operation(&self, table_id: TableId, operation: OperationKind, row_count: usize) {
+        let mut ops = self.recent_operations.write();
+        ops.push(SharedOperation {
+            table_id,
+            operation,
+            row_count: row_count as u64,
+        });
+        if ops.len() > 100 {
+            ops.remove(0);
+        }
+    }
+
     /// Apply a shared data command
-    async fn apply_command(&self, cmd: SharedDataCommand) -> Result<DataResponse, RaftError> {
+    async fn apply_command(
+        &self,
+        cmd: SharedDataCommand,
+        commit_seq: u64,
+    ) -> Result<DataResponse, RaftError> {
         // Get applier reference
         let applier = {
             let guard = self.applier.read();
@@ -208,7 +239,7 @@ impl SharedDataStateMachine {
 
                 // Persist data via applier if available
                 let rows_affected = if let Some(ref a) = applier {
-                    match a.insert(&table_id, &rows).await {
+                    match a.insert(&table_id, &rows, commit_seq).await {
                         Ok(count) => count,
                         Err(e) => {
                             log::warn!(
@@ -227,22 +258,7 @@ impl SharedDataStateMachine {
                     0
                 };
 
-                // Track operation
-                let op = SharedOperation {
-                    table_namespace: table_id.namespace_id().as_str().to_string(),
-                    table_name: table_id.table_name().as_str().to_string(),
-                    operation: "insert".to_string(),
-                    row_count: rows_affected as u64,
-                };
-
-                {
-                    let mut ops = self.recent_operations.write();
-                    ops.push(op);
-                    // Keep only last 100 operations
-                    if ops.len() > 100 {
-                        ops.remove(0);
-                    }
-                }
+                self.record_operation(table_id, OperationKind::Insert, rows_affected);
 
                 self.total_operations.fetch_add(1, Ordering::Relaxed);
                 self.approximate_size.fetch_add(rows.len() as u64, Ordering::Relaxed);
@@ -259,7 +275,7 @@ impl SharedDataStateMachine {
                 log::debug!("SharedDataStateMachine[{}]: Update {:?}", self.shard, table_id);
 
                 let rows_affected = if let Some(ref a) = applier {
-                    match a.update(&table_id, &updates, filter.as_deref()).await {
+                    match a.update(&table_id, &updates, filter.as_deref(), commit_seq).await {
                         Ok(count) => count,
                         Err(e) => {
                             log::warn!(
@@ -278,20 +294,7 @@ impl SharedDataStateMachine {
                     0
                 };
 
-                let op = SharedOperation {
-                    table_namespace: table_id.namespace_id().as_str().to_string(),
-                    table_name: table_id.table_name().as_str().to_string(),
-                    operation: "update".to_string(),
-                    row_count: rows_affected as u64,
-                };
-
-                {
-                    let mut ops = self.recent_operations.write();
-                    ops.push(op);
-                    if ops.len() > 100 {
-                        ops.remove(0);
-                    }
-                }
+                self.record_operation(table_id, OperationKind::Update, rows_affected);
 
                 self.total_operations.fetch_add(1, Ordering::Relaxed);
                 Ok(DataResponse::RowsAffected(rows_affected))
@@ -305,7 +308,7 @@ impl SharedDataStateMachine {
                 log::debug!("SharedDataStateMachine[{}]: Delete from {:?}", self.shard, table_id);
 
                 let rows_affected = if let Some(ref a) = applier {
-                    match a.delete(&table_id, pk_values.as_deref()).await {
+                    match a.delete(&table_id, pk_values.as_deref(), commit_seq).await {
                         Ok(count) => count,
                         Err(e) => {
                             log::warn!(
@@ -324,20 +327,7 @@ impl SharedDataStateMachine {
                     0
                 };
 
-                let op = SharedOperation {
-                    table_namespace: table_id.namespace_id().as_str().to_string(),
-                    table_name: table_id.table_name().as_str().to_string(),
-                    operation: "delete".to_string(),
-                    row_count: rows_affected as u64,
-                };
-
-                {
-                    let mut ops = self.recent_operations.write();
-                    ops.push(op);
-                    if ops.len() > 100 {
-                        ops.remove(0);
-                    }
-                }
+                self.record_operation(table_id, OperationKind::Delete, rows_affected);
 
                 self.total_operations.fetch_add(1, Ordering::Relaxed);
                 Ok(DataResponse::RowsAffected(rows_affected))
@@ -368,13 +358,14 @@ impl SharedDataStateMachine {
     async fn apply_decoded_command(
         &self,
         cmd: SharedApplyCommand,
+        commit_seq: u64,
     ) -> Result<DataResponse, RaftError> {
         match cmd {
-            SharedApplyCommand::Shared(command) => self.apply_command(command).await,
+            SharedApplyCommand::Shared(command) => self.apply_command(command, commit_seq).await,
             SharedApplyCommand::TransactionCommit {
                 transaction_id,
                 mutations,
-            } => self.apply_transaction_commit(transaction_id, mutations).await,
+            } => self.apply_transaction_commit(transaction_id, mutations, commit_seq).await,
         }
     }
 
@@ -382,6 +373,7 @@ impl SharedDataStateMachine {
         &self,
         transaction_id: TransactionId,
         mutations: Vec<StagedMutation>,
+        commit_seq: u64,
     ) -> Result<DataResponse, RaftError> {
         if mutations.iter().any(|mutation| mutation.table_type != TableType::Shared) {
             return Ok(DataResponse::error(
@@ -398,7 +390,7 @@ impl SharedDataStateMachine {
             return Ok(DataResponse::error("No applier set, transaction commit not persisted"));
         };
 
-        match applier.apply_transaction_batch(&transaction_id, &mutations).await {
+        match applier.apply_transaction_batch(&transaction_id, &mutations, commit_seq).await {
             Ok(result) => {
                 self.total_operations.fetch_add(1, Ordering::Relaxed);
                 Ok(DataResponse::TransactionCommitted(result))
@@ -445,7 +437,8 @@ impl KalamStateMachine for SharedDataStateMachine {
             let current_meta = get_coordinator().current_index();
             if required_meta > current_meta {
                 log::debug!(
-                    "SharedDataStateMachine[{}]: Buffering command (required_meta={} > current_meta={})",
+                    "SharedDataStateMachine[{}]: Buffering command (required_meta={} > \
+                     current_meta={})",
                     self.shard,
                     required_meta,
                     current_meta
@@ -460,6 +453,7 @@ impl KalamStateMachine for SharedDataStateMachine {
                 // Mark as applied (buffered) to satisfy Raft log progress
                 self.last_applied_index.store(index, Ordering::Release);
                 self.last_applied_term.store(term, Ordering::Release);
+                self.publish_last_applied(index);
 
                 return Ok(ApplyResult::NoOp);
             }
@@ -471,11 +465,13 @@ impl KalamStateMachine for SharedDataStateMachine {
         }
 
         // Apply current command
-        let response = self.apply_decoded_command(cmd).await?;
+        let commit_seq = commit_seq_from_log_position(self.group_id(), index);
+        let response = self.apply_decoded_command(cmd, commit_seq).await?;
 
         // Update last applied
         self.last_applied_index.store(index, Ordering::Release);
         self.last_applied_term.store(term, Ordering::Release);
+        self.publish_last_applied(index);
 
         // Serialize response
         let response_data = crate::codec::command_codec::encode_data_response(&response)?;
@@ -485,6 +481,21 @@ impl KalamStateMachine for SharedDataStateMachine {
 
     fn last_applied_index(&self) -> u64 {
         self.last_applied_index.load(Ordering::Acquire)
+    }
+
+    fn subscribe_last_applied(&self) -> Option<tokio::sync::watch::Receiver<u64>> {
+        Some(self.last_applied_tx.subscribe())
+    }
+
+    fn mark_applied_index(&self, index: u64, term: u64) {
+        let last_applied = self.last_applied_index.load(Ordering::Acquire);
+        if index <= last_applied {
+            return;
+        }
+
+        self.last_applied_index.store(index, Ordering::Release);
+        self.last_applied_term.store(term, Ordering::Release);
+        self.publish_last_applied(index);
     }
 
     fn last_applied_term(&self) -> u64 {
@@ -525,10 +536,14 @@ impl KalamStateMachine for SharedDataStateMachine {
         self.total_operations.store(data.total_operations, Ordering::Release);
         self.last_applied_index.store(snapshot.last_applied_index, Ordering::Release);
         self.last_applied_term.store(snapshot.last_applied_term, Ordering::Release);
+        self.publish_last_applied(snapshot.last_applied_index);
 
         log::info!(
-            "SharedDataStateMachine[{}]: Restored from snapshot at index {}, term {}, {} pending commands",
-            self.shard, snapshot.last_applied_index, snapshot.last_applied_term,
+            "SharedDataStateMachine[{}]: Restored from snapshot at index {}, term {}, {} pending \
+             commands",
+            self.shard,
+            snapshot.last_applied_index,
+            snapshot.last_applied_term,
             self.pending_buffer.len()
         );
 
@@ -542,19 +557,26 @@ impl KalamStateMachine for SharedDataStateMachine {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use async_trait::async_trait;
-    use kalamdb_commons::models::rows::Row;
-    use kalamdb_commons::models::NamespaceId;
-    use kalamdb_commons::models::OperationKind;
-    use kalamdb_commons::TableId;
     use std::collections::BTreeMap;
+
+    use async_trait::async_trait;
+    use kalamdb_commons::{
+        models::{rows::Row, NamespaceId, OperationKind},
+        TableId,
+    };
+
+    use super::*;
 
     struct TransactionBatchSharedApplier;
 
     #[async_trait]
     impl SharedDataApplier for TransactionBatchSharedApplier {
-        async fn insert(&self, _table_id: &TableId, rows: &[Row]) -> Result<usize, RaftError> {
+        async fn insert(
+            &self,
+            _table_id: &TableId,
+            rows: &[Row],
+            _commit_seq: u64,
+        ) -> Result<usize, RaftError> {
             Ok(rows.len())
         }
 
@@ -563,6 +585,7 @@ mod tests {
             _table_id: &TableId,
             _updates: &[Row],
             _filter: Option<&str>,
+            _commit_seq: u64,
         ) -> Result<usize, RaftError> {
             Ok(1)
         }
@@ -571,6 +594,7 @@ mod tests {
             &self,
             _table_id: &TableId,
             _pk_values: Option<&[String]>,
+            _commit_seq: u64,
         ) -> Result<usize, RaftError> {
             Ok(1)
         }
@@ -579,10 +603,11 @@ mod tests {
             &self,
             _transaction_id: &TransactionId,
             mutations: &[StagedMutation],
+            commit_seq: u64,
         ) -> Result<crate::TransactionApplyResult, RaftError> {
             Ok(crate::TransactionApplyResult {
                 rows_affected: mutations.len(),
-                commit_seq: 91,
+                commit_seq,
                 notifications_sent: 0,
                 manifest_updates: 0,
                 publisher_events: 0,
@@ -653,9 +678,10 @@ mod tests {
         {
             let ops = sm.recent_operations.read();
             assert_eq!(ops.len(), 3);
-            assert_eq!(ops[0].operation, "insert");
-            assert_eq!(ops[1].operation, "update");
-            assert_eq!(ops[2].operation, "delete");
+            assert_eq!(ops[0].operation, OperationKind::Insert);
+            assert_eq!(ops[1].operation, OperationKind::Update);
+            assert_eq!(ops[2].operation, OperationKind::Delete);
+            assert_eq!(ops[0].table_id, TableId::new(NamespaceId::default(), "settings".into()));
         }
     }
 
@@ -688,7 +714,10 @@ mod tests {
                 match response {
                     DataResponse::TransactionCommitted(result) => {
                         assert_eq!(result.rows_affected, 1);
-                        assert_eq!(result.commit_seq, 91);
+                        assert_eq!(
+                            result.commit_seq,
+                            commit_seq_from_log_position(GroupId::DataSharedShard(0), 1)
+                        );
                     },
                     other => panic!("unexpected response: {:?}", other),
                 }

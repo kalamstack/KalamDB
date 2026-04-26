@@ -37,7 +37,8 @@ fn expect_unauthorized(result: Result<String, Box<dyn std::error::Error>>, conte
 fn smoke_security_regular_user_cannot_impersonate_privileged_users_in_batch() {
     if !is_server_running() {
         eprintln!(
-            "Skipping smoke_security_regular_user_cannot_impersonate_privileged_users_in_batch: server not running at {}",
+            "Skipping smoke_security_regular_user_cannot_impersonate_privileged_users_in_batch: \
+             server not running at {}",
             server_url()
         );
         return;

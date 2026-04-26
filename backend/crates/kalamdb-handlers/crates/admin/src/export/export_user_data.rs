@@ -1,15 +1,19 @@
 //! Typed handler for EXPORT USER DATA statement
 
+use std::sync::Arc;
+
 use kalamdb_commons::JobId;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
-use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
-use kalamdb_jobs::executors::user_export::UserExportParams;
-use kalamdb_jobs::AppContextJobsExt;
+use kalamdb_core::{
+    app_context::AppContext,
+    error::KalamDbError,
+    sql::{
+        context::{ExecutionContext, ExecutionResult, ScalarValue},
+        executor::handlers::TypedStatementHandler,
+    },
+};
+use kalamdb_jobs::{executors::user_export::UserExportParams, AppContextJobsExt};
 use kalamdb_sql::ddl::ExportUserDataStatement;
 use kalamdb_system::JobType;
-use std::sync::Arc;
 
 /// Handler for EXPORT USER DATA
 ///
@@ -54,7 +58,8 @@ impl TypedStatementHandler<ExportUserDataStatement> for ExportUserDataHandler {
 
         Ok(ExecutionResult::Success {
             message: format!(
-                "User data export started. Job ID: {}. Use SHOW EXPORT to check status and get the download link.",
+                "User data export started. Job ID: {}. Use SHOW EXPORT to check status and get \
+                 the download link.",
                 job_id.as_str()
             ),
         })

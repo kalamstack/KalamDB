@@ -3,10 +3,21 @@ import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { config as loadEnv } from 'dotenv';
 import { Auth, createClient } from '@kalamdb/client';
 import { buildSummary, startSummarizerAgent } from '../src/agent.js';
 
 const exampleRoot = path.resolve(process.cwd());
+
+function readRuntimeConfig() {
+  loadEnv({ path: path.join(exampleRoot, '.env.local'), quiet: true });
+
+  return {
+    serverUrl: process.env.KALAMDB_URL ?? 'http://127.0.0.1:8080',
+    user: process.env.KALAMDB_USER ?? 'root',
+    password: process.env.KALAMDB_PASSWORD ?? 'kalamdb123',
+  };
+}
 
 test('agent writes summaries back into blog.blogs', async () => {
   execFileSync('./setup.sh', [], {
@@ -18,6 +29,8 @@ test('agent writes summaries back into blog.blogs', async () => {
     },
   });
 
+  const { serverUrl, user, password } = readRuntimeConfig();
+
   const controller = new AbortController();
   const agentRun = startSummarizerAgent({
     stopSignal: controller.signal,
@@ -27,8 +40,8 @@ test('agent writes summaries back into blog.blogs', async () => {
   await sleep(750);
 
   const client = createClient({
-    url: process.env.KALAMDB_URL ?? 'http://127.0.0.1:8080',
-    authProvider: async () => Auth.basic('root', process.env.KALAMDB_PASSWORD ?? 'kalamdb123'),
+    url: serverUrl,
+    authProvider: async () => Auth.basic(user, password),
   });
 
   const content = `KalamDB topics wake lightweight workers immediately after a row changes ${Date.now()}. The worker can enrich the row without polling.`;

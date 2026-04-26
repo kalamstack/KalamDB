@@ -1,10 +1,8 @@
-use datafusion::logical_expr::LogicalPlan;
-use datafusion::scalar::ScalarValue;
-use kalamdb_commons::schemas::TableType;
-use kalamdb_commons::{NamespaceId, Role, TableId};
+use std::{sync::Arc, time::Duration};
+
+use datafusion::{logical_expr::LogicalPlan, scalar::ScalarValue};
+use kalamdb_commons::{schemas::TableType, NamespaceId, Role, TableId};
 use moka::sync::Cache;
-use std::sync::Arc;
-use std::time::Duration;
 
 const DEFAULT_PLAN_MAX_ENTRIES: u64 = 1000;
 const DEFAULT_IDLE_TTL_SECS: u64 = 900;
@@ -211,10 +209,11 @@ impl Default for SqlCacheRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use datafusion::common::DFSchema;
-    use datafusion::logical_expr::EmptyRelation;
     use std::sync::Arc;
+
+    use datafusion::{common::DFSchema, logical_expr::EmptyRelation};
+
+    use super::*;
 
     #[test]
     fn clearing_registry_invalidates_all_caches() {

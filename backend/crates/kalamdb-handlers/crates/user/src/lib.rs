@@ -1,15 +1,15 @@
 pub mod helpers;
 pub mod user;
 
-use kalamdb_commons::AuthType;
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::sql::executor::handler_registry::HandlerRegistry;
-use kalamdb_handlers_support::register_typed_handler;
-use kalamdb_sql::classifier::SqlStatementKind;
-use kalamdb_sql::ddl::{
-    AlterUserStatement, CreateUserStatement, DropUserStatement, UserModification,
-};
 use std::sync::Arc;
+
+use kalamdb_commons::AuthType;
+use kalamdb_core::{app_context::AppContext, sql::executor::handler_registry::HandlerRegistry};
+use kalamdb_handlers_support::register_typed_handler;
+use kalamdb_sql::{
+    classifier::SqlStatementKind,
+    ddl::{AlterUserStatement, CreateUserStatement, DropUserStatement, UserModification},
+};
 
 pub fn register_user_handlers(
     registry: &HandlerRegistry,

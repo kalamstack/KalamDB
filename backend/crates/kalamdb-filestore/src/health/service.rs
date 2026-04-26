@@ -1,18 +1,17 @@
 //! Storage health check service implementation.
 
-use super::models::{ConnectivityTestResult, StorageHealthResult};
-use crate::core::factory::build_object_store;
-use crate::error::{FilestoreError, Result};
+use std::{path::Path, sync::Arc, time::Instant};
+
 use bytes::Bytes;
-use kalamdb_system::providers::storages::models::StorageType;
-use kalamdb_system::Storage;
-use object_store::path::Path as ObjectPath;
-use object_store::ObjectStore;
-use object_store::ObjectStoreExt;
-use std::path::Path;
-use std::sync::Arc;
-use std::time::Instant;
+use kalamdb_system::{providers::storages::models::StorageType, Storage};
+use object_store::{path::Path as ObjectPath, ObjectStore, ObjectStoreExt};
 use sysinfo::Disks;
+
+use super::models::{ConnectivityTestResult, StorageHealthResult};
+use crate::{
+    core::factory::build_object_store,
+    error::{FilestoreError, Result},
+};
 
 /// Test file content used for health checks.
 const HEALTH_CHECK_CONTENT: &[u8] = b"KALAMDB_HEALTH\n";

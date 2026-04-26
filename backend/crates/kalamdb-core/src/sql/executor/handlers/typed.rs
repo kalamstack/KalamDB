@@ -1,9 +1,11 @@
 //! Typed statement handler trait over parsed AST statements
 
+use std::future::Future;
+
+use kalamdb_sql::DdlAst;
+
 use super::{ExecutionContext, ExecutionResult, ScalarValue};
 use crate::error::KalamDbError;
-use kalamdb_sql::DdlAst;
-use std::future::Future;
 
 #[allow(async_fn_in_trait)]
 pub trait TypedStatementHandler<T: DdlAst>: Send + Sync {

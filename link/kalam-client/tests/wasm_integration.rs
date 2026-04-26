@@ -89,10 +89,7 @@ async fn test_insert_rejects_invalid_table_name() {
     let client = create_test_client();
 
     let result = client
-        .insert(
-            "bad table name".to_string(),
-            r#"{"title":"x"}"#.to_string(),
-        )
+        .insert("bad table name".to_string(), r#"{"title":"x"}"#.to_string())
         .await;
 
     let err = js_error_text(result.expect_err("invalid table name should fail"));
@@ -107,15 +104,10 @@ async fn test_insert_rejects_invalid_table_name() {
 async fn test_insert_rejects_invalid_json_payload() {
     let client = create_test_client();
 
-    let result = client
-        .insert("todos".to_string(), "{not-json}".to_string())
-        .await;
+    let result = client.insert("todos".to_string(), "{not-json}".to_string()).await;
 
     let err = js_error_text(result.expect_err("invalid JSON should fail"));
-    assert!(
-        err.contains("Invalid JSON data"),
-        "unexpected invalid JSON error: {err}"
-    );
+    assert!(err.contains("Invalid JSON data"), "unexpected invalid JSON error: {err}");
 }
 
 // T063W: Test insert() rejects empty JSON objects
@@ -159,9 +151,7 @@ async fn test_unsubscribe_not_connected() {
 #[wasm_bindgen_test]
 async fn test_delete_rejects_invalid_row_id() {
     let client = create_test_client();
-    let result = client
-        .delete("todos".to_string(), "bad' OR 1=1 --".to_string())
-        .await;
+    let result = client.delete("todos".to_string(), "bad' OR 1=1 --".to_string()).await;
 
     let err = js_error_text(result.expect_err("invalid row id should fail"));
     assert!(

@@ -1,18 +1,23 @@
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc, Mutex,
+};
+
 use async_trait::async_trait;
 use bytes::Bytes;
-use kalamdb_auth::{create_and_sign_token, services::unified::init_auth_config, AuthError, AuthResult, UserRepository};
+use kalamdb_auth::{
+    create_and_sign_token, services::unified::init_auth_config, AuthError, AuthResult,
+    UserRepository,
+};
 use kalamdb_commons::models::TransactionId;
 use kalamdb_configs::{AuthSettings, OAuthSettings};
 use kalamdb_pg::{
     BeginTransactionRequest, CloseSessionRequest, CommitTransactionRequest, DeleteRequest,
-    ExecuteQueryRpcRequest, ExecuteSqlRpcRequest, InsertRequest, KalamPgService, MutationResult,
-    LivePgTransaction, OpenSessionRequest, OperationExecutor, PgService, PgServiceServer, PingRequest,
+    ExecuteQueryRpcRequest, ExecuteSqlRpcRequest, InsertRequest, KalamPgService, LivePgTransaction,
+    MutationResult, OpenSessionRequest, OperationExecutor, PgService, PgServiceServer, PingRequest,
     RollbackTransactionRequest, ScanRequest, ScanResult, UpdateRequest,
 };
-use kalamdb_system::providers::storages::models::StorageMode;
-use kalamdb_system::{AuthType, Role, User};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use kalamdb_system::{providers::storages::models::StorageMode, AuthType, Role, User};
 use tonic::Request;
 
 const VALID_DBA_BASIC_AUTH: &str = "Basic cGdfYnJpZGdlX3VzZXI6c2VjcmV0LXBhc3M=";
@@ -55,7 +60,8 @@ impl StaticUserRepo {
         Self {
             user: User {
                 user_id: kalamdb_commons::UserId::new("pg_bridge_user"),
-                password_hash: "$2b$12$unusedhashunusedhashunusedhashunusedhashunusedhashu".to_string(),
+                password_hash: "$2b$12$unusedhashunusedhashunusedhashunusedhashunusedhashu"
+                    .to_string(),
                 role,
                 email: Some("pg-bridge@example.com".to_string()),
                 auth_type: AuthType::Password,
@@ -169,14 +175,16 @@ impl OperationExecutor for RecordingExecutor {
         &self,
         session_id: &str,
     ) -> Result<Option<LivePgTransaction>, tonic::Status> {
-        Ok(self
-            .active_tx
-            .lock()
-            .expect("recording executor active tx")
-            .clone()
-            .map(|transaction_id| {
-                LivePgTransaction::new(session_id.to_string(), transaction_id, kalamdb_pg::TransactionState::OpenRead, false)
-            }))
+        Ok(self.active_tx.lock().expect("recording executor active tx").clone().map(
+            |transaction_id| {
+                LivePgTransaction::new(
+                    session_id.to_string(),
+                    transaction_id,
+                    kalamdb_pg::TransactionState::OpenRead,
+                    false,
+                )
+            },
+        ))
     }
 
     async fn begin_transaction(
@@ -198,10 +206,7 @@ impl OperationExecutor for RecordingExecutor {
         transaction_id: &TransactionId,
     ) -> Result<Option<TransactionId>, tonic::Status> {
         self.commit_calls.fetch_add(1, Ordering::Relaxed);
-        self.active_tx
-            .lock()
-            .expect("recording executor commit active tx")
-            .take();
+        self.active_tx.lock().expect("recording executor commit active tx").take();
         Ok(Some(transaction_id.clone()))
     }
 
@@ -211,10 +216,7 @@ impl OperationExecutor for RecordingExecutor {
         transaction_id: &TransactionId,
     ) -> Result<Option<TransactionId>, tonic::Status> {
         self.rollback_calls.fetch_add(1, Ordering::Relaxed);
-        self.active_tx
-            .lock()
-            .expect("recording executor rollback active tx")
-            .take();
+        self.active_tx.lock().expect("recording executor rollback active tx").take();
         Ok(Some(transaction_id.clone()))
     }
 
@@ -267,7 +269,12 @@ impl OperationExecutor for BeginRollbackNotFoundExecutor {
             .expect("stale executor active tx")
             .clone()
             .map(|transaction_id| {
-                LivePgTransaction::new(session_id.to_string(), transaction_id, kalamdb_pg::TransactionState::OpenRead, false)
+                LivePgTransaction::new(
+                    session_id.to_string(),
+                    transaction_id,
+                    kalamdb_pg::TransactionState::OpenRead,
+                    false,
+                )
             }))
     }
 
@@ -301,10 +308,7 @@ impl OperationExecutor for BeginRollbackNotFoundExecutor {
         _session_id: &str,
         transaction_id: &TransactionId,
     ) -> Result<Option<TransactionId>, tonic::Status> {
-        self.active_tx
-            .lock()
-            .expect("stale executor rollback active tx")
-            .take();
+        self.active_tx.lock().expect("stale executor rollback active tx").take();
         Err(tonic::Status::failed_precondition(format!(
             "transaction '{}' not found",
             transaction_id
@@ -354,14 +358,16 @@ impl OperationExecutor for CommitNotFoundExecutor {
         &self,
         session_id: &str,
     ) -> Result<Option<LivePgTransaction>, tonic::Status> {
-        Ok(self
-            .active_tx
-            .lock()
-            .expect("commit-missing executor active tx")
-            .clone()
-            .map(|transaction_id| {
-                LivePgTransaction::new(session_id.to_string(), transaction_id, kalamdb_pg::TransactionState::OpenRead, false)
-            }))
+        Ok(self.active_tx.lock().expect("commit-missing executor active tx").clone().map(
+            |transaction_id| {
+                LivePgTransaction::new(
+                    session_id.to_string(),
+                    transaction_id,
+                    kalamdb_pg::TransactionState::OpenRead,
+                    false,
+                )
+            },
+        ))
     }
 
     async fn begin_transaction(
@@ -381,10 +387,7 @@ impl OperationExecutor for CommitNotFoundExecutor {
         _session_id: &str,
         transaction_id: &TransactionId,
     ) -> Result<Option<TransactionId>, tonic::Status> {
-        self.active_tx
-            .lock()
-            .expect("commit-missing executor commit active tx")
-            .take();
+        self.active_tx.lock().expect("commit-missing executor commit active tx").take();
         Err(tonic::Status::failed_precondition(format!(
             "transaction '{}' not found during commit",
             transaction_id
@@ -448,7 +451,12 @@ impl OperationExecutor for RollbackCommittedExecutor {
             .expect("rollback-committed executor active tx")
             .clone()
             .map(|transaction_id| {
-                LivePgTransaction::new(session_id.to_string(), transaction_id, kalamdb_pg::TransactionState::OpenRead, false)
+                LivePgTransaction::new(
+                    session_id.to_string(),
+                    transaction_id,
+                    kalamdb_pg::TransactionState::OpenRead,
+                    false,
+                )
             }))
     }
 
@@ -613,10 +621,7 @@ impl OperationExecutor for CapturingSqlExecutor {
     }
 
     async fn execute_query(&self, sql: &str) -> Result<(String, Vec<Bytes>), tonic::Status> {
-        self.last_query_sql
-            .lock()
-            .expect("capture query sql")
-            .replace(sql.to_string());
+        self.last_query_sql.lock().expect("capture query sql").replace(sql.to_string());
         Ok(("ok".to_string(), Vec::new()))
     }
 }
@@ -995,10 +1000,7 @@ async fn execute_query_passes_json_operator_sql_through_without_rewrite() {
         .expect("query sql should be captured");
 
     // SQL is now forwarded as-is; DataFusion handles the operator natively.
-    assert_eq!(
-        captured,
-        "SELECT doc->>'name' AS name FROM docs"
-    );
+    assert_eq!(captured, "SELECT doc->>'name' AS name FROM docs");
 }
 
 #[tokio::test]
@@ -1081,10 +1083,9 @@ async fn close_session_rolls_back_via_configured_operation_executor() {
         .transaction_id;
     assert!(!tx_id.is_empty());
 
-    service.session_registry().clear_transaction_state_if_matches(
-        &session_id,
-        Some(&TransactionId::new(tx_id.clone())),
-    );
+    service
+        .session_registry()
+        .clear_transaction_state_if_matches(&session_id, Some(&TransactionId::new(tx_id.clone())));
 
     service
         .close_session(plain_request(CloseSessionRequest {
@@ -1120,10 +1121,9 @@ async fn begin_transaction_reclaims_stale_remote_transaction_via_executor() {
         .into_inner()
         .transaction_id;
 
-    service.session_registry().clear_transaction_state_if_matches(
-        &session_id,
-        Some(&TransactionId::new(tx_id)),
-    );
+    service
+        .session_registry()
+        .clear_transaction_state_if_matches(&session_id, Some(&TransactionId::new(tx_id)));
 
     service
         .begin_transaction(plain_request(BeginTransactionRequest {
@@ -1172,10 +1172,7 @@ async fn begin_transaction_reconciles_local_state_when_stale_remote_tx_is_missin
     assert_eq!(first_tx, TX_ID_STALE);
     assert_eq!(replacement_tx, TX_ID_REPLACEMENT);
 
-    let session = service
-        .session_registry()
-        .get(&session_id)
-        .expect("session remains open");
+    let session = service.session_registry().get(&session_id).expect("session remains open");
     assert_eq!(session.transaction_id(), Some(TX_ID_REPLACEMENT));
 }
 
@@ -1212,10 +1209,7 @@ async fn commit_transaction_clears_local_state_when_remote_tx_is_already_gone() 
         .expect_err("remote missing transaction should still report an error");
     assert_eq!(err.code(), tonic::Code::FailedPrecondition);
 
-    let session = service
-        .session_registry()
-        .get(&session_id)
-        .expect("session remains open");
+    let session = service.session_registry().get(&session_id).expect("session remains open");
     assert_eq!(session.transaction_id(), None);
     assert_eq!(session.transaction_state(), None);
 }

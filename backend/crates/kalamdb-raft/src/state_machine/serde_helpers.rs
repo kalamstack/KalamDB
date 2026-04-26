@@ -4,8 +4,9 @@
 //! self-describing, schema-evolution-friendly (add/remove/reorder fields),
 //! and supports any serde key type including integer-keyed maps.
 
-use crate::error::RaftError;
 use serde::{de::DeserializeOwned, Serialize};
+
+use crate::error::RaftError;
 
 /// Encode a value to bytes using MessagePack with named fields.
 pub fn encode<T: Serialize>(value: &T) -> Result<Vec<u8>, RaftError> {
@@ -19,8 +20,9 @@ pub fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, RaftError> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde::{Deserialize, Serialize};
+
+    use super::*;
 
     #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
     struct TestData {
@@ -52,9 +54,11 @@ mod tests {
 
     #[test]
     fn test_entry_payload_membership_roundtrip() {
-        use crate::storage::{KalamNode, KalamTypeConfig};
-        use openraft::{EntryPayload, Membership};
         use std::collections::BTreeMap;
+
+        use openraft::{EntryPayload, Membership};
+
+        use crate::storage::{KalamNode, KalamTypeConfig};
 
         let node = KalamNode::new("127.0.0.1:9081", "http://127.0.0.1:8081");
         let mut nodes = BTreeMap::new();
@@ -80,9 +84,11 @@ mod tests {
 
     #[test]
     fn test_entry_payload_membership_with_two_nodes() {
-        use crate::storage::{KalamNode, KalamTypeConfig};
-        use openraft::{EntryPayload, Membership};
         use std::collections::BTreeMap;
+
+        use openraft::{EntryPayload, Membership};
+
+        use crate::storage::{KalamNode, KalamTypeConfig};
 
         let node1 = KalamNode::new("127.0.0.1:9081", "http://127.0.0.1:8081");
         let node2 = KalamNode::new("127.0.0.1:9082", "http://127.0.0.1:8082");

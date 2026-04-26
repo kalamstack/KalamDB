@@ -1,7 +1,9 @@
 use std::fmt;
 
-use kalamdb_commons::models::{TableId, TransactionId, UserId};
-use kalamdb_commons::TableType;
+use kalamdb_commons::{
+    models::{TableId, TransactionId, UserId},
+    TableType,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransactionAccessError {

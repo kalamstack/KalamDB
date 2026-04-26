@@ -1,10 +1,15 @@
 //! Test backend wrapper that records scan parameters.
 
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Mutex,
+};
+
 use kalamdb_commons::storage::KvIterator;
-use kalamdb_store::storage_trait::{Operation, Partition, StorageBackend};
-use kalamdb_store::test_utils::InMemoryBackend;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
+use kalamdb_store::{
+    storage_trait::{Operation, Partition, StorageBackend},
+    test_utils::InMemoryBackend,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScanArgs {

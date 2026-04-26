@@ -1,15 +1,22 @@
 //! Typed DDL handler for SHOW STATS statements
 
-use datafusion::arrow::array::{ArrayRef, RecordBatch, StringArray, UInt64Array};
-use kalamdb_commons::arrow_utils::{field_uint64, field_utf8, schema};
-use kalamdb_commons::models::{NamespaceId, TableId};
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::error_extensions::KalamDbResultExt;
-use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
-use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
-use kalamdb_sql::ddl::ShowTableStatsStatement;
 use std::sync::Arc;
+
+use datafusion::arrow::array::{ArrayRef, RecordBatch, StringArray, UInt64Array};
+use kalamdb_commons::{
+    arrow_utils::{field_uint64, field_utf8, schema},
+    models::{NamespaceId, TableId},
+};
+use kalamdb_core::{
+    app_context::AppContext,
+    error::KalamDbError,
+    error_extensions::KalamDbResultExt,
+    sql::{
+        context::{ExecutionContext, ExecutionResult, ScalarValue},
+        executor::handlers::TypedStatementHandler,
+    },
+};
+use kalamdb_sql::ddl::ShowTableStatsStatement;
 
 /// Typed handler for SHOW STATS statements
 pub struct ShowStatsHandler {

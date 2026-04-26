@@ -5,19 +5,25 @@
 //! Provides per-Raft-group OpenRaft metrics directly from RaftMetrics.
 //! Each row represents one Raft group's current state on this node.
 
-use crate::error::RegistryError;
-use crate::view_base::{ViewTableProvider, VirtualView};
-use datafusion::arrow::array::{ArrayRef, Int64Array, StringArray};
-use datafusion::arrow::datatypes::SchemaRef;
-use datafusion::arrow::record_batch::RecordBatch;
-use kalamdb_commons::datatypes::KalamDataType;
-use kalamdb_commons::schemas::{
-    ColumnDefault, ColumnDefinition, TableDefinition, TableOptions, TableType,
+use std::sync::{Arc, OnceLock};
+
+use datafusion::arrow::{
+    array::{ArrayRef, Int64Array, StringArray},
+    datatypes::SchemaRef,
+    record_batch::RecordBatch,
 };
-use kalamdb_commons::{NamespaceId, TableName};
+use kalamdb_commons::{
+    datatypes::KalamDataType,
+    schemas::{ColumnDefault, ColumnDefinition, TableDefinition, TableOptions, TableType},
+    NamespaceId, TableName,
+};
 use kalamdb_raft::{CommandExecutor, GroupId};
 use kalamdb_system::SystemTable;
-use std::sync::{Arc, OnceLock};
+
+use crate::{
+    error::RegistryError,
+    view_base::{ViewTableProvider, VirtualView},
+};
 
 fn cluster_groups_schema() -> SchemaRef {
     static SCHEMA: OnceLock<SchemaRef> = OnceLock::new();
@@ -239,8 +245,8 @@ impl VirtualView for ClusterGroupsView {
         }
 
         // log::info!(
-        //     "cluster_groups: Building view with {} user_shards, {} shared_shards = {} total groups",
-        //     info.user_shards, info.shared_shards, group_ids.len()
+        //     "cluster_groups: Building view with {} user_shards, {} shared_shards = {} total
+        // groups",     info.user_shards, info.shared_shards, group_ids.len()
         // );
 
         // Pre-allocate vectors for each column
@@ -285,8 +291,8 @@ impl VirtualView for ClusterGroupsView {
                 last_applieds.push(metrics.last_applied.map(|log_id| log_id.index as i64));
                 snapshots.push(metrics.snapshot.map(|log_id| log_id.index as i64));
                 purgeds.push(metrics.purged.map(|log_id| log_id.index as i64));
-                // Note: RaftMetrics doesn't directly expose committed; we'd need to get it from storage/log
-                // For now, use None
+                // Note: RaftMetrics doesn't directly expose committed; we'd need to get it from
+                // storage/log For now, use None
                 committeds.push(None);
                 states.push(Some(format!("{:?}", metrics.state)));
                 current_leaders.push(metrics.current_leader.map(|id| id as i64));

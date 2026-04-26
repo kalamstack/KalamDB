@@ -1,9 +1,10 @@
 //! WebSocket connection context
 
+use std::sync::Arc;
+
 use kalamdb_auth::UserRepository;
 use kalamdb_core::app_context::AppContext;
 use kalamdb_live::{ConnectionsManager, LiveQueryManager};
-use std::sync::Arc;
 
 use crate::limiter::RateLimiter;
 

@@ -4,9 +4,9 @@
 //! when executed against ANY node in the cluster (not just the leader).
 //! This ensures the cluster behaves identically from any entry point.
 
-use crate::cluster_common::*;
-use crate::common::*;
 use serde_json::Value;
+
+use crate::{cluster_common::*, common::*};
 
 /// Test: Basic CRUD operations work from any node
 #[test]
@@ -166,7 +166,8 @@ fn cluster_test_smoke_table_types_any_node() {
     execute_on_node(
         &urls[0],
         &format!(
-            "CREATE STREAM TABLE {}.stream_tbl (id BIGINT PRIMARY KEY, data STRING) WITH (TTL_SECONDS = 3600)",
+            "CREATE STREAM TABLE {}.stream_tbl (id BIGINT PRIMARY KEY, data STRING) WITH \
+             (TTL_SECONDS = 3600)",
             namespace
         ),
     )
@@ -190,7 +191,8 @@ fn cluster_test_smoke_table_types_any_node() {
         let tables = vec!["user_tbl", "shared_tbl", "stream_tbl"];
         for table_name in &tables {
             let query = format!(
-                "SELECT table_name FROM system.schemas WHERE namespace_id = '{}' AND table_name = '{}'",
+                "SELECT table_name FROM system.schemas WHERE namespace_id = '{}' AND table_name = \
+                 '{}'",
                 namespace, table_name
             );
 
@@ -296,7 +298,8 @@ fn cluster_test_smoke_complex_queries_any_node() {
     execute_on_node(
         &urls[0],
         &format!(
-            "CREATE SHARED TABLE {}.products (id BIGINT PRIMARY KEY, name STRING, price DOUBLE, category STRING)",
+            "CREATE SHARED TABLE {}.products (id BIGINT PRIMARY KEY, name STRING, price DOUBLE, \
+             category STRING)",
             namespace
         ),
     )
@@ -335,9 +338,22 @@ fn cluster_test_smoke_complex_queries_any_node() {
 
     // Test complex queries from each node
     let complex_queries = vec![
-        ("Aggregation", format!("SELECT category, count(*) as cnt FROM {}.products GROUP BY category ORDER BY category", namespace)),
-        ("Filter", format!("SELECT name FROM {}.products WHERE price > 15 ORDER BY price", namespace)),
-        ("OrderBy", format!("SELECT name, price FROM {}.products ORDER BY price DESC LIMIT 3", namespace)),
+        (
+            "Aggregation",
+            format!(
+                "SELECT category, count(*) as cnt FROM {}.products GROUP BY category ORDER BY \
+                 category",
+                namespace
+            ),
+        ),
+        (
+            "Filter",
+            format!("SELECT name FROM {}.products WHERE price > 15 ORDER BY price", namespace),
+        ),
+        (
+            "OrderBy",
+            format!("SELECT name, price FROM {}.products ORDER BY price DESC LIMIT 3", namespace),
+        ),
         ("Count", format!("SELECT count(*) as total FROM {}.products", namespace)),
     ];
 

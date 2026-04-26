@@ -1,8 +1,7 @@
 use std::{collections::HashMap, time::Duration};
 
-use crate::error::{KalamLinkError, Result};
-
 use super::AutoOffsetReset;
+use crate::error::{KalamLinkError, Result};
 
 #[derive(Debug, Clone)]
 pub struct ConsumerConfig {

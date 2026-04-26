@@ -15,18 +15,20 @@
 //! - **helpers**: Shared helper functions (future)
 //! - **audit**: Audit logging (future)
 
-use crate::error::KalamDbError;
-use kalamdb_sql::classifier::SqlStatement;
 use std::future::Future;
+
+use kalamdb_sql::classifier::SqlStatement;
+
+use crate::error::KalamDbError;
 
 // Typed handler trait (stays in core; handler impls are in kalamdb-handlers)
 pub mod typed;
 
 // Re-export core types from executor/models for convenience
-pub use crate::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
-
 // Re-export legacy placeholder handlers
 pub use typed::TypedStatementHandler;
+
+pub use crate::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
 
 /// Common trait for SQL statement handlers
 ///
@@ -106,7 +108,7 @@ pub trait StatementHandler: Send + Sync {
         context: &'a ExecutionContext,
     ) -> impl Future<Output = Result<(), KalamDbError>> + Send + 'a {
         // Default implementation: delegate to AuthorizationHandler
-        //AuthorizationHandler::check_authorization(context, statement)
+        // AuthorizationHandler::check_authorization(context, statement)
         let result = statement
             .check_authorization(context.user_role())
             .map_err(KalamDbError::PermissionDenied);

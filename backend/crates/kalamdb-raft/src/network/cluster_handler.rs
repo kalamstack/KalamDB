@@ -16,10 +16,12 @@ use std::sync::Arc;
 
 use tonic::{Request, Response, Status};
 
-use super::cluster_service::cluster_server::ClusterService;
-use super::models::{
-    ForwardSqlRequest, ForwardSqlResponse, ForwardSqlResponsePayload, GetNodeInfoRequest,
-    GetNodeInfoResponse, PingRequest, PingResponse,
+use super::{
+    cluster_service::cluster_server::ClusterService,
+    models::{
+        ForwardSqlRequest, ForwardSqlResponse, ForwardSqlResponsePayload, GetNodeInfoRequest,
+        GetNodeInfoResponse, PingRequest, PingResponse,
+    },
 };
 use crate::manager::RaftManager;
 

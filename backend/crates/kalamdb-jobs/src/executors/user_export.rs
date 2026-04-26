@@ -1,11 +1,11 @@
 //! User Export Job Executor
 //!
 //! Exports all user tables for a specific user across all namespaces by:
-//! 1. Triggering a flush job for every user table (ensures all buffered RocksDB
-//!    writes are persisted as Parquet files).
+//! 1. Triggering a flush job for every user table (ensures all buffered RocksDB writes are
+//!    persisted as Parquet files).
 //! 2. Waiting for all flush jobs to reach a terminal state.
-//! 3. Reading the raw Parquet files from `StorageCached` and packaging them
-//!    into a ZIP archive at `{data_path}/exports/{user_id}/{export_id}.zip`.
+//! 3. Reading the raw Parquet files from `StorageCached` and packaging them into a ZIP archive at
+//!    `{data_path}/exports/{user_id}/{export_id}.zip`.
 //!
 //! ## Parameters Format
 //! ```json
@@ -15,27 +15,31 @@
 //! }
 //! ```
 
-use crate::executors::flush::FlushParams;
-use crate::executors::{JobContext, JobDecision, JobExecutor, JobParams};
-use crate::AppContextJobsExt;
+use std::{
+    collections::HashMap,
+    fs,
+    io::{Cursor, Write},
+    time::Duration,
+};
+
 use async_trait::async_trait;
-use kalamdb_commons::ids::UserTableRowId;
-use kalamdb_commons::models::UserId;
-use kalamdb_commons::schemas::{TableOptions, TableType};
-use kalamdb_commons::{JobId, TableId};
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::providers::UserTableProvider;
+use kalamdb_commons::{
+    ids::UserTableRowId,
+    models::UserId,
+    schemas::{TableOptions, TableType},
+    JobId, TableId,
+};
+use kalamdb_core::{error::KalamDbError, providers::UserTableProvider};
 use kalamdb_store::EntityStore;
-use kalamdb_system::JobStatus;
-use kalamdb_system::JobType;
+use kalamdb_system::{JobStatus, JobType};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fs;
-use std::io::{Cursor, Write};
-use std::time::Duration;
 use tokio::time::sleep;
-use zip::write::SimpleFileOptions;
-use zip::ZipWriter;
+use zip::{write::SimpleFileOptions, ZipWriter};
+
+use crate::{
+    executors::{flush::FlushParams, JobContext, JobDecision, JobExecutor, JobParams},
+    AppContextJobsExt,
+};
 
 /// Maximum time to wait for all flush jobs to complete.
 const FLUSH_WAIT_TIMEOUT: Duration = Duration::from_secs(5 * 60); // 5 min

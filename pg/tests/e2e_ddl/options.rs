@@ -1,8 +1,10 @@
+use std::env;
+
+use tokio_postgres::{Config, NoTls};
+
 use super::common::{
     ensure_schema_exists, pg_kalam_exec, require_ddl_env, unique_name, DdlTestEnv,
 };
-use std::env;
-use tokio_postgres::{Config, NoTls};
 
 fn contains_status(text: &str, expected_terms: &[&str]) -> bool {
     let normalized = text.to_ascii_lowercase();
@@ -105,9 +107,8 @@ async fn e2e_ddl_create_table_using_kalamdb_forwards_shared_options() {
 
     let metadata = env
         .kalamdb_sql(&format!(
-            "SELECT table_type, storage_id, options \
-             FROM system.tables \
-             WHERE namespace_id = '{ns}' AND table_name = '{table}'"
+            "SELECT table_type, storage_id, options FROM system.tables WHERE namespace_id = \
+             '{ns}' AND table_name = '{table}'"
         ))
         .await;
 
@@ -165,9 +166,8 @@ async fn e2e_ddl_create_table_using_kalamdb_forwards_stream_ttl() {
 
     let metadata = env
         .kalamdb_sql(&format!(
-            "SELECT table_type, options \
-             FROM system.tables \
-             WHERE namespace_id = '{ns}' AND table_name = '{table}'"
+            "SELECT table_type, options FROM system.tables WHERE namespace_id = '{ns}' AND \
+             table_name = '{table}'"
         ))
         .await;
 
@@ -252,7 +252,8 @@ async fn e2e_ddl_kalam_exec_passthrough_statements() {
     let create_table = pg_kalam_exec(
         &pg,
         &format!(
-            "CREATE SHARED TABLE {ns}.{table} (id BIGINT PRIMARY KEY DEFAULT SNOWFLAKE_ID(), name TEXT)"
+            "CREATE SHARED TABLE {ns}.{table} (id BIGINT PRIMARY KEY DEFAULT SNOWFLAKE_ID(), name \
+             TEXT)"
         ),
     )
     .await;
@@ -328,19 +329,19 @@ async fn e2e_ddl_kalam_exec_json_text_operator() {
     .await
     .expect("insert json row through postgres");
 
-    let result = pg_kalam_exec(
-        &pg,
-        &format!("SELECT doc->>'name' AS name FROM {ns}.{table} WHERE id = 1"),
-    )
-    .await;
+    let result =
+        pg_kalam_exec(&pg, &format!("SELECT doc->>'name' AS name FROM {ns}.{table} WHERE id = 1"))
+            .await;
     let value: serde_json::Value = serde_json::from_str(&result).expect("parse kalam_exec json");
     let rows = value.as_array().expect("kalam_exec rows array");
     assert_eq!(rows.len(), 1, "unexpected kalam_exec response: {result}");
-    assert_eq!(rows[0]["name"].as_str(), Some("alice"), "unexpected kalam_exec response: {result}");
+    assert_eq!(
+        rows[0]["name"].as_str(),
+        Some("alice"),
+        "unexpected kalam_exec response: {result}"
+    );
 
-    pg.batch_execute(&format!("DROP SCHEMA IF EXISTS {ns} CASCADE;"))
-        .await
-        .ok();
+    pg.batch_execute(&format!("DROP SCHEMA IF EXISTS {ns} CASCADE;")).await.ok();
 }
 
 #[tokio::test]
@@ -374,7 +375,8 @@ async fn e2e_ddl_local_postgres_jsonb_operator_query() {
     let row = pg
         .query_one(
             &format!(
-                "SELECT doc->>'name' AS name, doc ? 'profile' AS has_profile FROM {ns}.{table} WHERE id = 1"
+                "SELECT doc->>'name' AS name, doc ? 'profile' AS has_profile FROM {ns}.{table} \
+                 WHERE id = 1"
             ),
             &[],
         )
@@ -387,9 +389,7 @@ async fn e2e_ddl_local_postgres_jsonb_operator_query() {
     assert_eq!(name, "alice");
     assert!(has_profile, "expected profile key to exist");
 
-    pg.batch_execute(&format!("DROP SCHEMA IF EXISTS {ns} CASCADE;"))
-        .await
-        .ok();
+    pg.batch_execute(&format!("DROP SCHEMA IF EXISTS {ns} CASCADE;")).await.ok();
 }
 
 #[tokio::test]

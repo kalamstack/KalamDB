@@ -1,7 +1,9 @@
 //! Type-safe wrapper for user identifiers.
 
-use std::fmt;
-use std::sync::{Arc, OnceLock};
+use std::{
+    fmt,
+    sync::{Arc, OnceLock},
+};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};

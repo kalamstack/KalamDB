@@ -1,16 +1,19 @@
 //! Typed handler for STORAGE FLUSH TABLE statement
 
-use kalamdb_commons::models::TableId;
-use kalamdb_commons::{JobId, TableType};
-use kalamdb_core::app_context::AppContext;
-use kalamdb_core::error::KalamDbError;
-use kalamdb_core::sql::context::{ExecutionContext, ExecutionResult, ScalarValue};
-use kalamdb_core::sql::executor::handlers::TypedStatementHandler;
-use kalamdb_jobs::executors::flush::FlushParams;
-use kalamdb_jobs::AppContextJobsExt;
+use std::sync::Arc;
+
+use kalamdb_commons::{models::TableId, JobId, TableType};
+use kalamdb_core::{
+    app_context::AppContext,
+    error::KalamDbError,
+    sql::{
+        context::{ExecutionContext, ExecutionResult, ScalarValue},
+        executor::handlers::TypedStatementHandler,
+    },
+};
+use kalamdb_jobs::{executors::flush::FlushParams, AppContextJobsExt};
 use kalamdb_sql::ddl::FlushTableStatement;
 use kalamdb_system::JobType;
-use std::sync::Arc;
 
 /// Handler for STORAGE FLUSH TABLE
 pub struct FlushTableHandler {
@@ -81,7 +84,8 @@ impl TypedStatementHandler<FlushTableStatement> for FlushTableHandler {
             Err(KalamDbError::IdempotentConflict(_)) => {
                 return Ok(ExecutionResult::Success {
                     message: format!(
-                        "Storage flush skipped: a flush is already queued or running for table '{}.{}'",
+                        "Storage flush skipped: a flush is already queued or running for table \
+                         '{}.{}'",
                         statement.namespace.as_str(),
                         statement.table_name.as_str()
                     ),

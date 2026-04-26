@@ -1,10 +1,11 @@
 #![allow(unused_imports, dead_code)]
 
-use crate::common;
-use crate::common::*;
+use std::time::Duration;
+
 // (apply_patch sanity check)
 use serde_json::Value;
-use std::time::Duration;
+
+use crate::{common, common::*};
 
 #[test]
 fn test_datatypes_json_preservation() {
@@ -42,7 +43,8 @@ fn test_datatypes_json_preservation() {
     // Note: Using a fixed timestamp for easier verification
     let timestamp_str = "2023-01-01 12:00:00";
     let insert_sql = format!(
-        "INSERT INTO {}.{} (col_string, col_int, col_float, col_bool, col_timestamp) VALUES ('test_string', 123, 45.67, true, '{}')",
+        "INSERT INTO {}.{} (col_string, col_int, col_float, col_bool, col_timestamp) VALUES \
+         ('test_string', 123, 45.67, true, '{}')",
         namespace, table_name, timestamp_str
     );
     let result = common::execute_sql_as_root_via_cli(&insert_sql);

@@ -18,6 +18,8 @@ mod import_foreign_schema;
 
 pub use delete_input::DeleteInput;
 pub use delete_plan::DeletePlan;
+#[cfg(feature = "import-foreign-schema")]
+pub use import_foreign_schema::create_foreign_table_sql;
 pub use insert_input::InsertInput;
 pub use insert_plan::InsertPlan;
 pub use request_planner::RequestPlanner;
@@ -28,6 +30,3 @@ pub use table_options::TableOptions;
 pub use update_input::UpdateInput;
 pub use update_plan::UpdatePlan;
 pub use virtual_column::VirtualColumn;
-
-#[cfg(feature = "import-foreign-schema")]
-pub use import_foreign_schema::create_foreign_table_sql;
