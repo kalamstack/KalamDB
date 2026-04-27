@@ -1,14 +1,14 @@
 import type { RemoteCallback } from 'drizzle-orm/pg-proxy';
 import type { KalamDBClient } from '@kalamdb/client';
 
-function toMilliseconds(value: number): number {
+export function toMilliseconds(value: number): number {
   if (value > 1e15) return Math.floor(value / 1000);
   if (value > 1e12) return value;
   if (value > 1e9) return value * 1000;
   return value;
 }
 
-function normalizeTemporalValue(value: unknown): unknown {
+export function normalizeTemporalValue(value: unknown): unknown {
   if (value === null || value === undefined) return value;
 
   if (value instanceof Date) {

@@ -15,6 +15,7 @@ use kalamdb_core::{
     },
 };
 use kalamdb_sql::ddl::{AlterUserStatement, UserModification};
+use kalamdb_system::Role;
 
 /// Handler for ALTER USER
 pub struct AlterUserHandler {
@@ -79,6 +80,11 @@ impl TypedStatementHandler<AlterUserStatement> for AlterUserHandler {
                 if !context.is_admin() {
                     return Err(KalamDbError::Unauthorized(
                         "Only admins can change roles".to_string(),
+                    ));
+                }
+                if context.user_role() == Role::Dba && new_role == Role::System {
+                    return Err(KalamDbError::Unauthorized(
+                        "DBA cannot grant System role".to_string(),
                     ));
                 }
                 updated.role = new_role;

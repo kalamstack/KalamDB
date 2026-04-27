@@ -56,9 +56,9 @@ describe('generateSchema', () => {
 
   it('uses snake_case for field names', () => {
     assert.ok(fullSchema.includes("user_id:"));
-    assert.ok(fullSchema.includes("actor_username:"));
+    assert.ok(fullSchema.includes("actor_user_id:"));
     assert.ok(!fullSchema.includes("userId:"));
-    assert.ok(!fullSchema.includes("actorUsername:"));
+    assert.ok(!fullSchema.includes("actorUserId:"));
   });
 
   it('maps timestamps to timestamp with mode string', () => {
@@ -149,5 +149,12 @@ describe('generateSchema', () => {
     assert.ok(schema.includes("system_audit_log"));
     assert.ok(schema.includes("dba_"));
     assert.ok(schema.includes("test_gen_uploads"));
+  });
+
+  it('deduplicates tables (no duplicate exports)', () => {
+    const exportLines = fullSchema.split('\n').filter((l) => l.startsWith('export const '));
+    const tableNames = exportLines.map((l) => l.match(/export const (\w+)/)?.[1]);
+    const uniqueNames = new Set(tableNames);
+    assert.equal(tableNames.length, uniqueNames.size, 'each table should appear exactly once');
   });
 });

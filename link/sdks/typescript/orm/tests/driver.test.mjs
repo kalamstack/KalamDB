@@ -1,7 +1,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { drizzle } from 'drizzle-orm/pg-proxy';
-import { pgTable, text, bigint } from 'drizzle-orm/pg-core';
+import { pgTable, text, bigint, timestamp } from 'drizzle-orm/pg-core';
 import { eq, desc } from 'drizzle-orm';
 import { kalamDriver, file } from '../dist/index.js';
 import { requirePassword, createTestClient } from './helpers.mjs';
@@ -13,17 +13,16 @@ let db;
 
 const system_users = pgTable('system.users', {
   user_id: text('user_id'),
-  username: text('username'),
   role: text('role'),
   email: text('email'),
 });
 
 const system_audit_log = pgTable('system.audit_log', {
   audit_id: text('audit_id'),
-  actor_username: text('actor_username'),
+  actor_user_id: text('actor_user_id'),
   action: text('action'),
   target: text('target'),
-  timestamp: bigint('timestamp', { mode: 'number' }),
+  timestamp: timestamp('timestamp', { mode: 'string' }),
 });
 
 before(async () => {
@@ -46,7 +45,7 @@ describe('kalamDriver', () => {
   it('returns typed fields', async () => {
     const rows = await db.select().from(system_users);
     const first = rows[0];
-    assert.ok(typeof first.username === 'string');
+    assert.ok(typeof first.user_id === 'string');
     assert.ok(typeof first.role === 'string');
   });
 
@@ -75,10 +74,10 @@ describe('kalamDriver', () => {
 
   it('supports SELECT with specific columns', async () => {
     const rows = await db
-      .select({ username: system_users.username, role: system_users.role })
+      .select({ user_id: system_users.user_id, role: system_users.role })
       .from(system_users);
     assert.ok(rows.length > 0);
-    assert.ok('username' in rows[0]);
+    assert.ok('user_id' in rows[0]);
     assert.ok('role' in rows[0]);
     assert.ok(!('email' in rows[0]));
   });
@@ -130,7 +129,7 @@ describe('kalamDriver', () => {
     const table = pgTable('test_orm_insert.multi_defaults', {
       id: bigint('id', { mode: 'number' }),
       label: text('label'),
-      created_at: bigint('created_at', { mode: 'number' }),
+      created_at: timestamp('created_at', { mode: 'string' }),
     });
 
     await db.insert(table).values({ label: 'multi-default-test' });
@@ -138,7 +137,8 @@ describe('kalamDriver', () => {
     assert.equal(rows.length, 1);
     assert.equal(rows[0].label, 'multi-default-test');
     assert.ok(rows[0].id > 0, 'id should be auto-generated');
-    assert.ok(rows[0].created_at > 0, 'created_at should be auto-generated');
+    assert.ok(typeof rows[0].created_at === 'string', 'created_at should be a string');
+    assert.ok(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(rows[0].created_at), 'created_at should be ISO 8601 format');
 
     await client.query('DROP TABLE IF EXISTS test_orm_insert.multi_defaults');
     await client.query('DROP NAMESPACE IF EXISTS test_orm_insert');
