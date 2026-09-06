@@ -210,11 +210,11 @@ pub async fn build_test_consumer(
 
 pub struct UniqueOffsetPollConfig {
     pub expected_messages: Option<usize>,
-    pub publishers_done: Option<Arc<AtomicBool>>,
-    pub deadline: Duration,
-    pub idle_break_after: u32,
-    pub idle_sleep: Duration,
-    pub per_record_delay: Duration,
+    pub publishers_done:   Option<Arc<AtomicBool>>,
+    pub deadline:          Duration,
+    pub idle_break_after:  u32,
+    pub idle_sleep:        Duration,
+    pub per_record_delay:  Duration,
     pub commit_each_batch: bool,
 }
 

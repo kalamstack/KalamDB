@@ -12,6 +12,7 @@ description = "Bootstrap-managed DBA namespace tables and typed repositories"
 kalamdb-commons = { path = "../kalamdb-commons", features = ["full"] }
 kalamdb-core = { path = "../kalamdb-core" }
 kalamdb-macros = { path = "../kalamdb-macros" }
+kalamdb-serialization = { workspace = true }
 kalamdb-system = { path = "../kalamdb-system" }
 kalamdb-tables = { path = "../kalamdb-tables" }
 

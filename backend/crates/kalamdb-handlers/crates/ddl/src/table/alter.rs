@@ -6,8 +6,8 @@ use std::sync::Arc;
 use kalamdb_commons::constants::SystemColumnNames;
 use kalamdb_commons::{
     models::{
-        schemas::{ColumnDefinition, TableDefinition},
-        NamespaceId, TableId, UserId,
+        schemas::{ColumnDefinition, ScalarIndexDefinition, TableDefinition},
+        ColumnId, NamespaceId, TableId, UserId,
     },
     schemas::{ColumnDefault, TableOptions, TableType},
 };
@@ -162,6 +162,88 @@ impl AlterTableHandler {
                 log::warn!(
                     "Failed to drop vector partition '{}' during DROP INDEX: {}",
                     partition_name,
+                    err
+                );
+            }
+        }
+    }
+
+    fn backfill_scalar_index(
+        &self,
+        table_id: &TableId,
+        table_def: &TableDefinition,
+    ) -> Result<(), KalamDbError> {
+        let pk_field = table_def
+            .columns
+            .iter()
+            .find(|column| column.is_primary_key)
+            .map(|column| column.column_name.as_str())
+            .ok_or_else(|| {
+                KalamDbError::InvalidOperation(format!("table {} has no primary key", table_id))
+            })?;
+        let storage_schema = kalamdb_tables::storage_schema_for_table(table_def).map_err(|e| {
+            KalamDbError::ExecutionError(format!(
+                "failed to build storage schema for {}: {}",
+                table_id, e
+            ))
+        })?;
+        let index_idx = table_def.scalar_indexes.len();
+        let backend = self.app_context.storage_backend();
+        match table_def.table_type {
+            TableType::User => {
+                let store = kalamdb_tables::new_indexed_user_table_store(
+                    backend,
+                    table_id,
+                    pk_field,
+                    storage_schema,
+                    &table_def.scalar_indexes,
+                    &table_def.columns,
+                );
+                store.backfill_index(index_idx).map_err(|e| {
+                    KalamDbError::ExecutionError(format!(
+                        "failed to backfill index on {}: {}",
+                        table_id, e
+                    ))
+                })?;
+            },
+            TableType::Shared => {
+                let store = kalamdb_tables::new_indexed_shared_table_store(
+                    backend,
+                    table_id,
+                    pk_field,
+                    storage_schema,
+                    &table_def.scalar_indexes,
+                    &table_def.columns,
+                );
+                store.backfill_index(index_idx).map_err(|e| {
+                    KalamDbError::ExecutionError(format!(
+                        "failed to backfill index on {}: {}",
+                        table_id, e
+                    ))
+                })?;
+            },
+            TableType::Stream | TableType::System => {},
+        }
+        Ok(())
+    }
+
+    fn drop_scalar_index_partition(
+        &self,
+        table_id: &TableId,
+        table_type: TableType,
+        index_name: &str,
+    ) {
+        let user_scoped = matches!(table_type, TableType::User);
+        let partition = Partition::new(kalamdb_tables::common::scalar_index_partition_name(
+            table_id,
+            index_name,
+            user_scoped,
+        ));
+        if let Err(err) = self.app_context.storage_backend().drop_partition(&partition) {
+            if !err.to_string().to_lowercase().contains("not found") {
+                log::warn!(
+                    "Failed to drop scalar index partition '{}' during DROP INDEX: {}",
+                    partition,
                     err
                 );
             }
@@ -476,6 +558,27 @@ impl TypedStatementHandler<AlterTableStatement> for AlterTableHandler {
             return self.execute_vector_index_operation(&statement, context).await;
         }
 
+        if let ColumnOperation::DropIndex { name, .. } = &statement.operation {
+            let table_id = TableId::from_strings(
+                statement.namespace_id.as_str(),
+                statement.table_name.as_str(),
+            );
+            let registry = self.app_context.schema_registry();
+            if let Ok(Some(table_def)) = registry.get_table_if_exists(&table_id) {
+                let is_scalar = table_def
+                    .scalar_indexes
+                    .iter()
+                    .any(|index| index.name.eq_ignore_ascii_case(name));
+                if !is_scalar {
+                    let mut vector_stmt = statement.clone();
+                    vector_stmt.operation = ColumnOperation::DropVectorIndex {
+                        column_name: name.clone(),
+                    };
+                    return self.execute_vector_index_operation(&vector_stmt, context).await;
+                }
+            }
+        }
+
         use crate::helpers::audit;
 
         let namespace_id: NamespaceId = statement.namespace_id.clone();
@@ -487,12 +590,27 @@ impl TypedStatementHandler<AlterTableStatement> for AlterTableHandler {
 
         // Only apply changes if something actually changed
         if changed {
-            // Delegate to unified applier - pass raw parameters
+            let dropped_index_name =
+                if let ColumnOperation::DropIndex { name, .. } = &statement.operation {
+                    Some(name.clone())
+                } else {
+                    None
+                };
+            let created_scalar =
+                matches!(statement.operation, ColumnOperation::CreateScalarIndex { .. });
+
             self.app_context
                 .applier()
                 .alter_table(table_id.clone(), table_def.clone())
                 .await
                 .map_err(|e| KalamDbError::ExecutionError(format!("ALTER TABLE failed: {}", e)))?;
+
+            if created_scalar {
+                self.backfill_scalar_index(&table_id, &table_def)?;
+            }
+            if let Some(name) = dropped_index_name {
+                self.drop_scalar_index_partition(&table_id, table_def.table_type, &name);
+            }
 
             // Log DDL operation
             let audit_entry = audit::log_ddl_operation(
@@ -633,6 +751,7 @@ fn apply_alter_operation(
             }
             let kalam_type = data_type.clone();
             let default = default_value.clone().unwrap_or(ColumnDefault::None);
+            crate::helpers::table_creation::validate_column_default(app_context, &default)?;
             let ordinal = (table_def.columns.len() + 1) as u32;
             let column_id = table_def.next_column_id;
             table_def.columns.push(ColumnDefinition::new(
@@ -679,6 +798,17 @@ fn apply_alter_operation(
                         column_name
                     ))
                 })?;
+            let column_id = table_def.columns[idx].column_id;
+            if let Some(index) = table_def
+                .scalar_indexes
+                .iter()
+                .find(|index| index.columns.iter().any(|id| id.as_u64() == column_id))
+            {
+                return Err(KalamDbError::InvalidOperation(format!(
+                    "cannot drop column '{}': still used by index '{}'",
+                    column_name, index.name
+                )));
+            }
             table_def.columns.remove(idx);
             for (i, c) in table_def.columns.iter_mut().enumerate() {
                 c.ordinal_position = (i + 1) as u32;
@@ -812,6 +942,7 @@ fn apply_alter_operation(
                 })?;
 
             let changed = col.default_value != *default_value;
+            crate::helpers::table_creation::validate_column_default(app_context, default_value)?;
             col.default_value = default_value.clone();
             Ok((
                 format!("ALTER COLUMN {} SET DEFAULT {}", column_name, default_value.to_sql()),
@@ -908,7 +1039,85 @@ fn apply_alter_operation(
         ColumnOperation::DropVectorIndex { column_name } => {
             Ok((format!("DROP INDEX {}", column_name), false))
         },
+        ColumnOperation::CreateScalarIndex {
+            name,
+            columns,
+            unique,
+            if_not_exists,
+        } => apply_create_scalar_index(table_def, name, columns, *unique, *if_not_exists),
+        ColumnOperation::DropIndex { name, if_exists } => {
+            apply_drop_scalar_index(table_def, name, *if_exists)
+        },
     }
+}
+
+fn apply_create_scalar_index(
+    table_def: &mut TableDefinition,
+    name: &str,
+    columns: &[String],
+    unique: bool,
+    if_not_exists: bool,
+) -> Result<(String, bool), KalamDbError> {
+    if !matches!(table_def.table_type, TableType::User | TableType::Shared) {
+        return Err(KalamDbError::InvalidOperation(
+            "scalar CREATE INDEX is only supported on USER and SHARED tables".to_string(),
+        ));
+    }
+    if let Some(existing) = table_def
+        .scalar_indexes
+        .iter()
+        .find(|index| index.name.eq_ignore_ascii_case(name))
+    {
+        if if_not_exists {
+            return Ok((format!("CREATE INDEX {}", name), false));
+        }
+        return Err(KalamDbError::InvalidOperation(format!(
+            "index '{}' already exists",
+            existing.name
+        )));
+    }
+
+    let mut column_ids = Vec::with_capacity(columns.len());
+    for column_name in columns {
+        if is_system_column(column_name) {
+            return Err(KalamDbError::InvalidOperation(format!(
+                "cannot index system column '{}'",
+                column_name
+            )));
+        }
+        let column = table_def
+            .columns
+            .iter()
+            .find(|column| column.column_name.eq_ignore_ascii_case(column_name))
+            .ok_or_else(|| {
+                KalamDbError::InvalidOperation(format!("column '{}' does not exist", column_name))
+            })?;
+        column_ids.push(ColumnId::new(column.column_id));
+    }
+
+    table_def
+        .scalar_indexes
+        .push(ScalarIndexDefinition::new(name, column_ids, unique));
+    Ok((format!("CREATE INDEX {} ({})", name, columns.join(", ")), true))
+}
+
+fn apply_drop_scalar_index(
+    table_def: &mut TableDefinition,
+    name: &str,
+    if_exists: bool,
+) -> Result<(String, bool), KalamDbError> {
+    let Some(idx) = table_def
+        .scalar_indexes
+        .iter()
+        .position(|index| index.name.eq_ignore_ascii_case(name))
+    else {
+        if if_exists {
+            return Ok((format!("DROP INDEX {}", name), false));
+        }
+        return Err(KalamDbError::InvalidOperation(format!("index '{}' does not exist", name)));
+    };
+    table_def.scalar_indexes.remove(idx);
+    Ok((format!("DROP INDEX {}", name), true))
 }
 
 fn apply_table_property_updates(
@@ -1099,5 +1308,209 @@ fn get_operation_summary(op: &ColumnOperation) -> String {
         ColumnOperation::DropVectorIndex { column_name } => {
             format!("DROP INDEX {}", column_name)
         },
+        ColumnOperation::CreateScalarIndex { name, .. } => format!("CREATE INDEX {}", name),
+        ColumnOperation::DropIndex { name, .. } => format!("DROP INDEX {}", name),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use kalamdb_commons::{
+        models::{
+            datatypes::KalamDataType,
+            schemas::{ColumnDefinition, TableDefinition, TableOptions},
+            NamespaceId, TableName,
+        },
+        schemas::TableType,
+    };
+    use kalamdb_core::test_helpers::test_app_context_simple;
+    use kalamdb_sql::ddl::ColumnOperation;
+
+    use super::{apply_create_scalar_index, apply_drop_scalar_index, AlterTableHandler};
+
+    fn user_table() -> TableDefinition {
+        TableDefinition::new(
+            NamespaceId::new("public"),
+            TableName::new("messages"),
+            TableType::User,
+            vec![
+                ColumnDefinition::primary_key(1, "id", 1, KalamDataType::BigInt),
+                ColumnDefinition::simple(2, "conversation_id", 2, KalamDataType::Text),
+            ],
+            TableOptions::user(),
+            None,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn apply_create_and_drop_scalar_index_updates_catalog() {
+        let mut table = user_table();
+        let (desc, changed) = apply_create_scalar_index(
+            &mut table,
+            "idx_conv",
+            &["conversation_id".to_string()],
+            false,
+            false,
+        )
+        .unwrap();
+        assert!(changed);
+        assert!(desc.contains("idx_conv"));
+        assert_eq!(table.scalar_indexes.len(), 1);
+        assert_eq!(table.scalar_indexes[0].columns[0].as_u64(), 2);
+
+        let err = apply_create_scalar_index(
+            &mut table,
+            "idx_conv",
+            &["conversation_id".to_string()],
+            false,
+            false,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("already exists"));
+
+        let (_, skipped) = apply_create_scalar_index(
+            &mut table,
+            "idx_conv",
+            &["conversation_id".to_string()],
+            false,
+            true,
+        )
+        .unwrap();
+        assert!(!skipped);
+
+        apply_drop_scalar_index(&mut table, "idx_conv", false).unwrap();
+        assert!(table.scalar_indexes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn drop_column_blocked_while_index_exists() {
+        let mut table = user_table();
+        apply_create_scalar_index(
+            &mut table,
+            "idx_conv",
+            &["conversation_id".to_string()],
+            false,
+            false,
+        )
+        .unwrap();
+        let err = super::apply_alter_operation(
+            &test_app_context_simple(),
+            &mut table,
+            &ColumnOperation::Drop {
+                column_name: "conversation_id".to_string(),
+            },
+            &kalamdb_commons::models::TableId::new(
+                NamespaceId::new("public"),
+                TableName::new("messages"),
+            ),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("still used by index"));
+    }
+
+    #[tokio::test]
+    async fn create_index_persists_and_backfills() {
+        use datafusion::scalar::ScalarValue;
+        use kalamdb_commons::{
+            ids::SeqId,
+            models::{rows::Row, UserTableRow},
+            UserId,
+        };
+
+        let app_ctx = test_app_context_simple();
+        let namespaces = app_ctx.system_tables().namespaces();
+        let namespace_id = NamespaceId::default();
+        if namespaces.get_namespace(&namespace_id).unwrap().is_none() {
+            namespaces
+                .create_namespace(kalamdb_system::Namespace {
+                    namespace_id: namespace_id.clone(),
+                    name:         "default".to_string(),
+                    created_at:   chrono::Utc::now().timestamp_millis(),
+                    options:      None,
+                    table_count:  0,
+                })
+                .unwrap();
+        }
+
+        let table_name =
+            TableName::new(format!("idx_bf_{}", chrono::Utc::now().timestamp_millis()));
+        let mut table = TableDefinition::new(
+            namespace_id.clone(),
+            table_name.clone(),
+            TableType::User,
+            vec![
+                ColumnDefinition::primary_key(1, "id", 1, KalamDataType::BigInt),
+                ColumnDefinition::simple(2, "conversation_id", 2, KalamDataType::Text),
+            ],
+            TableOptions::user(),
+            None,
+        )
+        .unwrap();
+        table.table_options = TableOptions::user();
+        app_ctx.schema_registry().register_table(table.clone()).unwrap();
+
+        let table_id =
+            kalamdb_commons::models::TableId::new(namespace_id.clone(), table_name.clone());
+        let schema = kalamdb_tables::storage_schema_for_table(&table).unwrap();
+        let store = kalamdb_tables::new_indexed_user_table_store(
+            app_ctx.storage_backend(),
+            &table_id,
+            "id",
+            schema,
+            &[],
+            &table.columns,
+        );
+        let user_id = UserId::new("alice");
+        let seq = SeqId::new(1);
+        let mut values = std::collections::BTreeMap::new();
+        values.insert("id".to_string(), ScalarValue::Int64(Some(1)));
+        values.insert("conversation_id".to_string(), ScalarValue::Utf8(Some("room-1".to_string())));
+        store
+            .insert(
+                &kalamdb_commons::ids::UserTableRowId::new(user_id.clone(), seq),
+                &UserTableRow {
+                    user_id,
+                    _seq: seq,
+                    _commit_seq: 1,
+                    _deleted: false,
+                    fields: Row::new(values),
+                },
+            )
+            .unwrap();
+
+        apply_create_scalar_index(
+            &mut table,
+            "idx_conv",
+            &["conversation_id".to_string()],
+            false,
+            false,
+        )
+        .unwrap();
+        app_ctx.schema_registry().register_table(table.clone()).unwrap();
+
+        let handler = AlterTableHandler::new(app_ctx.clone());
+        handler.backfill_scalar_index(&table_id, &table).unwrap();
+
+        let updated = app_ctx.schema_registry().get_table_if_exists(&table_id).unwrap().unwrap();
+        assert_eq!(updated.scalar_indexes.len(), 1);
+        assert_eq!(updated.scalar_indexes[0].name, "idx_conv");
+
+        let indexed = kalamdb_tables::new_indexed_user_table_store(
+            app_ctx.storage_backend(),
+            &table_id,
+            "id",
+            kalamdb_tables::storage_schema_for_table(&updated).unwrap(),
+            &updated.scalar_indexes,
+            &updated.columns,
+        );
+        let hits = indexed.scan_by_index(1, None, None).unwrap();
+        assert_eq!(hits.len(), 1);
+
+        apply_drop_scalar_index(&mut table, "idx_conv", false).unwrap();
+        app_ctx.schema_registry().register_table(table.clone()).unwrap();
+        handler.drop_scalar_index_partition(&table_id, table.table_type, "idx_conv");
+        let after_drop = app_ctx.schema_registry().get_table_if_exists(&table_id).unwrap().unwrap();
+        assert!(after_drop.scalar_indexes.is_empty());
     }
 }

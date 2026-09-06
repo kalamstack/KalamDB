@@ -233,18 +233,33 @@ impl SharedDataStateMachine {
                 table_id,
                 rows,
                 actor_user_id,
+                encoded_fields,
                 ..
             } => {
+                let insert_count = if encoded_fields.is_empty() {
+                    rows.len()
+                } else {
+                    encoded_fields.len()
+                };
                 log::debug!(
                     "SharedDataStateMachine[{}]: Insert into {:?} ({} rows)",
                     self.shard,
                     table_id,
-                    rows.len()
+                    insert_count
                 );
 
                 // Persist data via applier if available
                 let rows_affected = if let Some(ref a) = applier {
-                    match a.insert(&table_id, actor_user_id.as_ref(), &rows, commit_seq).await {
+                    match a
+                        .insert(
+                            &table_id,
+                            actor_user_id.as_ref(),
+                            &rows,
+                            &encoded_fields,
+                            commit_seq,
+                        )
+                        .await
+                    {
                         Ok(count) => count,
                         Err(e) => {
                             log::warn!(
@@ -266,7 +281,7 @@ impl SharedDataStateMachine {
                 self.record_operation(table_id, OperationKind::Insert, rows_affected);
 
                 self.total_operations.fetch_add(1, Ordering::Relaxed);
-                self.approximate_size.fetch_add(rows.len() as u64, Ordering::Relaxed);
+                self.approximate_size.fetch_add(insert_count as u64, Ordering::Relaxed);
 
                 Ok(DataResponse::RowsAffected(rows_affected))
             },
@@ -606,9 +621,10 @@ mod tests {
             _table_id: &TableId,
             _actor_user_id: Option<&UserId>,
             rows: &[Row],
+            encoded_fields: &[Vec<u8>],
             _commit_seq: u64,
         ) -> Result<usize, RaftError> {
-            Ok(rows.len())
+            Ok(rows.len().max(encoded_fields.len()))
         }
 
         async fn update(
@@ -655,10 +671,11 @@ mod tests {
             _table_id: &TableId,
             actor_user_id: Option<&UserId>,
             rows: &[Row],
+            encoded_fields: &[Vec<u8>],
             _commit_seq: u64,
         ) -> Result<usize, RaftError> {
             self.actor_records.lock().push((OperationKind::Insert, actor_user_id.cloned()));
-            Ok(rows.len())
+            Ok(rows.len().max(encoded_fields.len()))
         }
 
         async fn update(
@@ -707,6 +724,7 @@ mod tests {
         let cmd = SharedDataCommand::Insert {
             table_id:            TableId::new(NamespaceId::default(), "config".into()),
             rows:                vec![],
+            encoded_fields:      Vec::new(),
             required_meta_index: 0,
             transaction_id:      None,
             actor_user_id:       None,
@@ -727,6 +745,7 @@ mod tests {
         let insert = SharedDataCommand::Insert {
             table_id:            TableId::new(NamespaceId::default(), "settings".into()),
             rows:                vec![],
+            encoded_fields:      Vec::new(),
             required_meta_index: 0,
             transaction_id:      None,
             actor_user_id:       None,
@@ -789,6 +808,7 @@ mod tests {
         let insert = SharedDataCommand::Insert {
             table_id:            table_id.clone(),
             rows:                vec![],
+            encoded_fields:      Vec::new(),
             required_meta_index: 0,
             transaction_id:      None,
             actor_user_id:       Some(insert_actor.clone()),

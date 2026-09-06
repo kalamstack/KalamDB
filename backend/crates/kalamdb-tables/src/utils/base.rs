@@ -88,11 +88,12 @@ use kalamdb_commons::{
     conversions::arrow_json_conversion::coerce_rows,
     ids::SeqId,
     models::{
-        datatypes::KalamDataType, rows::Row, schemas::TableDefinition, NamespaceId, TableName,
-        UserId,
+        datatypes::KalamDataType,
+        rows::{Row, RowMetadata},
+        schemas::TableDefinition,
+        NamespaceId, TableName, UserId,
     },
     schemas::TableType,
-    serialization::row_codec::RowMetadata,
     try_pk_bucket_key, NotLeaderError, StorageKey, TableId,
 };
 use kalamdb_datafusion_sources::{
@@ -108,6 +109,7 @@ use kalamdb_datafusion_sources::{
 };
 use kalamdb_filestore::registry::{ListResult, StorageCached};
 use kalamdb_session_datafusion::ScanDiagnosticsContext;
+use kalamdb_store::IndexedEntityStore;
 use kalamdb_system::{
     ClusterCoordinator as ClusterCoordinatorTrait, Manifest, ManifestCacheEntry,
     SchemaRegistry as SchemaRegistryTrait,
@@ -1874,6 +1876,19 @@ where
 /// Log a warning when scanning version resolution without filter or limit.
 ///
 /// This helps identify potential performance issues where full table scans are happening.
+/// If `filter` matches a prefix index, return `(index_idx, prefix)` for `scan_by_index`.
+pub(crate) fn hot_index_seek<K, V>(
+    store: &IndexedEntityStore<K, V>,
+    filter: Option<&Expr>,
+    user_id: Option<&UserId>,
+) -> Option<(usize, Vec<u8>)>
+where
+    K: StorageKey + Clone + Send + Sync + 'static,
+    V: kalamdb_commons::KSerializable + Clone + Send + Sync + 'static,
+{
+    store.find_best_index_for_filter_expr(user_id, filter?)
+}
+
 /// Called by provider-side MVCC scan implementations.
 ///
 /// # Arguments

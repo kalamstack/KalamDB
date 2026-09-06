@@ -34,8 +34,10 @@ use datafusion::{
     },
 };
 use kalamdb_commons::{
-    constants::SystemColumnNames, conversions::arrow_json_conversion::arrow_value_to_scalar,
-    ids::SeqId, models::rows::Row, serialization::row_codec::RowMetadata,
+    constants::SystemColumnNames,
+    conversions::arrow_json_conversion::arrow_value_to_scalar,
+    ids::SeqId,
+    models::rows::{Row, RowMetadata, SharedTableRow},
 };
 pub use kalamdb_commons::{
     pk_bucket_key_from_array, pk_bucket_key_from_row, pk_bucket_key_from_scalar, PkBucketKey,
@@ -323,6 +325,31 @@ pub trait VersionedRow {
             Some(value) if !value.is_empty() => PkBucketKey::Text(value),
             _ => PkBucketKey::Seq(self.seq_id().as_i64()),
         }
+    }
+}
+
+impl VersionedRow for SharedTableRow {
+    fn seq_id(&self) -> SeqId {
+        self._seq
+    }
+
+    fn commit_seq(&self) -> u64 {
+        self._commit_seq
+    }
+
+    fn deleted(&self) -> bool {
+        self._deleted
+    }
+
+    fn pk_value(&self, pk_name: &str) -> Option<String> {
+        match self.pk_bucket_key(pk_name) {
+            PkBucketKey::Seq(_) => None,
+            key => Some(key.to_string()),
+        }
+    }
+
+    fn pk_bucket_key(&self, pk_name: &str) -> PkBucketKey {
+        pk_bucket_key_from_row(&self.fields, pk_name, self._seq)
     }
 }
 

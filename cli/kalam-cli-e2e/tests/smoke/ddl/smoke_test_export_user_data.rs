@@ -614,8 +614,8 @@ fn smoke_export_download_zip_is_valid() {
             expected_prefix, all_names
         );
         println!(
-            "✅  Export ZIP deep-checked: {} Parquet entries (PAR1 header+footer OK), \
-             path '{}' confirmed ({} total ZIP bytes)",
+            "✅  Export ZIP deep-checked: {} Parquet entries (PAR1 header+footer OK), path '{}' \
+             confirmed ({} total ZIP bytes)",
             parquet_count,
             expected_prefix,
             body.len()
@@ -665,14 +665,13 @@ fn smoke_export_user_data_download_and_reimport() {
     execute_sql_as_root_via_client(&format!("CREATE NAMESPACE {}", namespace))
         .expect("CREATE NAMESPACE failed");
     execute_sql_as_root_via_client(&format!(
-        "CREATE TABLE {} (id BIGINT AUTO_INCREMENT PRIMARY KEY, data TEXT) \
-         WITH (TYPE='USER', FLUSH_POLICY='rows:5')",
+        "CREATE TABLE {} (id BIGINT AUTO_INCREMENT PRIMARY KEY, data TEXT) WITH (TYPE='USER', \
+         FLUSH_POLICY='rows:5')",
         source_fqn
     ))
     .expect("CREATE source TABLE failed");
     execute_sql_as_root_via_client(&format!(
-        "CREATE TABLE {} (id BIGINT AUTO_INCREMENT PRIMARY KEY, data TEXT) \
-         WITH (TYPE='USER')",
+        "CREATE TABLE {} (id BIGINT AUTO_INCREMENT PRIMARY KEY, data TEXT) WITH (TYPE='USER')",
         target_fqn
     ))
     .expect("CREATE target TABLE failed");
@@ -803,8 +802,11 @@ fn smoke_export_user_data_download_and_reimport() {
             expected_prefix, all_names
         );
         println!(
-            "✅  Part 1: {} Parquet entries with valid PAR1 magic, path '{}' confirmed ({} ZIP bytes)",
-            parquet_count, expected_prefix, zip_body.len()
+            "✅  Part 1: {} Parquet entries with valid PAR1 magic, path '{}' confirmed ({} ZIP \
+             bytes)",
+            parquet_count,
+            expected_prefix,
+            zip_body.len()
         );
     }
 
@@ -926,7 +928,8 @@ fn smoke_export_user_data_download_and_reimport() {
     );
 
     println!(
-        "✅  Part 2: {}/12 rows imported; 'reimp_row_5' (flushed) and 'reimp_row_hot_12' (hot) verified",
+        "✅  Part 2: {}/12 rows imported; 'reimp_row_5' (flushed) and 'reimp_row_hot_12' (hot) \
+         verified",
         total
     );
 

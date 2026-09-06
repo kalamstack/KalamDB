@@ -1,8 +1,19 @@
 {
   "schema_version": "1.0",
-  "updated_at": "2026-06-23T00:00:00Z",
+  "updated_at": "2026-08-31T00:00:00Z",
   "catalog_url": "https://raw.githubusercontent.com/github/spec-kit/main/integrations/catalog.json",
   "integrations": {
+    "alquimia": {
+      "id": "alquimia",
+      "name": "Alquimia AI",
+      "version": "1.0.0",
+      "description": "Alquimia AI CLI integration",
+      "author": "spec-kit-core",
+      "repository": "https://github.com/github/spec-kit",
+      "tags": [
+        "alquimia"
+      ]
+    },
     "claude": {
       "id": "claude",
       "name": "Claude Code",
@@ -61,15 +72,29 @@
         "ide"
       ]
     },
-    "windsurf": {
-      "id": "windsurf",
-      "name": "Windsurf",
+    "droid": {
+      "id": "droid",
+      "name": "Factory Droid",
       "version": "1.0.0",
-      "description": "Windsurf IDE workflow integration",
+      "description": "Factory Droid CLI skills-based integration",
       "author": "spec-kit-core",
       "repository": "https://github.com/github/spec-kit",
       "tags": [
-        "ide"
+        "cli",
+        "skills",
+        "factory"
+      ]
+    },
+    "dsh": {
+      "id": "dsh",
+      "name": "DeepSeek Harness",
+      "version": "1.0.0",
+      "description": "DeepSeek Harness (DSH) CLI skills-based integration",
+      "author": "spec-kit-core",
+      "repository": "https://github.com/github/spec-kit",
+      "tags": [
+        "cli",
+        "skills"
       ]
     },
     "amp": {
@@ -95,6 +120,18 @@
         "skills"
       ]
     },
+    "command-code": {
+      "id": "command-code",
+      "name": "Command Code",
+      "version": "1.0.0",
+      "description": "Command Code CLI skills-based integration",
+      "author": "spec-kit-core",
+      "repository": "https://github.com/github/spec-kit",
+      "tags": [
+        "cli",
+        "skills"
+      ]
+    },
     "devin": {
       "id": "devin",
       "name": "Devin for Terminal",
@@ -105,6 +142,19 @@
       "tags": [
         "cli",
         "skills"
+      ]
+    },
+    "docker-agent": {
+      "id": "docker-agent",
+      "name": "Docker Agent",
+      "version": "1.0.0",
+      "description": "Docker Agent skills-based integration",
+      "author": "spec-kit-core",
+      "repository": "https://github.com/github/spec-kit",
+      "tags": [
+        "cli",
+        "skills",
+        "docker"
       ]
     },
     "qwen": {
@@ -219,17 +269,6 @@
         "ide"
       ]
     },
-    "roo": {
-      "id": "roo",
-      "name": "Roo Code",
-      "version": "1.0.0",
-      "description": "Roo Code IDE integration",
-      "author": "spec-kit-core",
-      "repository": "https://github.com/github/spec-kit",
-      "tags": [
-        "ide"
-      ]
-    },
     "rovodev": {
       "id": "rovodev",
       "name": "RovoDev ACLI",
@@ -245,13 +284,14 @@
     "bob": {
       "id": "bob",
       "name": "IBM Bob",
-      "version": "1.0.0",
-      "description": "IBM Bob IDE integration",
+      "version": "2.0.0",
+      "description": "IBM Bob 2.0 IDE skills-based integration",
       "author": "spec-kit-core",
       "repository": "https://github.com/github/spec-kit",
       "tags": [
         "ide",
-        "ibm"
+        "ibm",
+        "skills"
       ]
     },
     "trae": {
@@ -333,17 +373,6 @@
         "cli"
       ]
     },
-    "iflow": {
-      "id": "iflow",
-      "name": "iFlow CLI",
-      "version": "1.0.0",
-      "description": "iFlow CLI integration by iflow-ai",
-      "author": "spec-kit-core",
-      "repository": "https://github.com/github/spec-kit",
-      "tags": [
-        "cli"
-      ]
-    },
     "vibe": {
       "id": "vibe",
       "name": "Mistral Vibe",
@@ -390,6 +419,19 @@
         "cli"
       ]
     },
+    "grok": {
+      "id": "grok",
+      "name": "Grok Build",
+      "version": "1.0.0",
+      "description": "xAI Grok Build CLI skills-based integration",
+      "author": "spec-kit-core",
+      "repository": "https://github.com/github/spec-kit",
+      "tags": [
+        "cli",
+        "skills",
+        "xai"
+      ]
+    },
     "hermes": {
       "id": "hermes",
       "name": "Hermes Agent",
@@ -413,6 +455,30 @@
         "cli",
         "skills",
         "z-ai"
+      ]
+    },
+    "zed": {
+      "id": "zed",
+      "name": "Zed",
+      "version": "1.0.0",
+      "description": "Zed editor skills-based integration",
+      "author": "spec-kit-core",
+      "repository": "https://github.com/github/spec-kit",
+      "tags": [
+        "ide",
+        "skills"
+      ]
+    },
+    "muse": {
+      "id": "muse",
+      "name": "Muse Code",
+      "version": "1.0.0",
+      "description": "Meta Muse Code CLI skills-based integration",
+      "author": "spec-kit-core",
+      "repository": "https://github.com/github/spec-kit",
+      "tags": [
+        "cli",
+        "skills"
       ]
     }
   }

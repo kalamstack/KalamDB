@@ -11,7 +11,7 @@ use std::{
 use datafusion_common::ScalarValue;
 use kalamdb_commons::{
     models::{NamespaceId, PayloadMode, TableName},
-    KSerializable, StorageKey,
+    StorageKey,
 };
 use kalamdb_store::{
     storage_trait::{KvIterator, Operation, Partition, StorageBackend},
@@ -175,7 +175,7 @@ fn put_primary_only_message(
         .put(
             &Partition::new("topic_messages"),
             &message.id().storage_key(),
-            &message.encode().unwrap(),
+            &kalamdb_store::encode_entity(&message).unwrap(),
         )
         .unwrap();
 }

@@ -59,6 +59,7 @@ use kalamdb_commons::{next_storage_key_bytes, KSerializable, StorageKey};
 
 use crate::{
     async_utils::run_blocking_result,
+    persist::{decode_entity, encode_entity},
     storage_trait::{Partition, Result, StorageBackend, StorageError},
 };
 
@@ -85,9 +86,9 @@ pub type EntityIterator<'a, K, V> = Box<dyn Iterator<Item = Result<(K, V)>> + Se
 /// - `backend()`: Returns reference to the storage backend
 /// - `partition()`: Returns partition name for this entity type
 ///
-/// ## Provided Methods (with [`KSerializable`] delegation)
-/// - `serialize()`: Entity → bytes (delegates to [`KSerializable::encode`])
-/// - `deserialize()`: bytes → Entity (delegates to [`KSerializable::decode`])
+/// ## Provided Methods (with `kalamdb-serialization`)
+/// - `serialize()`: Entity → bytes (generic object profile, or row codec)
+/// - `deserialize()`: bytes → Entity (current envelope, with legacy FlexBuffers fallback)
 /// - `put()`: Store an entity by key
 /// - `get()`: Retrieve an entity by key
 /// - `delete()`: Remove an entity by key
@@ -152,7 +153,7 @@ where
                 for (key_bytes, value_bytes) in iter {
                     let key = K::from_storage_key(&key_bytes)
                         .map_err(StorageError::SerializationError)?;
-                    let entity = self.deserialize(&value_bytes)?;
+                    let entity = self.deserialize(&key, &value_bytes)?;
                     rows.push(Ok((key, entity)));
                     if rows.len() >= limit {
                         break;
@@ -184,7 +185,7 @@ where
                     }
                     let key = K::from_storage_key(&key_bytes)
                         .map_err(StorageError::SerializationError)?;
-                    let entity = self.deserialize(&value_bytes)?;
+                    let entity = self.deserialize(&key, &value_bytes)?;
                     rows.push(Ok((key, entity)));
                     if rows.len() >= limit {
                         break;
@@ -215,25 +216,26 @@ where
 
         let mapped = iter.map(|(key_bytes, value_bytes)| {
             let key = K::from_storage_key(&key_bytes).map_err(StorageError::SerializationError)?;
-            let value = V::decode(&value_bytes)?;
+            let value = decode_entity(&value_bytes)?;
             Ok((key, value))
         });
 
         Ok(Box::new(mapped))
     }
 
-    /// Serializes an entity to bytes.
+    /// Serializes an entity to bytes through `kalamdb-serialization`.
     ///
-    /// Default implementation delegates to [`KSerializable::encode`].
-    fn serialize(&self, entity: &V) -> Result<Vec<u8>> {
-        entity.encode()
+    /// `key` is available so row codecs can omit identity from the value and
+    /// reconstruct it on decode.
+    fn serialize(&self, key: &K, entity: &V) -> Result<Vec<u8>> {
+        let _ = key;
+        encode_entity(entity)
     }
 
-    /// Deserializes bytes to an entity.
-    ///
-    /// Default implementation delegates to [`KSerializable::decode`].
-    fn deserialize(&self, bytes: &[u8]) -> Result<V> {
-        V::decode(bytes)
+    /// Deserializes bytes to an entity through `kalamdb-serialization`.
+    fn deserialize(&self, key: &K, bytes: &[u8]) -> Result<V> {
+        let _ = key;
+        decode_entity(bytes)
     }
 
     /// Stores an entity with the given key.
@@ -249,7 +251,7 @@ where
     /// ```
     fn put(&self, key: &K, entity: &V) -> Result<()> {
         let partition = self.partition();
-        let value = self.serialize(entity)?;
+        let value = self.serialize(key, entity)?;
         self.backend().put(&partition, &key.storage_key(), &value)
     }
 
@@ -280,7 +282,7 @@ where
         let operations: Result<Vec<Operation>> = entries
             .iter()
             .map(|(key, entity)| {
-                let value = self.serialize(entity)?;
+                let value = self.serialize(key, entity)?;
                 Ok(Operation::Put {
                     partition: partition.clone(),
                     key: key.storage_key(),
@@ -308,7 +310,7 @@ where
     fn get(&self, key: &K) -> Result<Option<V>> {
         let partition = self.partition();
         match self.backend().get(&partition, &key.storage_key())? {
-            Some(bytes) => Ok(Some(self.deserialize(&bytes)?)),
+            Some(bytes) => Ok(Some(self.deserialize(key, &bytes)?)),
             None => Ok(None),
         }
     }
@@ -362,7 +364,7 @@ where
                     continue;
                 },
             };
-            let entity = match self.deserialize(&value_bytes) {
+            let entity = match self.deserialize(&key, &value_bytes) {
                 Ok(v) => v,
                 Err(e) => {
                     log::warn!("Skipping entry with malformed value: {}", e);
@@ -425,7 +427,7 @@ where
                     continue;
                 },
             };
-            let entity = match self.deserialize(&value_bytes) {
+            let entity = match self.deserialize(&key, &value_bytes) {
                 Ok(v) => v,
                 Err(e) => {
                     log::warn!("Skipping entry with malformed value: {}", e);
@@ -474,7 +476,7 @@ where
                     continue;
                 },
             };
-            let entity = match self.deserialize(&value_bytes) {
+            let entity = match self.deserialize(&key, &value_bytes) {
                 Ok(v) => v,
                 Err(e) => {
                     log::warn!("Skipping entry with malformed value: {}", e);
@@ -518,7 +520,7 @@ where
                     continue;
                 },
             };
-            let entity = match self.deserialize(&value_bytes) {
+            let entity = match self.deserialize(&key, &value_bytes) {
                 Ok(v) => v,
                 Err(e) => {
                     log::warn!("Skipping entry with malformed value: {}", e);
@@ -1042,7 +1044,7 @@ mod tests {
     }
 
     #[test]
-    fn default_kserializable_is_bincode() {
+    fn default_entity_uses_kobj_envelope() {
         let backend: Arc<dyn StorageBackend> = Arc::new(crate::test_utils::InMemoryBackend::new());
         let store = BinaryStore {
             backend,
@@ -1063,7 +1065,8 @@ mod tests {
             .expect("value stored");
 
         assert!(serde_json::from_slice::<JsonValue>(&raw).is_err());
-        let roundtrip = String::decode(&raw).unwrap();
+        assert_eq!(&raw[..4], b"KOBJ");
+        let roundtrip = store.get(&key).unwrap().expect("decoded");
         assert_eq!(roundtrip, value);
     }
 }

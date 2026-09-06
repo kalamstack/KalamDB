@@ -40,7 +40,8 @@ fn smoke_test_provider_exec_models() {
                 "logical_plan | TableScan: system.users",
                 "physical_plan | CooperativeExec",
                 "DeferredBatchExec: source=indexed_system_scan",
-            ]),
+            ],
+        ),
         (
             "view provider",
             "EXPLAIN SELECT * FROM system.datatypes".to_string(),
@@ -48,7 +49,8 @@ fn smoke_test_provider_exec_models() {
                 "logical_plan | TableScan: system.datatypes",
                 "physical_plan | CooperativeExec",
                 "DeferredBatchExec: source=view_scan",
-            ]),
+            ],
+        ),
         (
             "shared provider",
             format!("EXPLAIN SELECT * FROM {}", full_shared_table),
@@ -56,7 +58,8 @@ fn smoke_test_provider_exec_models() {
                 "logical_plan | TableScan: ",
                 "physical_plan | CooperativeExec",
                 "DeferredBatchExec: source=shared_table_scan",
-            ]),
+            ],
+        ),
         (
             "stream provider",
             format!("EXPLAIN SELECT * FROM {}", full_stream_table),
@@ -64,7 +67,8 @@ fn smoke_test_provider_exec_models() {
                 "logical_plan | TableScan: ",
                 "physical_plan | CooperativeExec",
                 "DeferredBatchExec: source=stream_table_scan",
-            ]),
+            ],
+        ),
     ];
 
     for (label, sql, expected_fragments) in explain_queries {

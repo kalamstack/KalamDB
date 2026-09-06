@@ -34,7 +34,8 @@ fn start_login_options_server(
 
                     write!(
                         stream,
-                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: \
+                         close\r\nContent-Length: {}\r\n\r\n{}",
                         body.len(),
                         body
                     )

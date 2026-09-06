@@ -41,13 +41,22 @@ impl SharedDataApplier for ProviderSharedDataApplier {
         table_id: &TableId,
         actor_user_id: Option<&UserId>,
         rows: &[Row],
+        encoded_fields: &[Vec<u8>],
         commit_seq: u64,
     ) -> Result<usize, RaftError> {
+        let rows = crate::applier::ordinal_dml::decode_insert_rows(
+            self.executor.app_context(),
+            table_id,
+            rows,
+            encoded_fields,
+        )
+        .map_err(RaftError::provider)?;
+
         log::debug!("ProviderSharedDataApplier: Inserting into {} ({} rows)", table_id, rows.len());
 
         self.executor
             .dml()
-            .insert_shared_data_with_commit_seq(table_id, actor_user_id, rows, commit_seq)
+            .insert_shared_data_with_commit_seq(table_id, actor_user_id, &rows, commit_seq)
             .await
             .map_err(|e| RaftError::provider(e.to_string()))
     }

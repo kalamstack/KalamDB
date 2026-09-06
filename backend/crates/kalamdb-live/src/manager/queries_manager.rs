@@ -577,6 +577,7 @@ mod tests {
                 compression:  TableCompression::Snappy,
             }),
             table_comment:  None,
+            scalar_indexes: Vec::new(),
             created_at:     chrono::Utc::now(),
             updated_at:     chrono::Utc::now(),
         }
@@ -597,6 +598,7 @@ mod tests {
                 localhost_only:    false,
             }),
             table_comment:  None,
+            scalar_indexes: Vec::new(),
             created_at:     chrono::Utc::now(),
             updated_at:     chrono::Utc::now(),
         }

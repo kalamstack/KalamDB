@@ -11,6 +11,8 @@ keywords = ["kalamdb", "schema", "migration", "sql"]
 categories = ["database"]
 
 [dependencies]
+kalamdb-sql = { package = "kalamdb-dialect", path = "../../../backend/crates/kalamdb-dialect" }
+kalamdb-commons = { path = "../../../backend/crates/kalamdb-commons", default-features = false }
 sqlparser = { workspace = true }
 thiserror = { workspace = true }
 

@@ -27,7 +27,8 @@ fn flush_table_and_wait(full_table: &str, timeout: Duration) {
 fn wait_for_single_compacted_parquet(
     namespace: &str,
     table: &str,
-    timeout: Duration) -> FlushStorageVerificationResult {
+    timeout: Duration,
+) -> FlushStorageVerificationResult {
     let start = Instant::now();
 
     loop {
@@ -175,7 +176,8 @@ fn smoke_test_user_table_flush_manifest() {
         &namespace,
         &table,
         true, // is_user_table
-        "USER table flush manifest test");
+        "USER table flush manifest test",
+    );
 
     println!("✅ Verified manifest.json and parquet files exist after flush");
 }
@@ -254,7 +256,8 @@ fn smoke_test_shared_table_flush_manifest() {
         &namespace,
         &table,
         false, // is_user_table (SHARED)
-        "SHARED table flush manifest test");
+        "SHARED table flush manifest test",
+    );
 
     println!("✅ Verified manifest.json exists for shared table");
 }
@@ -400,7 +403,8 @@ fn smoke_test_post_flush_compaction_rewrites_small_segments() {
 
     if !post_flush_compaction_smoke_enabled() {
         eprintln!(
-            "⚠️  Post-flush compaction smoke disabled; set KALAMDB_TEST_FLUSH_COMPACTION=1 for servers with [flush.compaction].enabled=true."
+            "⚠️  Post-flush compaction smoke disabled; set KALAMDB_TEST_FLUSH_COMPACTION=1 for \
+             servers with [flush.compaction].enabled=true."
         );
         return;
     }

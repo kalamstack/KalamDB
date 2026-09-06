@@ -1,9 +1,8 @@
 use kalamdb_commons::{
     models::{TableId, UserId},
     storage::Partition,
-    storage_key::{encode_key, encode_prefix},
 };
-use kalamdb_store::IndexDefinition;
+use kalamdb_store::{IndexDefinition, PrefixIndex, PrefixIndexedKey, PrefixIndexedValue};
 
 use super::{
     models::{SharedVectorHotOpId, UserVectorHotOpId, VectorHotOp},
@@ -12,77 +11,107 @@ use super::{
     },
 };
 
+impl PrefixIndexedKey for UserVectorHotOpId {
+    fn prefix_index_user_id(&self) -> Option<&UserId> {
+        Some(&self.user_id)
+    }
+
+    fn prefix_index_seq(&self) -> i64 {
+        self.seq.as_i64()
+    }
+}
+
+impl PrefixIndexedKey for SharedVectorHotOpId {
+    fn prefix_index_user_id(&self) -> Option<&UserId> {
+        None
+    }
+
+    fn prefix_index_seq(&self) -> i64 {
+        self.seq.as_i64()
+    }
+}
+
+impl PrefixIndexedValue for VectorHotOp {
+    fn prefix_index_field_bytes(&self, column: &str) -> Option<Vec<u8>> {
+        (column == "pk").then(|| self.pk.as_bytes().to_vec())
+    }
+}
+
 /// Secondary index for user-scoped vector ops by (user_id, pk, seq).
 pub struct UserVectorPkIndex {
-    partition: Partition,
+    inner: PrefixIndex<UserVectorHotOpId, VectorHotOp>,
 }
 
 impl UserVectorPkIndex {
     pub fn new(table_id: &TableId, column_name: &str) -> Self {
         Self {
-            partition: Partition::new(user_vector_pk_index_partition_name(table_id, column_name)),
+            inner: PrefixIndex::new(
+                user_vector_pk_index_partition_name(table_id, column_name),
+                vec!["pk".to_string()],
+                true,
+            ),
         }
     }
 
     pub fn build_prefix(&self, user_id: &UserId, pk: &str) -> Vec<u8> {
-        encode_prefix(&(user_id.as_str(), pk))
+        self.inner.encode_column_prefix(Some(user_id), &[pk.as_bytes().to_vec()])
     }
 }
 
 impl IndexDefinition<UserVectorHotOpId, VectorHotOp> for UserVectorPkIndex {
     fn partition(&self) -> Partition {
-        self.partition.clone()
+        self.inner.partition()
     }
 
     fn indexed_columns(&self) -> Vec<&str> {
-        vec!["pk"]
+        self.inner.indexed_columns()
     }
 
     fn extract_key(
         &self,
         primary_key: &UserVectorHotOpId,
-        _entity: &VectorHotOp,
+        entity: &VectorHotOp,
     ) -> Option<Vec<u8>> {
-        Some(encode_key(&(
-            primary_key.user_id.as_str(),
-            primary_key.pk.as_str(),
-            primary_key.seq.as_i64(),
-        )))
+        self.inner.extract_key(primary_key, entity)
     }
 }
 
 /// Secondary index for shared vector ops by (pk, seq).
 pub struct SharedVectorPkIndex {
-    partition: Partition,
+    inner: PrefixIndex<SharedVectorHotOpId, VectorHotOp>,
 }
 
 impl SharedVectorPkIndex {
     pub fn new(table_id: &TableId, column_name: &str) -> Self {
         Self {
-            partition: Partition::new(shared_vector_pk_index_partition_name(table_id, column_name)),
+            inner: PrefixIndex::new(
+                shared_vector_pk_index_partition_name(table_id, column_name),
+                vec!["pk".to_string()],
+                false,
+            ),
         }
     }
 
     pub fn build_prefix(&self, pk: &str) -> Vec<u8> {
-        encode_prefix(&(pk,))
+        self.inner.encode_column_prefix(None, &[pk.as_bytes().to_vec()])
     }
 }
 
 impl IndexDefinition<SharedVectorHotOpId, VectorHotOp> for SharedVectorPkIndex {
     fn partition(&self) -> Partition {
-        self.partition.clone()
+        self.inner.partition()
     }
 
     fn indexed_columns(&self) -> Vec<&str> {
-        vec!["pk"]
+        self.inner.indexed_columns()
     }
 
     fn extract_key(
         &self,
         primary_key: &SharedVectorHotOpId,
-        _entity: &VectorHotOp,
+        entity: &VectorHotOp,
     ) -> Option<Vec<u8>> {
-        Some(encode_key(&(primary_key.pk.as_str(), primary_key.seq.as_i64())))
+        self.inner.extract_key(primary_key, entity)
     }
 }
 

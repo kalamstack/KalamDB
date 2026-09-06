@@ -3,7 +3,9 @@ use std::collections::BTreeSet;
 use crate::{
     emitter::{
         add_column::emit_add_column,
+        create_index::emit_create_index,
         drop_column::emit_drop_column,
+        drop_index::emit_drop_index,
         flush_policy::emit_flush_policy_change,
         modify_column::emit_modify_column,
         set_tblproperties::{emit_removed_option_comments, emit_set_tblproperties},
@@ -75,6 +77,25 @@ pub(super) fn diff_existing_table(
         if !target.columns.contains_key(column_key) {
             let current_column = current.columns.get(column_key).expect("current column exists");
             emit_drop_column(target, current_column, allow_drop, out);
+        }
+    }
+
+    for (index_key, target_index) in &target.indexes {
+        match current.indexes.get(index_key) {
+            Some(current_index) if current_index.signature() == target_index.signature() => {},
+            Some(current_index) => {
+                emit_drop_index(target, current_index, allow_drop, out);
+                out.push(emit_create_index(target, target_index));
+            },
+            None => {
+                out.push(emit_create_index(target, target_index));
+            },
+        }
+    }
+
+    for (index_key, current_index) in &current.indexes {
+        if !target.indexes.contains_key(index_key) {
+            emit_drop_index(target, current_index, allow_drop, out);
         }
     }
 

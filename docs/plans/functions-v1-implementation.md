@@ -977,8 +977,13 @@ Observability:
 
 ### Checkpoint C
 
-- Generated client/REST → procedure → nested DB/topic work → typed result succeeds end-to-end.
-- Rollback, cancellation, EXECUTE permissions, routine security modes, one-group limits, and typed binary serialization are proven.
+Proven (2026-09-06) by `kobj_functions_checkpoint_c_call_nested_db_and_topic`:
+
+- SQL `CALL` and REST `POST /v1/functions/{schema}/{procedure}` return typed results.
+- Nested `ctx.functions.call` + `ctx.db.sql` INSERT + `ctx.topics.publish` commit together.
+- Nested errors include the host stack (`wrap_boom` → `boom`).
+- `BEGIN; CALL; ROLLBACK` drops the nested INSERT and the staged typed publish.
+- `GRANT`/`REVOKE EXECUTE` for `Role::User` allows then denies CALL.
 
 ### Task 10: Implement durable trigger delivery
 

@@ -1043,6 +1043,29 @@ The migration is complete only when all of the following are true:
 
 ---
 
+## Phase 0 inventory (2026-09-05)
+
+Wave 1 recorded callsites. Baseline encode/decode benches stay on Phase 8; this inventory classifies persistence vs wire vs test.
+
+| Location | Kind | Notes |
+| --- | --- | --- |
+| `kalamdb-commons/src/serialization*` | persisted object (legacy) | Envelope + row FlatBuffers; move/delete in Phases 2–7 |
+| `kalamdb-commons` schema models (`table_definition`, column types) | persisted object | FlexBuffers via `KSerializable` |
+| `kalamdb-store` `entity_store` / `index/secondary_index` | persisted object | JSON index values; EntityStore delegates to models |
+| `kalamdb-system` provider models | persisted object | FlexBuffers/JSON per model |
+| `kalamdb-publisher/src/payload.rs` | persisted object | Topic payload JSON |
+| `kalamdb-streams/src/file_store.rs` | persisted object | Direct FlexBuffers |
+| `kalamdb-raft/src/codec/command_codec.rs` | persisted object | FlexBuffers commands |
+| `kalamdb-raft/src/state_machine/serde_helpers.rs` | persisted object | MessagePack |
+| `kalamdb-commons/src/websocket.rs`, `kalamdb-api` | external/public wire | Allowed exception |
+| `kalamdb-auth` JWT/JSON | external/public wire | Allowed exception |
+| `**/tests/**`, `*_tests.rs` | test only | Allowed exception |
+| `kalamdb-serialization` | approved codec crate | Wave 1 home |
+
+CI: `python3 scripts/check-serialization-boundary.py` (report-only). `--fail` becomes blocking in Phase 7.
+
+---
+
 ## 20. Vortex Learnings Retained
 
 Vortex remains a design reference rather than a file-format dependency in this phase.

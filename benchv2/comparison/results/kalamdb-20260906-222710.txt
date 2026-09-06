@@ -1,0 +1,16 @@
+# KalamDB comparison (hot-only, tuned RocksDB/cache)
+# server_bin=/Users/jamal/git/KalamDB/target/release/kalamdb-server
+# flush.check_interval_seconds=0
+# table created without FLUSH_POLICY
+# rocksdb.block_cache=1GiB hot_data.write_buffer=128MiB
+# datafusion query_parallelism=2 max_partitions=1 batch_size=128
+# sql=parameterized; no multi-row batch (matches TB/PB one-row HTTP)
+# timed_read_response=bytes; HTTP status validation only (matches TB/PB)
+# http2_prior_knowledge=0
+# schema_response_cache=on; hot_only_pk_skip_cold=on
+# started=2026-09-06T19:27:10Z
+negotiated_http_version=HTTP/1.1
+logged in to http://127.0.0.1:2900
+mode=hot-only (no FLUSH_POLICY, flush scheduler disabled)
+sql=parameterized ($1..) for plan-cache reuse
+timed_read_response=bytes (HTTP status validation only; matches TB/PB)

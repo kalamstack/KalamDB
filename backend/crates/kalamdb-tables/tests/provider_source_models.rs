@@ -37,9 +37,9 @@ use kalamdb_system::{
 };
 use kalamdb_tables::{
     new_indexed_shared_table_store, new_indexed_user_table_store, new_stream_table_store,
-    utils::TableServices, BaseTableProvider, SharedTableProvider, SharedTableRow,
-    StreamTableProvider, StreamTableStorageMode, StreamTableStoreConfig, TableProviderCore,
-    UserTableProvider, UserTableRow,
+    storage_schema_for_table, utils::TableServices, BaseTableProvider, SharedTableProvider,
+    SharedTableRow, StreamTableProvider, StreamTableStorageMode, StreamTableStoreConfig,
+    TableProviderCore, UserTableProvider, UserTableRow,
 };
 use kalamdb_transactions::{
     CommitSequenceSource, TransactionAccessError, TransactionAccessValidator,
@@ -539,6 +539,7 @@ async fn stream_provider_scan_uses_deferred_batch_exec_and_returns_rows() {
             ttl_seconds:       Some(3_600),
             storage_mode:      StreamTableStorageMode::Memory,
         },
+        storage_schema_for_table(&table_def).expect("stream storage schema"),
     ));
     let provider = Arc::new(StreamTableProvider::new(
         Arc::new(TableProviderCore::new(
@@ -604,7 +605,14 @@ async fn user_provider_scan_uses_deferred_batch_exec_and_returns_rows() {
     let table_id = TableId::new(NamespaceId::new("app"), TableName::new("users_exec_plain"));
     let table_def = build_user_table_definition(&table_id);
     let services = build_services(Arc::clone(&table_def), Arc::clone(&backend));
-    let store = Arc::new(new_indexed_user_table_store(Arc::clone(&backend), &table_id, "id"));
+    let store = Arc::new(new_indexed_user_table_store(
+        Arc::clone(&backend),
+        &table_id,
+        "id",
+        storage_schema_for_table(&table_def).expect("user storage schema"),
+        &table_def.scalar_indexes,
+        &table_def.columns,
+    ));
     let provider = Arc::new(UserTableProvider::new(
         Arc::new(TableProviderCore::new(
             table_def,
@@ -674,7 +682,14 @@ async fn user_provider_dba_session_reads_only_subject_rows() {
     let table_id = TableId::new(NamespaceId::new("app"), TableName::new("users_exec_scoped"));
     let table_def = build_user_table_definition(&table_id);
     let services = build_services(Arc::clone(&table_def), Arc::clone(&backend));
-    let store = Arc::new(new_indexed_user_table_store(Arc::clone(&backend), &table_id, "id"));
+    let store = Arc::new(new_indexed_user_table_store(
+        Arc::clone(&backend),
+        &table_id,
+        "id",
+        storage_schema_for_table(&table_def).expect("user storage schema"),
+        &table_def.scalar_indexes,
+        &table_def.columns,
+    ));
     let provider = UserTableProvider::new(
         Arc::new(TableProviderCore::new(
             table_def,
@@ -744,7 +759,14 @@ async fn user_provider_delete_only_tombstones_subject_row() {
         TableId::new(NamespaceId::new("app"), TableName::new("users_exec_delete_scoped"));
     let table_def = build_user_table_definition(&table_id);
     let services = build_services(Arc::clone(&table_def), Arc::clone(&backend));
-    let store = Arc::new(new_indexed_user_table_store(Arc::clone(&backend), &table_id, "id"));
+    let store = Arc::new(new_indexed_user_table_store(
+        Arc::clone(&backend),
+        &table_id,
+        "id",
+        storage_schema_for_table(&table_def).expect("user storage schema"),
+        &table_def.scalar_indexes,
+        &table_def.columns,
+    ));
     let provider = UserTableProvider::new(
         Arc::new(TableProviderCore::new(
             table_def,
@@ -825,7 +847,14 @@ async fn user_provider_scan_with_overlay_uses_transaction_overlay_exec() {
     let table_id = TableId::new(NamespaceId::new("app"), TableName::new("users_exec"));
     let table_def = build_user_table_definition(&table_id);
     let services = build_services(Arc::clone(&table_def), Arc::clone(&backend));
-    let store = Arc::new(new_indexed_user_table_store(Arc::clone(&backend), &table_id, "id"));
+    let store = Arc::new(new_indexed_user_table_store(
+        Arc::clone(&backend),
+        &table_id,
+        "id",
+        storage_schema_for_table(&table_def).expect("user storage schema"),
+        &table_def.scalar_indexes,
+        &table_def.columns,
+    ));
     let provider = UserTableProvider::new(
         Arc::new(TableProviderCore::new(
             table_def,
@@ -885,7 +914,14 @@ async fn shared_provider_scan_uses_deferred_batch_exec_and_returns_rows() {
     let table_id = TableId::new(NamespaceId::new("app"), TableName::new("shared_exec_plain"));
     let table_def = build_shared_table_definition(&table_id);
     let services = build_services(Arc::clone(&table_def), Arc::clone(&backend));
-    let store = Arc::new(new_indexed_shared_table_store(Arc::clone(&backend), &table_id, "id"));
+    let store = Arc::new(new_indexed_shared_table_store(
+        Arc::clone(&backend),
+        &table_id,
+        "id",
+        storage_schema_for_table(&table_def).expect("shared storage schema"),
+        &table_def.scalar_indexes,
+        &table_def.columns,
+    ));
     let provider = Arc::new(SharedTableProvider::new(
         Arc::new(TableProviderCore::new(
             table_def,
@@ -954,7 +990,14 @@ async fn shared_provider_scan_with_overlay_uses_transaction_overlay_exec() {
     let table_id = TableId::new(NamespaceId::new("app"), TableName::new("shared_exec"));
     let table_def = build_shared_table_definition(&table_id);
     let services = build_services(Arc::clone(&table_def), Arc::clone(&backend));
-    let store = Arc::new(new_indexed_shared_table_store(Arc::clone(&backend), &table_id, "id"));
+    let store = Arc::new(new_indexed_shared_table_store(
+        Arc::clone(&backend),
+        &table_id,
+        "id",
+        storage_schema_for_table(&table_def).expect("shared storage schema"),
+        &table_def.scalar_indexes,
+        &table_def.columns,
+    ));
     let provider = SharedTableProvider::new(
         Arc::new(TableProviderCore::new(
             table_def,

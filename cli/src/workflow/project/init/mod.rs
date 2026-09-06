@@ -261,7 +261,8 @@ fn build_config(
         targets.insert(
             language.clone(),
             SchemaTarget {
-                output: output.into(),
+                output:            output.into(),
+                unqualified_names: false,
             },
         );
     }

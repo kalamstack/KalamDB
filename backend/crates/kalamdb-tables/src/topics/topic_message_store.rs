@@ -11,8 +11,8 @@
 
 use std::sync::Arc;
 
-use kalamdb_commons::{models::TopicId, storage::Partition, KSerializable, StorageKey};
-use kalamdb_store::{EntityStore, Operation, StorageBackend};
+use kalamdb_commons::{models::TopicId, storage::Partition, StorageKey};
+use kalamdb_store::{decode_entity, encode_entity, EntityStore, Operation, StorageBackend};
 
 use crate::topics::topic_message_models::{
     TopicMessage, TopicMessageId, TopicRetentionDeletionStats, TopicRetentionIndexEntry,
@@ -98,11 +98,11 @@ impl TopicMessageStore {
     ) -> kalamdb_store::storage_trait::Result<u64> {
         let msg_id = message.id();
         let key_encoded = msg_id.storage_key();
-        let value_encoded = message.encode()?;
+        let value_encoded = encode_entity(message)?;
         let message_bytes = value_encoded.len() as u64;
         let retention_entry = TopicRetentionIndexEntry::new(message, message_bytes);
         let retention_key = retention_entry.retention_key().storage_key();
-        let retention_value = retention_entry.encode()?;
+        let retention_value = encode_entity(&retention_entry)?;
 
         self.backend().batch(vec![
             Operation::Put {
@@ -223,7 +223,7 @@ impl TopicMessageStore {
             operations.push(Operation::Put {
                 partition: retention_partition.clone(),
                 key:       retention_entry.retention_key().storage_key(),
-                value:     retention_entry.encode()?,
+                value:     encode_entity(&retention_entry)?,
             });
         }
 
@@ -315,7 +315,7 @@ impl TopicMessageStore {
         iter.map(|(key_bytes, value_bytes)| {
             let key = TopicRetentionIndexKey::from_storage_key(&key_bytes)
                 .map_err(kalamdb_store::StorageError::SerializationError)?;
-            let entry = TopicRetentionIndexEntry::decode(&value_bytes)?;
+            let entry = decode_entity(&value_bytes)?;
             Ok((key, entry))
         })
         .collect()

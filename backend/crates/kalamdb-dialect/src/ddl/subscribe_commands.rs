@@ -49,7 +49,6 @@
 //!   }
 //! }
 //! ```
-//! ```
 
 use kalamdb_commons::{websocket::SubscriptionOptions, NamespaceId, TableName};
 use sqlparser::{
@@ -165,14 +164,13 @@ impl SubscribeStatement {
             return Err("SUBSCRIBE TO requires direct table reference".to_string());
         };
 
-        // Extract namespace.table from ObjectName
-        // Use "default" as fallback for unqualified table names
-        let (namespace, table_name) = Self::extract_namespace_table(name, "default")?;
+        let (namespace, table_name) =
+            Self::extract_namespace_table(name, &NamespaceId::default_ns())?;
 
         Ok(SubscribeStatement {
             select_query: select_sql,
-            namespace: NamespaceId::from(namespace),
-            table_name: TableName::from(table_name),
+            namespace,
+            table_name,
             options,
         })
     }
@@ -261,19 +259,10 @@ impl SubscribeStatement {
             .is_none_or(|ch| !ch.is_ascii_alphanumeric() && ch != '_')
     }
 
-    /// Extract namespace and table name from ObjectName.
-    /// Extract namespace and table from ObjectName.
-    ///
-    /// # Arguments
-    /// * `name` - The ObjectName from sqlparser
-    /// * `default_namespace` - The namespace to use for unqualified table names
-    ///
-    /// # Returns
-    /// (namespace, table_name) tuple
     fn extract_namespace_table(
         name: &ObjectName,
-        default_namespace: &str,
-    ) -> DdlResult<(String, String)> {
+        default_namespace: &NamespaceId,
+    ) -> DdlResult<(NamespaceId, TableName)> {
         let parts: Vec<String> = name
             .0
             .iter()
@@ -284,10 +273,9 @@ impl SubscribeStatement {
             .collect();
 
         if parts.len() == 2 {
-            Ok((parts[0].clone(), parts[1].clone()))
+            Ok((NamespaceId::new(parts[0].as_str()), TableName::from(parts[1].clone())))
         } else if parts.len() == 1 {
-            // Unqualified table name: use default namespace
-            Ok((default_namespace.to_string(), parts[0].clone()))
+            Ok((default_namespace.clone(), TableName::from(parts[0].clone())))
         } else {
             Err(format!("Invalid table reference: expected [namespace.]table, got {}", name))
         }

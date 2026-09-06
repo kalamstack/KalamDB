@@ -10,8 +10,8 @@ mod workflow;
 
 use parsers::parse_watch_interval;
 pub use workflow::{
-    DbArgs, DbCommand, DeployArgs, DevArgs, DevCommand, InitArgs, LinkArgs, MigrationArgs,
-    MigrationCommand, SchemaArgs, SchemaCommand, StatusArgs,
+    DbArgs, DbCommand, DeployArgs, DevArgs, DevCommand, FunctionsArgs, FunctionsCommand, InitArgs,
+    LinkArgs, MigrationArgs, MigrationCommand, SchemaArgs, SchemaCommand, StatusArgs,
 };
 
 // Build information - Create a static version string at compile time
@@ -322,6 +322,9 @@ pub enum CliCommand {
 
     /// Apply migrations and health checks for a deployment
     Deploy(DeployArgs),
+
+    /// Build, inspect, and roll back project procedures
+    Functions(FunctionsArgs),
 }
 
 #[derive(Args, Debug, Clone)]

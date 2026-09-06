@@ -1,7 +1,7 @@
 //! Shared-table RLS orchestration: policy binding, membership loading, and scan authorization.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -10,8 +10,7 @@ use std::{
 
 use datafusion::{
     error::{DataFusionError, Result as DataFusionResult},
-    logical_expr::Expr,
-    scalar::ScalarValue,
+    logical_expr::{col, lit, Expr},
 };
 use kalamdb_commons::{
     ids::SharedTableRowId,
@@ -196,20 +195,8 @@ impl SharedTableAuthorization {
         principal: &UserId,
         snapshot_commit_seq: Option<u64>,
     ) -> Result<AuthorizationSet, KalamDbError> {
-        if relation_provider.core.primary_key_column_id() == relation.principal_column {
-            if let Ok(pk_scalar) = principal_pk_scalar(relation_provider, principal) {
-                let rows = match relation_provider.find_by_pk(&pk_scalar).await? {
-                    Some((_, row)) => vec![row.fields],
-                    None => Vec::new(),
-                };
-                return Ok(AuthorizationSet::from_relation_rows(
-                    relation.clone(),
-                    relation_table,
-                    principal,
-                    rows.iter(),
-                ));
-            }
-        }
+        let principal_filter =
+            indexed_principal_filter(relation_provider, relation_table, relation, principal);
 
         let mut required_column_ids = relation.relation_keys.clone();
         required_column_ids.push(relation.principal_column);
@@ -234,7 +221,7 @@ impl SharedTableAuthorization {
         let relation_rows = relation_provider
             .scan_with_version_resolution_to_kvs_async(
                 base::system_user_id(),
-                None,
+                principal_filter.as_ref(),
                 None,
                 None,
                 false,
@@ -242,6 +229,30 @@ impl SharedTableAuthorization {
                 snapshot_commit_seq,
             )
             .await?;
+        if principal_filter.is_some() {
+            // Prefix scan can return stale versions after the principal column
+            // changes. Resolve each PK to the live winner before binding.
+            let pk_name = relation_provider.primary_key_field_name();
+            let mut seen = HashSet::new();
+            let mut winners = Vec::new();
+            for (_, row) in &relation_rows {
+                let Some(pk) = row.fields.get(pk_name) else {
+                    continue;
+                };
+                if !seen.insert(pk.clone()) {
+                    continue;
+                }
+                if let Some((_, winner)) = relation_provider.find_by_pk(pk).await? {
+                    winners.push(winner.fields);
+                }
+            }
+            return Ok(AuthorizationSet::from_relation_rows(
+                relation.clone(),
+                relation_table,
+                principal,
+                winners.iter(),
+            ));
+        }
         Ok(AuthorizationSet::from_relation_rows(
             relation.clone(),
             relation_table,
@@ -552,17 +563,33 @@ fn append_policy_explain(details: &str, policies: &BoundTablePolicies) -> String
     }
 }
 
-fn principal_pk_scalar(
+fn indexed_principal_filter(
     relation_provider: &SharedTableProvider,
+    relation_table: &kalamdb_commons::schemas::TableDefinition,
+    relation: &AuthorizationRelation,
     principal: &UserId,
-) -> Result<ScalarValue, KalamDbError> {
-    let pk_name = relation_provider.primary_key_field_name();
+) -> Option<Expr> {
+    let indexed = relation_table.scalar_indexes.iter().any(|index| {
+        index
+            .columns
+            .first()
+            .is_some_and(|column_id| column_id.as_u64() == relation.principal_column)
+    });
+    if !indexed {
+        return None;
+    }
+    let column = relation_table
+        .columns
+        .iter()
+        .find(|column| column.column_id == relation.principal_column)?;
     let data_type = relation_provider
         .schema_ref()
-        .field_with_name(pk_name)
-        .map_err(|error| KalamDbError::InvalidOperation(error.to_string()))?
+        .field_with_name(&column.column_name)
+        .ok()?
         .data_type()
         .clone();
-    kalamdb_commons::conversions::parse_string_as_scalar(principal.as_str(), &data_type)
-        .map_err(KalamDbError::InvalidOperation)
+    let scalar =
+        kalamdb_commons::conversions::parse_string_as_scalar(principal.as_str(), &data_type)
+            .ok()?;
+    Some(col(column.column_name.as_str()).eq(lit(scalar)))
 }

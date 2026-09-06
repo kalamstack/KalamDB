@@ -1,10 +1,9 @@
+use super::common::{should_run_minio_storage_tests, *};
 use crate::common::{
     default_password, default_username, execute_sql_as_root_via_cli, execute_sql_via_http_as,
     generate_unique_namespace, generate_unique_table, get_access_token, leader_or_server_url,
     shared_http_client,
 };
-
-use super::common::{should_run_minio_storage_tests, *};
 
 #[test]
 fn test_minio_file_datatype_roundtrip() {
@@ -22,7 +21,8 @@ fn test_minio_file_datatype_roundtrip() {
     execute_sql_as_root_via_cli(&format!("CREATE NAMESPACE {}", namespace))
         .expect("namespace creation");
     execute_sql_as_root_via_cli(&format!(
-        "CREATE TABLE {} (id TEXT PRIMARY KEY, name TEXT, attachment FILE) WITH (TYPE='SHARED', STORAGE_ID='{}', FLUSH_POLICY='rows:1')",
+        "CREATE TABLE {} (id TEXT PRIMARY KEY, name TEXT, attachment FILE) WITH (TYPE='SHARED', \
+         STORAGE_ID='{}', FLUSH_POLICY='rows:1')",
         full_table, storage_id
     ))
     .expect("file table creation");
@@ -33,7 +33,8 @@ fn test_minio_file_datatype_roundtrip() {
         .expect("access token");
     let client = shared_http_client();
     let sql = format!(
-        "INSERT INTO {} (id, name, attachment) VALUES ('doc1', 'My Document', FILE(\"myfile.txt\"))",
+        "INSERT INTO {} (id, name, attachment) VALUES ('doc1', 'My Document', \
+         FILE(\"myfile.txt\"))",
         full_table
     );
     let test_content = b"This is the file content for testing FILE datatype!".to_vec();

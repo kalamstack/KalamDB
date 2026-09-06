@@ -9,13 +9,16 @@ use std::sync::Arc;
 
 use arrow_schema::{Field, Schema as ArrowSchema};
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{
+    de::{self, SeqAccess, Visitor},
+    Deserialize, Deserializer, Serialize, Serializer,
+};
 
 use crate::{
     conversions::{with_kalam_column_flags_metadata, with_kalam_data_type_metadata},
     models::{
         datatypes::{ArrowConversionError, ToArrowType},
-        schemas::{ColumnDefinition, SchemaField, TableOptions, TableType},
+        schemas::{ColumnDefinition, ScalarIndexDefinition, SchemaField, TableOptions, TableType},
     },
     NamespaceId, TableName,
 };
@@ -57,6 +60,9 @@ pub struct TableDefinition {
     /// Table comment/description
     pub table_comment: Option<String>,
 
+    /// Scalar secondary indexes (non-unique by default). Empty when omitted.
+    pub scalar_indexes: Vec<ScalarIndexDefinition>,
+
     /// Creation timestamp
     pub created_at: DateTime<Utc>,
 
@@ -74,6 +80,8 @@ struct TableDefinitionRepr {
     next_column_id: u64,
     table_options:  TableOptions,
     table_comment:  Option<String>,
+    #[serde(default)]
+    scalar_indexes: Vec<ScalarIndexDefinition>,
     created_at:     DateTime<Utc>,
     updated_at:     DateTime<Utc>,
 }
@@ -89,10 +97,23 @@ impl From<&TableDefinition> for TableDefinitionRepr {
             next_column_id: table.next_column_id,
             table_options:  table.table_options.clone(),
             table_comment:  table.table_comment.clone(),
+            scalar_indexes: table.scalar_indexes.clone(),
             created_at:     table.created_at,
             updated_at:     table.updated_at,
         }
     }
+}
+
+#[derive(PartialEq, Serialize)]
+struct SemanticSchema<'a> {
+    namespace_id:   &'a NamespaceId,
+    table_name:     &'a TableName,
+    table_type:     TableType,
+    columns:        &'a [ColumnDefinition],
+    next_column_id: u64,
+    table_options:  &'a TableOptions,
+    table_comment:  &'a Option<String>,
+    scalar_indexes: &'a [ScalarIndexDefinition],
 }
 
 impl From<TableDefinitionRepr> for TableDefinition {
@@ -106,9 +127,55 @@ impl From<TableDefinitionRepr> for TableDefinition {
             next_column_id: value.next_column_id,
             table_options:  value.table_options,
             table_comment:  value.table_comment,
+            scalar_indexes: value.scalar_indexes,
             created_at:     value.created_at,
             updated_at:     value.updated_at,
         }
+    }
+}
+
+struct BinaryTableDefinitionVisitor;
+
+impl<'de> Visitor<'de> for BinaryTableDefinitionVisitor {
+    type Value = TableDefinition;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("table definition tuple")
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        let namespace_id =
+            seq.next_element()?.ok_or_else(|| de::Error::invalid_length(0, &self))?;
+        let table_name = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(1, &self))?;
+        let table_type = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(2, &self))?;
+        let columns = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(3, &self))?;
+        let schema_version =
+            seq.next_element()?.ok_or_else(|| de::Error::invalid_length(4, &self))?;
+        let next_column_id =
+            seq.next_element()?.ok_or_else(|| de::Error::invalid_length(5, &self))?;
+        let table_options =
+            seq.next_element()?.ok_or_else(|| de::Error::invalid_length(6, &self))?;
+        let table_comment =
+            seq.next_element()?.ok_or_else(|| de::Error::invalid_length(7, &self))?;
+        let created_at = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(8, &self))?;
+        let updated_at = seq.next_element()?.ok_or_else(|| de::Error::invalid_length(9, &self))?;
+        let scalar_indexes = seq.next_element()?.unwrap_or_default();
+        Ok(TableDefinition {
+            namespace_id,
+            table_name,
+            table_type,
+            columns,
+            schema_version,
+            next_column_id,
+            table_options,
+            table_comment,
+            scalar_indexes,
+            created_at,
+            updated_at,
+        })
     }
 }
 
@@ -131,6 +198,7 @@ impl Serialize for TableDefinition {
                 &self.table_comment,
                 &self.created_at,
                 &self.updated_at,
+                &self.scalar_indexes,
             )
                 .serialize(serializer)
         }
@@ -146,44 +214,7 @@ impl<'de> Deserialize<'de> for TableDefinition {
             let repr = TableDefinitionRepr::deserialize(deserializer)?;
             Ok(repr.into())
         } else {
-            type BinaryTuple = (
-                NamespaceId,
-                TableName,
-                TableType,
-                Vec<ColumnDefinition>,
-                u32,
-                u64,
-                TableOptions,
-                Option<String>,
-                DateTime<Utc>,
-                DateTime<Utc>,
-            );
-
-            let (
-                namespace_id,
-                table_name,
-                table_type,
-                columns,
-                schema_version,
-                next_column_id,
-                table_options,
-                table_comment,
-                created_at,
-                updated_at,
-            ): BinaryTuple = BinaryTuple::deserialize(deserializer)?;
-
-            Ok(Self {
-                namespace_id,
-                table_name,
-                table_type,
-                columns,
-                schema_version,
-                next_column_id,
-                table_options,
-                table_comment,
-                created_at,
-                updated_at,
-            })
+            deserializer.deserialize_seq(BinaryTableDefinitionVisitor)
         }
     }
 }
@@ -239,6 +270,7 @@ impl TableDefinition {
             next_column_id,
             table_options,
             table_comment,
+            scalar_indexes: Vec::new(),
             created_at: now,
             updated_at: now,
         })
@@ -398,6 +430,34 @@ impl TableDefinition {
         Ok(removed)
     }
 
+    fn semantic_schema(&self) -> SemanticSchema<'_> {
+        SemanticSchema {
+            namespace_id:   &self.namespace_id,
+            table_name:     &self.table_name,
+            table_type:     self.table_type,
+            columns:        &self.columns,
+            next_column_id: self.next_column_id,
+            table_options:  &self.table_options,
+            table_comment:  &self.table_comment,
+            scalar_indexes: &self.scalar_indexes,
+        }
+    }
+
+    /// Compare schema identity, ignoring `schema_version` and timestamps.
+    ///
+    /// Restarts rebuild in-memory definitions with `Utc::now()`, so full
+    /// [`PartialEq`] is the wrong check for "did this table actually change?".
+    pub fn semantically_equal(&self, other: &Self) -> bool {
+        self.semantic_schema() == other.semantic_schema()
+    }
+
+    /// Stable JSON of semantic schema fields for catalog reconcile markers.
+    pub fn semantic_reconcile_bytes(defs: &[&Self]) -> Result<Vec<u8>, String> {
+        let rows: Vec<SemanticSchema<'_>> =
+            defs.iter().copied().map(Self::semantic_schema).collect();
+        serde_json::to_vec(&rows).map_err(|error| error.to_string())
+    }
+
     /// Get the names of primary key columns, sorted by ordinal position
     ///
     /// Returns an empty vector if no primary key columns are defined.
@@ -422,10 +482,7 @@ impl TableDefinition {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        models::{datatypes::KalamDataType, schemas::ColumnDefault},
-        NamespaceId, TableName,
-    };
+    use crate::{models::datatypes::KalamDataType, NamespaceId, TableName};
 
     fn sample_columns() -> Vec<ColumnDefinition> {
         vec![
@@ -691,34 +748,6 @@ mod tests {
     }
 
     #[test]
-    fn test_flexbuffers_roundtrip() {
-        let mut columns = sample_columns();
-        columns[1].default_value = ColumnDefault::literal(serde_json::json!({
-            "kind": "text",
-            "value": "default",
-        }));
-
-        let table = TableDefinition::new(
-            NamespaceId::default(),
-            TableName::new("users"),
-            TableType::Shared,
-            columns,
-            TableOptions::shared(),
-            Some("Test table".to_string()),
-        )
-        .unwrap();
-        let bytes = flexbuffers::to_vec(&table).expect("encode table definition");
-        let decoded: TableDefinition =
-            flexbuffers::from_slice(&bytes).expect("decode table definition");
-
-        assert_eq!(decoded.table_name, table.table_name);
-        assert_eq!(decoded.columns.len(), table.columns.len());
-        assert_eq!(decoded.table_options, table.table_options);
-        assert_eq!(decoded.table_comment, table.table_comment);
-        assert_eq!(decoded.columns[1].default_value, table.columns[1].default_value);
-    }
-
-    #[test]
     fn test_get_primary_key_columns_single() {
         let columns = vec![
             ColumnDefinition::primary_key(1, "id", 1, KalamDataType::BigInt),
@@ -761,6 +790,120 @@ mod tests {
 
         let pk_columns = table.get_primary_key_columns();
         assert!(pk_columns.is_empty());
+    }
+
+    #[test]
+    fn scalar_indexes_roundtrip_json_and_default_to_empty() {
+        let mut table = TableDefinition::new_with_defaults(
+            NamespaceId::default(),
+            TableName::new("messages"),
+            TableType::Shared,
+            sample_columns(),
+            None,
+        )
+        .unwrap();
+        table.scalar_indexes = vec![
+            ScalarIndexDefinition::new(
+                "messages_conversation_id",
+                vec![crate::models::ColumnId::new(2)],
+                false,
+            ),
+            ScalarIndexDefinition::new(
+                "messages_created_at",
+                vec![
+                    crate::models::ColumnId::new(2),
+                    crate::models::ColumnId::new(3),
+                ],
+                false,
+            ),
+        ];
+
+        let json = serde_json::to_string(&table).unwrap();
+        let decoded: TableDefinition = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.scalar_indexes, table.scalar_indexes);
+        assert!(!decoded.scalar_indexes[1].unique);
+
+        let mut omitted = serde_json::from_str::<serde_json::Value>(&json).unwrap();
+        omitted.as_object_mut().unwrap().remove("scalar_indexes");
+        let without_field: TableDefinition = serde_json::from_value(omitted).unwrap();
+        assert!(without_field.scalar_indexes.is_empty());
+    }
+
+    #[test]
+    fn scalar_indexes_resolve_renamed_column_by_id() {
+        let mut table = TableDefinition::new_with_defaults(
+            NamespaceId::default(),
+            TableName::new("messages"),
+            TableType::Shared,
+            sample_columns(),
+            None,
+        )
+        .unwrap();
+        table.scalar_indexes = vec![ScalarIndexDefinition::new(
+            "idx_name",
+            vec![crate::models::ColumnId::new(2)],
+            false,
+        )];
+        table.columns[1].column_name = "title".to_string();
+        assert_eq!(
+            table.scalar_indexes[0].resolved_column_names(&table.columns),
+            Some(vec!["title"])
+        );
+    }
+
+    #[test]
+    fn semantically_equal_ignores_timestamps_and_schema_version() {
+        let mut current = TableDefinition::new_with_defaults(
+            NamespaceId::default(),
+            TableName::new("users"),
+            TableType::User,
+            sample_columns(),
+            Some("User table".to_string()),
+        )
+        .unwrap();
+        let expected = current.clone();
+        current.schema_version = 9;
+        current.created_at -= chrono::Duration::seconds(30);
+        current.updated_at -= chrono::Duration::seconds(5);
+
+        assert_ne!(current, expected);
+        assert!(current.semantically_equal(&expected));
+    }
+
+    #[test]
+    fn semantically_equal_detects_column_changes() {
+        let current = TableDefinition::new_with_defaults(
+            NamespaceId::default(),
+            TableName::new("users"),
+            TableType::User,
+            sample_columns(),
+            None,
+        )
+        .unwrap();
+        let mut expected = current.clone();
+        expected.columns[1].column_name = "title".to_string();
+
+        assert!(!current.semantically_equal(&expected));
+    }
+
+    #[test]
+    fn semantic_reconcile_bytes_are_stable_across_timestamps() {
+        let mut first = TableDefinition::new_with_defaults(
+            NamespaceId::default(),
+            TableName::new("users"),
+            TableType::User,
+            sample_columns(),
+            None,
+        )
+        .unwrap();
+        let second = first.clone();
+        first.created_at -= chrono::Duration::days(1);
+        first.updated_at -= chrono::Duration::hours(3);
+        first.schema_version = 4;
+
+        let left = TableDefinition::semantic_reconcile_bytes(&[&first]).unwrap();
+        let right = TableDefinition::semantic_reconcile_bytes(&[&second]).unwrap();
+        assert_eq!(left, right);
     }
 }
 

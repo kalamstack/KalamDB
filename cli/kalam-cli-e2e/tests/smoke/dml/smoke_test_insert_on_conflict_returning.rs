@@ -11,7 +11,7 @@ use serde_json::Value;
 use crate::common::*;
 
 struct UsersFixture {
-    namespace: String,
+    namespace:  String,
     full_table: String,
 }
 
@@ -25,8 +25,7 @@ impl UsersFixture {
             .expect("create namespace should succeed");
 
         let create_sql = format!(
-            "CREATE TABLE {} (id BIGINT PRIMARY KEY, name TEXT, age INT) \
-             WITH (TYPE='SHARED')",
+            "CREATE TABLE {} (id BIGINT PRIMARY KEY, name TEXT, age INT) WITH (TYPE='SHARED')",
             full_table
         );
         execute_sql_as_root_via_client(&create_sql)
@@ -239,9 +238,8 @@ fn smoke_on_conflict_do_update_returning_star() {
     ));
 
     let sql = format!(
-        "INSERT INTO {} (id, name, age) VALUES (1, 'Nader Updated', 5) \
-         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, age = EXCLUDED.age \
-         RETURNING *",
+        "INSERT INTO {} (id, name, age) VALUES (1, 'Nader Updated', 5) ON CONFLICT (id) DO UPDATE \
+         SET name = EXCLUDED.name, age = EXCLUDED.age RETURNING *",
         fixture.full_table
     );
     let json = exec_sql_json(&sql);
@@ -277,8 +275,7 @@ fn smoke_on_conflict_do_nothing_returning_zero_rows() {
     ));
 
     let sql = format!(
-        "INSERT INTO {} (id, name, age) VALUES (1, 'Ignored', 99) \
-         ON CONFLICT (id) DO NOTHING \
+        "INSERT INTO {} (id, name, age) VALUES (1, 'Ignored', 99) ON CONFLICT (id) DO NOTHING \
          RETURNING *",
         fixture.full_table
     );
@@ -304,7 +301,8 @@ fn smoke_on_conflict_do_nothing_returning_zero_rows() {
 fn smoke_on_conflict_do_update_where_false_returning_zero_rows() {
     if !is_server_running() {
         eprintln!(
-            "Skipping smoke_on_conflict_do_update_where_false_returning_zero_rows: server not running"
+            "Skipping smoke_on_conflict_do_update_where_false_returning_zero_rows: server not \
+             running"
         );
         return;
     }
@@ -316,10 +314,8 @@ fn smoke_on_conflict_do_update_where_false_returning_zero_rows() {
     ));
 
     let sql = format!(
-        "INSERT INTO {} (id, name, age) VALUES (1, 'Ignored', 99) \
-         ON CONFLICT (id) DO UPDATE SET age = EXCLUDED.age \
-         WHERE false \
-         RETURNING *",
+        "INSERT INTO {} (id, name, age) VALUES (1, 'Ignored', 99) ON CONFLICT (id) DO UPDATE SET \
+         age = EXCLUDED.age WHERE false RETURNING *",
         fixture.full_table
     );
     let json = exec_sql_json(&sql);
@@ -358,11 +354,9 @@ fn smoke_on_conflict_multi_row_mixed_returning() {
     ));
 
     let sql = format!(
-        "INSERT INTO {} (id, name, age) VALUES \
-            (1, 'Updated', 30), \
-            (4, 'New User', 18) \
-         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, age = EXCLUDED.age \
-         RETURNING id, name, age",
+        "INSERT INTO {} (id, name, age) VALUES (1, 'Updated', 30), (4, 'New User', 18) ON \
+         CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, age = EXCLUDED.age RETURNING id, name, \
+         age",
         fixture.full_table
     );
     let json = exec_sql_json(&sql);
@@ -395,9 +389,8 @@ fn smoke_on_conflict_type_error_does_not_partially_write() {
     ));
 
     let sql = format!(
-        "INSERT INTO {} (id, age) VALUES (1, 'not-number') \
-         ON CONFLICT (id) DO UPDATE SET age = EXCLUDED.age \
-         RETURNING *",
+        "INSERT INTO {} (id, age) VALUES (1, 'not-number') ON CONFLICT (id) DO UPDATE SET age = \
+         EXCLUDED.age RETURNING *",
         fixture.full_table
     );
     let error = exec_sql_json_expect_error(&sql);
@@ -444,22 +437,22 @@ fn smoke_on_conflict_user_table_isolation() {
     .expect("create user_b");
 
     let upsert_a = format!(
-        "INSERT INTO {} (id, text) VALUES (1, 'A note') \
-         ON CONFLICT (id) DO UPDATE SET text = EXCLUDED.text \
-         RETURNING id, text",
+        "INSERT INTO {} (id, text) VALUES (1, 'A note') ON CONFLICT (id) DO UPDATE SET text = \
+         EXCLUDED.text RETURNING id, text",
         fixture.full_table
     );
     let upsert_b = format!(
-        "INSERT INTO {} (id, text) VALUES (1, 'B note') \
-         ON CONFLICT (id) DO UPDATE SET text = EXCLUDED.text \
-         RETURNING id, text",
+        "INSERT INTO {} (id, text) VALUES (1, 'B note') ON CONFLICT (id) DO UPDATE SET text = \
+         EXCLUDED.text RETURNING id, text",
         fixture.full_table
     );
 
     let json_a = parse_client_json(
-        &execute_sql_via_client_as_json(&user_a, password, &upsert_a).expect("user A upsert"));
+        &execute_sql_via_client_as_json(&user_a, password, &upsert_a).expect("user A upsert"),
+    );
     let json_b = parse_client_json(
-        &execute_sql_via_client_as_json(&user_b, password, &upsert_b).expect("user B upsert"));
+        &execute_sql_via_client_as_json(&user_b, password, &upsert_b).expect("user B upsert"),
+    );
 
     assert_status_success(&json_a, "user A upsert");
     assert_status_success(&json_b, "user B upsert");
@@ -474,12 +467,14 @@ fn smoke_on_conflict_user_table_isolation() {
     let view_a = execute_sql_via_client_as(
         &user_a,
         password,
-        &format!("SELECT text FROM {} WHERE id = 1", fixture.full_table))
+        &format!("SELECT text FROM {} WHERE id = 1", fixture.full_table),
+    )
     .expect("user A select");
     let view_b = execute_sql_via_client_as(
         &user_b,
         password,
-        &format!("SELECT text FROM {} WHERE id = 1", fixture.full_table))
+        &format!("SELECT text FROM {} WHERE id = 1", fixture.full_table),
+    )
     .expect("user B select");
 
     assert!(view_a.contains("A note"), "user A should see own row: {view_a}");
@@ -499,7 +494,8 @@ fn smoke_on_conflict_user_table_isolation() {
 fn smoke_on_conflict_partial_update_preserves_unassigned_columns() {
     if !is_server_running() {
         eprintln!(
-            "Skipping smoke_on_conflict_partial_update_preserves_unassigned_columns: server not running"
+            "Skipping smoke_on_conflict_partial_update_preserves_unassigned_columns: server not \
+             running"
         );
         return;
     }
@@ -511,9 +507,8 @@ fn smoke_on_conflict_partial_update_preserves_unassigned_columns() {
     ));
 
     let sql = format!(
-        "INSERT INTO {} (id, name, age) VALUES (1, 'Nader', 4) \
-         ON CONFLICT (id) DO UPDATE SET age = EXCLUDED.age \
-         RETURNING id, name, age",
+        "INSERT INTO {} (id, name, age) VALUES (1, 'Nader', 4) ON CONFLICT (id) DO UPDATE SET age \
+         = EXCLUDED.age RETURNING id, name, age",
         fixture.full_table
     );
     let rows = result_rows(&exec_sql_json(&sql));
@@ -547,9 +542,8 @@ fn smoke_on_conflict_returning_api_response_shape() {
     assert_eq!(cell_string(&rows[0], "name"), "Nader");
 
     let nothing_sql = format!(
-        "INSERT INTO {} (id, name) VALUES (1, 'Ignored') \
-         ON CONFLICT (id) DO NOTHING \
-         RETURNING id, name",
+        "INSERT INTO {} (id, name) VALUES (1, 'Ignored') ON CONFLICT (id) DO NOTHING RETURNING \
+         id, name",
         fixture.full_table
     );
     let nothing_json = exec_sql_json(&nothing_sql);
@@ -571,9 +565,8 @@ fn smoke_on_conflict_missing_conflict_target_errors() {
 
     let fixture = UsersFixture::new_shared();
     let sql = format!(
-        "INSERT INTO {} (id, name) VALUES (1, 'Nader') \
-         ON CONFLICT DO UPDATE SET name = EXCLUDED.name \
-         RETURNING *",
+        "INSERT INTO {} (id, name) VALUES (1, 'Nader') ON CONFLICT DO UPDATE SET name = \
+         EXCLUDED.name RETURNING *",
         fixture.full_table
     );
     let error = exec_sql_json_expect_error(&sql);
@@ -596,9 +589,8 @@ fn smoke_on_conflict_non_primary_key_target_errors() {
 
     let fixture = UsersFixture::new_shared();
     let sql = format!(
-        "INSERT INTO {} (id, name) VALUES (1, 'Nader') \
-         ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name \
-         RETURNING *",
+        "INSERT INTO {} (id, name) VALUES (1, 'Nader') ON CONFLICT (name) DO UPDATE SET name = \
+         EXCLUDED.name RETURNING *",
         fixture.full_table
     );
     let error = exec_sql_json_expect_error(&sql);
@@ -627,9 +619,8 @@ fn smoke_on_conflict_shared_table_global_conflict() {
     ));
 
     let second = format!(
-        "INSERT INTO {} (id, name, age) VALUES (1, 'Second', 2) \
-         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, age = EXCLUDED.age \
-         RETURNING id, name, age",
+        "INSERT INTO {} (id, name, age) VALUES (1, 'Second', 2) ON CONFLICT (id) DO UPDATE SET \
+         name = EXCLUDED.name, age = EXCLUDED.age RETURNING id, name, age",
         fixture.full_table
     );
     let rows = result_rows(&exec_sql_json(&second));

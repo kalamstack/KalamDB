@@ -27,6 +27,7 @@ kalamdb-configs = { path = "crates/kalamdb-configs" }
 kalamdb-system = { path = "crates/kalamdb-system" }
 kalamdb-dba = { path = "crates/kalamdb-dba" }
 kalamdb-postgres-wire = { path = "crates/kalamdb-postgres-wire" }
+kalamdb-functions = { path = "crates/kalamdb-functions" }
 
 
 # Password hashing

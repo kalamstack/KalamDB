@@ -358,12 +358,15 @@ impl UnifiedApplier for RaftApplier {
         user_id: UserId,
         rows: Vec<Row>,
     ) -> Result<DataResponse, ApplierError> {
+        let (rows, encoded_fields) =
+            super::ordinal_dml::encode_insert_rows(self.executor().app_context(), &table_id, rows);
         let raft_cmd = UserDataCommand::Insert {
             required_meta_index: 0, // Will be set by RaftExecutor
             transaction_id: None,
             table_id,
             user_id,
             rows,
+            encoded_fields,
         };
         self.execute_user_data_cmd(raft_cmd).await
     }
@@ -412,12 +415,15 @@ impl UnifiedApplier for RaftApplier {
         actor_user_id: Option<UserId>,
         rows: Vec<Row>,
     ) -> Result<DataResponse, ApplierError> {
+        let (rows, encoded_fields) =
+            super::ordinal_dml::encode_insert_rows(self.executor().app_context(), &table_id, rows);
         let raft_cmd = SharedDataCommand::Insert {
             required_meta_index: 0, // Will be set by RaftExecutor
             transaction_id: None,
             actor_user_id,
             table_id,
             rows,
+            encoded_fields,
         };
         self.execute_shared_data_cmd(raft_cmd).await
     }

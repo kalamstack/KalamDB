@@ -21,7 +21,8 @@ pub trait SharedDataApplier: Send + Sync {
     ///
     /// # Arguments
     /// * `table_id` - The table identifier
-    /// * `rows` - Row data to insert
+    /// * `rows` - Logical row data when `encoded_fields` is empty (legacy logs)
+    /// * `encoded_fields` - Ordinal KOBJ field payloads (preferred)
     ///
     /// # Returns
     /// Number of rows inserted
@@ -30,6 +31,7 @@ pub trait SharedDataApplier: Send + Sync {
         table_id: &TableId,
         actor_user_id: Option<&UserId>,
         rows: &[kalamdb_commons::models::rows::Row],
+        encoded_fields: &[Vec<u8>],
         commit_seq: u64,
     ) -> Result<usize, RaftError>;
 
@@ -86,6 +88,7 @@ impl SharedDataApplier for NoOpSharedDataApplier {
         _table_id: &TableId,
         _actor_user_id: Option<&UserId>,
         _rows: &[kalamdb_commons::models::rows::Row],
+        _encoded_fields: &[Vec<u8>],
         _commit_seq: u64,
     ) -> Result<usize, RaftError> {
         Ok(0)
@@ -153,10 +156,11 @@ mod tests {
             _table_id: &TableId,
             _actor_user_id: Option<&UserId>,
             rows: &[kalamdb_commons::models::rows::Row],
+            encoded_fields: &[Vec<u8>],
             _commit_seq: u64,
         ) -> Result<usize, RaftError> {
             self.insert_count.fetch_add(1, Ordering::SeqCst);
-            Ok(rows.len())
+            Ok(rows.len().max(encoded_fields.len()))
         }
 
         async fn update(
@@ -202,7 +206,7 @@ mod tests {
         let table_id =
             TableId::new(NamespaceId::from("shared_ns"), TableName::from("shared_table"));
 
-        let result = applier.insert(&table_id, None, &[], 1).await;
+        let result = applier.insert(&table_id, None, &[], &[], 1).await;
         assert!(result.is_ok());
         assert_eq!(applier.insert_count.load(Ordering::SeqCst), 1);
     }
@@ -212,7 +216,7 @@ mod tests {
         let applier = NoOpSharedDataApplier;
         let table_id = TableId::new(NamespaceId::from("test_ns"), TableName::from("test_table"));
 
-        assert_eq!(applier.insert(&table_id, None, &[], 1).await.unwrap(), 0);
+        assert_eq!(applier.insert(&table_id, None, &[], &[], 1).await.unwrap(), 0);
         assert_eq!(applier.update(&table_id, None, &[], None, 1).await.unwrap(), 0);
         assert_eq!(applier.delete(&table_id, None, None, 1).await.unwrap(), 0);
     }

@@ -1,26 +1,32 @@
+pub mod catalog_type;
 pub mod helpers;
 pub mod namespace;
 pub mod policy;
+pub mod procedure;
 pub mod storage;
 pub mod table;
+pub mod trigger;
 pub mod view;
 
 use std::{collections::HashMap, sync::Arc};
 
 use datafusion::arrow::datatypes::Schema as ArrowSchema;
 use kalamdb_commons::{
-    models::{NamespaceId, StorageId, TableName},
-    TableType,
+    models::{NamespaceId, RoutineId, StorageId, TableName, TriggerId, TypeId},
+    RoutineSecurityMode, TableType,
 };
 use kalamdb_core::{app_context::AppContext, sql::executor::handler_registry::HandlerRegistry};
 use kalamdb_handlers_support::register_typed_handler;
 use kalamdb_sql::{
     classifier::SqlStatementKind,
     ddl::{
-        AlterPolicyOperation, AlterPolicyStatement, AlterTableStatement, CreatePolicyStatement,
-        CreateTableStatement, CreateViewStatement, DescribeTableStatement, DropPolicyStatement,
-        DropTableStatement, PolicyCommand, PolicyTarget, ShowTableStatsStatement,
-        ShowTablesStatement,
+        AlterPolicyOperation, AlterPolicyStatement, AlterTableStatement, AlterTriggerStatement,
+        AlterTypeOperation, AlterTypeStatement, CreatePolicyStatement, CreateProcedureStatement,
+        CreateTableStatement, CreateTriggerStatement, CreateTypeBody, CreateTypeStatement,
+        CreateViewStatement, DescribeTableStatement, DropPolicyStatement, DropProcedureStatement,
+        DropTableStatement, DropTriggerStatement, DropTypeStatement, ExecuteGrantee,
+        GrantExecuteStatement, PolicyCommand, PolicyTarget, RevokeExecuteStatement,
+        ShowTableStatsStatement, ShowTablesStatement, TypeReference,
     },
 };
 
@@ -233,6 +239,135 @@ pub fn register_ddl_handlers(registry: &HandlerRegistry, app_context: Arc<AppCon
         }),
         policy::DropPolicyHandler::new(app_context.clone()),
         SqlStatementKind::DropPolicy
+    );
+
+    register_typed_handler!(
+        registry,
+        SqlStatementKind::CreateType(CreateTypeStatement {
+            type_id:       TypeId::new("_placeholder.t"),
+            namespace_id:  NamespaceId::new("_placeholder"),
+            name:          String::new(),
+            if_not_exists: false,
+            body:          CreateTypeBody::Composite { fields: Vec::new() },
+        }),
+        catalog_type::CreateTypeHandler::new(app_context.clone()),
+        SqlStatementKind::CreateType
+    );
+
+    register_typed_handler!(
+        registry,
+        SqlStatementKind::AlterType(AlterTypeStatement {
+            type_id:   TypeId::new("_placeholder.t"),
+            operation: AlterTypeOperation::AddAttribute {
+                field:    String::new(),
+                type_ref: TypeReference {
+                    namespace_id: None,
+                    name:         "text".to_string(),
+                    data_type:    Some(kalamdb_commons::KalamDataType::Text),
+                    is_array:     false,
+                    not_null:     false,
+                    nonempty:     false,
+                },
+            },
+        }),
+        catalog_type::AlterTypeHandler::new(app_context.clone()),
+        SqlStatementKind::AlterType
+    );
+
+    register_typed_handler!(
+        registry,
+        SqlStatementKind::DropType(DropTypeStatement {
+            type_id:   TypeId::new("_placeholder.t"),
+            if_exists: false,
+            cascade:   false,
+        }),
+        catalog_type::DropTypeHandler::new(app_context.clone()),
+        SqlStatementKind::DropType
+    );
+
+    register_typed_handler!(
+        registry,
+        SqlStatementKind::CreateProcedure(CreateProcedureStatement {
+            routine_id:   RoutineId::new("_placeholder.proc"),
+            namespace_id: NamespaceId::new("_placeholder"),
+            name:         String::new(),
+            or_replace:   false,
+            parameters:   Vec::new(),
+            return_type:  None,
+            language:     None,
+            security:     RoutineSecurityMode::Invoker,
+            body:         None,
+        }),
+        procedure::CreateProcedureHandler::new(app_context.clone()),
+        SqlStatementKind::CreateProcedure
+    );
+
+    register_typed_handler!(
+        registry,
+        SqlStatementKind::DropProcedure(DropProcedureStatement {
+            routine_id: RoutineId::new("_placeholder.proc"),
+            if_exists:  false,
+        }),
+        procedure::DropProcedureHandler::new(app_context.clone()),
+        SqlStatementKind::DropProcedure
+    );
+
+    register_typed_handler!(
+        registry,
+        SqlStatementKind::CreateTrigger(CreateTriggerStatement {
+            trigger_id:       TriggerId::new("_placeholder.trig"),
+            namespace_id:     NamespaceId::new("_placeholder"),
+            name:             String::new(),
+            topic_id:         kalamdb_commons::models::TopicId::new("_placeholder.topic"),
+            routine_id:       RoutineId::new("_placeholder.proc"),
+            principal:        String::new(),
+            start_from:       "latest".to_string(),
+            retries:          5,
+            retry_backoff_ms: 1000,
+            concurrency:      1,
+        }),
+        trigger::CreateTriggerHandler::new(app_context.clone()),
+        SqlStatementKind::CreateTrigger
+    );
+
+    register_typed_handler!(
+        registry,
+        SqlStatementKind::DropTrigger(DropTriggerStatement {
+            trigger_id: TriggerId::new("_placeholder.trig"),
+            if_exists:  false,
+        }),
+        trigger::DropTriggerHandler::new(app_context.clone()),
+        SqlStatementKind::DropTrigger
+    );
+
+    register_typed_handler!(
+        registry,
+        SqlStatementKind::AlterTrigger(AlterTriggerStatement {
+            trigger_id: TriggerId::new("_placeholder.trig"),
+            enabled:    true,
+        }),
+        trigger::AlterTriggerHandler::new(app_context.clone()),
+        SqlStatementKind::AlterTrigger
+    );
+
+    register_typed_handler!(
+        registry,
+        SqlStatementKind::GrantExecute(GrantExecuteStatement {
+            routine_id: RoutineId::new("_placeholder.proc"),
+            grantee:    ExecuteGrantee::Public,
+        }),
+        procedure::GrantExecuteHandler::new(app_context.clone()),
+        SqlStatementKind::GrantExecute
+    );
+
+    register_typed_handler!(
+        registry,
+        SqlStatementKind::RevokeExecute(RevokeExecuteStatement {
+            routine_id: RoutineId::new("_placeholder.proc"),
+            grantee:    ExecuteGrantee::Public,
+        }),
+        procedure::RevokeExecuteHandler::new(app_context.clone()),
+        SqlStatementKind::RevokeExecute
     );
 
     register_typed_handler!(

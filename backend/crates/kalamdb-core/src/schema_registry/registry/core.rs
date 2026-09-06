@@ -139,8 +139,8 @@ impl SchemaRegistry {
         expected_defs: &[Arc<TableDefinition>],
     ) -> Result<Vec<u8>, KalamDbError> {
         let defs: Vec<&TableDefinition> = expected_defs.iter().map(Arc::as_ref).collect();
-        let mut marker = b"system-schema-reconcile-marker:v1\0".to_vec();
-        let serialized = serde_json::to_vec(&defs).map_err(|e| {
+        let mut marker = b"system-schema-reconcile-marker:v2\0".to_vec();
+        let serialized = TableDefinition::semantic_reconcile_bytes(&defs).map_err(|e| {
             KalamDbError::SerializationError(format!(
                 "failed to serialize expected system schemas: {e}"
             ))
@@ -313,7 +313,7 @@ impl SchemaRegistry {
                     );
                 },
                 Some(current) => {
-                    if Self::schema_semantically_equal(&current, expected) {
+                    if current.semantically_equal(expected) {
                         stats.unchanged += 1;
                         continue;
                     }
@@ -355,16 +355,6 @@ impl SchemaRegistry {
             .into_kalamdb_error("Failed to persist system schema reconcile marker")?;
 
         Ok(stats)
-    }
-
-    fn schema_semantically_equal(current: &TableDefinition, expected: &TableDefinition) -> bool {
-        current.namespace_id == expected.namespace_id
-            && current.table_name == expected.table_name
-            && current.table_type == expected.table_type
-            && current.columns == expected.columns
-            && current.next_column_id == expected.next_column_id
-            && current.table_options == expected.table_options
-            && current.table_comment == expected.table_comment
     }
 
     fn build_reconciled_definition(
@@ -758,11 +748,10 @@ impl SchemaRegistry {
         match default_value {
             ColumnDefault::None => None,
             ColumnDefault::Literal(json) => Some(Expr::Literal(json_value_to_scalar(json), None)),
-            ColumnDefault::FunctionCall { name, args } => {
-                let udf = Self::lookup_scalar_function(scalar_functions, name)?;
-                let arg_exprs =
-                    args.iter().map(|arg| Expr::Literal(json_value_to_scalar(arg), None)).collect();
-                Some(Expr::ScalarFunction(ScalarFunctionExpr::new_udf(udf, arg_exprs)))
+            ColumnDefault::FunctionCall(call) => {
+                let udf_name = call.scalar_udf_name()?;
+                let udf = Self::lookup_scalar_function(scalar_functions, udf_name)?;
+                Some(Expr::ScalarFunction(ScalarFunctionExpr::new_udf(udf, Vec::new())))
             },
         }
     }
@@ -793,7 +782,7 @@ impl SchemaRegistry {
         use kalamdb_sharding::ShardRouter;
         use kalamdb_tables::{
             new_indexed_shared_table_store, new_indexed_user_table_store, new_stream_table_store,
-            StreamTableStoreConfig,
+            storage_schema_for_table, StreamTableStoreConfig,
         };
 
         use crate::{
@@ -861,10 +850,19 @@ impl SchemaRegistry {
 
         match table_def.table_type {
             TableType::User => {
+                let storage_schema = storage_schema_for_table(&table_def).map_err(|e| {
+                    KalamDbError::InvalidOperation(format!(
+                        "Failed to build storage schema for {}: {}",
+                        table_id, e
+                    ))
+                })?;
                 let user_table_store = Arc::new(new_indexed_user_table_store(
                     app_ctx.storage_backend(),
                     &table_id,
                     &pk_field,
+                    storage_schema,
+                    &table_def.scalar_indexes,
+                    &table_def.columns,
                 ));
 
                 let core = Arc::new(TableProviderCore::new(
@@ -879,10 +877,19 @@ impl SchemaRegistry {
                 Ok(provider as Arc<dyn kalamdb_tables::KalamTableProvider>)
             },
             TableType::Shared => {
+                let storage_schema = storage_schema_for_table(&table_def).map_err(|e| {
+                    KalamDbError::InvalidOperation(format!(
+                        "Failed to build storage schema for {}: {}",
+                        table_id, e
+                    ))
+                })?;
                 let shared_store = Arc::new(new_indexed_shared_table_store(
                     app_ctx.storage_backend(),
                     &table_id,
                     &pk_field,
+                    storage_schema,
+                    &table_def.scalar_indexes,
+                    &table_def.columns,
                 ));
 
                 let core = Arc::new(TableProviderCore::new(
@@ -917,6 +924,12 @@ impl SchemaRegistry {
                         ttl_seconds: Some(ttl_seconds),
                         storage_mode: kalamdb_tables::StreamTableStorageMode::File,
                     },
+                    storage_schema_for_table(&table_def).map_err(|e| {
+                        KalamDbError::InvalidOperation(format!(
+                            "Failed to build storage schema for {}: {}",
+                            table_id, e
+                        ))
+                    })?,
                 ));
 
                 let core = Arc::new(TableProviderCore::new(
@@ -1488,7 +1501,8 @@ mod tests {
         current.updated_at = Utc::now() - Duration::days(2);
         let expected = base_table_definition();
 
-        assert!(SchemaRegistry::schema_semantically_equal(&current, &expected));
+        assert_ne!(current, expected);
+        assert!(current.semantically_equal(&expected));
     }
 
     #[test]
@@ -1591,6 +1605,22 @@ mod tests {
 
         assert_eq!(upgraded.schema_version, 4);
         assert_eq!(upgraded.created_at, created_at);
-        assert!(SchemaRegistry::schema_semantically_equal(&upgraded, &expected));
+        assert!(upgraded.semantically_equal(&expected));
+    }
+
+    #[test]
+    fn reconcile_marker_ignores_timestamps_and_version() {
+        let mut current = base_table_definition();
+        current.schema_version = 9;
+        current.created_at = Utc::now() - Duration::days(30);
+        let expected = base_table_definition();
+
+        let left = SchemaRegistry::system_schema_reconcile_marker(&[std::sync::Arc::new(current)])
+            .expect("marker");
+        let right =
+            SchemaRegistry::system_schema_reconcile_marker(&[std::sync::Arc::new(expected)])
+                .expect("marker");
+        assert_eq!(left, right);
+        assert!(left.starts_with(b"system-schema-reconcile-marker:v2\0"));
     }
 }

@@ -333,3 +333,65 @@ fn test_bloom_filter_default_behavior() {
 
     let _ = fs::remove_dir_all(&temp_dir);
 }
+
+#[test]
+fn test_bloom_filter_for_scalar_index_column() {
+    let temp_dir = env::temp_dir().join("kalamdb_bloom_filter_scalar_index_test");
+    let _ = fs::remove_dir_all(&temp_dir);
+    fs::create_dir_all(&temp_dir).unwrap();
+
+    let storage = create_test_storage(&temp_dir);
+    let storage_cached = StorageCached::with_default_timeouts(storage);
+    let table_id = TableId::from_strings("chat", "messages");
+
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Int64, false),
+        Field::new("conversation_id", DataType::Utf8, false),
+        Field::new("_seq", DataType::Int64, false),
+    ]));
+
+    let num_rows = 1024;
+    let ids: Vec<i64> = (0..num_rows as i64).collect();
+    let conversations: Vec<String> = (0..num_rows).map(|i| format!("room-{}", i % 4)).collect();
+    let seqs: Vec<i64> = (0..num_rows as i64).collect();
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(Int64Array::from(ids)),
+            Arc::new(StringArray::from(conversations)),
+            Arc::new(Int64Array::from(seqs)),
+        ],
+    )
+    .unwrap();
+
+    let file_path = "with_conversation_bloom.parquet";
+    storage_cached
+        .write_parquet_sync(
+            TableType::Shared,
+            &table_id,
+            None,
+            file_path,
+            schema,
+            vec![batch],
+            Some(vec!["id".to_string(), "conversation_id".to_string()]),
+        )
+        .unwrap();
+
+    let full_path = storage_cached
+        .get_file_path(TableType::Shared, &table_id, None, file_path)
+        .full_path;
+    let file = fs::File::open(&full_path).unwrap();
+    let reader = SerializedFileReader::new(file).unwrap();
+    let row_group = reader.metadata().row_group(0);
+    let conv_idx = row_group
+        .columns()
+        .iter()
+        .position(|col| col.column_path().string() == "conversation_id")
+        .expect("conversation_id column");
+    assert!(
+        row_group.column(conv_idx).bloom_filter_offset().is_some(),
+        "scalar index column conversation_id should have a Bloom filter"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
+}

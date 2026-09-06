@@ -1,86 +1,51 @@
 //! Primary Key Index for Shared Tables
 //!
-//! This module provides a secondary index on the primary key field of shared tables,
-//! enabling efficient lookup of rows by their PK value without scanning all rows.
-//!
-//! ## Index Key Format
-//!
-//! Storekey tuple encoding: `(pk_value_encoded, seq)`
-//!
-//! - `pk_value_encoded`: PK value encoded as bytes
-//! - `seq`: sequence ID (i64) for MVCC ordering
-//!
-//! ## Prefix Scanning
-//!
-//! To find all versions of a row with a given PK:
-//! 1. Build prefix: `(pk_value_encoded)`
-//! 2. Scan all keys with that prefix
-//! 3. Results are ordered by seq (storekey preserves numeric ordering)
+//! Thin wrapper over [`PrefixIndex`]. Key format: `(pk_value_encoded, seq)`.
 
 use datafusion::scalar::ScalarValue;
 use kalamdb_commons::{
-    conversions::scalar_value_to_bytes,
-    ids::SharedTableRowId,
-    storage::Partition,
-    storage_key::{encode_key, encode_prefix},
+    conversions::scalar_value_to_bytes, ids::SharedTableRowId, models::UserId, storage::Partition,
+    TableId,
 };
-use kalamdb_store::IndexDefinition;
+use kalamdb_store::{IndexDefinition, PrefixIndex};
 
 use super::SharedTableRow;
 
 /// Index for querying shared table rows by primary key value.
-///
-/// Key format (storekey tuple): `(pk_value_encoded, seq)`
-///
-/// This index allows efficient lookups by PK value,
-/// returning all MVCC versions of rows with matching PK.
 #[derive(Clone)]
 pub struct SharedTablePkIndex {
-    /// Partition for the index
-    partition:     Partition,
-    /// Name of the primary key field (e.g., "id", "product_id", etc.)
-    pk_field_name: String,
+    inner: PrefixIndex<SharedTableRowId, SharedTableRow>,
 }
 
 impl SharedTablePkIndex {
     /// Create a new PK index for a shared table.
-    ///
-    /// # Arguments
-    /// * `table_id` - Table identifier (namespace + table name)
-    /// * `pk_field_name` - Name of the primary key column
-    pub fn new(table_id: &kalamdb_commons::TableId, pk_field_name: &str) -> Self {
-        let partition = format!("shared_{}_pk_idx", table_id); // TableId Display: "namespace:table"
+    pub fn new(table_id: &TableId, pk_field_name: &str) -> Self {
+        let partition = format!("shared_{}_pk_idx", table_id);
         Self {
-            partition:     Partition::new(partition),
-            pk_field_name: pk_field_name.to_string(),
+            inner: PrefixIndex::new(partition, vec![pk_field_name.to_string()], false),
         }
     }
 
     /// Build a prefix for scanning all versions of a PK.
     pub fn build_prefix_for_pk(&self, pk_value: &ScalarValue) -> Vec<u8> {
         let pk_bytes = scalar_value_to_bytes(pk_value);
-        encode_prefix(&(pk_bytes,))
+        self.inner.encode_column_prefix(None, &[pk_bytes])
     }
 
     /// Build a prefix for a PK string value (for batch existence checks).
-    ///
-    /// Returns a prefix for the PK value
-    ///
-    /// This is a simpler version of `build_prefix_for_pk` that takes a string
-    /// directly, avoiding ScalarValue parsing overhead for batch operations.
     #[inline]
     pub fn build_pk_prefix(&self, pk_value: &str) -> Vec<u8> {
-        encode_prefix(&(pk_value.as_bytes().to_vec(),))
+        self.inner.encode_column_prefix(None, &[pk_value.as_bytes().to_vec()])
     }
 }
 
 impl IndexDefinition<SharedTableRowId, SharedTableRow> for SharedTablePkIndex {
     fn partition(&self) -> Partition {
-        self.partition.clone()
+        self.inner.partition()
     }
 
     fn indexed_columns(&self) -> Vec<&str> {
-        vec![&self.pk_field_name]
+        self.inner.indexed_columns()
     }
 
     fn extract_key(
@@ -88,44 +53,25 @@ impl IndexDefinition<SharedTableRowId, SharedTableRow> for SharedTablePkIndex {
         primary_key: &SharedTableRowId,
         entity: &SharedTableRow,
     ) -> Option<Vec<u8>> {
-        // Get the PK field value from the row
-        let pk_value = entity.fields.get(&self.pk_field_name)?;
-
-        let pk_bytes = scalar_value_to_bytes(pk_value);
-        Some(encode_key(&(pk_bytes, primary_key.as_i64())))
+        self.inner.extract_key(primary_key, entity)
     }
 
     fn filter_to_prefix(&self, filter: &datafusion::logical_expr::Expr) -> Option<Vec<u8>> {
-        use kalamdb_store::{extract_i64_equality, extract_string_equality};
+        self.inner.filter_to_prefix(filter)
+    }
 
-        // Try to extract equality filter on PK column
-        if let Some((col, val)) = extract_string_equality(filter) {
-            if col == self.pk_field_name {
-                let pk_value = ScalarValue::Utf8(Some(val.to_string()));
-                let pk_bytes = scalar_value_to_bytes(&pk_value);
-                return Some(encode_prefix(&(pk_bytes,)));
-            }
-        }
-
-        if let Some((col, val)) = extract_i64_equality(filter) {
-            if col == self.pk_field_name {
-                let pk_value = ScalarValue::Int64(Some(val));
-                let pk_bytes = scalar_value_to_bytes(&pk_value);
-                return Some(encode_prefix(&(pk_bytes,)));
-            }
-        }
-
-        None
+    fn filter_to_prefix_with_scope(
+        &self,
+        user_id: Option<&UserId>,
+        filter: &datafusion::logical_expr::Expr,
+    ) -> Option<Vec<u8>> {
+        self.inner.filter_to_prefix_with_scope(user_id, filter)
     }
 }
 
 /// Create a PK index for a shared table.
-///
-/// # Arguments
-/// * `table_id` - Table identifier (namespace + table name)
-/// * `pk_field_name` - Name of the primary key column
 pub fn create_shared_table_pk_index(
-    table_id: &kalamdb_commons::TableId,
+    table_id: &TableId,
     pk_field_name: &str,
 ) -> std::sync::Arc<dyn IndexDefinition<SharedTableRowId, SharedTableRow>> {
     std::sync::Arc::new(SharedTablePkIndex::new(table_id, pk_field_name))
@@ -174,7 +120,6 @@ mod tests {
         let table_id = kalamdb_commons::TableId::from_strings("default", "products");
         let index = SharedTablePkIndex::new(&table_id, "id");
 
-        // Two versions of the same row (same PK, different seq)
         let (key1, row1) = create_test_row(100, 42);
         let (key2, row2) = create_test_row(200, 42);
 
@@ -198,7 +143,6 @@ mod tests {
         let index_key1 = index.extract_key(&key1, &row1).unwrap();
         let index_key2 = index.extract_key(&key2, &row2).unwrap();
 
-        // Different pk values - keys should be completely different
         assert_ne!(index_key1, index_key2);
     }
 

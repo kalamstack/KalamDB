@@ -3,12 +3,12 @@ use std::{
     thread,
 };
 
+use tokio::runtime::Runtime;
+
+use super::common::{should_run_minio_storage_tests, *};
 use crate::common::{
     admin_username, execute_sql_as_root_via_cli, generate_unique_namespace, generate_unique_table,
 };
-
-use super::common::{should_run_minio_storage_tests, *};
-use tokio::runtime::Runtime;
 
 #[test]
 fn test_minio_user_flush_manifest_and_query() {
@@ -24,7 +24,8 @@ fn test_minio_user_flush_manifest_and_query() {
     execute_sql_as_root_via_cli(&format!("CREATE NAMESPACE {}", namespace))
         .expect("namespace creation");
     execute_sql_as_root_via_cli(&format!(
-        "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, name TEXT NOT NULL) WITH (TYPE='USER', STORAGE_ID='{}', FLUSH_POLICY='rows:2')",
+        "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, name TEXT NOT NULL) WITH (TYPE='USER', \
+         STORAGE_ID='{}', FLUSH_POLICY='rows:2')",
         namespace, table, storage_id
     ))
     .expect("user table creation");
@@ -69,7 +70,8 @@ fn test_minio_shared_flush_manifest_and_query() {
     execute_sql_as_root_via_cli(&format!("CREATE NAMESPACE {}", namespace))
         .expect("namespace creation");
     execute_sql_as_root_via_cli(&format!(
-        "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, name TEXT NOT NULL) WITH (TYPE='SHARED', STORAGE_ID='{}', FLUSH_POLICY='rows:2')",
+        "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, name TEXT NOT NULL) WITH (TYPE='SHARED', \
+         STORAGE_ID='{}', FLUSH_POLICY='rows:2')",
         namespace, table, storage_id
     ))
     .expect("shared table creation");
@@ -112,7 +114,8 @@ fn test_minio_user_multiple_flushes_and_segments() {
     execute_sql_as_root_via_cli(&format!("CREATE NAMESPACE {}", namespace))
         .expect("namespace creation");
     execute_sql_as_root_via_cli(&format!(
-        "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, name TEXT NOT NULL) WITH (TYPE='USER', STORAGE_ID='{}', FLUSH_POLICY='rows:1')",
+        "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, name TEXT NOT NULL) WITH (TYPE='USER', \
+         STORAGE_ID='{}', FLUSH_POLICY='rows:1')",
         namespace, table, storage_id
     ))
     .expect("user table creation");
@@ -146,7 +149,8 @@ fn test_minio_shared_multiple_flushes_and_segments() {
     execute_sql_as_root_via_cli(&format!("CREATE NAMESPACE {}", namespace))
         .expect("namespace creation");
     execute_sql_as_root_via_cli(&format!(
-        "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, name TEXT NOT NULL) WITH (TYPE='SHARED', STORAGE_ID='{}', FLUSH_POLICY='rows:1')",
+        "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, name TEXT NOT NULL) WITH (TYPE='SHARED', \
+         STORAGE_ID='{}', FLUSH_POLICY='rows:1')",
         namespace, table, storage_id
     ))
     .expect("shared table creation");
@@ -182,7 +186,8 @@ fn test_minio_parallel_flushes_across_tables() {
         .expect("namespace creation");
     for table in [&table_a, &table_b] {
         execute_sql_as_root_via_cli(&format!(
-            "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, name TEXT NOT NULL) WITH (TYPE='SHARED', STORAGE_ID='{}', FLUSH_POLICY='rows:1')",
+            "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, name TEXT NOT NULL) WITH (TYPE='SHARED', \
+             STORAGE_ID='{}', FLUSH_POLICY='rows:1')",
             namespace, table, storage_id
         ))
         .expect("table creation");

@@ -392,15 +392,4 @@ impl Ord for Row {
 
 // KSerializable implementation for EntityStore support
 #[cfg(feature = "serialization")]
-impl crate::serialization::KSerializable for Row {
-    fn encode(&self) -> Result<Vec<u8>, crate::storage::StorageError> {
-        crate::serialization::row_codec::encode_row(self)
-    }
-
-    fn decode(bytes: &[u8]) -> Result<Self, crate::storage::StorageError>
-    where
-        Self: Sized,
-    {
-        crate::serialization::row_codec::decode_row(bytes)
-    }
-}
+impl crate::serialization::KSerializable for Row {}

@@ -12,9 +12,12 @@ use kalamdb_api::limiter::RateLimiter;
 use kalamdb_auth::CachedUsersRepo;
 use kalamdb_commons::{AuthType, Role, StorageId, UserId};
 use kalamdb_configs::ServerConfig;
-use kalamdb_core::sql::{
-    datafusion_session::DataFusionSessionFactory,
-    executor::{handler_registry::HandlerRegistry, SqlExecutor},
+use kalamdb_core::{
+    functions::TriggerDispatcherRuntime,
+    sql::{
+        datafusion_session::DataFusionSessionFactory,
+        executor::{handler_registry::HandlerRegistry, SqlExecutor},
+    },
 };
 use kalamdb_dba::{ensure_dba_notification_policies, initialize_dba_namespace};
 use kalamdb_jobs::{AppContextJobsExt, JobsManagerRuntime};
@@ -44,6 +47,7 @@ pub struct ApplicationComponents {
     pub user_repo:           Arc<dyn kalamdb_auth::UserRepository>,
     pub connection_registry: Arc<ConnectionsManager>,
     pub jobs_runtime:        Option<JobsManagerRuntime>,
+    pub trigger_runtime:     Option<TriggerDispatcherRuntime>,
 }
 
 async fn fail_bootstrap<T>(
@@ -201,6 +205,7 @@ pub async fn prepare_components(
     debug!("Starting JobsManager run loop with max {} concurrent jobs", max_concurrent);
     let jobs_runtime =
         JobsManagerRuntime::start(app_context.job_manager(), max_concurrent as usize);
+    let trigger_runtime = TriggerDispatcherRuntime::start(Arc::clone(&app_context));
 
     info!(
         "Startup: prepare_components completed in {:.2}ms",
@@ -215,6 +220,7 @@ pub async fn prepare_components(
         user_repo,
         connection_registry,
         jobs_runtime: Some(jobs_runtime),
+        trigger_runtime: Some(trigger_runtime),
     })
 }
 
@@ -457,6 +463,7 @@ pub async fn run(
         .jobs_runtime
         .take()
         .expect("jobs runtime must be initialized before server startup");
+    let trigger_runtime = components.trigger_runtime.take();
     let job_drain_timeout = std::time::Duration::from_secs(config.shutdown.flush.timeout.into());
     let mut http_server = match HttpServerRuntime::start_configured(
         config,
@@ -466,6 +473,9 @@ pub async fn run(
     ) {
         Ok(server) => server,
         Err(error) => {
+            if let Some(runtime) = trigger_runtime {
+                runtime.shutdown().await;
+            }
             if let Err(cleanup_error) =
                 shutdown_background_services(Some(jobs_runtime), app_context, job_drain_timeout)
                     .await
@@ -489,6 +499,9 @@ pub async fn run(
     {
         Ok(listener) => listener,
         Err(error) => {
+            if let Some(runtime) = trigger_runtime {
+                runtime.shutdown().await;
+            }
             return shutdown_server(
                 crate::shutdown::TerminationReason::PostgresWireStopped(Err(error)),
                 http_server,
@@ -511,6 +524,9 @@ pub async fn run(
     );
 
     let reason = wait_for_termination(&mut http_server, &mut postgres_wire_listener).await;
+    if let Some(runtime) = trigger_runtime {
+        runtime.shutdown().await;
+    }
     let shutdown_result = shutdown_server(
         reason,
         http_server,
@@ -538,6 +554,7 @@ pub struct RunningTestHttpServer {
     pub app_context:     Arc<kalamdb_core::app_context::AppContext>,
     http_server:         HttpServerRuntime,
     jobs_runtime:        JobsManagerRuntime,
+    trigger_runtime:     Option<TriggerDispatcherRuntime>,
     connection_registry: Arc<ConnectionsManager>,
     job_drain_timeout:   std::time::Duration,
 }
@@ -545,6 +562,9 @@ pub struct RunningTestHttpServer {
 impl RunningTestHttpServer {
     pub async fn shutdown(self) {
         println!("Shutting down test HTTP server at {}", self.base_url);
+        if let Some(runtime) = self.trigger_runtime {
+            runtime.shutdown().await;
+        }
         let result = shutdown_server(
             crate::shutdown::TerminationReason::Explicit,
             self.http_server,
@@ -577,6 +597,7 @@ pub async fn run_for_tests(
         .jobs_runtime
         .take()
         .expect("jobs runtime must be initialized before test server startup");
+    let trigger_runtime = components.trigger_runtime.take();
     let job_drain_timeout = std::time::Duration::from_secs(config.shutdown.flush.timeout.into());
     let http_server = match HttpServerRuntime::start_ephemeral(
         config,
@@ -586,6 +607,9 @@ pub async fn run_for_tests(
     ) {
         Ok(server) => server,
         Err(error) => {
+            if let Some(runtime) = trigger_runtime {
+                runtime.shutdown().await;
+            }
             if let Err(cleanup_error) =
                 shutdown_background_services(Some(jobs_runtime), app_context, job_drain_timeout)
                     .await
@@ -604,6 +628,7 @@ pub async fn run_for_tests(
         app_context,
         http_server,
         jobs_runtime,
+        trigger_runtime,
         connection_registry: components.connection_registry.clone(),
         job_drain_timeout,
     })
@@ -619,6 +644,7 @@ pub async fn run_detached(
         .jobs_runtime
         .take()
         .expect("jobs runtime must be initialized before detached server startup");
+    let trigger_runtime = components.trigger_runtime.take();
     let job_drain_timeout = std::time::Duration::from_secs(config.shutdown.flush.timeout.into());
     let http_server = match HttpServerRuntime::start_configured(
         config,
@@ -628,6 +654,9 @@ pub async fn run_detached(
     ) {
         Ok(server) => server,
         Err(error) => {
+            if let Some(runtime) = trigger_runtime {
+                runtime.shutdown().await;
+            }
             if let Err(cleanup_error) =
                 shutdown_background_services(Some(jobs_runtime), app_context, job_drain_timeout)
                     .await
@@ -646,6 +675,7 @@ pub async fn run_detached(
         app_context,
         http_server,
         jobs_runtime,
+        trigger_runtime,
         connection_registry: components.connection_registry.clone(),
         job_drain_timeout,
     })

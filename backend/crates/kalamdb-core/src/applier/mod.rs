@@ -40,6 +40,7 @@ mod applier;
 mod command;
 mod error;
 pub mod executor;
+pub(crate) mod ordinal_dml;
 
 // Raft applier implementations (traits defined in kalamdb-raft)
 pub mod raft;

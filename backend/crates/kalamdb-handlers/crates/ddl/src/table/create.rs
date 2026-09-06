@@ -117,6 +117,8 @@ impl TypedStatementHandler<CreateTableStatement> for CreateTableHandler {
         })
         .await?;
 
+        let implicit_def = table_def.clone();
+
         // Delegate to unified applier - pass raw parameters
         let message = self
             .app_context
@@ -138,6 +140,23 @@ impl TypedStatementHandler<CreateTableStatement> for CreateTableHandler {
             None,
         );
         audit::persist_audit_entry(&self.app_context, &audit_entry).await?;
+
+        let implicit_table_id = table_id.clone();
+        let app_for_type = Arc::clone(&self.app_context);
+        if let Err(error) = run_blocking(move || {
+            crate::catalog_type::ensure_implicit_row_type(
+                &app_for_type.system_tables().catalog_stores(),
+                &implicit_table_id,
+                &implicit_def,
+            )
+        })
+        .await
+        {
+            log::error!(
+                "failed to catalog implicit row type for {}: {error}",
+                table_id.full_name()
+            );
+        }
 
         Ok(ExecutionResult::Success { message })
     }

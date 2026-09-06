@@ -2,14 +2,13 @@
 //! and Parquet decoding logic into `kalamdb-datafusion-sources`.
 
 use datafusion::{arrow::array::RecordBatch, error::DataFusionError};
-use kalamdb_commons::{ids::SeqId, serialization::row_codec::RowMetadata};
+use kalamdb_commons::{ids::SeqId, models::rows::RowMetadata};
 use kalamdb_datafusion_sources::exec::{
     parquet_batch_to_metadata as shared_parquet_batch_to_metadata,
-    parquet_batch_to_rows as shared_parquet_batch_to_rows, pk_bucket_key_from_row, PkBucketKey,
-    VersionedRow,
+    parquet_batch_to_rows as shared_parquet_batch_to_rows,
 };
 
-use crate::{error::KalamDbError, SharedTableRow};
+use crate::error::KalamDbError;
 
 #[cfg(test)]
 mod tests {
@@ -26,6 +25,7 @@ mod tests {
         scalar::ScalarValue,
     };
     use kalamdb_commons::constants::SystemColumnNames;
+    use kalamdb_datafusion_sources::exec::{PkBucketKey, VersionedRow};
 
     use super::*;
 
@@ -299,31 +299,6 @@ fn shared_decoder_error(error: DataFusionError) -> KalamDbError {
 /// Convert Parquet RecordBatch rows into SeqId + JSON field maps
 pub fn parquet_batch_to_rows(batch: &RecordBatch) -> Result<Vec<ParquetRowData>, KalamDbError> {
     shared_parquet_batch_to_rows(batch).map_err(shared_decoder_error)
-}
-
-impl VersionedRow for SharedTableRow {
-    fn seq_id(&self) -> SeqId {
-        self._seq
-    }
-
-    fn commit_seq(&self) -> u64 {
-        self._commit_seq
-    }
-
-    fn deleted(&self) -> bool {
-        self._deleted
-    }
-
-    fn pk_value(&self, pk_name: &str) -> Option<String> {
-        match self.pk_bucket_key(pk_name) {
-            PkBucketKey::Seq(_) => None,
-            key => Some(key.to_string()),
-        }
-    }
-
-    fn pk_bucket_key(&self, pk_name: &str) -> PkBucketKey {
-        pk_bucket_key_from_row(&self.fields, pk_name, self._seq)
-    }
 }
 
 /// Extract lightweight metadata (seq, deleted, pk_value) from a Parquet RecordBatch

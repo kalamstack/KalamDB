@@ -1,11 +1,16 @@
 //! Tests for CREATE TABLE IF NOT EXISTS with constraints.
 
+use kalamdb_commons::models::NamespaceId;
 use kalamdb_dialect::ddl::create_table::CreateTableStatement;
+
+fn default_ns() -> NamespaceId {
+    NamespaceId::new("default")
+}
 
 #[test]
 fn test_if_not_exists_basic() {
     let sql = "CREATE TABLE IF NOT EXISTS test.users (id BIGINT, name TEXT)";
-    let stmt = CreateTableStatement::parse(sql, "default").unwrap();
+    let stmt = CreateTableStatement::parse(sql, &default_ns()).unwrap();
 
     assert!(stmt.if_not_exists);
     assert_eq!(stmt.table_name.as_str(), "users");
@@ -20,7 +25,7 @@ fn test_if_not_exists_with_primary_key() {
             name TEXT NOT NULL
         )
     "#;
-    let stmt = CreateTableStatement::parse(sql, "default").unwrap();
+    let stmt = CreateTableStatement::parse(sql, &default_ns()).unwrap();
 
     assert!(stmt.if_not_exists);
     assert_eq!(stmt.primary_key_column.as_deref(), Some("id"));
@@ -37,7 +42,7 @@ fn test_exact_user_query() {
             value REAL
         )
     "#;
-    let stmt = CreateTableStatement::parse(sql, "default").unwrap();
+    let stmt = CreateTableStatement::parse(sql, &default_ns()).unwrap();
 
     assert!(stmt.if_not_exists);
     assert_eq!(stmt.table_name.as_str(), "playing_with_neon");
@@ -53,7 +58,7 @@ fn test_exact_user_query() {
 #[test]
 fn test_without_if_not_exists() {
     let sql = "CREATE TABLE test.orders (id BIGINT PRIMARY KEY, total REAL)";
-    let stmt = CreateTableStatement::parse(sql, "default").unwrap();
+    let stmt = CreateTableStatement::parse(sql, &default_ns()).unwrap();
 
     assert!(!stmt.if_not_exists);
 }
@@ -69,7 +74,7 @@ fn test_multiple_not_null_columns() {
             department TEXT
         )
     "#;
-    let stmt = CreateTableStatement::parse(sql, "default").unwrap();
+    let stmt = CreateTableStatement::parse(sql, &default_ns()).unwrap();
 
     assert!(stmt.if_not_exists);
     assert_eq!(stmt.primary_key_column.as_deref(), Some("id"));
@@ -89,7 +94,7 @@ fn test_primary_key_table_constraint() {
             PRIMARY KEY (id)
         )
     "#;
-    let stmt = CreateTableStatement::parse(sql, "default").unwrap();
+    let stmt = CreateTableStatement::parse(sql, &default_ns()).unwrap();
 
     assert!(stmt.if_not_exists);
     assert_eq!(stmt.primary_key_column.as_deref(), Some("id"));
@@ -99,12 +104,12 @@ fn test_primary_key_table_constraint() {
 #[test]
 fn test_table_types_with_if_not_exists() {
     let sql = "CREATE USER TABLE IF NOT EXISTS test.user_data (id BIGINT PRIMARY KEY)";
-    let stmt = CreateTableStatement::parse(sql, "default").unwrap();
+    let stmt = CreateTableStatement::parse(sql, &default_ns()).unwrap();
     assert!(stmt.if_not_exists);
     assert_eq!(stmt.table_type, kalamdb_commons::schemas::TableType::User);
 
     let sql = "CREATE SHARED TABLE IF NOT EXISTS test.shared_data (id BIGINT PRIMARY KEY)";
-    let stmt = CreateTableStatement::parse(sql, "default").unwrap();
+    let stmt = CreateTableStatement::parse(sql, &default_ns()).unwrap();
     assert!(stmt.if_not_exists);
     assert_eq!(stmt.table_type, kalamdb_commons::schemas::TableType::Shared);
 
@@ -115,7 +120,7 @@ fn test_table_types_with_if_not_exists() {
             TTL_SECONDS = 3600
         )
     "#;
-    let stmt = CreateTableStatement::parse(sql, "default").unwrap();
+    let stmt = CreateTableStatement::parse(sql, &default_ns()).unwrap();
     assert!(stmt.if_not_exists);
     assert_eq!(stmt.table_type, kalamdb_commons::schemas::TableType::Stream);
 }
@@ -123,7 +128,7 @@ fn test_table_types_with_if_not_exists() {
 #[test]
 fn test_validation_primary_key_not_null() {
     let sql = "CREATE TABLE test.data (id BIGINT PRIMARY KEY)";
-    let stmt = CreateTableStatement::parse(sql, "default").unwrap();
+    let stmt = CreateTableStatement::parse(sql, &default_ns()).unwrap();
 
     assert!(!stmt.schema.field_with_name("id").unwrap().is_nullable());
 }
@@ -136,7 +141,7 @@ fn test_validation_multiple_primary_keys_rejected() {
             id2 BIGINT PRIMARY KEY
         )
     "#;
-    let result = CreateTableStatement::parse(sql, "default");
+    let result = CreateTableStatement::parse(sql, &default_ns());
 
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("Multiple PRIMARY KEY"));
@@ -151,7 +156,7 @@ fn test_validation_composite_primary_key_not_supported() {
             PRIMARY KEY (id1, id2)
         )
     "#;
-    let result = CreateTableStatement::parse(sql, "default");
+    let result = CreateTableStatement::parse(sql, &default_ns());
 
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("Composite PRIMARY KEY"));
@@ -161,7 +166,7 @@ fn test_validation_composite_primary_key_not_supported() {
 #[ignore]
 fn test_validation_invalid_column_names() {
     let sql = "CREATE TABLE test.invalid (`id-with-dash` BIGINT)";
-    let result = CreateTableStatement::parse(sql, "default");
+    let result = CreateTableStatement::parse(sql, &default_ns());
 
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -177,7 +182,7 @@ fn test_validation_primary_key_must_exist() {
             PRIMARY KEY (nonexistent)
         )
     "#;
-    let result = CreateTableStatement::parse(sql, "default");
+    let result = CreateTableStatement::parse(sql, &default_ns());
 
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("not found"));

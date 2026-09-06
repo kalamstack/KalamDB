@@ -2,11 +2,13 @@ mod add_column;
 mod add_topic_source;
 mod alter_policy;
 mod clear_topic_retention;
+mod create_index;
 mod create_namespace;
 mod create_policy;
 mod create_table;
 mod create_topic;
 mod drop_column;
+mod drop_index;
 mod drop_policy;
 mod drop_table;
 mod drop_topic;
@@ -57,6 +59,10 @@ pub(crate) fn diff_schema(current: &Schema, target: &Schema, allow_drop: bool) -
             },
             None => {
                 out.push(emit_create_table(target_table));
+                crate::emitter::create_index::emit_indexes_after_create_table(
+                    target_table,
+                    &mut out,
+                );
 
                 let table_policies = policies_for_table(&target.policies, table_key);
                 if table_policies.is_empty() && target_table.is_shared() {

@@ -1,21 +1,24 @@
 //! Serialization helpers for Raft state machine payloads.
 //!
-//! Uses MessagePack (rmp-serde) with named fields for encoding: compact binary,
-//! self-describing, schema-evolution-friendly (add/remove/reorder fields),
-//! and supports any serde key type including integer-keyed maps.
+//! Encoding goes through `kalamdb-serialization`. Legacy unenveloped MessagePack
+//! snapshots are rejected; wipe the data directory before upgrading to 0.7.
 
+use kalamdb_serialization::{decode_protocol, encode_protocol, ProtocolKind};
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::error::RaftError;
 
-/// Encode a value to bytes using MessagePack with named fields.
+/// Encode a value for durable state-machine storage.
 pub fn encode<T: Serialize>(value: &T) -> Result<Vec<u8>, RaftError> {
-    rmp_serde::to_vec_named(value).map_err(|e| RaftError::Serialization(e.to_string()))
+    encode_protocol(ProtocolKind::StateMachine, value)
+        .map(|encoded| encoded.into_bytes())
+        .map_err(|e| RaftError::Serialization(e.to_string()))
 }
 
-/// Decode a value from MessagePack bytes.
+/// Decode a value from durable state-machine storage.
 pub fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, RaftError> {
-    rmp_serde::from_slice(bytes).map_err(|e| RaftError::Serialization(e.to_string()))
+    decode_protocol(bytes, ProtocolKind::StateMachine)
+        .map_err(|e| RaftError::Serialization(e.to_string()))
 }
 
 #[cfg(test)]
@@ -37,19 +40,14 @@ mod tests {
             name: "test".to_string(),
         };
         let bytes = encode(&data).unwrap();
+        assert_eq!(&bytes[..4], b"KOBJ");
         let decoded: TestData = decode(&bytes).unwrap();
         assert_eq!(data, decoded);
     }
 
     #[test]
-    fn test_msgpack_compact() {
-        let data = TestData {
-            id:   123456789,
-            name: "a_reasonably_long_name_for_testing".to_string(),
-        };
-        let mp_bytes = encode(&data).unwrap();
-        // MessagePack with named fields should be compact
-        assert!(mp_bytes.len() < 60, "msgpack should be compact, got {} bytes", mp_bytes.len());
+    fn test_unenveloped_bytes_are_rejected() {
+        assert!(decode::<TestData>(b"not-a-kobj-envelope").is_err());
     }
 
     #[test]

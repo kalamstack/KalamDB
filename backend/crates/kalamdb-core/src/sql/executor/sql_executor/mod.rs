@@ -168,12 +168,13 @@ impl SqlExecutor {
                 if let Some(on_conflict_rows) =
                     super::transaction_batch_insert::try_build_literal_on_conflict_update_rows(
                         parsed_statement,
-                        self.app_context.as_ref(),
+                        Arc::clone(&self.app_context),
                         self.sql_cache_registry.as_ref(),
                         exec_ctx,
                         table_id,
                         params,
-                    )?
+                    )
+                    .await?
                 {
                     return self
                         .execute_literal_on_conflict_update(table_id, exec_ctx, on_conflict_rows)
@@ -191,12 +192,13 @@ impl SqlExecutor {
 
         let Some(insert_rows) = super::transaction_batch_insert::try_build_literal_insert_rows(
             parsed_statement,
-            self.app_context.as_ref(),
+            Arc::clone(&self.app_context),
             self.sql_cache_registry.as_ref(),
             exec_ctx,
             table_id,
             params,
-        )?
+        )
+        .await?
         else {
             return Ok(None);
         };
@@ -725,6 +727,17 @@ impl SqlExecutor {
                 | SqlStatementKind::CreatePolicy(_)
                 | SqlStatementKind::AlterPolicy(_)
                 | SqlStatementKind::DropPolicy(_)
+                | SqlStatementKind::CreateType(_)
+                | SqlStatementKind::AlterType(_)
+                | SqlStatementKind::DropType(_)
+                | SqlStatementKind::CreateProcedure(_)
+                | SqlStatementKind::DropProcedure(_)
+                | SqlStatementKind::CreateTrigger(_)
+                | SqlStatementKind::DropTrigger(_)
+                | SqlStatementKind::AlterTrigger(_)
+                | SqlStatementKind::GrantExecute(_)
+                | SqlStatementKind::RevokeExecute(_)
+                | SqlStatementKind::CreateSchema(_)
         )
     }
 
@@ -1217,7 +1230,7 @@ impl SqlExecutor {
 
         match super::transaction_batch_insert::try_batch_inserts_in_transaction(
             &parsed_stmts,
-            self.app_context.as_ref(),
+            Arc::clone(&self.app_context),
             self.sql_cache_registry.as_ref(),
             exec_ctx,
             table_id,
@@ -1451,6 +1464,15 @@ impl SqlExecutor {
                     SqlStatementKind::RollbackTransaction => {
                         self.execute_rollback_transaction(exec_ctx)
                     },
+                    SqlStatementKind::Call(statement) => {
+                        crate::functions::FunctionService::execute_call(
+                            Arc::clone(&self.app_context),
+                            exec_ctx,
+                            statement,
+                            &params,
+                        )
+                        .await
+                    },
 
                     // Hot path: SELECT queries use DataFusion
                     // Tables are already registered in base session, we just inject user_id
@@ -1541,7 +1563,10 @@ impl SqlExecutor {
                     | SqlStatementKind::AlterPolicy(_)
                     | SqlStatementKind::DropPolicy(_)
                     | SqlStatementKind::CreateNamespace(_)
-                    | SqlStatementKind::DropNamespace(_) => {
+                    | SqlStatementKind::DropNamespace(_)
+                    | SqlStatementKind::CreateType(_)
+                    | SqlStatementKind::AlterType(_)
+                    | SqlStatementKind::DropType(_) => {
                         let result = self
                             .handler_registry
                             .handle(classified.clone(), params, exec_ctx)

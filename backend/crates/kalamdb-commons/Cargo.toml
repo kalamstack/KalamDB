@@ -24,8 +24,6 @@ kalamdb-observability = { workspace = true, default-features = false, optional =
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 arrow-schema = { workspace = true, optional = true }
-flatbuffers = { workspace = true, optional = true }
-flexbuffers = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
 arrow = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
@@ -68,13 +66,7 @@ conversions = [
 	"dep:uuid",
 	"dep:kalamdb-observability",
 	]
-serialization = [
-	"rows",
-	"conversions",
-	"dep:flatbuffers",
-	"dep:flexbuffers",
-	"dep:kalamdb-observability",
-	]
+serialization = ["rows", "conversions"]
 arrow-utils = [
 	"arrow",
 	"rows",

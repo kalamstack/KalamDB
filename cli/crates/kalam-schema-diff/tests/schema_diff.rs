@@ -777,3 +777,111 @@ fn detect_clear_flush_policy() {
 
     assert_contains(&diff.up, "ALTER TABLE app.messages SET TBLPROPERTIES (FLUSH_POLICY = NULL);");
 }
+
+#[test]
+fn detect_create_type_procedure_and_grant() {
+    let diff = diff(
+        "CREATE SCHEMA chat; CREATE TYPE chat.address AS (city TEXT);",
+        r#"
+            CREATE SCHEMA chat;
+            CREATE TYPE chat.address AS (city TEXT, country TEXT);
+            CREATE PROCEDURE chat.get_address(id TEXT)
+            RETURNS chat.address
+            LANGUAGE SQL
+            SECURITY INVOKER
+            AS $$ SELECT 1; $$;
+            GRANT EXECUTE ON PROCEDURE chat.get_address TO user;
+        "#,
+    );
+
+    assert_contains(&diff.up, "ALTER TYPE chat.address ADD ATTRIBUTE country TEXT");
+    assert_contains(&diff.up, "CREATE OR REPLACE PROCEDURE chat.get_address");
+    assert_contains(&diff.up, "GRANT EXECUTE ON PROCEDURE chat.get_address TO user;");
+}
+
+#[test]
+fn detect_create_scalar_index_from_create_index_on() {
+    let diff = diff(
+        r#"
+            CREATE USER TABLE app.messages (
+              id BIGINT PRIMARY KEY,
+              conversation_id TEXT NOT NULL
+            );
+        "#,
+        r#"
+            CREATE USER TABLE app.messages (
+              id BIGINT PRIMARY KEY,
+              conversation_id TEXT NOT NULL
+            );
+            CREATE INDEX idx_conv ON app.messages (conversation_id);
+        "#,
+    );
+
+    assert_contains(&diff.up, "ALTER TABLE app.messages CREATE INDEX idx_conv (conversation_id);");
+}
+
+#[test]
+fn detect_create_scalar_index_from_alter_table() {
+    let diff = diff(
+        "",
+        r#"
+            CREATE USER TABLE app.messages (
+              id BIGINT PRIMARY KEY,
+              conversation_id TEXT NOT NULL
+            );
+            ALTER TABLE app.messages CREATE INDEX idx_conv (conversation_id);
+        "#,
+    );
+
+    assert_contains(&diff.up, "CREATE USER TABLE app.messages");
+    assert_contains(&diff.up, "ALTER TABLE app.messages CREATE INDEX idx_conv (conversation_id);");
+}
+
+#[test]
+fn drop_index_requires_destructive() {
+    let before = r#"
+        CREATE USER TABLE app.messages (
+          id BIGINT PRIMARY KEY,
+          conversation_id TEXT NOT NULL
+        );
+        CREATE INDEX idx_conv ON app.messages (conversation_id);
+    "#;
+    let after = r#"
+        CREATE USER TABLE app.messages (
+          id BIGINT PRIMARY KEY,
+          conversation_id TEXT NOT NULL
+        );
+    "#;
+
+    let skipped = diff(before, after);
+    assert_contains(&skipped.up, "destructive change skipped: index");
+    assert!(
+        !skipped
+            .up
+            .lines()
+            .any(|line| line == "ALTER TABLE app.messages DROP INDEX idx_conv;"),
+        "{}",
+        skipped.up
+    );
+
+    let dropped = destructive_diff(before, after);
+    assert_contains(&dropped.up, "ALTER TABLE app.messages DROP INDEX idx_conv;");
+}
+
+#[test]
+fn vector_create_index_using_cosine_is_not_scalar() {
+    let diff = diff(
+        "",
+        r#"
+            CREATE USER TABLE docs (
+              id BIGINT PRIMARY KEY,
+              embedding TEXT
+            );
+            ALTER TABLE docs CREATE INDEX embedding USING COSINE;
+        "#,
+    );
+
+    assert_contains(&diff.up, "ALTER TABLE docs CREATE INDEX embedding USING COSINE;");
+    assert_not_contains(&diff.up, "CREATE INDEX embedding (");
+    assert_not_contains(&diff.up, "idx_");
+}

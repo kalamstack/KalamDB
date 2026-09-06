@@ -60,7 +60,8 @@ fn expect_execute_as_denied(result: Result<String, Box<dyn std::error::Error>>, 
 fn smoke_as_user_role_matrix_allows_privileged_roles_and_denies_user() {
     if !is_server_running() {
         eprintln!(
-            "Skipping smoke_as_user_role_matrix_allows_privileged_roles_and_denies_user: server not running"
+            "Skipping smoke_as_user_role_matrix_allows_privileged_roles_and_denies_user: server \
+             not running"
         );
         return;
     }
@@ -104,7 +105,8 @@ fn smoke_as_user_role_matrix_allows_privileged_roles_and_denies_user() {
             &denied_actor,
             password,
             &format!(
-                "EXECUTE AS USER '{}' (INSERT INTO {} (id, value) VALUES ('denied-user', 'blocked'))",
+                "EXECUTE AS USER '{}' (INSERT INTO {} (id, value) VALUES ('denied-user', \
+                 'blocked'))",
                 target_user, full_table
             ),
         ),
@@ -236,7 +238,8 @@ fn smoke_as_user_self_target_dml_stays_under_actor_user_id() {
 fn smoke_as_user_allowed_select_update_delete_runs_in_target_scope() {
     if !is_server_running() {
         eprintln!(
-            "Skipping smoke_as_user_allowed_select_update_delete_runs_in_target_scope: server not running"
+            "Skipping smoke_as_user_allowed_select_update_delete_runs_in_target_scope: server not \
+             running"
         );
         return;
     }

@@ -13,11 +13,14 @@ use chrono::{DateTime, Utc};
 use kalamdb_commons::{
     models::{
         schemas::{TableDefinition, TableType},
-        JobId, NamespaceId, NodeId, StorageId, UserId,
+        FunctionRevisionId, JobId, NamespaceId, NodeId, StorageId, UserId,
     },
     TableId,
 };
-use kalamdb_system::{providers::jobs::models::Job, JobStatus, Storage, User};
+use kalamdb_system::{
+    providers::jobs::models::Job, CatalogFunctionArtifact, CatalogFunctionModule,
+    CatalogFunctionRevision, JobStatus, Storage, User,
+};
 use serde::{Deserialize, Serialize};
 
 /// Commands for the unified metadata Raft group
@@ -189,6 +192,17 @@ pub enum MetaCommand {
         namespace_id: NamespaceId,
         created_by:   Option<UserId>,
     },
+
+    /// Stage a function artifact/revision and CAS-activate it.
+    ///
+    /// Keep this variant at the end so existing bincode-encoded Raft log
+    /// discriminants remain stable for older variants.
+    ActivateFunctionRevision {
+        module:               CatalogFunctionModule,
+        revision:             CatalogFunctionRevision,
+        artifact:             CatalogFunctionArtifact,
+        expected_revision_id: Option<FunctionRevisionId>,
+    },
 }
 
 impl MetaCommand {
@@ -215,6 +229,7 @@ impl MetaCommand {
             | Self::FailJob { .. }
             | Self::ReleaseJob { .. }
             | Self::CancelJob { .. } => "job",
+            Self::ActivateFunctionRevision { .. } => "function",
         }
     }
 }
@@ -340,6 +355,36 @@ mod tests {
 
         let cmd = MetaCommand::CreateUser { user: test_user() };
         assert_eq!(cmd.category(), "user");
+
+        let module_id = kalamdb_commons::FunctionModuleId::new("backend");
+        let artifact_id = kalamdb_commons::ArtifactId::new("abc");
+        let revision_id = FunctionRevisionId::from_module_artifact(&module_id, &artifact_id);
+        let cmd = MetaCommand::ActivateFunctionRevision {
+            module:               CatalogFunctionModule {
+                module_id:          module_id.clone(),
+                runtime:            kalamdb_commons::FunctionRuntime::Typescript,
+                active_revision_id: None,
+                contract_hash:      None,
+                abi_version:        1,
+            },
+            revision:             CatalogFunctionRevision {
+                revision_id,
+                module_id,
+                artifact_id: artifact_id.clone(),
+                contract_hash: "hash".to_string(),
+                abi_version: 1,
+                runtime: kalamdb_commons::FunctionRuntime::Typescript,
+                created_at: 0,
+            },
+            artifact:             CatalogFunctionArtifact {
+                artifact_id,
+                size_bytes: 1,
+                runtime: kalamdb_commons::FunctionRuntime::Typescript,
+                created_at: 0,
+            },
+            expected_revision_id: None,
+        };
+        assert_eq!(cmd.category(), "function");
     }
 
     #[test]

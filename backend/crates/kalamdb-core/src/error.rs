@@ -354,6 +354,7 @@ impl From<kalamdb_system::SystemError> for KalamDbError {
             },
             kalamdb_system::SystemError::NotFound(msg) => KalamDbError::NotFound(msg),
             kalamdb_system::SystemError::AlreadyExists(msg) => KalamDbError::AlreadyExists(msg),
+            kalamdb_system::SystemError::Conflict(msg) => KalamDbError::Conflict(msg),
             kalamdb_system::SystemError::InvalidOperation(msg) => {
                 KalamDbError::InvalidOperation(msg)
             },

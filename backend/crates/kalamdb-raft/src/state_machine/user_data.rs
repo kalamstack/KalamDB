@@ -203,18 +203,24 @@ impl UserDataStateMachine {
                 table_id,
                 user_id,
                 rows,
+                encoded_fields,
                 ..
             } => {
+                let insert_count = if encoded_fields.is_empty() {
+                    rows.len()
+                } else {
+                    encoded_fields.len()
+                };
                 log::debug!(
                     "UserDataStateMachine[{}]: Insert into {:?} ({} rows)",
                     self.shard,
                     table_id,
-                    rows.len()
+                    insert_count
                 );
 
                 // Persist data via applier if available
                 let rows_affected = if let Some(ref a) = applier {
-                    match a.insert(&table_id, &user_id, &rows, commit_seq).await {
+                    match a.insert(&table_id, &user_id, &rows, &encoded_fields, commit_seq).await {
                         Ok(count) => count,
                         Err(e) => {
                             // Convert applier errors to DataResponse::Error
@@ -236,7 +242,7 @@ impl UserDataStateMachine {
                 };
 
                 self.total_operations.fetch_add(1, Ordering::Relaxed);
-                self.approximate_size.fetch_add(rows.len() as u64, Ordering::Relaxed);
+                self.approximate_size.fetch_add(insert_count as u64, Ordering::Relaxed);
 
                 Ok(DataResponse::RowsAffected(rows_affected))
             },
@@ -550,9 +556,10 @@ mod tests {
             _table_id: &TableId,
             _user_id: &UserId,
             rows: &[Row],
+            encoded_fields: &[Vec<u8>],
             _commit_seq: u64,
         ) -> Result<usize, RaftError> {
-            Ok(rows.len())
+            Ok(rows.len().max(encoded_fields.len()))
         }
 
         async fn update(
@@ -600,6 +607,7 @@ mod tests {
             table_id:            TableId::new(NamespaceId::default(), "users".into()),
             user_id:             UserId::new("user123"),
             rows:                vec![],
+            encoded_fields:      Vec::new(),
             required_meta_index: 0,
             transaction_id:      None,
         };

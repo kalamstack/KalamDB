@@ -191,7 +191,8 @@ fn smoke_test_cached_point_get_projection() {
 
     let (names, rows) = query_rows(
         &format!("SELECT file_ref FROM {files_table} WHERE path = $1"),
-        vec![Value::String("missing.md".to_string())]);
+        vec![Value::String("missing.md".to_string())],
+    );
     assert_eq!(names, vec!["file_ref"]);
     assert!(rows.is_empty(), "missing PK must return no file_ref row");
 
@@ -204,7 +205,8 @@ fn smoke_test_cached_point_get_projection() {
 
     let (names, rows) = query_rows(
         &format!("SELECT file_ref, path, body FROM {files_table} WHERE path = $1"),
-        path_param.clone());
+        path_param.clone(),
+    );
     assert_eq!(names, vec!["file_ref", "path", "body"]);
     assert_eq!(file_ref_sha256(&rows[0]), second_sha);
     assert_eq!(string_value(&rows[0], "path"), "index.md");

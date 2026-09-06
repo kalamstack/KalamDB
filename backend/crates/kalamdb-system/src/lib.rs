@@ -65,6 +65,11 @@ pub use providers::jobs::models::{
 // Re-export live query models for convenience
 pub use providers::live::models::{LiveQuery, LiveQueryStatus};
 pub use providers::{
+    catalog::{
+        ActivateFunctionOutcome, CatalogFunctionArtifact, CatalogFunctionModule,
+        CatalogFunctionRevision, CatalogRoutine, CatalogRoutineGrant, CatalogRoutineParameter,
+        CatalogStores, CatalogTrigger, CatalogTriggerAttempt, CatalogType, CatalogTypeField,
+    },
     job_nodes::models::JobNode,
     manifest::models::{
         ColumnStats, FileRef, FileSubfolderState, Manifest, ManifestCacheEntry, SegmentMetadata,
@@ -80,9 +85,13 @@ pub use providers::{
 };
 // Re-export all providers
 pub use providers::{
-    AuditLogsTableProvider, InMemoryChecker, JobNodesTableProvider, JobsTableProvider,
-    ManifestTableProvider, MigrationsTableProvider, NamespacesTableProvider, SchemasTableProvider,
-    StoragesTableProvider, TablePoliciesTableProvider, UsersTableProvider,
+    AuditLogsTableProvider, FunctionArtifactsTableProvider, FunctionModulesTableProvider,
+    FunctionRevisionsTableProvider, InMemoryChecker, JobNodesTableProvider, JobsTableProvider,
+    ManifestTableProvider, MigrationsTableProvider, NamespacesTableProvider,
+    RoutineGrantsTableProvider, RoutineParametersTableProvider, RoutinesTableProvider,
+    SchemasTableProvider, StoragesTableProvider, TablePoliciesTableProvider,
+    TriggerAttemptsTableProvider, TriggersTableProvider, TypeFieldsTableProvider,
+    TypesTableProvider, UsersTableProvider,
 };
 pub use registry::SystemTablesRegistry;
 pub use services::SystemColumnsService;

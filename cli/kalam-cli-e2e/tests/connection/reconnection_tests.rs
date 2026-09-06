@@ -14,8 +14,8 @@ use kalam_client::{ConnectionOptions, SeqId, SubscriptionOptions};
 /// Simulates the subscription state tracking done by the WASM client
 #[allow(dead_code)]
 struct MockSubscriptionState {
-    sql: String,
-    options: SubscriptionOptions,
+    sql:         String,
+    options:     SubscriptionOptions,
     last_seq_id: Option<SeqId>,
 }
 
@@ -24,8 +24,8 @@ struct MockSubscriptionState {
 fn test_seq_id_tracking_for_resume() {
     // Simulate initial subscription state
     let mut state = MockSubscriptionState {
-        sql: "SELECT * FROM messages".to_string(),
-        options: SubscriptionOptions::new().with_batch_size(100),
+        sql:         "SELECT * FROM messages".to_string(),
+        options:     SubscriptionOptions::new().with_batch_size(100),
         last_seq_id: None,
     };
 
@@ -60,8 +60,8 @@ fn test_multiple_subscriptions_seq_id_tracking() {
     subscriptions.insert(
         "sub-1".to_string(),
         MockSubscriptionState {
-            sql: "SELECT * FROM messages".to_string(),
-            options: SubscriptionOptions::new().with_batch_size(50),
+            sql:         "SELECT * FROM messages".to_string(),
+            options:     SubscriptionOptions::new().with_batch_size(50),
             last_seq_id: None,
         },
     );
@@ -69,8 +69,8 @@ fn test_multiple_subscriptions_seq_id_tracking() {
     subscriptions.insert(
         "sub-2".to_string(),
         MockSubscriptionState {
-            sql: "SELECT * FROM users".to_string(),
-            options: SubscriptionOptions::new().with_batch_size(100),
+            sql:         "SELECT * FROM users".to_string(),
+            options:     SubscriptionOptions::new().with_batch_size(100),
             last_seq_id: None,
         },
     );

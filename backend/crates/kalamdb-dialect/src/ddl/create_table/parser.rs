@@ -16,6 +16,7 @@ use sqlparser::ast::{ColumnOption, CreateTable, ObjectNamePart, Statement, Table
 use super::types::CreateTableStatement;
 use crate::{
     compatibility::map_sql_type_to_kalam,
+    ddl::column_default::expr_to_column_default,
     parser::utils::{format_span, parse_sql_statements},
     validation::validate_column_name,
 };
@@ -30,7 +31,7 @@ static USING_ACCESS_METHOD_RE: Lazy<Regex> =
 
 impl CreateTableStatement {
     /// Parse a SQL statement into a CreateTableStatement
-    pub fn parse(sql: &str, default_namespace: &str) -> Result<Self, String> {
+    pub fn parse(sql: &str, default_namespace: &NamespaceId) -> Result<Self, String> {
         crate::ddl::reject_access_level_sql(sql)?;
         let (mut normalized_sql, create_prefix_table_type) = normalize_create_table_sql(sql);
 
@@ -64,10 +65,7 @@ impl CreateTableStatement {
             }) => {
                 // 1. Parse table name and namespace
                 let (namespace_id, table_name) = if name.0.len() == 1 {
-                    (
-                        NamespaceId::from(default_namespace),
-                        TableName::from(name.0[0].to_string().as_str()),
-                    )
+                    (default_namespace.clone(), TableName::from(name.0[0].to_string().as_str()))
                 } else if name.0.len() == 2 {
                     (
                         NamespaceId::from(name.0[0].to_string().as_str()),
@@ -368,7 +366,7 @@ impl CreateTableStatement {
                             },
                             ColumnOption::Null => {},
                             ColumnOption::Default(expr) => {
-                                let default_spec = expr_to_column_default(expr);
+                                let default_spec = expr_to_column_default(expr, &namespace_id)?;
                                 column_defaults.insert(col_name.clone(), default_spec);
                             },
                             ColumnOption::DialectSpecific(tokens) => {
@@ -509,67 +507,6 @@ fn normalize_create_table_sql(sql: &str) -> (String, Option<TableType>) {
     }
 }
 
-fn expr_to_column_default(expr: &sqlparser::ast::Expr) -> ColumnDefault {
-    match expr {
-        // Handle function calls
-        sqlparser::ast::Expr::Function(func) => {
-            let name = func.name.to_string().to_uppercase();
-            match name.as_str() {
-                "NOW" | "CURRENT_TIMESTAMP" | "SNOWFLAKE_ID" | "UUID_V7" | "ULID"
-                | "CURRENT_USER" => ColumnDefault::function(&name, vec![]),
-                _ => {
-                    // Fallback to string literal for unknown functions
-                    ColumnDefault::literal(serde_json::Value::String(func.to_string()))
-                },
-            }
-        },
-        // Handle literals
-        sqlparser::ast::Expr::Value(val) => match &val.value {
-            sqlparser::ast::Value::Number(n, _) => {
-                if let Ok(i) = n.parse::<i64>() {
-                    ColumnDefault::literal(serde_json::Value::Number(i.into()))
-                } else if let Ok(f) = n.parse::<f64>() {
-                    ColumnDefault::literal(serde_json::json!(f))
-                } else {
-                    ColumnDefault::literal(serde_json::Value::String(n.clone()))
-                }
-            },
-            sqlparser::ast::Value::SingleQuotedString(s)
-            | sqlparser::ast::Value::DoubleQuotedString(s) => {
-                ColumnDefault::literal(serde_json::Value::String(s.clone()))
-            },
-            sqlparser::ast::Value::Boolean(b) => {
-                ColumnDefault::literal(serde_json::Value::Bool(*b))
-            },
-            sqlparser::ast::Value::Null => ColumnDefault::literal(serde_json::Value::Null),
-            _ => ColumnDefault::literal(serde_json::Value::String(val.to_string())),
-        },
-        // Handle identifiers (e.g. CURRENT_TIMESTAMP without parens)
-        sqlparser::ast::Expr::Identifier(ident) => {
-            let s = ident.value.to_uppercase();
-            match s.as_str() {
-                "CURRENT_TIMESTAMP" => ColumnDefault::function("NOW", vec![]),
-                "CURRENT_USER" => ColumnDefault::function("CURRENT_USER", vec![]),
-                "NULL" => ColumnDefault::literal(serde_json::Value::Null),
-                _ => ColumnDefault::literal(serde_json::Value::String(ident.value.clone())),
-            }
-        },
-        _ => {
-            let default_val = expr.to_string();
-            let upper_val = default_val.to_uppercase();
-            if upper_val == "NULL" {
-                ColumnDefault::literal(serde_json::Value::Null)
-            } else if upper_val == "CURRENT_TIMESTAMP" || upper_val == "NOW()" {
-                ColumnDefault::function("NOW", vec![])
-            } else {
-                // Strip quotes if present
-                let val = default_val.trim_matches('\'').to_string();
-                ColumnDefault::literal(serde_json::Value::String(val))
-            }
-        },
-    }
-}
-
 /// Returns true if the SQL data type is a PostgreSQL SERIAL type that implies
 /// auto-increment semantics (SERIAL, BIGSERIAL, SMALLSERIAL and their aliases).
 fn is_serial_type(data_type: &sqlparser::ast::DataType) -> bool {
@@ -595,6 +532,10 @@ mod tests {
 
     const DEFAULT_NS: &str = "sales";
 
+    fn default_ns() -> NamespaceId {
+        NamespaceId::new(DEFAULT_NS)
+    }
+
     #[test]
     fn modern_create_table_parses() {
         let sql = r#"
@@ -610,7 +551,7 @@ WITH (
 );
 "#;
 
-        let stmt = CreateTableStatement::parse(sql, DEFAULT_NS).unwrap();
+        let stmt = CreateTableStatement::parse(sql, &default_ns()).unwrap();
         assert_eq!(stmt.table_type, TableType::User);
         assert_eq!(stmt.table_name.as_str(), "orders2");
         assert_eq!(stmt.namespace_id.as_str(), "sales");
@@ -632,7 +573,7 @@ CREATE TABLE sales.user_profile (
     COMPRESSION = 'zstd'
 );
 "#;
-        let stmt = CreateTableStatement::parse(user_sql, DEFAULT_NS).unwrap();
+        let stmt = CreateTableStatement::parse(user_sql, &default_ns()).unwrap();
         assert_eq!(stmt.table_type, TableType::User);
         assert_eq!(stmt.storage_id.unwrap().as_str(), "local-ssd");
         assert!(stmt.use_user_storage);
@@ -650,7 +591,7 @@ CREATE TABLE sales.events (
     MAX_STREAM_SIZE_BYTES = 1048576
 );
 "#;
-        let stmt = CreateTableStatement::parse(stream_sql, DEFAULT_NS).unwrap();
+        let stmt = CreateTableStatement::parse(stream_sql, &default_ns()).unwrap();
         assert_eq!(stmt.table_type, TableType::Stream);
         assert_eq!(stmt.ttl_seconds, Some(3600));
         assert_eq!(stmt.eviction_strategy.as_deref(), Some("hybrid"));
@@ -659,7 +600,7 @@ CREATE TABLE sales.events (
 
         let none_sql = "CREATE TABLE sales.raw (id BIGINT PRIMARY KEY) WITH (TYPE='SHARED', \
                         COMPRESSION='none')";
-        let stmt = CreateTableStatement::parse(none_sql, DEFAULT_NS).unwrap();
+        let stmt = CreateTableStatement::parse(none_sql, &default_ns()).unwrap();
         assert_eq!(stmt.table_type, TableType::Shared);
         assert_eq!(stmt.compression, Some(TableCompression::None));
     }
@@ -668,7 +609,7 @@ CREATE TABLE sales.events (
     fn create_table_rejects_unsupported_compression() {
         let sql = "CREATE TABLE sales.bad_compression (id BIGINT PRIMARY KEY) WITH (TYPE='USER', \
                    COMPRESSION='lz4')";
-        let err = CreateTableStatement::parse(sql, DEFAULT_NS).unwrap_err();
+        let err = CreateTableStatement::parse(sql, &default_ns()).unwrap_err();
         assert!(err.contains("Supported: none, snappy, zstd"));
     }
 
@@ -676,7 +617,7 @@ CREATE TABLE sales.events (
     fn create_table_rejects_stream_compression() {
         let sql = "CREATE TABLE sales.bad_stream (id BIGINT PRIMARY KEY) WITH (TYPE='STREAM', \
                    TTL_SECONDS=60, COMPRESSION='snappy')";
-        let err = CreateTableStatement::parse(sql, DEFAULT_NS).unwrap_err();
+        let err = CreateTableStatement::parse(sql, &default_ns()).unwrap_err();
         assert!(err.contains("COMPRESSION is only supported for USER and SHARED tables"));
     }
 
@@ -685,14 +626,14 @@ CREATE TABLE sales.events (
         let err = CreateTableStatement::parse(
             "CREATE TABLE sales.bad_user (id BIGINT PRIMARY KEY) WITH (TYPE='USER', \
              TTL_SECONDS=60)",
-            DEFAULT_NS,
+            &default_ns(),
         )
         .unwrap_err();
         assert!(err.contains("TTL_SECONDS is only supported for STREAM tables"));
 
         let err = CreateTableStatement::parse(
             "CREATE TABLE sales.bad_shared (id TEXT) WITH (TYPE='SHARED', ACCESS_LEVEL='PUBLIC')",
-            DEFAULT_NS,
+            &default_ns(),
         )
         .unwrap_err();
         assert!(err.contains("ACCESS_LEVEL is not supported"));
@@ -700,7 +641,7 @@ CREATE TABLE sales.events (
 
         let err = CreateTableStatement::parse(
             "CREATE SHARED TABLE sales.legacy (id TEXT) ACCESS LEVEL private",
-            DEFAULT_NS,
+            &default_ns(),
         )
         .unwrap_err();
         assert!(err.contains("ACCESS_LEVEL is not supported"));
@@ -719,7 +660,7 @@ CREATE TABLE sales.widgets (
 );
 "#;
 
-        let err = CreateTableStatement::parse(sql, DEFAULT_NS).unwrap_err();
+        let err = CreateTableStatement::parse(sql, &default_ns()).unwrap_err();
         assert!(
             err.contains("Duplicate column name"),
             "expected duplicate-column error, got: {err}"
@@ -736,7 +677,7 @@ CREATE TABLE sales.widgets (
 );
 "#;
 
-        let err = CreateTableStatement::parse(sql, DEFAULT_NS).unwrap_err();
+        let err = CreateTableStatement::parse(sql, &default_ns()).unwrap_err();
         assert!(
             err.contains("Duplicate column name"),
             "expected duplicate-column error, got: {err}"
@@ -754,7 +695,7 @@ CREATE TABLE sales.activity (
 );
 "#;
 
-        let err = CreateTableStatement::parse(sql, DEFAULT_NS).unwrap_err();
+        let err = CreateTableStatement::parse(sql, &default_ns()).unwrap_err();
         assert!(err.contains("STREAM tables must specify"));
     }
 
@@ -769,7 +710,7 @@ CREATE TABLE sales.system_config (
     TYPE = 'SHARED'
 )
 "#;
-        let stmt = CreateTableStatement::parse(sql_string, DEFAULT_NS).unwrap();
+        let stmt = CreateTableStatement::parse(sql_string, &default_ns()).unwrap();
         assert_eq!(stmt.primary_key_column.as_deref(), Some("key"));
         assert_eq!(stmt.table_type, TableType::Shared);
 
@@ -782,7 +723,7 @@ CREATE TABLE sales.config2 (
     TYPE = 'SHARED'
 )
 "#;
-        let stmt = CreateTableStatement::parse(sql_text, DEFAULT_NS).unwrap();
+        let stmt = CreateTableStatement::parse(sql_text, &default_ns()).unwrap();
         assert_eq!(stmt.primary_key_column.as_deref(), Some("key"));
         assert_eq!(stmt.table_type, TableType::Shared);
     }
@@ -797,7 +738,7 @@ CREATE TABLE concurrent.user_data (
     current_user_id TEXT DEFAULT CURRENT_USER()
 ) WITH (TYPE='USER', FLUSH_POLICY='rows:100')
 "#;
-        let stmt = CreateTableStatement::parse(sql, DEFAULT_NS).unwrap();
+        let stmt = CreateTableStatement::parse(sql, &default_ns()).unwrap();
         assert!(stmt.column_defaults.contains_key("current_user_id"));
     }
 
@@ -811,7 +752,7 @@ CREATE TABLE concurrent.user_data_no_parens (
     current_user_id TEXT DEFAULT CURRENT_USER
 ) WITH (TYPE='USER')
 "#;
-        let stmt = CreateTableStatement::parse(sql, DEFAULT_NS).unwrap();
+        let stmt = CreateTableStatement::parse(sql, &default_ns()).unwrap();
         assert!(stmt.column_defaults.contains_key("current_user_id"));
     }
 
@@ -823,7 +764,7 @@ CREATE TABLE sales.orders (
     title TEXT NOT NULL
 ) WITH (TYPE = 'SHARED')
 "#;
-        let stmt = CreateTableStatement::parse(sql, DEFAULT_NS).unwrap();
+        let stmt = CreateTableStatement::parse(sql, &default_ns()).unwrap();
         assert!(
             stmt.column_defaults.contains_key("id"),
             "BIGSERIAL should auto-add SNOWFLAKE_ID() default"
@@ -843,7 +784,7 @@ CREATE TABLE sales.orders (
                 label.to_lowercase(),
                 serial_type
             );
-            let stmt = CreateTableStatement::parse(&sql, DEFAULT_NS)
+            let stmt = CreateTableStatement::parse(&sql, &default_ns())
                 .unwrap_or_else(|e| panic!("{label} failed: {e}"));
             assert!(
                 stmt.column_defaults.contains_key("id"),
@@ -861,7 +802,7 @@ CREATE TABLE sales.compression_test (
 ) USING kalamdb
   WITH (TYPE = 'USER')
 "#;
-        let stmt = CreateTableStatement::parse(sql, DEFAULT_NS).unwrap();
+        let stmt = CreateTableStatement::parse(sql, &default_ns()).unwrap();
         assert_eq!(stmt.table_type, TableType::User);
         assert_eq!(stmt.table_name.as_str(), "compression_test");
     }
@@ -876,7 +817,7 @@ CREATE TABLE sales.my_table (
 ) USING kalamdb
   WITH (TYPE = 'USER', STORAGE_ID = 'local-ssd')
 "#;
-        let stmt = CreateTableStatement::parse(sql, DEFAULT_NS).unwrap();
+        let stmt = CreateTableStatement::parse(sql, &default_ns()).unwrap();
         assert_eq!(stmt.table_type, TableType::User);
         assert_eq!(stmt.storage_id.unwrap().as_str(), "local-ssd");
         assert!(stmt.column_defaults.contains_key("id"), "BIGSERIAL auto-increment");
@@ -891,10 +832,41 @@ CREATE TABLE sales.identity_test (
     name TEXT
 ) WITH (TYPE = 'SHARED')
 "#;
-        let stmt = CreateTableStatement::parse(sql, DEFAULT_NS).unwrap();
+        let stmt = CreateTableStatement::parse(sql, &default_ns()).unwrap();
         assert!(
             stmt.column_defaults.contains_key("id"),
             "GENERATED ALWAYS AS IDENTITY should add SNOWFLAKE_ID() default"
         );
+    }
+
+    #[test]
+    fn default_procedure_uses_call_models() {
+        use kalamdb_commons::{CallArgument, RoutineId};
+
+        let sql = r#"
+CREATE TABLE sales.orders (
+    id BIGINT PRIMARY KEY DEFAULT next_id('v1'),
+    created_at TIMESTAMP DEFAULT NOW()
+) WITH (TYPE = 'USER')
+"#;
+        let stmt = CreateTableStatement::parse(sql, &default_ns()).unwrap();
+        assert_eq!(
+            stmt.column_defaults.get("id"),
+            Some(&ColumnDefault::procedure(
+                RoutineId::from_parts(
+                    Some(&kalamdb_commons::models::NamespaceId::new("sales")),
+                    "next_id"
+                ),
+                vec![CallArgument::text("v1")],
+            ))
+        );
+        assert_eq!(
+            stmt.column_defaults.get("created_at"),
+            Some(&ColumnDefault::function("NOW", vec![]))
+        );
+
+        let ns = kalamdb_commons::models::NamespaceId::new(DEFAULT_NS);
+        let call = crate::ddl::CallStatement::parse("CALL next_id('v1')", &ns).unwrap();
+        assert_eq!(stmt.column_defaults.get("id").unwrap().as_routine_call(), Some(&call.call));
     }
 }

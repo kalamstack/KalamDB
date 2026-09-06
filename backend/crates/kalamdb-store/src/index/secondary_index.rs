@@ -5,6 +5,17 @@ use serde::{Deserialize, Serialize};
 use super::extractor::{FunctionExtractor, IndexKeyExtractor};
 use crate::storage_trait::{Partition, Result, StorageBackend, StorageError};
 
+fn encode_pk_list(primary_keys: &[String]) -> Result<Vec<u8>> {
+    kalamdb_serialization::encode_string_list(primary_keys)
+        .map(|encoded| encoded.into_bytes())
+        .map_err(|e| StorageError::SerializationError(e.to_string()))
+}
+
+fn decode_pk_list(bytes: &[u8]) -> Result<Vec<String>> {
+    kalamdb_serialization::decode_string_list(bytes)
+        .map_err(|e| StorageError::SerializationError(e.to_string()))
+}
+
 /// Secondary index implementation for entity stores.
 ///
 /// Provides mapping from index keys to primary keys (entity IDs).
@@ -15,7 +26,7 @@ use crate::storage_trait::{Partition, Result, StorageBackend, StorageError};
 ///
 /// ## Storage Format
 /// - **Unique Index**: `partition:index_key` → `primary_key`
-/// - **Non-Unique Index**: `partition:index_key` → `["pk1", "pk2", ...]` (JSON array)
+/// - **Non-Unique Index**: `partition:index_key` → encoded string list
 ///
 /// ## Type Parameters
 /// - `T`: Entity type
@@ -163,8 +174,7 @@ where
             // Non-unique index: append to list
             let mut primary_keys = match self.backend.get(&self.partition, new_key.as_ref())? {
                 Some(bytes) => {
-                    let existing: Vec<String> = serde_json::from_slice(&bytes)
-                        .map_err(|e| StorageError::SerializationError(e.to_string()))?;
+                    let existing: Vec<String> = decode_pk_list(&bytes)?;
                     existing
                 },
                 None => Vec::new(),
@@ -175,8 +185,7 @@ where
                 primary_keys.push(primary_key.to_string());
             }
 
-            let bytes = serde_json::to_vec(&primary_keys)
-                .map_err(|e| StorageError::SerializationError(e.to_string()))?;
+            let bytes = encode_pk_list(&primary_keys)?;
             self.backend.put(&self.partition, new_key.as_ref(), &bytes)?;
         }
 
@@ -204,8 +213,7 @@ where
         } else {
             // Non-unique index: remove from list
             if let Some(bytes) = self.backend.get(&self.partition, index_key.as_ref())? {
-                let mut primary_keys: Vec<String> = serde_json::from_slice(&bytes)
-                    .map_err(|e| StorageError::SerializationError(e.to_string()))?;
+                let mut primary_keys: Vec<String> = decode_pk_list(&bytes)?;
 
                 primary_keys.retain(|pk| pk != primary_key);
 
@@ -214,8 +222,7 @@ where
                     self.backend.delete(&self.partition, index_key.as_ref())?;
                 } else {
                     // Update the list
-                    let bytes = serde_json::to_vec(&primary_keys)
-                        .map_err(|e| StorageError::SerializationError(e.to_string()))?;
+                    let bytes = encode_pk_list(&primary_keys)?;
                     self.backend.put(&self.partition, index_key.as_ref(), &bytes)?;
                 }
             }
@@ -283,8 +290,7 @@ where
                     Ok(vec![pk])
                 } else {
                     // Non-unique index: array of primary keys
-                    let pks: Vec<String> = serde_json::from_slice(&bytes)
-                        .map_err(|e| StorageError::SerializationError(e.to_string()))?;
+                    let pks: Vec<String> = decode_pk_list(&bytes)?;
                     Ok(pks)
                 }
             },

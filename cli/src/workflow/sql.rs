@@ -194,7 +194,8 @@ mod tests {
                     targets:   HashMap::from([(
                         "typescript".into(),
                         SchemaTarget {
-                            output: "src/generated/kalam.ts".into(),
+                            output:            "src/generated/kalam.ts".into(),
+                            unqualified_names: false,
                         },
                     )]),
                 },

@@ -51,6 +51,9 @@ CREATE SHARED TABLE IF NOT EXISTS chat_demo.messages (
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_messages_room ON chat_demo.messages (room);
+CREATE INDEX IF NOT EXISTS idx_room_members_user ON chat_demo.room_members (user_id);
+
 -- Live "the agent is thinking / typing" rows. STREAM + TTL so they fade away.
 CREATE STREAM TABLE IF NOT EXISTS chat_demo.agent_events (
     id BIGINT PRIMARY KEY DEFAULT SNOWFLAKE_ID(),

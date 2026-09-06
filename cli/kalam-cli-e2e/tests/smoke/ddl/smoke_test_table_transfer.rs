@@ -213,7 +213,8 @@ fn smoke_table_export_import_shared_via_api_and_show_export() {
     execute_sql_as_root_via_client(&format!("CREATE NAMESPACE {}", namespace))
         .expect("create namespace");
     execute_sql_as_root_via_client(&format!(
-        "CREATE TABLE {} (id BIGINT AUTO_INCREMENT PRIMARY KEY, note TEXT) WITH (TYPE='SHARED', FLUSH_POLICY='rows:5')",
+        "CREATE TABLE {} (id BIGINT AUTO_INCREMENT PRIMARY KEY, note TEXT) WITH (TYPE='SHARED', \
+         FLUSH_POLICY='rows:5')",
         source_fqn
     ))
     .expect("create source table");
@@ -433,7 +434,8 @@ fn smoke_table_export_import_user_table_flushed_and_hot_data() {
     execute_sql_as_root_via_client(&format!("CREATE NAMESPACE {}", namespace))
         .expect("create namespace");
     execute_sql_as_root_via_client(&format!(
-        "CREATE TABLE {} (id BIGINT AUTO_INCREMENT PRIMARY KEY, note TEXT) WITH (TYPE='USER', FLUSH_POLICY='rows:5')",
+        "CREATE TABLE {} (id BIGINT AUTO_INCREMENT PRIMARY KEY, note TEXT) WITH (TYPE='USER', \
+         FLUSH_POLICY='rows:5')",
         source_fqn
     ))
     .expect("create source user table");

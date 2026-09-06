@@ -160,12 +160,12 @@ mod tests {
         assert_eq!(
             got,
             vec![
-                None,                             // JsonNull
-                Some("true"),                     // Bool
-                Some("42"),                       // Int
-                Some("1.5"),                      // Float
+                None,         // JsonNull
+                Some("true"), // Bool
+                Some("42"),   // Int
+                Some("1.5"),  // Float
                 Some("\"foo\\\"bar\\n\\u0001\""), /* Str: JSON-quoted + escaped (quote, newline,
-                                                   * control char) */
+                               * control char) */
                 Some("[1,2]"),      // Array (passthrough)
                 Some(r#"{"a":1}"#), // Object (passthrough)
                 None,               // None

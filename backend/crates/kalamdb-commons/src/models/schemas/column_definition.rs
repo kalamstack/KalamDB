@@ -252,27 +252,6 @@ mod tests {
     }
 
     #[test]
-    fn test_flexbuffers_roundtrip() {
-        let column = ColumnDefinition::new(
-            5, // column_id
-            "status",
-            5,
-            KalamDataType::Text,
-            false,
-            false,
-            false,
-            ColumnDefault::literal(json!({"state": "active"})),
-            Some("Status column".to_string()),
-        );
-
-        let bytes = flexbuffers::to_vec(&column).expect("encode column definition");
-        let decoded: ColumnDefinition =
-            flexbuffers::from_slice(&bytes).expect("decode column definition");
-
-        assert_eq!(decoded, column);
-    }
-
-    #[test]
     fn test_column_name_case_insensitive() {
         // Column names should be normalized to lowercase
         let col1 = ColumnDefinition::simple(1, "FirstName", 1, KalamDataType::Text);

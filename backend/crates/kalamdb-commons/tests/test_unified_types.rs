@@ -71,7 +71,7 @@ fn test_all_kalambdata_types_convert_to_arrow_losslessly() {
 
 #[test]
 fn test_embedding_dimensions_work_correctly() {
-    let dimensions = vec![384, 768, 1536, 3072];
+    let dimensions = [384u16, 768, 1536, 3072];
 
     for dim in dimensions {
         let kalam_type = KalamDataType::Embedding(dim);

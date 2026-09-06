@@ -817,9 +817,11 @@ Fix by either:
 - installing `kalamdb-server` on `PATH`, or
 - setting `KALAMDB_SERVER_BIN=/absolute/path/to/kalamdb-server`
 
-### `deploy blocked: pending migration(s)`
+### `deploy blocked: schema changes require a committed migration before production deploy`
 
-Run:
+Production-like environments (`prod`, `production`, `staging`) refuse to deploy when `schema.sql` differs from the baseline and no matching migration file exists.
+
+Create and commit a migration first:
 
 ```bash
 kalam db migrate

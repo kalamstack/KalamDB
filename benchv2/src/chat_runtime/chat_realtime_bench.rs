@@ -449,6 +449,33 @@ async fn create_chat_schema(client: &KalamClient, namespace: &str) -> Result<(),
     run_sql_with_retry(
         client,
         &format!(
+            "CREATE INDEX IF NOT EXISTS idx_messages_ai_conversation ON {}.messages_ai \
+             (conversation_id)",
+            namespace
+        ),
+    )
+    .await?;
+    run_sql_with_retry(
+        client,
+        &format!(
+            "CREATE INDEX IF NOT EXISTS idx_messages_conversation ON {}.messages (conversation_id)",
+            namespace
+        ),
+    )
+    .await?;
+    run_sql_with_retry(
+        client,
+        &format!(
+            "CREATE INDEX IF NOT EXISTS idx_conversation_members_user ON {}.conversation_members \
+             (user_id)",
+            namespace
+        ),
+    )
+    .await?;
+
+    run_sql_with_retry(
+        client,
+        &format!(
             "CREATE POLICY conversations_member_select ON {}.conversations FOR SELECT TO user \
              USING (id IN (SELECT conversation_id FROM {}.conversation_members WHERE user_id = \
              CURRENT_USER))",

@@ -61,7 +61,8 @@ fn smoke_test_alter_user_table_options_preserves_query_dml_and_flush() {
     .expect("Failed to insert initial user-table row");
 
     let alter_sql = format!(
-        "ALTER TABLE {} SET TBLPROPERTIES (USE_USER_STORAGE = false, FLUSH_POLICY = 'rows:50,interval:120', COMPRESSION = 'none')",
+        "ALTER TABLE {} SET TBLPROPERTIES (USE_USER_STORAGE = false, FLUSH_POLICY = \
+         'rows:50,interval:120', COMPRESSION = 'none')",
         full_table
     );
     execute_sql_as_root_via_client(&alter_sql).expect("Failed to alter user table options");
@@ -73,7 +74,8 @@ fn smoke_test_alter_user_table_options_preserves_query_dml_and_flush() {
     assert_eq!(row_bool(&history[1], "is_latest"), Some(true));
 
     let latest_output = execute_sql_as_root_via_client_json(&format!(
-        "SELECT use_user_storage, options FROM system.schemas WHERE namespace_id = '{}' AND table_name = '{}' AND is_latest = true",
+        "SELECT use_user_storage, options FROM system.schemas WHERE namespace_id = '{}' AND \
+         table_name = '{}' AND is_latest = true",
         namespace, table
     ))
     .expect("Failed to query latest user table schema row");
@@ -87,7 +89,8 @@ fn smoke_test_alter_user_table_options_preserves_query_dml_and_flush() {
             "interval_seconds",
             "120",
         ],
-        "latest user table schema options");
+        "latest user table schema options",
+    );
 
     execute_sql_as_root_via_client(&format!(
         "INSERT INTO {} (id, name, visits) VALUES (2, 'Bob', 20)",
@@ -101,12 +104,14 @@ fn smoke_test_alter_user_table_options_preserves_query_dml_and_flush() {
         &format!("SELECT * FROM {} ORDER BY id", full_table),
         "Alice",
         Duration::from_secs(20),
-        execute_sql_as_root_via_client)
+        execute_sql_as_root_via_client,
+    )
     .expect("Failed to query USER table after ALTER DML");
     assert_contains_all_case_insensitive(
         &pre_flush,
         &["Alice", "15", "Bob", "20"],
-        "user table rows after ALTER DML");
+        "user table rows after ALTER DML",
+    );
 
     flush_table_and_assert(&full_table, &namespace, &table, true, "user table option alter");
 
@@ -114,12 +119,14 @@ fn smoke_test_alter_user_table_options_preserves_query_dml_and_flush() {
         &format!("SELECT * FROM {} ORDER BY id", full_table),
         "Bob",
         Duration::from_secs(20),
-        execute_sql_as_root_via_client)
+        execute_sql_as_root_via_client,
+    )
     .expect("Failed to query USER table after flush");
     assert_contains_all_case_insensitive(
         &post_flush,
         &["Alice", "15", "Bob", "20"],
-        "user table rows after flush");
+        "user table rows after flush",
+    );
 
     execute_sql_as_root_via_client(&format!(
         "INSERT INTO {} (id, name, visits) VALUES (3, 'Carol', 30)",
@@ -131,12 +138,14 @@ fn smoke_test_alter_user_table_options_preserves_query_dml_and_flush() {
         &format!("SELECT * FROM {} ORDER BY id", full_table),
         "Carol",
         Duration::from_secs(20),
-        execute_sql_as_root_via_client)
+        execute_sql_as_root_via_client,
+    )
     .expect("Failed to query USER table after post-flush insert");
     assert_contains_all_case_insensitive(
         &final_output,
         &["Alice", "Bob", "Carol", "30"],
-        "user table rows after post-flush insert");
+        "user table rows after post-flush insert",
+    );
 
     let _ =
         execute_sql_as_root_via_client(&format!("DROP NAMESPACE IF EXISTS {} CASCADE", namespace));
@@ -184,7 +193,8 @@ fn smoke_test_alter_shared_table_options_preserves_query_dml_and_flush() {
     .expect("Failed to insert initial shared-table row");
 
     let alter_sql = format!(
-        "ALTER TABLE {} SET TBLPROPERTIES (FLUSH_POLICY = 'rows:25,interval:180', COMPRESSION = 'zstd')",
+        "ALTER TABLE {} SET TBLPROPERTIES (FLUSH_POLICY = 'rows:25,interval:180', COMPRESSION = \
+         'zstd')",
         full_table
     );
     execute_sql_as_root_via_client(&alter_sql).expect("Failed to alter shared table options");
@@ -196,14 +206,16 @@ fn smoke_test_alter_shared_table_options_preserves_query_dml_and_flush() {
     assert_eq!(row_bool(&history[1], "is_latest"), Some(true));
 
     let latest_output = execute_sql_as_root_via_client_json(&format!(
-        "SELECT options FROM system.schemas WHERE namespace_id = '{}' AND table_name = '{}' AND is_latest = true",
+        "SELECT options FROM system.schemas WHERE namespace_id = '{}' AND table_name = '{}' AND \
+         is_latest = true",
         namespace, table
     ))
     .expect("Failed to query latest shared table schema row");
     assert_contains_all_case_insensitive(
         &latest_output,
         &["zstd", "row_limit", "25", "interval_seconds", "180"],
-        "latest shared table schema options");
+        "latest shared table schema options",
+    );
 
     execute_sql_as_root_via_client(&format!(
         "INSERT INTO {} (id, key, enabled) VALUES (2, 'beta_access', false)",
@@ -220,12 +232,14 @@ fn smoke_test_alter_shared_table_options_preserves_query_dml_and_flush() {
         &format!("SELECT * FROM {} ORDER BY id", full_table),
         "dark_mode",
         Duration::from_secs(20),
-        execute_sql_as_root_via_client)
+        execute_sql_as_root_via_client,
+    )
     .expect("Failed to query SHARED table after ALTER DML");
     assert_contains_all_case_insensitive(
         &pre_flush,
         &["dark_mode", "beta_access"],
-        "shared table rows after ALTER DML");
+        "shared table rows after ALTER DML",
+    );
 
     flush_table_and_assert(&full_table, &namespace, &table, false, "shared table option alter");
 
@@ -233,12 +247,14 @@ fn smoke_test_alter_shared_table_options_preserves_query_dml_and_flush() {
         &format!("SELECT * FROM {} ORDER BY id", full_table),
         "beta_access",
         Duration::from_secs(20),
-        execute_sql_as_root_via_client)
+        execute_sql_as_root_via_client,
+    )
     .expect("Failed to query SHARED table after flush");
     assert_contains_all_case_insensitive(
         &post_flush,
         &["dark_mode", "beta_access"],
-        "shared table rows after flush");
+        "shared table rows after flush",
+    );
 
     execute_sql_as_root_via_client(&format!(
         "INSERT INTO {} (id, key, enabled) VALUES (3, 'feature_x', true)",
@@ -250,12 +266,14 @@ fn smoke_test_alter_shared_table_options_preserves_query_dml_and_flush() {
         &format!("SELECT * FROM {} ORDER BY id", full_table),
         "feature_x",
         Duration::from_secs(20),
-        execute_sql_as_root_via_client)
+        execute_sql_as_root_via_client,
+    )
     .expect("Failed to query SHARED table after post-flush insert");
     assert_contains_all_case_insensitive(
         &final_output,
         &["dark_mode", "beta_access", "feature_x"],
-        "shared table rows after post-flush insert");
+        "shared table rows after post-flush insert",
+    );
 
     let _ =
         execute_sql_as_root_via_client(&format!("DROP NAMESPACE IF EXISTS {} CASCADE", namespace));
@@ -310,7 +328,8 @@ fn smoke_test_alter_stream_table_options_preserves_query_and_dml() {
     assert_sql_rejected_with(
         &invalid_stream_create,
         "COMPRESSION is only supported for USER and SHARED tables",
-        "stream CREATE with compression");
+        "stream CREATE with compression",
+    );
 
     execute_sql_as_root_via_client(&format!(
         "INSERT INTO {} (event_id, event_type, payload) VALUES (1, 'created', 'before alter')",
@@ -319,7 +338,8 @@ fn smoke_test_alter_stream_table_options_preserves_query_and_dml() {
     .expect("Failed to insert initial stream-table row");
 
     let alter_sql = format!(
-        "ALTER TABLE {} SET TBLPROPERTIES (TTL_SECONDS = 120, EVICTION_STRATEGY = 'hybrid', MAX_STREAM_SIZE_BYTES = 4096)",
+        "ALTER TABLE {} SET TBLPROPERTIES (TTL_SECONDS = 120, EVICTION_STRATEGY = 'hybrid', \
+         MAX_STREAM_SIZE_BYTES = 4096)",
         full_table
     );
     execute_sql_as_root_via_client(&alter_sql).expect("Failed to alter stream table options");
@@ -327,7 +347,8 @@ fn smoke_test_alter_stream_table_options_preserves_query_and_dml() {
     assert_sql_rejected_with(
         &format!("ALTER TABLE {} SET TBLPROPERTIES (COMPRESSION = 'zstd')", full_table),
         "COMPRESSION is not supported for STREAM tables",
-        "stream ALTER with compression");
+        "stream ALTER with compression",
+    );
 
     let history = wait_for_schema_history(&namespace, &table, 2, 2, "stream alter");
     assert_eq!(row_i64(&history[0], "schema_version"), Some(1));
@@ -336,7 +357,8 @@ fn smoke_test_alter_stream_table_options_preserves_query_and_dml() {
     assert_eq!(row_bool(&history[1], "is_latest"), Some(true));
 
     let latest_output = execute_sql_as_root_via_client_json(&format!(
-        "SELECT options FROM system.schemas WHERE namespace_id = '{}' AND table_name = '{}' AND is_latest = true",
+        "SELECT options FROM system.schemas WHERE namespace_id = '{}' AND table_name = '{}' AND \
+         is_latest = true",
         namespace, table
     ))
     .expect("Failed to query latest stream table schema row");
@@ -349,7 +371,8 @@ fn smoke_test_alter_stream_table_options_preserves_query_and_dml() {
             "max_stream_size_bytes",
             "4096",
         ],
-        "latest stream table schema options");
+        "latest stream table schema options",
+    );
 
     execute_sql_as_root_via_client(&format!(
         "INSERT INTO {} (event_id, event_type, payload) VALUES (2, 'updated', 'after alter')",
@@ -361,12 +384,14 @@ fn smoke_test_alter_stream_table_options_preserves_query_and_dml() {
         &format!("SELECT * FROM {} ORDER BY event_id", full_table),
         "after alter",
         Duration::from_secs(20),
-        execute_sql_as_root_via_client)
+        execute_sql_as_root_via_client,
+    )
     .expect("Failed to query STREAM table after ALTER insert");
     assert_contains_all_case_insensitive(
         &stream_output,
         &["before alter", "after alter", "created", "updated"],
-        "stream table rows after ALTER insert");
+        "stream table rows after ALTER insert",
+    );
 
     assert_stream_flush_is_rejected(&full_table);
 
@@ -374,12 +399,14 @@ fn smoke_test_alter_stream_table_options_preserves_query_and_dml() {
         &format!("SELECT * FROM {} ORDER BY event_id", full_table),
         "after alter",
         Duration::from_secs(20),
-        execute_sql_as_root_via_client)
+        execute_sql_as_root_via_client,
+    )
     .expect("Failed to query STREAM table after rejected flush");
     assert_contains_all_case_insensitive(
         &after_rejection,
         &["before alter", "after alter"],
-        "stream table rows after rejected flush");
+        "stream table rows after rejected flush",
+    );
 
     let _ =
         execute_sql_as_root_via_client(&format!("DROP NAMESPACE IF EXISTS {} CASCADE", namespace));
@@ -390,9 +417,11 @@ fn wait_for_schema_history(
     table: &str,
     expected_rows: usize,
     expected_latest_version: i64,
-    context: &str) -> Vec<HashMap<String, Value>> {
+    context: &str,
+) -> Vec<HashMap<String, Value>> {
     let query = format!(
-        "SELECT schema_version, is_latest FROM system.schemas WHERE namespace_id = '{}' AND table_name = '{}' ORDER BY schema_version",
+        "SELECT schema_version, is_latest FROM system.schemas WHERE namespace_id = '{}' AND \
+         table_name = '{}' ORDER BY schema_version",
         namespace, table
     );
     let deadline = Instant::now() + SCHEMA_WAIT_TIMEOUT;
@@ -494,7 +523,8 @@ fn flush_table_and_assert(
     namespace: &str,
     table: &str,
     is_user_table: bool,
-    context: &str) {
+    context: &str,
+) {
     let flush_output =
         execute_sql_as_root_via_client(&format!("STORAGE FLUSH TABLE {}", full_table))
             .unwrap_or_else(|err| panic!("{}: flush command failed: {}", context, err));

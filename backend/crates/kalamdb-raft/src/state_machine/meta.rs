@@ -524,6 +524,37 @@ impl MetaStateMachine {
 
                 Ok(MetaResponse::Ok)
             },
+
+            MetaCommand::ActivateFunctionRevision {
+                module,
+                revision,
+                artifact,
+                expected_revision_id,
+            } => {
+                log::debug!(
+                    "MetaStateMachine: ActivateFunctionRevision {} -> {:?}",
+                    module.module_id,
+                    revision.revision_id
+                );
+
+                let message = if let Some(ref a) = applier {
+                    a.activate_function_revision(
+                        &module,
+                        &revision,
+                        &artifact,
+                        expected_revision_id.as_ref(),
+                    )
+                    .await?
+                } else {
+                    String::new()
+                };
+
+                if message.starts_with("conflict:") {
+                    Ok(MetaResponse::Error { message })
+                } else {
+                    Ok(MetaResponse::Message { message })
+                }
+            },
         }
     }
 }

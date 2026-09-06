@@ -117,6 +117,76 @@ const SYSTEM_TABLE_METADATA: &[SystemTableMetadata] = &[
         column_family_name: Some("system_table_policies"),
     },
     SystemTableMetadata {
+        table:              SystemTable::Types,
+        sql_name:           "types",
+        aliases:            &["types", "system_types"],
+        is_view:            false,
+        column_family_name: Some("system_types"),
+    },
+    SystemTableMetadata {
+        table:              SystemTable::TypeFields,
+        sql_name:           "type_fields",
+        aliases:            &["type_fields", "system_type_fields"],
+        is_view:            false,
+        column_family_name: Some("system_type_fields"),
+    },
+    SystemTableMetadata {
+        table:              SystemTable::Routines,
+        sql_name:           "routines",
+        aliases:            &["routines", "system_routines"],
+        is_view:            false,
+        column_family_name: Some("system_routines"),
+    },
+    SystemTableMetadata {
+        table:              SystemTable::RoutineParameters,
+        sql_name:           "routine_parameters",
+        aliases:            &["routine_parameters", "system_routine_parameters"],
+        is_view:            false,
+        column_family_name: Some("system_routine_parameters"),
+    },
+    SystemTableMetadata {
+        table:              SystemTable::RoutineGrants,
+        sql_name:           "routine_grants",
+        aliases:            &["routine_grants", "system_routine_grants"],
+        is_view:            false,
+        column_family_name: Some("system_routine_grants"),
+    },
+    SystemTableMetadata {
+        table:              SystemTable::FunctionModules,
+        sql_name:           "function_modules",
+        aliases:            &["function_modules", "system_function_modules"],
+        is_view:            false,
+        column_family_name: Some("system_function_modules"),
+    },
+    SystemTableMetadata {
+        table:              SystemTable::FunctionRevisions,
+        sql_name:           "function_revisions",
+        aliases:            &["function_revisions", "system_function_revisions"],
+        is_view:            false,
+        column_family_name: Some("system_function_revisions"),
+    },
+    SystemTableMetadata {
+        table:              SystemTable::FunctionArtifacts,
+        sql_name:           "function_artifacts",
+        aliases:            &["function_artifacts", "system_function_artifacts"],
+        is_view:            false,
+        column_family_name: Some("system_function_artifacts"),
+    },
+    SystemTableMetadata {
+        table:              SystemTable::Triggers,
+        sql_name:           "triggers",
+        aliases:            &["triggers", "system_triggers"],
+        is_view:            false,
+        column_family_name: Some("system_triggers"),
+    },
+    SystemTableMetadata {
+        table:              SystemTable::TriggerAttempts,
+        sql_name:           "trigger_attempts",
+        aliases:            &["trigger_attempts", "system_trigger_attempts"],
+        is_view:            false,
+        column_family_name: Some("system_trigger_attempts"),
+    },
+    SystemTableMetadata {
         table:              SystemTable::Stats,
         sql_name:           "stats",
         aliases:            &["stats"],
@@ -262,6 +332,26 @@ pub enum SystemTable {
     Migrations,
     /// system.table_policies - Shared-table row-level security policies (persisted)
     TablePolicies,
+    /// system.types - Named, implicit, and alias SQL types (persisted)
+    Types,
+    /// system.type_fields - Composite/enum/row-type fields (persisted)
+    TypeFields,
+    /// system.routines - SQL procedures (persisted)
+    Routines,
+    /// system.routine_parameters - Procedure arguments (persisted)
+    RoutineParameters,
+    /// system.routine_grants - EXECUTE ACLs independent of table/RLS policy (persisted)
+    RoutineGrants,
+    /// system.function_modules - function module active revision pointer (persisted)
+    FunctionModules,
+    /// system.function_revisions - immutable function module revisions (persisted)
+    FunctionRevisions,
+    /// system.function_artifacts - content-addressed artifact metadata (persisted)
+    FunctionArtifacts,
+    /// system.triggers - durable topic trigger catalog (persisted)
+    Triggers,
+    /// system.trigger_attempts - trigger delivery attempts, leases, and DLQ (persisted)
+    TriggerAttempts,
 
     // ==================== VIRTUAL VIEWS ====================
     /// system.stats - Runtime metrics (computed on-demand)
@@ -355,6 +445,16 @@ impl SystemTable {
             SystemTable::TopicOffsets,
             SystemTable::Migrations,
             SystemTable::TablePolicies,
+            SystemTable::Types,
+            SystemTable::TypeFields,
+            SystemTable::Routines,
+            SystemTable::RoutineParameters,
+            SystemTable::RoutineGrants,
+            SystemTable::FunctionModules,
+            SystemTable::FunctionRevisions,
+            SystemTable::FunctionArtifacts,
+            SystemTable::Triggers,
+            SystemTable::TriggerAttempts,
         ]
     }
 
@@ -396,6 +496,16 @@ impl SystemTable {
             SystemTable::TopicOffsets,
             SystemTable::Migrations,
             SystemTable::TablePolicies,
+            SystemTable::Types,
+            SystemTable::TypeFields,
+            SystemTable::Routines,
+            SystemTable::RoutineParameters,
+            SystemTable::RoutineGrants,
+            SystemTable::FunctionModules,
+            SystemTable::FunctionRevisions,
+            SystemTable::FunctionArtifacts,
+            SystemTable::Triggers,
+            SystemTable::TriggerAttempts,
             // Views
             SystemTable::Stats,
             SystemTable::Live,
@@ -441,6 +551,22 @@ impl SystemTable {
         static MIGRATIONS: Lazy<Partition> = Lazy::new(|| Partition::new("system_migrations"));
         static TABLE_POLICIES: Lazy<Partition> =
             Lazy::new(|| Partition::new("system_table_policies"));
+        static TYPES: Lazy<Partition> = Lazy::new(|| Partition::new("system_types"));
+        static TYPE_FIELDS: Lazy<Partition> = Lazy::new(|| Partition::new("system_type_fields"));
+        static ROUTINES: Lazy<Partition> = Lazy::new(|| Partition::new("system_routines"));
+        static ROUTINE_PARAMETERS: Lazy<Partition> =
+            Lazy::new(|| Partition::new("system_routine_parameters"));
+        static ROUTINE_GRANTS: Lazy<Partition> =
+            Lazy::new(|| Partition::new("system_routine_grants"));
+        static FUNCTION_MODULES: Lazy<Partition> =
+            Lazy::new(|| Partition::new("system_function_modules"));
+        static FUNCTION_REVISIONS: Lazy<Partition> =
+            Lazy::new(|| Partition::new("system_function_revisions"));
+        static FUNCTION_ARTIFACTS: Lazy<Partition> =
+            Lazy::new(|| Partition::new("system_function_artifacts"));
+        static TRIGGERS: Lazy<Partition> = Lazy::new(|| Partition::new("system_triggers"));
+        static TRIGGER_ATTEMPTS: Lazy<Partition> =
+            Lazy::new(|| Partition::new("system_trigger_attempts"));
 
         match self {
             SystemTable::Users => Some(&USERS),
@@ -456,6 +582,16 @@ impl SystemTable {
             SystemTable::TopicOffsets => Some(&TOPIC_OFFSETS),
             SystemTable::Migrations => Some(&MIGRATIONS),
             SystemTable::TablePolicies => Some(&TABLE_POLICIES),
+            SystemTable::Types => Some(&TYPES),
+            SystemTable::TypeFields => Some(&TYPE_FIELDS),
+            SystemTable::Routines => Some(&ROUTINES),
+            SystemTable::RoutineParameters => Some(&ROUTINE_PARAMETERS),
+            SystemTable::RoutineGrants => Some(&ROUTINE_GRANTS),
+            SystemTable::FunctionModules => Some(&FUNCTION_MODULES),
+            SystemTable::FunctionRevisions => Some(&FUNCTION_REVISIONS),
+            SystemTable::FunctionArtifacts => Some(&FUNCTION_ARTIFACTS),
+            SystemTable::Triggers => Some(&TRIGGERS),
+            SystemTable::TriggerAttempts => Some(&TRIGGER_ATTEMPTS),
             // Views have no partition
             SystemTable::Stats
             | SystemTable::Live
@@ -769,13 +905,23 @@ mod tests {
     #[test]
     fn test_all() {
         let all = SystemTable::all();
-        assert_eq!(all.len(), 26); // 13 tables + 13 views
+        assert_eq!(all.len(), 36); // 23 tables + 13 views
         assert!(all.contains(&SystemTable::Users));
         assert!(all.contains(&SystemTable::Storages));
         assert!(all.contains(&SystemTable::AuditLog));
         assert!(all.contains(&SystemTable::TopicOffsets));
         assert!(all.contains(&SystemTable::Migrations));
         assert!(all.contains(&SystemTable::TablePolicies));
+        assert!(all.contains(&SystemTable::Types));
+        assert!(all.contains(&SystemTable::TypeFields));
+        assert!(all.contains(&SystemTable::Routines));
+        assert!(all.contains(&SystemTable::RoutineParameters));
+        assert!(all.contains(&SystemTable::RoutineGrants));
+        assert!(all.contains(&SystemTable::FunctionModules));
+        assert!(all.contains(&SystemTable::FunctionRevisions));
+        assert!(all.contains(&SystemTable::FunctionArtifacts));
+        assert!(all.contains(&SystemTable::Triggers));
+        assert!(all.contains(&SystemTable::TriggerAttempts));
         assert!(all.contains(&SystemTable::Stats));
         assert!(all.contains(&SystemTable::Live));
         assert!(all.contains(&SystemTable::Sessions));
@@ -789,8 +935,10 @@ mod tests {
     #[test]
     fn test_all_tables() {
         let tables = SystemTable::all_tables();
-        assert_eq!(tables.len(), 13);
+        assert_eq!(tables.len(), 23);
         assert!(tables.contains(&SystemTable::TablePolicies));
+        assert!(tables.contains(&SystemTable::Types));
+        assert!(tables.contains(&SystemTable::Routines));
         assert!(tables.iter().all(|t| !t.is_view()));
     }
 

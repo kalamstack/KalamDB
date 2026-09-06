@@ -107,7 +107,11 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
                 // Export download endpoint
                 .service(http::files::download_export)
                 .service(http::files::download_table_export)
-                .service(ws::websocket_handler),
+                .service(ws::websocket_handler)
+                .route(
+                    "/functions/{schema}/{procedure}",
+                    web::post().to(http::functions::invoke_function_v1),
+                ),
         );
 }
 

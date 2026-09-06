@@ -16,6 +16,7 @@ use kalamdb_commons::{
     storage::Partition,
     TableId,
 };
+use kalamdb_serialization::StorageSchema;
 use kalamdb_sharding::ShardRouter;
 use kalamdb_store::storage_trait::{Result, StorageError};
 use kalamdb_streams::{
@@ -171,6 +172,7 @@ impl StreamTableStore {
         table_id: TableId,
         partition: impl Into<Partition>,
         config: StreamTableStoreConfig,
+        schema: Arc<StorageSchema>,
     ) -> Self {
         let log_store = match config.storage_mode {
             StreamTableStorageMode::Memory => StreamLogStoreBackend::Memory(Arc::new(
@@ -180,12 +182,15 @@ impl StreamTableStore {
                 ),
             )),
             StreamTableStorageMode::File => {
-                StreamLogStoreBackend::File(Arc::new(FileStreamLogStore::new(StreamLogConfig {
-                    base_dir:     config.base_dir.clone(),
-                    shard_router: config.shard_router.clone(),
-                    bucket:       config.bucket(),
-                    table_id:     table_id.clone(),
-                })))
+                StreamLogStoreBackend::File(Arc::new(FileStreamLogStore::new(
+                    StreamLogConfig {
+                        base_dir:     config.base_dir.clone(),
+                        shard_router: config.shard_router.clone(),
+                        bucket:       config.bucket(),
+                        table_id:     table_id.clone(),
+                    },
+                    schema,
+                )))
             },
         };
 
@@ -421,12 +426,13 @@ impl StreamTableStore {
 pub fn new_stream_table_store(
     table_id: &TableId,
     config: StreamTableStoreConfig,
+    schema: Arc<StorageSchema>,
 ) -> StreamTableStore {
     let partition_name = partition_name(
         kalamdb_commons::constants::ColumnFamilyNames::STREAM_TABLE_PREFIX,
         table_id,
     );
-    StreamTableStore::new(table_id.clone(), partition_name, config)
+    StreamTableStore::new(table_id.clone(), partition_name, config, schema)
 }
 
 #[cfg(test)]
@@ -435,9 +441,20 @@ mod tests {
 
     use datafusion::scalar::ScalarValue;
     use kalamdb_commons::models::{rows::Row, NamespaceId, TableName};
+    use kalamdb_serialization::{StorageDataType, StorageField, StorageSchema};
     use kalamdb_sharding::ShardRouter;
 
     use super::*;
+
+    fn test_schema() -> Arc<StorageSchema> {
+        Arc::new(StorageSchema::new(
+            1,
+            vec![
+                StorageField::new("event", StorageDataType::Utf8),
+                StorageField::new("data", StorageDataType::Int64),
+            ],
+        ))
+    }
 
     fn create_test_store(_base_dir: &std::path::Path) -> StreamTableStore {
         let table_id = TableId::new(NamespaceId::new("test_ns"), TableName::new("test_stream"));
@@ -448,7 +465,7 @@ mod tests {
             ttl_seconds:       Some(3600),
             storage_mode:      StreamTableStorageMode::File,
         };
-        new_stream_table_store(&table_id, config)
+        new_stream_table_store(&table_id, config, test_schema())
     }
 
     fn create_test_row(user_id: &UserId, seq: i64) -> StreamTableRow {
@@ -551,11 +568,11 @@ mod tests {
         let key = StreamTableRowId::new(UserId::new("user1"), SeqId::new(100));
         let row = create_test_row(&UserId::new("user1"), 100);
 
-        let store = new_stream_table_store(&table_id, config.clone());
+        let store = new_stream_table_store(&table_id, config.clone(), test_schema());
         store.put(&key, &row).unwrap();
         drop(store);
 
-        let reopened = new_stream_table_store(&table_id, config);
+        let reopened = new_stream_table_store(&table_id, config, test_schema());
         let retrieved = reopened.get(&key).unwrap();
         assert_eq!(retrieved, Some(row));
     }

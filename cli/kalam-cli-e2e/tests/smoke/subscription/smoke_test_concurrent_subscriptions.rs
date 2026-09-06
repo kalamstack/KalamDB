@@ -112,7 +112,8 @@ fn smoke_test_concurrent_subscription_fanout() {
                     })
                     .count();
                 return Err(format!(
-                    "expected {} live subscriptions in system.live, found {}; client registry has {}",
+                    "expected {} live subscriptions in system.live, found {}; client registry has \
+                     {}",
                     subscription_count, registered, client_registered
                 ));
             }
@@ -124,20 +125,17 @@ fn smoke_test_concurrent_subscription_fanout() {
             .map_err(|error| format!("trigger insert failed: {}", error))?;
 
             let delivery_started = Instant::now();
-            let delivery_results = join_all(subscriptions.iter_mut().enumerate().map(
-                |(index, subscription)| {
+            let delivery_results =
+                join_all(subscriptions.iter_mut().enumerate().map(|(index, subscription)| {
                     let expected_value = insert_value.clone();
                     async move {
                         wait_for_insert_value(index, subscription, expected_value.as_str()).await
                     }
-                },
-            ))
-            .await;
+                }))
+                .await;
 
-            let delivery_errors: Vec<String> = delivery_results
-                .into_iter()
-                .filter_map(Result::err)
-                .collect();
+            let delivery_errors: Vec<String> =
+                delivery_results.into_iter().filter_map(Result::err).collect();
             if !delivery_errors.is_empty() {
                 return Err(format!(
                     "failed to fan out insert to {} subscriptions: {}",
@@ -172,7 +170,8 @@ fn smoke_test_concurrent_subscription_fanout() {
         );
 
         println!(
-            "\n=== Concurrent Subscription Smoke Test ===\nSubscriptions: {}\nOpen time: {:?}\nDelivery time: {:?}\n",
+            "\n=== Concurrent Subscription Smoke Test ===\nSubscriptions: {}\nOpen time: \
+             {:?}\nDelivery time: {:?}\n",
             subscription_count, open_elapsed, delivery_elapsed
         );
     });

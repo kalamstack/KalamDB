@@ -37,4 +37,4 @@ pub use parquet::{
     reader::{parse_parquet_stream, ParquetReadOptions, RecordBatchFileStream},
     writer::{ParquetWriteResult, ParquetWriterOptions},
 };
-pub use registry::{StorageCached, StorageRegistry};
+pub use registry::{hash_function_artifact, StorageCached, StorageRegistry};

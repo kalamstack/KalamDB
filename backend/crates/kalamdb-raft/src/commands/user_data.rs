@@ -30,8 +30,12 @@ pub enum UserDataCommand {
         transaction_id:      Option<TransactionId>,
         table_id:            TableId,
         user_id:             UserId,
-        /// Rows to insert
+        /// Rows to insert. Empty when [`Self::Insert::encoded_fields`] is set.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
         rows:                Vec<kalamdb_commons::models::rows::Row>,
+        /// Ordinal KOBJ field payloads (same codec as RocksDB rows).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        encoded_fields:      Vec<Vec<u8>>,
     },
 
     /// Update rows in a user table
@@ -130,6 +134,7 @@ mod tests {
             table_id:            TableId::new(NamespaceId::from("ns"), TableName::from("table")),
             user_id:             UserId::from("user_1"),
             rows:                vec![],
+            encoded_fields:      Vec::new(),
         };
 
         assert_eq!(cmd.required_meta_index(), 100);
@@ -162,6 +167,7 @@ mod tests {
             ),
             user_id:             UserId::from("user_456"),
             rows:                vec![],
+            encoded_fields:      Vec::new(),
         };
 
         assert_eq!(cmd.required_meta_index(), 123);
@@ -180,6 +186,7 @@ mod tests {
                 table_id:            table_id.clone(),
                 user_id:             user_id.clone(),
                 rows:                vec![],
+                encoded_fields:      Vec::new(),
             },
             UserDataCommand::Update {
                 required_meta_index: 2,
@@ -216,6 +223,7 @@ mod tests {
             table_id:            table_id.clone(),
             user_id:             user_id.clone(),
             rows:                vec![],
+            encoded_fields:      Vec::new(),
         };
 
         let mut update = UserDataCommand::Update {

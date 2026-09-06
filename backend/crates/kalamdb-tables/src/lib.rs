@@ -44,6 +44,7 @@ pub mod error;
 pub mod error_extensions;
 pub mod manifest;
 pub mod rls;
+pub mod row_codec;
 pub mod shared_tables;
 pub mod stream_tables;
 pub mod topics;
@@ -61,6 +62,7 @@ pub use kalamdb_vector::{
     normalize_vector_column_name, SharedVectorHotOpId, SharedVectorHotStore, UserVectorHotOpId,
     UserVectorHotStore, VectorHotOp, VectorHotOpType,
 };
+pub use row_codec::{empty_storage_schema, storage_schema_for_table, SharedRowCodec, UserRowCodec};
 pub use shared_tables::{
     pk_index::{create_shared_table_pk_index, SharedTablePkIndex},
     shared_table_store::{

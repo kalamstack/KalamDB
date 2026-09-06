@@ -102,8 +102,8 @@ fn cluster_test_leader_only_flush_jobs() {
         // Fallback: search system.jobs filtered by this table's parameters
         let table_filter = format!("{}.{}", namespace, table_name);
         let sql = format!(
-            "SELECT job_id FROM system.jobs WHERE job_type = 'flush' AND parameters LIKE \
-             '%{}%' ORDER BY created_at DESC LIMIT 1",
+            "SELECT job_id FROM system.jobs WHERE job_type = 'flush' AND parameters LIKE '%{}%' \
+             ORDER BY created_at DESC LIMIT 1",
             table_filter
         );
         let deadline = Instant::now() + Duration::from_secs(15);

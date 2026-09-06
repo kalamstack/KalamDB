@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use kalamdb_commons::{
     models::{NamespaceId, StorageId, TableId, UserId},
-    schemas::TableType,
+    schemas::{ColumnDefault, TableType},
     Role,
 };
 use kalamdb_core::{
@@ -355,6 +355,10 @@ pub fn build_table_definition(
         })
         .collect::<Result<Vec<_>, KalamDbError>>()?;
 
+    for column in &columns {
+        validate_column_default(&app_context, &column.default_value)?;
+    }
+
     // Build table options
     let table_options = match stmt.table_type {
         TableType::User => TableOptions::user(),
@@ -434,4 +438,42 @@ fn resolve_storage_info(
 
     let storage_type = storage.storage_type;
     Ok((storage_id, storage_type))
+}
+
+pub fn validate_column_default(
+    app_context: &AppContext,
+    default: &ColumnDefault,
+) -> Result<(), KalamDbError> {
+    let Some(call) = default.as_routine_call() else {
+        return Ok(());
+    };
+    if call.has_placeholder() {
+        return Err(KalamDbError::InvalidSql(
+            "DEFAULT procedure arguments cannot use placeholders".to_string(),
+        ));
+    }
+    if call.is_builtin_default() {
+        if !call.arguments.is_empty() {
+            return Err(KalamDbError::InvalidOperation(format!(
+                "built-in default {}() does not take arguments",
+                call.unqualified_name().to_ascii_uppercase()
+            )));
+        }
+        return Ok(());
+    }
+
+    let stores = app_context.system_tables().catalog_stores();
+    let routine = stores.get_routine(&call.routine_id).map_err(|error| {
+        KalamDbError::ExecutionError(format!(
+            "failed to load procedure {}: {error}",
+            call.routine_id
+        ))
+    })?;
+    if routine.is_none() {
+        return Err(KalamDbError::NotFound(format!(
+            "procedure {} not found for column default",
+            call.routine_id
+        )));
+    }
+    Ok(())
 }

@@ -1,9 +1,10 @@
+use std::time::Duration;
+
 use crate::common::{
     assert_flush_storage_files_exist, execute_sql_as_root_via_cli,
     execute_sql_as_root_via_client_json, extract_typed_value, get_rows_as_hashmaps,
     is_cluster_mode, parse_job_id_from_flush_output, verify_job_completed,
 };
-use std::time::Duration;
 
 pub(super) fn embedding_literal(dimension: usize, active_index: usize) -> String {
     assert!(dimension > 0, "embedding dimension must be positive");

@@ -94,10 +94,6 @@ fn find_matching_paren(sql: &str, open_index: usize) -> Option<usize> {
     None
 }
 
-pub(crate) fn split_sql_statements(sql: &str) -> Vec<String> {
-    split_top_level(sql, ';')
-}
-
 fn split_top_level(input: &str, separator: char) -> Vec<String> {
     let mut out = Vec::new();
     let mut start = 0usize;
@@ -277,4 +273,53 @@ pub(crate) fn trim_leading_sql_comments(mut input: &str) -> &str {
 
         return trimmed;
     }
+}
+
+pub(crate) fn is_contract_ddl(sql: &str) -> bool {
+    let sql = sql.trim_start();
+    starts_ci(sql, "CREATE TYPE")
+        || starts_ci(sql, "ALTER TYPE")
+        || starts_ci(sql, "DROP TYPE")
+        || starts_ci(sql, "CREATE PROCEDURE")
+        || starts_ci(sql, "CREATE OR REPLACE PROCEDURE")
+        || starts_ci(sql, "DROP PROCEDURE")
+        || starts_ci(sql, "GRANT EXECUTE")
+        || starts_ci(sql, "REVOKE EXECUTE")
+        || starts_ci(sql, "SET SEARCH_PATH")
+        || starts_ci(sql, "SET NAMESPACE")
+        || starts_ci(sql, "USE ")
+        || starts_ci(sql, "USE NAMESPACE")
+}
+
+fn starts_ci(sql: &str, prefix: &str) -> bool {
+    sql.len() >= prefix.len()
+        && sql.as_bytes()[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes())
+}
+
+/// Remove `ROW TYPE ident` so sqlparser can parse CREATE TABLE.
+pub(crate) fn strip_row_type_clause(sql: &str) -> String {
+    let bytes = sql.as_bytes();
+    let mut i = 0usize;
+    let mut depth = 0i32;
+    while i + 8 < bytes.len() {
+        let ch = bytes[i] as char;
+        if ch == '(' {
+            depth += 1;
+        } else if ch == ')' {
+            depth -= 1;
+            if depth == 0 {
+                let after = sql[i + 1..].trim_start();
+                if after.len() >= 8 && after[..8].eq_ignore_ascii_case("ROW TYPE") {
+                    let alias_start = sql.len() - after.len() + 8;
+                    let rest = sql[alias_start..].trim_start();
+                    let ident_len =
+                        rest.find(|ch: char| ch.is_whitespace() || ch == '(').unwrap_or(rest.len());
+                    let after_ident = rest[ident_len..].trim_start();
+                    return format!("{} {}", sql[..=i].trim_end(), after_ident);
+                }
+            }
+        }
+        i += 1;
+    }
+    sql.to_string()
 }

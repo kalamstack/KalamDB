@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use crate::{
     cpu::{get_cpu_count, get_physical_cpu_count},
+    function_metrics::function_metrics_snapshot,
     health_monitor::HealthMonitor,
     pubsub_metrics::pubsub_metrics_snapshot,
     query_metrics::query_metrics_snapshot,
@@ -99,6 +100,7 @@ pub fn collect_system_stats(source: &impl SystemStatsSource) -> Vec<(String, Str
     metrics.extend(runtime.as_pairs());
     metrics.extend(query_metrics_snapshot().as_pairs());
     metrics.extend(pubsub_metrics_snapshot().as_pairs());
+    metrics.extend(function_metrics_snapshot().as_pairs());
     metrics.extend(storage_metrics_snapshot().as_pairs());
 
     push_metric(&mut metrics, "cpu_logical_cores", get_cpu_count());

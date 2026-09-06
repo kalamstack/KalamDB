@@ -248,19 +248,10 @@ impl TopicPublisherService {
                     );
                     let msg_id = message.id();
 
-                    // TODO: Use the store to serialize the message directly to avoid redundant
-                    // serialization in TopicMessage::new and TopicMessageStore::put. This would
-                    // require refactoring TopicMessage to separate the in-memory model from the
-                    // serialized form, or adding a method to get the pre-encoded bytes without
-                    // going through the full struct construction.
                     let key_encoded = kalamdb_commons::StorageKey::storage_key(&msg_id);
-                    let value_encoded =
-                        kalamdb_commons::KSerializable::encode(&message).map_err(|e| {
-                            CommonError::Internal(format!(
-                                "Failed to serialize topic message: {}",
-                                e
-                            ))
-                        })?;
+                    let value_encoded = kalamdb_store::encode_entity(&message).map_err(|e| {
+                        CommonError::Internal(format!("Failed to serialize topic message: {}", e))
+                    })?;
                     let retention_entry = kalamdb_tables::TopicRetentionIndexEntry::new_raw(
                         entry.topic_id.clone(),
                         *partition_id,
@@ -287,5 +278,39 @@ impl TopicPublisherService {
 
         tracing::Span::current().record("published_count", total_published);
         Ok(total_published)
+    }
+
+    /// Persist a typed procedure payload on an explicit topic.
+    pub fn publish_typed(
+        &self,
+        topic_id: &TopicId,
+        payload: Vec<u8>,
+        user_id: Option<&UserId>,
+    ) -> Result<u64> {
+        if !self.topic_exists(topic_id) {
+            return Err(CommonError::NotFound(format!("topic {topic_id} not found")));
+        }
+        let partition_id = 0u32;
+        let lock = self.partition_write_lock(topic_id, partition_id);
+        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        let offset = self.offset_allocator.next_offset(topic_id, partition_id);
+        let timestamp_ms = chrono::Utc::now().timestamp_millis();
+        let message = TopicMessage::new_with_user(
+            topic_id.clone(),
+            partition_id,
+            offset,
+            payload,
+            None,
+            timestamp_ms,
+            user_id.cloned(),
+            TopicOp::Insert,
+        );
+        let message_bytes =
+            self.message_store.put_message_with_retention_index(&message).map_err(|e| {
+                CommonError::Internal(format!("Failed to store typed topic message: {}", e))
+            })?;
+        self.add_retained_bytes(topic_id, partition_id, message_bytes);
+        record_pubsub_messages_published(1, message_bytes);
+        Ok(offset)
     }
 }

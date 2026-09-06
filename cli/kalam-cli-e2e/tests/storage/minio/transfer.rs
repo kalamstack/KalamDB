@@ -1,11 +1,10 @@
 use tokio::runtime::Runtime;
 
+use super::common::{should_run_minio_storage_tests, *};
 use crate::common::{
     execute_sql_as_root_via_cli, generate_unique_namespace, generate_unique_table,
     leader_or_server_url, wait_for_job_finished,
 };
-
-use super::common::{should_run_minio_storage_tests, *};
 
 #[test]
 fn test_minio_shared_table_export_import_roundtrip() {
@@ -25,12 +24,14 @@ fn test_minio_shared_table_export_import_roundtrip() {
         .expect("namespace creation");
 
     execute_sql_as_root_via_cli(&format!(
-        "CREATE TABLE {} (id BIGINT PRIMARY KEY, body TEXT NOT NULL) WITH (TYPE='SHARED', STORAGE_ID='{}', FLUSH_POLICY='rows:10')",
+        "CREATE TABLE {} (id BIGINT PRIMARY KEY, body TEXT NOT NULL) WITH (TYPE='SHARED', \
+         STORAGE_ID='{}', FLUSH_POLICY='rows:10')",
         source_full, storage_id
     ))
     .expect("source table creation");
     execute_sql_as_root_via_cli(&format!(
-        "CREATE TABLE {} (id BIGINT PRIMARY KEY, body TEXT NOT NULL) WITH (TYPE='SHARED', STORAGE_ID='{}', FLUSH_POLICY='rows:10')",
+        "CREATE TABLE {} (id BIGINT PRIMARY KEY, body TEXT NOT NULL) WITH (TYPE='SHARED', \
+         STORAGE_ID='{}', FLUSH_POLICY='rows:10')",
         target_full, storage_id
     ))
     .expect("target table creation");

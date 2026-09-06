@@ -355,6 +355,8 @@ mod tests {
             None,
         )
         .expect("table definition");
+        let storage_schema =
+            kalamdb_tables::storage_schema_for_table(&table_def).expect("stream storage schema");
 
         app_ctx.schema_registry().put(table_def).expect("Failed to put table def");
 
@@ -373,6 +375,7 @@ mod tests {
                 ttl_seconds: Some(ttl_seconds),
                 storage_mode,
             },
+            storage_schema,
         ));
         let tables_schema_registry =
             Arc::new(TablesSchemaRegistryAdapter::new(app_ctx.schema_registry()));

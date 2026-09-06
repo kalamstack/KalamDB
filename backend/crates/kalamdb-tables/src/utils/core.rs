@@ -132,7 +132,7 @@ impl TableProviderCore {
         schema: SchemaRef,
         column_defaults: HashMap<String, Expr>,
     ) -> Self {
-        use kalamdb_commons::{constants::SystemColumnNames, schemas::ColumnDefault};
+        use kalamdb_commons::constants::SystemColumnNames;
 
         // Precompute non-nullable columns from the schema.
         // Exclude system columns (_seq, _deleted) because they are auto-generated
@@ -152,12 +152,10 @@ impl TableProviderCore {
 
         // Check if PK is auto-increment (AUTO_INCREMENT or SNOWFLAKE_ID function)
         let is_auto_increment_pk = if let Some(pk_col) = pk_column {
-            matches!(
-                &pk_col.default_value,
-                ColumnDefault::FunctionCall { name, .. }
-                    if name.eq_ignore_ascii_case("auto_increment")
-                    || name.eq_ignore_ascii_case("snowflake_id")
-            )
+            pk_col
+                .default_value
+                .as_routine_call()
+                .is_some_and(|call| call.is_id_generator_default())
         } else {
             // No PK column means no uniqueness constraint to check
             true

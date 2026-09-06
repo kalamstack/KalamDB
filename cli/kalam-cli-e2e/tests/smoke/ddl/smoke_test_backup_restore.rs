@@ -4,8 +4,8 @@
 //! - `BACKUP DATABASE TO '<path>'` creates a job that completes and writes either the expected
 //!   backup directory layout (`rocksdb/`, `storage/`, `snapshots/`, `streams/`) or a `.tar.gz`
 //!   archive containing that layout.
-//! - `RESTORE DATABASE FROM '<path>'` accepts either a backup directory or a `.tar.gz` archive
-//!   and creates a restore job that reaches a terminal state.
+//! - `RESTORE DATABASE FROM '<path>'` accepts either a backup directory or a `.tar.gz` archive and
+//!   creates a restore job that reaches a terminal state.
 //! - Non-DBA users receive an authorization error when attempting either command.
 //! - `RESTORE DATABASE FROM '<non-existent-path>'` returns a clear error immediately (no job
 //!   created).
@@ -68,7 +68,8 @@ fn seed_backup_fixture_data(prefix: &str) -> (String, String, String) {
     execute_sql_as_root_via_client(&format!("CREATE NAMESPACE {}", namespace))
         .expect("create fixture namespace");
     execute_sql_as_root_via_client(&format!(
-        "CREATE TABLE {} (id BIGINT AUTO_INCREMENT PRIMARY KEY, note TEXT) WITH (TYPE='SHARED', FLUSH_POLICY='rows:5')",
+        "CREATE TABLE {} (id BIGINT AUTO_INCREMENT PRIMARY KEY, note TEXT) WITH (TYPE='SHARED', \
+         FLUSH_POLICY='rows:5')",
         table_fqn
     ))
     .expect("create fixture table");

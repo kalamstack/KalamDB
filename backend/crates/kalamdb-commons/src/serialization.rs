@@ -1,25 +1,15 @@
-//! Serialization traits for KalamDB entity storage.
+//! Marker trait for values stored through an entity store.
 //!
-//! This module provides the `KSerializable` trait which standardizes how
-//! entities are serialized/deserialized for storage in RocksDB.
+//! Generic catalog/system objects are encoded by `kalamdb-serialization`
+//! (`encode_object`). USER/SHARED/STREAM rows use a schema-aware store
+//! codec and do not go through this trait.
 
 use serde::{Deserialize, Serialize};
 
-use crate::storage::StorageError;
-
-pub mod envelope;
-pub mod generated;
-pub mod row_codec;
-pub mod schema;
-
-type Result<T> = std::result::Result<T, StorageError>;
-
-pub use envelope::{encode_envelope_inline, CodecKind, EntityEnvelope};
-
-/// Trait implemented by values that can be stored in an [`EntityStore`].
+/// Marker bound for values stored through an entity store.
 ///
-/// Types can override `encode`/`decode` for custom storage formats (e.g.,
-/// row envelopes vs. JSON). The default implementation uses FlexBuffers.
+/// Persistence encode/decode lives in `kalamdb-serialization`. This trait only
+/// names types that may be stored as generic objects.
 ///
 /// ## Example
 ///
@@ -35,68 +25,6 @@ pub use envelope::{encode_envelope_inline, CodecKind, EntityEnvelope};
 ///
 /// impl KSerializable for MyEntity {}
 /// ```
-pub trait KSerializable: Serialize + for<'de> Deserialize<'de> + Send + Sync {
-    fn encode(&self) -> Result<Vec<u8>> {
-        flexbuffers::to_vec(self).map_err(|e| {
-            StorageError::SerializationError(format!("flexbuffers encode failed: {}", e))
-        })
-    }
+pub trait KSerializable: Serialize + for<'de> Deserialize<'de> + Send + Sync {}
 
-    fn decode(bytes: &[u8]) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        flexbuffers::from_slice(bytes).map_err(|e| {
-            StorageError::SerializationError(format!("flexbuffers decode failed: {}", e))
-        })
-    }
-}
-
-// Blanket implementation for String (common storage type)
 impl KSerializable for String {}
-
-/// Encode a payload into a versioned entity envelope.
-///
-/// This helper establishes the envelope contract used during the migration away
-/// from raw payloads. Callers are expected to increment `schema_version` on
-/// wire changes.
-pub fn encode_enveloped(
-    codec_kind: CodecKind,
-    schema_version: u16,
-    payload: Vec<u8>,
-) -> Result<Vec<u8>> {
-    let envelope = EntityEnvelope::new(codec_kind, schema_version, payload);
-    envelope.encode()
-}
-
-/// Decode and validate an entity envelope.
-///
-/// `expected_schema_version` provides strict version validation.
-pub fn decode_enveloped(bytes: &[u8], expected_schema_version: u16) -> Result<EntityEnvelope> {
-    let envelope = EntityEnvelope::decode(bytes)?;
-    envelope.validate(expected_schema_version)?;
-    Ok(envelope)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn envelope_roundtrip() {
-        let bytes =
-            encode_enveloped(CodecKind::FlatBuffers, 1, vec![1, 2, 3]).expect("encode envelope");
-
-        let decoded = decode_enveloped(&bytes, 1).expect("decode envelope");
-        assert_eq!(decoded.codec_kind, CodecKind::FlatBuffers);
-        assert_eq!(decoded.payload, vec![1, 2, 3]);
-    }
-
-    #[test]
-    fn envelope_schema_version_mismatch_rejected() {
-        let bytes = encode_enveloped(CodecKind::FlatBuffers, 1, vec![9]).expect("encode envelope");
-
-        let err = decode_enveloped(&bytes, 2).expect_err("schema version mismatch should fail");
-        assert!(err.to_string().contains("schema_version mismatch"));
-    }
-}

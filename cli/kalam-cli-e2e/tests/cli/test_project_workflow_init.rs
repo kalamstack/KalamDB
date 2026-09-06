@@ -56,15 +56,16 @@ fn test_project_workflow_init_lists_templates_json() {
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let payload: serde_json::Value = serde_json::from_str(&stdout).expect("parse list-templates json");
+    let payload: serde_json::Value =
+        serde_json::from_str(&stdout).expect("parse list-templates json");
     assert_eq!(payload["ok"], true);
     assert_eq!(payload["default_template"], "simple-live");
-    assert!(payload["next"].as_str().unwrap_or_default().contains("kalam init --yes --template"));
+    assert!(payload["next"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("kalam init --yes --template"));
     let templates = payload["templates"].as_array().expect("templates array");
-    let ids: Vec<&str> = templates
-        .iter()
-        .filter_map(|template| template["id"].as_str())
-        .collect();
+    let ids: Vec<&str> = templates.iter().filter_map(|template| template["id"].as_str()).collect();
     assert!(ids.contains(&"simple-live"));
     assert!(ids.contains(&"chat-with-ai"));
     assert!(ids.contains(&"react-ai-chat"));

@@ -31,7 +31,7 @@ use kalamdb_commons::{
     NotLeaderError, PolicyCommand, TableId, TableType,
 };
 use kalamdb_datafusion_sources::{
-    exec::DeferredScanDiagnostics,
+    exec::{pk_bucket_key_from_row, DeferredScanDiagnostics},
     provider::{
         merged_projection_scan_descriptor, mvcc_filter_capability, FilterCapability,
         ScanDescriptor, SourceProvider,
@@ -570,6 +570,26 @@ impl SharedTableProvider {
     }
 }
 
+fn scan_hot_pk_insert(
+    store: &SharedTableIndexedStore,
+    pk_prefixes: &[(String, Vec<u8>)],
+) -> Result<(Option<String>, HashSet<String>), KalamDbError> {
+    let mut tombstoned = HashSet::new();
+    for (pk_str, prefix) in pk_prefixes {
+        if let Some((_row_id, row)) = store
+            .get_latest_by_index_prefix(0, prefix)
+            .map_err(|e| KalamDbError::InvalidOperation(format!("PK index scan failed: {}", e)))?
+        {
+            if row._deleted {
+                tombstoned.insert(pk_str.clone());
+            } else {
+                return Ok((Some(pk_str.clone()), tombstoned));
+            }
+        }
+    }
+    Ok((None, tombstoned))
+}
+
 fn collect_live_string_primary_keys_before_from_store(
     store: &SharedTableIndexedStore,
     pk_name: &str,
@@ -677,7 +697,21 @@ mod tests {
     fn create_store(pk_field_name: &str) -> Arc<SharedTableIndexedStore> {
         let backend: Arc<dyn StorageBackend> = Arc::new(InMemoryBackend::new());
         let table_id = TableId::new(NamespaceId::new("dba"), TableName::new("stats"));
-        Arc::new(new_indexed_shared_table_store(backend, &table_id, pk_field_name))
+        let schema = Arc::new(kalamdb_serialization::StorageSchema::new(
+            1,
+            vec![kalamdb_serialization::StorageField::new(
+                pk_field_name,
+                kalamdb_serialization::StorageDataType::Utf8,
+            )],
+        ));
+        Arc::new(new_indexed_shared_table_store(
+            backend,
+            &table_id,
+            pk_field_name,
+            schema,
+            &[],
+            &[],
+        ))
     }
 
     fn build_row(
@@ -1525,6 +1559,21 @@ impl SharedTableProvider {
         let start_key = since_seq.map(|seq| kalamdb_commons::ids::SeqId::from(seq.as_i64() + 1));
         let scan_limit = base::calculate_scan_limit(limit);
         let hot_future = async {
+            if since_seq.is_none() {
+                if let Some((idx, prefix)) = base::hot_index_seek(self.store.as_ref(), filter, None)
+                {
+                    return self
+                        .store
+                        .scan_by_index_async(idx, Some(prefix), Some(scan_limit))
+                        .await
+                        .map_err(|e| {
+                            KalamDbError::InvalidOperation(format!(
+                                "Failed to scan shared table hot index: {}",
+                                e
+                            ))
+                        });
+                }
+            }
             self.store
                 .scan_typed_with_prefix_and_start_async(None, start_key.as_ref(), scan_limit)
                 .await
@@ -1585,57 +1634,47 @@ impl SharedTableProvider {
 }
 
 impl SharedTableProvider {
-    /// Count resolved rows without materializing full row data.
+    /// Count resolved live rows for COUNT(*) without a filter.
     ///
-    /// Used for COUNT(*) queries where projection is empty. Instead of deserializing
-    /// all row fields (which can consume ~600-800 bytes per row in HashMap allocations),
-    /// this only decodes seq, deleted, and the PK field for version resolution.
-    ///
-    /// For 100K rows, this saves ~80MB of memory compared to the full scan path.
+    /// Hot rows are decoded through the store codec so KOBJ payloads reconstruct
+    /// `_seq`, `_deleted`, and the PK used for MVCC winner selection.
     async fn count_resolved_rows_async(
         &self,
         snapshot_commit_seq: Option<u64>,
     ) -> Result<usize, KalamDbError> {
-        use kalamdb_commons::serialization::row_codec::decode_shared_table_row_metadata;
+        use kalamdb_commons::models::rows::RowMetadata;
 
         let pk_name = self.primary_key_field_name().to_string();
         let store = Arc::clone(&self.store);
         let pk_name_clone = pk_name.clone();
 
-        // Hot storage: scan raw bytes and decode metadata only (skip full field deserialization)
-        let hot_future = tokio::task::spawn_blocking(move || {
-            let partition = store.partition();
-            let iter =
-                store.backend().scan(&partition, None, None, Some(1_000_000)).map_err(|e| {
+        // Hot storage: typed scan so KOBJ values reconstruct seq/deleted/PK from the
+        // store codec instead of the retired FlatBuffers metadata decoder.
+        let hot_future = async move {
+            let hot_rows =
+                store.scan_all_async(Some(1_000_000), None, None).await.map_err(|e| {
                     KalamDbError::InvalidOperation(format!(
                         "Failed to scan shared table hot storage for count: {}",
                         e
                     ))
                 })?;
 
-            let mut hot_metadata = Vec::new();
-            for (_key_bytes, value_bytes) in iter {
-                match decode_shared_table_row_metadata(&value_bytes, &pk_name_clone) {
-                    Ok(metadata) => hot_metadata.push(metadata),
-                    Err(e) => {
-                        log::warn!("Skipping row with malformed metadata: {}", e);
-                        continue;
-                    },
-                }
-            }
+            let hot_metadata = hot_rows
+                .into_iter()
+                .map(|(_key, row)| RowMetadata {
+                    seq:        row._seq,
+                    commit_seq: row._commit_seq,
+                    deleted:    row._deleted,
+                    pk_bucket:  pk_bucket_key_from_row(&row.fields, &pk_name_clone, row._seq),
+                })
+                .collect();
             Ok::<_, KalamDbError>(hot_metadata)
-        });
+        };
 
         // Cold storage: project only the PK + MVCC metadata needed for counting.
         let cold_columns = base::compute_metadata_only_cold_columns(&pk_name);
         let cold_future =
             self.scan_parquet_files_as_batch_async(None, Some(cold_columns.as_slice()));
-
-        let hot_future = async {
-            hot_future.await.map_err(|e| {
-                KalamDbError::InvalidOperation(format!("spawn_blocking join error: {}", e))
-            })?
-        };
 
         base::count_resolved_rows_from_futures(
             &pk_name,
@@ -1792,28 +1831,19 @@ impl SharedTableProvider {
                 }
 
                 let store = self.store.clone();
-                let hot_duplicate =
-                    tokio::task::spawn_blocking(move || -> Result<Option<String>, KalamDbError> {
-                        for (pk_str, prefix) in &pk_prefixes {
-                            if let Some((_row_id, row)) =
-                                store.get_latest_by_index_prefix(0, prefix).map_err(|e| {
-                                    KalamDbError::InvalidOperation(format!(
-                                        "PK index scan failed: {}",
-                                        e
-                                    ))
-                                })?
-                            {
-                                if !row._deleted {
-                                    return Ok(Some(pk_str.clone()));
-                                }
-                            }
-                        }
-                        Ok(None)
-                    })
+                let (hot_duplicate, tombstoned_pks) = if pk_prefixes.len() <= 1 {
+                    scan_hot_pk_insert(&store, &pk_prefixes)?
+                } else {
+                    tokio::task::spawn_blocking(
+                        move || -> Result<(Option<String>, HashSet<String>), KalamDbError> {
+                            scan_hot_pk_insert(&store, &pk_prefixes)
+                        },
+                    )
                     .await
                     .map_err(|e| {
                         KalamDbError::InvalidOperation(format!("spawn_blocking error: {}", e))
-                    })??;
+                    })??
+                };
 
                 if let Some(dup_pk) = hot_duplicate {
                     return Err(KalamDbError::AlreadyExists(format!(
@@ -1825,10 +1855,8 @@ impl SharedTableProvider {
                 let pk_column_id = self.core.primary_key_column_id();
                 let mut pk_values_for_cold_check: Vec<String> =
                     Vec::with_capacity(pk_values_to_check.len());
-                for (pk_str, pk_value) in &pk_values_to_check {
-                    // A hot tombstone must shadow older cold rows for the same PK.
-                    // Without this guard, async flush output can cause false duplicate errors.
-                    if !self.pk_tombstoned_in_hot(pk_value).await? {
+                for (pk_str, _pk_value) in &pk_values_to_check {
+                    if !tombstoned_pks.contains(pk_str) {
                         pk_values_for_cold_check.push(pk_str.clone());
                     }
                 }
@@ -1874,39 +1902,29 @@ impl SharedTableProvider {
         }
 
         let store = self.store.clone();
-
-        let entries = tokio::task::spawn_blocking(
-            move || -> Result<Vec<(SharedTableRowId, SharedTableRow)>, KalamDbError> {
-                let encode_input: Vec<(
-                    kalamdb_commons::ids::SeqId,
-                    u64,
-                    bool,
-                    &kalamdb_commons::models::rows::Row,
-                )> = entries
-                    .iter()
-                    .map(|(_, row)| (row._seq, row._commit_seq, row._deleted, &row.fields))
-                    .collect();
-                let encoded_values =
-                    kalamdb_commons::serialization::row_codec::batch_encode_shared_table_rows(
-                        &encode_input,
-                    )
-                    .map_err(|e| {
+        let entries = if row_count <= 1 {
+            store.insert_batch(&entries).map_err(|e| {
+                KalamDbError::InvalidOperation(format!(
+                    "Failed to batch insert shared table rows: {}",
+                    e
+                ))
+            })?;
+            entries
+        } else {
+            tokio::task::spawn_blocking(
+                move || -> Result<Vec<(SharedTableRowId, SharedTableRow)>, KalamDbError> {
+                    store.insert_batch(&entries).map_err(|e| {
                         KalamDbError::InvalidOperation(format!(
-                            "Failed to batch encode shared table rows: {}",
+                            "Failed to batch insert shared table rows: {}",
                             e
                         ))
                     })?;
-                store.insert_batch_preencoded(&entries, encoded_values).map_err(|e| {
-                    KalamDbError::InvalidOperation(format!(
-                        "Failed to batch insert shared table rows: {}",
-                        e
-                    ))
-                })?;
-                Ok(entries)
-            },
-        )
-        .await
-        .map_err(|e| KalamDbError::InvalidOperation(format!("spawn_blocking error: {}", e)))??;
+                    Ok(entries)
+                },
+            )
+            .await
+            .map_err(|e| KalamDbError::InvalidOperation(format!("spawn_blocking error: {}", e)))??
+        };
 
         if let Err(e) = self.stage_vector_upsert_batch(&entries).await {
             log::warn!(

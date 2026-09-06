@@ -22,3 +22,4 @@ regex = { workspace = true }
 once_cell = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }
+sha2 = { workspace = true }

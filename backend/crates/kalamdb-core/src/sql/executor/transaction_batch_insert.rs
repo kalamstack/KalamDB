@@ -28,6 +28,7 @@ use uuid::Uuid;
 use crate::{
     app_context::AppContext,
     error::KalamDbError,
+    functions::FunctionService,
     schema_registry::CachedTableData,
     sql::{
         plan_cache::{
@@ -109,6 +110,7 @@ fn staged_mutation_user_id(table_type: TableType, exec_ctx: &ExecutionContext) -
 enum PreparedDefaultValue {
     Constant(ScalarValue),
     Volatile(VolatileDefaultFunction),
+    Procedure(kalamdb_commons::RoutineCall),
 }
 
 enum VolatileDefaultFunction {
@@ -128,10 +130,11 @@ impl From<KalamDbError> for InsertValuesRowsError {
     }
 }
 
-fn apply_missing_defaults(
+async fn apply_missing_defaults(
     rows: &mut [Row],
     missing_defaults: &[FastInsertDefaultEntry],
     exec_ctx: &ExecutionContext,
+    app_context: Arc<AppContext>,
 ) -> Result<(), KalamDbError> {
     if rows.is_empty() || missing_defaults.is_empty() {
         return Ok(());
@@ -147,7 +150,8 @@ fn apply_missing_defaults(
 
     for row in rows.iter_mut() {
         for (col_name, prepared_default) in &prepared_defaults {
-            let scalar = materialize_prepared_default(prepared_default, exec_ctx)?;
+            let scalar =
+                materialize_prepared_default(prepared_default, exec_ctx, &app_context).await?;
             row.values.insert(col_name.clone(), scalar);
         }
     }
@@ -155,12 +159,13 @@ fn apply_missing_defaults(
     Ok(())
 }
 
-fn try_build_insert_rows_from_values_rows(
+async fn try_build_insert_rows_from_values_rows(
     value_rows: &[Parens<Vec<Expr>>],
     insert_metadata: &FastInsertMetadata,
     cached_table: &CachedTableData,
     exec_ctx: &ExecutionContext,
     params: &[ScalarValue],
+    app_context: Arc<AppContext>,
 ) -> Result<Option<Vec<Row>>, KalamDbError> {
     let mut rows = match build_insert_rows_from_values_rows(
         value_rows,
@@ -168,25 +173,30 @@ fn try_build_insert_rows_from_values_rows(
         cached_table,
         exec_ctx,
         params,
-    ) {
+        Arc::clone(&app_context),
+    )
+    .await
+    {
         Ok(rows) => rows,
         Err(InsertValuesRowsError::Unsupported) => return Ok(None),
         Err(InsertValuesRowsError::Execution(error)) => return Err(error),
     };
 
     if !insert_metadata.missing_defaults.is_empty() {
-        apply_missing_defaults(&mut rows, &insert_metadata.missing_defaults, exec_ctx)?;
+        apply_missing_defaults(&mut rows, &insert_metadata.missing_defaults, exec_ctx, app_context)
+            .await?;
     }
 
     Ok(Some(rows))
 }
 
-fn build_insert_rows_from_values_rows(
+async fn build_insert_rows_from_values_rows(
     value_rows: &[Parens<Vec<Expr>>],
     column_names: &[String],
     cached_table: &CachedTableData,
     exec_ctx: &ExecutionContext,
     params: &[ScalarValue],
+    app_context: Arc<AppContext>,
 ) -> Result<Vec<Row>, InsertValuesRowsError> {
     let mut rows = Vec::with_capacity(value_rows.len());
     let mut explicit_default_values = BTreeMap::new();
@@ -207,7 +217,9 @@ fn build_insert_rows_from_values_rows(
                     exec_ctx,
                     params,
                     &mut explicit_default_values,
-                )?,
+                    &app_context,
+                )
+                .await?,
             );
         }
         rows.push(Row::new(values));
@@ -216,13 +228,14 @@ fn build_insert_rows_from_values_rows(
     Ok(rows)
 }
 
-fn insert_value_expr_to_scalar(
+async fn insert_value_expr_to_scalar(
     expr: &Expr,
     column_name: &str,
     cached_table: &CachedTableData,
     exec_ctx: &ExecutionContext,
     params: &[ScalarValue],
     explicit_default_values: &mut BTreeMap<String, PreparedDefaultValue>,
+    app_context: &Arc<AppContext>,
 ) -> Result<ScalarValue, InsertValuesRowsError> {
     if is_default_expr(expr) {
         return materialize_explicit_default(
@@ -230,18 +243,21 @@ fn insert_value_expr_to_scalar(
             cached_table,
             exec_ctx,
             explicit_default_values,
+            app_context,
         )
+        .await
         .map_err(InsertValuesRowsError::Execution);
     }
 
     expr_to_scalar_with_params(expr, params).map_err(|_| InsertValuesRowsError::Unsupported)
 }
 
-fn materialize_explicit_default(
+async fn materialize_explicit_default(
     column_name: &str,
     cached_table: &CachedTableData,
     exec_ctx: &ExecutionContext,
     explicit_default_values: &mut BTreeMap<String, PreparedDefaultValue>,
+    app_context: &Arc<AppContext>,
 ) -> Result<ScalarValue, KalamDbError> {
     let prepared_default = match explicit_default_values.entry(column_name.to_string()) {
         Entry::Occupied(entry) => entry.into_mut(),
@@ -249,7 +265,7 @@ fn materialize_explicit_default(
             entry.insert(prepare_explicit_default(column_name, cached_table, exec_ctx)?)
         },
     };
-    materialize_prepared_default(prepared_default, exec_ctx)
+    materialize_prepared_default(prepared_default, exec_ctx, app_context).await
 }
 
 fn prepare_explicit_default(
@@ -294,9 +310,9 @@ pub(crate) struct OnConflictStagedMutation {
     pub returned_row: Row,
 }
 
-pub(crate) fn try_build_literal_insert_rows(
+pub(crate) async fn try_build_literal_insert_rows(
     statement: &Statement,
-    app_context: &AppContext,
+    app_context: Arc<AppContext>,
     sql_cache_registry: &SqlCacheRegistry,
     exec_ctx: &ExecutionContext,
     table_id: &TableId,
@@ -311,11 +327,12 @@ pub(crate) fn try_build_literal_insert_rows(
         false,
         params,
     )
+    .await
 }
 
-fn try_build_literal_insert_rows_inner(
+async fn try_build_literal_insert_rows_inner(
     statement: &Statement,
-    app_context: &AppContext,
+    app_context: Arc<AppContext>,
     sql_cache_registry: &SqlCacheRegistry,
     exec_ctx: &ExecutionContext,
     table_id: &TableId,
@@ -345,11 +362,12 @@ fn try_build_literal_insert_rows_inner(
         !allow_on_conflict,
         params,
     )
+    .await
 }
 
-fn build_literal_insert_rows_from_values(
+async fn build_literal_insert_rows_from_values(
     view: ValuesInsertView<'_>,
-    app_context: &AppContext,
+    app_context: Arc<AppContext>,
     sql_cache_registry: &SqlCacheRegistry,
     exec_ctx: &ExecutionContext,
     table_id: &TableId,
@@ -396,7 +414,10 @@ fn build_literal_insert_rows_from_values(
         cached_table.as_ref(),
         exec_ctx,
         params,
-    )? {
+        Arc::clone(&app_context),
+    )
+    .await?
+    {
         Some(rows) => rows,
         None => return Ok(None),
     };
@@ -417,9 +438,9 @@ fn build_literal_insert_rows_from_values(
     }))
 }
 
-pub(crate) fn try_build_literal_on_conflict_update_rows(
+pub(crate) async fn try_build_literal_on_conflict_update_rows(
     statement: &Statement,
-    app_context: &AppContext,
+    app_context: Arc<AppContext>,
     sql_cache_registry: &SqlCacheRegistry,
     exec_ctx: &ExecutionContext,
     table_id: &TableId,
@@ -437,7 +458,9 @@ pub(crate) fn try_build_literal_on_conflict_update_rows(
         table_id,
         false,
         params,
-    )? {
+    )
+    .await?
+    {
         Some(rows) => rows,
         None => return Ok(None),
     };
@@ -618,25 +641,25 @@ fn prepare_default_template(
         ColumnDefault::Literal(json) => {
             Ok(FastInsertDefaultTemplate::Literal(json_value_to_scalar(json)))
         },
-        ColumnDefault::FunctionCall { name, args } => {
-            if !args.is_empty() {
-                return Err(KalamDbError::InvalidOperation(format!(
-                    "Default function '{}' with arguments is not supported in transaction batch \
-                     INSERT",
-                    name
-                )));
+        ColumnDefault::FunctionCall(call) => {
+            if call.has_placeholder() {
+                return Err(KalamDbError::InvalidOperation(
+                    "DEFAULT procedure arguments cannot use placeholders".to_string(),
+                ));
             }
-
-            match name.to_uppercase().as_str() {
-                "NOW" | "CURRENT_TIMESTAMP" => Ok(FastInsertDefaultTemplate::CurrentTimestamp),
-                "CURRENT_USER" => Ok(FastInsertDefaultTemplate::CurrentUser),
-                "SNOWFLAKE_ID" => Ok(FastInsertDefaultTemplate::SnowflakeId),
-                "UUID_V7" => Ok(FastInsertDefaultTemplate::UuidV7),
-                "ULID" => Ok(FastInsertDefaultTemplate::Ulid),
-                other => Err(KalamDbError::InvalidOperation(format!(
-                    "Unsupported default function '{}' in transaction batch INSERT",
-                    other
-                ))),
+            if let Some(builtin) = call.scalar_udf_name() {
+                match call.unqualified_name() {
+                    "now" | "current_timestamp" => Ok(FastInsertDefaultTemplate::CurrentTimestamp),
+                    "current_user" => Ok(FastInsertDefaultTemplate::CurrentUser),
+                    "snowflake_id" | "auto_increment" => Ok(FastInsertDefaultTemplate::SnowflakeId),
+                    "uuid_v7" => Ok(FastInsertDefaultTemplate::UuidV7),
+                    "ulid" => Ok(FastInsertDefaultTemplate::Ulid),
+                    _ => Err(KalamDbError::InvalidOperation(format!(
+                        "Unsupported default function '{builtin}' in transaction batch INSERT"
+                    ))),
+                }
+            } else {
+                Ok(FastInsertDefaultTemplate::Procedure(call.clone()))
             }
         },
     }
@@ -668,12 +691,16 @@ fn prepare_statement_default(
         FastInsertDefaultTemplate::Ulid => {
             Ok(PreparedDefaultValue::Volatile(VolatileDefaultFunction::Ulid))
         },
+        FastInsertDefaultTemplate::Procedure(call) => {
+            Ok(PreparedDefaultValue::Procedure(call.clone()))
+        },
     }
 }
 
-fn materialize_prepared_default(
+async fn materialize_prepared_default(
     prepared_default: &PreparedDefaultValue,
-    _exec_ctx: &ExecutionContext,
+    exec_ctx: &ExecutionContext,
+    app_context: &Arc<AppContext>,
 ) -> Result<ScalarValue, KalamDbError> {
     match prepared_default {
         PreparedDefaultValue::Constant(value) => Ok(value.clone()),
@@ -692,6 +719,9 @@ fn materialize_prepared_default(
         PreparedDefaultValue::Volatile(VolatileDefaultFunction::Ulid) => {
             Ok(ScalarValue::Utf8(Some(Ulid::generate().to_string())))
         },
+        PreparedDefaultValue::Procedure(call) => {
+            FunctionService::execute_routine_call(Arc::clone(app_context), exec_ctx, call).await
+        },
     }
 }
 
@@ -701,7 +731,7 @@ fn materialize_prepared_default(
 /// mutations, and submits them with a single `stage_batch()` call.
 pub(crate) async fn try_batch_inserts_in_transaction(
     statements: &[&Statement],
-    app_context: &AppContext,
+    app_context: Arc<AppContext>,
     sql_cache_registry: &SqlCacheRegistry,
     exec_ctx: &ExecutionContext,
     table_id: &TableId,
@@ -782,7 +812,10 @@ pub(crate) async fn try_batch_inserts_in_transaction(
             cached_table.as_ref(),
             exec_ctx,
             &[],
-        )? {
+            Arc::clone(&app_context),
+        )
+        .await?
+        {
             Some(rows) => rows,
             None => return Ok(None),
         };

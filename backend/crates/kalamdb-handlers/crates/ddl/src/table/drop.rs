@@ -341,7 +341,8 @@ impl TypedStatementHandler<DropTableStatement> for DropTableHandler {
 
         // TODO: Check active live queries/subscriptions before dropping (Phase 9 integration)
 
-        // Delegate to unified applier (handles standalone vs cluster internally)
+        cleanup_dropped_table_partitions(&self.app_context, &table_id, actual_type).await?;
+
         self.app_context
             .applier()
             .drop_table(table_id.clone())
@@ -360,9 +361,13 @@ impl TypedStatementHandler<DropTableStatement> for DropTableHandler {
                 ))
             })?;
 
-        let job_id =
-            schedule_drop_table_cleanup(&self.app_context, &table_id, actual_type, storage_details)
-                .await?;
+        let job_id = enqueue_drop_table_cleanup_job(
+            &self.app_context,
+            &table_id,
+            actual_type,
+            storage_details,
+        )
+        .await?;
 
         wait_for_cleanup_job(&self.app_context, &job_id, &table_id.full_name()).await?;
 
@@ -478,6 +483,9 @@ mod tests {
             app_ctx.storage_backend(),
             &table_id,
             "id",
+            kalamdb_tables::empty_storage_schema(),
+            &[],
+            &[],
         );
         let main_partition = store.partition();
         let pk_partition = store.indexes()[0].partition();

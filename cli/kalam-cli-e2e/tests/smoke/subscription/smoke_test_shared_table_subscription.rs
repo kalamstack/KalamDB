@@ -27,7 +27,8 @@ fn try_subscribe_as_user(username: &str, password: &str, query: &str) -> Result<
             .subscribe_timeout_secs(10)
             .auth_timeout_secs(10)
             .initial_data_timeout(std::time::Duration::from_secs(15))
-            .build())
+            .build(),
+    )
     .map_err(|e| format!("Failed to build client: {}", e))?;
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -59,7 +60,8 @@ fn try_subscribe_as_user(username: &str, password: &str, query: &str) -> Result<
                 Ok(Some(Err(e))) => return Err(e),
                 Ok(None) => {
                     return Err(kalam_client::error::KalamLinkError::WebSocketError(
-                        "Stream closed before ACK".to_string()));
+                        "Stream closed before ACK".to_string(),
+                    ));
                 },
                 Err(_) => return Ok(()),
             }
@@ -246,7 +248,8 @@ fn smoke_shared_table_subscription_default_deny_allowed() {
                 "Skipping transient live-query backend failure for shared subscription: {}",
                 error
             );
-            let _ = execute_sql_as_root_via_client(&format!("DROP NAMESPACE {} CASCADE", namespace));
+            let _ =
+                execute_sql_as_root_via_client(&format!("DROP NAMESPACE {} CASCADE", namespace));
             let _ = execute_sql_as_root_via_client(&format!("DROP USER {}", user));
             return;
         }

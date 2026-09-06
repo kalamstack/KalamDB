@@ -92,3 +92,19 @@ impl NotificationRow {
         TableId::new(NamespaceId::new(DBA_NAMESPACE), TableName::new("notifications"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn notification_definitions_match_semantically_across_rebuilds() {
+        let mut first = NotificationRow::definition();
+        let second = NotificationRow::definition();
+        first.created_at -= chrono::Duration::seconds(8);
+        first.updated_at -= chrono::Duration::seconds(8);
+
+        assert_ne!(first, second);
+        assert!(first.semantically_equal(&second));
+    }
+}

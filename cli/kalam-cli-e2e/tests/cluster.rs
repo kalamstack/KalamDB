@@ -32,19 +32,19 @@ mod cluster_common {
     use crate::common::*;
 
     struct ClusterHelperStats {
-        calls: AtomicU64,
-        attempts: AtomicU64,
+        calls:            AtomicU64,
+        attempts:         AtomicU64,
         retryable_errors: AtomicU64,
-        total_micros: AtomicU64,
+        total_micros:     AtomicU64,
     }
 
     impl ClusterHelperStats {
         const fn new() -> Self {
             Self {
-                calls: AtomicU64::new(0),
-                attempts: AtomicU64::new(0),
+                calls:            AtomicU64::new(0),
+                attempts:         AtomicU64::new(0),
                 retryable_errors: AtomicU64::new(0),
-                total_micros: AtomicU64::new(0),
+                total_micros:     AtomicU64::new(0),
             }
         }
     }
@@ -843,7 +843,8 @@ mod cluster_common {
         if !cluster_requested {
             if matches!(server_type.as_deref(), Some("fresh") | Some("running")) {
                 println!(
-                    "\n  Skipping: KALAMDB_SERVER_TYPE={} (cluster tests require KALAMDB_SERVER_TYPE=cluster)\n",
+                    "\n  Skipping: KALAMDB_SERVER_TYPE={} (cluster tests require \
+                     KALAMDB_SERVER_TYPE=cluster)\n",
                     server_type.as_deref().unwrap_or("unknown")
                 );
                 return false;
@@ -851,13 +852,12 @@ mod cluster_common {
 
             let has_multi_node_urls = std::env::var("KALAMDB_CLUSTER_URLS")
                 .ok()
-                .map(|raw| {
-                    raw.split(',').map(str::trim).filter(|url| !url.is_empty()).count() > 1
-                })
+                .map(|raw| raw.split(',').map(str::trim).filter(|url| !url.is_empty()).count() > 1)
                 .unwrap_or(false);
             if !has_multi_node_urls {
                 println!(
-                    "\n  Skipping: single-node server detected (cluster tests require multi-node)\n"
+                    "\n  Skipping: single-node server detected (cluster tests require \
+                     multi-node)\n"
                 );
                 return false;
             }

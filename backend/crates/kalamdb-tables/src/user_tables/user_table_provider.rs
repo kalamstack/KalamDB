@@ -248,20 +248,8 @@ impl UserTableProvider {
         let error_context = error_context.to_string();
 
         tokio::task::spawn_blocking(move || -> Result<(), KalamDbError> {
-            let encoded_values =
-                kalamdb_commons::serialization::row_codec::batch_encode_user_table_rows(
-                    std::slice::from_ref(&entity),
-                )
-                .map_err(|e| {
-                    KalamDbError::InvalidOperation(format!(
-                        "Failed to batch encode user table row: {}",
-                        e
-                    ))
-                })?;
-
-            let entries = vec![(row_key, entity)];
             store
-                .insert_batch_preencoded(&entries, encoded_values)
+                .insert(&row_key, &entity)
                 .map_err(|e| KalamDbError::InvalidOperation(format!("{}: {}", error_context, e)))
         })
         .await
@@ -313,25 +301,17 @@ impl UserTableProvider {
         }
 
         let store = self.store.clone();
-        let hot_duplicate =
-            tokio::task::spawn_blocking(move || -> Result<Option<String>, KalamDbError> {
-                for (pk_str, prefix) in &pk_prefixes {
-                    if let Some((_row_id, row)) =
-                        store.get_latest_by_index_prefix(0, prefix).map_err(|e| {
-                            KalamDbError::InvalidOperation(format!("PK index scan failed: {}", e))
-                        })?
-                    {
-                        if !row._deleted {
-                            return Ok(Some(pk_str.clone()));
-                        }
-                    }
-                }
-                Ok(None)
-            })
+        let (hot_duplicate, tombstoned_pks) = if pk_prefixes.len() <= 1 {
+            scan_user_hot_pk_insert(&store, &pk_prefixes)?
+        } else {
+            tokio::task::spawn_blocking(
+                move || -> Result<(Option<String>, HashSet<String>), KalamDbError> {
+                    scan_user_hot_pk_insert(&store, &pk_prefixes)
+                },
+            )
             .await
-            .map_err(|e| {
-                KalamDbError::InvalidOperation(format!("spawn_blocking error: {}", e))
-            })??;
+            .map_err(|e| KalamDbError::InvalidOperation(format!("spawn_blocking error: {}", e)))??
+        };
 
         if let Some(dup_pk) = hot_duplicate {
             return Err(KalamDbError::AlreadyExists(format!(
@@ -343,10 +323,8 @@ impl UserTableProvider {
         let pk_column_id = self.core.primary_key_column_id();
         let mut pk_values_for_cold_check: Vec<String> =
             Vec::with_capacity(pk_values_to_check.len());
-        for (pk_str, pk_value) in &pk_values_to_check {
-            // A hot tombstone must shadow older cold rows for the same PK.
-            // Without this guard, async flush output can cause false duplicate errors.
-            if !self.pk_tombstoned_in_hot(user_id, pk_value).await? {
+        for (pk_str, _pk_value) in &pk_values_to_check {
+            if !tombstoned_pks.contains(pk_str) {
                 pk_values_for_cold_check.push(pk_str.clone());
             }
         }
@@ -429,31 +407,29 @@ impl UserTableProvider {
         }
 
         let store = self.store.clone();
-
-        let entries = tokio::task::spawn_blocking(
-            move || -> Result<Vec<(UserTableRowId, UserTableRow)>, KalamDbError> {
-                let encode_input: Vec<&UserTableRow> = entries.iter().map(|(_, row)| row).collect();
-                let encoded_values =
-                    kalamdb_commons::serialization::row_codec::batch_encode_user_table_row_refs(
-                        &encode_input,
-                    )
-                    .map_err(|e| {
+        let entries = if row_count <= 1 {
+            store.insert_batch(&entries).map_err(|e| {
+                KalamDbError::InvalidOperation(format!(
+                    "Failed to batch insert user table rows: {}",
+                    e
+                ))
+            })?;
+            entries
+        } else {
+            tokio::task::spawn_blocking(
+                move || -> Result<Vec<(UserTableRowId, UserTableRow)>, KalamDbError> {
+                    store.insert_batch(&entries).map_err(|e| {
                         KalamDbError::InvalidOperation(format!(
-                            "Failed to batch encode user table rows: {}",
+                            "Failed to batch insert user table rows: {}",
                             e
                         ))
                     })?;
-                store.insert_batch_preencoded(&entries, encoded_values).map_err(|e| {
-                    KalamDbError::InvalidOperation(format!(
-                        "Failed to batch insert user table rows: {}",
-                        e
-                    ))
-                })?;
-                Ok(entries)
-            },
-        )
-        .await
-        .map_err(|e| KalamDbError::InvalidOperation(format!("spawn_blocking error: {}", e)))??;
+                    Ok(entries)
+                },
+            )
+            .await
+            .map_err(|e| KalamDbError::InvalidOperation(format!("spawn_blocking error: {}", e)))??
+        };
 
         if let Err(e) = self.stage_vector_upsert_batch(user_id, &entries).await {
             log::warn!(
@@ -1570,6 +1546,26 @@ impl BaseTableProvider<UserTableRowId, UserTableRow> for UserTableProvider {
     }
 }
 
+fn scan_user_hot_pk_insert(
+    store: &UserTableIndexedStore,
+    pk_prefixes: &[(String, Vec<u8>)],
+) -> Result<(Option<String>, HashSet<String>), KalamDbError> {
+    let mut tombstoned = HashSet::new();
+    for (pk_str, prefix) in pk_prefixes {
+        if let Some((_row_id, row)) = store
+            .get_latest_by_index_prefix(0, prefix)
+            .map_err(|e| KalamDbError::InvalidOperation(format!("PK index scan failed: {}", e)))?
+        {
+            if row._deleted {
+                tombstoned.insert(pk_str.clone());
+            } else {
+                return Ok((Some(pk_str.clone()), tombstoned));
+            }
+        }
+    }
+    Ok((None, tombstoned))
+}
+
 impl UserTableProvider {
     async fn scan_with_version_resolution_to_kvs_with_diagnostics_async(
         &self,
@@ -1621,6 +1617,27 @@ impl UserTableProvider {
         let scan_limit = base::calculate_scan_limit(limit);
 
         let hot_future = async {
+            if since_seq.is_none() {
+                if let Some((idx, prefix)) =
+                    base::hot_index_seek(self.store.as_ref(), filter, Some(user_id))
+                {
+                    return self
+                        .store
+                        .scan_by_index_async(idx, Some(prefix), Some(scan_limit))
+                        .await
+                        .map_err(|e| {
+                            KalamDbError::InvalidOperation(format!(
+                                "Failed to scan user table hot index: {}",
+                                e
+                            ))
+                        })
+                        .map(|rows| {
+                            rows.into_iter()
+                                .map(|(row_id, row)| (row_id, UserMvccRow(row)))
+                                .collect::<Vec<_>>()
+                        });
+                }
+            }
             self.store
                 .scan_with_raw_prefix_async(&user_prefix, start_key_bytes.as_deref(), scan_limit)
                 .await
@@ -1693,7 +1710,7 @@ impl UserTableProvider {
         user_id: &UserId,
         snapshot_commit_seq: Option<u64>,
     ) -> Result<usize, KalamDbError> {
-        use kalamdb_commons::serialization::row_codec::RowMetadata;
+        use kalamdb_commons::models::rows::RowMetadata;
         use kalamdb_store::EntityStoreAsync;
 
         let pk_name = self.primary_key_field_name().to_string();

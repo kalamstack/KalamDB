@@ -64,6 +64,7 @@ impl SchemaSnapshot {
 pub enum LanguageTarget {
     TypeScript,
     Dart,
+    Rust,
 }
 
 impl LanguageTarget {
@@ -71,6 +72,7 @@ impl LanguageTarget {
         match value.trim().to_ascii_lowercase().as_str() {
             "typescript" | "ts" => Some(Self::TypeScript),
             "dart" | "flutter" => Some(Self::Dart),
+            "rust" | "rs" => Some(Self::Rust),
             _ => None,
         }
     }
@@ -79,6 +81,7 @@ impl LanguageTarget {
         match self {
             Self::TypeScript => "typescript",
             Self::Dart => "dart",
+            Self::Rust => "rust",
         }
     }
 }
@@ -96,5 +99,6 @@ mod tests {
         assert_eq!(LanguageTarget::parse("ts"), Some(LanguageTarget::TypeScript));
         assert_eq!(LanguageTarget::parse("dart"), Some(LanguageTarget::Dart));
         assert_eq!(LanguageTarget::parse("flutter"), Some(LanguageTarget::Dart));
+        assert_eq!(LanguageTarget::parse("rust"), Some(LanguageTarget::Rust));
     }
 }

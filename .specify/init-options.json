@@ -9,5 +9,5 @@
   "offline": false,
   "preset": null,
   "script": "sh",
-  "speckit_version": "0.12.1.dev0"
+  "speckit_version": "1.0.4"
 }

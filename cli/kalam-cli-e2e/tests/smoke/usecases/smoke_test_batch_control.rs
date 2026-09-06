@@ -20,8 +20,8 @@ fn start_subscription_with_config(
 #[derive(Debug, Clone)]
 pub struct ParsedBatchControl {
     pub batch_num: u32,
-    pub has_more: bool,
-    pub status: String,
+    pub has_more:  bool,
+    pub status:    String,
 }
 
 /// Parsed event from subscription
@@ -30,16 +30,16 @@ pub struct ParsedBatchControl {
 pub enum ParsedEvent {
     Ack {
         subscription_id: String,
-        batch_control: ParsedBatchControl,
+        batch_control:   ParsedBatchControl,
     },
     InitialDataBatch {
         subscription_id: String,
-        row_count: usize,
-        batch_control: ParsedBatchControl,
+        row_count:       usize,
+        batch_control:   ParsedBatchControl,
     },
     Insert {
         subscription_id: String,
-        row_count: usize,
+        row_count:       usize,
     },
     Other(String),
     Error(String),
@@ -55,7 +55,7 @@ impl ParsedEvent {
                 if let Some(bc) = Self::extract_batch_control(event_str) {
                     return ParsedEvent::Ack {
                         subscription_id: sub_id,
-                        batch_control: bc,
+                        batch_control:   bc,
                     };
                 }
             }
@@ -158,8 +158,8 @@ impl ParsedEvent {
 /// Advanced subscription listener with batch control parsing
 pub struct BatchSubscriptionListener {
     event_receiver: std::sync::mpsc::Receiver<String>,
-    stop_sender: Option<tokio::sync::oneshot::Sender<()>>,
-    handle: Option<std::thread::JoinHandle<()>>,
+    stop_sender:    Option<tokio::sync::oneshot::Sender<()>>,
+    handle:         Option<std::thread::JoinHandle<()>>,
 }
 
 impl Drop for BatchSubscriptionListener {
@@ -268,8 +268,8 @@ impl BatchSubscriptionListener {
 
         Ok(Self {
             event_receiver: event_rx,
-            stop_sender: Some(stop_tx),
-            handle: Some(handle),
+            stop_sender:    Some(stop_tx),
+            handle:         Some(handle),
         })
     }
 

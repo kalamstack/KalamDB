@@ -90,7 +90,7 @@ impl ParquetReadOptions {
         self
     }
 
-    pub fn with_pk_bloom_values<I, S>(mut self, column: impl Into<String>, values: I) -> Self
+    pub fn with_column_bloom_values<I, S>(mut self, column: impl Into<String>, values: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,
@@ -100,6 +100,15 @@ impl ParquetReadOptions {
             values: values.into_iter().map(Into::into).collect(),
         });
         self
+    }
+
+    /// Equality Bloom prune for a named column (PK or scalar index).
+    pub fn with_pk_bloom_values<I, S>(self, column: impl Into<String>, values: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.with_column_bloom_values(column, values)
     }
 }
 

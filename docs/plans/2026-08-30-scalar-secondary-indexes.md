@@ -259,3 +259,29 @@ Do not ship a release where flushed rows disappear from indexed queries, or wher
 ## Suggested order
 
 Follow [0.7 waves](2026-09-01-kalamdb-0.7.md) when working this plan next to serialization and functions. Task 1 is a written DataFusion decision (no storage work). Task 2 is the catalog (`TableDefinition` + `system.schemas`). Task 3 extracts/rewrites the **one** indexing core and points vector hot PK at it. Tasks 4–5 unlock hot-path chat SELECTs using that core and DF-pushed filters. Task 6 makes indexes user-declarable. Task 7 is CLI schema-diff so `schema.sql` is not a lie. Task 8 is flush-time Parquet blooms + min/max/row-group prune for indexed columns (correctness and cold speed). Task 9 is RLS scale. Task 10 proves the original bench.
+
+---
+
+## Decision: DataFusion 55 seek vs planner (Task 1)
+
+Written 2026-09-05. No storage or planner code in this task.
+
+### Used APIs (keep)
+
+- `TableProvider::supports_filters_pushdown` → `base_supports_filters_pushdown` → `pushdown_results_for_filters` + `SourceProvider::filter_capability`.
+- User/shared `filter_capability` calls `mvcc_filter_capability`, which reports **`Exact` for every filter**. That means DataFusion 55 will not wrap the scan in an extra `FilterExec`. It does **not** mean a secondary index seek happened. Exact here is “we re-check the predicate on MVCC-resolved rows inside deferred exec.”
+- `TableProvider::scan` / `base_scan` already receives the planner-pushed `filters` slice. `mvcc_filter_evaluation` splits Exact vs Inexact for hot/cold **pruning hints** only.
+- `TableProvider::statistics` is implemented from the Parquet manifest. A comment in `base.rs` is still true: DataFusion 55 mainline does not consume these statistics for join/scan planning.
+- `IndexedEntityStore::supports_filter` / `filter_to_prefix` / `find_best_index_for_filters` already exist. PK adapters use them. Scalar USER/SHARED indexes should plug into that same path.
+
+### Unused / not available for custom providers
+
+- DataFusion has **no generic secondary-index catalog** for custom `TableProvider`s in 55.0.0. There is no workspace `IndexStatistics` hook that performs RocksDB prefix seeks.
+- DataFusion hash indexes, `IndexJoin`, and built-in catalog indexes apply to DF-owned tables, not Kalam `TableProvider` implementations.
+- Custom logical optimizer rules are unused and unnecessary if `scan` already sees equality filters.
+
+### Decision for Task 5
+
+**Seek inside `scan` using already-pushed filters.** Call `find_best_index_for_filters` (or the extracted prefix adapter) from the user/shared hot scan. Do not add a Kalam logical optimizer rule, physical `IndexJoin`, or DataFusion-owned index engine.
+
+Do not build: DF hash indexes, a second filter-pushdown contract, or a planner node whose only job is to attach `conversation_id = ?` to the provider. The provider already gets that predicate.

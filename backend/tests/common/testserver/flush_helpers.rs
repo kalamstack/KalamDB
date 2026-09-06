@@ -97,6 +97,10 @@ pub async fn execute_flush_synchronously(
         server.app_context.storage_backend(),
         &table_id,
         &pk_field,
+        kalamdb_tables::storage_schema_for_table(&table_def)
+            .map_err(|e| format!("Failed to build storage schema: {}", e))?,
+        &table_def.scalar_indexes,
+        &table_def.columns,
     ));
 
     let flush_job = UserTableFlushJob::new(
@@ -167,6 +171,10 @@ pub async fn execute_shared_flush_synchronously(
         server.app_context.storage_backend(),
         &table_id,
         &pk_field,
+        kalamdb_tables::storage_schema_for_table(&table_def)
+            .map_err(|e| format!("Failed to build storage schema: {}", e))?,
+        &table_def.scalar_indexes,
+        &table_def.columns,
     ));
 
     let flush_job = SharedTableFlushJob::new(

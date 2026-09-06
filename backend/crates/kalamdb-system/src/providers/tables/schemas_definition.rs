@@ -163,6 +163,17 @@ pub fn schemas_table_definition() -> TableDefinition {
             ColumnDefault::None,
             Some("Whether this table uses user-specific storage assignment".to_string()),
         ),
+        ColumnDefinition::new(
+            15,
+            "indexes",
+            15,
+            KalamDataType::Json,
+            false,
+            false,
+            false,
+            ColumnDefault::None,
+            Some("Scalar secondary indexes as JSON array".to_string()),
+        ),
     ];
 
     TableDefinition::new(

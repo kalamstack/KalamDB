@@ -144,6 +144,27 @@ pub(crate) struct Table {
     pub(crate) columns:      BTreeMap<String, Column>,
     pub(crate) constraints:  Vec<String>,
     pub(crate) options:      BTreeMap<String, String>,
+    pub(crate) indexes:      BTreeMap<String, TableIndex>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TableIndex {
+    pub(crate) name:    String,
+    pub(crate) columns: Vec<String>,
+    pub(crate) unique:  bool,
+    pub(crate) kind:    TableIndexKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TableIndexKind {
+    Scalar,
+    Vector { metric: String },
+}
+
+impl TableIndex {
+    pub(crate) fn signature(&self) -> String {
+        format!("kind={:?};unique={};cols={}", self.kind, self.unique, self.columns.join(","))
+    }
 }
 
 #[derive(Debug, Clone)]

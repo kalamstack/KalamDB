@@ -47,7 +47,10 @@ use kalamdb_commons::KSerializable;
 pub use kalamdb_sharding::GroupId;
 use serde::{Deserialize, Serialize};
 
-use crate::storage_trait::{Operation, Partition, Result, StorageBackend};
+use crate::{
+    persist::{decode_entity, encode_entity},
+    storage_trait::{Operation, Partition, Result, StorageBackend},
+};
 
 /// The single partition name for all Raft data.
 pub const RAFT_PARTITION_NAME: &str = "raft_data";
@@ -202,7 +205,7 @@ impl RaftPartitionStore {
             .iter()
             .map(|entry| {
                 let key = self.log_key(entry.index);
-                let value = entry.encode()?;
+                let value = encode_entity(entry)?;
                 Ok(Operation::Put {
                     partition: self.partition.clone(),
                     key,
@@ -218,7 +221,7 @@ impl RaftPartitionStore {
     pub fn get_log(&self, index: u64) -> Result<Option<RaftLogEntry>> {
         let key = self.log_key(index);
         match self.backend.get(&self.partition, &key)? {
-            Some(bytes) => Ok(Some(RaftLogEntry::decode(&bytes)?)),
+            Some(bytes) => Ok(Some(decode_entity(&bytes)?)),
             None => Ok(None),
         }
     }
@@ -243,7 +246,7 @@ impl RaftPartitionStore {
                 if index >= end {
                     break; // Keys are sorted, so we can stop
                 }
-                entries.push(RaftLogEntry::decode(&value)?);
+                entries.push(decode_entity(&value)?);
             }
         }
 
@@ -350,7 +353,7 @@ impl RaftPartitionStore {
     /// Saves the current vote state.
     pub fn save_vote(&self, vote: &RaftVote) -> Result<()> {
         let key = self.vote_key();
-        let value = vote.encode()?;
+        let value = encode_entity(vote)?;
         self.backend.put(&self.partition, &key, &value)
     }
 
@@ -358,7 +361,7 @@ impl RaftPartitionStore {
     pub fn read_vote(&self) -> Result<Option<RaftVote>> {
         let key = self.vote_key();
         match self.backend.get(&self.partition, &key)? {
-            Some(bytes) => Ok(Some(RaftVote::decode(&bytes)?)),
+            Some(bytes) => Ok(Some(decode_entity(&bytes)?)),
             None => Ok(None),
         }
     }
@@ -372,7 +375,7 @@ impl RaftPartitionStore {
         let key = self.commit_key();
         match commit {
             Some(log_id) => {
-                let value = log_id.encode()?;
+                let value = encode_entity(&log_id)?;
                 self.backend.put(&self.partition, &key, &value)
             },
             None => self.backend.delete(&self.partition, &key),
@@ -383,7 +386,7 @@ impl RaftPartitionStore {
     pub fn read_commit(&self) -> Result<Option<RaftLogId>> {
         let key = self.commit_key();
         match self.backend.get(&self.partition, &key)? {
-            Some(bytes) => Ok(Some(RaftLogId::decode(&bytes)?)),
+            Some(bytes) => Ok(Some(decode_entity(&bytes)?)),
             None => Ok(None),
         }
     }
@@ -393,7 +396,7 @@ impl RaftPartitionStore {
         let key = self.purge_key();
         match purge {
             Some(log_id) => {
-                let value = log_id.encode()?;
+                let value = encode_entity(&log_id)?;
                 self.backend.put(&self.partition, &key, &value)
             },
             None => self.backend.delete(&self.partition, &key),
@@ -404,7 +407,7 @@ impl RaftPartitionStore {
     pub fn read_purge(&self) -> Result<Option<RaftLogId>> {
         let key = self.purge_key();
         match self.backend.get(&self.partition, &key)? {
-            Some(bytes) => Ok(Some(RaftLogId::decode(&bytes)?)),
+            Some(bytes) => Ok(Some(decode_entity(&bytes)?)),
             None => Ok(None),
         }
     }
@@ -422,7 +425,7 @@ impl RaftPartitionStore {
         let key = self.last_applied_key();
         match last_applied {
             Some(log_id) => {
-                let value = log_id.encode()?;
+                let value = encode_entity(&log_id)?;
                 self.backend.put(&self.partition, &key, &value)
             },
             None => self.backend.delete(&self.partition, &key),
@@ -433,7 +436,7 @@ impl RaftPartitionStore {
     pub fn read_last_applied(&self) -> Result<Option<RaftLogId>> {
         let key = self.last_applied_key();
         match self.backend.get(&self.partition, &key)? {
-            Some(bytes) => Ok(Some(RaftLogId::decode(&bytes)?)),
+            Some(bytes) => Ok(Some(decode_entity(&bytes)?)),
             None => Ok(None),
         }
     }
@@ -460,7 +463,7 @@ impl RaftPartitionStore {
     /// Saves snapshot metadata.
     pub fn save_snapshot_meta(&self, meta: &RaftSnapshotMeta) -> Result<()> {
         let key = self.snap_meta_key();
-        let value = meta.encode()?;
+        let value = encode_entity(meta)?;
         self.backend.put(&self.partition, &key, &value)
     }
 
@@ -468,7 +471,7 @@ impl RaftPartitionStore {
     pub fn read_snapshot_meta(&self) -> Result<Option<RaftSnapshotMeta>> {
         let key = self.snap_meta_key();
         match self.backend.get(&self.partition, &key)? {
-            Some(bytes) => Ok(Some(RaftSnapshotMeta::decode(&bytes)?)),
+            Some(bytes) => Ok(Some(decode_entity(&bytes)?)),
             None => Ok(None),
         }
     }
@@ -476,7 +479,7 @@ impl RaftPartitionStore {
     /// Saves snapshot data reference (inline or file path).
     pub fn save_snapshot_data(&self, data: &RaftSnapshotData) -> Result<()> {
         let key = self.snap_data_key();
-        let value = data.encode()?;
+        let value = encode_entity(data)?;
         self.backend.put(&self.partition, &key, &value)
     }
 
@@ -484,7 +487,7 @@ impl RaftPartitionStore {
     pub fn read_snapshot_data(&self) -> Result<Option<RaftSnapshotData>> {
         let key = self.snap_data_key();
         match self.backend.get(&self.partition, &key)? {
-            Some(bytes) => Ok(Some(RaftSnapshotData::decode(&bytes)?)),
+            Some(bytes) => Ok(Some(decode_entity(&bytes)?)),
             None => Ok(None),
         }
     }

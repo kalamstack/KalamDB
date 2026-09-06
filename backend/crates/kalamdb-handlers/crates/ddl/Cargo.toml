@@ -21,6 +21,7 @@ kalamdb-store = { path = "../../../kalamdb-store" }
 kalamdb-system = { path = "../../../kalamdb-system" }
 kalamdb-tables = { path = "../../../kalamdb-tables" }
 kalamdb-vector = { path = "../../../kalamdb-vector" }
+kalamdb-functions = { path = "../../../kalamdb-functions" }
 
 arrow = { workspace = true }
 chrono = { workspace = true }

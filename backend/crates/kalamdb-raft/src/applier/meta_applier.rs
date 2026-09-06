@@ -12,9 +12,12 @@
 use async_trait::async_trait;
 use kalamdb_commons::models::{
     schemas::{TableDefinition, TableType},
-    JobId, NamespaceId, NodeId, StorageId, TableId, UserId,
+    FunctionRevisionId, JobId, NamespaceId, NodeId, StorageId, TableId, UserId,
 };
-use kalamdb_system::{providers::jobs::models::Job, JobStatus, Storage, User};
+use kalamdb_system::{
+    providers::jobs::models::Job, CatalogFunctionArtifact, CatalogFunctionModule,
+    CatalogFunctionRevision, JobStatus, Storage, User,
+};
 
 use crate::RaftError;
 
@@ -198,6 +201,15 @@ pub trait MetaApplier: Send + Sync {
         reason: &str,
         cancelled_at: i64,
     ) -> Result<String, RaftError>;
+
+    /// Stage artifact/revision rows then CAS-activate the module pointer.
+    async fn activate_function_revision(
+        &self,
+        module: &CatalogFunctionModule,
+        revision: &CatalogFunctionRevision,
+        artifact: &CatalogFunctionArtifact,
+        expected_revision_id: Option<&FunctionRevisionId>,
+    ) -> Result<String, RaftError>;
 }
 
 /// No-op applier for testing or standalone scenarios
@@ -312,6 +324,15 @@ impl MetaApplier for NoOpMetaApplier {
         Ok(String::new())
     }
     async fn cancel_job(&self, _: &JobId, _: &str, _: i64) -> Result<String, RaftError> {
+        Ok(String::new())
+    }
+    async fn activate_function_revision(
+        &self,
+        _: &CatalogFunctionModule,
+        _: &CatalogFunctionRevision,
+        _: &CatalogFunctionArtifact,
+        _: Option<&FunctionRevisionId>,
+    ) -> Result<String, RaftError> {
         Ok(String::new())
     }
 }
@@ -488,6 +509,15 @@ mod tests {
         async fn cancel_job(&self, _: &JobId, _: &str, _: i64) -> Result<String, RaftError> {
             self.job_ops.fetch_add(1, Ordering::SeqCst);
             Ok(String::new())
+        }
+        async fn activate_function_revision(
+            &self,
+            _: &CatalogFunctionModule,
+            _: &CatalogFunctionRevision,
+            _: &CatalogFunctionArtifact,
+            _: Option<&FunctionRevisionId>,
+        ) -> Result<String, RaftError> {
+            Ok("activated".to_string())
         }
     }
 

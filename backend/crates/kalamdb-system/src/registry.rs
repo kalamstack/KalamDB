@@ -20,6 +20,14 @@ use once_cell::sync::OnceCell;
 use parking_lot::RwLock;
 
 use super::providers::{
+    catalog::{
+        CatalogFunctionArtifact, CatalogFunctionModule, CatalogFunctionRevision, CatalogRoutine,
+        CatalogRoutineGrant, CatalogRoutineParameter, CatalogStores, CatalogTrigger,
+        CatalogTriggerAttempt, CatalogType, CatalogTypeField, FunctionArtifactsTableProvider,
+        FunctionModulesTableProvider, FunctionRevisionsTableProvider, RoutineGrantsTableProvider,
+        RoutineParametersTableProvider, RoutinesTableProvider, TriggerAttemptsTableProvider,
+        TriggersTableProvider, TypeFieldsTableProvider, TypesTableProvider,
+    },
     job_nodes::models::JobNode,
     jobs::models::Job,
     manifest::manifest_table_definition,
@@ -47,19 +55,29 @@ use super::providers::{
 #[derive(Debug)]
 pub struct SystemTablesRegistry {
     // ===== system.* tables (EntityStore-based) =====
-    users:          Arc<UsersTableProvider>,
-    jobs:           Arc<JobsTableProvider>,
-    job_nodes:      Arc<JobNodesTableProvider>,
-    namespaces:     Arc<NamespacesTableProvider>,
-    storages:       Arc<StoragesTableProvider>,
-    schemas:        Arc<SchemasTableProvider>,
-    audit_logs:     Arc<AuditLogsTableProvider>,
-    topics:         Arc<TopicsTableProvider>,
-    topic_offsets:  Arc<TopicOffsetsTableProvider>,
-    migrations:     Arc<MigrationsTableProvider>,
-    table_policies: Arc<TablePoliciesTableProvider>,
+    users:              Arc<UsersTableProvider>,
+    jobs:               Arc<JobsTableProvider>,
+    job_nodes:          Arc<JobNodesTableProvider>,
+    namespaces:         Arc<NamespacesTableProvider>,
+    storages:           Arc<StoragesTableProvider>,
+    schemas:            Arc<SchemasTableProvider>,
+    audit_logs:         Arc<AuditLogsTableProvider>,
+    topics:             Arc<TopicsTableProvider>,
+    topic_offsets:      Arc<TopicOffsetsTableProvider>,
+    migrations:         Arc<MigrationsTableProvider>,
+    table_policies:     Arc<TablePoliciesTableProvider>,
+    types:              Arc<TypesTableProvider>,
+    type_fields:        Arc<TypeFieldsTableProvider>,
+    routines:           Arc<RoutinesTableProvider>,
+    routine_parameters: Arc<RoutineParametersTableProvider>,
+    routine_grants:     Arc<RoutineGrantsTableProvider>,
+    function_modules:   Arc<FunctionModulesTableProvider>,
+    function_revisions: Arc<FunctionRevisionsTableProvider>,
+    function_artifacts: Arc<FunctionArtifactsTableProvider>,
+    triggers:           Arc<TriggersTableProvider>,
+    trigger_attempts:   Arc<TriggerAttemptsTableProvider>,
     // ===== Manifest cache table =====
-    manifest:       Arc<ManifestTableProvider>,
+    manifest:           Arc<ManifestTableProvider>,
 
     // ===== Virtual tables =====
     stats:          RwLock<Option<Arc<dyn TableProvider + Send + Sync>>>,
@@ -89,6 +107,16 @@ impl SystemTablesRegistry {
             SystemTable::TopicOffsets,
             SystemTable::Migrations,
             SystemTable::TablePolicies,
+            SystemTable::Types,
+            SystemTable::TypeFields,
+            SystemTable::Routines,
+            SystemTable::RoutineParameters,
+            SystemTable::RoutineGrants,
+            SystemTable::FunctionModules,
+            SystemTable::FunctionRevisions,
+            SystemTable::FunctionArtifacts,
+            SystemTable::Triggers,
+            SystemTable::TriggerAttempts,
         ]
     }
 
@@ -110,19 +138,46 @@ impl SystemTablesRegistry {
     /// let registry = SystemTablesRegistry::new(backend);
     /// ```
     pub fn new(storage_backend: Arc<dyn StorageBackend>) -> Self {
+        let catalog_stores = CatalogStores::new(storage_backend.clone());
         Self {
             // EntityStore-based providers
-            users:          Arc::new(UsersTableProvider::new(storage_backend.clone())),
-            jobs:           Arc::new(JobsTableProvider::new(storage_backend.clone())),
-            job_nodes:      Arc::new(JobNodesTableProvider::new(storage_backend.clone())),
-            namespaces:     Arc::new(NamespacesTableProvider::new(storage_backend.clone())),
-            storages:       Arc::new(StoragesTableProvider::new(storage_backend.clone())),
-            schemas:        Arc::new(SchemasTableProvider::new(storage_backend.clone())),
-            audit_logs:     Arc::new(AuditLogsTableProvider::new(storage_backend.clone())),
-            topics:         Arc::new(TopicsTableProvider::new(storage_backend.clone())),
-            topic_offsets:  Arc::new(TopicOffsetsTableProvider::new(storage_backend.clone())),
-            migrations:     Arc::new(MigrationsTableProvider::new(storage_backend.clone())),
-            table_policies: Arc::new(TablePoliciesTableProvider::new(storage_backend.clone())),
+            users:              Arc::new(UsersTableProvider::new(storage_backend.clone())),
+            jobs:               Arc::new(JobsTableProvider::new(storage_backend.clone())),
+            job_nodes:          Arc::new(JobNodesTableProvider::new(storage_backend.clone())),
+            namespaces:         Arc::new(NamespacesTableProvider::new(storage_backend.clone())),
+            storages:           Arc::new(StoragesTableProvider::new(storage_backend.clone())),
+            schemas:            Arc::new(SchemasTableProvider::new(storage_backend.clone())),
+            audit_logs:         Arc::new(AuditLogsTableProvider::new(storage_backend.clone())),
+            topics:             Arc::new(TopicsTableProvider::new(storage_backend.clone())),
+            topic_offsets:      Arc::new(TopicOffsetsTableProvider::new(storage_backend.clone())),
+            migrations:         Arc::new(MigrationsTableProvider::new(storage_backend.clone())),
+            table_policies:     Arc::new(TablePoliciesTableProvider::new(storage_backend.clone())),
+            types:              Arc::new(TypesTableProvider::from_stores(catalog_stores.clone())),
+            type_fields:        Arc::new(TypeFieldsTableProvider::from_stores(
+                catalog_stores.clone(),
+            )),
+            routines:           Arc::new(RoutinesTableProvider::from_stores(
+                catalog_stores.clone(),
+            )),
+            routine_parameters: Arc::new(RoutineParametersTableProvider::from_stores(
+                catalog_stores.clone(),
+            )),
+            routine_grants:     Arc::new(RoutineGrantsTableProvider::from_stores(
+                catalog_stores.clone(),
+            )),
+            function_modules:   Arc::new(FunctionModulesTableProvider::from_stores(
+                catalog_stores.clone(),
+            )),
+            function_revisions: Arc::new(FunctionRevisionsTableProvider::from_stores(
+                catalog_stores.clone(),
+            )),
+            function_artifacts: Arc::new(FunctionArtifactsTableProvider::from_stores(
+                catalog_stores.clone(),
+            )),
+            triggers:           Arc::new(TriggersTableProvider::from_stores(
+                catalog_stores.clone(),
+            )),
+            trigger_attempts:   Arc::new(TriggerAttemptsTableProvider::from_stores(catalog_stores)),
 
             // Manifest cache provider
             manifest: Arc::new(ManifestTableProvider::new(storage_backend)),
@@ -156,6 +211,16 @@ impl SystemTablesRegistry {
                     (SystemTable::TopicOffsets, TopicOffset::definition()),
                     (SystemTable::Migrations, Migration::definition()),
                     (SystemTable::TablePolicies, TablePolicyRecord::definition()),
+                    (SystemTable::Types, CatalogType::definition()),
+                    (SystemTable::TypeFields, CatalogTypeField::definition()),
+                    (SystemTable::Routines, CatalogRoutine::definition()),
+                    (SystemTable::RoutineParameters, CatalogRoutineParameter::definition()),
+                    (SystemTable::RoutineGrants, CatalogRoutineGrant::definition()),
+                    (SystemTable::FunctionModules, CatalogFunctionModule::definition()),
+                    (SystemTable::FunctionRevisions, CatalogFunctionRevision::definition()),
+                    (SystemTable::FunctionArtifacts, CatalogFunctionArtifact::definition()),
+                    (SystemTable::Triggers, CatalogTrigger::definition()),
+                    (SystemTable::TriggerAttempts, CatalogTriggerAttempt::definition()),
                 ];
 
                 defs.into_iter().map(|(_, definition)| Arc::new(definition)).collect()
@@ -218,6 +283,36 @@ impl SystemTablesRegistry {
     /// Get the system.table_policies provider.
     pub fn table_policies(&self) -> Arc<TablePoliciesTableProvider> {
         self.table_policies.clone()
+    }
+
+    /// Get the system.types provider.
+    pub fn types(&self) -> Arc<TypesTableProvider> {
+        self.types.clone()
+    }
+
+    /// Get the system.type_fields provider.
+    pub fn type_fields(&self) -> Arc<TypeFieldsTableProvider> {
+        self.type_fields.clone()
+    }
+
+    /// Get the system.routines provider.
+    pub fn routines(&self) -> Arc<RoutinesTableProvider> {
+        self.routines.clone()
+    }
+
+    /// Get the system.routine_parameters provider.
+    pub fn routine_parameters(&self) -> Arc<RoutineParametersTableProvider> {
+        self.routine_parameters.clone()
+    }
+
+    /// Get the system.routine_grants provider.
+    pub fn routine_grants(&self) -> Arc<RoutineGrantsTableProvider> {
+        self.routine_grants.clone()
+    }
+
+    /// Shared catalog stores (types, routines, function revisions).
+    pub fn catalog_stores(&self) -> CatalogStores {
+        self.types.stores().clone()
     }
 
     /// Get the system.stats provider (virtual table)
@@ -307,6 +402,28 @@ impl SystemTablesRegistry {
             SystemTable::TablePolicies => {
                 Some(self.table_policies.clone() as Arc<dyn TableProvider>)
             },
+            SystemTable::Types => Some(self.types.clone() as Arc<dyn TableProvider>),
+            SystemTable::TypeFields => Some(self.type_fields.clone() as Arc<dyn TableProvider>),
+            SystemTable::Routines => Some(self.routines.clone() as Arc<dyn TableProvider>),
+            SystemTable::RoutineParameters => {
+                Some(self.routine_parameters.clone() as Arc<dyn TableProvider>)
+            },
+            SystemTable::RoutineGrants => {
+                Some(self.routine_grants.clone() as Arc<dyn TableProvider>)
+            },
+            SystemTable::FunctionModules => {
+                Some(self.function_modules.clone() as Arc<dyn TableProvider>)
+            },
+            SystemTable::FunctionRevisions => {
+                Some(self.function_revisions.clone() as Arc<dyn TableProvider>)
+            },
+            SystemTable::FunctionArtifacts => {
+                Some(self.function_artifacts.clone() as Arc<dyn TableProvider>)
+            },
+            SystemTable::Triggers => Some(self.triggers.clone() as Arc<dyn TableProvider>),
+            SystemTable::TriggerAttempts => {
+                Some(self.trigger_attempts.clone() as Arc<dyn TableProvider>)
+            },
             _ => None,
         }
     }
@@ -348,6 +465,16 @@ impl SystemTablesRegistry {
             SystemTable::TopicOffsets,
             SystemTable::Migrations,
             SystemTable::TablePolicies,
+            SystemTable::Types,
+            SystemTable::TypeFields,
+            SystemTable::Routines,
+            SystemTable::RoutineParameters,
+            SystemTable::RoutineGrants,
+            SystemTable::FunctionModules,
+            SystemTable::FunctionRevisions,
+            SystemTable::FunctionArtifacts,
+            SystemTable::Triggers,
+            SystemTable::TriggerAttempts,
         ]
         .into_iter()
         .collect()

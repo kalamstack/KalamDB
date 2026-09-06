@@ -139,6 +139,27 @@ fn test_slow_query_trackable_dml_and_select_only() {
 }
 
 #[test]
+fn test_classify_create_index_on_as_alter_table() {
+    let ns = NamespaceId::new("default");
+    let stmt = SqlStatement::classify_and_parse(
+        "CREATE INDEX idx_conv ON messages (conversation_id)",
+        &ns,
+        Role::User,
+    )
+    .expect("classify CREATE INDEX");
+    match stmt.kind() {
+        SqlStatementKind::AlterTable(alter) => match &alter.operation {
+            kalamdb_dialect::ddl::ColumnOperation::CreateScalarIndex { name, columns, .. } => {
+                assert_eq!(name, "idx_conv");
+                assert_eq!(columns, &["conversation_id".to_string()]);
+            },
+            other => panic!("expected CreateScalarIndex, got {other:?}"),
+        },
+        other => panic!("expected AlterTable, got {other:?}"),
+    }
+}
+
+#[test]
 fn test_classify_show_transaction_isolation_level_for_jdbc() {
     let ns = NamespaceId::new("default");
     for role in [Role::User, Role::Service, Role::Dba] {
@@ -156,4 +177,19 @@ fn test_classify_show_transaction_isolation_level_for_jdbc() {
     let tables = SqlStatement::classify_and_parse("SHOW TABLES", &ns, Role::User)
         .expect("SHOW TABLES must stay a Kalam command");
     assert!(matches!(tables.kind(), SqlStatementKind::ShowTables(_)));
+}
+
+#[test]
+fn test_classify_call_procedure() {
+    let ns = NamespaceId::new("default");
+    let stmt = SqlStatement::classify_and_parse("CALL api.echo('hi')", &ns, Role::User)
+        .expect("classify CALL");
+    match stmt.kind() {
+        SqlStatementKind::Call(call) => {
+            assert_eq!(call.call.routine_id.as_str(), "api.echo");
+            assert_eq!(call.call.arguments.len(), 1);
+        },
+        other => panic!("expected CALL, got {other:?}"),
+    }
+    stmt.check_authorization(Role::User).expect("user may CALL");
 }

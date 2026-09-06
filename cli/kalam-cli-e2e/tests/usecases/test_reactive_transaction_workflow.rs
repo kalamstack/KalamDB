@@ -66,7 +66,8 @@ fn wait_for_subscription_value(
     listener: &mut SubscriptionListener,
     event_kind: &str,
     token: &str,
-    timeout: Duration) -> Result<String, Box<dyn std::error::Error>> {
+    timeout: Duration,
+) -> Result<String, Box<dyn std::error::Error>> {
     let start = Instant::now();
     let mut seen = Vec::new();
 
@@ -195,33 +196,29 @@ fn test_reactive_transactions_schema_and_stream_workflow() {
         .expect("typing subscription should be acknowledged before writes");
 
     let cross_group_tx = execute_http_as_root(&format!(
-        "BEGIN; \
-         INSERT INTO {} (id, title, state, updated_at_ms) VALUES ({}, 'Launch plan', 'open', 1); \
-         INSERT INTO {} (id, conversation_id, actor, content, status, created_at_ms) \
-         VALUES (1, {}, 'user', 'Draft the launch checklist', 'draft', 1); \
-         COMMIT;",
+        "BEGIN; INSERT INTO {} (id, title, state, updated_at_ms) VALUES ({}, 'Launch plan', \
+         'open', 1); INSERT INTO {} (id, conversation_id, actor, content, status, created_at_ms) \
+         VALUES (1, {}, 'user', 'Draft the launch checklist', 'draft', 1); COMMIT;",
         conversations, conversation_id, messages, conversation_id
     ))
     .expect("cross-group transaction request should return");
     assert_error_contains_any(
         &cross_group_tx,
         &["cannot access table", "data raft group"],
-        "cross USER+SHARED explicit transaction");
+        "cross USER+SHARED explicit transaction",
+    );
 
     let shared_insert_tx = execute_http_as_root(&format!(
-        "BEGIN; \
-         INSERT INTO {} (id, title, state, updated_at_ms) VALUES ({}, 'Launch plan', 'open', 1); \
-         COMMIT;",
+        "BEGIN; INSERT INTO {} (id, title, state, updated_at_ms) VALUES ({}, 'Launch plan', \
+         'open', 1); COMMIT;",
         conversations, conversation_id
     ))
     .expect("shared insert transaction request should return");
     assert_success(&shared_insert_tx, "shared insert transaction");
 
     let user_insert_tx = execute_http_as_root(&format!(
-        "BEGIN; \
-         INSERT INTO {} (id, conversation_id, actor, content, status, created_at_ms) \
-         VALUES (1, {}, 'user', 'Draft the launch checklist', 'draft', 1); \
-         COMMIT;",
+        "BEGIN; INSERT INTO {} (id, conversation_id, actor, content, status, created_at_ms) \
+         VALUES (1, {}, 'user', 'Draft the launch checklist', 'draft', 1); COMMIT;",
         messages, conversation_id
     ))
     .expect("user insert transaction request should return");
@@ -231,14 +228,15 @@ fn test_reactive_transactions_schema_and_stream_workflow() {
         &mut message_listener,
         "Insert",
         "Draft the launch checklist",
-        event_timeout)
+        event_timeout,
+    )
     .expect("message subscriber should receive committed row");
     wait_for_subscription_value(&mut conversation_listener, "Insert", "Launch plan", event_timeout)
         .expect("shared subscriber should receive committed row");
 
     execute_sql_as_root_via_client(&format!(
-        "INSERT INTO {} (id, conversation_id, actor, event_type, created_at_ms) VALUES \
-         (10, {}, 'assistant', 'typing', 2)",
+        "INSERT INTO {} (id, conversation_id, actor, event_type, created_at_ms) VALUES (10, {}, \
+         'assistant', 'typing', 2)",
         typing_events, conversation_id
     ))
     .expect("stream write outside explicit transaction should succeed");
@@ -246,18 +244,15 @@ fn test_reactive_transactions_schema_and_stream_workflow() {
         .expect("stream subscriber should receive ephemeral event");
 
     let message_update_tx = execute_http_as_root(&format!(
-        "BEGIN; \
-         UPDATE {} SET status = 'sent', content = 'Launch checklist committed' WHERE id = 1; \
-         COMMIT;",
+        "BEGIN; UPDATE {} SET status = 'sent', content = 'Launch checklist committed' WHERE id = \
+         1; COMMIT;",
         messages
     ))
     .expect("message update transaction request should return");
     assert_success(&message_update_tx, "message update transaction");
 
     let conversation_update_tx = execute_http_as_root(&format!(
-        "BEGIN; \
-         UPDATE {} SET state = 'active', updated_at_ms = 3 WHERE id = {}; \
-         COMMIT;",
+        "BEGIN; UPDATE {} SET state = 'active', updated_at_ms = 3 WHERE id = {}; COMMIT;",
         conversations, conversation_id
     ))
     .expect("conversation update transaction request should return");
@@ -267,7 +262,8 @@ fn test_reactive_transactions_schema_and_stream_workflow() {
         &mut message_listener,
         "Update",
         "Launch checklist committed",
-        event_timeout)
+        event_timeout,
+    )
     .expect("message subscriber should receive committed update");
     wait_for_subscription_value(&mut conversation_listener, "Update", "active", event_timeout)
         .expect("shared subscriber should receive committed update");
@@ -284,23 +280,21 @@ fn test_reactive_transactions_schema_and_stream_workflow() {
         &mut message_listener,
         "Insert",
         "Checklist is ready",
-        event_timeout)
+        event_timeout,
+    )
     .expect("message subscription should survive schema evolution");
 
     let message_rollback_tx = execute_http_as_root(&format!(
-        "BEGIN; \
-         INSERT INTO {} (id, conversation_id, actor, content, status, sentiment, created_at_ms) \
-         VALUES (3, {}, 'assistant', 'This row rolls back', 'draft', 'negative', 5); \
-         ROLLBACK;",
+        "BEGIN; INSERT INTO {} (id, conversation_id, actor, content, status, sentiment, \
+         created_at_ms) VALUES (3, {}, 'assistant', 'This row rolls back', 'draft', 'negative', \
+         5); ROLLBACK;",
         messages, conversation_id
     ))
     .expect("message rollback transaction request should return");
     assert_success(&message_rollback_tx, "message rollback transaction block");
 
     let shared_rollback_tx = execute_http_as_root(&format!(
-        "BEGIN; \
-         UPDATE {} SET state = 'rolled_back', updated_at_ms = 5 WHERE id = {}; \
-         ROLLBACK;",
+        "BEGIN; UPDATE {} SET state = 'rolled_back', updated_at_ms = 5 WHERE id = {}; ROLLBACK;",
         conversations, conversation_id
     ))
     .expect("shared rollback transaction request should return");
@@ -336,17 +330,16 @@ fn test_reactive_transactions_schema_and_stream_workflow() {
     );
 
     let stream_tx = execute_http_as_root(&format!(
-        "BEGIN; \
-         INSERT INTO {} (id, conversation_id, actor, event_type, created_at_ms) \
-         VALUES (11, {}, 'assistant', 'committed_in_tx', 6); \
-         COMMIT;",
+        "BEGIN; INSERT INTO {} (id, conversation_id, actor, event_type, created_at_ms) VALUES \
+         (11, {}, 'assistant', 'committed_in_tx', 6); COMMIT;",
         typing_events, conversation_id
     ))
     .expect("stream transaction request should return");
     assert_error_contains(
         &stream_tx,
         "stream tables are not supported inside explicit transactions",
-        "stream write inside explicit transaction");
+        "stream write inside explicit transaction",
+    );
 
     let stream_rows = execute_sql_as_root_via_client_json(&format!(
         "SELECT event_type FROM {} WHERE conversation_id = {}",
@@ -365,7 +358,8 @@ fn test_reactive_transactions_schema_and_stream_workflow() {
     );
 
     let active_transactions = execute_sql_as_root_via_client_json(
-        "SELECT COUNT(*) AS cnt FROM system.transactions WHERE origin = 'SqlBatch'")
+        "SELECT COUNT(*) AS cnt FROM system.transactions WHERE origin = 'SqlBatch'",
+    )
     .expect("system.transactions should be readable by root");
     assert!(
         json_count_is_zero(&active_transactions),

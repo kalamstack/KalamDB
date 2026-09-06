@@ -193,6 +193,9 @@ jobs:
       - name: Report disk space
         run: df -h
 
+      - name: Serialization boundary
+        run: python3 scripts/check-serialization-boundary.py --fail
+
       - name: Run tests (nextest)
         id: nextest
         run: |

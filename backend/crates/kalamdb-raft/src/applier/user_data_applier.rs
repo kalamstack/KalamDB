@@ -32,7 +32,8 @@ pub trait UserDataApplier: Send + Sync {
     /// # Arguments
     /// * `table_id` - The table identifier
     /// * `user_id` - The user who owns this data
-    /// * `rows` - Row data to insert
+    /// * `rows` - Logical row data when `encoded_fields` is empty (legacy logs)
+    /// * `encoded_fields` - Ordinal KOBJ field payloads (preferred)
     ///
     /// # Returns
     /// Number of rows inserted
@@ -41,6 +42,7 @@ pub trait UserDataApplier: Send + Sync {
         table_id: &TableId,
         user_id: &UserId,
         rows: &[kalamdb_commons::models::rows::Row],
+        encoded_fields: &[Vec<u8>],
         commit_seq: u64,
     ) -> Result<usize, RaftError>;
 
@@ -99,6 +101,7 @@ impl UserDataApplier for NoOpUserDataApplier {
         _table_id: &TableId,
         _user_id: &UserId,
         _rows: &[kalamdb_commons::models::rows::Row],
+        _encoded_fields: &[Vec<u8>],
         _commit_seq: u64,
     ) -> Result<usize, RaftError> {
         Ok(0)
@@ -178,10 +181,11 @@ mod tests {
             _table_id: &TableId,
             _user_id: &UserId,
             rows: &[kalamdb_commons::models::rows::Row],
+            encoded_fields: &[Vec<u8>],
             _commit_seq: u64,
         ) -> Result<usize, RaftError> {
             self.insert_count.fetch_add(1, Ordering::SeqCst);
-            Ok(rows.len())
+            Ok(rows.len().max(encoded_fields.len()))
         }
 
         async fn update(
@@ -229,7 +233,7 @@ mod tests {
         let table_id = TableId::new(NamespaceId::from("test_ns"), TableName::from("test_table"));
         let user_id = UserId::from("user_123");
 
-        let result = applier.insert(&table_id, &user_id, &[], 1).await;
+        let result = applier.insert(&table_id, &user_id, &[], &[], 1).await;
         assert!(result.is_ok());
         assert_eq!(applier.get_counts(), (1, 0, 0));
     }
@@ -263,7 +267,7 @@ mod tests {
         let table_id = TableId::new(NamespaceId::from("test_ns"), TableName::from("test_table"));
         let user_id = UserId::from("user_123");
 
-        assert_eq!(applier.insert(&table_id, &user_id, &[], 1).await.unwrap(), 0);
+        assert_eq!(applier.insert(&table_id, &user_id, &[], &[], 1).await.unwrap(), 0);
         assert_eq!(applier.update(&table_id, &user_id, &[], None, 1).await.unwrap(), 0);
         assert_eq!(applier.delete(&table_id, &user_id, None, 1).await.unwrap(), 0);
     }
@@ -291,8 +295,8 @@ mod tests {
         let table_id = TableId::new(NamespaceId::from("test_ns"), TableName::from("test_table"));
         let user_id = UserId::from("user_123");
 
-        applier.insert(&table_id, &user_id, &[], 1).await.unwrap();
-        applier.insert(&table_id, &user_id, &[], 2).await.unwrap();
+        applier.insert(&table_id, &user_id, &[], &[], 1).await.unwrap();
+        applier.insert(&table_id, &user_id, &[], &[], 2).await.unwrap();
         applier.update(&table_id, &user_id, &[], None, 3).await.unwrap();
         applier.delete(&table_id, &user_id, None, 4).await.unwrap();
 

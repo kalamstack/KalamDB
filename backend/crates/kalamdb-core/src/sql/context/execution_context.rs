@@ -180,6 +180,9 @@ impl ExecutionContext {
         // SessionContext::state() already clones SessionState once; avoid cloning it again.
         // Keep per-user options/extensions isolated while shared internals stay Arc-backed.
         // (shared internals like RuntimeEnv remain Arc-backed)
+        crate::sql::datafusion_session::DataFusionSessionFactory::ensure_extended_functions(
+            &self.base_session_context,
+        );
         let mut session_state = self.base_session_context.state();
 
         // Inject current user_id, role, and read_context into session config extensions

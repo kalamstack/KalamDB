@@ -14,7 +14,7 @@ fn expect_unauthorized(result: Result<String, Box<dyn std::error::Error>>, conte
             msg.contains("unauthorized")
                 || msg.contains("not authorized")
                 || msg.contains("permission")
-                ||             msg.contains("privilege")
+                || msg.contains("privilege")
                 || msg.contains("access denied")
                 || msg.contains("row-level")
                 || msg.contains("with check")
@@ -45,7 +45,8 @@ fn subscribe_as_user(username: &str, password: &str, query: &str) -> Result<(), 
             .subscribe_timeout_secs(10)
             .auth_timeout_secs(10)
             .initial_data_timeout(Duration::from_secs(15))
-            .build())
+            .build(),
+    )
     .map_err(|e| format!("Failed to build client: {}", e))?;
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -87,7 +88,8 @@ fn subscribe_as_user(username: &str, password: &str, query: &str) -> Result<(), 
                 Ok(None) => {
                     // Stream closed without ACK — treat as error.
                     return Err(kalam_client::error::KalamLinkError::WebSocketError(
-                        "Stream closed before receiving ACK".to_string()));
+                        "Stream closed before receiving ACK".to_string(),
+                    ));
                 },
                 Err(_) => {
                     // Timeout without any event — subscription is alive.
@@ -225,7 +227,8 @@ fn smoke_security_private_shared_table_blocked_in_batch() {
         password,
         &format!("SELECT * FROM {}", full_table),
     );
-    let select_output = select_result.expect("user SELECT on a default-deny shared table should succeed with zero rows");
+    let select_output = select_result
+        .expect("user SELECT on a default-deny shared table should succeed with zero rows");
     assert!(
         !select_output.to_lowercase().contains("secret"),
         "user SELECT must not return unauthorized rows: {select_output}"
@@ -241,7 +244,8 @@ fn smoke_security_private_shared_table_blocked_in_batch() {
     let delete_result = execute_sql_via_client_as(
         &regular_user,
         password,
-        &format!("DELETE FROM {} WHERE id = 1", full_table));
+        &format!("DELETE FROM {} WHERE id = 1", full_table),
+    );
     delete_result.expect(
         "DELETE on a default-deny shared table should succeed with zero rows rather than error",
     );
@@ -464,21 +468,24 @@ fn smoke_security_cross_user_row_isolation() {
     execute_sql_via_client_as(
         &user_a,
         password,
-        &format!("INSERT INTO {} (id, note) VALUES ('a1', 'secret-a')", full_table))
+        &format!("INSERT INTO {} (id, note) VALUES ('a1', 'secret-a')", full_table),
+    )
     .expect("User A insert failed");
 
     // User B inserts a different private row.
     execute_sql_via_client_as(
         &user_b,
         password,
-        &format!("INSERT INTO {} (id, note) VALUES ('b1', 'secret-b')", full_table))
+        &format!("INSERT INTO {} (id, note) VALUES ('b1', 'secret-b')", full_table),
+    )
     .expect("User B insert failed");
 
     // User A must see their own row.
     let a_view = execute_sql_via_client_as(
         &user_a,
         password,
-        &format!("SELECT note FROM {} WHERE id = 'a1'", full_table))
+        &format!("SELECT note FROM {} WHERE id = 'a1'", full_table),
+    )
     .expect("User A select failed");
     assert!(a_view.contains("secret-a"), "User A should see their own row: {a_view}");
 
@@ -489,7 +496,8 @@ fn smoke_security_cross_user_row_isolation() {
     let b_view = execute_sql_via_client_as(
         &user_b,
         password,
-        &format!("SELECT note FROM {} WHERE id = 'b1'", full_table))
+        &format!("SELECT note FROM {} WHERE id = 'b1'", full_table),
+    )
     .expect("User B select failed");
     assert!(b_view.contains("secret-b"), "User B should see their own row: {b_view}");
 
@@ -531,7 +539,8 @@ fn smoke_security_cross_user_row_isolation() {
 fn smoke_security_execute_as_username_injection_rejected() {
     if !is_server_running() {
         eprintln!(
-            "Skipping smoke_security_execute_as_username_injection_rejected: server not running at {}",
+            "Skipping smoke_security_execute_as_username_injection_rejected: server not running \
+             at {}",
             server_url()
         );
         return;
@@ -578,7 +587,8 @@ fn smoke_security_execute_as_username_injection_rejected() {
 fn smoke_security_plain_user_cannot_execute_as_any_user() {
     if !is_server_running() {
         eprintln!(
-            "Skipping smoke_security_plain_user_cannot_execute_as_any_user: server not running at {}",
+            "Skipping smoke_security_plain_user_cannot_execute_as_any_user: server not running at \
+             {}",
             server_url()
         );
         return;
@@ -623,7 +633,8 @@ fn smoke_security_plain_user_cannot_execute_as_any_user() {
         &format!(
             "EXECUTE AS USER '{}' (INSERT INTO {} (id, v) VALUES ('x', 'blocked'))",
             target, full_table
-        ));
+        ),
+    );
     assert!(
         result_user.is_err(),
         "Regular user must not impersonate another user: {}",
@@ -634,7 +645,8 @@ fn smoke_security_plain_user_cannot_execute_as_any_user() {
     let result_dba = execute_sql_via_client_as(
         &actor,
         password,
-        &format!("EXECUTE AS USER '{}' (SELECT 1)", dba_target));
+        &format!("EXECUTE AS USER '{}' (SELECT 1)", dba_target),
+    );
     assert!(
         result_dba.is_err(),
         "Regular user must not impersonate a DBA: {}",

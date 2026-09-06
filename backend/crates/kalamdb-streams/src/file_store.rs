@@ -14,11 +14,12 @@ use kalamdb_commons::{
     ids::StreamTableRowId,
     models::{StreamTableRow, TableId, UserId},
 };
+use kalamdb_serialization::StorageSchema;
 
 use crate::{
     config::StreamLogConfig,
     error::{Result, StreamLogError},
-    record::StreamLogRecord,
+    record::{PersistedStreamLogRecord, StreamLogRecord},
     store_trait::StreamLogStore,
     time_bucket::StreamTimeBucket,
     utils::{cleanup_empty_dir, visit_dirs},
@@ -74,6 +75,7 @@ struct LogFileEntry {
 ///   acquisition.
 pub struct FileStreamLogStore {
     config:   StreamLogConfig,
+    schema:   Arc<StorageSchema>,
     /// Cached open segment writers keyed by log-file path.
     segments: DashMap<PathBuf, Arc<Mutex<SegmentWriter>>>,
 }
@@ -88,9 +90,10 @@ impl fmt::Debug for FileStreamLogStore {
 }
 
 impl FileStreamLogStore {
-    pub fn new(config: StreamLogConfig) -> Self {
+    pub fn new(config: StreamLogConfig, schema: Arc<StorageSchema>) -> Self {
         Self {
             config,
+            schema,
             segments: DashMap::new(),
         }
     }
@@ -438,11 +441,50 @@ impl FileStreamLogStore {
         Ok(segment)
     }
 
+    fn persist_record(&self, record: &StreamLogRecord) -> Result<PersistedStreamLogRecord> {
+        match record {
+            StreamLogRecord::Put { row_id, row } => {
+                let payload = kalamdb_serialization::encode_stream_row(row, &self.schema)
+                    .map_err(|e| StreamLogError::Serialization(e.to_string()))?
+                    .into_bytes();
+                Ok(PersistedStreamLogRecord::Put {
+                    row_id: row_id.clone(),
+                    payload,
+                })
+            },
+            StreamLogRecord::Delete { row_id } => Ok(PersistedStreamLogRecord::Delete {
+                row_id: row_id.clone(),
+            }),
+        }
+    }
+
+    fn hydrate_record(&self, persisted: PersistedStreamLogRecord) -> Result<StreamLogRecord> {
+        match persisted {
+            PersistedStreamLogRecord::Put { row_id, payload } => {
+                let row = kalamdb_serialization::decode_stream_row(
+                    &payload,
+                    &self.schema,
+                    row_id.user_id.clone(),
+                    row_id.seq,
+                )
+                .map_err(|e| StreamLogError::Serialization(e.to_string()))?;
+                Ok(StreamLogRecord::Put { row_id, row })
+            },
+            PersistedStreamLogRecord::Delete { row_id } => Ok(StreamLogRecord::Delete { row_id }),
+        }
+    }
+
     /// Serialise `record` and write the length-prefixed frame to `writer`.
     #[inline]
-    fn write_record_bytes(writer: &mut BufWriter<File>, record: &StreamLogRecord) -> Result<()> {
-        let payload = flexbuffers::to_vec(record)
-            .map_err(|e| StreamLogError::Serialization(e.to_string()))?;
+    fn write_record_bytes(
+        &self,
+        writer: &mut BufWriter<File>,
+        record: &StreamLogRecord,
+    ) -> Result<()> {
+        let persisted = self.persist_record(record)?;
+        let payload = kalamdb_serialization::encode_stream(&persisted)
+            .map_err(|e| StreamLogError::Serialization(e.to_string()))?
+            .into_bytes();
         let len = payload.len() as u32;
         writer
             .write_all(&len.to_le_bytes())
@@ -456,7 +498,7 @@ impl FileStreamLogStore {
         let mut guard = seg
             .lock()
             .map_err(|e| StreamLogError::Io(format!("segment lock poisoned: {}", e)))?;
-        Self::write_record_bytes(&mut guard.writer, &record)?;
+        self.write_record_bytes(&mut guard.writer, &record)?;
         guard.record_count += 1;
         guard.last_write = Instant::now();
         Ok(())
@@ -472,7 +514,7 @@ impl FileStreamLogStore {
         }
     }
 
-    fn visit_records<F>(path: &Path, mut visitor: F) -> Result<bool>
+    fn visit_records<F>(&self, path: &Path, mut visitor: F) -> Result<bool>
     where
         F: FnMut(StreamLogRecord) -> Result<bool>,
     {
@@ -500,8 +542,10 @@ impl FileStreamLogStore {
                     return Err(StreamLogError::Io(err.to_string()));
                 },
             }
-            let record = flexbuffers::from_slice::<StreamLogRecord>(&payload)
-                .map_err(|e| StreamLogError::Serialization(e.to_string()))?;
+            let persisted =
+                kalamdb_serialization::decode_stream::<PersistedStreamLogRecord>(&payload)
+                    .map_err(|e| StreamLogError::Serialization(e.to_string()))?;
+            let record = self.hydrate_record(persisted)?;
             if !visitor(record)? {
                 return Ok(false);
             }
@@ -509,9 +553,9 @@ impl FileStreamLogStore {
         Ok(true)
     }
 
-    fn read_records(path: &Path) -> Result<Vec<StreamLogRecord>> {
+    fn read_records(&self, path: &Path) -> Result<Vec<StreamLogRecord>> {
         let mut records = Vec::new();
-        Self::visit_records(path, |record| {
+        self.visit_records(path, |record| {
             records.push(record);
             Ok(true)
         })?;
@@ -617,7 +661,7 @@ impl FileStreamLogStore {
 
         for entry in entries {
             self.flush_segment(&entry.path);
-            let should_continue = Self::visit_records(&entry.path, |record| {
+            let should_continue = self.visit_records(&entry.path, |record| {
                 match record {
                     StreamLogRecord::Put { row_id, row } => {
                         let seq = row_id.seq().as_i64();
@@ -679,7 +723,7 @@ impl FileStreamLogStore {
 
         for entry in &entries {
             self.flush_segment(&entry.path);
-            let records = Self::read_records(&entry.path)?;
+            let records = self.read_records(&entry.path)?;
             for record in records.into_iter().rev() {
                 match record {
                     StreamLogRecord::Put { row_id, row } => {
@@ -727,7 +771,7 @@ impl StreamLogStore for FileStreamLogStore {
                 .lock()
                 .map_err(|e| StreamLogError::Io(format!("segment lock poisoned: {}", e)))?;
             for record in &records {
-                Self::write_record_bytes(&mut guard.writer, record)?;
+                self.write_record_bytes(&mut guard.writer, record)?;
             }
             guard.record_count += records.len() as u32;
             guard.last_write = Instant::now();
@@ -779,6 +823,7 @@ mod tests {
         collections::{BTreeMap, HashMap},
         fs,
         path::PathBuf,
+        sync::Arc,
     };
 
     use chrono::{Datelike, TimeZone, Timelike};
@@ -787,6 +832,7 @@ mod tests {
         ids::{SeqId, SnowflakeGenerator, StreamTableRowId},
         models::{rows::Row, NamespaceId, StreamTableRow, TableId, TableName, UserId},
     };
+    use kalamdb_serialization::StorageSchema;
     use kalamdb_sharding::ShardRouter;
 
     use super::{FileStreamLogStore, MAX_OPEN_SEGMENTS};
@@ -865,12 +911,15 @@ mod tests {
         shard_router: ShardRouter,
         bucket: StreamTimeBucket,
     ) -> FileStreamLogStore {
-        FileStreamLogStore::new(StreamLogConfig {
-            base_dir,
-            shard_router,
-            bucket,
-            table_id,
-        })
+        FileStreamLogStore::new(
+            StreamLogConfig {
+                base_dir,
+                shard_router,
+                bucket,
+                table_id,
+            },
+            Arc::new(StorageSchema::new(1, Vec::new())),
+        )
     }
 
     #[test]

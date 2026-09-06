@@ -193,6 +193,10 @@ pub struct DeployArgs {
     /// Target environment name
     #[arg(long = "env", global = true)]
     pub env: Option<String>,
+
+    /// Validate readiness without applying migrations or health checks
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -315,3 +319,39 @@ pub struct DbResetArgs {
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct DbMigrateArgs {}
+
+#[derive(Args, Debug, Clone)]
+pub struct FunctionsArgs {
+    #[command(subcommand)]
+    pub command: FunctionsCommand,
+
+    /// Project directory containing kalam.toml
+    #[arg(long = "project-dir", global = true)]
+    pub project_dir: Option<PathBuf>,
+
+    /// Target environment name
+    #[arg(long = "env", global = true)]
+    pub env: Option<String>,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum FunctionsCommand {
+    /// Generate function contracts and SDK artifacts
+    Build,
+    /// Show catalogued procedures and revisions
+    Status,
+    /// Point the active revision at a previously activated hash
+    Rollback(FunctionsRollbackArgs),
+    /// Print recent trigger delivery attempts
+    Logs(FunctionsLogsArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct FunctionsRollbackArgs {
+    pub revision: String,
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub struct FunctionsLogsArgs {
+    pub procedure: Option<String>,
+}

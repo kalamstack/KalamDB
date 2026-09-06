@@ -598,6 +598,7 @@ async fn test_all_groups_accept_proposals() {
             ),
             user_id:             UserId::from(format!("user_{}", shard)),
             rows:                vec![make_test_row()],
+            encoded_fields:      Vec::new(),
         };
         let result = leader.manager.propose_user_data(shard, cmd).await;
         assert!(result.is_ok(), "UserDataShard({}) should accept proposals", shard);
@@ -612,6 +613,7 @@ async fn test_all_groups_accept_proposals() {
             actor_user_id:       None,
             table_id:            TableId::new(NamespaceId::from("shared"), TableName::from("data")),
             rows:                vec![make_test_row()],
+            encoded_fields:      Vec::new(),
         };
         let result = leader.manager.propose_shared_data(0, cmd).await;
         assert!(result.is_ok(), "SharedDataShard should accept proposals");
@@ -834,6 +836,7 @@ async fn test_user_data_shard_operations() {
             table_id:            table_id.clone(),
             user_id:             user_id.clone(),
             rows:                vec![make_test_row()],
+            encoded_fields:      Vec::new(),
         };
         let result = leader.manager.propose_user_data(shard, cmd).await;
         assert!(result.is_ok(), "Insert shard {} should succeed", shard);
@@ -887,6 +890,7 @@ async fn test_shared_data_shard_operations() {
         actor_user_id:       None,
         table_id:            table_id.clone(),
         rows:                vec![make_test_row()],
+        encoded_fields:      Vec::new(),
     };
     let result = leader.manager.propose_shared_data(0, cmd).await;
     assert!(result.is_ok(), "SharedData Insert should succeed");
@@ -944,6 +948,7 @@ async fn test_proposal_throughput() {
             table_id:            TableId::new(NamespaceId::from("perf"), TableName::from("test")),
             user_id:             UserId::from(format!("user_{}", i)),
             rows:                vec![make_test_row()],
+            encoded_fields:      Vec::new(),
         };
         if leader.manager.propose_user_data(0, cmd).await.is_ok() {
             success_count += 1;
@@ -996,6 +1001,7 @@ async fn test_concurrent_multi_group_proposals() {
                         ),
                         user_id:             UserId::from(format!("user_{}_{}", shard, i)),
                         rows:                vec![make_test_row()],
+                        encoded_fields:      Vec::new(),
                     };
                     if manager.propose_user_data(shard, cmd).await.is_ok() {
                         success.fetch_add(1, Ordering::Relaxed);
@@ -1118,6 +1124,7 @@ async fn test_invalid_shard_error() {
         table_id:            TableId::new(NamespaceId::from("test"), TableName::from("table")),
         user_id:             UserId::from("user1"),
         rows:                vec![make_test_row()],
+        encoded_fields:      Vec::new(),
         required_meta_index: 0,
         transaction_id:      None,
     };

@@ -25,6 +25,7 @@ pub mod backends;
 pub mod entity_store; // Phase 14: Type-safe EntityStore<K, V> with generic keys
 pub mod index; // Generic secondary index support
 pub mod indexed_store; // Phase 15: Automatic secondary index management
+mod persist;
 pub mod raft_storage; // Phase 17: Raft log/meta persistence
 pub mod storage_trait;
 
@@ -37,13 +38,19 @@ pub use entity_store::{
     EntityStoreAsync, // Async versions using spawn_blocking internally
 };
 // Export index types
-pub use index::{FunctionExtractor, IndexKeyExtractor, SecondaryIndex};
+pub use index::{
+    FunctionExtractor, IndexKeyExtractor, PrefixIndex, PrefixIndexedKey, PrefixIndexedValue,
+    SecondaryIndex,
+};
 #[cfg(feature = "datafusion")]
 pub use indexed_store::{extract_i64_equality, extract_string_equality};
 // Phase 15: Export IndexedEntityStore for automatic index management
 pub use indexed_store::{IndexDefinition, IndexedEntityStore};
 // Re-export StorageKey from kalamdb-commons to avoid import inconsistency
 pub use kalamdb_commons::StorageKey;
+pub use persist::{
+    decode_entity, encode_entity, object_entity_codec, EntityCodec, ObjectEntityCodec,
+};
 // Phase 17: Export Raft storage types
 pub use raft_storage::{
     GroupId, RaftLogEntry, RaftLogId, RaftPartitionStore, RaftSnapshotData, RaftSnapshotMeta,

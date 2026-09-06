@@ -3,14 +3,23 @@ use datafusion::{
     logical_expr::Expr,
 };
 use kalamdb_commons::{
-    models::{schemas::TableType, UserId},
+    constants::SystemColumnNames,
+    models::{
+        schemas::{TableDefinition, TableType},
+        UserId,
+    },
     TableId,
 };
 
 use crate::{
     error::KalamDbError,
-    manifest::{ManifestAccessPlanner, ParquetScanStats},
-    utils::core::TableProviderCore,
+    manifest::{ColdScanPruning, ManifestAccessPlanner, ParquetScanStats},
+    utils::{
+        core::TableProviderCore,
+        row_utils::{
+            extract_equality_predicates, extract_seq_bounds_from_filter, scalar_to_prune_string,
+        },
+    },
 };
 
 #[derive(Debug)]
@@ -198,13 +207,8 @@ async fn scan_parquet_files_internal_async(
     })?;
 
     let planner = ManifestAccessPlanner::new();
-    let (min_seq, max_seq) = filter
-        .map(crate::utils::row_utils::extract_seq_bounds_from_filter)
-        .unwrap_or((None, None));
-    let seq_range = match (min_seq, max_seq) {
-        (Some(min), Some(max)) => Some((min, max)),
-        _ => None,
-    };
+    let table_def = core.schema_registry().get_table_if_exists(table_id).ok().flatten();
+    let pruning = cold_scan_pruning(filter, table_def.as_deref());
 
     let (combined, stats) = planner
         .scan_parquet_files_async(
@@ -213,7 +217,7 @@ async fn scan_parquet_files_internal_async(
             table_type,
             table_id,
             user_id,
-            seq_range,
+            pruning,
             use_degraded_mode,
             schema.clone(),
             core.services.schema_registry.as_ref(),
@@ -250,4 +254,57 @@ async fn scan_parquet_files_internal_async(
         batch: combined,
         stats,
     })
+}
+
+fn cold_scan_pruning(
+    filter: Option<&Expr>,
+    table_def: Option<&TableDefinition>,
+) -> ColdScanPruning {
+    let (min_seq, max_seq) = filter.map(extract_seq_bounds_from_filter).unwrap_or((None, None));
+    let seq_range = match (min_seq, max_seq) {
+        (Some(min), Some(max)) => Some((min, max)),
+        _ => None,
+    };
+    let mut pruning = ColdScanPruning {
+        seq_range,
+        indexed_equalities: Vec::new(),
+        bloom: None,
+    };
+    let Some(filter) = filter else {
+        return pruning;
+    };
+    let Some(table) = table_def else {
+        return pruning;
+    };
+
+    let mut pk_bloom = None;
+    let mut scalar_bloom = None;
+    for (name, value) in extract_equality_predicates(filter) {
+        if name == SystemColumnNames::SEQ {
+            continue;
+        }
+        let Some(column) = table.columns.iter().find(|column| column.column_name == name) else {
+            continue;
+        };
+        let indexed = column.is_primary_key
+            || table.scalar_indexes.iter().any(|index| {
+                index.columns.iter().any(|column_id| column_id.as_u64() == column.column_id)
+            });
+        if !indexed {
+            continue;
+        }
+        let Some(value_str) = scalar_to_prune_string(&value) else {
+            continue;
+        };
+        pruning.indexed_equalities.push((column.column_id, value_str.clone()));
+        if column.data_type.supports_equality_bloom() {
+            if column.is_primary_key {
+                pk_bloom.get_or_insert((name.to_string(), value_str));
+            } else {
+                scalar_bloom.get_or_insert((name.to_string(), value_str));
+            }
+        }
+    }
+    pruning.bloom = scalar_bloom.or(pk_bloom);
+    pruning
 }

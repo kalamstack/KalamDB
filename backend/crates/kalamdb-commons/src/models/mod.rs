@@ -37,11 +37,17 @@ mod kalam_cell_value;
 
 // Standalone type modules (not IDs, not system tables)
 mod auth_type;
+mod call_argument;
+mod catalog_type_kind;
 mod connection;
 mod file_ref;
+mod function_runtime;
 mod payload_mode;
 mod read_context;
 mod role;
+mod routine_call;
+mod routine_grantee;
+mod routine_security;
 pub mod row_level_security;
 mod session_origin;
 mod topic_op;
@@ -57,21 +63,27 @@ pub mod pg_operations;
 
 // Re-export all types from submodules for convenience
 pub use auth_type::AuthType;
+pub use call_argument::CallArgument;
+pub use catalog_type_kind::CatalogTypeKind;
 pub use connection::ConnectionInfo;
 pub use datatypes::KalamDataType;
 pub use file_ref::FileRef;
+pub use function_runtime::FunctionRuntime;
 pub use ids::*;
 pub use kalam_cell_value::KalamCellValue;
 pub use payload_mode::PayloadMode;
 pub use read_context::ReadContext;
 pub use role::Role;
+pub use routine_call::{is_builtin_default_name, normalize_builtin_name, RoutineCall};
+pub use routine_grantee::RoutineGrantee;
+pub use routine_security::RoutineSecurityMode;
 pub use row_level_security::{
     AuthorizationRelation, BoundExprShape, InvalidationStrategy, PolicyCommand, PolicyId,
     PolicyProgram, PolicyScalar, PolicyTarget, PredicateOperator, PrincipalExpr, ScalarPredicate,
     TablePolicy,
 };
 #[cfg(feature = "rows")]
-pub use rows::{KTableRow, StreamTableRow, SystemTableRow, UserTableRow};
+pub use rows::{KTableRow, SharedTableRow, StreamTableRow, SystemTableRow, UserTableRow};
 pub use schemas::{FieldFlag, FieldFlags, SchemaField, TableAccess, TableName};
 pub use session_origin::SessionOrigin;
 pub use topic_op::TopicOp;

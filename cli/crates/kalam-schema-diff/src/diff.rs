@@ -70,7 +70,29 @@ pub fn diff_schema_sql_with_options(
 ) -> Result<MigrationStatements, SchemaDiffError> {
     let current = parse_schema("before schema", before_sql)?;
     let target = parse_schema("after schema", after_sql)?;
-    let up = diff_schema(&current, &target, options.allow_destructive).join("\n");
+    let mut up_lines = diff_schema(&current, &target, options.allow_destructive);
+
+    let current_contract =
+        kalamdb_sql::compile_contract_sql(before_sql, "public").map_err(|err| {
+            SchemaDiffError::Parse {
+                message: err.message,
+            }
+        })?;
+    let target_contract =
+        kalamdb_sql::compile_contract_sql(after_sql, "public").map_err(|err| {
+            SchemaDiffError::Parse {
+                message: err.message,
+            }
+        })?;
+    let contract_diff = kalamdb_sql::diff_contracts(&current_contract, &target_contract);
+    if !contract_diff.statements.is_empty() {
+        if up_lines.last().map(String::as_str) != Some("") {
+            up_lines.push(String::new());
+        }
+        up_lines.extend(contract_diff.statements);
+    }
+
+    let up = up_lines.join("\n");
 
     Ok(MigrationStatements {
         up,

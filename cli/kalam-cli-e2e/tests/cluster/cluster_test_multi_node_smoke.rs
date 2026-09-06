@@ -496,9 +496,8 @@ fn cluster_test_mixed_statement_batch_routes_per_group() {
         .unwrap_or_else(|| urls[0].clone());
 
     let batch = format!(
-        "CREATE USER {} WITH PASSWORD '{}' ROLE 'user'; \
-         INSERT INTO {}.mixed_shared (id, value) VALUES (1, 'initial'); \
-         UPDATE {}.mixed_shared SET value = 'updated' WHERE id = 1",
+        "CREATE USER {} WITH PASSWORD '{}' ROLE 'user'; INSERT INTO {}.mixed_shared (id, value) \
+         VALUES (1, 'initial'); UPDATE {}.mixed_shared SET value = 'updated' WHERE id = 1",
         user, password, namespace, namespace
     );
 

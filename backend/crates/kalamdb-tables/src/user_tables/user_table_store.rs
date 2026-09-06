@@ -18,10 +18,13 @@ use std::sync::Arc;
 use kalamdb_commons::{
     ids::UserTableRowId, models::rows::UserTableRow, storage::Partition, TableId,
 };
+use kalamdb_serialization::StorageSchema;
 use kalamdb_store::{entity_store::EntityStore, IndexedEntityStore, StorageBackend};
 
-use super::pk_index::create_user_table_pk_index;
-use crate::common::{ensure_partition, new_indexed_store_with_pk, partition_name};
+use crate::{
+    common::{ensure_partition, new_indexed_store_with_pk, partition_name, table_prefix_indexes},
+    row_codec::UserRowCodec,
+};
 
 // KSerializable for UserTableRow is implemented in kalamdb-store
 // impl KSerializable for UserTableRow {}
@@ -102,11 +105,14 @@ pub fn new_indexed_user_table_store(
     backend: Arc<dyn StorageBackend>,
     table_id: &TableId,
     pk_field_name: &str,
+    schema: Arc<StorageSchema>,
+    scalar_indexes: &[kalamdb_commons::models::schemas::ScalarIndexDefinition],
+    columns: &[kalamdb_commons::models::schemas::ColumnDefinition],
 ) -> UserTableIndexedStore {
     let name =
         partition_name(kalamdb_commons::constants::ColumnFamilyNames::USER_TABLE_PREFIX, table_id);
-    let pk_index = create_user_table_pk_index(table_id, pk_field_name);
-    new_indexed_store_with_pk(backend, name, vec![pk_index])
+    let indexes = table_prefix_indexes(table_id, pk_field_name, scalar_indexes, columns, true);
+    new_indexed_store_with_pk(backend, name, indexes, Arc::new(UserRowCodec::new(schema)))
 }
 
 #[cfg(test)]
@@ -232,5 +238,169 @@ mod tests {
         // Both exist independently
         assert_eq!(store.get(&key1).unwrap().unwrap().user_id, UserId::new("user1"));
         assert_eq!(store.get(&key2).unwrap().unwrap().user_id, UserId::new("user2"));
+    }
+
+    #[test]
+    fn indexed_user_store_writes_ordinal_kobj_without_identity() {
+        let backend: Arc<dyn StorageBackend> = Arc::new(RecordingBackend::new());
+        let table_id = TableId::new(NamespaceId::new("test_ns"), TableName::new("test_table"));
+        let schema = crate::row_codec::storage_schema_from_named_fields([
+            ("id", kalamdb_serialization::StorageDataType::Int64),
+            ("name", kalamdb_serialization::StorageDataType::Utf8),
+        ]);
+        let store =
+            new_indexed_user_table_store(Arc::clone(&backend), &table_id, "id", schema, &[], &[]);
+        let user_id = UserId::new("user-alice");
+        let key = UserTableRowId::new(user_id.clone(), SeqId::new(100));
+        let row = create_test_row(&user_id, 100);
+        store.insert(&key, &row).unwrap();
+
+        let raw = backend
+            .get(&store.partition(), &key.storage_key())
+            .unwrap()
+            .expect("stored row value");
+        assert_eq!(&raw[0..4], b"KOBJ");
+        assert!(
+            !raw.windows(b"user-alice".len()).any(|window| window == b"user-alice"),
+            "user_id must not be stored in the row value"
+        );
+
+        let retrieved = store.get(&key).unwrap().unwrap();
+        assert_eq!(retrieved.user_id, user_id);
+        assert_eq!(retrieved._seq, SeqId::new(100));
+        assert_eq!(retrieved.fields.values.get("name"), row.fields.values.get("name"));
+    }
+
+    #[test]
+    fn indexed_user_store_prefix_scan_is_user_scoped() {
+        use kalamdb_commons::models::{
+            datatypes::KalamDataType,
+            schemas::{ColumnDefinition, ScalarIndexDefinition},
+            ColumnId,
+        };
+
+        let backend = Arc::new(RecordingBackend::new());
+        let table_id = TableId::new(NamespaceId::new("chat"), TableName::new("messages_ai"));
+        let schema = crate::row_codec::storage_schema_from_named_fields([
+            ("id", kalamdb_serialization::StorageDataType::Int64),
+            ("conversation_id", kalamdb_serialization::StorageDataType::Utf8),
+            ("name", kalamdb_serialization::StorageDataType::Utf8),
+        ]);
+        let columns = [
+            ColumnDefinition::primary_key(1, "id", 1, KalamDataType::BigInt),
+            ColumnDefinition::simple(2, "conversation_id", 2, KalamDataType::Text),
+            ColumnDefinition::simple(3, "name", 3, KalamDataType::Text),
+        ];
+        let indexes = [ScalarIndexDefinition::new(
+            "messages_conversation_id",
+            vec![ColumnId::new(2)],
+            false,
+        )];
+        let store = new_indexed_user_table_store(
+            backend.clone(),
+            &table_id,
+            "id",
+            schema,
+            &indexes,
+            &columns,
+        );
+
+        let insert_row = |user: &str, seq: i64, conversation: &str, id: i64| {
+            let user_id = UserId::new(user);
+            let mut values = BTreeMap::new();
+            values.insert("id".to_string(), ScalarValue::Int64(Some(id)));
+            values.insert(
+                "conversation_id".to_string(),
+                ScalarValue::Utf8(Some(conversation.to_string())),
+            );
+            values.insert("name".to_string(), ScalarValue::Utf8(Some("msg".to_string())));
+            store
+                .insert(
+                    &UserTableRowId::new(user_id.clone(), SeqId::new(seq)),
+                    &UserTableRow {
+                        user_id,
+                        _seq: SeqId::new(seq),
+                        _commit_seq: 0,
+                        _deleted: false,
+                        fields: Row::new(values),
+                    },
+                )
+                .unwrap();
+        };
+        insert_row("alice", 10, "room-a", 1);
+        insert_row("alice", 20, "room-a", 2);
+        insert_row("bob", 30, "room-a", 3);
+
+        let filter = datafusion::logical_expr::col("conversation_id")
+            .eq(datafusion::logical_expr::lit("room-a"));
+        let (idx, prefix) = store
+            .find_best_index_for_filter_expr(Some(&UserId::new("alice")), &filter)
+            .expect("user-scoped conversation_id prefix");
+        assert_eq!(idx, 1);
+        let hits = store.scan_by_index(idx, Some(&prefix), None).unwrap();
+        assert_eq!(hits.len(), 2);
+        assert!(hits.iter().all(|(k, _)| k.user_id.as_str() == "alice"));
+    }
+
+    #[test]
+    fn create_index_backfill_indexes_existing_rows() {
+        use kalamdb_commons::models::{
+            datatypes::KalamDataType,
+            schemas::{ColumnDefinition, ScalarIndexDefinition},
+            ColumnId,
+        };
+
+        let backend: Arc<dyn StorageBackend> = Arc::new(RecordingBackend::new());
+        let table_id = TableId::new(NamespaceId::new("chat"), TableName::new("messages_bf"));
+        let schema = crate::row_codec::storage_schema_from_named_fields([
+            ("id", kalamdb_serialization::StorageDataType::Int64),
+            ("conversation_id", kalamdb_serialization::StorageDataType::Utf8),
+        ]);
+        let columns = [
+            ColumnDefinition::primary_key(1, "id", 1, KalamDataType::BigInt),
+            ColumnDefinition::simple(2, "conversation_id", 2, KalamDataType::Text),
+        ];
+        let empty = new_indexed_user_table_store(
+            Arc::clone(&backend),
+            &table_id,
+            "id",
+            Arc::clone(&schema),
+            &[],
+            &columns,
+        );
+        let user_id = UserId::new("alice");
+        let mut values = BTreeMap::new();
+        values.insert("id".to_string(), ScalarValue::Int64(Some(1)));
+        values.insert("conversation_id".to_string(), ScalarValue::Utf8(Some("room-a".to_string())));
+        empty
+            .insert(
+                &UserTableRowId::new(user_id.clone(), SeqId::new(10)),
+                &UserTableRow {
+                    user_id:     user_id.clone(),
+                    _seq:        SeqId::new(10),
+                    _commit_seq: 0,
+                    _deleted:    false,
+                    fields:      Row::new(values),
+                },
+            )
+            .unwrap();
+
+        let indexes = [ScalarIndexDefinition::new(
+            "messages_conversation_id",
+            vec![ColumnId::new(2)],
+            false,
+        )];
+        let indexed = new_indexed_user_table_store(
+            Arc::clone(&backend),
+            &table_id,
+            "id",
+            schema,
+            &indexes,
+            &columns,
+        );
+        assert_eq!(indexed.backfill_index(1).unwrap(), 1);
+        let hits = indexed.scan_by_index(1, None, None).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].0.user_id, user_id);
     }
 }

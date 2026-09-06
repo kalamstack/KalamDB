@@ -12,6 +12,9 @@ pub enum SystemError {
     #[error("Already exists: {0}")]
     AlreadyExists(String),
 
+    #[error("Conflict: {0}")]
+    Conflict(String),
+
     #[error("Invalid operation: {0}")]
     InvalidOperation(String),
 

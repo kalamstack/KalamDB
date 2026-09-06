@@ -267,12 +267,8 @@ impl VirtualView for ColumnsView {
                     ColumnDefault::Literal(lit) => {
                         default_values.append_value(format!("{:?}", lit))
                     },
-                    ColumnDefault::FunctionCall { name, args } => {
-                        if args.is_empty() {
-                            default_values.append_value(format!("{}()", name));
-                        } else {
-                            default_values.append_value(format!("{}({:?})", name, args));
-                        }
+                    ColumnDefault::FunctionCall(call) => {
+                        default_values.append_value(call.to_sql());
                     },
                 }
 

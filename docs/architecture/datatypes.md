@@ -114,14 +114,30 @@ KalamDB has two storage layers with different representations:
 
 ## 3.1 Hot path (RocksDB row payload)
 
-Rows are encoded with FlatBuffers (`row_codec`) as typed scalar payloads.
+Rows are encoded by `kalamdb-serialization` as ordinal `KOBJ` values. Identity fields
+(`user_id`, `_seq`) live on the RocksDB key, not in the payload. Nested `STRUCT` / `List`
+values use the same crate.
 
 Key points:
-- Row fields are stored as typed scalar values, not a plain untyped JSON blob.
+- Row fields are stored as typed ordinal scalars, not a name-keyed JSON blob and not FlatBuffers `KENV`.
 - `Int64`/`UInt64` are represented as strings in `StoredScalarValue` JSON-facing form to avoid JS precision loss.
 - `Decimal128` stores integer mantissa + precision/scale metadata.
 - `Embedding` stores `size` + vector float values.
 - `UUID` can be stored as fixed-size binary scalar in typed path.
+
+### 3.1.1 Upgrading to 0.7 (wipe-data)
+
+0.7 does not dual-decode legacy RocksDB bytes. Unenveloped FlexBuffers, MessagePack
+snapshots, JSON PK arrays, and old `KENV` / name-keyed rows are rejected on read.
+
+For every **dev and test** cluster when moving to 0.7:
+
+1. Stop the server.
+2. Delete the data directory (`storage.data_path`, default `./data`; CLI local projects use `kalam/server/data`; tests often set `KALAMDB_DATA_DIR`).
+3. Start 0.7 so it can recreate empty RocksDB / Parquet / snapshot dirs.
+4. Re-apply schema and reload data (SQL / `kalam deploy`). Do not copy an old `rocksdb` directory forward.
+
+Production clusters that still have pre-0.7 bytes need a **separate offline rewrite tool** (not the 0.7 server). Until that tool exists, wipe-and-reload is the supported path.
 
 ## 3.2 Flushed path (Parquet)
 

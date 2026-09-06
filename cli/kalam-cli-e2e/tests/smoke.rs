@@ -130,6 +130,16 @@ mod smoke_test_table_option_alters;
 #[path = "smoke/ddl/smoke_test_table_transfer.rs"]
 mod smoke_test_table_transfer;
 
+// 0.7 ordinal-row / scalar-index storage validation
+#[path = "smoke/kobj/functions.rs"]
+mod kobj_functions;
+#[path = "smoke/kobj/helpers.rs"]
+mod kobj_helpers;
+#[path = "smoke/kobj/indexes.rs"]
+mod kobj_indexes;
+#[path = "smoke/kobj/rows.rs"]
+mod kobj_rows;
+
 // DML tests
 #[path = "smoke/dml/smoke_test_dml_extended.rs"]
 mod smoke_test_dml_extended;

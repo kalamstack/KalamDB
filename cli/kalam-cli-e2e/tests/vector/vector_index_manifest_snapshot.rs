@@ -1,13 +1,13 @@
-use crate::common::{
-    assert_flush_storage_files_exist, execute_sql_as_root_via_cli,
-    execute_sql_as_root_via_client_json, generate_unique_namespace, generate_unique_table,
-};
-
-use crate::minio_common::{
-    cleanup_minio_resources, query_count, setup_minio_storage, should_run_minio_storage_tests,
-};
-
 use super::helpers::{flush_user_table_and_wait, vector_query_ids};
+use crate::{
+    common::{
+        assert_flush_storage_files_exist, execute_sql_as_root_via_cli,
+        execute_sql_as_root_via_client_json, generate_unique_namespace, generate_unique_table,
+    },
+    minio_common::{
+        cleanup_minio_resources, query_count, setup_minio_storage, should_run_minio_storage_tests,
+    },
+};
 
 #[test]
 fn test_minio_vector_index_manifest_snapshot_exists() {
@@ -24,7 +24,8 @@ fn test_minio_vector_index_manifest_snapshot_exists() {
     execute_sql_as_root_via_cli(&format!("CREATE NAMESPACE {}", namespace))
         .expect("namespace creation");
     execute_sql_as_root_via_cli(&format!(
-        "CREATE TABLE {} (id BIGINT PRIMARY KEY, embedding EMBEDDING(3), body TEXT NOT NULL) WITH (TYPE='USER', STORAGE_ID='{}', FLUSH_POLICY='rows:100')",
+        "CREATE TABLE {} (id BIGINT PRIMARY KEY, embedding EMBEDDING(3), body TEXT NOT NULL) WITH \
+         (TYPE='USER', STORAGE_ID='{}', FLUSH_POLICY='rows:100')",
         full_table, storage_id
     ))
     .expect("vector table creation");

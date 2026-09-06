@@ -1,0 +1,45 @@
+[package]
+name = "kalamdb-functions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SQL procedure runtime ABI, V8 adapter, and revision activation"
+keywords = ["kalamdb", "functions", "v8"]
+categories = ["database"]
+
+[features]
+default = ["catalog", "wasm-runtime"]
+catalog = ["dep:kalamdb-filestore", "dep:kalamdb-system", "dep:kalamdb-store"]
+wasm-runtime = ["dep:wasmtime"]
+
+[dependencies]
+kalamdb-commons = { path = "../kalamdb-commons", features = ["full"] }
+kalamdb-filestore = { path = "../kalamdb-filestore", optional = true }
+kalamdb-system = { path = "../kalamdb-system", optional = true }
+arrow = { workspace = true }
+bytes = { workspace = true }
+datafusion-common = { workspace = true, default-features = false }
+futures-util = { workspace = true, features = ["std", "async-await"] }
+moka = { workspace = true }
+serde_json = { workspace = true }
+hex = { workspace = true }
+serde = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+v8 = { workspace = true }
+wasmtime = { workspace = true, optional = true }
+
+kalamdb-store = { path = "../kalamdb-store", optional = true }
+
+[dev-dependencies]
+ntest = { workspace = true }
+
+[lib]
+name = "kalamdb_functions"
+path = "src/lib.rs"
+doctest = false

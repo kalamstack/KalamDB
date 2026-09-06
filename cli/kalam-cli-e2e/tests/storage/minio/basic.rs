@@ -1,11 +1,10 @@
 use tokio::runtime::Runtime;
 
+use super::common::{should_run_minio_storage_tests, *};
 use crate::common::{
     admin_username, execute_sql_as_root_via_cli, execute_sql_as_root_via_client_json,
     generate_unique_namespace, generate_unique_table, get_rows_as_hashmaps, parse_cli_json_output,
 };
-
-use super::common::{should_run_minio_storage_tests, *};
 
 #[test]
 fn test_minio_storage_end_to_end() {
@@ -24,12 +23,14 @@ fn test_minio_storage_end_to_end() {
         .expect("namespace creation");
 
     execute_sql_as_root_via_cli(&format!(
-        "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, name VARCHAR NOT NULL) WITH (TYPE='USER', STORAGE_ID='{}', FLUSH_POLICY='rows:2')",
+        "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, name VARCHAR NOT NULL) WITH (TYPE='USER', \
+         STORAGE_ID='{}', FLUSH_POLICY='rows:2')",
         namespace, user_table, storage_id
     ))
     .expect("user table creation");
     execute_sql_as_root_via_cli(&format!(
-        "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, name VARCHAR NOT NULL) WITH (TYPE='SHARED', STORAGE_ID='{}', FLUSH_POLICY='rows:2')",
+        "CREATE TABLE {}.{} (id BIGINT PRIMARY KEY, name VARCHAR NOT NULL) WITH (TYPE='SHARED', \
+         STORAGE_ID='{}', FLUSH_POLICY='rows:2')",
         namespace, shared_table, storage_id
     ))
     .expect("shared table creation");

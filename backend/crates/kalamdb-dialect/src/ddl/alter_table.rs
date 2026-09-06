@@ -22,7 +22,7 @@ use sqlparser::{
 
 use crate::{
     compatibility::map_sql_type_to_kalam,
-    ddl::{parsing::parse_table_reference, DdlResult},
+    ddl::{column_default::expr_to_column_default, parsing::parse_table_reference, DdlResult},
     parser::utils::parse_sql_statements,
 };
 
@@ -71,6 +71,16 @@ pub enum ColumnOperation {
     },
     /// Disable a vector index for an embedding column.
     DropVectorIndex { column_name: String },
+    /// Create a scalar prefix index (parentheses form).
+    CreateScalarIndex {
+        name:          String,
+        columns:       Vec<String>,
+        unique:        bool,
+        if_not_exists: bool,
+    },
+    /// Drop a scalar index, or a vector index when the name is not in the
+    /// scalar catalog (`DROP INDEX` without the VECTOR keyword).
+    DropIndex { name: String, if_exists: bool },
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -127,6 +137,11 @@ impl AlterTableStatement {
     /// Parse an ALTER TABLE statement from SQL (sqlparser-backed)
     pub fn parse(sql: &str, current_namespace: &NamespaceId) -> DdlResult<Self> {
         crate::ddl::reject_access_level_sql(sql)?;
+        if let Some(stmt) =
+            crate::ddl::create_index::parse_alter_table_scalar_index(sql, current_namespace)?
+        {
+            return Ok(stmt);
+        }
         if let Some(stmt) = parse_vector_index_operation(sql, current_namespace)? {
             return Ok(stmt);
         }
@@ -153,7 +168,7 @@ impl AlterTableStatement {
         }
 
         let (namespace_id, table_name) = resolve_table_reference(name, current_namespace)?;
-        let operation = convert_operation(&operations[0])?;
+        let operation = convert_operation(&operations[0], &namespace_id)?;
 
         Ok(Self {
             table_name,
@@ -220,7 +235,7 @@ fn parse_vector_index_operation(
     Ok(None)
 }
 
-fn resolve_table_reference_from_str(
+pub(crate) fn resolve_table_reference_from_str(
     table_ref: &str,
     current_namespace: &NamespaceId,
 ) -> DdlResult<(NamespaceId, TableName)> {
@@ -264,7 +279,10 @@ fn resolve_table_reference(
     }
 }
 
-fn convert_operation(operation: &AlterTableOperation) -> DdlResult<ColumnOperation> {
+fn convert_operation(
+    operation: &AlterTableOperation,
+    default_namespace: &NamespaceId,
+) -> DdlResult<ColumnOperation> {
     match operation {
         AlterTableOperation::AddColumn {
             column_def,
@@ -275,7 +293,7 @@ fn convert_operation(operation: &AlterTableOperation) -> DdlResult<ColumnOperati
             if column_position.is_some() {
                 return Err("Column position modifiers (FIRST/AFTER) are not supported".to_string());
             }
-            build_add_column_operation(column_def, *if_not_exists)
+            build_add_column_operation(column_def, *if_not_exists, default_namespace)
         },
         AlterTableOperation::DropColumn {
             column_names,
@@ -294,7 +312,7 @@ fn convert_operation(operation: &AlterTableOperation) -> DdlResult<ColumnOperati
             build_modify_column_operation(col_name, data_type, options)
         },
         AlterTableOperation::AlterColumn { column_name, op } => {
-            build_alter_column_operation(column_name, op)
+            build_alter_column_operation(column_name, op, default_namespace)
         },
         AlterTableOperation::RenameColumn {
             old_column_name,
@@ -313,11 +331,13 @@ fn convert_operation(operation: &AlterTableOperation) -> DdlResult<ColumnOperati
 fn build_add_column_operation(
     column_def: &ColumnDef,
     if_not_exists: bool,
+    default_namespace: &NamespaceId,
 ) -> DdlResult<ColumnOperation> {
     let default_nullable = true;
     let column_name = column_def.name.value.clone();
     let data_type = map_sql_type_to_kalam(&column_def.data_type)?;
-    let (nullable, default_value) = extract_column_options(&column_def.options, default_nullable);
+    let (nullable, default_value) =
+        extract_column_options(&column_def.options, default_nullable, default_namespace)?;
 
     Ok(ColumnOperation::Add {
         column_name,
@@ -369,6 +389,7 @@ fn build_modify_column_operation(
 fn build_alter_column_operation(
     column_name: &Ident,
     operation: &AlterColumnOperation,
+    default_namespace: &NamespaceId,
 ) -> DdlResult<ColumnOperation> {
     match operation {
         AlterColumnOperation::SetNotNull => Ok(ColumnOperation::SetNullable {
@@ -381,7 +402,7 @@ fn build_alter_column_operation(
         }),
         AlterColumnOperation::SetDefault { value } => Ok(ColumnOperation::SetDefault {
             column_name:   column_name.value.clone(),
-            default_value: expr_to_column_default(value),
+            default_value: expr_to_column_default(value, default_namespace)?,
         }),
         AlterColumnOperation::DropDefault => Ok(ColumnOperation::DropDefault {
             column_name: column_name.value.clone(),
@@ -457,7 +478,8 @@ fn extract_table_property_updates(
 fn extract_column_options(
     options: &[ColumnOptionDef],
     default_nullable: bool,
-) -> (bool, Option<ColumnDefault>) {
+    default_namespace: &NamespaceId,
+) -> DdlResult<(bool, Option<ColumnDefault>)> {
     let mut nullable = default_nullable;
     let mut default_value = None;
 
@@ -466,97 +488,19 @@ fn extract_column_options(
             ColumnOption::NotNull => nullable = false,
             ColumnOption::Null => nullable = true,
             ColumnOption::Default(expr) => {
-                default_value = Some(expr_to_column_default(expr));
+                default_value = Some(expr_to_column_default(expr, default_namespace)?);
             },
             _ => {},
         }
     }
 
-    (nullable, default_value)
+    Ok((nullable, default_value))
 }
 
 fn expr_to_literal(expr: &Expr) -> String {
     match expr {
         Expr::Value(value) => value_to_string(&value.value),
         _ => expr.to_string(),
-    }
-}
-
-fn expr_to_column_default(expr: &Expr) -> ColumnDefault {
-    match expr {
-        Expr::Function(func) => {
-            let name = func.name.to_string().to_uppercase();
-            match name.as_str() {
-                "NOW" | "CURRENT_TIMESTAMP" | "SNOWFLAKE_ID" | "UUID_V7" | "ULID"
-                | "CURRENT_USER" => ColumnDefault::function(&name, vec![]),
-                _ => ColumnDefault::literal(serde_json::Value::String(func.to_string())),
-            }
-        },
-        Expr::Value(value) => match &value.value {
-            Value::Number(number, _) => {
-                if let Ok(int_value) = number.parse::<i64>() {
-                    ColumnDefault::literal(serde_json::Value::Number(int_value.into()))
-                } else if let Ok(float_value) = number.parse::<f64>() {
-                    ColumnDefault::literal(serde_json::json!(float_value))
-                } else {
-                    ColumnDefault::literal(serde_json::Value::String(number.clone()))
-                }
-            },
-            Value::SingleQuotedString(string_value)
-            | Value::DoubleQuotedString(string_value)
-            | Value::TripleSingleQuotedString(string_value)
-            | Value::TripleDoubleQuotedString(string_value)
-            | Value::SingleQuotedByteStringLiteral(string_value)
-            | Value::DoubleQuotedByteStringLiteral(string_value)
-            | Value::TripleSingleQuotedByteStringLiteral(string_value)
-            | Value::TripleDoubleQuotedByteStringLiteral(string_value)
-            | Value::SingleQuotedRawStringLiteral(string_value)
-            | Value::DoubleQuotedRawStringLiteral(string_value)
-            | Value::TripleSingleQuotedRawStringLiteral(string_value)
-            | Value::TripleDoubleQuotedRawStringLiteral(string_value)
-            | Value::EscapedStringLiteral(string_value)
-            | Value::UnicodeStringLiteral(string_value)
-            | Value::NationalStringLiteral(string_value)
-            | Value::HexStringLiteral(string_value) => {
-                ColumnDefault::literal(serde_json::Value::String(string_value.clone()))
-            },
-            Value::DollarQuotedString(string_value) => {
-                ColumnDefault::literal(serde_json::Value::String(string_value.value.clone()))
-            },
-            Value::QuoteDelimitedStringLiteral(string_value)
-            | Value::NationalQuoteDelimitedStringLiteral(string_value) => {
-                ColumnDefault::literal(serde_json::Value::String(string_value.value.clone()))
-            },
-            Value::Boolean(boolean_value) => {
-                ColumnDefault::literal(serde_json::Value::Bool(*boolean_value))
-            },
-            Value::Null => ColumnDefault::literal(serde_json::Value::Null),
-            Value::Placeholder(value) => {
-                ColumnDefault::literal(serde_json::Value::String(value.clone()))
-            },
-        },
-        Expr::Identifier(identifier) => {
-            let normalized = identifier.value.to_uppercase();
-            match normalized.as_str() {
-                "CURRENT_TIMESTAMP" => ColumnDefault::function("NOW", vec![]),
-                "CURRENT_USER" => ColumnDefault::function("CURRENT_USER", vec![]),
-                "NULL" => ColumnDefault::literal(serde_json::Value::Null),
-                _ => ColumnDefault::literal(serde_json::Value::String(identifier.value.clone())),
-            }
-        },
-        _ => {
-            let literal = expr.to_string();
-            let normalized = literal.to_uppercase();
-            if normalized == "NULL" {
-                ColumnDefault::literal(serde_json::Value::Null)
-            } else if normalized == "CURRENT_TIMESTAMP" || normalized == "NOW()" {
-                ColumnDefault::function("NOW", vec![])
-            } else {
-                ColumnDefault::literal(serde_json::Value::String(
-                    literal.trim_matches('\'').to_string(),
-                ))
-            }
-        },
     }
 }
 
@@ -663,6 +607,8 @@ fn parse_eviction_strategy_property(value: &Expr) -> DdlResult<String> {
 
 #[cfg(test)]
 mod tests {
+    use kalamdb_commons::{CallArgument, RoutineId};
+
     use super::*;
 
     fn test_namespace() -> NamespaceId {
@@ -801,6 +747,35 @@ mod tests {
             } => {
                 assert_eq!(column_name, "created_at");
                 assert_eq!(default_value, ColumnDefault::function("NOW", vec![]));
+            },
+            _ => panic!("Expected SetDefault operation"),
+        }
+    }
+
+    #[test]
+    fn test_parse_alter_column_set_default_procedure() {
+        let ns = test_namespace();
+        let stmt = AlterTableStatement::parse(
+            "ALTER TABLE messages ALTER COLUMN id SET DEFAULT next_id('v1')",
+            &ns,
+        )
+        .unwrap();
+
+        match stmt.operation {
+            ColumnOperation::SetDefault {
+                column_name,
+                default_value,
+            } => {
+                assert_eq!(column_name, "id");
+                assert_eq!(
+                    default_value,
+                    ColumnDefault::procedure(
+                        RoutineId::from_parts(Some(&ns), "next_id"),
+                        vec![CallArgument::text("v1")],
+                    )
+                );
+                let call = crate::ddl::CallStatement::parse("CALL next_id('v1')", &ns).unwrap();
+                assert_eq!(default_value.as_routine_call(), Some(&call.call));
             },
             _ => panic!("Expected SetDefault operation"),
         }
@@ -1062,15 +1037,69 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_drop_vector_index() {
+    fn test_parse_drop_index_is_catalog_drop() {
         let stmt =
             AlterTableStatement::parse("ALTER TABLE docs DROP INDEX embedding", &test_namespace())
                 .unwrap();
+        match stmt.operation {
+            ColumnOperation::DropIndex { name, if_exists } => {
+                assert_eq!(name, "embedding");
+                assert!(!if_exists);
+            },
+            _ => panic!("Expected DropIndex operation"),
+        }
+    }
+
+    #[test]
+    fn test_parse_drop_vector_index_keyword() {
+        let stmt = AlterTableStatement::parse(
+            "ALTER TABLE docs DROP VECTOR INDEX embedding",
+            &test_namespace(),
+        )
+        .unwrap();
         match stmt.operation {
             ColumnOperation::DropVectorIndex { column_name } => {
                 assert_eq!(column_name, "embedding");
             },
             _ => panic!("Expected DropVectorIndex operation"),
+        }
+    }
+
+    #[test]
+    fn test_parse_create_scalar_index() {
+        let stmt = AlterTableStatement::parse(
+            "ALTER TABLE messages CREATE INDEX idx_conv (conversation_id)",
+            &test_namespace(),
+        )
+        .unwrap();
+        match stmt.operation {
+            ColumnOperation::CreateScalarIndex {
+                name,
+                columns,
+                unique,
+                if_not_exists,
+            } => {
+                assert_eq!(name, "idx_conv");
+                assert_eq!(columns, vec!["conversation_id".to_string()]);
+                assert!(!unique);
+                assert!(!if_not_exists);
+            },
+            _ => panic!("Expected CreateScalarIndex operation"),
+        }
+    }
+
+    #[test]
+    fn test_parse_create_index_without_parens_stays_vector() {
+        let stmt = AlterTableStatement::parse(
+            "ALTER TABLE docs CREATE INDEX embedding",
+            &test_namespace(),
+        )
+        .unwrap();
+        match stmt.operation {
+            ColumnOperation::CreateVectorIndex { column_name, .. } => {
+                assert_eq!(column_name, "embedding");
+            },
+            _ => panic!("Expected CreateVectorIndex operation"),
         }
     }
 }

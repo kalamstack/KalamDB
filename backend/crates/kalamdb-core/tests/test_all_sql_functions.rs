@@ -15,7 +15,9 @@ use kalamdb_session::AuthSession;
 fn create_test_session() -> Arc<SessionContext> {
     let factory =
         DataFusionSessionFactory::new().expect("Failed to create DataFusionSessionFactory");
-    Arc::new(factory.create_session())
+    let session = factory.create_session();
+    DataFusionSessionFactory::ensure_extended_functions(&session);
+    Arc::new(session)
 }
 
 fn create_exec_context_with_user(user_id: &str, role: Role) -> ExecutionContext {

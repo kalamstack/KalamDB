@@ -12,6 +12,7 @@
 
 pub mod audit_logs;
 pub mod base;
+pub mod catalog;
 pub mod job_nodes;
 pub mod jobs;
 pub mod live;
@@ -30,6 +31,15 @@ pub mod users;
 pub use audit_logs::{AuditLogEntry, AuditLogsTableProvider};
 pub use base::{
     extract_filter_value, extract_range_filters, SimpleSystemTableScan, SystemTableScan,
+};
+pub use catalog::{
+    ActivateFunctionOutcome, CatalogFunctionArtifact, CatalogFunctionModule,
+    CatalogFunctionRevision, CatalogRoutine, CatalogRoutineGrant, CatalogRoutineParameter,
+    CatalogStores, CatalogTrigger, CatalogTriggerAttempt, CatalogType, CatalogTypeField,
+    FunctionArtifactsTableProvider, FunctionModulesTableProvider, FunctionRevisionsTableProvider,
+    RoutineGrantsTableProvider, RoutineParametersTableProvider, RoutinesTableProvider,
+    TriggerAttemptsTableProvider, TriggersTableProvider, TypeFieldsTableProvider,
+    TypesTableProvider,
 };
 pub use job_nodes::JobNodesTableProvider;
 pub use jobs::JobsTableProvider;

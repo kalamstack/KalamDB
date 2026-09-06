@@ -310,7 +310,11 @@ impl SchemasTableProvider {
                 use_user_storage_flags => OptionalBoolean(|entry| match &entry.0.table_options {
                     TableOptions::User(opts) => Some(opts.use_user_storage),
                     _ => None,
-                })
+                }),
+                indexes_json => OptionalString(|entry| Some(match serde_json::to_string(&entry.0.scalar_indexes) {
+                    Ok(json) => json,
+                    Err(e) => format!("{{\"error\":\"failed to serialize indexes: {}\"}}", e),
+                }))
             ]
         )
         .into_arrow_error("Failed to create RecordBatch")
@@ -379,7 +383,10 @@ mod tests {
     };
     use kalamdb_commons::{
         datatypes::KalamDataType,
-        schemas::{ColumnDefinition, TableDefinition, TableOptions, TableType as KalamTableType},
+        schemas::{
+            ColumnDefinition, ScalarIndexDefinition, TableDefinition, TableOptions,
+            TableType as KalamTableType,
+        },
         NamespaceId, TableId, TableName,
     };
     use kalamdb_store::test_utils::InMemoryBackend;
@@ -488,7 +495,55 @@ mod tests {
         // Scan - should have 3 rows (3 versioned entries, lat pointers are skipped)
         let batch = provider.scan_all_tables().unwrap();
         assert_eq!(batch.num_rows(), 3);
-        assert_eq!(batch.num_columns(), 14); // All 14 columns from system.tables definition
+        assert_eq!(batch.num_columns(), 15); // All 15 columns from system.schemas definition
+    }
+
+    #[test]
+    fn test_scan_projects_scalar_indexes_json() {
+        let provider = create_test_provider();
+        let (table_id, mut table_def) = create_test_table("chat", "messages");
+        table_def.scalar_indexes = vec![
+            ScalarIndexDefinition::new(
+                "messages_conversation_id",
+                vec![kalamdb_commons::models::ColumnId::new(2)],
+                false,
+            ),
+            ScalarIndexDefinition::new(
+                "messages_created_at",
+                vec![
+                    kalamdb_commons::models::ColumnId::new(2),
+                    kalamdb_commons::models::ColumnId::new(3),
+                ],
+                false,
+            ),
+        ];
+        provider.create_table(&table_id, &table_def).unwrap();
+
+        let batch = provider.scan_all_tables().unwrap();
+        assert_eq!(batch.num_columns(), 15);
+        let indexes = batch.column_by_name("indexes").expect("indexes column");
+        let arr = indexes
+            .as_any()
+            .downcast_ref::<datafusion::arrow::array::StringArray>()
+            .expect("indexes is utf8");
+        let parsed: Vec<ScalarIndexDefinition> = serde_json::from_str(arr.value(0)).unwrap();
+        assert_eq!(parsed, table_def.scalar_indexes);
+    }
+
+    #[test]
+    fn test_scan_omitted_indexes_is_empty_array() {
+        let provider = create_test_provider();
+        let (table_id, table_def) = create_test_table("chat", "messages");
+        provider.create_table(&table_id, &table_def).unwrap();
+
+        let batch = provider.scan_all_tables().unwrap();
+        let indexes = batch.column_by_name("indexes").expect("indexes column");
+        let arr = indexes
+            .as_any()
+            .downcast_ref::<datafusion::arrow::array::StringArray>()
+            .expect("indexes is utf8");
+        let parsed: Vec<ScalarIndexDefinition> = serde_json::from_str(arr.value(0)).unwrap();
+        assert!(parsed.is_empty());
     }
 
     #[test]

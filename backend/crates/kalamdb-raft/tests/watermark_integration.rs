@@ -230,6 +230,7 @@ async fn test_user_data_buffering_when_meta_behind() {
         rows:                vec![Row {
             values: BTreeMap::new(),
         }],
+        encoded_fields:      Vec::new(),
         required_meta_index: current_meta + 100, // Well above current, so must buffer
         transaction_id:      None,
     };
@@ -252,6 +253,7 @@ async fn test_user_data_buffering_when_meta_behind() {
         rows:                vec![Row {
             values: BTreeMap::new(),
         }],
+        encoded_fields:      Vec::new(),
         required_meta_index: 0, // Can apply immediately, also triggers drain
         transaction_id:      None,
     };
@@ -279,6 +281,7 @@ async fn test_user_data_immediate_apply_when_meta_caught_up() {
         rows:                vec![Row {
             values: BTreeMap::new(),
         }],
+        encoded_fields:      Vec::new(),
         required_meta_index: 500, // Meta is at 1000, so this applies immediately
         transaction_id:      None,
     };
@@ -313,6 +316,7 @@ async fn test_user_data_snapshot_includes_pending_commands() {
         rows:                vec![Row {
             values: BTreeMap::new(),
         }],
+        encoded_fields:      Vec::new(),
         required_meta_index: current_meta + 1000, // Will be buffered
         transaction_id:      None,
     };
@@ -353,6 +357,7 @@ async fn test_shared_data_buffering() {
         rows:                vec![Row {
             values: BTreeMap::new(),
         }],
+        encoded_fields:      Vec::new(),
         required_meta_index: current_meta + 500,
         transaction_id:      None,
         actor_user_id:       None,
@@ -374,6 +379,7 @@ async fn test_shared_data_buffering() {
         rows:                vec![Row {
             values: BTreeMap::new(),
         }],
+        encoded_fields:      Vec::new(),
         required_meta_index: 0,
         transaction_id:      None,
         actor_user_id:       None,
@@ -399,6 +405,7 @@ async fn test_shared_data_snapshot_roundtrip() {
         rows:                vec![Row {
             values: BTreeMap::new(),
         }],
+        encoded_fields:      Vec::new(),
         required_meta_index: current_meta + 2000, // Will be buffered
         transaction_id:      None,
         actor_user_id:       None,
@@ -457,6 +464,7 @@ async fn test_rejoin_ordering_scenario() {
             rows:                vec![Row {
                 values: BTreeMap::new(),
             }],
+            encoded_fields:      Vec::new(),
             required_meta_index: *required_meta,
             transaction_id:      None,
         };
@@ -478,6 +486,7 @@ async fn test_rejoin_ordering_scenario() {
         rows:                vec![Row {
             values: BTreeMap::new(),
         }],
+        encoded_fields:      Vec::new(),
         required_meta_index: 0, // Immediate
         transaction_id:      None,
     };
@@ -497,6 +506,7 @@ async fn test_rejoin_ordering_scenario() {
         rows:                vec![Row {
             values: BTreeMap::new(),
         }],
+        encoded_fields:      Vec::new(),
         required_meta_index: 0,
         transaction_id:      None,
     };

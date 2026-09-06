@@ -9,8 +9,9 @@ use kalam_cli::{
 };
 
 use crate::args::{
-    Cli, CliCommand, DbArgs, DbCommand, DeployArgs, DevArgs, DevCommand, InitArgs, LinkArgs,
-    MigrationArgs, MigrationCommand, SchemaArgs, SchemaCommand, StatusArgs,
+    Cli, CliCommand, DbArgs, DbCommand, DeployArgs, DevArgs, DevCommand, FunctionsArgs,
+    FunctionsCommand, InitArgs, LinkArgs, MigrationArgs, MigrationCommand, SchemaArgs,
+    SchemaCommand, StatusArgs,
 };
 
 pub async fn handle_workflow_command(cli: &Cli) -> Result<bool> {
@@ -49,6 +50,10 @@ pub async fn handle_workflow_command(cli: &Cli) -> Result<bool> {
         },
         CliCommand::Deploy(args) => {
             handle_deploy(cli, args).await?;
+            Ok(true)
+        },
+        CliCommand::Functions(args) => {
+            handle_functions(cli, args).await?;
             Ok(true)
         },
         _ => Ok(false),
@@ -254,5 +259,19 @@ async fn handle_status(cli: &Cli, args: &StatusArgs) -> Result<()> {
 
 async fn handle_deploy(cli: &Cli, args: &DeployArgs) -> Result<()> {
     let ctx = workflow_context(cli, args.project_dir.as_deref(), args.env.as_deref(), None)?;
-    workflow::deploy_project(&ctx, args.env.clone()).await
+    workflow::deploy_project(&ctx, args.env.clone(), args.dry_run).await
+}
+
+async fn handle_functions(cli: &Cli, args: &FunctionsArgs) -> Result<()> {
+    let ctx = workflow_context(cli, args.project_dir.as_deref(), args.env.as_deref(), None)?;
+    match &args.command {
+        FunctionsCommand::Build => workflow::functions::build_functions(&ctx).await,
+        FunctionsCommand::Status => workflow::functions::show_function_status(&ctx).await,
+        FunctionsCommand::Rollback(rollback) => {
+            workflow::functions::rollback_function(&ctx, &rollback.revision)
+        },
+        FunctionsCommand::Logs(logs) => {
+            workflow::functions::show_function_logs(&ctx, logs.procedure.as_deref()).await
+        },
+    }
 }

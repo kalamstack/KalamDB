@@ -41,6 +41,7 @@ pub mod applier;
 pub mod cluster_handler;
 pub mod error;
 pub mod error_extensions;
+pub mod functions;
 pub mod job_waker;
 pub mod live_adapters;
 pub mod manifest;

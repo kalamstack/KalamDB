@@ -37,8 +37,9 @@ fn test_shared_catalog_select_without_write() {
     ))
     .expect("create user");
 
-    let visible = common::execute_sql_via_client_as(&user, password, &format!("SELECT name FROM {full}"))
-        .expect("user SELECT catalog");
+    let visible =
+        common::execute_sql_via_client_as(&user, password, &format!("SELECT name FROM {full}"))
+            .expect("user SELECT catalog");
     assert!(
         visible.to_lowercase().contains("free"),
         "PUBLIC SELECT policy must expose catalog rows: {visible}"
@@ -49,13 +50,12 @@ fn test_shared_catalog_select_without_write() {
         password,
         &format!("INSERT INTO {full} (id, name) VALUES (2, 'pwned')"),
     );
-    assert!(
-        insert.is_err(),
-        "SELECT-only catalog must reject subject INSERT: {insert:?}"
-    );
+    assert!(insert.is_err(), "SELECT-only catalog must reject subject INSERT: {insert:?}");
 
     let _ = common::execute_sql_as_root_via_client(&format!("DROP USER {user}"));
-    let _ = common::execute_sql_as_root_via_client(&format!("DROP NAMESPACE IF EXISTS {namespace} CASCADE"));
+    let _ = common::execute_sql_as_root_via_client(&format!(
+        "DROP NAMESPACE IF EXISTS {namespace} CASCADE"
+    ));
 }
 
 /// No policy means User sees zero rows (FORCE RLS default deny).
@@ -88,13 +88,16 @@ fn test_shared_default_deny_without_policy() {
     ))
     .expect("create user");
 
-    let output = common::execute_sql_via_client_as(&user, password, &format!("SELECT content FROM {full}"))
-        .expect("default-deny SELECT returns zero rows");
+    let output =
+        common::execute_sql_via_client_as(&user, password, &format!("SELECT content FROM {full}"))
+            .expect("default-deny SELECT returns zero rows");
     assert!(
         !output.to_lowercase().contains("classified"),
         "User must not see rows without a policy: {output}"
     );
 
     let _ = common::execute_sql_as_root_via_client(&format!("DROP USER {user}"));
-    let _ = common::execute_sql_as_root_via_client(&format!("DROP NAMESPACE IF EXISTS {namespace} CASCADE"));
+    let _ = common::execute_sql_as_root_via_client(&format!(
+        "DROP NAMESPACE IF EXISTS {namespace} CASCADE"
+    ));
 }

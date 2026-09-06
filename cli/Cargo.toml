@@ -19,6 +19,7 @@ path = "src/main.rs"
 kalam-client = { path = "../link/sdks/rust", default-features = false, features = ["native-cli"] }
 kalamdb-commons = { workspace = true, default-features = false, features = ["serde", "websocket-auth"] }
 kalam-schema-diff = { path = "crates/kalam-schema-diff" }
+kalamdb-sql = { package = "kalamdb-dialect", path = "../backend/crates/kalamdb-dialect" }
 
 # CLI argument parsing
 clap = { workspace = true }

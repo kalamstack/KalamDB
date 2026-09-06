@@ -93,15 +93,17 @@ pub(crate) fn should_run_minio_storage_tests() -> bool {
 
     if !server_supports_s3_storage() {
         eprintln!(
-            "⚠️  Server at {} does not include S3/object storage (build with --features cloud-aws). \
-             Skipping MinIO storage test.",
+            "⚠️  Server at {} does not include S3/object storage (build with --features \
+             cloud-aws). Skipping MinIO storage test.",
             server_url()
         );
         eprintln!(
-            "    Rebuild: cd backend && cargo build -p kalamdb-server --bin kalamdb-server --features cloud-aws"
+            "    Rebuild: cd backend && cargo build -p kalamdb-server --bin kalamdb-server \
+             --features cloud-aws"
         );
         eprintln!(
-            "    Or run: KALAMDB_SERVER_TYPE=fresh ./cli/run-tests.sh --package kalam-cli-e2e --test-target storage"
+            "    Or run: KALAMDB_SERVER_TYPE=fresh ./cli/run-tests.sh --package kalam-cli-e2e \
+             --test-target storage"
         );
         return false;
     }
@@ -110,7 +112,8 @@ pub(crate) fn should_run_minio_storage_tests() -> bool {
         Ok(runtime) => runtime,
         Err(err) => {
             eprintln!(
-                "⚠️  Failed to create tokio runtime for MinIO probe: {err}. Skipping MinIO storage test."
+                "⚠️  Failed to create tokio runtime for MinIO probe: {err}. Skipping MinIO \
+                 storage test."
             );
             return false;
         },
@@ -229,16 +232,18 @@ pub(super) fn wait_for_storage_check_healthy(
     }
 
     Err(format!(
-        "MinIO storage unhealthy after {:?}. Last check: {}.\nSet MINIO_ENDPOINT/MINIO_ACCESS_KEY/MINIO_SECRET_KEY/MINIO_BUCKET/MINIO_REGION if server cannot reach MinIO.",
+        "MinIO storage unhealthy after {:?}. Last check: {}.\nSet \
+         MINIO_ENDPOINT/MINIO_ACCESS_KEY/MINIO_SECRET_KEY/MINIO_BUCKET/MINIO_REGION if server \
+         cannot reach MinIO.",
         timeout, last_error
     ))
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct StorageMeta {
-    pub base_directory: String,
+    pub base_directory:  String,
     pub shared_template: String,
-    pub user_template: String,
+    pub user_template:   String,
 }
 
 pub(super) fn fetch_storage_metadata(storage_id: &str) -> StorageMeta {
@@ -258,9 +263,9 @@ pub(super) fn fetch_storage_metadata(storage_id: &str) -> StorageMeta {
     let row = rows.first().unwrap();
 
     StorageMeta {
-        base_directory: get_row_string(row, "base_directory"),
+        base_directory:  get_row_string(row, "base_directory"),
         shared_template: get_row_string(row, "shared_tables_template"),
-        user_template: get_row_string(row, "user_tables_template"),
+        user_template:   get_row_string(row, "user_tables_template"),
     }
 }
 

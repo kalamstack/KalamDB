@@ -14,7 +14,8 @@ categories = ["database"]
 # Internal crates
 kalamdb-commons = { path = "../kalamdb-commons", features = ["full"] }
 kalamdb-macros = { path = "../kalamdb-macros" }
-kalamdb-store = { path = "../kalamdb-store" }
+kalamdb-store = { path = "../kalamdb-store", features = ["datafusion"] }
+kalamdb-serialization = { workspace = true }
 kalamdb-filestore = { path = "../kalamdb-filestore" }
 kalamdb-observability = { path = "../kalamdb-observability", default-features = false }
 kalamdb-rls = { path = "../kalamdb-rls" }

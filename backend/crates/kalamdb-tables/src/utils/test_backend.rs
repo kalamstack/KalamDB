@@ -16,6 +16,7 @@ pub struct ScanArgs {
     pub prefix:    Option<Vec<u8>>,
     pub start_key: Option<Vec<u8>>,
     pub limit:     Option<usize>,
+    pub partition: String,
 }
 
 /// StorageBackend wrapper that records the last scan call.
@@ -90,6 +91,7 @@ impl StorageBackend for RecordingBackend {
             prefix: prefix.map(|p| p.to_vec()),
             start_key: start_key.map(|k| k.to_vec()),
             limit,
+            partition: partition.name().to_string(),
         };
         *self.last_scan.lock().unwrap() = Some(args);
         self.scan_calls.fetch_add(1, Ordering::SeqCst);

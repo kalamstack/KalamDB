@@ -48,7 +48,8 @@ fn query_count_on_url(base_url: &str, sql: &str) -> i64 {
                     .subscribe_timeout_secs(10)
                     .auth_timeout_secs(10)
                     .initial_data_timeout(Duration::from_secs(30))
-                    .build())
+                    .build(),
+            )
             .expect("Failed to build cluster client");
             client.execute_query(&sql, None, None, None).await
         })
@@ -349,7 +350,8 @@ fn smoke_test_cluster_user_data_partitioning() {
     execute_sql_via_client_as(
         &user1,
         "kalamdb123",
-        &format!("INSERT INTO {}.user_notes (note) VALUES ('User1 private note')", namespace))
+        &format!("INSERT INTO {}.user_notes (note) VALUES ('User1 private note')", namespace),
+    )
     .expect("Failed to insert as user1");
     println!("  ✓ User1 inserted data");
 
@@ -357,7 +359,8 @@ fn smoke_test_cluster_user_data_partitioning() {
     execute_sql_via_client_as(
         &user2,
         "kalamdb123",
-        &format!("INSERT INTO {}.user_notes (note) VALUES ('User2 private note')", namespace))
+        &format!("INSERT INTO {}.user_notes (note) VALUES ('User2 private note')", namespace),
+    )
     .expect("Failed to insert as user2");
     println!("  ✓ User2 inserted data");
 
@@ -365,7 +368,8 @@ fn smoke_test_cluster_user_data_partitioning() {
     let user1_data = execute_sql_via_client_as(
         &user1,
         "kalamdb123",
-        &format!("SELECT * FROM {}.user_notes", namespace))
+        &format!("SELECT * FROM {}.user_notes", namespace),
+    )
     .expect("Failed to query as user1");
 
     assert!(user1_data.contains("User1 private note"), "User1 should see their own note");
@@ -376,7 +380,8 @@ fn smoke_test_cluster_user_data_partitioning() {
     let user2_data = execute_sql_via_client_as(
         &user2,
         "kalamdb123",
-        &format!("SELECT * FROM {}.user_notes", namespace))
+        &format!("SELECT * FROM {}.user_notes", namespace),
+    )
     .expect("Failed to query as user2");
 
     assert!(user2_data.contains("User2 private note"), "User2 should see their own note");
@@ -447,7 +452,8 @@ fn smoke_test_cluster_shared_table_consistency() {
     let user_data = execute_sql_via_client_as(
         &user,
         "kalamdb123",
-        &format!("SELECT * FROM {}.global_config WHERE config_key = 'app_version'", namespace))
+        &format!("SELECT * FROM {}.global_config WHERE config_key = 'app_version'", namespace),
+    )
     .expect("Failed to query as user");
 
     assert!(user_data.contains("1.0.0"), "User should see shared config value");
@@ -673,7 +679,8 @@ fn smoke_test_cluster_job_tracking() {
     // Check system.jobs for flush jobs
     let result = execute_sql_as_root_via_client(
         "SELECT job_id, job_type, status FROM system.jobs WHERE job_type = 'flush' ORDER BY \
-         created_at DESC LIMIT 5")
+         created_at DESC LIMIT 5",
+    )
     .expect("Failed to query system.jobs");
 
     println!("  Recent flush jobs:\n{}", result);
@@ -704,7 +711,8 @@ fn smoke_test_cluster_storage_operations() {
 
     // Query existing storages
     let result = execute_sql_as_root_via_client(
-        "SELECT storage_id, storage_type, base_directory FROM system.storages")
+        "SELECT storage_id, storage_type, base_directory FROM system.storages",
+    )
     .expect("Failed to query system.storages");
 
     println!("  Existing storages:\n{}", result);
@@ -773,7 +781,8 @@ fn smoke_test_cluster_live_query_tracking() {
 
     // Query current live queries
     let result = execute_sql_as_root_via_client(
-        "SELECT live_id, table_name, user_id FROM system.live LIMIT 10")
+        "SELECT live_id, table_name, user_id FROM system.live LIMIT 10",
+    )
     .expect("Failed to query system.live");
 
     println!("  Current live subscriptions:\n{}", result);

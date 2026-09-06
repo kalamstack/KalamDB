@@ -1,11 +1,10 @@
 use tokio::runtime::Runtime;
 
+use super::common::{should_run_minio_storage_tests, *};
 use crate::common::{
     execute_sql_as_root_via_cli, execute_sql_as_root_via_client_json, generate_unique_namespace,
     generate_unique_table, parse_job_id_from_json_message,
 };
-
-use super::common::{should_run_minio_storage_tests, *};
 
 #[test]
 fn test_minio_storage_compact_table_command_runs() {
@@ -22,7 +21,8 @@ fn test_minio_storage_compact_table_command_runs() {
     execute_sql_as_root_via_cli(&format!("CREATE NAMESPACE {}", namespace))
         .expect("namespace creation");
     execute_sql_as_root_via_cli(&format!(
-        "CREATE TABLE {} (id BIGINT PRIMARY KEY, body TEXT NOT NULL) WITH (TYPE='SHARED', STORAGE_ID='{}', FLUSH_POLICY='rows:1')",
+        "CREATE TABLE {} (id BIGINT PRIMARY KEY, body TEXT NOT NULL) WITH (TYPE='SHARED', \
+         STORAGE_ID='{}', FLUSH_POLICY='rows:1')",
         full_table, storage_id
     ))
     .expect("shared table creation");

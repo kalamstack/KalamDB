@@ -95,7 +95,11 @@ pub enum SchemaMode {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SchemaTarget {
-    pub output: String,
+    pub output:            String,
+    /// Drop schema prefixes from generated type names (`User` instead of `ChatUser`).
+    /// Call paths stay nested. Generate fails if short names collide.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unqualified_names: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -650,7 +654,8 @@ output = "src/generated/kalam.ts"
                 targets:   HashMap::from([(
                     "typescript".into(),
                     SchemaTarget {
-                        output: "src/generated/kalam.ts".into(),
+                        output:            "src/generated/kalam.ts".into(),
+                        unqualified_names: false,
                     },
                 )]),
             },

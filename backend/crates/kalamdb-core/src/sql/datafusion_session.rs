@@ -111,9 +111,12 @@ impl DataFusionSessionFactory {
 
         let mut base_ctx = SessionContext::new_with_config_rt(config, runtime_env);
 
-        // Register custom functions ONCE on the base context
-        // The resulting SessionState is then reused via cheap clones.
-        Self::register_custom_functions(&mut base_ctx);
+        // Register core functions ONCE on the base context.
+        // Nested/lambda array functions are already installed by DataFusion's
+        // SessionState defaults. JSON operators (`json_get`, `->`, `->>`) are
+        // deferred until the first SQL session so empty-node startup does not
+        // pay that vendor pack's registration cost.
+        Self::register_core_functions(&mut base_ctx);
 
         Ok(Self {
             state: base_ctx.state(),
@@ -132,6 +135,23 @@ impl DataFusionSessionFactory {
         SessionContext::new_with_state(self.state.clone())
     }
 
+    /// Register JSON operators on `ctx` (`json_get`, `->`, `->>`, …).
+    ///
+    /// Safe to call more than once: already-loaded sessions return immediately.
+    /// Clones of `ctx` share the same `SessionState` lock, so registering on the
+    /// base AppContext session is visible to later per-request clones.
+    pub fn ensure_extended_functions(ctx: &SessionContext) {
+        use datafusion::execution::FunctionRegistry;
+
+        if ctx.udf("json_get").is_ok() {
+            return;
+        }
+
+        let mut ctx = ctx.clone();
+        datafusion_functions_json::register_all(&mut ctx)
+            .expect("failed to register JSON functions");
+    }
+
     /// Register custom SQL functions with the session
     ///
     /// Registers KalamDB-specific functions:
@@ -144,7 +164,7 @@ impl DataFusionSessionFactory {
     /// DataFusion built-in functions already available:
     /// - NOW() - Current timestamp
     /// - CURRENT_TIMESTAMP() - Alias for NOW()
-    fn register_custom_functions(ctx: &mut SessionContext) {
+    fn register_core_functions(ctx: &mut SessionContext) {
         // Register SNOWFLAKE_ID() function
         let snowflake_fn = SnowflakeIdFunction::new();
         ctx.register_udf(ScalarUDF::from(snowflake_fn));
@@ -174,17 +194,6 @@ impl DataFusionSessionFactory {
         ctx.register_udf(ScalarUDF::from(ColDescriptionFunction::new()));
         ctx.register_udf(ScalarUDF::from(FormatTypeFunction::new()));
         ctx.register_udf(ScalarUDF::from(PgGetExprFunction::new()));
-
-        // Register PostgreSQL-compatible JSON functions and operators (->, ->>, ?).
-        // User-facing SQL still uses PostgreSQL operator syntax, but the DuckDB dialect
-        // required for lambda array functions parses bare `->` as lambda syntax. The
-        // dialect rewrite layer converts operators to these UDFs before planning.
-        datafusion_functions_json::register_all(ctx).expect("failed to register JSON functions");
-
-        // Ensure DataFusion 55 nested/lambda array functions and planners are registered
-        // for SQL like `array_transform(arr, x -> x * 2)`.
-        datafusion::functions_nested::register_all(ctx)
-            .expect("failed to register nested expression functions");
 
         // Register COSINE_DISTANCE(vector, query_vector) for ORDER BY similarity search syntax.
         // The dispatcher routes JSON query literals internally and delegates array/array
@@ -256,6 +265,8 @@ impl Default for DataFusionSessionFactory {
 
 #[cfg(test)]
 mod tests {
+    use datafusion::execution::FunctionRegistry;
+
     use super::*;
 
     #[test]
@@ -308,9 +319,27 @@ mod tests {
     }
 
     #[test]
+    fn test_extended_functions_are_deferred_until_ensure() {
+        let factory = DataFusionSessionFactory::new().unwrap();
+        let session = factory.create_session();
+        assert!(
+            session.udf("json_get").is_err(),
+            "json_get must not be registered during session factory construction"
+        );
+        assert!(
+            session.higher_order_function("array_transform").is_ok(),
+            "array_transform is a DataFusion default and must still be present at construction"
+        );
+
+        DataFusionSessionFactory::ensure_extended_functions(&session);
+        assert!(session.udf("json_get").is_ok());
+    }
+
+    #[test]
     fn test_higher_order_functions_are_registered() {
         let factory = DataFusionSessionFactory::new().unwrap();
         let session = factory.create_session();
+        DataFusionSessionFactory::ensure_extended_functions(&session);
         let names: Vec<_> = session.state().higher_order_functions().keys().cloned().collect();
         assert!(
             names.iter().any(|name| name == "array_transform"),
@@ -322,6 +351,7 @@ mod tests {
     async fn test_lambda_array_transform_sql() {
         let factory = DataFusionSessionFactory::new().unwrap();
         let session = factory.create_session();
+        DataFusionSessionFactory::ensure_extended_functions(&session);
         let result = session.sql("SELECT array_transform([1, 2, 3], x -> x * 10)").await;
         assert!(result.is_ok(), "lambda array_transform failed: {:?}", result.err());
     }

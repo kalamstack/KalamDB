@@ -1,4 +1,5 @@
 mod create_policy;
+mod index;
 mod table;
 mod topic;
 
@@ -19,8 +20,8 @@ use crate::{
         },
     },
     sql::{
-        extract_with_options, normalize_object_key, split_sql_statements,
-        strip_trailing_with_options, trim_leading_sql_comments,
+        extract_with_options, normalize_object_key, strip_trailing_with_options,
+        trim_leading_sql_comments,
     },
 };
 
@@ -29,8 +30,13 @@ pub(crate) fn parse_schema(path: &str, sql: &str) -> Result<Schema, SchemaDiffEr
     let mut schema = Schema::default();
     let mut pending_topic_sources = Vec::new();
     let mut pending_policies = Vec::new();
+    let mut pending_indexes = Vec::new();
 
-    for raw_stmt in split_sql_statements(sql) {
+    let statements = kalamdb_sql::split_statements(sql).map_err(|err| SchemaDiffError::Parse {
+        message: format!("{path}: {err}"),
+    })?;
+
+    for raw_stmt in statements {
         let raw_stmt = raw_stmt.trim();
 
         if raw_stmt.is_empty() {
@@ -71,6 +77,15 @@ pub(crate) fn parse_schema(path: &str, sql: &str) -> Result<Schema, SchemaDiffEr
             continue;
         }
 
+        if crate::parser::index::is_index_ddl(custom_stmt) {
+            pending_indexes.push(crate::parser::index::parse_index_ddl(path, custom_stmt)?);
+            continue;
+        }
+
+        if crate::sql::is_contract_ddl(custom_stmt) {
+            continue;
+        }
+
         if let Some(topic_key) = parse_drop_topic(path, custom_stmt)? {
             schema.topics.remove(&topic_key);
             continue;
@@ -78,7 +93,9 @@ pub(crate) fn parse_schema(path: &str, sql: &str) -> Result<Schema, SchemaDiffEr
 
         let kind_from_prefix = extract_kalam_table_kind(custom_stmt);
         let with_options = extract_with_options(custom_stmt);
-        let parseable_stmt = strip_trailing_with_options(&remove_kalam_table_kind(custom_stmt));
+        let parseable_stmt = crate::sql::strip_row_type_clause(&strip_trailing_with_options(
+            &remove_kalam_table_kind(custom_stmt),
+        ));
 
         let parsed = Parser::parse_sql(&dialect, &parseable_stmt).map_err(|source| {
             SchemaDiffError::Parse {
@@ -116,6 +133,7 @@ pub(crate) fn parse_schema(path: &str, sql: &str) -> Result<Schema, SchemaDiffEr
 
     attach_topic_sources(path, &mut schema, pending_topic_sources)?;
     attach_policies(path, &mut schema, pending_policies)?;
+    crate::parser::index::attach_indexes(path, &mut schema, pending_indexes)?;
 
     Ok(schema)
 }
@@ -129,11 +147,9 @@ mod tests {
     fn shared_table_kind_survives_leading_line_comment() {
         let schema = parse_schema(
             "schema.sql",
-            "-- Rooms everyone can create. SELECT is limited to rooms the user belongs to.\n\
-             CREATE SHARED TABLE IF NOT EXISTS chat_demo.rooms (\n\
-               id TEXT PRIMARY KEY,\n\
-               title TEXT NOT NULL\n\
-             );",
+            "-- Rooms everyone can create. SELECT is limited to rooms the user belongs \
+             to.\nCREATE SHARED TABLE IF NOT EXISTS chat_demo.rooms (\nid TEXT PRIMARY \
+             KEY,\ntitle TEXT NOT NULL\n);",
         )
         .expect("parse shared table after comment");
 
@@ -146,11 +162,9 @@ mod tests {
     fn stream_table_ttl_survives_leading_line_comment() {
         let schema = parse_schema(
             "schema.sql",
-            "-- Live thinking / typing rows.\n\
-             CREATE STREAM TABLE IF NOT EXISTS chat_demo.agent_events (\n\
-               id BIGINT PRIMARY KEY,\n\
-               stage TEXT NOT NULL\n\
-             ) WITH (TTL_SECONDS = 10);",
+            "-- Live thinking / typing rows.\nCREATE STREAM TABLE IF NOT EXISTS \
+             chat_demo.agent_events (\nid BIGINT PRIMARY KEY,\nstage TEXT NOT NULL\n) WITH \
+             (TTL_SECONDS = 10);",
         )
         .expect("parse stream table after comment");
 
@@ -163,11 +177,9 @@ mod tests {
     fn drop_table_after_leading_comment_does_not_fail_parse() {
         let schema = parse_schema(
             "schema.sql",
-            "-- This file is the source of truth for `kalam dev`.\n\
-             DROP TABLE IF EXISTS chat_demo.rooms;\n\
-             CREATE SHARED TABLE IF NOT EXISTS chat_demo.rooms (\n\
-               id TEXT PRIMARY KEY\n\
-             );",
+            "-- This file is the source of truth for `kalam dev`.\nDROP TABLE IF EXISTS \
+             chat_demo.rooms;\nCREATE SHARED TABLE IF NOT EXISTS chat_demo.rooms (\nid TEXT \
+             PRIMARY KEY\n);",
         )
         .expect("parse drop plus create after comments");
 

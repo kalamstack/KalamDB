@@ -6,7 +6,7 @@ use crate::common::*;
 
 struct CleanupGuard {
     namespace: String,
-    user: String,
+    user:      String,
 }
 
 impl Drop for CleanupGuard {
@@ -30,7 +30,8 @@ fn query_rows(sql: &str) -> Vec<HashMap<String, Value>> {
 fn scalar_string(row: &HashMap<String, Value>, column: &str) -> String {
     let value = extract_typed_value(
         row.get(column)
-            .unwrap_or_else(|| panic!("expected column '{}' in row {:?}", column, row)));
+            .unwrap_or_else(|| panic!("expected column '{}' in row {:?}", column, row)),
+    );
     match value {
         Value::String(text) => text,
         other => panic!("expected '{}' to be string-like, got {:?}", column, other),
@@ -53,7 +54,7 @@ fn smoke_test_filter_pushdown() {
     let full_stream_table = format!("{}.{}", namespace, stream_table);
     let _cleanup = CleanupGuard {
         namespace: namespace.clone(),
-        user: user.clone(),
+        user:      user.clone(),
     };
 
     let _ = execute_sql_as_root_via_client(&format!("DROP USER IF EXISTS {}", user));

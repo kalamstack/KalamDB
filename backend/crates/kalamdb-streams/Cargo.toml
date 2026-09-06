@@ -13,11 +13,11 @@ categories = ["database"]
 [dependencies]
 # Internal crates
 kalamdb-commons = { path = "../kalamdb-commons", features = ["full"] }
+kalamdb-serialization = { workspace = true }
 kalamdb-sharding = { path = "../kalamdb-sharding" }
 
 # Serialization
 serde = { workspace = true }
-flexbuffers = { workspace = true }
 
 # Concurrent data structures
 dashmap = { workspace = true }

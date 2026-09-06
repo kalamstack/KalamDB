@@ -1,27 +1,22 @@
-//! Column default value specification
+//! Column default value specification.
 
 use serde::{de::Error as DeError, Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as JsonValue;
 
-/// Represents the default value for a column
+use crate::models::{CallArgument, RoutineCall, RoutineId};
+
+/// Represents the default value for a column.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum ColumnDefault {
-    /// No default value - column must be specified in INSERT
+    /// No default value — column must be specified in INSERT.
     #[default]
     None,
 
-    /// Literal value as JSON (supports all KalamDataTypes)
-    /// Examples: null, true, 42, "hello", [1.0, 2.0, 3.0]
+    /// Literal value as JSON (supports all KalamDataTypes).
     Literal(JsonValue),
 
-    /// Function call with arguments
-    /// Examples: NOW(), UUID(), CURRENT_USER()
-    FunctionCall {
-        /// Function name (case-insensitive)
-        name: String,
-        /// Function arguments (empty for no-arg functions)
-        args: Vec<JsonValue>,
-    },
+    /// Built-in ScalarUDF or user procedure. Same `RoutineCall` shape as `CALL`.
+    FunctionCall(RoutineCall),
 }
 
 impl Serialize for ColumnDefault {
@@ -58,7 +53,10 @@ impl<'de> Deserialize<'de> for ColumnDefault {
 enum ColumnDefaultRepr {
     None,
     Literal(JsonValue),
-    FunctionCall { name: String, args: Vec<JsonValue> },
+    FunctionCall {
+        routine_id: RoutineId,
+        arguments:  Vec<CallArgument>,
+    },
 }
 
 impl From<&ColumnDefault> for ColumnDefaultRepr {
@@ -66,9 +64,9 @@ impl From<&ColumnDefault> for ColumnDefaultRepr {
         match value {
             ColumnDefault::None => ColumnDefaultRepr::None,
             ColumnDefault::Literal(json) => ColumnDefaultRepr::Literal(json.clone()),
-            ColumnDefault::FunctionCall { name, args } => ColumnDefaultRepr::FunctionCall {
-                name: name.clone(),
-                args: args.clone(),
+            ColumnDefault::FunctionCall(call) => ColumnDefaultRepr::FunctionCall {
+                routine_id: call.routine_id.clone(),
+                arguments:  call.arguments.clone(),
             },
         }
     }
@@ -79,9 +77,10 @@ impl From<ColumnDefaultRepr> for ColumnDefault {
         match value {
             ColumnDefaultRepr::None => ColumnDefault::None,
             ColumnDefaultRepr::Literal(json) => ColumnDefault::Literal(json),
-            ColumnDefaultRepr::FunctionCall { name, args } => {
-                ColumnDefault::FunctionCall { name, args }
-            },
+            ColumnDefaultRepr::FunctionCall {
+                routine_id,
+                arguments,
+            } => ColumnDefault::FunctionCall(RoutineCall::new(routine_id, arguments)),
         }
     }
 }
@@ -90,7 +89,10 @@ impl From<ColumnDefaultRepr> for ColumnDefault {
 enum StoredColumnDefault {
     None,
     Literal(String),
-    FunctionCall { name: String, args: Vec<String> },
+    FunctionCall {
+        routine_id: RoutineId,
+        arguments:  Vec<CallArgument>,
+    },
 }
 
 impl From<&ColumnDefault> for StoredColumnDefault {
@@ -98,12 +100,9 @@ impl From<&ColumnDefault> for StoredColumnDefault {
         match value {
             ColumnDefault::None => StoredColumnDefault::None,
             ColumnDefault::Literal(json) => StoredColumnDefault::Literal(json.to_string()),
-            ColumnDefault::FunctionCall { name, args } => {
-                let serialized_args = args.iter().map(|arg| arg.to_string()).collect();
-                StoredColumnDefault::FunctionCall {
-                    name: name.clone(),
-                    args: serialized_args,
-                }
+            ColumnDefault::FunctionCall(call) => StoredColumnDefault::FunctionCall {
+                routine_id: call.routine_id.clone(),
+                arguments:  call.arguments.clone(),
             },
         }
     }
@@ -119,75 +118,62 @@ impl TryFrom<StoredColumnDefault> for ColumnDefault {
                 let parsed = serde_json::from_str(&json)?;
                 Ok(ColumnDefault::Literal(parsed))
             },
-            StoredColumnDefault::FunctionCall { name, args } => {
-                let mut parsed_args = Vec::with_capacity(args.len());
-                for arg in args {
-                    parsed_args.push(serde_json::from_str(&arg)?);
-                }
-                Ok(ColumnDefault::FunctionCall {
-                    name,
-                    args: parsed_args,
-                })
-            },
+            StoredColumnDefault::FunctionCall {
+                routine_id,
+                arguments,
+            } => Ok(ColumnDefault::FunctionCall(RoutineCall::new(routine_id, arguments))),
         }
     }
 }
 
 impl ColumnDefault {
-    /// Create a None default
     pub fn none() -> Self {
         ColumnDefault::None
     }
 
-    /// Create a literal default from a JSON value
     pub fn literal(value: JsonValue) -> Self {
         ColumnDefault::Literal(value)
     }
 
-    /// Create a function call default
-    pub fn function(name: impl Into<String>, args: Vec<JsonValue>) -> Self {
-        ColumnDefault::FunctionCall {
-            name: name.into(),
-            args,
-        }
+    /// Built-in or unqualified routine name with CALL-shaped arguments.
+    pub fn function(name: impl Into<String>, args: Vec<CallArgument>) -> Self {
+        let name = name.into();
+        let routine_id = if crate::models::is_builtin_default_name(&name) {
+            RoutineId::new(crate::models::normalize_builtin_name(&name))
+        } else {
+            RoutineId::new(name.to_ascii_lowercase())
+        };
+        ColumnDefault::FunctionCall(RoutineCall::new(routine_id, args))
     }
 
-    /// Check if this is a None default
+    pub fn procedure(routine_id: RoutineId, arguments: Vec<CallArgument>) -> Self {
+        ColumnDefault::FunctionCall(RoutineCall::new(routine_id, arguments))
+    }
+
     pub fn is_none(&self) -> bool {
         matches!(self, ColumnDefault::None)
     }
 
-    /// Get SQL representation for display
+    pub fn as_routine_call(&self) -> Option<&RoutineCall> {
+        match self {
+            ColumnDefault::FunctionCall(call) => Some(call),
+            _ => None,
+        }
+    }
+
     pub fn to_sql(&self) -> String {
         match self {
             ColumnDefault::None => "".to_string(),
-            ColumnDefault::Literal(value) => {
-                // Format JSON value as SQL literal
-                match value {
-                    JsonValue::Null => "NULL".to_string(),
-                    JsonValue::Bool(b) => b.to_string().to_uppercase(),
-                    JsonValue::Number(n) => n.to_string(),
-                    JsonValue::String(s) => format!("'{}'", s.replace('\'', "''")),
-                    JsonValue::Array(_) | JsonValue::Object(_) => {
-                        format!("'{}'", value.to_string().replace('\'', "''"))
-                    },
-                }
+            ColumnDefault::Literal(value) => match value {
+                JsonValue::Null => "NULL".to_string(),
+                JsonValue::Bool(b) => b.to_string().to_uppercase(),
+                JsonValue::Number(n) => n.to_string(),
+                JsonValue::String(s) => format!("'{}'", s.replace('\'', "''")),
+                JsonValue::Array(_) | JsonValue::Object(_) => {
+                    format!("'{}'", value.to_string().replace('\'', "''"))
+                },
             },
-            ColumnDefault::FunctionCall { name, args } => {
-                if args.is_empty() {
-                    format!("{}()", name.to_uppercase())
-                } else {
-                    let args_str = args
-                        .iter()
-                        .map(|arg| match arg {
-                            JsonValue::String(s) => format!("'{}'", s.replace('\'', "''")),
-                            other => other.to_string(),
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    format!("{}({})", name.to_uppercase(), args_str)
-                }
-            },
+            ColumnDefault::FunctionCall(call) => call.to_sql(),
         }
     }
 }
@@ -225,17 +211,19 @@ mod tests {
 
     #[test]
     fn test_function_call_defaults() {
-        // No-arg function
         let default = ColumnDefault::function("NOW", vec![]);
         assert_eq!(default.to_sql(), "NOW()");
+        assert!(default.as_routine_call().unwrap().is_builtin_default());
 
-        // Function with args
-        let default = ColumnDefault::function("UUID_GENERATE", vec![json!("v4")]);
-        assert_eq!(default.to_sql(), "UUID_GENERATE('v4')");
+        let default = ColumnDefault::function("chat.next_id", vec![CallArgument::text("v4")]);
+        assert_eq!(default.to_sql(), "chat.next_id('v4')");
+        assert!(!default.as_routine_call().unwrap().is_builtin_default());
 
-        // Function with multiple args
-        let default = ColumnDefault::function("CONCAT", vec![json!("prefix_"), json!("value")]);
-        assert_eq!(default.to_sql(), "CONCAT('prefix_', 'value')");
+        let default = ColumnDefault::function(
+            "concat",
+            vec![CallArgument::text("prefix_"), CallArgument::text("value")],
+        );
+        assert_eq!(default.to_sql(), "concat('prefix_', 'value')");
     }
 
     #[test]
@@ -244,27 +232,15 @@ mod tests {
             ColumnDefault::none(),
             ColumnDefault::literal(json!(42)),
             ColumnDefault::function("NOW", vec![]),
+            ColumnDefault::procedure(
+                RoutineId::from_parts(Some(&crate::models::NamespaceId::new("app")), "gen_id"),
+                vec![CallArgument::bigint(1)],
+            ),
         ];
 
         for original in defaults {
             let json = serde_json::to_string(&original).unwrap();
             let decoded: ColumnDefault = serde_json::from_str(&json).unwrap();
-            assert_eq!(original, decoded);
-        }
-    }
-
-    #[test]
-    fn test_flexbuffers_roundtrip() {
-        let defaults = vec![
-            ColumnDefault::none(),
-            ColumnDefault::literal(json!({"key": "value", "nested": [1, 2, 3]})),
-            ColumnDefault::function("CONCAT", vec![json!("prefix"), json!({"expr": "value"})]),
-        ];
-
-        for original in defaults {
-            let bytes = flexbuffers::to_vec(&original).expect("encode to flexbuffers");
-            let decoded: ColumnDefault =
-                flexbuffers::from_slice(&bytes).expect("decode from flexbuffers");
             assert_eq!(original, decoded);
         }
     }

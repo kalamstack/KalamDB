@@ -306,8 +306,8 @@ fn smoke_test_alter_shared_table_rejects_access_level() {
 
     let alter_sql =
         format!("ALTER TABLE {} SET TBLPROPERTIES (ACCESS_LEVEL = 'RESTRICTED')", full_table);
-    let err = execute_sql_as_root_via_client(&alter_sql)
-        .expect_err("ACCESS_LEVEL should be rejected");
+    let err =
+        execute_sql_as_root_via_client(&alter_sql).expect_err("ACCESS_LEVEL should be rejected");
     assert!(
         err.to_string().contains("ACCESS_LEVEL is not supported"),
         "unexpected error: {err}"

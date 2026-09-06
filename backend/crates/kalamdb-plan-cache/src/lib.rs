@@ -145,6 +145,7 @@ pub enum FastInsertDefaultTemplate {
     SnowflakeId,
     UuidV7,
     Ulid,
+    Procedure(kalamdb_commons::RoutineCall),
 }
 
 pub struct InsertMetadataCache {

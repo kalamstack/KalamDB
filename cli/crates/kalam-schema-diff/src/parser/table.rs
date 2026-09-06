@@ -50,6 +50,7 @@ pub(super) fn table_from_create(
         columns,
         constraints,
         options,
+        indexes: BTreeMap::new(),
     })
 }
 

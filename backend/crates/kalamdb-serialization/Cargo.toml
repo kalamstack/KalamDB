@@ -1,0 +1,36 @@
+[package]
+name = "kalamdb-serialization"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Central persisted-object codec for KalamDB"
+keywords = ["kalamdb", "serialization", "storage"]
+categories = ["database", "encoding"]
+
+[dependencies]
+kalamdb-commons = { path = "../kalamdb-commons", default-features = false, features = [
+    "conversions",
+    "rows",
+    "table-definition",
+] }
+arrow = { workspace = true }
+datafusion-common = { workspace = true, default-features = false }
+flexbuffers = { workspace = true }
+rmp-serde = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[lib]
+name = "kalamdb_serialization"
+path = "src/lib.rs"
+
+[[bench]]
+name = "codec"
+harness = false

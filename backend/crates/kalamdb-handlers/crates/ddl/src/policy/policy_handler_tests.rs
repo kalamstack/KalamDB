@@ -1,8 +1,13 @@
 use datafusion::scalar::ScalarValue;
 use kalamdb_commons::{
     datatypes::KalamDataType,
-    models::rows::Row,
-    schemas::{ColumnDefinition, TableDefinition, TableOptions, TableType},
+    models::{
+        rows::Row,
+        schemas::{
+            ColumnDefinition, ScalarIndexDefinition, TableDefinition, TableOptions, TableType,
+        },
+        ColumnId,
+    },
     BoundExprShape, NamespaceId, PolicyId, PolicyProgram, PrincipalExpr, Role, TableId, TableName,
     UserId,
 };
@@ -21,6 +26,15 @@ use kalamdb_tables::{
 };
 
 use super::{AlterPolicyHandler, CreatePolicyHandler, DropPolicyHandler};
+
+fn with_user_id_index(mut table: TableDefinition) -> TableDefinition {
+    table.scalar_indexes.push(ScalarIndexDefinition::new(
+        format!("{}_user_id", table.table_name.as_str()),
+        vec![ColumnId::new(2)],
+        false,
+    ));
+    table
+}
 
 fn shared_table(name: &str) -> TableDefinition {
     TableDefinition::new(
@@ -273,19 +287,21 @@ async fn membership_rls_runs_after_mvcc_winner_selection() {
         None,
     )
     .unwrap();
-    let mut members = TableDefinition::new(
-        NamespaceId::new("chat"),
-        TableName::new("mvcc_members"),
-        TableType::Shared,
-        vec![
-            ColumnDefinition::primary_key(1, "id", 1, KalamDataType::Text),
-            ColumnDefinition::simple(2, "user_id", 2, KalamDataType::Text),
-            ColumnDefinition::simple(3, "group_id", 3, KalamDataType::Text),
-        ],
-        TableOptions::shared(),
-        None,
-    )
-    .unwrap();
+    let mut members = with_user_id_index(
+        TableDefinition::new(
+            NamespaceId::new("chat"),
+            TableName::new("mvcc_members"),
+            TableType::Shared,
+            vec![
+                ColumnDefinition::primary_key(1, "id", 1, KalamDataType::Text),
+                ColumnDefinition::simple(2, "user_id", 2, KalamDataType::Text),
+                ColumnDefinition::simple(3, "group_id", 3, KalamDataType::Text),
+            ],
+            TableOptions::shared(),
+            None,
+        )
+        .unwrap(),
+    );
     app_context.system_columns_service().add_system_columns(&mut messages).unwrap();
     app_context.system_columns_service().add_system_columns(&mut members).unwrap();
     app_context.schema_registry().register_table(messages).unwrap();
@@ -1106,20 +1122,22 @@ async fn membership_policy_hides_rows_with_null_join_key() {
         None,
     )
     .unwrap();
-    let mut members = TableDefinition::new(
-        NamespaceId::new("chat"),
-        TableName::new("null_key_members"),
-        TableType::Shared,
-        vec![
-            ColumnDefinition::primary_key(1, "id", 1, KalamDataType::Text),
-            ColumnDefinition::simple(2, "user_id", 2, KalamDataType::Text),
-            ColumnDefinition::simple(3, "group_id", 3, KalamDataType::Text),
-            ColumnDefinition::simple(4, "status", 4, KalamDataType::Text),
-        ],
-        TableOptions::shared(),
-        None,
-    )
-    .unwrap();
+    let mut members = with_user_id_index(
+        TableDefinition::new(
+            NamespaceId::new("chat"),
+            TableName::new("null_key_members"),
+            TableType::Shared,
+            vec![
+                ColumnDefinition::primary_key(1, "id", 1, KalamDataType::Text),
+                ColumnDefinition::simple(2, "user_id", 2, KalamDataType::Text),
+                ColumnDefinition::simple(3, "group_id", 3, KalamDataType::Text),
+                ColumnDefinition::simple(4, "status", 4, KalamDataType::Text),
+            ],
+            TableOptions::shared(),
+            None,
+        )
+        .unwrap(),
+    );
     app_context.system_columns_service().add_system_columns(&mut messages).unwrap();
     app_context.system_columns_service().add_system_columns(&mut members).unwrap();
     app_context.schema_registry().register_table(messages).unwrap();
@@ -1273,19 +1291,21 @@ async fn live_authorization_fails_closed_when_membership_is_revoked() {
         None,
     )
     .unwrap();
-    let mut members = TableDefinition::new(
-        NamespaceId::new("chat"),
-        TableName::new("live_membership_members"),
-        TableType::Shared,
-        vec![
-            ColumnDefinition::primary_key(1, "id", 1, KalamDataType::Text),
-            ColumnDefinition::simple(2, "user_id", 2, KalamDataType::Text),
-            ColumnDefinition::simple(3, "group_id", 3, KalamDataType::Text),
-        ],
-        TableOptions::shared(),
-        None,
-    )
-    .unwrap();
+    let mut members = with_user_id_index(
+        TableDefinition::new(
+            NamespaceId::new("chat"),
+            TableName::new("live_membership_members"),
+            TableType::Shared,
+            vec![
+                ColumnDefinition::primary_key(1, "id", 1, KalamDataType::Text),
+                ColumnDefinition::simple(2, "user_id", 2, KalamDataType::Text),
+                ColumnDefinition::simple(3, "group_id", 3, KalamDataType::Text),
+            ],
+            TableOptions::shared(),
+            None,
+        )
+        .unwrap(),
+    );
     app_context.system_columns_service().add_system_columns(&mut messages).unwrap();
     app_context.system_columns_service().add_system_columns(&mut members).unwrap();
     app_context.schema_registry().register_table(messages).unwrap();
@@ -1396,4 +1416,118 @@ async fn service_role_does_not_inherit_user_targeted_policies() {
         .await
         .unwrap();
     assert_eq!(row_count(&visible), 0);
+}
+
+#[tokio::test]
+async fn membership_bind_uses_indexed_principal_among_many_rows() {
+    let app_context = test_app_context_simple();
+    let mut messages = TableDefinition::new(
+        NamespaceId::new("chat"),
+        TableName::new("scaled_messages"),
+        TableType::Shared,
+        vec![
+            ColumnDefinition::primary_key(1, "id", 1, KalamDataType::Text),
+            ColumnDefinition::simple(2, "group_id", 2, KalamDataType::Text),
+        ],
+        TableOptions::shared(),
+        None,
+    )
+    .unwrap();
+    let mut members = with_user_id_index(
+        TableDefinition::new(
+            NamespaceId::new("chat"),
+            TableName::new("scaled_members"),
+            TableType::Shared,
+            vec![
+                ColumnDefinition::primary_key(1, "id", 1, KalamDataType::Text),
+                ColumnDefinition::simple(2, "user_id", 2, KalamDataType::Text),
+                ColumnDefinition::simple(3, "group_id", 3, KalamDataType::Text),
+            ],
+            TableOptions::shared(),
+            None,
+        )
+        .unwrap(),
+    );
+    app_context.system_columns_service().add_system_columns(&mut messages).unwrap();
+    app_context.system_columns_service().add_system_columns(&mut members).unwrap();
+    app_context.schema_registry().register_table(messages).unwrap();
+    app_context.schema_registry().register_table(members).unwrap();
+
+    let messages_id = TableId::from_strings("chat", "scaled_messages");
+    let members_id = TableId::from_strings("chat", "scaled_members");
+    let messages_provider = app_context.schema_registry().get_provider(&messages_id).unwrap();
+    let messages_provider = (messages_provider.as_ref() as &dyn std::any::Any)
+        .downcast_ref::<SharedTableProvider>()
+        .unwrap();
+    let members_provider = app_context.schema_registry().get_provider(&members_id).unwrap();
+    let members_provider = (members_provider.as_ref() as &dyn std::any::Any)
+        .downcast_ref::<SharedTableProvider>()
+        .unwrap();
+    let system = UserId::new("system");
+
+    let mut member_rows = Vec::with_capacity(1002);
+    for i in 0..1000 {
+        member_rows.push(Row::from_vec(vec![
+            ("id".to_string(), ScalarValue::Utf8(Some(format!("other-{i}")))),
+            ("user_id".to_string(), ScalarValue::Utf8(Some(format!("user-{i}")))),
+            ("group_id".to_string(), ScalarValue::Utf8(Some(format!("G{i}")))),
+        ]));
+    }
+    member_rows.push(Row::from_vec(vec![
+        ("id".to_string(), ScalarValue::Utf8(Some("alice-1".to_string()))),
+        ("user_id".to_string(), ScalarValue::Utf8(Some("alice".to_string()))),
+        ("group_id".to_string(), ScalarValue::Utf8(Some("A".to_string()))),
+    ]));
+    member_rows.push(Row::from_vec(vec![
+        ("id".to_string(), ScalarValue::Utf8(Some("alice-2".to_string()))),
+        ("user_id".to_string(), ScalarValue::Utf8(Some("alice".to_string()))),
+        ("group_id".to_string(), ScalarValue::Utf8(Some("B".to_string()))),
+    ]));
+    members_provider.insert_rows(&system, member_rows).await.unwrap();
+
+    messages_provider
+        .insert_rows(
+            &system,
+            vec![
+                Row::from_vec(vec![
+                    ("id".to_string(), ScalarValue::Utf8(Some("msg-a".to_string()))),
+                    ("group_id".to_string(), ScalarValue::Utf8(Some("A".to_string()))),
+                ]),
+                Row::from_vec(vec![
+                    ("id".to_string(), ScalarValue::Utf8(Some("msg-b".to_string()))),
+                    ("group_id".to_string(), ScalarValue::Utf8(Some("B".to_string()))),
+                ]),
+                Row::from_vec(vec![
+                    ("id".to_string(), ScalarValue::Utf8(Some("msg-other".to_string()))),
+                    ("group_id".to_string(), ScalarValue::Utf8(Some("G0".to_string()))),
+                ]),
+            ],
+        )
+        .await
+        .unwrap();
+
+    CreatePolicyHandler::new(app_context.clone())
+        .execute(
+            CreatePolicyStatement::parse(
+                "CREATE POLICY member_read ON chat.scaled_messages FOR SELECT TO user USING \
+                 (group_id IN (SELECT group_id FROM chat.scaled_members WHERE user_id = \
+                 CURRENT_USER))",
+                &NamespaceId::new("chat"),
+            )
+            .unwrap(),
+            Vec::new(),
+            &app_execution_context(&app_context, "admin", Role::Dba),
+        )
+        .await
+        .unwrap();
+
+    let visible = app_execution_context(&app_context, "alice", Role::User)
+        .create_session_with_user()
+        .sql("SELECT id FROM chat.scaled_messages")
+        .await
+        .unwrap()
+        .collect()
+        .await
+        .unwrap();
+    assert_eq!(row_count(&visible), 2);
 }

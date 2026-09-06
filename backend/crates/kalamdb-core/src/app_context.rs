@@ -169,6 +169,9 @@ pub struct AppContext {
     // ===== Shared SqlExecutor =====
     sql_executor: OnceCell<Arc<SqlExecutor>>,
 
+    // ===== Function CALL runtime (staged topic publishes) =====
+    function_runtime: OnceCell<Arc<crate::functions::FunctionRuntimeState>>,
+
     // ===== Auth user cache (invalidated after DDL user mutations) =====
     cached_user_repo: OnceCell<Arc<CachedUsersRepo>>,
 
@@ -201,6 +204,7 @@ impl std::fmt::Debug for AppContext {
             .field("manifest_service", &"Arc<ManifestService>")
             .field("topic_publisher", &"Arc<TopicPublisherService>")
             .field("sql_executor", &"OnceCell<Arc<SqlExecutor>>")
+            .field("function_runtime", &"OnceCell<Arc<FunctionRuntimeState>>")
             .field("cached_user_repo", &"OnceCell<Arc<CachedUsersRepo>>")
             .finish()
     }
@@ -534,6 +538,7 @@ impl AppContext {
                 file_storage_service,
                 topic_publisher: Arc::clone(&topic_publisher),
                 sql_executor: OnceCell::new(),
+                function_runtime: OnceCell::new(),
                 cached_user_repo: OnceCell::new(),
                 server_start_time,
             });
@@ -993,6 +998,7 @@ impl AppContext {
             file_storage_service,
             topic_publisher: Arc::clone(&topic_publisher),
             sql_executor: OnceCell::new(),
+            function_runtime: OnceCell::new(),
             cached_user_repo: OnceCell::new(),
             server_start_time,
         });
@@ -1394,6 +1400,17 @@ impl AppContext {
     /// Get the shared SqlExecutor (panics if not yet initialized)
     pub fn sql_executor(&self) -> Arc<SqlExecutor> {
         self.try_sql_executor().expect("SqlExecutor not initialized in AppContext")
+    }
+
+    /// Staged function-runtime state (typed topic publishes).
+    pub fn function_runtime(&self) -> Arc<crate::functions::FunctionRuntimeState> {
+        if let Some(state) = self.function_runtime.get() {
+            return Arc::clone(state);
+        }
+        let _ = self
+            .function_runtime
+            .set(Arc::new(crate::functions::FunctionRuntimeState::default()));
+        Arc::clone(self.function_runtime.get().expect("function runtime initialized"))
     }
 
     /// Get server uptime in seconds

@@ -9,6 +9,7 @@ members = [
     "pg/crates/kalam-pg-client",
     "backend/crates/kalamdb-macros",
     "backend/crates/kalamdb-commons",
+    "backend/crates/kalamdb-serialization",
     "backend/crates/kalamdb-row-filter",
     "backend/crates/kalamdb-configs",
     "backend/crates/kalamdb-filestore",
@@ -39,6 +40,7 @@ members = [
     "backend/crates/kalamdb-plan-cache",
     "backend/crates/kalamdb-publisher",
     "backend/crates/kalamdb-dialect",
+    "backend/crates/kalamdb-functions",
     "backend/crates/kalamdb-store",
     "backend/crates/kalamdb-api",
     "backend/crates/kalamdb-auth",
@@ -100,7 +102,7 @@ url = "2.5.8"
 tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
 
 # Security floor pins for vulnerable transitive TLS/QUIC crates.
-aws-lc-rs = { version = "1.18.0", default-features = false }
+aws-lc-rs = { version = "1.18.1", default-features = false }
 rustls = { version = "0.23.43", default-features = false }
 quinn-proto = { version = "0.11.17", default-features = false }
 rustls-webpki = { version = "0.103.15", default-features = false }
@@ -191,6 +193,7 @@ rand = "0.10.2"
 rcgen = "0.14.10"
 x509-parser = "0.18.1"
 kalamdb-commons = { path = "backend/crates/kalamdb-commons", default-features = false }
+kalamdb-serialization = { path = "backend/crates/kalamdb-serialization" }
 kalamdb-observability = { path = "backend/crates/kalamdb-observability", default-features = false }
 link-common = { path = "link/link-common", default-features = false }
 kalam-client = { path = "link/sdks/rust", default-features = false }
@@ -203,6 +206,7 @@ kalamdb-tables = { path = "backend/crates/kalamdb-tables" }
 kalamdb-rls = { path = "backend/crates/kalamdb-rls" }
 kalamdb-views = { path = "backend/crates/kalamdb-views" }
 kalamdb-datafusion-sources = { path = "backend/crates/kalamdb-datafusion-sources" }
+kalamdb-functions = { path = "backend/crates/kalamdb-functions" }
 cookie = "0.18.2"
 colored = "3.1.1"
 fern = "0.7"
@@ -228,7 +232,7 @@ http-body-util = "0.1.5"
 cc = "1.4.5"
 proc-macro2 = "1.0.107"
 quote = "1.0.47"
-syn = { version = "3.0.4", features = ["full", "extra-traits"] }
+syn = { version = "3.0.5", features = ["full", "extra-traits"] }
 
 # Object storage abstraction (S3/GCS/Azure/local)
 object_store = { version = "0.13.2" }
@@ -244,7 +248,7 @@ sha2 = "0.11.0"
 storekey = "0.11"
 moka = { version = "0.12.16", features = ["future", "sync"] }
 ntest = "0.9.5"
-ipnet = "2.12.1"
+ipnet = "2.12.2"
 wasm-bindgen = { version = "0.2.128" }
 wasm-bindgen-futures = { version = "0.4.78" }
 js-sys = { version = "0.3.105" }
@@ -269,6 +273,8 @@ tokio-postgres = "0.7.18"
 
 # Tracing / observability
 tracing = "0.1"
+v8 = "152.2.0"
+wasmtime = { version = "47.0.0", default-features = false, features = ["std", "runtime", "cranelift", "async", "component-model", "pooling-allocator", "wat", "anyhow"] }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json", "fmt"] }
 tracing-actix-web = "0.7.22"
 tracing-log = "0.2"

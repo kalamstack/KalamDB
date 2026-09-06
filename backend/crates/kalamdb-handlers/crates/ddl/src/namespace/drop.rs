@@ -449,6 +449,9 @@ mod tests {
             app_ctx.storage_backend(),
             &table_id,
             "id",
+            kalamdb_tables::empty_storage_schema(),
+            &[],
+            &[],
         );
         let main_partition = store.partition();
         let pk_partition = store.indexes()[0].partition();

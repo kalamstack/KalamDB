@@ -13,6 +13,7 @@
 pub mod activity;
 pub mod allocator_metrics;
 pub mod cpu;
+pub mod function_metrics;
 pub mod health_monitor;
 pub mod pubsub_metrics;
 pub mod query_metrics;
@@ -26,6 +27,9 @@ pub use allocator_metrics::{
     collect_allocator_metrics, force_allocator_collection, AllocatorMetrics,
 };
 pub use cpu::{get_cpu_count, get_physical_cpu_count};
+pub use function_metrics::{
+    begin_function_run, finish_function_run, function_metrics_snapshot, FunctionMetricsSnapshot,
+};
 pub use health_monitor::{
     decrement_websocket_sessions, get_websocket_session_count, get_websocket_session_peak_count,
     increment_websocket_sessions, HealthCounts, HealthMetrics, HealthMonitor,

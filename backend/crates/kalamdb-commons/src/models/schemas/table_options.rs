@@ -512,12 +512,4 @@ mod tests {
         let decoded: TableCompression = serde_json::from_str("\"snappy\"").unwrap();
         assert_eq!(decoded, TableCompression::Snappy);
     }
-
-    #[test]
-    fn test_table_compression_decodes_persisted_string_shape() {
-        let bytes = flexbuffers::to_vec("zstd").unwrap();
-        let decoded: TableCompression = flexbuffers::from_slice(&bytes).unwrap();
-
-        assert_eq!(decoded, TableCompression::Zstd);
-    }
 }

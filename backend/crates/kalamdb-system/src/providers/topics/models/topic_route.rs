@@ -128,11 +128,6 @@ mod tests {
             TopicOp::Update,
         );
 
-        // Test binary round-trip
-        let encoded = flexbuffers::to_vec(&route).unwrap();
-        let decoded: TopicRoute = flexbuffers::from_slice(&encoded).unwrap();
-        assert_eq!(route, decoded);
-
         // Test JSON round-trip
         let json = serde_json::to_string(&route).unwrap();
         let from_json: TopicRoute = serde_json::from_str(&json).unwrap();

@@ -1,6 +1,9 @@
-use std::sync::{
-    atomic::{AtomicU8, Ordering},
-    Arc, OnceLock,
+use std::{
+    collections::HashSet,
+    sync::{
+        atomic::{AtomicU8, Ordering},
+        Arc, OnceLock,
+    },
 };
 
 use datafusion::datasource::TableProvider;
@@ -82,7 +85,7 @@ pub struct CachedTableData {
     /// Current schema version number
     pub schema_version: u32,
 
-    /// Bloom filter columns (PRIMARY KEY + _seq) - computed once on cache entry creation
+    /// Bloom filter columns (PRIMARY KEY + equality-friendly scalar indexes)
     /// Static for each table schema version, changes only on ALTER TABLE
     bloom_filter_columns: Vec<String>,
 
@@ -158,22 +161,68 @@ impl CachedTableData {
     /// This is computed once when CachedTableData is created and reused for all
     /// flush operations. Returns (bloom_filter_columns, indexed_columns).
     ///
-    /// - bloom_filter_columns: PRIMARY KEY columns (for Parquet Bloom filters)
-    /// - indexed_columns: PRIMARY KEY columns + _seq for segment stats extraction
+    /// - bloom_filter_columns: PRIMARY KEY + equality-friendly scalar index columns
+    /// - indexed_columns: those columns plus `_seq` for segment stats extraction
     fn compute_indexed_columns(table_def: &TableDefinition) -> (Vec<String>, Vec<(u64, String)>) {
         let mut bloom_filter_columns = Vec::new();
         let mut indexed_columns = Vec::new();
+        let mut seen_column_ids = HashSet::new();
 
-        // Add PRIMARY KEY columns
         for col in table_def.columns.iter().filter(|c| c.is_primary_key) {
-            bloom_filter_columns.push(col.column_name.clone());
-            indexed_columns.push((col.column_id, col.column_name.clone()));
+            Self::push_indexed_column(
+                col.column_id,
+                &col.column_name,
+                col.data_type.supports_equality_bloom(),
+                &mut bloom_filter_columns,
+                &mut indexed_columns,
+                &mut seen_column_ids,
+            );
         }
 
-        // Add _seq system column for range stats; Bloom filters are kept to PK columns.
-        indexed_columns.push((0, SystemColumnNames::SEQ.to_string())); // _seq uses column_id 0
+        for index in &table_def.scalar_indexes {
+            let Some(names) = index.resolved_column_names(&table_def.columns) else {
+                continue;
+            };
+            for (column_id, name) in index.columns.iter().zip(names.iter()) {
+                let bloom = table_def
+                    .columns
+                    .iter()
+                    .find(|column| column.column_id == column_id.as_u64())
+                    .is_some_and(|column| column.data_type.supports_equality_bloom());
+                if !bloom {
+                    continue;
+                }
+                Self::push_indexed_column(
+                    column_id.as_u64(),
+                    name,
+                    true,
+                    &mut bloom_filter_columns,
+                    &mut indexed_columns,
+                    &mut seen_column_ids,
+                );
+            }
+        }
+
+        indexed_columns.push((0, SystemColumnNames::SEQ.to_string()));
 
         (bloom_filter_columns, indexed_columns)
+    }
+
+    fn push_indexed_column(
+        column_id: u64,
+        column_name: &str,
+        bloom: bool,
+        bloom_filter_columns: &mut Vec<String>,
+        indexed_columns: &mut Vec<(u64, String)>,
+        seen_column_ids: &mut HashSet<u64>,
+    ) {
+        if !seen_column_ids.insert(column_id) {
+            return;
+        }
+        if bloom {
+            bloom_filter_columns.push(column_name.to_string());
+        }
+        indexed_columns.push((column_id, column_name.to_string()));
     }
 
     /// Extract storage ID from table definition options
@@ -257,7 +306,7 @@ impl CachedTableData {
         &self.bloom_filter_columns
     }
 
-    /// Get cached indexed columns with column_id (PRIMARY KEY + _seq)
+    /// Get cached indexed columns with column_id (PK + scalar indexes + `_seq`)
     ///
     /// Returns (column_id, column_name) pairs for columns that need
     /// row-group statistics in Parquet files. Column IDs are stable
@@ -346,6 +395,47 @@ mod tests {
             cached.indexed_columns(),
             &[
                 (1, "id".to_string()),
+                (0, SystemColumnNames::SEQ.to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn cached_column_sets_include_scalar_index_columns_and_skip_embeddings() {
+        use kalamdb_commons::{
+            models::{ColumnId, KalamDataType, NamespaceId, TableName},
+            schemas::{ColumnDefinition, ScalarIndexDefinition, TableOptions, TableType},
+        };
+
+        let mut table_def = TableDefinition::new(
+            NamespaceId::from("chat"),
+            TableName::from("messages"),
+            TableType::Shared,
+            vec![
+                ColumnDefinition::primary_key(1, "id", 1, KalamDataType::BigInt),
+                ColumnDefinition::simple(2, "conversation_id", 2, KalamDataType::Text),
+                ColumnDefinition::simple(3, "embedding", 3, KalamDataType::Embedding(3)),
+            ],
+            TableOptions::shared(),
+            None,
+        )
+        .expect("table definition");
+        table_def.scalar_indexes = vec![
+            ScalarIndexDefinition::new("idx_conversation_id", vec![ColumnId::new(2)], false),
+            ScalarIndexDefinition::new("idx_embedding", vec![ColumnId::new(3)], false),
+        ];
+
+        let cached = CachedTableData::new(Arc::new(table_def));
+
+        assert_eq!(
+            cached.bloom_filter_columns(),
+            &["id".to_string(), "conversation_id".to_string()]
+        );
+        assert_eq!(
+            cached.indexed_columns(),
+            &[
+                (1, "id".to_string()),
+                (2, "conversation_id".to_string()),
                 (0, SystemColumnNames::SEQ.to_string())
             ]
         );

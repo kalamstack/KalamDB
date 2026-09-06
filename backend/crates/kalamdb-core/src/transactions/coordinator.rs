@@ -323,12 +323,14 @@ impl TransactionCoordinator {
             self.active_by_owner.remove(&owner_key);
 
             let Some((_, mut sealed_handle)) = self.active_by_id.remove(transaction_id) else {
+                crate::functions::drop_staged_publishes(self.app_context.as_ref(), transaction_id);
                 return Err(KalamDbError::NotFound(format!(
                     "transaction '{}' not found during commit",
                     transaction_id
                 )));
             };
             sealed_handle.mark_state(TransactionState::Committed);
+            crate::functions::flush_staged_publishes(self.app_context.as_ref(), transaction_id)?;
 
             return Ok(TransactionCommitResult::committed(
                 transaction_id.clone(),
@@ -353,6 +355,7 @@ impl TransactionCoordinator {
                 if let Some((_, mut sealed_handle)) = self.active_by_id.remove(transaction_id) {
                     sealed_handle.mark_state(TransactionState::Aborted);
                 }
+                crate::functions::drop_staged_publishes(self.app_context.as_ref(), transaction_id);
                 return Err(KalamDbError::InvalidOperation(format!(
                     "failed to commit transaction '{}': {}",
                     transaction_id, error
@@ -380,6 +383,7 @@ impl TransactionCoordinator {
             )));
         };
         sealed_handle.mark_state(TransactionState::Committed);
+        crate::functions::flush_staged_publishes(self.app_context.as_ref(), transaction_id)?;
 
         Ok(TransactionCommitResult::committed(
             transaction_id.clone(),
@@ -408,6 +412,7 @@ impl TransactionCoordinator {
                 let owner_key = handle.owner_key;
                 drop(handle);
                 self.write_sets.remove(transaction_id);
+                crate::functions::drop_staged_publishes(self.app_context.as_ref(), transaction_id);
                 self.active_by_owner.remove(&owner_key);
                 self.active_by_id.remove(transaction_id);
                 return Ok(());
@@ -422,6 +427,7 @@ impl TransactionCoordinator {
         };
 
         self.write_sets.remove(transaction_id);
+        crate::functions::drop_staged_publishes(self.app_context.as_ref(), transaction_id);
         self.active_by_owner.remove(&owner_key);
         let Some((_, mut sealed_handle)) = self.active_by_id.remove(transaction_id) else {
             return Err(KalamDbError::NotFound(format!(

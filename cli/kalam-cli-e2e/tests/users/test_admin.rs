@@ -166,7 +166,8 @@ EXECUTE AS USER '{}' (SELECT * FROM {});"#,
     // Verify execution - should show Query OK messages and final result
     assert!(
         stdout.contains("Item; One -- literal"),
-        "Batch execution should preserve semicolons and comment markers inside literals.\nstdout: {}",
+        "Batch execution should preserve semicolons and comment markers inside literals.\nstdout: \
+         {}",
         stdout
     );
 

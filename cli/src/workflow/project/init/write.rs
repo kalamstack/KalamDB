@@ -124,18 +124,22 @@ pub(super) fn write_project_scaffold(
         }
     }
 
-    if config.schema.languages.iter().any(|language| language == "dart") {
-        if let Some(target) = config.schema.targets.get("dart") {
-            match crate::workflow::schema::load::load_schema_snapshot(root, config) {
-                Ok(snapshot) => {
-                    let dart_path = root.join(&target.output);
-                    crate::workflow::schema::dart::write_dart_schema(&dart_path, &snapshot)?;
-                    output.detail(format!("generated {}", display_project_path(root, &dart_path)));
-                },
-                Err(error) => {
-                    output.detail(format!("skipped Dart schema generation during init: {error}"));
-                },
-            }
+    let languages = crate::workflow::schema::model::parse_language_list(&config.schema.languages);
+    if !languages.is_empty() {
+        match crate::workflow::schema::gen::generate_languages(root, config, &languages, None) {
+            Ok(()) => {
+                for language in &languages {
+                    if let Some(target) = config.schema.targets.get(language.as_str()) {
+                        output.detail(format!(
+                            "generated {}",
+                            display_project_path(root, &root.join(&target.output))
+                        ));
+                    }
+                }
+            },
+            Err(error) => {
+                output.detail(format!("skipped schema generation during init: {error}"));
+            },
         }
     }
 

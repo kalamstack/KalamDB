@@ -359,6 +359,7 @@ async fn stream_provider_planning_stays_lightweight_until_execution() {
             ttl_seconds:       Some(3_600),
             storage_mode:      StreamTableStorageMode::Memory,
         },
+        kalamdb_tables::storage_schema_for_table(&table_def).expect("stream storage schema"),
     ));
     let provider = StreamTableProvider::new(
         Arc::new(TableProviderCore::new(

@@ -127,6 +127,57 @@ pub fn extract_seq_bounds_from_filter(expr: &Expr) -> (Option<SeqId>, Option<Seq
     }
 }
 
+/// Collect `col = literal` predicates from an equality or AND tree.
+pub fn extract_equality_predicates(expr: &Expr) -> Vec<(&str, ScalarValue)> {
+    let mut out = Vec::new();
+    collect_equality_predicates(expr, &mut out);
+    out
+}
+
+fn collect_equality_predicates<'a>(expr: &'a Expr, out: &mut Vec<(&'a str, ScalarValue)>) {
+    match expr {
+        Expr::BinaryExpr(binary) if binary.op == Operator::And => {
+            collect_equality_predicates(&binary.left, out);
+            collect_equality_predicates(&binary.right, out);
+        },
+        Expr::BinaryExpr(binary) if binary.op == Operator::Eq => {
+            match (binary.left.as_ref(), binary.right.as_ref()) {
+                (Expr::Column(col), Expr::Literal(value, _)) if !value.is_null() => {
+                    out.push((col.name.as_str(), value.clone()));
+                },
+                (Expr::Literal(value, _), Expr::Column(col)) if !value.is_null() => {
+                    out.push((col.name.as_str(), value.clone()));
+                },
+                _ => {},
+            }
+        },
+        _ => {},
+    }
+}
+
+/// String form used for manifest min/max and Parquet Bloom equality prune.
+pub fn scalar_to_prune_string(value: &ScalarValue) -> Option<String> {
+    match value {
+        ScalarValue::Utf8(Some(s)) | ScalarValue::LargeUtf8(Some(s)) => Some(s.clone()),
+        ScalarValue::Int64(Some(v)) => Some(v.to_string()),
+        ScalarValue::Int32(Some(v)) => Some(v.to_string()),
+        ScalarValue::Int16(Some(v)) => Some(v.to_string()),
+        ScalarValue::Int8(Some(v)) => Some(v.to_string()),
+        ScalarValue::UInt64(Some(v)) => Some(v.to_string()),
+        ScalarValue::UInt32(Some(v)) => Some(v.to_string()),
+        ScalarValue::UInt16(Some(v)) => Some(v.to_string()),
+        ScalarValue::UInt8(Some(v)) => Some(v.to_string()),
+        ScalarValue::Boolean(Some(v)) => Some(v.to_string()),
+        ScalarValue::Date32(Some(v)) => Some(v.to_string()),
+        ScalarValue::Date64(Some(v)) => Some(v.to_string()),
+        ScalarValue::TimestampMicrosecond(Some(v), _)
+        | ScalarValue::TimestampMillisecond(Some(v), _)
+        | ScalarValue::TimestampSecond(Some(v), _)
+        | ScalarValue::TimestampNanosecond(Some(v), _) => Some(v.to_string()),
+        _ => None,
+    }
+}
+
 /// Return a shared `_system` user identifier for scope-agnostic operations
 pub fn system_user_id() -> &'static UserId {
     &SYSTEM_USER_ID

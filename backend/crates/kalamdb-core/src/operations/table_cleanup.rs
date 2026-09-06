@@ -6,7 +6,10 @@
 use std::{fs, sync::Arc};
 
 use kalamdb_commons::{
-    models::{StorageId, TableId},
+    models::{
+        schemas::{ColumnDefinition, ScalarIndexDefinition},
+        StorageId, TableId,
+    },
     schemas::TableType,
 };
 use serde::{Deserialize, Serialize};
@@ -56,31 +59,49 @@ pub async fn cleanup_table_data_internal(
 
     let rows_deleted = match table_type {
         TableType::User => {
-            use kalamdb_tables::new_indexed_user_table_store;
+            use kalamdb_tables::{empty_storage_schema, new_indexed_user_table_store};
 
-            new_indexed_user_table_store(app_context.storage_backend(), table_id, "_pk")
-                .drop_all_partitions()
-                .map_err(|e| {
-                    KalamDbError::Other(format!(
-                        "Failed to drop user table partitions for {}: {}",
-                        table_id, e
-                    ))
-                })?;
+            let (pk_field, scalar_indexes, columns) =
+                catalog_open_args(app_context, table_id, "_pk");
+            new_indexed_user_table_store(
+                app_context.storage_backend(),
+                table_id,
+                &pk_field,
+                empty_storage_schema(),
+                &scalar_indexes,
+                &columns,
+            )
+            .drop_all_partitions()
+            .map_err(|e| {
+                KalamDbError::Other(format!(
+                    "Failed to drop user table partitions for {}: {}",
+                    table_id, e
+                ))
+            })?;
 
             log::debug!("[CleanupHelper] Dropped all partitions for user table {:?}", table_id);
             0usize
         },
         TableType::Shared => {
-            use kalamdb_tables::new_indexed_shared_table_store;
+            use kalamdb_tables::{empty_storage_schema, new_indexed_shared_table_store};
 
-            new_indexed_shared_table_store(app_context.storage_backend(), table_id, "_pk")
-                .drop_all_partitions()
-                .map_err(|e| {
-                    KalamDbError::Other(format!(
-                        "Failed to drop shared table partitions for {}: {}",
-                        table_id, e
-                    ))
-                })?;
+            let (pk_field, scalar_indexes, columns) =
+                catalog_open_args(app_context, table_id, "_pk");
+            new_indexed_shared_table_store(
+                app_context.storage_backend(),
+                table_id,
+                &pk_field,
+                empty_storage_schema(),
+                &scalar_indexes,
+                &columns,
+            )
+            .drop_all_partitions()
+            .map_err(|e| {
+                KalamDbError::Other(format!(
+                    "Failed to drop shared table partitions for {}: {}",
+                    table_id, e
+                ))
+            })?;
 
             log::debug!("[CleanupHelper] Dropped all partitions for shared table {:?}", table_id);
             0usize
@@ -129,6 +150,25 @@ pub async fn cleanup_table_data_internal(
 
     log::debug!("[CleanupHelper] Deleted {} rows from table data", rows_deleted);
     Ok(rows_deleted)
+}
+
+fn catalog_open_args(
+    app_context: &Arc<AppContext>,
+    table_id: &TableId,
+    fallback_pk: &str,
+) -> (String, Vec<ScalarIndexDefinition>, Vec<ColumnDefinition>) {
+    match app_context.schema_registry().get_table_if_exists(table_id) {
+        Ok(Some(def)) => {
+            let pk = def
+                .columns
+                .iter()
+                .find(|column| column.is_primary_key)
+                .map(|column| column.column_name.clone())
+                .unwrap_or_else(|| fallback_pk.to_string());
+            (pk, def.scalar_indexes.clone(), def.columns.clone())
+        },
+        _ => (fallback_pk.to_string(), Vec::new(), Vec::new()),
+    }
 }
 
 /// Delete Parquet files from the storage backend for a given table.

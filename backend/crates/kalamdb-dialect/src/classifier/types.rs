@@ -69,6 +69,32 @@ pub enum SqlStatementKind {
     // ===== Table Operations =====
     /// CREATE [USER|SHARED|STREAM] TABLE ...
     CreateTable(CreateTableStatement),
+    /// CREATE SCHEMA ... (PostgreSQL alias of CREATE NAMESPACE)
+    CreateSchema(CreateSchemaStatement),
+    /// SET search_path TO ...
+    SetSearchPath(SetSearchPathStatement),
+    /// CREATE TYPE ...
+    CreateType(CreateTypeStatement),
+    /// ALTER TYPE ...
+    AlterType(AlterTypeStatement),
+    /// DROP TYPE ...
+    DropType(DropTypeStatement),
+    /// CREATE PROCEDURE ...
+    CreateProcedure(CreateProcedureStatement),
+    /// DROP PROCEDURE ...
+    DropProcedure(DropProcedureStatement),
+    /// GRANT EXECUTE ON PROCEDURE ...
+    GrantExecute(GrantExecuteStatement),
+    /// REVOKE EXECUTE ON PROCEDURE ...
+    RevokeExecute(RevokeExecuteStatement),
+    /// CALL schema.name(...)
+    Call(CallStatement),
+    /// CREATE TRIGGER ... ON TOPIC ... EXECUTE PROCEDURE ...
+    CreateTrigger(CreateTriggerStatement),
+    /// DROP TRIGGER ...
+    DropTrigger(DropTriggerStatement),
+    /// ALTER TRIGGER ... ENABLE|DISABLE
+    AlterTrigger(AlterTriggerStatement),
     /// CREATE VIEW ...
     CreateView(CreateViewStatement),
     /// ALTER TABLE <namespace>.<table> ...
@@ -284,11 +310,23 @@ impl SqlStatement {
             | SqlStatementKind::DataFusionMetaCommand
             | SqlStatementKind::Unknown => false,
 
-            // USE NAMESPACE only affects session state, not cluster state
-            SqlStatementKind::UseNamespace(_) => false,
+            // USE NAMESPACE / SET search_path only affect session state, not cluster state
+            SqlStatementKind::UseNamespace(_) | SqlStatementKind::SetSearchPath(_) => false,
 
             // All other operations modify data or schema - must go to leader
             SqlStatementKind::CreateNamespace(_)
+            | SqlStatementKind::CreateSchema(_)
+            | SqlStatementKind::CreateType(_)
+            | SqlStatementKind::AlterType(_)
+            | SqlStatementKind::DropType(_)
+            | SqlStatementKind::CreateProcedure(_)
+            | SqlStatementKind::DropProcedure(_)
+            | SqlStatementKind::GrantExecute(_)
+            | SqlStatementKind::RevokeExecute(_)
+            | SqlStatementKind::Call(_)
+            | SqlStatementKind::CreateTrigger(_)
+            | SqlStatementKind::DropTrigger(_)
+            | SqlStatementKind::AlterTrigger(_)
             | SqlStatementKind::AlterNamespace(_)
             | SqlStatementKind::DropNamespace(_)
             | SqlStatementKind::CreateStorage(_)
@@ -346,6 +384,19 @@ impl SqlStatement {
             SqlStatementKind::DropNamespace(_) => "DROP NAMESPACE",
             SqlStatementKind::ShowNamespaces(_) => "SHOW NAMESPACES",
             SqlStatementKind::UseNamespace(_) => "USE NAMESPACE",
+            SqlStatementKind::CreateSchema(_) => "CREATE SCHEMA",
+            SqlStatementKind::SetSearchPath(_) => "SET SEARCH_PATH",
+            SqlStatementKind::CreateType(_) => "CREATE TYPE",
+            SqlStatementKind::AlterType(_) => "ALTER TYPE",
+            SqlStatementKind::DropType(_) => "DROP TYPE",
+            SqlStatementKind::CreateProcedure(_) => "CREATE PROCEDURE",
+            SqlStatementKind::DropProcedure(_) => "DROP PROCEDURE",
+            SqlStatementKind::GrantExecute(_) => "GRANT EXECUTE",
+            SqlStatementKind::RevokeExecute(_) => "REVOKE EXECUTE",
+            SqlStatementKind::Call(_) => "CALL",
+            SqlStatementKind::CreateTrigger(_) => "CREATE TRIGGER",
+            SqlStatementKind::DropTrigger(_) => "DROP TRIGGER",
+            SqlStatementKind::AlterTrigger(_) => "ALTER TRIGGER",
             SqlStatementKind::CreateStorage(_) => "CREATE STORAGE",
             SqlStatementKind::AlterStorage(_) => "ALTER STORAGE",
             SqlStatementKind::DropStorage(_) => "DROP STORAGE",

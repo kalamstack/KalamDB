@@ -3,7 +3,7 @@
 //! Provides utilities to translate `Manifest` metadata into
 //! concrete file/row-group selections for efficient reads.
 
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use datafusion::arrow::{compute::cast, datatypes::SchemaRef, record_batch::RecordBatch};
 use futures_util::{future::join_all, TryStreamExt};
@@ -42,6 +42,23 @@ pub struct ParquetScanStats {
     pub skipped_files: usize,
     pub scanned_files: usize,
     pub visited_files: Vec<String>,
+}
+
+/// Optional seq-range, indexed-column equality, and Bloom prune for a cold scan.
+#[derive(Debug, Clone, Default)]
+pub struct ColdScanPruning {
+    pub seq_range:          Option<(SeqId, SeqId)>,
+    pub indexed_equalities: Vec<(u64, String)>,
+    pub bloom:              Option<(String, String)>,
+}
+
+impl ColdScanPruning {
+    pub fn seq_range(min_seq: SeqId, max_seq: SeqId) -> Self {
+        Self {
+            seq_range: Some((min_seq, max_seq)),
+            ..Self::default()
+        }
+    }
 }
 
 /// Planner that produces pruning-aware selections from the manifest
@@ -116,7 +133,7 @@ impl ManifestAccessPlanner {
         table_type: TableType,
         table_id: &TableId,
         user_id: Option<&UserId>,
-        seq_range: Option<(SeqId, SeqId)>,
+        pruning: ColdScanPruning,
         use_degraded_mode: bool,
         schema: SchemaRef,
         schema_registry: &dyn SchemaRegistryTrait<Error = KalamDbError>,
@@ -149,11 +166,21 @@ impl ManifestAccessPlanner {
             if let Some(manifest) = manifest_opt {
                 total_batches = manifest.segments.len();
 
-                let selected_files: Vec<String> = if let Some((min_seq, max_seq)) = seq_range {
-                    let selections = self.plan_by_seq_range(manifest, min_seq, max_seq);
-                    selections.into_iter().map(|s| s.file_path).collect()
-                } else {
-                    self.plan_all_files(manifest)
+                let selected_files: Vec<String> = {
+                    let mut files = if let Some((min_seq, max_seq)) = pruning.seq_range {
+                        self.plan_by_seq_range(manifest, min_seq, max_seq)
+                            .into_iter()
+                            .map(|s| s.file_path)
+                            .collect()
+                    } else {
+                        self.plan_all_files(manifest)
+                    };
+                    for (column_id, value) in &pruning.indexed_equalities {
+                        let keep = self.plan_by_indexed_column_value(manifest, *column_id, value);
+                        let keep_set: HashSet<&str> = keep.iter().map(String::as_str).collect();
+                        files.retain(|path| keep_set.contains(path.as_str()));
+                    }
+                    files
                 };
 
                 scanned = selected_files.len();
@@ -199,7 +226,8 @@ impl ManifestAccessPlanner {
 
         // Clone column names for use inside async closures
         let col_names: Option<Vec<String>> = columns.map(|c| c.to_vec());
-        let seq_range_for_read = seq_range.map(|(min, max)| (min.as_i64(), max.as_i64()));
+        let seq_range_for_read = pruning.seq_range.map(|(min, max)| (min.as_i64(), max.as_i64()));
+        let bloom_for_read = pruning.bloom.clone();
 
         // Open all file streams concurrently — only metadata footers are read here.
         // Actual column data is fetched on demand as each stream is polled.
@@ -209,6 +237,7 @@ impl ManifestAccessPlanner {
                 let sc = storage_cached.clone();
                 let file = parquet_file.clone();
                 let cols = col_names.clone();
+                let bloom = bloom_for_read.clone();
                 async move {
                     let mut read_options = ParquetReadOptions::new();
                     if let Some(cols) = cols {
@@ -217,6 +246,9 @@ impl ManifestAccessPlanner {
                     if let Some((min_seq, max_seq)) = seq_range_for_read {
                         read_options =
                             read_options.with_seq_range(SystemColumnNames::SEQ, min_seq, max_seq);
+                    }
+                    if let Some((column, value)) = bloom {
+                        read_options = read_options.with_column_bloom_values(column, [value]);
                     }
 
                     sc.read_parquet_file_stream_with_options(
@@ -406,6 +438,18 @@ impl ManifestAccessPlanner {
         Ok(projected_batch)
     }
 
+    /// Plan files that may contain an indexed-column equality (PK or scalar index).
+    ///
+    /// Segments without stats for `column_id` are included (conservative).
+    pub fn plan_by_indexed_column_value(
+        &self,
+        manifest: &Manifest,
+        column_id: u64,
+        value: &str,
+    ) -> Vec<String> {
+        self.plan_by_pk_value(manifest, column_id, value)
+    }
+
     /// Prune segments that definitely cannot contain a PK value based on column_stats min/max
     ///
     /// Returns segments where the PK value could exist (i.e., value is within [min, max] range).
@@ -510,6 +554,14 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+
+    fn string_stats(min: &str, max: &str) -> ColumnStats {
+        ColumnStats::new(
+            Some(StoredScalarValue::Utf8(Some(min.to_string()))),
+            Some(StoredScalarValue::Utf8(Some(max.to_string()))),
+            Some(0),
+        )
+    }
 
     fn numeric_stats(min: i64, max: i64) -> ColumnStats {
         ColumnStats::new(
@@ -628,6 +680,7 @@ mod tests {
             next_column_id: 3,
             schema_version: 1,
             table_comment:  None,
+            scalar_indexes: Vec::new(),
             created_at:     chrono::Utc::now(),
             updated_at:     chrono::Utc::now(),
         }
@@ -905,7 +958,7 @@ mod tests {
                 TableType::Shared,
                 &table_id,
                 None,
-                Some((SeqId::from(1i64), SeqId::from(10i64))),
+                ColdScanPruning::seq_range(SeqId::from(1i64), SeqId::from(10i64)),
                 false,
                 Arc::clone(&schema),
                 &schema_registry,
@@ -920,5 +973,58 @@ mod tests {
         assert_eq!(stats.scanned_files, 1);
         assert_eq!(stats.visited_files, vec!["batch-in-range.parquet".to_string()]);
         assert_eq!(combined.num_rows(), 2);
+    }
+
+    #[test]
+    fn plan_by_indexed_column_value_prunes_out_of_range_and_keeps_missing_stats() {
+        let table_id = TableId::from_strings("chat", "messages");
+        let mut manifest = Manifest::new(table_id, None);
+
+        let mut matching = HashMap::new();
+        matching.insert(2, string_stats("room-a", "room-a"));
+        manifest.add_segment(SegmentMetadata::with_schema_version(
+            "batch-room-a.parquet".to_string(),
+            "batch-room-a.parquet".to_string(),
+            matching,
+            SeqId::from(1i64),
+            SeqId::from(10i64),
+            5,
+            128,
+            1,
+        ));
+
+        let mut other = HashMap::new();
+        other.insert(2, string_stats("room-b", "room-z"));
+        manifest.add_segment(SegmentMetadata::with_schema_version(
+            "batch-other.parquet".to_string(),
+            "batch-other.parquet".to_string(),
+            other,
+            SeqId::from(11i64),
+            SeqId::from(20i64),
+            5,
+            128,
+            1,
+        ));
+
+        manifest.add_segment(SegmentMetadata::with_schema_version(
+            "batch-legacy-no-stats.parquet".to_string(),
+            "batch-legacy-no-stats.parquet".to_string(),
+            HashMap::new(),
+            SeqId::from(21i64),
+            SeqId::from(30i64),
+            5,
+            128,
+            1,
+        ));
+
+        let planner = ManifestAccessPlanner::new();
+        let selected = planner.plan_by_indexed_column_value(&manifest, 2, "room-a");
+        assert_eq!(
+            selected,
+            vec![
+                "batch-room-a.parquet".to_string(),
+                "batch-legacy-no-stats.parquet".to_string()
+            ]
+        );
     }
 }

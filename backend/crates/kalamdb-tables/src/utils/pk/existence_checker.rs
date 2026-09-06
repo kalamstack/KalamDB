@@ -544,6 +544,7 @@ mod tests {
             next_column_id: 3,
             schema_version: 1,
             table_comment:  None,
+            scalar_indexes: Vec::new(),
             created_at:     chrono::Utc::now(),
             updated_at:     chrono::Utc::now(),
         }

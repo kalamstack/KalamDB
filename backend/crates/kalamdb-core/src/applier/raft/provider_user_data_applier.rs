@@ -41,8 +41,17 @@ impl UserDataApplier for ProviderUserDataApplier {
         table_id: &TableId,
         user_id: &UserId,
         rows: &[Row],
+        encoded_fields: &[Vec<u8>],
         commit_seq: u64,
     ) -> Result<usize, RaftError> {
+        let rows = crate::applier::ordinal_dml::decode_insert_rows(
+            self.executor.app_context(),
+            table_id,
+            rows,
+            encoded_fields,
+        )
+        .map_err(RaftError::provider)?;
+
         log::debug!(
             "ProviderUserDataApplier: Inserting into {} for user {} ({} rows)",
             table_id,
@@ -52,7 +61,7 @@ impl UserDataApplier for ProviderUserDataApplier {
 
         self.executor
             .dml()
-            .insert_user_data_with_commit_seq(table_id, user_id, rows, commit_seq)
+            .insert_user_data_with_commit_seq(table_id, user_id, &rows, commit_seq)
             .await
             .map_err(|e| RaftError::provider(e.to_string()))
     }

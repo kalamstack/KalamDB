@@ -2,21 +2,20 @@
 
 use std::path::Path;
 
-use kalam_client::AuthProvider;
-
 use crate::{
     error::{CLIError, Result},
     output::WorkflowOutput,
-    process::{resolve_node_binary, run_program_configured, shell_working_directory},
     workflow::{
-        auth::resolve_workflow_auth_provider,
-        project::resolve::ResolvedEnvironment,
-        schema::model::{parse_language_list, LanguageTarget},
+        project::config::KalamProjectConfig,
+        schema::{
+            dart, load,
+            model::{parse_language_list, LanguageTarget},
+            naming::{assign_names, NamingOptions},
+            rust, typescript,
+        },
         WorkflowContext,
     },
 };
-
-const ORM_CODEGEN_SCRIPT: &str = include_str!("../../../assets/orm-codegen.mjs");
 
 pub struct GenerateOptions {
     pub languages: Option<Vec<String>>,
@@ -27,141 +26,80 @@ pub fn generate_schema_artifacts(
     options: &GenerateOptions,
     output: &WorkflowOutput,
 ) -> Result<()> {
-    let languages = options
-        .languages
-        .as_ref()
-        .map(|values| parse_language_list(values))
-        .unwrap_or_else(|| parse_language_list(&ctx.config.schema.languages));
+    let languages = resolve_languages(&ctx.config, options.languages.as_ref())?;
+    generate_languages(&ctx.project_root, &ctx.config, &languages, Some(output))
+}
 
+pub fn generate_languages(
+    project_root: &Path,
+    config: &KalamProjectConfig,
+    languages: &[LanguageTarget],
+    output: Option<&WorkflowOutput>,
+) -> Result<()> {
     if languages.is_empty() {
         return Err(CLIError::ConfigurationError(
             "no language targets selected for generation".into(),
         ));
     }
 
-    let mut resolved_environment: Option<ResolvedEnvironment> = None;
+    let (snapshot, hash) = load::compile_project_contract(project_root, config)?;
+
     for language in languages {
         let key = language.as_str();
-        let Some(target) = ctx.config.schema.targets.get(key) else {
+        let Some(target) = config.schema.targets.get(key) else {
             return Err(CLIError::ConfigurationError(format!(
                 "missing schema.targets.{key} in kalam.toml"
             )));
         };
-
-        let output_path = ctx.project_root.join(&target.output);
+        let names = assign_names(
+            &snapshot,
+            NamingOptions {
+                unqualified_names: target.unqualified_names,
+            },
+        )?;
+        let output_path = project_root.join(&target.output);
         {
-            let _spinner =
-                output.status_spinner(format!("generating {} -> {}", key, target.output));
+            let _spinner = output
+                .map(|out| out.status_spinner(format!("generating {} -> {}", key, target.output)));
             match language {
                 LanguageTarget::TypeScript => {
-                    if resolved_environment.is_none() {
-                        resolved_environment = Some(ctx.resolved_environment()?);
-                    }
-                    let environment =
-                        resolved_environment.as_ref().expect("resolved environment initialized");
-                    generate_typescript_via_orm(ctx, environment, &output_path)?;
+                    typescript::write_typescript(
+                        &output_path,
+                        &snapshot,
+                        &hash,
+                        &names,
+                        project_root,
+                    )?;
                 },
                 LanguageTarget::Dart => {
-                    let snapshot = crate::workflow::schema::load::load_schema_snapshot(
-                        &ctx.project_root,
-                        &ctx.config,
-                    )?;
-                    crate::workflow::schema::dart::write_dart_schema(&output_path, &snapshot)?;
+                    dart::write_dart_schema(&output_path, &snapshot, &hash, &names)?;
+                },
+                LanguageTarget::Rust => {
+                    rust::write_rust_schema(&output_path, &snapshot, &hash, &names)?;
                 },
             }
         }
-        output.status(format!("generated {} -> {}", key, target.output));
+        if let Some(out) = output {
+            out.status(format!("generated {} -> {}", key, target.output));
+        }
     }
 
     Ok(())
 }
 
-fn generate_typescript_via_orm(
-    ctx: &WorkflowContext,
-    environment: &ResolvedEnvironment,
-    output_path: &Path,
-) -> Result<()> {
-    if let Some(parent) = output_path.parent() {
-        std::fs::create_dir_all(parent)?;
+fn resolve_languages(
+    config: &KalamProjectConfig,
+    requested: Option<&Vec<String>>,
+) -> Result<Vec<LanguageTarget>> {
+    let languages = requested
+        .map(|values| parse_language_list(values))
+        .unwrap_or_else(|| parse_language_list(&config.schema.languages));
+    if languages.is_empty() {
+        return Err(CLIError::ConfigurationError(
+            "no language targets selected for generation".into(),
+        ));
     }
-
-    let auth = resolve_typescript_codegen_auth(ctx, environment)?;
-    let output = run_program_configured(Path::new(&resolve_node_binary()), |command| {
-        command
-            .current_dir(shell_working_directory(&ctx.project_root))
-            .args(node_codegen_args())
-            .arg("-e")
-            .arg(ORM_CODEGEN_SCRIPT)
-            .env("KALAM_SCHEMA_URL", &environment.url)
-            .env("KALAM_SCHEMA_NAMESPACE", environment.namespace.as_str())
-            .env("KALAM_SCHEMA_OUT", output_path);
-
-        match auth {
-            OrmCodegenAuth::Basic { user, password } => {
-                command
-                    .env("KALAM_SCHEMA_AUTH_MODE", "basic")
-                    .env("KALAM_SCHEMA_USER", user)
-                    .env("KALAM_SCHEMA_PASSWORD", password);
-            },
-            OrmCodegenAuth::Jwt { token } => {
-                command.env("KALAM_SCHEMA_AUTH_MODE", "jwt").env("KALAM_SCHEMA_TOKEN", token);
-            },
-            OrmCodegenAuth::None => {
-                command.env("KALAM_SCHEMA_AUTH_MODE", "none");
-            },
-        }
-    })
-    .map_err(|error| {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            CLIError::ConfigurationError(
-                "Node.js is required for TypeScript schema generation via @kalamdb/orm".into(),
-            )
-        } else {
-            CLIError::FileError(format!("failed to launch @kalamdb/orm generator: {error}"))
-        }
-    })?;
-
-    if output.status.success() {
-        return Ok(());
-    }
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    Err(CLIError::ConfigurationError(format!(
-        "TypeScript schema generation failed (exit {}): {}{}",
-        output.status.code().unwrap_or(-1),
-        if stdout.trim().is_empty() {
-            String::new()
-        } else {
-            format!("\nstdout:\n{stdout}")
-        },
-        if stderr.trim().is_empty() {
-            String::new()
-        } else {
-            format!("\nstderr:\n{stderr}")
-        }
-    )))
-}
-
-fn node_codegen_args() -> &'static [&'static str] {
-    &["--preserve-symlinks", "--input-type=module"]
-}
-
-enum OrmCodegenAuth {
-    Basic { user: String, password: String },
-    Jwt { token: String },
-    None,
-}
-
-fn resolve_typescript_codegen_auth(
-    ctx: &WorkflowContext,
-    environment: &ResolvedEnvironment,
-) -> Result<OrmCodegenAuth> {
-    match resolve_workflow_auth_provider(ctx, environment)? {
-        AuthProvider::JwtToken(token) => Ok(OrmCodegenAuth::Jwt { token }),
-        AuthProvider::BasicAuth(user, password) => Ok(OrmCodegenAuth::Basic { user, password }),
-        AuthProvider::None => Ok(OrmCodegenAuth::None),
-    }
+    Ok(languages)
 }
 
 pub fn validate_language_filter(
@@ -172,7 +110,7 @@ pub fn validate_language_filter(
     for value in requested {
         let Some(parsed) = LanguageTarget::parse(value) else {
             return Err(CLIError::ConfigurationError(format!(
-                "unsupported language target '{value}'; supported: typescript, dart"
+                "unsupported language target '{value}'; supported: typescript, dart, rust"
             )));
         };
         let canonical = parsed.as_str().to_string();
@@ -193,14 +131,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn node_codegen_args_preserve_project_symlink_resolution() {
-        assert!(node_codegen_args().contains(&"--preserve-symlinks"));
-    }
-
-    #[test]
     fn validate_language_filter_accepts_flutter_alias() {
         let filtered =
             validate_language_filter(&["flutter".into()], &["dart".into()]).expect("filter");
         assert_eq!(filtered, vec!["dart"]);
+    }
+
+    #[test]
+    fn validate_language_filter_accepts_rust() {
+        let filtered =
+            validate_language_filter(&["rust".into()], &["rust".into()]).expect("filter");
+        assert_eq!(filtered, vec!["rust"]);
     }
 }

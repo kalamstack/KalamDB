@@ -52,7 +52,8 @@ fn pre_session_command(cli: &Cli) -> Option<PreSessionCommand> {
             | CliCommand::Db(_)
             | CliCommand::Dev(_)
             | CliCommand::Status(_)
-            | CliCommand::Deploy(_) => None,
+            | CliCommand::Deploy(_)
+            | CliCommand::Functions(_) => None,
         };
     }
 

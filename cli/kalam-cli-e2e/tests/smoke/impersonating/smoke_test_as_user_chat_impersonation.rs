@@ -5,12 +5,12 @@ use std::time::Duration;
 use crate::common::*;
 
 struct ChatFixture {
-    namespace: String,
+    namespace:      String,
     messages_table: String,
-    service_user: String,
-    regular_user: String,
-    other_user: String,
-    password: String,
+    service_user:   String,
+    regular_user:   String,
+    other_user:     String,
+    password:       String,
 }
 
 impl ChatFixture {
@@ -94,8 +94,8 @@ fn seed_regular_message(fixture: &ChatFixture) {
         &fixture.regular_user,
         &fixture.password,
         &format!(
-            "INSERT INTO {} (id, conversation_id, sender, role, content, status) VALUES \
-             (2001, 1001, '{}', 'user', 'Hello from regular user', 'sent')",
+            "INSERT INTO {} (id, conversation_id, sender, role, content, status) VALUES (2001, \
+             1001, '{}', 'user', 'Hello from regular user', 'sent')",
             fixture.messages_table, fixture.regular_user
         ),
     )
@@ -117,9 +117,8 @@ fn smoke_as_user_chat_service_can_insert_for_regular_user() {
         &fixture.service_user,
         &fixture.password,
         &format!(
-            "EXECUTE AS USER '{}' (INSERT INTO {} (id, conversation_id, sender, role, \
-             content, status) VALUES (2002, 1001, 'AI Assistant', 'assistant', 'allowed', \
-             'sent'))",
+            "EXECUTE AS USER '{}' (INSERT INTO {} (id, conversation_id, sender, role, content, \
+             status) VALUES (2002, 1001, 'AI Assistant', 'assistant', 'allowed', 'sent'))",
             fixture.regular_user, fixture.messages_table
         ),
     )
@@ -155,7 +154,10 @@ fn smoke_as_user_chat_service_can_insert_for_regular_user() {
 #[test]
 fn smoke_as_user_chat_service_can_select_update_and_delete_regular_rows() {
     if !is_server_running() {
-        eprintln!("Skipping smoke_as_user_chat_service_can_select_update_and_delete_regular_rows: server not running");
+        eprintln!(
+            "Skipping smoke_as_user_chat_service_can_select_update_and_delete_regular_rows: \
+             server not running"
+        );
         return;
     }
 

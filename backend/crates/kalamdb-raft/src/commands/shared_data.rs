@@ -26,8 +26,13 @@ pub enum SharedDataCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         actor_user_id:       Option<UserId>,
         table_id:            TableId,
-        /// Rows to insert
+        /// Rows to insert. Empty when [`Self::Insert::encoded_fields`] is set.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
         rows:                Vec<kalamdb_commons::models::rows::Row>,
+        /// Ordinal KOBJ field payloads (same codec as RocksDB rows).
+        /// Avoids FlexBuffering DataFusion `ScalarValue` maps on the Raft log.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        encoded_fields:      Vec<Vec<u8>>,
     },
 
     /// Update rows in a shared table
@@ -156,6 +161,7 @@ mod tests {
             actor_user_id:       None,
             table_id:            table_id.clone(),
             rows:                vec![],
+            encoded_fields:      Vec::new(),
         };
 
         assert_eq!(cmd.table_id(), &table_id);
@@ -185,6 +191,7 @@ mod tests {
                 actor_user_id:       None,
                 table_id:            table_id.clone(),
                 rows:                vec![],
+                encoded_fields:      Vec::new(),
             },
             SharedDataCommand::Update {
                 required_meta_index: 20,
@@ -219,6 +226,7 @@ mod tests {
             actor_user_id:       None,
             table_id:            table_id.clone(),
             rows:                vec![],
+            encoded_fields:      Vec::new(),
         };
 
         let mut update = SharedDataCommand::Update {
@@ -256,6 +264,7 @@ mod tests {
             actor_user_id:       Some(actor_user_id.clone()),
             table_id:            TableId::new(NamespaceId::from("shared"), TableName::from("data")),
             rows:                vec![],
+            encoded_fields:      Vec::new(),
         };
 
         assert_eq!(cmd.actor_user_id(), Some(&actor_user_id));

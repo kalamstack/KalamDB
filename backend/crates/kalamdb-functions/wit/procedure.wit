@@ -1,0 +1,19 @@
+package kalam:procedure@2.0.0;
+
+interface host {
+    // Values are Arrow IPC streams with one row and a column per argument.
+    query: func(sql: string, params: list<u8>) -> result<list<u8>, string>;
+    execute: func(sql: string, params: list<u8>) -> result<list<u8>, string>;
+    call: func(procedure: string, args: list<u8>) -> result<list<u8>, string>;
+    publish: func(topic: string, payload: list<u8>) -> result<_, string>;
+    metadata: func() -> string;
+    log: func(level: string, message: string) -> result<_, string>;
+    request-header: func(name: string) -> result<option<string>, string>;
+    response-status: func(status: u16) -> result<_, string>;
+    response-header: func(name: string, value: string) -> result<_, string>;
+}
+
+world procedure {
+    import host;
+    export invoke: func(procedure: string, args: list<u8>) -> result<list<u8>, string>;
+}

@@ -335,8 +335,29 @@ pub fn split_statements(sql: &str) -> Result<Vec<String>, BatchParseError> {
     let mut in_backtick = false;
     let mut in_line_comment = false;
     let mut in_block_comment = false;
+    let mut dollar_closer: Option<String> = None;
+    let mut dollar_closer_matched = 0usize;
 
     while let Some(ch) = chars.next() {
+        if let Some(closer) = dollar_closer.as_deref() {
+            current.push(ch);
+            let closer_bytes = closer.as_bytes();
+            if dollar_closer_matched < closer_bytes.len()
+                && ch as u8 == closer_bytes[dollar_closer_matched]
+            {
+                dollar_closer_matched += 1;
+                if dollar_closer_matched == closer_bytes.len() {
+                    dollar_closer = None;
+                    dollar_closer_matched = 0;
+                }
+            } else if ch as u8 == closer_bytes[0] {
+                dollar_closer_matched = 1;
+            } else {
+                dollar_closer_matched = 0;
+            }
+            continue;
+        }
+
         if in_line_comment {
             if ch == '\n' {
                 in_line_comment = false;
@@ -372,6 +393,25 @@ pub fn split_statements(sql: &str) -> Result<Vec<String>, BatchParseError> {
             if ch == '/' && chars.peek() == Some(&'*') {
                 chars.next();
                 in_block_comment = true;
+                continue;
+            }
+
+            if ch == '$' {
+                current.push(ch);
+                let mut tag = String::new();
+                while let Some(&next) = chars.peek() {
+                    if next.is_ascii_alphanumeric() || next == '_' {
+                        tag.push(next);
+                        current.push(chars.next().unwrap());
+                    } else {
+                        break;
+                    }
+                }
+                if chars.peek() == Some(&'$') {
+                    current.push(chars.next().unwrap());
+                    dollar_closer = Some(format!("${tag}$"));
+                    dollar_closer_matched = 0;
+                }
                 continue;
             }
         }
@@ -417,6 +457,10 @@ pub fn split_statements(sql: &str) -> Result<Vec<String>, BatchParseError> {
         }
     }
 
+    if dollar_closer.is_some() {
+        return Err(BatchParseError::new("Unterminated dollar-quoted string in SQL batch"));
+    }
+
     if in_single_quote || in_double_quote || in_backtick {
         return Err(BatchParseError::new("Unterminated quoted string in SQL batch"));
     }
@@ -454,6 +498,15 @@ mod tests {
         let statements = split_statements(sql).unwrap();
         assert_eq!(statements.len(), 2);
         assert!(statements[0].contains("value;still part of string"));
+    }
+
+    #[test]
+    fn ignores_semicolons_in_dollar_quoted_bodies() {
+        let sql = "CREATE PROCEDURE chat.get_user(id TEXT) AS $$ SELECT 1; SELECT 2; $$; SELECT 3;";
+        let statements = split_statements(sql).unwrap();
+        assert_eq!(statements.len(), 2);
+        assert!(statements[0].contains("SELECT 1; SELECT 2;"));
+        assert_eq!(statements[1], "SELECT 3");
     }
 
     #[test]

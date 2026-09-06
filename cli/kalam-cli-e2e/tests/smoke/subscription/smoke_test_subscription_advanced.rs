@@ -24,8 +24,8 @@ fn start_subscription_with_config(
 /// Advanced subscription listener with additional capabilities
 pub struct SubscriptionListenerAdvanced {
     event_receiver: std::sync::mpsc::Receiver<String>,
-    stop_sender: Option<tokio::sync::oneshot::Sender<()>>,
-    _handle: Option<std::thread::JoinHandle<()>>,
+    stop_sender:    Option<tokio::sync::oneshot::Sender<()>>,
+    _handle:        Option<std::thread::JoinHandle<()>>,
 }
 
 impl Drop for SubscriptionListenerAdvanced {
@@ -166,8 +166,8 @@ impl SubscriptionListenerAdvanced {
 
         Ok(Self {
             event_receiver: event_rx,
-            stop_sender: Some(stop_tx),
-            _handle: Some(handle),
+            stop_sender:    Some(stop_tx),
+            _handle:        Some(handle),
         })
     }
 

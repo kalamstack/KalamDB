@@ -12,7 +12,9 @@ use kalamdb_core::sql::{context::ExecutionContext, datafusion_session::DataFusio
 fn create_test_session() -> Arc<SessionContext> {
     let factory =
         DataFusionSessionFactory::new().expect("Failed to create DataFusionSessionFactory");
-    Arc::new(factory.create_session())
+    let session = factory.create_session();
+    DataFusionSessionFactory::ensure_extended_functions(&session);
+    Arc::new(session)
 }
 
 fn exec_ctx() -> ExecutionContext {

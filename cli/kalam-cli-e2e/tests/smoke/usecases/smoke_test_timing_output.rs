@@ -266,7 +266,8 @@ fn smoke_test_timing_join_query() {
         &users_table_check,
         &table1,
         Duration::from_secs(10),
-        execute_sql_as_root_via_cli_json)
+        execute_sql_as_root_via_cli_json,
+    )
     .expect("users table should be visible");
 
     // Create orders table
@@ -285,7 +286,8 @@ fn smoke_test_timing_join_query() {
         &orders_table_check,
         &table2,
         Duration::from_secs(10),
-        execute_sql_as_root_via_cli_json)
+        execute_sql_as_root_via_cli_json,
+    )
     .expect("orders table should be visible");
 
     // Insert test data
